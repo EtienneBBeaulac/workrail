@@ -87,8 +87,8 @@ async function main(): Promise<void> {
   // Auto-bridge: stdio instances yield to a running primary rather than
   // starting a competing full server.
   if (mode.kind === 'stdio') {
-    const primaryPort = await detectHealthyPrimary(DEFAULT_MCP_PORT);
-    if (primaryPort != null) {
+    const primaryDetected = await detectHealthyPrimary(DEFAULT_MCP_PORT);
+    if (primaryDetected != null) {
       // Zombie-bridge guard: probe stdin before starting the bridge.
       // A real stdio client (Claude Code stdio, firebender) sends MCP data
       // immediately. An HTTP-type `command` helper never writes to stdin.
@@ -97,14 +97,16 @@ async function main(): Promise<void> {
       const hasClient = await waitForStdinReadable(STDIO_CLIENT_PROBE_MS, process.stdin);
       if (!hasClient) {
         console.error(
-          `[Startup] Primary on :${primaryPort}, no stdio client within ${STDIO_CLIENT_PROBE_MS}ms — exiting`,
+          `[Startup] Primary on :${primaryDetected.port}, no stdio client within ${STDIO_CLIENT_PROBE_MS}ms — exiting`,
         );
         process.exit(0);
       }
 
-      console.error(`[Startup] Primary detected on :${primaryPort} — starting in bridge mode`);
+      console.error(`[Startup] Primary detected on :${primaryDetected.port} — starting in bridge mode`);
       try {
-        await startBridgeServer(primaryPort);
+        // Pass the original primary's PID so the bridge can detect if it later
+        // connects to a different primary (orphan detection). See bridge-entry.ts.
+        await startBridgeServer(primaryDetected.port, undefined, { originalPrimaryPid: primaryDetected.pid });
       } catch (error) {
         // Bridge failed to connect. Fall back to a full server so the IDE
         // client isn't left without a WorkRail connection.

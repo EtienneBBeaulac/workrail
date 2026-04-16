@@ -15,6 +15,7 @@ import { composeServer } from '../server.js';
 import { bindWithPortFallback } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
 import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
+import { clearTombstone, writeTombstone } from './primary-tombstone.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
@@ -25,6 +26,10 @@ export async function startHttpServer(port: number): Promise<void> {
   // Register early — before composeServer() — so startup failures exit cleanly.
   registerFatalHandlers('http');
   logStartup('http', { port });
+
+  // Clear any tombstone from the previous primary run. This signals to
+  // slow-polling bridges that a new primary is available.
+  clearTombstone();
 
   const { server, ctx } = await composeServer();
 
@@ -72,8 +77,13 @@ export async function startHttpServer(port: number): Promise<void> {
   // so it only becomes available once the MCP transport is fully ready.
   // Registering it before connect() creates a race: bridges detect "healthy"
   // and try to connect via /mcp before it's accepting sessions, causing hangs.
+  //
+  // The `pid` field enables orphan bridge detection: a bridge records the PID
+  // of the primary it first connects to. If it later reconnects and sees a
+  // different PID, it knows it has outlived its original session and exits
+  // cleanly rather than hijacking the new session.
   listener.app.get('/workrail-health', (_req, res) => {
-    res.json({ service: 'workrail' });
+    res.json({ service: 'workrail', pid: process.pid });
   });
 
   const boundPort = listener.getBoundPort();
@@ -92,6 +102,11 @@ export async function startHttpServer(port: number): Promise<void> {
   // -------------------------------------------------------------------------
   wireShutdownHooks({
     onBeforeTerminate: async () => {
+      // Write tombstone synchronously BEFORE async teardown so bridges can detect
+      // the clean death immediately. Tombstone is advisory -- silently ignored on error.
+      if (boundPort != null) {
+        writeTombstone(boundPort, process.pid);
+      }
       await listener.stop();
       await ctx.httpServer?.stop();
     },

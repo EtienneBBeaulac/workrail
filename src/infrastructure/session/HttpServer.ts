@@ -710,6 +710,34 @@ export class HttpServer {
           }
         }
         
+        // POST-RENAME PID VERIFICATION: Confirm we actually won the election.
+        //
+        // WHY: POSIX rename is unconditional -- it always succeeds, even when multiple
+        // processes race to rename the same destination. The last rename wins; all
+        // others also see success (no EEXIST on rename). Without this check, every
+        // concurrent process that called rename would set isPrimary = true, resulting
+        // in multiple primaries fighting over port 3456.
+        //
+        // By reading back the lock and checking that our PID is in it, we confirm we
+        // were the last renamer (the winner). Any loser will see a different PID and
+        // correctly yield with return false.
+        //
+        // Race: the tombstone/heartbeat could write between our rename and read-back,
+        // but neither changes the PID field, so the check is still correct.
+        try {
+          const writtenContent = await fs.readFile(this.lockFile, 'utf-8');
+          const writtenData: DashboardLock = JSON.parse(writtenContent);
+          if (writtenData.pid !== process.pid) {
+            // Another process renamed over us — they won the election.
+            try { process.stderr.write(`[Dashboard] Lost lock election (winner PID ${writtenData.pid}), yielding\n`); } catch { /* ignore */ }
+            return false;
+          }
+        } catch {
+          // Read-back failed (ENOENT: file deleted by another process, or JSON parse error).
+          // Safest action: yield and retry fresh rather than claiming primary status we may not hold.
+          return await this.tryBecomePrimary();
+        }
+
         try { process.stderr.write('[Dashboard] Lock reclaimed successfully\n'); } catch { /* ignore */ }
         this.isPrimary = true;
         this.setupPrimaryCleanup();

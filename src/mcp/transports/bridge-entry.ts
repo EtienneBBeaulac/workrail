@@ -8,15 +8,21 @@
  *   IDE/firebender (stdio) ←→ WorkRail bridge ←→ primary WorkRail (:3100)
  *
  * PRIMARY DEATH + AUTOMATIC RESPAWN
- * When the reconnect loop exhausts, the bridge spawns a new primary as a
- * detached child process (same binary, HTTP transport) and restarts the
- * reconnect loop. The stdio connection stays alive — the IDE client never
- * disconnects. Respawning is bounded by `maxRespawnAttempts`; after the
- * budget is spent the bridge shuts down cleanly.
+ * When the reconnect loop exhausts, the bridge attempts to spawn a new primary.
+ * Spawn coordination uses an O_EXCL lock file (~/.workrail/spawn-coordinator-PORT.lock)
+ * so exactly one bridge wins the right to spawn — others skip the spawn and continue
+ * polling. After the spawn budget is spent, bridges enter `waiting_for_primary` mode
+ * (slow-polling every 5s indefinitely) rather than shutting down. The stdio connection
+ * stays alive — the IDE client never disconnects.
  *
- * TOOL CALLS DURING RECONNECT
+ * TOMBSTONE OPTIMIZATION
+ * When the primary dies cleanly (stdin closed / SIGHUP), it writes a tombstone file
+ * (~/.workrail/primary.tombstone) with its PID. Bridges that see a matching tombstone
+ * skip the rapid-reconnect phase and enter slow-poll immediately, reducing churn.
+ *
+ * TOOL CALLS DURING RECONNECT / WAITING
  * Rather than silently dropping messages (agent hangs), the bridge returns
- * an immediate human-readable JSON-RPC error while reconnecting.
+ * an immediate human-readable JSON-RPC error while reconnecting or waiting.
  *
  * DESIGN NOTES
  * - ConnectionState is a sealed discriminated union — no boolean flags.
@@ -27,13 +33,19 @@
  *   a second close event is a no-op. Prevents concurrent loops.
  * - handleReconnectOutcome is a named, testable function that drives all
  *   state transitions after reconnectWithBackoff returns.
- * - SpawnLike and FetchLike are injected for testability.
+ * - SpawnLike, FetchLike, and WriteFileLike are injected for testability.
  * - All shutdown paths go through a single performShutdown() function.
+ * - waiting_for_primary bridges still respond to requests with a helpful
+ *   error so agents know to retry rather than hanging indefinitely.
  */
 
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { registerFatalHandlers, logStartup } from './fatal-exit.js';
 import { logBridgeEvent } from './bridge-events.js';
+import { readTombstone } from './primary-tombstone.js';
+import { writeFileSync, mkdirSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -48,7 +60,7 @@ export interface BridgeConfig {
   readonly forwardTimeoutMs: number;
   /**
    * How many times the bridge may spawn a new primary per connection-failure
-   * cycle before giving up and shutting down.
+   * cycle before giving up and entering waiting_for_primary mode.
    *
    * This is a per-death-cycle budget, not a lifetime budget. Each time the
    * primary closes the connection, t.onclose reseeds the budget to this
@@ -60,6 +72,17 @@ export interface BridgeConfig {
    * rapid-crash loops, not to cap total lifetime spawn activity.
    */
   readonly maxRespawnAttempts: number;
+  /**
+   * How long (ms) before a spawn coordinator lock is considered stale.
+   * Stale locks are left by bridges that crashed after winning the lock
+   * but before releasing it. Default: 30 seconds.
+   */
+  readonly spawnLockStaleMs: number;
+  /**
+   * Interval (ms) between polls in waiting_for_primary mode.
+   * Default: 5000ms (5 seconds).
+   */
+  readonly waitForPrimaryPollMs: number;
 }
 
 export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
@@ -67,6 +90,8 @@ export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
   reconnectMaxAttempts: 8,
   forwardTimeoutMs: 30_000,
   maxRespawnAttempts: 3,
+  spawnLockStaleMs: 30_000,
+  waitForPrimaryPollMs: 5_000,
 };
 
 // ---------------------------------------------------------------------------
@@ -85,7 +110,8 @@ type HttpBridgeTransport = {
  * state travels together — no separate mutable variable needed.
  *
  * Invariant: reconnecting.respawnBudget >= 0. When budget reaches 0 and
- * reconnects are exhausted, the state transitions to closed.
+ * reconnects are exhausted, the state transitions to waiting_for_primary
+ * (indefinite slow-poll) rather than closed.
  */
 export type ConnectionState =
   | { readonly kind: 'connecting' }
@@ -96,12 +122,9 @@ export type ConnectionState =
       readonly maxAttempts: number;
       readonly respawnBudget: number;
     }
+  | { readonly kind: 'waiting_for_primary' }
   | { readonly kind: 'closed' };
 
-/**
- * Outcome of a reconnect attempt sequence — errors are data, not callbacks.
- * The caller switches exhaustively on the result via handleReconnectOutcome.
- */
 /**
  * Outcome of a reconnect attempt sequence — errors are data, not callbacks.
  * The caller switches exhaustively on the result via handleReconnectOutcome.
@@ -114,6 +137,14 @@ export type ReconnectOutcome =
   | { readonly kind: 'reconnected' }
   | { readonly kind: 'exhausted' }
   | { readonly kind: 'aborted' };
+
+/**
+ * Result of attempting to acquire the spawn coordinator lock.
+ * Only the winner should call spawnPrimary.
+ */
+export type SpawnLockResult =
+  | { readonly kind: 'acquired' }
+  | { readonly kind: 'skipped'; readonly reason: string };
 
 // ---------------------------------------------------------------------------
 // Injectable side-effect types
@@ -131,19 +162,54 @@ export type SpawnLike = (
   },
 ) => { unref: () => void };
 
+/**
+ * Injectable synchronous file write. Mirrors fs.writeFileSync signature
+ * for the subset we need. Used for coordinator lock file operations.
+ */
+export type WriteFileSyncLike = (path: string, content: string, opts: { flag: 'wx' }) => void;
+
+/**
+ * Injectable synchronous stat to get file mtime for stale lock detection.
+ * Returns { mtimeMs: number } or throws on missing file.
+ */
+export type StatSyncLike = (path: string) => { mtimeMs: number };
+
+/**
+ * Injectable synchronous file unlink for lock release.
+ */
+export type UnlinkSyncLike = (path: string) => void;
+
 // ---------------------------------------------------------------------------
 // Detection
 // ---------------------------------------------------------------------------
 
 /**
+ * The response shape of the /workrail-health endpoint.
+ *
+ * `pid` was added to enable orphan bridge detection: a bridge that originally
+ * connected to primary PID X can detect when a different primary (PID Y) is
+ * now running and exit cleanly rather than hijacking the new session. Old
+ * primaries that do not return `pid` are treated as "unknown session" and
+ * orphan detection is skipped for them.
+ */
+export type HealthResponse = {
+  readonly port: number;
+  readonly pid: number;
+};
+
+/**
  * Check whether a healthy WorkRail MCP server is accepting connections on the
  * given port. Uses /workrail-health to distinguish WorkRail from any other
  * HTTP server on the same port.
+ *
+ * Returns `{ port, pid }` when a healthy WorkRail primary is found, or `null`
+ * if no healthy primary is available. The `pid` field enables orphan bridge
+ * detection -- see startBridgeServer for usage.
  */
 export async function detectHealthyPrimary(
   port: number,
   opts: { retries?: number; baseDelayMs?: number; fetch?: FetchLike } = {},
-): Promise<number | null> {
+): Promise<HealthResponse | null> {
   const retries = opts.retries ?? 3;
   const baseDelayMs = opts.baseDelayMs ?? 200;
   const fetchFn = opts.fetch ?? globalThis.fetch;
@@ -155,8 +221,12 @@ export async function detectHealthyPrimary(
         signal: AbortSignal.timeout(500),
       });
       if (response.ok) {
-        const body = (await response.json().catch(() => null)) as { service?: string } | null;
-        if (body?.service === 'workrail') return port;
+        const body = (await response.json().catch(() => null)) as { service?: string; pid?: number } | null;
+        if (body?.service === 'workrail') {
+          // pid is present on new primaries; absent on old ones. Both are valid.
+          const pid = typeof body.pid === 'number' ? body.pid : 0;
+          return { port, pid };
+        }
       }
     } catch {
       // Connection refused or timeout — not available yet.
@@ -166,6 +236,123 @@ export async function detectHealthyPrimary(
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Spawn coordinator lock
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the per-port spawn coordinator lock file path.
+ *
+ * Per-port (not global) so that multiple independent WorkRail setups on
+ * different ports don't interfere with each other's spawn coordination.
+ */
+export function spawnLockPath(port: number): string {
+  return join(homedir(), '.workrail', `spawn-coordinator-${port}.lock`);
+}
+
+/**
+ * Try to acquire the spawn coordinator lock for the given port.
+ *
+ * Uses O_EXCL semantics (writeFileSync with flag:'wx') so at most one bridge
+ * wins per death cycle. Losers get EEXIST and skip the spawn.
+ *
+ * Stale lock detection: if the lock's mtime is older than staleMs, the lock
+ * was likely left by a bridge that crashed before releasing it. The stale lock
+ * is deleted and a fresh attempt is made.
+ *
+ * The winner is responsible for releasing the lock via releaseSpawnLock()
+ * after the spawn completes (success or failure).
+ *
+ * All errors except EEXIST/stale are treated as "skipped" to avoid blocking
+ * spawn on unexpected FS conditions.
+ */
+export function acquireSpawnLock(
+  port: number,
+  staleMs: number,
+  deps: {
+    readonly writeFileSync?: WriteFileSyncLike;
+    readonly statSync?: StatSyncLike;
+    readonly unlinkSync?: UnlinkSyncLike;
+  } = {},
+): SpawnLockResult {
+  const lockPath = spawnLockPath(port);
+  const writeFn = deps.writeFileSync ?? writeFileSync;
+  const statFn = deps.statSync ?? (require('fs') as typeof import('fs')).statSync;
+  const unlinkFn = deps.unlinkSync ?? (require('fs') as typeof import('fs')).unlinkSync;
+
+  // Ensure ~/.workrail exists before attempting to create the lock.
+  // Mirrors the pattern in bridge-events.ts (mkdirSync before appendFileSync).
+  try {
+    mkdirSync(join(homedir(), '.workrail'), { recursive: true });
+  } catch {
+    // Directory creation failed — can't write lock, treat as skipped.
+    return { kind: 'skipped', reason: 'mkdirSync failed' };
+  }
+
+  try {
+    writeFn(lockPath, String(process.pid), { flag: 'wx' });
+    logBridgeEvent({ kind: 'spawn_lock_acquired', port });
+    return { kind: 'acquired' };
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+
+    if (code === 'EEXIST') {
+      // Lock already exists. Check if it is stale.
+      try {
+        const stat = statFn(lockPath);
+        const ageMs = Date.now() - stat.mtimeMs;
+        if (ageMs > staleMs) {
+          // Stale lock — the bridge that wrote it has likely crashed.
+          // Unlink and try again.
+          try {
+            unlinkFn(lockPath);
+          } catch {
+            // Race: another bridge may have already removed it. That's fine.
+          }
+          // Retry once with the fresh state.
+          try {
+            writeFn(lockPath, String(process.pid), { flag: 'wx' });
+            logBridgeEvent({ kind: 'spawn_lock_acquired', port });
+            return { kind: 'acquired' };
+          } catch {
+            // Lost the race after reclaim — another bridge just won.
+            logBridgeEvent({ kind: 'spawn_lock_skipped', reason: 'lost race after stale reclaim' });
+            return { kind: 'skipped', reason: 'lost race after stale reclaim' };
+          }
+        }
+        logBridgeEvent({ kind: 'spawn_lock_skipped', reason: 'lock held by another bridge' });
+        return { kind: 'skipped', reason: 'lock held by another bridge' };
+      } catch {
+        // stat failed (file deleted between our write attempt and stat — another bridge just won).
+        logBridgeEvent({ kind: 'spawn_lock_skipped', reason: 'lock contested' });
+        return { kind: 'skipped', reason: 'lock contested' };
+      }
+    }
+
+    // Unexpected error (EACCES, disk full, etc.) — treat as skipped.
+    logBridgeEvent({ kind: 'spawn_lock_skipped', reason: `unexpected error: ${code ?? String(err)}` });
+    return { kind: 'skipped', reason: `unexpected error: ${code ?? String(err)}` };
+  }
+}
+
+/**
+ * Release the spawn coordinator lock.
+ *
+ * Called by the lock winner after spawning (whether spawn succeeded or failed).
+ * Silently ignores ENOENT (lock already released or stolen by stale reclaim).
+ */
+export function releaseSpawnLock(
+  port: number,
+  deps: { readonly unlinkSync?: UnlinkSyncLike } = {},
+): void {
+  const unlinkFn = deps.unlinkSync ?? (require('fs') as typeof import('fs')).unlinkSync;
+  try {
+    unlinkFn(spawnLockPath(port));
+  } catch {
+    // ENOENT or unexpected error — silently ignore.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +366,9 @@ export async function detectHealthyPrimary(
  * starts as the HTTP primary. Jitter + pre-spawn detection check reduces
  * stampede when multiple bridges exhaust simultaneously.
  *
+ * The coordinator lock in acquireSpawnLock provides the primary guarantee
+ * against spawn storms. The jitter here is a secondary defense.
+ *
  * Spawn errors are caught and logged — the caller handles failure via the
  * reconnect loop's exhaustion path.
  */
@@ -186,7 +376,8 @@ export async function spawnPrimary(
   port: number,
   deps: { spawn: SpawnLike; fetch?: FetchLike },
 ): Promise<void> {
-  // Jitter: reduces stampede when multiple bridges exhaust at the same time.
+  // Jitter: secondary defense against stampede. The primary defense is the
+  // coordinator lock acquired before calling this function.
   //
   // WHY 2000ms (not 300ms): primary startup typically takes 500-1000ms.
   // With 300ms jitter, multiple bridges clear the window before the primary is up,
@@ -198,8 +389,8 @@ export async function spawnPrimary(
   // Post-jitter check: another bridge may have already spawned the primary.
   // 3 retries with 500ms base delay gives up to 3.5s of polling (0 + 500 + 1000ms),
   // which covers primaries that started late in the jitter window.
-  const alreadyUp = await detectHealthyPrimary(port, { retries: 3, baseDelayMs: 500, fetch: deps.fetch });
-  if (alreadyUp != null) {
+  const primaryDetected = await detectHealthyPrimary(port, { retries: 3, baseDelayMs: 500, fetch: deps.fetch });
+  if (primaryDetected != null) {
     logBridgeEvent({ kind: 'spawn_skipped', reason: 'primary already up after jitter' });
     console.error('[Bridge] Primary already available after jitter — skipping spawn');
     return;
@@ -227,7 +418,7 @@ export async function spawnPrimary(
   } catch (err) {
     console.error('[Bridge] Failed to spawn primary:', err);
     // Reconnect loop will continue polling; if spawn genuinely failed the
-    // budget will eventually drain and the bridge will shut down.
+    // budget will eventually drain and the bridge will enter waiting_for_primary.
   }
 }
 
@@ -280,7 +471,8 @@ type OutcomeHandlerDeps = {
   readonly setConnectionState: (state: ConnectionState) => void;
   readonly performShutdown: (reason: string) => void;
   readonly startReconnectLoop: () => void;
-  /** Triggers a primary spawn. Async; errors are logged inside. */
+  readonly startWaitLoop: () => void;
+  /** Triggers a primary spawn attempt (coordination lock included). Async; errors are logged inside. */
   readonly triggerSpawn: () => Promise<void>;
   readonly config: Pick<BridgeConfig, 'reconnectMaxAttempts'>;
 };
@@ -321,9 +513,18 @@ export async function handleReconnectOutcome(
         });
         deps.startReconnectLoop();
       } else {
-        logBridgeEvent({ kind: 'budget_exhausted', budgetUsed: reconnectingState.maxAttempts });
-        deps.setConnectionState({ kind: 'closed' });
-        deps.performShutdown('respawn budget exhausted — primary repeatedly unavailable');
+        // Budget spent. Instead of shutting down (which permanently destroys
+        // the IDE's WorkRail connection), enter waiting_for_primary mode:
+        // slow-poll every 5s indefinitely until the primary returns.
+        // The bridge stays alive as long as stdin is open.
+        logBridgeEvent({
+          kind: 'budget_exhausted',
+          budgetUsed: reconnectingState.maxAttempts,
+          respawnBudget: reconnectingState.respawnBudget,
+        });
+        console.error('[Bridge] Spawn budget exhausted — entering slow-poll mode (5s interval)');
+        deps.setConnectionState({ kind: 'waiting_for_primary' });
+        deps.startWaitLoop();
       }
       return;
   }
@@ -337,7 +538,7 @@ export async function startBridgeServer(
   primaryPort: number,
   config: BridgeConfig = DEFAULT_BRIDGE_CONFIG,
   // Injectable side effects for testability. Production callers use defaults.
-  deps: { spawn?: SpawnLike; fetch?: FetchLike } = {},
+  deps: { spawn?: SpawnLike; fetch?: FetchLike; originalPrimaryPid?: number } = {},
 ): Promise<void> {
   // Register early — before any async work — so that exceptions thrown
   // during bridge startup exit cleanly rather than spinning. See fatal-exit.ts.
@@ -409,13 +610,34 @@ export async function startBridgeServer(
     };
 
     // Primary close triggers reconnect.
-    // Idempotent: no-op if connecting/reconnecting (loop already in progress).
+    // Idempotent: no-op if connecting/reconnecting/waiting (loop already in progress).
     t.onclose = () => {
       if (shutdownSignal.aborted) return;
       const current = connectionState;
-      if (current.kind === 'connecting' || current.kind === 'reconnecting') return;
+      if (
+        current.kind === 'connecting' ||
+        current.kind === 'reconnecting' ||
+        current.kind === 'waiting_for_primary'
+      ) return;
       logBridgeEvent({ kind: 'disconnected' });
       console.error('[Bridge] Primary connection lost — reconnecting');
+
+      // Tombstone check: if the primary wrote a tombstone matching our primary PID,
+      // skip rapid reconnects and go directly to slow-poll mode.
+      // This eliminates the ~10s of failing reconnect attempts when the primary
+      // died cleanly (stdin EOF, SIGHUP).
+      const connectedPrimaryPid = deps.originalPrimaryPid ?? 0;
+      if (connectedPrimaryPid > 0) {
+        const tombstone = readTombstone();
+        if (tombstone?.pid === connectedPrimaryPid) {
+          console.error('[Bridge] Tombstone detected — primary died cleanly, entering slow-poll mode');
+          logBridgeEvent({ kind: 'waiting_for_primary', port: primaryPort });
+          setConnectionState({ kind: 'waiting_for_primary' });
+          startWaitLoop();
+          return;
+        }
+      }
+
       setConnectionState({
         kind: 'reconnecting',
         attempt: 0,
@@ -452,6 +674,23 @@ export async function startBridgeServer(
       signal: shutdownSignal,
       config,
       detect: async (attempt) => {
+        // Check tombstone on every attempt: the primary may have written it
+        // after our first attempt failed. If it matches, short-circuit to slow-poll.
+        const connectedPrimaryPid = deps.originalPrimaryPid ?? 0;
+        if (connectedPrimaryPid > 0) {
+          const tombstone = readTombstone();
+          if (tombstone?.pid === connectedPrimaryPid) {
+            console.error('[Bridge] Tombstone detected during reconnect — entering slow-poll mode');
+            logBridgeEvent({ kind: 'waiting_for_primary', port: primaryPort });
+            setConnectionState({ kind: 'waiting_for_primary' });
+            startWaitLoop();
+            // Return true to stop reconnectWithBackoff -- state transition already done.
+            // The outcome will be 'reconnected' but state is actually waiting_for_primary;
+            // handleReconnectOutcome's 'reconnected' branch is a no-op (state already set).
+            return true;
+          }
+        }
+
         logBridgeEvent({ kind: 'reconnect_attempt', attempt: attempt + 1, maxAttempts: config.reconnectMaxAttempts });
         console.error(`[Bridge] Reconnect attempt ${attempt + 1}/${config.reconnectMaxAttempts}`);
         const detected = await detectHealthyPrimary(primaryPort, { retries: 1, fetch: deps.fetch });
@@ -463,14 +702,27 @@ export async function startBridgeServer(
       },
     })
       .then((outcome) => {
-        // Snapshot again at outcome time — state may have changed (e.g. shutdown).
+        // Snapshot again at outcome time — state may have changed (e.g. shutdown or tombstone).
         const stateAtOutcome = connectionState;
         if (stateAtOutcome.kind !== 'reconnecting') return; // race: already handled
         return handleReconnectOutcome(outcome, stateAtOutcome, {
           setConnectionState,
           performShutdown,
           startReconnectLoop,
-          triggerSpawn: () => spawnPrimary(primaryPort, { spawn: spawnFn, fetch: deps.fetch }),
+          startWaitLoop,
+          triggerSpawn: async () => {
+            // Coordinator lock: only one bridge spawns per death cycle.
+            const lockResult = acquireSpawnLock(primaryPort, config.spawnLockStaleMs);
+            if (lockResult.kind === 'skipped') {
+              console.error(`[Bridge] Spawn skipped (coordinator lock): ${lockResult.reason}`);
+              return;
+            }
+            try {
+              await spawnPrimary(primaryPort, { spawn: spawnFn, fetch: deps.fetch });
+            } finally {
+              releaseSpawnLock(primaryPort);
+            }
+          },
           config,
         });
       })
@@ -488,6 +740,52 @@ export async function startBridgeServer(
         });
         console.error('[Bridge] Unexpected error in reconnect loop:', err);
       });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Wait loop: slow-poll every waitForPrimaryPollMs until primary returns.
+  //
+  // This runs when the spawn budget is exhausted or the tombstone signals a
+  // clean primary death. It keeps the bridge alive indefinitely so the IDE
+  // session is never permanently severed by a primary crash.
+  // ---------------------------------------------------------------------------
+
+  const startWaitLoop = (): void => {
+    // Idempotent guard: only one wait loop at a time.
+    const stateAtStart = connectionState;
+    if (stateAtStart.kind !== 'waiting_for_primary') return;
+
+    void (async () => {
+      logBridgeEvent({ kind: 'waiting_for_primary', port: primaryPort });
+      while (!shutdownSignal.aborted) {
+        await sleep(config.waitForPrimaryPollMs);
+        if (shutdownSignal.aborted) return;
+
+        const detected = await detectHealthyPrimary(primaryPort, { retries: 1, fetch: deps.fetch });
+        if (detected != null) {
+          console.error('[Bridge] Primary found after waiting — resuming normal operation');
+          logBridgeEvent({ kind: 'primary_found_after_wait', port: primaryPort });
+          // Re-enter reconnecting with a fresh budget so the new primary session
+          // gets its full spawn budget, not a depleted one from before.
+          setConnectionState({
+            kind: 'reconnecting',
+            attempt: 0,
+            maxAttempts: config.reconnectMaxAttempts,
+            respawnBudget: config.maxRespawnAttempts,
+          });
+          startReconnectLoop();
+          return;
+        }
+      }
+    })().catch((err) => {
+      const errObj = err instanceof Error ? err : new Error(String(err));
+      logBridgeEvent({
+        kind: 'reconnect_loop_error',
+        message: `wait loop error: ${errObj.message}`,
+        stack: errObj.stack ?? null,
+      });
+      console.error('[Bridge] Unexpected error in wait loop:', err);
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -512,9 +810,11 @@ export async function startBridgeServer(
 
       case 'connecting':
       case 'reconnecting':
-        // Both states mean "no primary available right now."
+      case 'waiting_for_primary':
+        // All three states mean "no primary available right now."
         // 'connecting' = initial handshake in progress.
-        // 'reconnecting' = prior connection lost, loop running.
+        // 'reconnecting' = prior connection lost, rapid retry loop running.
+        // 'waiting_for_primary' = spawn budget spent, slow-polling.
         sendUnavailableError(msg, (m) => stdioTransport.send(m));
         return;
 
@@ -567,7 +867,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 /**
  * Send a JSON-RPC error response to the IDE for requests that arrive while
- * no primary is available (connecting or reconnecting states).
+ * no primary is available (connecting, reconnecting, or waiting_for_primary).
  *
  * Notifications have no id — they never get a response. Only requests do.
  */
