@@ -371,6 +371,12 @@ export async function runDelivery(
       const details = `commit succeeded (sha: ${sha}) but PR creation failed: ${formatExecError(e)}`;
       return { _tag: 'error', phase: 'pr', details };
     }
+  } catch (e: unknown) {
+    // WHY: fs.writeFile can throw (disk full, tmpdir quota exceeded). Without this catch,
+    // the exception exits runDelivery uncaught and becomes a floating unhandled rejection
+    // in the void queue.enqueue() callback. Node 20 exits the process on unhandled rejection.
+    // This catch converts writeFile failures to a DeliveryResult so the daemon never crashes.
+    return { _tag: 'error', phase: 'pr', details: formatExecError(e) };
   } finally {
     // Always delete the temp file, even if gh failed or threw.
     await fs.unlink(tmpFile).catch(() => {

@@ -587,8 +587,10 @@ function validateAndResolveTrigger(
       // pass correctly (Number('1e2') === 100, which is a valid integer).
       const asNumber = Number(raw.agentConfig.maxSessionMinutes);
       if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        // WHY invalid_field_value not missing_field: the field IS present -- its value is
+        // invalid (non-integer, negative, or zero). missing_field means the field is absent.
         return err({
-          kind: 'missing_field',
+          kind: 'invalid_field_value',
           field: 'agentConfig.maxSessionMinutes (must be a positive integer)',
           triggerId: rawId,
         });
@@ -601,8 +603,9 @@ function validateAndResolveTrigger(
       // WHY Number.isInteger: same rationale as maxSessionMinutes above.
       const asNumber = Number(raw.agentConfig.maxTurns);
       if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        // WHY invalid_field_value not missing_field: field is present, value is invalid.
         return err({
-          kind: 'missing_field',
+          kind: 'invalid_field_value',
           field: 'agentConfig.maxTurns (must be a positive integer)',
           triggerId: rawId,
         });
@@ -714,18 +717,22 @@ function validateAndResolveTrigger(
     }
 
     // Parse pollIntervalSeconds: optional, must be a positive integer, defaults to 60
+    // WHY Number.isInteger instead of parseInt: parseInt('60.7', 10) silently returns 60,
+    // so an operator writing pollIntervalSeconds: 60.7 would get 60 with no warning.
+    // Number.isInteger(Number(raw)) catches both non-numeric strings (NaN -> false) and
+    // decimal values (60.7 -> false) in one check. Same pattern as maxSessionMinutes above.
     const intervalRaw = src.pollIntervalSeconds?.trim();
     let pollIntervalSeconds = 60;
     if (intervalRaw) {
-      const parsed = parseInt(intervalRaw, 10);
-      if (isNaN(parsed) || parsed <= 0) {
+      const asNumber = Number(intervalRaw);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
         return err({
-          kind: 'missing_field',
+          kind: 'invalid_field_value',
           field: `source.pollIntervalSeconds (must be a positive integer, got: ${intervalRaw})`,
           triggerId: rawId,
         });
       }
-      pollIntervalSeconds = parsed;
+      pollIntervalSeconds = asNumber;
     }
 
     pollingSource = {

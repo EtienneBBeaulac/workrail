@@ -534,9 +534,13 @@ export class TriggerRouter {
       // WHY: bind delivery target at trigger-config time, post result at completion time.
       // A failed POST produces a 'delivery_failed' result so the failure is never silent.
       // TODO(follow-up): add retry, auth headers, $ENV_VAR_NAME resolution for callbackUrl.
-      // Capture _tag before potential reassignment so log messages accurately reflect the
-      // original workflow outcome (success vs error) when delivery also fails.
+      // Capture both _tag and original result before potential reassignment.
+      // WHY originalResult: maybeRunDelivery gates on result._tag === 'success'. If callbackUrl
+      // fails and result is reassigned to delivery_failed, the gate would incorrectly skip
+      // autoCommit even though the workflow succeeded. callbackUrl and autoCommit are independent
+      // delivery systems and must not affect each other.
       const originalTag = result._tag;
+      const originalResult = result;
       if (trigger.callbackUrl) {
         const deliveryResult = await deliveryPost(trigger.callbackUrl, result);
         if (deliveryResult.kind === 'err') {
@@ -587,7 +591,8 @@ export class TriggerRouter {
       }
       // Post-workflow delivery: runs after the workflow result is logged.
       // Best-effort -- errors are logged and discarded, never change the workflow result.
-      await maybeRunDelivery(trigger.id, trigger, result, this.execFn);
+      // Use originalResult (not result) so callbackUrl failure does not skip autoCommit.
+      await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
