@@ -1873,15 +1873,17 @@ trigger: "implement feature X"
 
 | Workflow | Status |
 |----------|--------|
-| `coding-task-workflow-agentic` | ✅ exists |
-| `mr-review-workflow-agentic` | ✅ exists |
-| `routine-context-gathering` | ✅ exists |
-| `routine-hypothesis-challenge` | ✅ exists |
-| `routine-philosophy-alignment` | ✅ exists |
-| `ux-design-workflow` | ❌ needs authoring |
-| `production-risk-audit-workflow` | ❌ needs authoring |
-| `architecture-review-workflow` | ❌ needs authoring (partial -- in coding-task) |
-| `classify-task-workflow` | ❌ needs authoring (fast, cheap, Small-only) |
+| `coding-task-workflow-agentic` | ✅ `coding-task-workflow-agentic.lean.v2.json` |
+| `mr-review-workflow-agentic` | ✅ `mr-review-workflow.agentic.v2.json` |
+| `routine-context-gathering` | ✅ `routines/` |
+| `routine-hypothesis-challenge` | ✅ `routines/` |
+| `routine-philosophy-alignment` | ✅ `routines/` |
+| `ux-design-workflow` | ✅ `ui-ux-design-workflow.json` |
+| `production-risk-audit-workflow` | ✅ `production-readiness-audit.json` |
+| `architecture-review-workflow` | ✅ `architecture-scalability-audit.json` |
+| `bug-investigation-workflow` | ✅ `bug-investigation.agentic.v2.json` |
+| `discovery-workflow` | ✅ `wr.discovery.json` |
+| `classify-task-workflow` | ❌ needs authoring -- fast, 1-step, outputs taskComplexity/riskLevel/hasUI/touchesArchitecture |
 
 **The classify step is the gate.** A cheap, fast workflow that takes a task description and returns structured vars. This is where the coordinator decides what to run. It's the single most important missing workflow -- without it, the coordinator has to spawn everything for every task, which is wasteful.
 
