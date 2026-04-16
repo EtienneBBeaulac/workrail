@@ -498,6 +498,11 @@ export function mountConsoleRoutes(
   // Returns 503 when no V2ToolContext is available (daemon not running in same
   // process, or v2 tools disabled).
   // ---------------------------------------------------------------------------
+  // POST /api/v2/auto/dispatch -- LOCAL DEVELOPER USE ONLY.
+  // This endpoint has no auth. It is intentionally unprotected for local developer
+  // use where the console HTTP server should be bound to 127.0.0.1 only (the default
+  // HttpServer binding). Do NOT expose this port on a shared or production host.
+  // TODO(security): add token auth before any multi-user deployment.
   app.post('/api/v2/auto/dispatch', express.json(), async (req: Request, res: Response) => {
     if (!v2ToolContext) {
       res.status(503).json({ success: false, error: 'Autonomous dispatch requires v2 tools enabled.' });
@@ -511,6 +516,25 @@ export function mountConsoleRoutes(
 
     if (!workflowId || !goal || !workspacePath) {
       res.status(400).json({ success: false, error: 'workflowId, goal, and workspacePath are required.' });
+      return;
+    }
+
+    // Validate workspacePath is an absolute path that exists on disk.
+    // This is a local-developer-only feature; this check prevents obvious mistakes.
+    const nodePath = await import('node:path');
+    const nodeFs = await import('node:fs/promises');
+    if (!nodePath.isAbsolute(workspacePath)) {
+      res.status(400).json({ success: false, error: 'workspacePath must be an absolute path.' });
+      return;
+    }
+    try {
+      const stat = await nodeFs.stat(workspacePath);
+      if (!stat.isDirectory()) {
+        res.status(400).json({ success: false, error: 'workspacePath must be an existing directory.' });
+        return;
+      }
+    } catch {
+      res.status(400).json({ success: false, error: `workspacePath does not exist: ${workspacePath}` });
       return;
     }
 
