@@ -36,6 +36,8 @@ export type {
   ContextMapping,
   ContextMappingEntry,
   GitLabPollingSource,
+  GitHubPollingSource,
+  PollingSource,
 } from './types.js';
 export { PolledEventStore } from './polled-event-store.js';
 export type { PolledEventState, PolledEventStoreError } from './polled-event-store.js';

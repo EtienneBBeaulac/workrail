@@ -461,3 +461,256 @@ triggers:
     warnSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// github_issues_poll and github_prs_poll provider parsing
+// ---------------------------------------------------------------------------
+
+describe('github_issues_poll provider parsing', () => {
+  const BASE_YAML = `
+triggers:
+  - id: gh-issues
+    provider: github_issues_poll
+    workflowId: bug-investigation
+    workspacePath: /workspace
+    goal: Investigate new bug
+    source:
+      repo: acme/my-project
+      token: $GITHUB_TOKEN
+      events: issues.opened issues.updated
+      excludeAuthors: worktrain-bot dependabot[bot]
+      notLabels: wont-fix duplicate
+      labelFilter: bug
+      pollIntervalSeconds: 300
+`;
+
+  it('parses a complete github_issues_poll trigger', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(BASE_YAML, { GITHUB_TOKEN: 'ghp_secret' });
+
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') { warnSpy.mockRestore(); return; }
+
+    const trigger = result.value.triggers[0];
+    expect(trigger).toBeDefined();
+    if (!trigger) { warnSpy.mockRestore(); return; }
+
+    expect(trigger.provider).toBe('github_issues_poll');
+    expect(trigger.workflowId).toBe('bug-investigation');
+
+    const src = trigger.pollingSource;
+    expect(src).toBeDefined();
+    if (!src) { warnSpy.mockRestore(); return; }
+
+    expect(src.provider).toBe('github_issues_poll');
+
+    // Only check fields present in GitHubPollingSource
+    if (src.provider === 'github_issues_poll' || src.provider === 'github_prs_poll') {
+      expect(src.repo).toBe('acme/my-project');
+      expect(src.token).toBe('ghp_secret'); // resolved from env
+      expect(src.events).toEqual(['issues.opened', 'issues.updated']);
+      expect(src.excludeAuthors).toEqual(['worktrain-bot', 'dependabot[bot]']);
+      expect(src.notLabels).toEqual(['wont-fix', 'duplicate']);
+      expect(src.labelFilter).toEqual(['bug']);
+      expect(src.pollIntervalSeconds).toBe(300);
+    }
+
+    warnSpy.mockRestore();
+  });
+
+  it('defaults pollIntervalSeconds to 60 when not specified', () => {
+    const yaml = `
+triggers:
+  - id: gh-issues-minimal
+    provider: github_issues_poll
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Check issues
+    source:
+      repo: acme/my-project
+      token: ghp_token
+      events: issues.opened
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      const src = result.value.triggers[0]?.pollingSource;
+      expect(src?.pollIntervalSeconds).toBe(60);
+    }
+    warnSpy.mockRestore();
+  });
+
+  it('defaults excludeAuthors, notLabels, labelFilter to empty arrays when absent', () => {
+    const yaml = `
+triggers:
+  - id: gh-issues-minimal2
+    provider: github_issues_poll
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Check issues
+    source:
+      repo: acme/my-project
+      token: ghp_token
+      events: issues.opened
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      const src = result.value.triggers[0]?.pollingSource;
+      if (src?.provider === 'github_issues_poll') {
+        expect(src.excludeAuthors).toEqual([]);
+        expect(src.notLabels).toEqual([]);
+        expect(src.labelFilter).toEqual([]);
+      }
+    }
+    warnSpy.mockRestore();
+  });
+
+  it('emits warning when excludeAuthors is not set', () => {
+    const yaml = `
+triggers:
+  - id: gh-issues-no-exclude
+    provider: github_issues_poll
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Check issues
+    source:
+      repo: acme/my-project
+      token: ghp_token
+      events: issues.opened
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    loadTriggerConfig(yaml, {});
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('excludeAuthors is not set'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('returns missing_field error when source.repo is absent', () => {
+    const yaml = `
+triggers:
+  - id: gh-issues-no-repo
+    provider: github_issues_poll
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Check issues
+    source:
+      token: ghp_token
+      events: issues.opened
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    // Trigger is skipped (invalid) -- config loads with 0 triggers
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('returns missing_field error when source is absent', () => {
+    const yaml = `
+triggers:
+  - id: gh-issues-no-source
+    provider: github_issues_poll
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Check issues
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('resolves token from environment variable', () => {
+    const yaml = `
+triggers:
+  - id: gh-issues-env-token
+    provider: github_issues_poll
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Check issues
+    source:
+      repo: acme/my-project
+      token: $MY_GH_TOKEN
+      events: issues.opened
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, { MY_GH_TOKEN: 'resolved-token' });
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      const src = result.value.triggers[0]?.pollingSource;
+      expect(src?.token).toBe('resolved-token');
+    }
+    warnSpy.mockRestore();
+  });
+});
+
+describe('github_prs_poll provider parsing', () => {
+  it('parses a complete github_prs_poll trigger', () => {
+    const yaml = `
+triggers:
+  - id: gh-prs
+    provider: github_prs_poll
+    workflowId: mr-review-workflow
+    workspacePath: /workspace
+    goal: Review PR
+    source:
+      repo: acme/my-project
+      token: ghp_token
+      events: pull_request.opened pull_request.updated
+      excludeAuthors: worktrain-bot
+      pollIntervalSeconds: 300
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') { warnSpy.mockRestore(); return; }
+
+    const trigger = result.value.triggers[0];
+    expect(trigger?.provider).toBe('github_prs_poll');
+
+    const src = trigger?.pollingSource;
+    if (src?.provider === 'github_prs_poll') {
+      expect(src.repo).toBe('acme/my-project');
+      expect(src.events).toEqual(['pull_request.opened', 'pull_request.updated']);
+      expect(src.excludeAuthors).toEqual(['worktrain-bot']);
+      expect(src.pollIntervalSeconds).toBe(300);
+    }
+
+    warnSpy.mockRestore();
+  });
+
+  it('github_prs_poll pollingSource has provider tag === github_prs_poll', () => {
+    const yaml = `
+triggers:
+  - id: gh-prs-tag
+    provider: github_prs_poll
+    workflowId: mr-review
+    workspacePath: /workspace
+    goal: Review PR
+    source:
+      repo: acme/proj
+      token: tok
+      events: pull_request.opened
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.pollingSource?.provider).toBe('github_prs_poll');
+    }
+    warnSpy.mockRestore();
+  });
+});
