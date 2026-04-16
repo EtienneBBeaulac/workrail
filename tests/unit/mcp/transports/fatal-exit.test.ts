@@ -108,6 +108,86 @@ describe('fatalExit', () => {
   });
 });
 
+describe('registerGracefulShutdown', () => {
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'workrail-fatal-test-'));
+    vi.resetModules();
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.useFakeTimers();
+    // process.exit mock: record calls without actually exiting
+    vi.spyOn(process, 'exit').mockImplementation((_code?: number | string | null | undefined) => {
+      // intentional no-op in test
+      return undefined as never;
+    });
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('calls the registered shutdown fn before exiting', async () => {
+    const { fatalExit, registerGracefulShutdown } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    let shutdownCalled = false;
+    registerGracefulShutdown(async () => { shutdownCalled = true; });
+
+    fatalExit('test', new Error('test'));
+
+    // Advance fake timers to allow the Promise chain to resolve
+    await vi.runAllTimersAsync();
+
+    expect(shutdownCalled).toBe(true);
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  it('exits after timeout if shutdown fn hangs', async () => {
+    const { fatalExit, registerGracefulShutdown } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    // Register a fn that never resolves
+    registerGracefulShutdown(async () => { await new Promise(() => { /* never */ }); }, 3000);
+
+    fatalExit('test', new Error('test'));
+
+    // Hard exit timer fires after 3000ms
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  it('exits normally if no shutdown fn is registered', async () => {
+    const { fatalExit } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    // No registerGracefulShutdown call — default behavior
+    fatalExit('test', new Error('test'));
+
+    // Synchronous exit path — no timers needed
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  it('registerGracefulShutdown(null) clears the registered fn', async () => {
+    const { fatalExit, registerGracefulShutdown } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    let shutdownCalled = false;
+    registerGracefulShutdown(async () => { shutdownCalled = true; });
+    registerGracefulShutdown(null); // clear it
+
+    fatalExit('test', new Error('test'));
+
+    // Synchronous exit path used (no fn registered)
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(shutdownCalled).toBe(false);
+  });
+
+  it('handles a shutdown fn that throws synchronously', async () => {
+    const { fatalExit, registerGracefulShutdown } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    registerGracefulShutdown(async () => { throw new Error('sync-ish throw'); });
+
+    fatalExit('test', new Error('test'));
+
+    await vi.runAllTimersAsync();
+
+    // Must still exit despite the fn throwing
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+});
+
 describe('registerFatalHandlers', () => {
   beforeEach(() => {
     // Create a fresh temp dir for this test so crash log writes are isolated.
