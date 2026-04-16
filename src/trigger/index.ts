@@ -35,4 +35,8 @@ export type {
   WebhookEvent,
   ContextMapping,
   ContextMappingEntry,
+  GitLabPollingSource,
 } from './types.js';
+export { PolledEventStore } from './polled-event-store.js';
+export type { PolledEventState, PolledEventStoreError } from './polled-event-store.js';
+export { PollingScheduler } from './polling-scheduler.js';
