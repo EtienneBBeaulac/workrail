@@ -32,6 +32,7 @@
  */
 
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { registerFatalHandlers } from './fatal-exit.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -325,6 +326,10 @@ export async function startBridgeServer(
   // Injectable side effects for testability. Production callers use defaults.
   deps: { spawn?: SpawnLike; fetch?: FetchLike } = {},
 ): Promise<void> {
+  // Register early — before any async work — so that exceptions thrown
+  // during bridge startup exit cleanly rather than spinning. See fatal-exit.ts.
+  registerFatalHandlers();
+
   console.error(`[Bridge] Forwarding stdio → http://localhost:${primaryPort}/mcp`);
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
