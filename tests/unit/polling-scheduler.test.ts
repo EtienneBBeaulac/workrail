@@ -42,6 +42,7 @@ function makePollingTrigger(overrides: Partial<TriggerDefinition> = {}): Trigger
     workspacePath: '/workspace',
     goal: 'Review MR',
     pollingSource: {
+      provider: 'gitlab_poll',
       baseUrl: 'https://gitlab.example.com',
       projectId: '12345',
       token: 'test-token',
@@ -210,7 +211,7 @@ describe('PollingScheduler poll cycle', () => {
 
     expect(dispatched).toHaveLength(0);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Poll failed for trigger 'test-gitlab-poll'"),
+      expect.stringContaining("poll failed for trigger 'test-gitlab-poll'"),
     );
 
     warnSpy.mockRestore();

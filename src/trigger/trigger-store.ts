@@ -418,6 +418,10 @@ function parseTriggersYaml(
             switch (srcKey) {
               case 'baseUrl':              source.baseUrl = srcValueResult.value; break;
               case 'projectId':            source.projectId = srcValueResult.value; break;
+              case 'repo':                 source.repo = srcValueResult.value; break;
+              case 'excludeAuthors':       source.excludeAuthors = srcValueResult.value; break;
+              case 'notLabels':            source.notLabels = srcValueResult.value; break;
+              case 'labelFilter':          source.labelFilter = srcValueResult.value; break;
               case 'token':                source.token = srcValueResult.value; break;
               case 'events':               source.events = srcValueResult.value; break;
               case 'pollIntervalSeconds':  source.pollIntervalSeconds = srcValueResult.value; break;
@@ -937,12 +941,6 @@ function validateAndResolveTrigger(
           `excludeAuthors is not set. If WorkTrain creates issues/PRs under a bot account, ` +
           `omitting excludeAuthors will cause infinite self-review loops. ` +
           `Set excludeAuthors to your WorkTrain bot account login (e.g. "worktrain-bot").`,
-        );
-      } else if (event === 'merge_request.merged' || event === 'merge_request.closed') {
-        console.warn(
-          `[TriggerStore] Event type '${event}' for trigger '${rawId}' cannot be observed ` +
-          `with state=opened polling (GitLab only returns open MRs). ` +
-          `Use a webhook trigger for merge/close events.`,
         );
       }
 

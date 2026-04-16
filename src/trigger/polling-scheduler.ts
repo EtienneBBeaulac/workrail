@@ -1,8 +1,9 @@
 /**
  * WorkRail Auto: Polling Scheduler
  *
- * Manages polling loops for all gitlab_poll triggers in the trigger index.
- * Calls TriggerRouter.dispatch() for each new event detected.
+ * Manages polling loops for all polling triggers (gitlab_poll, github_issues_poll,
+ * github_prs_poll) in the trigger index. Calls TriggerRouter.dispatch() for each
+ * new event detected.
  *
  * Design notes:
  * - One setInterval per polling trigger. Each interval runs independently.
@@ -17,15 +18,18 @@
  * - PolledEventStore: per-trigger JSON file. Tracks processed event IDs and
  *   lastPollAt timestamp. Initialized to { processedIds: [], lastPollAt: now }
  *   on first start (fresh-start invariant: no historical events re-fired).
- * - Context for dispatched workflows:
+ * - Context for dispatched workflows (GitLab):
  *   { mrId, mrIid, mrTitle, mrUrl, mrUpdatedAt, mrAuthorUsername }
+ * - Context for dispatched workflows (GitHub):
+ *   { itemId, itemNumber, itemTitle, itemUrl, itemUpdatedAt, itemAuthorLogin }
  *   These are available to goalTemplate interpolation and workflow context.
  */
 
-import type { TriggerDefinition } from './types.js';
+import type { TriggerDefinition, PollingSource, TriggerId } from './types.js';
 import type { TriggerRouter } from './trigger-router.js';
 import type { PolledEventStore } from './polled-event-store.js';
 import { pollGitLabMRs, type FetchFn, type GitLabMR } from './adapters/gitlab-poller.js';
+import { pollGitHubIssues, pollGitHubPRs, type GitHubIssue, type GitHubPR } from './adapters/github-poller.js';
 import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
 
 // ---------------------------------------------------------------------------
@@ -35,9 +39,11 @@ import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
 /**
  * A trigger definition that has a pollingSource configured.
  * Used to narrow TriggerDefinition in the scheduler.
+ * The pollingSource field is typed as a PollingSource discriminated union;
+ * use switch(trigger.pollingSource.provider) to narrow further.
  */
 type PollingTriggerDefinition = TriggerDefinition & {
-  readonly pollingSource: NonNullable<TriggerDefinition['pollingSource']>;
+  readonly pollingSource: PollingSource;
 };
 
 function isPollingTrigger(trigger: TriggerDefinition): trigger is PollingTriggerDefinition {
@@ -192,16 +198,47 @@ export class PollingScheduler {
     // Get lastPollAt from store (or now if fresh start)
     const lastPollAt = await this.store.getLastPollAt(triggerId);
 
-    // Fetch MRs from GitLab
-    const pollResult = await pollGitLabMRs(
-      trigger.pollingSource,
-      lastPollAt,
-      this.fetchFn,
-    );
+    // Route to the correct adapter based on provider.
+    // The discriminated union on trigger.pollingSource.provider narrows the type
+    // within each branch so the compiler enforces correct adapter/source pairing.
+    switch (trigger.pollingSource.provider) {
+      case 'gitlab_poll':
+        await this.doPollGitLab(trigger, triggerId, pollStartAt, lastPollAt, trigger.pollingSource);
+        break;
+      case 'github_issues_poll':
+        await this.doPollGitHub(trigger, triggerId, pollStartAt, lastPollAt, trigger.pollingSource, 'issues');
+        break;
+      case 'github_prs_poll':
+        await this.doPollGitHub(trigger, triggerId, pollStartAt, lastPollAt, trigger.pollingSource, 'prs');
+        break;
+      default: {
+        // TypeScript exhaustiveness: if a new provider is added to the PollingSource union
+        // without a case here, this line becomes unreachable and the compiler warns.
+        const _exhaustive: never = trigger.pollingSource;
+        console.warn(
+          `[PollingScheduler] Unknown provider '${String((_exhaustive as { provider?: string }).provider)}' ` +
+          `for trigger '${triggerId}'. Skipping cycle.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Poll GitLab MRs and dispatch new events.
+   * At-least-once delivery: dispatch BEFORE record.
+   */
+  private async doPollGitLab(
+    trigger: PollingTriggerDefinition,
+    triggerId: TriggerId,
+    pollStartAt: string,
+    lastPollAt: string,
+    source: Extract<PollingSource, { readonly provider: 'gitlab_poll' }>,
+  ): Promise<void> {
+    const pollResult = await pollGitLabMRs(source, lastPollAt, this.fetchFn);
 
     if (pollResult.kind === 'err') {
       console.warn(
-        `[PollingScheduler] Poll failed for trigger '${triggerId}': ` +
+        `[PollingScheduler] GitLab poll failed for trigger '${triggerId}': ` +
         `${pollResult.error.kind}: ${(pollResult.error as { message: string }).message}. ` +
         `Skipping this cycle, will retry at next interval.`,
       );
@@ -209,15 +246,80 @@ export class PollingScheduler {
     }
 
     const mrs = pollResult.value;
+    await this.dispatchAndRecord(
+      trigger,
+      triggerId,
+      pollStartAt,
+      mrs.map(mr => String(mr.id)),
+      (id) => {
+        const mr = mrs.find(m => String(m.id) === id);
+        return mr ? buildGitLabWorkflowTrigger(trigger, mr) : null;
+      },
+    );
+  }
 
-    if (mrs.length === 0) {
-      // No new/updated MRs -- still update lastPollAt
+  /**
+   * Poll GitHub Issues or PRs and dispatch new events.
+   * At-least-once delivery: dispatch BEFORE record.
+   */
+  private async doPollGitHub(
+    trigger: PollingTriggerDefinition,
+    triggerId: TriggerId,
+    pollStartAt: string,
+    lastPollAt: string,
+    source: Extract<PollingSource, { readonly provider: 'github_issues_poll' | 'github_prs_poll' }>,
+    kind: 'issues' | 'prs',
+  ): Promise<void> {
+    type Item = GitHubIssue | GitHubPR;
+    let pollResult: Awaited<ReturnType<typeof pollGitHubIssues>>;
+
+    if (kind === 'issues') {
+      pollResult = await pollGitHubIssues(source, lastPollAt, this.fetchFn);
+    } else {
+      pollResult = await pollGitHubPRs(source, lastPollAt, this.fetchFn);
+    }
+
+    if (pollResult.kind === 'err') {
+      console.warn(
+        `[PollingScheduler] GitHub ${kind} poll failed for trigger '${triggerId}': ` +
+        `${pollResult.error.kind}: ${(pollResult.error as { message: string }).message}. ` +
+        `Skipping this cycle, will retry at next interval.`,
+      );
+      return;
+    }
+
+    const items = pollResult.value as Item[];
+    await this.dispatchAndRecord(
+      trigger,
+      triggerId,
+      pollStartAt,
+      items.map(item => String(item.id)),
+      (id) => {
+        const item = items.find(i => String(i.id) === id);
+        return item ? buildGitHubWorkflowTrigger(trigger, item) : null;
+      },
+    );
+  }
+
+  /**
+   * Shared dispatch-and-record logic for all polling providers.
+   *
+   * Invariant: dispatch BEFORE record (at-least-once delivery).
+   * If the process crashes between dispatch and record, events re-fire on the next cycle.
+   * This ensures no events are silently missed at the cost of rare duplicates.
+   */
+  private async dispatchAndRecord(
+    trigger: PollingTriggerDefinition,
+    triggerId: TriggerId,
+    pollStartAt: string,
+    candidateIds: string[],
+    buildTrigger: (id: string) => WorkflowTrigger | null,
+  ): Promise<void> {
+    if (candidateIds.length === 0) {
       await this.store.record(triggerId, [], pollStartAt);
       return;
     }
 
-    // Filter to only MRs not already processed
-    const candidateIds = mrs.map(mr => String(mr.id));
     const filterResult = await this.store.filterNew(triggerId, candidateIds);
 
     if (filterResult.kind === 'err') {
@@ -231,22 +333,14 @@ export class PollingScheduler {
     const newIds = filterResult.value;
 
     if (newIds.length === 0) {
-      // All MRs already processed -- just update lastPollAt
       await this.store.record(triggerId, [], pollStartAt);
       return;
     }
 
-    // Build a lookup from id string to GitLabMR for dispatch
-    const mrById = new Map<string, GitLabMR>(mrs.map(mr => [String(mr.id), mr]));
-
     // INVARIANT: dispatch BEFORE record (at-least-once delivery)
-    // If we crash after dispatch but before record, the event re-fires on next cycle.
-    // This is safer than the alternative (silent miss).
     for (const newId of newIds) {
-      const mr = mrById.get(newId);
-      if (!mr) continue;
-
-      const workflowTrigger = buildWorkflowTrigger(trigger, mr);
+      const workflowTrigger = buildTrigger(newId);
+      if (!workflowTrigger) continue;
       this.router.dispatch(workflowTrigger);
     }
 
@@ -272,9 +366,6 @@ export class PollingScheduler {
 /**
  * Build a WorkflowTrigger from a TriggerDefinition and a GitLab MR.
  *
- * The goal is interpolated from the trigger's goalTemplate (if present)
- * using MR fields. Falls back to the static goal if any token is missing.
- *
  * Context variables injected:
  * - mrId: globally unique MR ID
  * - mrIid: project-scoped MR number (the !N number)
@@ -283,7 +374,7 @@ export class PollingScheduler {
  * - mrUpdatedAt: ISO 8601 timestamp of last update
  * - mrAuthorUsername: author's username (if available)
  */
-function buildWorkflowTrigger(
+function buildGitLabWorkflowTrigger(
   trigger: PollingTriggerDefinition,
   mr: GitLabMR,
 ): WorkflowTrigger {
@@ -296,8 +387,15 @@ function buildWorkflowTrigger(
     ...(mr.author?.username ? { mrAuthorUsername: mr.author.username } : {}),
   };
 
-  // Interpolate goal from template if configured
-  const goal = interpolateGoal(trigger, mr);
+  const goal = interpolateGoalFromPayload(trigger, {
+    id: mr.id,
+    iid: mr.iid,
+    title: mr.title,
+    web_url: mr.web_url,
+    updated_at: mr.updated_at,
+    state: mr.state,
+    author: mr.author ?? {},
+  });
 
   return {
     workflowId: trigger.workflowId,
@@ -310,37 +408,65 @@ function buildWorkflowTrigger(
 }
 
 /**
- * Interpolate a goal string from the trigger's goalTemplate and MR fields.
+ * Build a WorkflowTrigger from a TriggerDefinition and a GitHub Issue or PR.
  *
- * Supported tokens:
- * - {{$.iid}} or {{iid}} -> mr.iid
- * - {{$.title}} or {{title}} -> mr.title
- * - {{$.web_url}} or {{web_url}} -> mr.web_url
- * - {{$.author.username}} or {{author.username}} -> mr.author?.username
+ * Context variables injected:
+ * - itemId: globally unique item ID
+ * - itemNumber: repository-scoped issue/PR number
+ * - itemTitle: issue/PR title
+ * - itemUrl: HTML URL of the item
+ * - itemUpdatedAt: ISO 8601 timestamp of last update
+ * - itemAuthorLogin: author's GitHub login (if available)
+ */
+function buildGitHubWorkflowTrigger(
+  trigger: PollingTriggerDefinition,
+  item: GitHubIssue | GitHubPR,
+): WorkflowTrigger {
+  const context: Record<string, unknown> = {
+    itemId: item.id,
+    itemNumber: item.number,
+    itemTitle: item.title,
+    itemUrl: item.html_url,
+    itemUpdatedAt: item.updated_at,
+    ...(item.user?.login ? { itemAuthorLogin: item.user.login } : {}),
+  };
+
+  const goal = interpolateGoalFromPayload(trigger, {
+    id: item.id,
+    number: item.number,
+    title: item.title,
+    html_url: item.html_url,
+    updated_at: item.updated_at,
+    state: item.state,
+    user: item.user ?? {},
+  });
+
+  return {
+    workflowId: trigger.workflowId,
+    goal,
+    workspacePath: trigger.workspacePath,
+    context,
+    ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
+    ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
+  };
+}
+
+/**
+ * Interpolate a goal string from the trigger's goalTemplate using a payload object.
  *
+ * Token syntax: {{$.path}} or {{path}}. Strips leading "$." or "$".
  * Falls back to the static goal if any token cannot be resolved.
  */
-function interpolateGoal(trigger: PollingTriggerDefinition, mr: GitLabMR): string {
+function interpolateGoalFromPayload(
+  trigger: PollingTriggerDefinition,
+  payload: Record<string, unknown>,
+): string {
   const template = trigger.goalTemplate;
   if (!template) return trigger.goal;
 
-  // Build a payload-like object from the MR for dot-path traversal
-  const payload: Record<string, unknown> = {
-    id: mr.id,
-    iid: mr.iid,
-    title: mr.title,
-    web_url: mr.web_url,
-    updated_at: mr.updated_at,
-    state: mr.state,
-    author: mr.author ?? {},
-  };
-
-  // Use the same simple interpolation as TriggerRouter.interpolateGoalTemplate
-  // Token syntax: {{$.path}} or {{path}}
   const TOKEN_RE = /\{\{([^}]+)\}\}/g;
-  let result = template;
-  let match: RegExpExecArray | null;
   const tokens: string[] = [];
+  let match: RegExpExecArray | null;
   while ((match = TOKEN_RE.exec(template)) !== null) {
     if (match[1] !== undefined) tokens.push(match[1]);
   }
@@ -356,8 +482,7 @@ function interpolateGoal(trigger: PollingTriggerDefinition, mr: GitLabMR): strin
     resolved.set(token, String(value));
   }
 
-  result = template.replace(/\{\{([^}]+)\}\}/g, (_, token: string) => resolved.get(token) ?? trigger.goal);
-  return result;
+  return template.replace(/\{\{([^}]+)\}\}/g, (_, token: string) => resolved.get(token) ?? trigger.goal);
 }
 
 /**
