@@ -33,6 +33,9 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: ['tests/**/*.test.ts'],
+          // Exclude the knowledge-graph test -- it runs in the 'knowledge-graph' project
+          // below with pool:forks to avoid DuckDB native binary + worker thread conflicts.
+          exclude: ['tests/unit/knowledge-graph.test.ts'],
           pool: 'threads',
           poolOptions: {
             threads: {
@@ -56,6 +59,26 @@ export default defineConfig({
             },
           },
           ...shared,
+        },
+      },
+      // Knowledge graph tests use pool:forks because @duckdb/node-api is a native
+      // binary that may not be safe in worker threads. Forks pool isolates each
+      // test file in a separate process, which avoids thread-local state issues.
+      {
+        test: {
+          name: 'knowledge-graph',
+          environment: 'node',
+          include: ['tests/unit/knowledge-graph.test.ts'],
+          pool: 'forks',
+          poolOptions: {
+            forks: {
+              singleFork: true,
+            },
+          },
+          ...shared,
+          // Give the indexer extra time -- it runs ts-morph over the full src/ tree
+          testTimeout: 60000,
+          hookTimeout: 120000,
         },
       },
       // Console ViewModel hook tests live in console/src/hooks/__tests__/ and

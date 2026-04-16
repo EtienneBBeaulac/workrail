@@ -1638,3 +1638,205 @@ If the spike answers those two questions correctly, the foundation is proven and
 
 **Incremental update model (post-spike):**
 After each daemon session completes, run the indexer only on files that appear in the session's `filesChanged` list (from the handoff artifact). Full re-index only on first run or when the schema changes. This is a script the daemon runs post-workflow, not an agent task.
+
+---
+
+### Dynamic pipeline composition: task maturity determines the workflow mix (Apr 15, 2026)
+
+**The insight:** not all tasks are equal in how much work is needed before implementation. A raw idea needs a completely different pipeline than a fully-specced ticket with BRD and designs. WorkTrain should compose the pipeline dynamically based on what already exists, not always run the same fixed set of phases.
+
+**The maturity spectrum:**
+
+```
+Raw idea                                                    Fully specced
+    │                                                              │
+    ▼                                                              ▼
+"it would be nice if..."        "here's the BRD, designs,    "fix this bug in
+                                 acceptance criteria, and     file X, line Y"
+                                 ticket with all context"
+```
+
+**What changes at each maturity level:**
+
+| What exists | Pipeline additions |
+|-------------|-------------------|
+| Nothing -- just an idea | ideation → market research → feasibility → scope definition → spec authoring → design → ticket creation → then all of implementation phases |
+| Rough spec or ticket | clarify requirements → design → then implementation |
+| BRD + designs | architecture review → implementation |
+| BRD + designs + arch decision | implementation only |
+| Fully specced + arch decided | coding → review → audit → verify |
+| Code written, needs validation | review → audit → test → verify |
+
+**How classify-task-workflow learns maturity:**
+The classify step doesn't just classify complexity and risk -- it also assesses maturity:
+- `taskMaturity`: idea / rough / specced / ready / code-complete
+- `existingArtifacts`: which of [brd, designs, arch-decision, acceptance-criteria, ticket, implementation] exist
+- `missingArtifacts`: what needs to be created before implementation can begin
+
+The coordinator script uses `taskMaturity` and `missingArtifacts` to prepend the right phases to the pipeline.
+
+**New workflows needed for the early phases:**
+
+| Workflow | Purpose |
+|----------|---------|
+| `ideation-workflow` | Expand a raw idea into a structured opportunity: problem statement, user value, rough scope, open questions |
+| `market-research-workflow` | Research whether this problem is solved elsewhere, what competitors do, what patterns exist |
+| `spec-authoring-workflow` | Author a BRD/PRD from scratch: user stories, acceptance criteria, non-goals, success metrics |
+| `ticket-creation-workflow` | Break a spec into actionable tickets with proper sizing and dependencies |
+| `grooming-workflow` | Review a spec or ticket for completeness, edge cases, and implementation readiness |
+
+**The full lifecycle pipeline for a raw idea:**
+```
+idea → ideation → market research → spec authoring → grooming/validation
+     → design (if hasUI) → architecture → ticket creation
+     → for each ticket: implementation pipeline
+     → integration testing → production audit → ship
+```
+
+**The key design:** the coordinator script drives all of this. It checks what artifacts exist, decides which phases to run, spawns workers for each phase in the right order, and gates on artifacts before proceeding. No human needed to manage the pipeline -- the maturity assessment tells the coordinator exactly what to do.
+
+**Context from today's session as evidence:** we've been doing exactly this manually -- ideas emerged in conversation (coordinator sessions, message queue, knowledge graph), we groomed them into backlog items, the backlog items have varying levels of completeness, and different agents are running different phases based on where each item is in the lifecycle. WorkTrain should own this entire flow.
+
+---
+
+### Verification and proof as first-class citizens (Apr 15, 2026)
+
+**The problem:** today there's no single place that tells you "here's everything that was done to verify this feature is correct." Tests pass, a review ran, an audit happened -- but it's scattered across session notes, PR descriptions, CI logs, and half-remembered conversations. No verification chain.
+
+**The vision:** every shipped change has a **proof record** -- a structured document that answers: what was built, how was it verified, by whom (which agents), and what was the verdict at each gate. Not a summary for humans -- a queryable record that the coordinator and watchdog can use to enforce quality gates and answer questions like "has this module been production-audited in the last 30 days?"
+
+**What a proof record contains:**
+
+```json
+{
+  "prNumber": 402,
+  "goal": "auto-commit and auto-PR daemon feature",
+  "verificationChain": [
+    {
+      "kind": "unit_tests",
+      "outcome": "pass",
+      "coverage": "14 tests, delivery-action.ts covered",
+      "sessionId": "sess_abc123",
+      "timestamp": "2026-04-15T22:00:00Z"
+    },
+    {
+      "kind": "mr_review",
+      "outcome": "request_changes",
+      "findings": [{ "severity": "Major", "id": "F1", "description": "shell injection via exec()" }],
+      "sessionId": "sess_def456",
+      "timestamp": "2026-04-15T22:10:00Z"
+    },
+    {
+      "kind": "mr_review",
+      "outcome": "approve",
+      "findings": [],
+      "sessionId": "sess_ghi789",
+      "timestamp": "2026-04-15T23:00:00Z"
+    },
+    {
+      "kind": "production_audit",
+      "outcome": "pass",
+      "sessionId": "sess_jkl012",
+      "timestamp": "2026-04-15T23:05:00Z"
+    }
+  ],
+  "gates": {
+    "unit_tests": "pass",
+    "mr_review": "approved",
+    "production_audit": "pass",
+    "architecture_audit": "skipped (riskLevel=Medium)"
+  },
+  "overallVerdict": "verified",
+  "mergedAt": "2026-04-15T23:15:00Z"
+}
+```
+
+**Verification gates the coordinator enforces:**
+
+| Gate | Required for | Trigger |
+|------|-------------|---------|
+| Unit tests pass | All changes | After coding, before review |
+| MR review approved (no Critical/Major) | All changes | After unit tests |
+| Architecture audit | `touchesArchitecture=true` or `riskLevel=High` | Before coding |
+| Production audit | `riskLevel=High` or affects prod paths | After coding |
+| Integration tests | `taskComplexity=Large` | After all slices |
+| Performance audit | touches hot paths | After coding |
+| Security audit | touches auth/input/external | After coding |
+
+No PR merges without passing all required gates for its classification. The coordinator enforces this -- not as a suggestion, but as a hard gate in the script.
+
+**Visibility surfaces:**
+
+1. **Console PR view** -- shows the full verification chain for any merged or open PR. Expandable: click any gate to see the session notes from that review.
+
+2. **Module health dashboard** -- per module (e.g. `src/trigger/`, `src/daemon/`), shows: last MR review date, last production audit date, test coverage, open findings. Answers "is this module production-ready right now?"
+
+3. **`worktrain verify <pr-number>`** -- command that checks whether a PR has passed all required gates for its classification. Output: pass/fail per gate, with session links.
+
+4. **Proof record in every PR description** -- auto-generated section: "Verification chain: ✅ 14 unit tests | ✅ MR review (0 findings) | ✅ Production audit | ⏭ Architecture audit (skipped: riskLevel=Low)"
+
+**Why this matters:**
+Right now, "has this been reviewed and audited?" is a question that requires reading through PRs and session notes. With proof records, it's a query: `SELECT * FROM proof_records WHERE module='src/trigger/' AND kind='production_audit' AND outcome='pass' AND timestamp > NOW()-30days`. The knowledge graph stores these records. The watchdog checks them on a schedule. The coordinator gates on them before merging. Verification becomes infrastructure, not process.
+---
+
+### Dynamic model selection: right model for the right task (Apr 15, 2026)
+
+**The principle:** not every task needs Sonnet 4.6. Not every task should be locked to Anthropic. The coordinator and the task classifier should be able to select the model dynamically based on what the task actually needs.
+
+**Why this matters:**
+- **Cost**: classification, simple routing decisions, and status checks don't need a frontier model. A fast cheap model (Haiku) costs ~20x less and is fast enough for deterministic tasks.
+- **Quality ceiling**: some tasks (complex architecture decisions, multi-file refactors) benefit from the best available model regardless of cost.
+- **Provider flexibility**: Anthropic goes down, pricing changes, a new provider releases a better model. Being locked to one provider is an operational risk and a competitive disadvantage.
+- **Specialization**: some models are better at specific tasks -- code generation, reasoning, multimodal (if designs/screenshots are involved).
+
+**Model selection in triggers.yml:**
+```yaml
+triggers:
+  - id: mr-review
+    workflowId: mr-review-workflow.agentic.v2
+    agentConfig:
+      model: claude-sonnet-4-6          # explicit override
+      provider: anthropic               # or: amazon-bedrock, openai, gemini
+
+  - id: classify-task
+    workflowId: classify-task-workflow
+    agentConfig:
+      model: claude-haiku-4-5           # fast + cheap for classification
+      provider: amazon-bedrock
+
+  - id: architecture-design
+    workflowId: architecture-scalability-audit
+    agentConfig:
+      model: claude-opus-4-6            # best available for high-stakes design
+      provider: anthropic
+```
+
+**Model selection in the classifier output:**
+The classify-task-workflow can output a `recommendedModel` var alongside the pipeline:
+- `Small + Low` → Haiku (fast, cheap)
+- `Medium + Medium` → Sonnet (balanced)
+- `Large + High` or `touchesArchitecture=true` → Opus (best quality)
+
+The coordinator script reads `recommendedModel` from the classifier and passes it as `agentConfig` when spawning child sessions.
+
+**Provider abstraction (already partially built):**
+The Bedrock integration (`src/daemon/pi-mono-loader.ts` / first-party agent loop in progress) already handles Anthropic vs Bedrock. The abstraction needs to extend to:
+- **OpenAI** -- GPT-4o, o3 (useful for reasoning-heavy tasks)
+- **Google Gemini** -- Gemini 1.5 Pro (strong at long-context, multimodal)
+- **Ollama** -- local models (air-gapped environments, cost-zero for classification tasks)
+- **Any OpenAI-compatible API** -- covers most new providers automatically
+
+**Implementation path:**
+The first-party agent loop (in progress, PR TBD) is the right place to implement the provider abstraction. Instead of hardcoding the Anthropic SDK, it accepts a provider client that conforms to the Anthropic messages API format (which most providers support via compatibility layers). The `agentConfig.provider` and `agentConfig.model` fields are already in `TriggerDefinition` (added in GAP-8 / PR #397) -- the loop just needs to instantiate the right client.
+
+**Cost optimization opportunity:**
+With model routing, a full development pipeline becomes significantly cheaper:
+- classify-task: Haiku (~$0.002)
+- discovery: Sonnet (~$0.05)
+- coding: Sonnet (~$0.20)
+- mr-review: Sonnet (~$0.10)
+- production-audit: Sonnet (~$0.08)
+- architecture (if needed): Opus (~$0.50)
+
+vs today where everything runs on Sonnet by default. For a typical Medium task, model routing saves ~60% cost with no quality loss on the lightweight phases.
+
