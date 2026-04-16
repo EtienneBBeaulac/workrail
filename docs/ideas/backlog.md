@@ -1840,3 +1840,1066 @@ With model routing, a full development pipeline becomes significantly cheaper:
 
 vs today where everything runs on Sonnet by default. For a typical Medium task, model routing saves ~60% cost with no quality loss on the lightweight phases.
 
+---
+
+### Native multi-agent orchestration: coordinator sessions + session DAG (HIGH PRIORITY, Apr 15, 2026)
+
+**The problem:** Everything we can do manually today -- spawn parallel agents, chain discovery→implement→review→fix, react to findings, merge when clean -- WorkTrain should be able to do natively, fully autonomously, with full observability, and without any user feedback.
+
+Today this requires a human (or Claude Code) to:
+- Read completion notifications
+- Interpret findings
+- Decide what follow-up agents to spawn
+- Track which PRs are clean vs need fixes
+- Trigger the merge sequence when everything is ready
+
+None of that should require a human. It's all policy that belongs in a coordinator workflow.
+
+---
+
+#### New primitives required
+
+**`spawn_session` tool** (available inside workflow steps)
+Starts a child session with a given workflowId + goal. Non-blocking -- returns a `sessionHandle` immediately. The coordinator continues executing the current step.
+
+```typescript
+spawn_session({
+  workflowId: 'mr-review-workflow-agentic',
+  goal: `Review PR #${prNumber}: ${prTitle}`,
+  workspacePath: '/path/to/repo',
+  context: { prNumber, prTitle, prDiff }
+}) → { sessionHandle: 'sess_abc123' }
+```
+
+**`await_sessions` tool** (available inside workflow steps)
+Blocks until one or all of a set of session handles complete. Returns their results and output artifacts (notes, handoff artifacts, MR review findings).
+
+```typescript
+await_sessions({
+  handles: ['sess_abc123', 'sess_def456'],
+  mode: 'all'  // or 'any'
+}) → [{ handle, result, outputs: { notes, findings, artifacts } }]
+```
+
+**Coordinator session type**
+A session that owns child sessions. Parent-child relationship stored in the session store. Killing a coordinator kills all its children. The console DAG view shows the full tree.
+
+**Result routing**
+Child session outputs are automatically available when `await_sessions` resolves -- the coordinator doesn't manually query the session store.
+
+---
+
+#### Coordinator workflow pattern
+
+A coordinator workflow uses a `while` loop step with `spawn_session` + `await_sessions` to drive a dynamic DAG:
+
+```
+Phase 1: Gather work items (e.g. open PRs, open issues, failing tests)
+Phase 2: Spawn workers in parallel (one per work item)
+Phase 3: Await all workers
+Phase 4: Classify results
+  - Clean items: queue for merge/close
+  - Items with findings: spawn fix agents
+  - Items with blockers: escalate to human (fire onComplete notification)
+Phase 5: Await fix agents, re-review if needed (circuit breaker: max 3 attempts)
+Phase 6: Execute final action (merge sequence, create summary, post to Slack)
+```
+
+This is what we did manually all day. It should be a workflow anyone can run with a single trigger.
+
+---
+
+#### Observability: session DAG view in console
+
+The QueuePane shows a flat list today. For coordinator workflows it must show a tree:
+
+```
+● coordinator: groom and fix all PRs          [running, 47 min]
+  ├── ✓ sess_abc: GAP-1 implement             [merged, 18 min]
+  ├── ✓ sess_def: GAP-1 MR review             [approved, 4 min]
+  ├── ✓ sess_ghi: GAP-6 implement             [merged, 12 min]
+  ├── ● sess_jkl: GAP-6 MR review fix         [running, 3 min]
+  │     └── ✓ sess_mno: GAP-6 findings fix    [complete, 8 min]
+  └── ✓ sess_pqr: TS6 tsconfig fix            [merged, 6 min]
+```
+
+Each node: status icon, workflow type, goal snippet, duration. Expand to see step notes. Parent-child edges visible. Critical path highlighted.
+
+---
+
+#### No-user-feedback policy logic
+
+The coordinator workflow encodes the policy as workflow step instructions:
+
+- **Critical/Major finding** → block merge, spawn fix agent, re-review (max 3 passes), escalate if still failing
+- **Minor finding** → spawn fix agent if auto-fixable, else log and proceed
+- **Nit** → log, proceed without fix
+- **Clean** → queue for merge
+- **Merge sequence** → serial (one at a time, pull before each merge to avoid conflicts)
+- **Circuit breaker** → after 3 failed fix attempts on same finding, post to Slack/GitLab and pause
+
+This policy lives in the coordinator workflow, not in the daemon code. Different teams can have different policies by using different coordinator workflows.
+
+---
+
+#### What this unlocks
+
+A single trigger fires the entire development cycle autonomously:
+
+```yaml
+# triggers.yml
+- id: daily-grooming
+  type: cron
+  schedule: "0 9 * * 1-5"   # 9am weekdays
+  workflowId: coordinator-groom-and-ship
+  goal: "Review all open PRs, fix findings, merge clean PRs, file issues for blockers"
+  workspacePath: ~/git/my-project
+  autoCommit: true
+  autoOpenPR: true
+```
+
+WorkTrain wakes up at 9am, reviews every open PR, fixes everything it can, merges what's clean, posts a summary to Slack, and files GitHub issues for anything that needs human judgment. No human involved unless the circuit breaker fires.
+
+---
+
+#### Build order
+
+1. **`spawn_session` + `await_sessions` tools** -- the core primitives. These are new MCP tools exposed to workflow steps, backed by a new `SpawnedSessionRegistry` in the DI container.
+2. **Parent-child session relationship in session store** -- `parentSessionId` field on session creation event.
+3. **Console DAG view** -- new `CoordinatorView` component that renders the session tree from the parent-child graph.
+4. **Coordinator workflow templates** -- `coordinator-groom-and-ship`, `coordinator-review-all-prs`, `coordinator-investigate-and-fix` as bundled workflows.
+5. **No-feedback policy encoding** -- document the MR review finding classification schema so coordinator workflows can reliably parse and act on it.
+
+**This is the most important architectural work remaining in WorkTrain.** Everything else -- polling triggers, onboarding, knowledge graph -- makes WorkTrain better. This makes it genuinely autonomous.
+
+---
+
+### Message queue: async communication with WorkTrain from anywhere (Apr 15, 2026)
+
+**The problem:** working with WorkTrain today requires you to be in the terminal, watching notifications, responding in real time. But the most valuable moments are often asynchronous -- you have a thought at 2am, want to redirect a running agent from your phone, or want to queue a direction before the current batch finishes.
+
+**The design:** a persistent message queue that decouples when you send a message from when WorkTrain acts on it.
+
+```bash
+worktrain tell "skip the architecture review for the polling triggers PR, it's low risk"
+worktrain tell "add knowledge graph vector layer to next sprint"
+worktrain tell "stop the worktrain-init agent, I changed my mind on the UX"
+```
+
+Each command appends to `~/.workrail/message-queue.jsonl` (append-only, one JSON line per message). The daemon drains the queue between agent completions -- never mid-run, always at a natural break point. Messages are delivered in order and never lost across restarts.
+
+**What the queue enables:**
+
+- **Direction changes while agents run** -- "actually, use polling not webhooks" can be queued while 6 agents are running; the coordinator picks it up before spawning the next batch
+- **Mobile input** -- a mobile app (or simple HTTP endpoint) writes to the queue; WorkTrain processes when ready
+- **Async ideation** -- thoughts queued whenever they occur, not forced into a synchronous conversation window
+- **Stop/pause signals** -- `worktrain tell "pause after current batch"` is queue-delivered; coordinator checks for pause signals before each spawn
+- **Priority override** -- `worktrain tell "prioritize the shell injection fix, it's blocking"` bumps a task to the front of the coordinator's work list
+
+**Outbox (WorkTrain → user):**
+The same pattern in reverse. WorkTrain appends notifications to `~/.workrail/outbox.jsonl` -- agent completions, findings that need human judgment, questions that require a decision. A mobile client polls this file (or an HTTP SSE endpoint wraps it) and pushes to the user's phone. The user reads the notification, taps a response, it goes into the message queue. Full async loop with no real-time presence required.
+
+**Architecture:**
+- `~/.workrail/message-queue.jsonl` -- inbound, append-only, drained in order
+- `~/.workrail/outbox.jsonl` -- outbound, append-only, read by clients
+- `worktrain tell <message>` CLI command -- appends to message-queue
+- `worktrain inbox` CLI command -- reads unread outbox items
+- Coordinator loop checks message-queue at the start of each cycle before spawning new agents
+- The `talk` session (interactive ideation) consumes from the same queue -- seamless transition between async messages and live conversation
+
+**This is the foundation for mobile monitoring.** The mobile app is just a client that reads outbox and writes to message-queue. No new daemon capability needed -- just a thin client over these two files.
+
+---
+
+### Autonomous merge: WorkTrain approves and merges its own PRs after full vetting (Apr 15, 2026)
+
+**The idea:** after the full verification chain passes (unit tests, MR review clean, all required audits green), WorkTrain runs `gh pr review --approve && gh pr merge --squash` itself. No human needed in the loop for PRs that pass all gates.
+
+**This is already mostly built.** The coordinator script already calls `gh pr merge` -- we've been doing it today. The gap is formalizing the policy that makes auto-merge safe: what gates must pass, what findings are acceptable, and what always requires a human.
+
+---
+
+#### The auto-merge policy (what makes it safe)
+
+**Auto-merge allowed when ALL of:**
+- All required verification gates pass (defined by task classification)
+- MR review: 0 Critical, 0 Major findings
+- If `riskLevel=High`: production audit also passes
+- If `touchesArchitecture=true`: architecture audit also passes
+- CI is green (all required checks pass)
+- No `needs-human-review` label on the PR
+- The PR is not to a protected branch that requires human approval (configurable)
+
+**Auto-merge blocked when ANY of:**
+- Any Critical or Major finding in any review/audit
+- CI is failing
+- The PR was authored by a human (WorkTrain only auto-merges its own PRs)
+- The PR touches security-sensitive paths (auth, credentials, network exposure) -- configurable blocklist
+- Circuit breaker has fired (3+ fix attempts on same finding = escalate to human)
+- `riskLevel=Critical` (always human approval for highest-risk changes)
+
+**Human always required for:**
+- Schema changes (breaking changes to public API contracts)
+- Dependency upgrades (major version)
+- Infrastructure/CI/CD changes
+- Changes to WorkTrain's own merge policy
+- Anything the watchdog flags as a drift-from-spec
+
+---
+
+#### Implementation
+
+This is a coordinator script policy, not a new capability. The required pieces:
+
+1. **Proof record gates** (in progress -- verification chain spec) -- the coordinator checks the proof record before calling merge
+2. **`--admin` merge bypass for CI false positives** -- already used today; coordinator should note when it uses `--admin` and why
+3. **`needs-human-review` label escape hatch** -- any human can block auto-merge by adding this label; WorkTrain respects it
+4. **Merge audit log** -- every auto-merge appended to `~/.workrail/merge-log.jsonl`: which PR, which gates passed, which were skipped and why, timestamp. The watchdog checks this log.
+
+**The coordinator script merge gate:**
+```typescript
+const proofRecord = await getProofRecord(prNumber);
+const canAutoMerge =
+  proofRecord.gates.unit_tests === 'pass' &&
+  proofRecord.gates.mr_review === 'approved_clean' &&  // 0 Critical, 0 Major
+  (riskLevel !== 'High' || proofRecord.gates.production_audit === 'pass') &&
+  (touchesArchitecture !== true || proofRecord.gates.architecture_audit === 'pass') &&
+  !prLabels.includes('needs-human-review') &&
+  prAuthor.startsWith('worktrain-');  // only merge own PRs
+
+if (canAutoMerge) {
+  await exec(`gh pr merge ${prNumber} --squash`);
+  appendMergeLog({ prNumber, gates: proofRecord.gates, timestamp: new Date() });
+} else {
+  await notifyHuman(prNumber, proofRecord);  // post to Slack with what's blocking
+}
+```
+
+**The trust boundary is the proof record.** WorkTrain doesn't decide "this looks fine" -- it checks whether each required gate has a recorded pass. The merge decision is deterministic. A human can always override by adding `needs-human-review`. The audit log makes every auto-merge traceable.
+
+**Why this is safe even though it sounds scary:**
+The risk of auto-merge is "something bad gets into main." The mitigations are: the review agent is adversarial (actively looks for problems), the production audit checks for runtime risks, CI validates behavior, and the proof record is the immutable record of what was checked. A human reviewing the PR manually doesn't add much signal beyond what 3 specialized audit agents already found. The real human value is in edge cases -- which is exactly what `needs-human-review` and the `riskLevel=Critical` block handle.
+
+**Near-term:** WorkTrain already merges in the coordinator script (we've done it today). Formalizing the policy above just makes it explicit and auditable rather than ad-hoc.
+
+---
+
+### Periodic analysis agents: continuous project health scanning (Apr 15, 2026)
+
+**The idea:** WorkTrain runs agents on a schedule to proactively identify issues, gaps, improvement opportunities, and ideas -- without being asked. The watchdog (already spec'd) handles drift detection. These are deeper, domain-specific scans that run weekly or monthly.
+
+**The agent zoo:**
+
+**Weekly: Code health scan**
+Runs `architecture-scalability-audit` on modules that haven't been audited in 30 days. Scans for: coupling violations, growing complexity hotspots (files with most churn), missing abstractions that are emerging across multiple recent PRs, performance anti-patterns introduced in the last sprint. Output: `code-health-report.md` + GitHub issues filed for actionable findings.
+
+**Weekly: Test coverage scan**
+Identifies files modified in the last 30 days with zero or low test coverage. Files with new exported symbols that have no tests. Critical paths (error handling, auth, external API boundaries) with only happy-path tests. Output: files a missing test coverage filed as GitHub issues with suggested test scenarios.
+
+**Weekly: Documentation drift scan**
+Checks if recently merged PRs changed behavior that's described in docs. Identifies code that lacks inline documentation for non-obvious logic. Finds CLAUDE.md / AGENTS.md that haven't been updated to reflect new modules or conventions. Output: `doc-drift-report.md` + PRs to fix the most important gaps.
+
+**Monthly: Dependency health scan**
+Goes beyond just "is it outdated?" -- assesses: are there known CVEs? are there active forks or replacements? are there lighter alternatives for heavy dependencies? is pi-mono still the right choice or should it be replaced? Output: `dependency-health-report.md` with recommendations ranked by impact.
+
+**Monthly: Performance baseline**
+Runs a set of benchmark scenarios: startup time, first workflow step latency, session store read/write throughput, knowledge graph query time on a real repo. Compares against the previous month's baseline. Flags regressions > 10%. Output: `performance-baseline-YYYY-MM.md` + issues for regressions.
+
+**Continuous: Security scan**
+On every PR merge: scan changed files for OWASP top 10 patterns -- hardcoded secrets, command injection vectors (like the `exec()` issue we found in #402), missing input validation at boundaries, unsafe deserialization. Output: findings posted as PR comments before merge if not already reviewed.
+
+**Monthly: Ideas generation**
+The most interesting one. Runs `wr.discovery` on the current state of the codebase + backlog + recent session history and asks: "what's the most impactful thing we could build next that we haven't thought of yet?" Cross-references with competitor landscape (GraphRAG, LangGraph, nexus-core updates), recent AI research, and user pain points in the session notes. Output: `ideas-YYYY-MM.md` -- a list of concrete improvement opportunities with rough effort estimates. The best ideas get promoted to the backlog by the watchdog.
+
+**How this works with the coordinator:**
+All of these are just cron triggers in `triggers.yml`. The coordinator script for each runs the appropriate workflow, reads the output, files GitHub issues for actionable findings, and posts a summary to Slack. No human needed to kick them off -- they just run.
+
+```yaml
+triggers:
+  - id: weekly-code-health
+    type: cron
+    schedule: "0 8 * * 1"   # Monday 8am
+    workflowId: architecture-scalability-audit
+    goal: "Weekly code health scan: identify coupling violations, complexity hotspots, missing abstractions"
+    workspacePath: ~/git/personal/workrail
+    agentConfig:
+      model: claude-sonnet-4-6
+    callbackUrl: http://localhost:3200/internal/file-issues
+
+  - id: monthly-ideas
+    type: cron
+    schedule: "0 9 1 * *"   # 1st of every month
+    workflowId: wr.discovery
+    goal: "Monthly ideas generation: what's the most impactful improvement we haven't thought of yet?"
+    workspacePath: ~/git/personal/workrail
+```
+
+**The meta-point:** WorkTrain running these agents on the WorkRail/WorkTrain repo means the product improves itself on a schedule. Every Monday it finds its own architectural problems. Every month it generates ideas for its own improvement. Every PR gets a security scan before it merges. The codebase gets continuously healthier without anyone managing it.
+
+---
+
+### Monitoring, analytics, and autonomous remediation (Apr 15, 2026)
+
+**The idea:** WorkTrain watches your application's health metrics in real time, identifies anomalies, investigates root causes, and resolves what it can -- automatically. This closes the full loop from "something went wrong" to "it's fixed and here's why."
+
+---
+
+#### What WorkTrain monitors
+
+**Application metrics (via polling or push):**
+- Error rate (Sentry, Datadog, CloudWatch, custom endpoint)
+- Latency P50/P95/P99 (per endpoint, per workflow step)
+- Memory and CPU usage of the daemon itself
+- Session success/failure rate (from the daemon's own session store)
+- Workflow completion time trends (are sessions getting slower?)
+- Queue depth (are triggers backing up?)
+
+**Codebase health metrics (derived from WorkTrain's own data):**
+- Test coverage trends (going up or down over time?)
+- Build time trends
+- PR cycle time (time from open to merge)
+- Number of open findings by severity across all open PRs
+- Number of sessions that ended in `_tag: 'error'` vs `'success'` in the last 7 days
+- Workflow steps most likely to fail (from session store analysis)
+
+**Custom metrics (user-defined):**
+```yaml
+# triggers.yml
+monitoring:
+  - id: session-error-rate
+    type: metric_threshold
+    source: daemon_sessions    # reads from ~/.workrail/data/sessions/
+    query: "error_rate_7d > 0.15"   # >15% session failure rate
+    workflowId: bug-investigation.agentic.v2
+    goal: "Investigate high daemon session error rate: {{$.error_rate}}% failures in last 7 days"
+    workspacePath: ~/git/personal/workrail
+
+  - id: sentry-errors
+    type: sentry_poll
+    project: workrail
+    token: $SENTRY_TOKEN
+    threshold: new_error_rate_1h > 5
+    workflowId: bug-investigation.agentic.v2
+    goalTemplate: "Investigate Sentry error spike: {{$.error.type}} -- {{$.error.message}}"
+```
+
+---
+
+#### The monitoring loop
+
+```
+monitor: detect anomaly
+  │
+  ├── classify severity (script -- based on threshold breach magnitude)
+  │     Critical: > 3x normal, affects production users
+  │     High: > 2x normal, degraded but functional
+  │     Low: trending bad but within bounds
+  │
+  ├── [if Critical] page immediately
+  │     script: post to Slack #incidents with metric data + session link
+  │
+  ├── investigate
+  │     workflow: bug-investigation.agentic.v2
+  │     inputs: metric data, recent commits, error logs, affected code paths
+  │     outputs: root cause hypothesis, affected files, confidence score
+  │
+  ├── [if confidence >= 0.8 AND severity <= High] attempt auto-remediation
+  │     ├── [if config/feature-flag fix] flip flag (script, instant)
+  │     ├── [if code fix, well-understood] spawn coding-task → review → merge
+  │     └── [if rollback needed] create rollback PR → review → merge
+  │
+  ├── [if confidence < 0.8 OR severity == Critical] escalate
+  │     script: post full investigation findings to Slack + file GitHub issue
+  │
+  └── follow-up check
+        cron: 30 min later → has the metric recovered? post update.
+```
+
+---
+
+#### WorkTrain analytics dashboard
+
+Beyond alerting, WorkTrain maintains a persistent analytics layer that answers questions like:
+
+- "What's our average PR cycle time this month vs last month?"
+- "Which workflow steps fail most often?"
+- "How much did autonomous sessions cost in tokens this week?"
+- "What percentage of bugs were auto-fixed vs escalated?"
+- "Which modules have the most open findings from MR reviews?"
+- "How many sessions ran today / this week / this month?"
+
+This data lives in the knowledge graph (structured, queryable) and is visualized in the console. The `worktrain talk` interface can answer these questions conversationally: "how are we doing this week?" → pulls the analytics and gives a natural language summary.
+
+---
+
+#### Self-monitoring: WorkTrain watching itself
+
+The most immediately useful instance is WorkTrain monitoring its own daemon:
+
+- Session error rate rising → investigate what kinds of tasks are failing
+- Queue depth growing → daemon may be overloaded → reduce poll frequency or spawn fewer concurrent sessions
+- Session duration outliers → some sessions are running way too long → investigate which workflow step is stuck
+- Memory leak → daemon process growing unbounded → restart + file bug
+- Disk usage → session store growing too large → prune old sessions
+
+These are all monitorable from `~/.workrail/data/sessions/` with no external dependency. WorkTrain can watch itself with zero additional infrastructure.
+
+---
+
+#### Implementation path
+
+**Now (no new features needed):** cron trigger → `wr.discovery` workflow that reads session store metrics → posts summary to Slack. This gives analytics immediately.
+
+**Near-term (needs `metric_threshold` trigger type):** new `PollingMonitorSource` that evaluates a metric expression on a schedule and fires only when threshold breaches. Same polling infrastructure as `gitlab_poll`.
+
+**Medium-term:** Sentry/Datadog/CloudWatch adapters as polling sources. Same pattern as GitLab -- poll the API, deduplicate events, dispatch workflow.
+
+**Long-term:** real-time metric ingestion (push rather than pull), time-series storage in DuckDB alongside the knowledge graph, analytics dashboard in the console.
+
+---
+
+### Per-workspace work queue: proactive task drain instead of pure event-driven (Apr 15, 2026)
+
+**The insight:** triggers make WorkTrain reactive (something happens, WorkTrain responds). A work queue makes WorkTrain proactive -- it pulls the next item when capacity is available, works it to completion, pulls the next. This is how a real development team operates: you have a sprint board you drain, not just a webhook listener.
+
+**The queue is the backlog made executable.** Every item in the backlog, every GitHub issue labeled for autonomous work, every `worktrain enqueue "..."` from the terminal -- all normalized into one ordered list per workspace that WorkTrain drains continuously.
+
+---
+
+#### How it works
+
+**Internal queue format:** `~/.workrail/workspaces/<name>/queue.jsonl` -- append-only, one item per line. The daemon's coordinator loop checks this file between sessions and pulls the next item when under `maxConcurrentSessions`. Items are consumed in priority order, then FIFO.
+
+```jsonl
+{"id":"q_001","goal":"implement maxConcurrentSessions global semaphore","priority":"high","source":"manual","createdAt":"2026-04-15T22:00:00Z","workflow":null,"status":"pending"}
+{"id":"q_002","goal":"add GitHub polling adapter","priority":"medium","source":"github_issue","issueNumber":410,"createdAt":"2026-04-15T22:01:00Z","workflow":null,"status":"pending"}
+{"id":"q_003","goal":"investigate flaky timing test in console-service-dormancy","priority":"low","source":"manual","createdAt":"2026-04-15T22:02:00Z","workflow":"bug-investigation.agentic.v2","status":"pending"}
+```
+
+**CLI interface:**
+```bash
+worktrain enqueue "implement X" --workspace workrail --priority high
+worktrain enqueue "investigate this bug" --workspace workrail --workflow bug-investigation.agentic.v2
+worktrain queue list --workspace workrail          # show pending items
+worktrain queue pause --workspace workrail         # stop draining
+worktrain queue resume --workspace workrail        # resume draining
+worktrain queue remove <id> --workspace workrail   # remove an item
+```
+
+**External pull sources (normalized into the internal queue):**
+```yaml
+workspaces:
+  workrail:
+    path: ~/git/personal/workrail
+    queue:
+      maxConcurrentSessions: 3
+      sources:
+        - type: github_issues
+          integration: github
+          filter: 'label:worktrain-queue'
+          priority:
+            - label: 'priority:high'   → high
+            - label: 'priority:medium' → medium
+            - default:                 → low
+        - type: internal              # always included
+```
+
+When a GitHub issue is labeled `worktrain-queue`, a poll cycle picks it up and normalizes it into the internal queue. When WorkTrain completes the work, it removes the label (or transitions status) and closes the issue. The team uses GitHub issues as their task interface; WorkTrain drains them autonomously.
+
+**Supported external sources:**
+- GitHub issues (label filter)
+- GitLab issues (label filter)
+- Jira sprint board (active sprint items assigned to worktrain user)
+- Linear (triage queue or assignee filter)
+- Internal queue.jsonl (always available, zero config)
+
+---
+
+#### Queue + message queue + talk: the full interface
+
+Three modes, all async-safe, all persisted:
+
+| Interface | Use case | Latency |
+|-----------|----------|---------|
+| **Work queue** | "do this when you have capacity" | Whenever a slot is free |
+| **Message queue** (`worktrain tell`) | "do this now, between current sessions" | End of current batch |
+| **Talk** (`worktrain talk`) | "let's discuss and decide together" | Interactive |
+
+You can send a thought from your phone at 2am via `worktrain tell`, and separately have a queue of 10 backlog items WorkTrain is draining during the day. The talk session can inspect the queue, reorder items, and add new ones -- all from natural conversation.
+
+---
+
+#### Queue-aware coordinator loop
+
+The coordinator's main loop becomes:
+
+```typescript
+while (daemon.running) {
+  // 1. Drain message queue (direction changes, questions)
+  const messages = await readMessageQueue();
+  for (const msg of messages) await handleMessage(msg);
+
+  // 2. Pull next queue items up to maxConcurrentSessions
+  const active = await getActiveSessions();
+  const slots = maxConcurrentSessions - active.length;
+  if (slots > 0) {
+    const items = await dequeueItems(slots);
+    for (const item of items) {
+      const pipeline = await classifyAndBuildPipeline(item.goal);
+      await spawnCoordinatorSession(pipeline, item);
+    }
+  }
+
+  // 3. Check external pull sources for new items
+  await syncExternalSources();
+
+  await sleep(5_000);  // 5s coordinator tick
+}
+```
+
+The queue is the thing that makes WorkTrain feel like a teammate rather than a service -- it has its own work to do, it makes progress autonomously, and you can check in on it rather than having to drive every task manually.
+
+---
+
+#### Queue visibility in the console
+
+The console adds a **Queue tab** (alongside Sessions and AUTO):
+- Pending items (ordered by priority, FIFO within priority)
+- Active items (with live session link)
+- Completed items (with outcome, duration, PR link if applicable)
+- Paused/blocked items (with reason)
+
+Drag-to-reorder for priority. Click to expand and see the full pipeline plan. Button to pause/resume the queue. "Add item" form that goes to `worktrain enqueue`.
+
+---
+
+#### Relationship to worktrain spawn/await
+
+`worktrain spawn` / `worktrain await` are for coordinator *scripts* -- explicit programmatic orchestration. The work queue is for *ambient* drain -- WorkTrain autonomously pulls items when capacity is free. Both use the same underlying session engine. The difference is who's driving: a script (spawn/await) or the queue drain loop. They compose naturally: a queue item might be a coordinator script that spawns its own child sessions via spawn/await.
+
+---
+
+### Work queue refinements: filtering, catch-all mode, and deadline-aware prioritization (Apr 15, 2026)
+
+#### Issue/ticket filtering
+
+The external pull sources need richer filtering than just a label. Real teams organize work by project, team, component, sprint, and assignee -- all of these should be filterable:
+
+```yaml
+workspaces:
+  workrail:
+    queue:
+      sources:
+        - type: github_issues
+          integration: github
+          filter:
+            labels: ['worktrain-queue']     # optional -- if omitted, pulls all open issues
+            milestone: 'Sprint 12'          # optional
+            assignee: 'worktrain-bot'       # optional -- only issues assigned to WorkTrain
+            notLabels: ['needs-human', 'blocked', 'wontfix']  # always exclude these
+
+        - type: jira
+          integration: jira
+          filter:
+            project: ENG                    # required -- scope to one project
+            sprint: active                  # 'active', 'backlog', or sprint name
+            assignee: worktrain             # Jira user
+            issueTypes: ['Bug', 'Task']     # not Stories/Epics
+            notStatuses: ['Done', 'Closed']
+
+        - type: linear
+          integration: linear
+          filter:
+            team: platform                  # Linear team slug
+            state: triage                   # pull from triage queue
+            priority: [urgent, high]        # only urgent and high priority
+```
+
+**Catch-all mode:** if `filter` is omitted entirely, WorkTrain pulls everything open and unassigned in the project/repo. This is the "let WorkTrain go find work" mode -- useful for batch grooming sessions but should require explicit opt-in (`catchAll: true`) since it could pull thousands of items.
+
+```yaml
+- type: github_issues
+  integration: github
+  catchAll: true                # pulls ALL open issues, no label required
+  filter:
+    notLabels: ['needs-human', 'wontfix']
+  maxItemsPerCycle: 5           # drain slowly, not everything at once
+```
+
+---
+
+#### Deadline-aware prioritization
+
+WorkTrain should be able to determine priority not just from labels, but from deadlines it finds anywhere:
+
+**Sources WorkTrain reads for deadline context:**
+- Issue/ticket due dates (Jira, Linear, GitHub milestones)
+- Epic end dates (Jira epics, Linear projects)
+- Sprint end date (current active sprint)
+- Release/milestone dates from the repo
+- Calendar events (via Glean or Google Calendar integration)
+- Confluence/Notion pages that mention deadlines
+- Docs in the repo (`ROADMAP.md`, `docs/milestones.md`, etc.)
+
+**What WorkTrain does with deadlines:**
+The classify-task-workflow (or a new `prioritize-queue` workflow) reads the deadline context and produces an adjusted priority score:
+
+```
+base_priority = from label/assignee (low/medium/high)
+deadline_urgency = days_until_deadline:
+  < 2 days  → +3 (critical)
+  < 7 days  → +2 (high)
+  < 14 days → +1 (medium)
+  > 14 days → +0 (no adjustment)
+  past due  → +4 (overdue, surface immediately)
+
+adjusted_priority = base_priority + deadline_urgency
+```
+
+Items are queued in adjusted_priority order, not just the label order. A medium-priority task due tomorrow beats a high-priority task due in 3 months.
+
+**Glean integration for deadline discovery:**
+Glean indexes everything -- Jira, Confluence, Google Docs, Slack, emails. WorkTrain can query Glean: "what are the deadlines affecting the workrail project this month?" and get a synthesized view across all systems. This is especially powerful for deadline context that lives in documents rather than tickets (e.g. a Confluence roadmap page that says "feature X must ship by Q2").
+
+```yaml
+workspaces:
+  workrail:
+    queue:
+      deadlineContext:
+        sources:
+          - type: glean
+            query: "workrail deadlines milestones due dates"
+            maxResults: 10
+          - type: github_milestones
+            integration: github
+          - type: jira_epics
+            integration: jira
+            project: ENG
+        refreshInterval: 3600   # re-fetch deadline context every hour
+```
+
+**The prioritize-queue routine:**
+A cheap, fast routine (one step, Haiku model) that runs after each external sync and re-scores the queue. Reads: current queue items + deadline context. Outputs: reordered queue with deadline annotations. The coordinator's drain loop always reads the latest ordering.
+
+```
+Input: queue items + deadline context
+Output: same items reordered, each with:
+  - adjustedPriority (critical/high/medium/low)
+  - deadlineReason: "Sprint 12 ends in 3 days" or "Epic ENG-200 due June 1"
+  - deadlineSource: URL or doc reference
+```
+
+**Escalation when deadlines are at risk:**
+If a queue item has a deadline within 48 hours and hasn't been started yet, the watchdog notifies: "WORKRAIL-410 (GitHub polling adapter) is due in 2 days and hasn't been started. Current queue position: 8. Bumping to position 1." Posts to Slack + the message outbox. The user can override via message queue if they disagree.
+
+**Why this is powerful:**
+WorkTrain effectively becomes your sprint manager. It knows what's due, in what order things need to happen, and it works the highest-urgency items first -- without anyone having to manually reorder a board. The deadline context is always fresh (re-fetched every hour), so if a Confluence page updates the roadmap, the queue re-prioritizes automatically.
+
+---
+
+### Workspace pipeline policy: artifact gates vs autonomous decomposition (Apr 15, 2026)
+
+**The core tension:** some workspaces have rigorous pre-implementation processes (BRD required, design approved, shapeup doc reviewed). Others are solo/small-team projects where you figure it out as you go. WorkTrain should respect both -- waiting patiently in governed workspaces, doing the work itself in autonomous workspaces.
+
+---
+
+#### Two workspace modes
+
+**Governed mode** -- for projects with existing process gates:
+
+```yaml
+workspaces:
+  my-work-project:
+    path: ~/git/work/my-project
+    pipelinePolicy:
+      mode: governed
+      requiredArtifacts:
+        - type: brd                    # Business Requirements Document
+          sources: [confluence, jira_epic, google_docs]
+          searchQuery: "BRD {{ticket.key}}"
+        - type: design                 # UI/UX designs
+          sources: [figma, confluence]
+          searchQuery: "designs {{ticket.key}}"
+        - type: shapeup                # Shape Up pitch/bet
+          sources: [notion, confluence]
+      onMissingArtifacts: wait         # 'wait', 'skip', or 'escalate'
+      waitCheckInterval: 3600          # re-check every hour
+      waitTimeout: 168h                # escalate after 7 days of waiting
+      escalationMessage: "Ticket {{ticket.key}} has been waiting for required artifacts for {{wait_duration}}. Manual review needed."
+```
+
+When WorkTrain picks up a ticket in governed mode, it first searches for the required artifacts using the configured sources and search queries. If they're not found:
+- `wait`: holds the ticket in a "waiting" state, re-checks every hour, notifies when artifacts appear
+- `skip`: moves to the next ticket, re-queues this one later
+- `escalate`: posts to Slack + blocks the ticket, requires human to resolve
+
+When artifacts are found, WorkTrain automatically extracts context from them, attaches them as `referenceUrls` to the session, and proceeds with implementation -- skipping the discovery/design phases since those artifacts already contain the answer.
+
+**Autonomous mode** -- for projects without pre-existing process:
+
+```yaml
+workspaces:
+  workrail:
+    path: ~/git/personal/workrail
+    pipelinePolicy:
+      mode: autonomous
+      # No required artifacts -- WorkTrain does its own discovery and design
+      # Uses the full pipeline: classify → discovery → design → arch review → implement → review
+      decompositionEnabled: true       # can break large tasks into sub-tickets
+      decompositionThreshold: Large    # tasks classified Large get decomposed
+```
+
+In autonomous mode, WorkTrain runs the full pipeline including discovery, UX design (if `hasUI`), architecture review (if `touchesArchitecture`), and implementation. It doesn't wait for external artifacts because there are none -- it generates them itself.
+
+---
+
+#### Automatic task decomposition
+
+When a task is classified as `Large` (or Medium with high complexity), WorkTrain decomposes it into sub-tickets before starting implementation. The sub-tickets go into the workspace queue and are worked in order.
+
+**Decomposition workflow** (new, needs authoring):
+```
+Input: task description + context from discovery
+Output: ordered list of sub-tickets, each with:
+  - title (imperative, specific)
+  - goal (1-2 sentence description)
+  - estimatedComplexity (Small/Medium)
+  - dependencies (which sub-tickets must complete first)
+  - workflowId (which workflow to use)
+```
+
+**Example:** task "implement polling triggers system"
+```
+Decomposed into:
+  1. [Small] Add PollingTriggerSource type to TriggerDefinition   → depends: none
+  2. [Small] Implement PolledEventStore with atomic persistence    → depends: 1
+  3. [Small] Implement GitLab MR polling adapter                  → depends: 2
+  4. [Small] Implement PollingScheduler with setInterval          → depends: 2,3
+  5. [Small] Wire PollingScheduler into TriggerListener           → depends: 4
+  6. [Small] Add unit tests for all new modules                   → depends: 1-5
+```
+
+Each sub-ticket is Small or Medium -- never Large. If a sub-ticket comes out Large during decomposition, it gets recursively decomposed. The decomposition agent enforces this invariant.
+
+Sub-tickets are added to the queue with:
+- `parentTicketId` linking back to the original task
+- `dependsOn` list preventing out-of-order execution
+- Same priority as the parent ticket
+- Auto-label so they're visually grouped in GitHub/Jira
+
+**Queue behavior with dependencies:**
+The queue drain loop respects `dependsOn` -- a sub-ticket is only picked up when all its dependencies are completed. The coordinator naturally serializes dependent work and parallelizes independent work (sub-tickets with no shared dependencies can run concurrently).
+
+---
+
+#### Hybrid: governed workspace with autonomous decomposition
+
+Some workspaces need both -- a BRD required before implementation starts, but the implementation itself gets decomposed autonomously:
+
+```yaml
+workspaces:
+  my-work-project:
+    pipelinePolicy:
+      mode: governed
+      requiredArtifacts:
+        - type: brd
+          onMissingArtifacts: wait
+      decompositionEnabled: true       # once BRD is found, decompose into sub-tickets
+      decompositionThreshold: Medium   # decompose Medium and Large tasks
+```
+
+Flow: ticket filed → WorkTrain finds BRD → reads BRD for context → classifies task → if Medium/Large decomposes into sub-tickets → works sub-tickets in order. The BRD gates the start; decomposition handles the execution.
+
+---
+
+#### The "patiently waiting" UX
+
+In the console Queue tab, tickets waiting for artifacts show a distinct state:
+
+```
+⏳ WORKRAIL-410: Implement new auth flow        [waiting for: BRD, designs]
+   Waiting 2d 4h · Last checked: 5 min ago · Artifacts: 0/2 found
+   
+   → Found: none
+   → Searched: Confluence ("BRD WORKRAIL-410"), Figma ("WORKRAIL-410 designs")
+```
+
+WorkTrain posts a Slack message when it starts waiting: "I picked up WORKRAIL-410 but it's missing required artifacts (BRD, designs). I'll check hourly and start automatically when they're ready." Then posts again when artifacts are found: "Found BRD and designs for WORKRAIL-410. Starting implementation now."
+
+The team doesn't have to remember to trigger WorkTrain -- they just do their normal process (write the BRD, create the designs) and WorkTrain starts automatically.
+
+---
+
+#### Why this matters
+
+- **Governed projects**: WorkTrain integrates with existing process rather than bypassing it. PMs and designers work normally; WorkTrain picks up when the handoff is ready. No one has to remember to trigger it.
+- **Autonomous projects**: WorkTrain is a full solo developer -- it discovers, designs, decomposes, implements, reviews, and ships. The only human touchpoint is approving the final PR (or enabling auto-merge for fully vetted changes).
+- **The queue is the unifying interface**: both modes feed the same queue. The pipeline policy determines what happens when an item is picked up.
+
+---
+
+### Templates, living docs, and external workflow ingestion (Apr 15, 2026)
+
+---
+
+#### Templates: consistent output formatting across all systems
+
+WorkTrain should know the templates used in each workspace and apply them automatically when creating artifacts. No more agents writing PRs in inconsistent formats or Jira tickets missing required fields.
+
+**Template types:**
+
+```yaml
+workspaces:
+  my-work-project:
+    templates:
+      pullRequest:
+        source: .github/pull_request_template.md   # repo-local
+      mergeRequest:
+        source: .gitlab/merge_request_templates/default.md
+      jiraTicket:
+        source: confluence://ENG/ticket-template   # from Confluence
+        requiredFields: [summary, description, acceptanceCriteria, storyPoints, component]
+      jiraBug:
+        source: confluence://ENG/bug-template
+        requiredFields: [summary, description, stepsToReproduce, expectedVsActual, severity]
+      shapeup:
+        source: notion://templates/shapeup-pitch
+      brd:
+        source: confluence://templates/brd-template
+      designSpec:
+        source: notion://templates/design-spec
+      incidentPostmortem:
+        source: confluence://templates/postmortem
+```
+
+When WorkTrain creates a PR, it reads the PR template and structures its output to match. When it files a Jira bug from an investigation, it reads the bug template and fills every required field. When it writes a BRD in autonomous mode, it uses the BRD template so the output looks like what the team expects.
+
+Templates are resolved at session start and injected as context. The agent is told: "When creating a [type], use this template structure exactly." The handoff artifact for the auto-commit/PR path includes the PR body pre-formatted to match the template.
+
+**Template sources:**
+- Local files in the repo (`.github/`, `.gitlab/`, `docs/templates/`)
+- Confluence pages
+- Notion databases/templates
+- Google Docs
+- Inline in `triggers.yml`
+
+---
+
+#### Living docs: on-demand generation and continuous updates
+
+WorkTrain maintains documentation as a first-class output, not an afterthought. Docs can be generated on-demand and kept current automatically.
+
+**On-demand doc generation:**
+
+```bash
+worktrain doc generate --type architecture-overview --workspace workrail
+worktrain doc generate --type api-reference --workspace workrail
+worktrain doc generate --type runbook "How to debug a stuck daemon session"
+worktrain doc generate --type adr "Why we replaced pi-mono with a first-party agent loop"
+```
+
+Each generates a doc by pulling from all available sources:
+- Knowledge graph (structural understanding of the codebase)
+- Session store (recent decisions and findings)
+- Backlog (design decisions and rationale)
+- GitHub PRs (what changed and why -- from PR descriptions)
+- Confluence/Notion (existing docs to extend, not duplicate)
+
+**Continuous doc updates:**
+When code changes, affected docs are flagged for update. WorkTrain runs a `doc-drift-scan` (part of the periodic analysis agents) that identifies docs whose described behavior no longer matches the code. When drift is detected, a queue item is created: "Update architecture-overview.md -- AgentLoop class was added, pi-mono removed."
+
+```yaml
+workspaces:
+  workrail:
+    docs:
+      autoUpdate: true
+      docPaths:
+        - docs/architecture/
+        - docs/design/
+        - README.md
+      driftCheck:
+        schedule: "0 8 * * 1"    # Monday morning
+        onDrift: queue            # or: pr, notify, ignore
+```
+
+**Doc sources it pulls from:**
+
+| Source | What it provides |
+|--------|-----------------|
+| Knowledge graph | Symbol relationships, module structure, call paths |
+| Session store | Recent decisions, investigation findings, design rationale |
+| Backlog | Why things were built the way they were |
+| Git log | What changed, when, linked PRs |
+| Confluence/Notion | Existing team knowledge to incorporate |
+| Glean | Cross-system knowledge synthesis |
+| Code comments and JSDoc | Inline documentation |
+
+**Doc formats it produces:**
+- Architecture overview (modules, dependencies, data flow)
+- API reference (from TypeScript types + JSDoc)
+- Runbook (operational procedures)
+- ADR (Architecture Decision Record -- from backlog decisions)
+- Postmortem (from incident investigation sessions)
+- Sprint recap (from completed queue items)
+- Onboarding guide (from architecture + setup docs)
+
+---
+
+#### External workflow ingestion
+
+WorkTrain can already discover and run workflows from external repos via managed sources (`[[workflow_repos]]` in Common-Ground config). This should be a first-class feature, not just a Common-Ground integration.
+
+**How it works today (via managed sources):**
+Any workflow JSON file in a configured directory or git repo is automatically available. `workrail list` shows all workflows from all sources.
+
+**What to add:**
+
+**1. Workflow registry / marketplace:**
+A curated list of community workflows that WorkTrain can pull from. `worktrain workflow install <id>` fetches a workflow from the registry and adds it to the user's workflow library.
+
+```bash
+worktrain workflow install community/postgres-migration-workflow
+worktrain workflow install company/my-company-mr-review      # private org registry
+worktrain workflow install ./local-custom-workflow.json      # local file
+```
+
+**2. Workflow composition:**
+A workflow that calls another workflow as a step (already possible via `templateCall`, extend to full `workflowCall`). A coordinator workflow can invoke specialized workflows as phases:
+
+```json
+{
+  "id": "full-feature-pipeline",
+  "steps": [
+    { "workflowCall": { "workflowId": "classify-task-workflow" } },
+    { "workflowCall": { "workflowId": "wr.discovery", "when": "taskComplexity != Small" } },
+    { "workflowCall": { "workflowId": "coding-task-workflow-agentic" } },
+    { "workflowCall": { "workflowId": "mr-review-workflow.agentic.v2" } }
+  ]
+}
+```
+
+**3. Workflow sharing between workspaces:**
+A workflow authored for workrail can be shared to storyforge without copying it. Workflows are linked by reference, not copied. Updates to the source propagate automatically (or on explicit sync).
+
+**4. Org-level workflow libraries:**
+Teams publish their workflow libraries to a git repo. WorkTrain pulls from it. Every team member's WorkTrain automatically gets the team's curated workflow set. This is exactly what Common-Ground's `[[workflow_repos]]` does today -- make it a first-class WorkTrain config option without requiring Common-Ground.
+
+```yaml
+workspaces:
+  my-work-project:
+    workflowSources:
+      - type: git
+        url: https://github.com/mycompany/worktrain-workflows
+        branch: main
+        syncInterval: 3600
+      - type: local
+        path: ~/git/personal/workrail/workflows
+```
+
+---
+
+### Workflow effectiveness assessment and self-improvement proposals (Apr 15, 2026)
+
+**The idea:** WorkTrain runs workflows hundreds of times. It accumulates more data about workflow effectiveness than any human author ever could. It should use that data to propose improvements back -- to the workflow library, to the workflow authors, and to the community.
+
+This closes the self-improvement loop: WorkTrain uses workflows → measures outcomes → proposes improvements → workflows get better → WorkTrain produces better results.
+
+---
+
+#### What WorkTrain measures per workflow run
+
+Every session already stores rich data in the session store. From this, WorkTrain can derive:
+
+**Efficiency metrics:**
+- Steps skipped (condition gates that always skip for a given workflow type) → candidate for removal or restructuring
+- Steps that consistently take the most tokens/time → candidates for subagent offloading or simplification
+- Steps where the agent calls `continue_workflow` immediately with minimal work → the step prompt may be too vague or redundant
+- Steps where the agent hits `requireConfirmation` and always gets the same response → the gate is unnecessary for autonomous use
+
+**Quality metrics:**
+- Sessions that produced PRs: how many had MR review findings? How severe?
+- Sessions where findings required multiple fix passes → the workflow may not be thorough enough in those areas
+- Sessions where the final output was rejected or required manual correction → workflow produced low-quality output
+- Verification gate pass rate (build_correctness, invariant_preservation) → how often does the workflow produce code that actually works?
+
+**Completion metrics:**
+- Sessions that completed vs hit max_turns or timeout → workflow may be too long for the given task type
+- Steps where the agent loops unexpectedly (loop_control: continue more than expected) → loop exit conditions may be wrong
+- Steps with unusually high token consumption → prompt may be bloated
+
+---
+
+#### The assessment workflow
+
+A new `workflow-effectiveness-assessment` workflow (or routine) that:
+
+1. Reads session store history for a given workflowId (last N sessions)
+2. Computes the metrics above
+3. Identifies the top 3-5 issues with evidence (specific sessions, specific steps)
+4. Proposes concrete changes:
+   - "Step `phase-1b-design-quick` was skipped in 87% of sessions because `rigorMode != QUICK`. Consider making this condition more permissive or removing the step."
+   - "Step `phase-4-plan-audit` consumed an average of 4,200 tokens per session. The loop runs 1.8 times on average. Consider reducing `maxIterations` from 2 to 1 for QUICK rigor mode."
+   - "3 of the last 8 `coding-task-workflow-agentic` sessions produced PRs with Critical MR review findings. The workflow's verification step may not be catching these issues."
+
+5. Outputs a structured proposal:
+
+```json
+{
+  "workflowId": "coding-task-workflow-agentic.lean.v2",
+  "assessmentPeriod": "last 30 sessions",
+  "proposedChanges": [
+    {
+      "stepId": "phase-1b-design-quick",
+      "issue": "Skipped in 87% of sessions",
+      "evidence": ["sess_abc", "sess_def", "sess_ghi"],
+      "proposedChange": "Remove or restructure -- not exercised enough to justify its existence",
+      "confidence": 0.85,
+      "impactEstimate": "Saves ~200 tokens per session, no quality impact"
+    }
+  ],
+  "overallHealthScore": 0.72,
+  "recommendation": "Run workflow-for-workflows on this workflow with assessment findings attached"
+}
+```
+
+---
+
+#### How proposals flow back
+
+**To WorkRail (the open-source project):**
+WorkTrain creates a GitHub issue on `EtienneBBeaulac/workrail` with the assessment findings and proposed changes. The issue includes:
+- The assessment data (anonymized session stats, no content)
+- The proposed changes with rationale
+- Label: `workflow-improvement-proposal`
+
+Any WorkTrain user can contribute workflow improvements back to the community just by running WorkTrain and enabling assessments.
+
+**To workflow authors (for non-bundled workflows):**
+If the workflow came from an org workflow library (`workflowSources: git`), WorkTrain opens a PR against that repo with the proposed changes. The workflow author reviews and merges.
+
+**To the local workflow library:**
+WorkTrain can automatically apply low-risk changes (reordering steps, updating prompt text) to the user's local workflow copy. High-risk changes (removing steps, changing conditions) require human review. Same governed/autonomous split as everywhere else.
+
+---
+
+#### Continuous improvement loop
+
+```
+WorkTrain runs workflows
+  → session store accumulates data
+  → weekly: assessment routine analyzes patterns
+  → proposals generated per workflow
+  → low-confidence proposals: GitHub issue for human review
+  → high-confidence, low-risk proposals: auto-applied to local copy + PR to community
+  → workflow gets better
+  → WorkTrain produces better results
+  → loop repeats
+```
+
+**The compounding effect:** every WorkTrain instance that runs assessments contributes signal. A workflow used by 100 teams accumulates 10x the data of a workflow used by 10 teams. The more WorkTrain is used, the better its workflows get -- for everyone. This is the flywheel that makes WorkTrain's workflow library genuinely better than hand-authored alternatives over time.
+
+**What makes this different from manual workflow improvement:**
+Humans improve workflows based on intuition and memorable failures. WorkTrain improves workflows based on statistical patterns across hundreds of runs. It finds issues that no human would notice -- like a step that's almost always skipped, or a loop that almost always terminates on the first pass, or a prompt fragment that correlates with lower-quality output.
+
+**Integration with `workflow-for-workflows`:**
+The assessment output is designed to feed directly into `workflow-for-workflows`. Assessment findings become the context for authoring improved workflow versions. WorkTrain literally uses its own meta-workflow to improve its own workflows, informed by real execution data.

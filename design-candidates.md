@@ -1,6 +1,6 @@
-# Design Candidates: WorkRail Auto Task Input MVP
+# Design Candidates: Merge PRs #397, #403, #392
 
-**Date:** 2026-04-14
+**Date:** 2026-04-15
 **Status:** Ready for main-agent review
 
 ---
@@ -9,148 +9,89 @@
 
 ### Core Tensions
 
-1. **TriggerRouter cohesion vs dispatch seam**: `TriggerRouter` was designed to route webhook events only. Adding `dispatch()` and `getTriggers()` extends its responsibility. But it already owns all needed dependencies (`index`, `runWorkflowFn`, `ctx`, `apiKey`). Any alternative boundary would duplicate those injections.
+1. **Order dependency**: Merging #397 changes main, which affects whether #403 and #392 remain cleanly mergeable. Must merge sequentially and re-verify mergeability before each step.
 
-2. **console-routes read-only invariant vs mutating dispatch endpoint**: `console-routes.ts` has a comment stating "All routes are GET-only (invariant: Console is read-only)". The task explicitly requires `POST /api/v2/auto/dispatch`. Resolution: update the comment; add `express.json()` only for that path; keep GET routes unchanged.
+2. **Conflict resolution in workflow-runner.ts**: PR #397 is CONFLICTING because main advanced (concurrencyMode support, hono bump) after the branch was cut. The conflict must keep both sides -- dropping either the GAP-8 timeout logic or main's concurrencyMode changes would be wrong.
 
-3. **WorkflowTrigger interface scope**: The task requires `buildSystemPrompt()` and model setup in `workflow-runner.ts` to read `trigger.referenceUrls` and `trigger.agentConfig`. `WorkflowTrigger` is the type passed to `runWorkflow()`. Extending it with optional fields is additive; the alternative (passing `TriggerDefinition` separately) would couple the daemon to the trigger system types.
-
-4. **TriggerRouter lifecycle vs console route availability**: `TriggerRouter` is only instantiated when `WORKRAIL_TRIGGERS_ENABLED=true`. `mountConsoleRoutes` must handle `undefined` router gracefully (503 from dispatch, empty list from GET /api/v2/triggers).
+3. **Stale mergeability**: GitHub reports #403 and #392 as MERGEABLE against current main. After #397 lands, this assessment is stale -- both also touch `workflow-runner.ts`, so conflicts could emerge.
 
 ### What Makes This Hard
 
-1. **YAML parser extension for nested blocks**: `agentConfig` and `onComplete` are sub-objects in the narrow YAML parser. Each requires a new block parser similar to the existing `contextMapping` special-case.
-
-2. **`goalTemplate` interpolation fallback**: `{{$.dot.path}}` tokens must extract values from the webhook payload. If ANY token is missing, the entire template must fall back to the static `goal`. Partial interpolation produces broken goal strings.
-
-3. **TriggerRouter exposure in server.ts**: `startTriggerListener()` currently returns a `TriggerListenerHandle` but does not expose the router. The router must be accessible to thread to `mountConsoleRoutes()`.
-
-4. **`ContextMappingEntry.required` already exists**: Do NOT add it again -- already defined in `types.ts` at line 41.
+- `workflow-runner.ts` is a 1097-line central orchestration file. A wrong conflict resolution could silently break daemon behavior.
+- `git rebase -Xours` or `-Xtheirs` would silently drop one side's changes -- must resolve manually or verify auto-resolution keeps both.
+- After each merge, must re-verify the next PR is still cleanly mergeable before proceeding.
 
 ### Likely Seam
 
-The natural seam for the HTTP dispatch entry point is `TriggerRouter`, which already owns the full dispatch dependency set. The `console-routes.ts` file is the right location for mounting the new endpoints (follows the established pattern for optional features).
+The rebase conflict in `src/daemon/workflow-runner.ts` for #397 is the only real technical challenge. Everything else is sequential execution.
 
 ---
 
 ## Philosophy Constraints
 
-From `/Users/etienneb/CLAUDE.md` (primary) and codebase patterns:
-
-- **Immutability by default**: All new `TriggerDefinition` fields must be `readonly`.
-- **Make illegal states unrepresentable**: `onComplete.runOn` must be `'success' | 'failure' | 'always'` literal union.
-- **Errors are data**: Dispatch endpoint returns `{ error: string }` JSON, never throws.
-- **Validate at boundaries, trust inside**: YAML parsing is the boundary for all new fields. Runtime dispatch trusts a valid `WorkflowTrigger`.
-- **YAGNI with discipline**: Don't implement `onComplete.runOn !== 'success'` -- emit warning only. Don't build full JSONPath -- only `{{$.dot.path}}` templates.
-- **Document "why", not "what"**: Comments explain intent of the warning for unimplemented `onComplete.runOn` values.
-
-**Conflict:** `console-routes.ts` comment says read-only invariant. Task requires POST. Resolution: update the comment.
+- **Double-check before destructive actions**: Verify `--json mergeable` before and after each merge.
+- **Surface information, don't hide it**: Report what merged and what (if anything) was skipped.
+- **Errors are data**: If a merge fails or a rebase has unresolvable conflicts, stop and report rather than proceeding blindly.
+- **NEVER push directly to main**: Merging via `gh pr merge --squash` is the correct path. Force-with-lease push is only to the PR branch.
 
 ---
 
 ## Impact Surface
 
-- `TriggerListenerHandle` interface (exposed publicly) -- adding `router` field is additive
-- `mountConsoleRoutes` function signature -- adding optional `triggerRouter?` follows existing optional-param pattern
-- `WorkflowTrigger` interface -- adding optional fields is non-breaking for all existing callers
-- `buildSystemPrompt()` signature -- no change needed; reads from `trigger` which is already a parameter
-- All existing trigger-store and trigger-router tests must pass unchanged
-- TypeScript must compile clean: all new types must be consistent
+- `src/daemon/workflow-runner.ts` -- touched by all three PRs
+- `src/trigger/trigger-router.ts`, `trigger-store.ts`, `trigger/types.ts` -- #397 only
+- `src/v2/usecases/console-routes.ts` -- #397 only
+- `src/cli-worktrain.ts`, `cli.ts`, `cli/commands/`, `config/config-file.ts`, `daemon/soul-template.ts` -- #403 only
 
 ---
 
 ## Candidates
 
-### Candidate 1: Minimal additive -- extend TriggerRouter, pass as optional param
+### Candidate 1 (only viable approach): Rebase + squash merge in order
 
-**Summary:** Add `dispatch()` and `getTriggers()` methods to `TriggerRouter`. Expose the router in `TriggerListenerHandle`. Pass it as an optional 7th parameter to `mountConsoleRoutes()`.
-
-**Tensions resolved:**
-- No dependency duplication: reuses existing injections in TriggerRouter
-- console-routes: single POST route added with comment update, no structural change
-- WorkflowTrigger: extends with optional `referenceUrls?` and `agentConfig?` fields
-
-**Tensions accepted:** Mild TriggerRouter cohesion violation (adds HTTP dispatch semantics to a webhook router).
-
-**Boundary solved at:** `TriggerRouter` -- already owns `index`, `runWorkflowFn`, `ctx`, `apiKey`. Any other boundary duplicates these.
-
-**Why that boundary is the best fit:** `dispatch()` is semantically "route a dispatch request to runWorkflowFn" -- the same thing the class does for webhook events, just with a different input source. The conceptual center of the class doesn't change.
-
-**Failure mode:** If the trigger listener never starts, the optional router is `undefined`, and the dispatch endpoint returns 503. Must be handled explicitly in console-routes.
-
-**Repo-pattern relationship:** Follows the established `mountConsoleRoutes` optional-param pattern (`workflowService?`, `timingRingBuffer?`, etc.).
-
-**Gains:** Minimal blast radius. No new files in `src/trigger/`. Single new dependency edge (console-routes -> TriggerRouter type). All existing tests pass unchanged.
-
-**Losses:** TriggerRouter.dispatch() is technically a second responsibility for the class.
-
-**Impact surface:** server.ts startup sequence needs to store the router from the listener result.
-
-**Scope judgment:** Best-fit. Evidence: `mountConsoleRoutes` already has 4 optional parameters using this exact pattern.
-
-**Philosophy fit:** Honors YAGNI (no new classes), immutability, errors-as-data. Mild conflict with single-responsibility.
-
----
-
-### Candidate 2: Extract AutoDispatcher -- dedicated class for HTTP-originated dispatch
-
-**Summary:** Create `src/trigger/auto-dispatcher.ts` with an `AutoDispatcher` class that wraps `runWorkflowFn`, `ctx`, `apiKey`, and the trigger index, with `dispatch()` and `listTriggers()` methods. Pass this to `mountConsoleRoutes` instead of `TriggerRouter`.
+**Summary:** Checkout `fix/gap-8-session-timeout`, rebase onto `origin/main`, resolve conflicts by keeping both sides, push with `--force-with-lease`, then squash-merge all three PRs in order (#397, #403, #392), pulling main and re-verifying mergeability between each.
 
 **Tensions resolved:**
-- TriggerRouter cohesion: stays webhook-only, clean SRP
+- Order dependency: sequential execution with re-verification
+- Conflict resolution: manual inspection ensures both sides kept
+- Stale mergeability: re-check after each merge before proceeding
 
-**Tensions accepted:**
-- Dependency duplication: `AutoDispatcher` and `TriggerRouter` both need the same 4 injected dependencies
-- Index ownership: two holders of the same `Map<string, TriggerDefinition>`
+**Tensions accepted:** Minor risk that #403/#392 develop new conflicts after #397 lands; handled by re-checking mergeability.
 
-**Boundary solved at:** New `AutoDispatcher` class.
+**Boundary solved at:** The rebase conflict in `workflow-runner.ts` -- the only real seam.
 
-**Failure mode:** Index synchronization -- if triggers reload in the future, both objects must be updated.
+**Why that boundary is the best fit:** There is no alternative seam for this task.
 
-**Repo-pattern relationship:** Departs from existing pattern. No existing analogue.
+**Failure mode:** Conflict resolution drops one side's changes. Mitigation: grep for `sessionTimeoutMs` and `concurrencyMode` after rebase.
 
-**Gains:** Clean single-responsibility for TriggerRouter.
+**Repo-pattern relationship:** Follows exactly. All merges in this repo are squash merges (evidenced by PR number parentheticals throughout git log).
 
-**Losses:** More files, more injection, future index sync surface.
+**Gains:** Clean linear history, atomic per-PR changes, minimal risk.
 
-**Scope judgment:** Too broad for the current task. Creates infrastructure for a minor SRP concern.
+**Losses:** Nothing -- no alternatives exist.
 
-**Philosophy fit:** Honors SRP. Conflicts with YAGNI.
+**Scope judgment:** Best-fit.
+
+**Philosophy fit:** Honors all relevant principles. No conflicts.
 
 ---
 
 ## Comparison and Recommendation
 
-| Tension | Candidate 1 | Candidate 2 |
-|---|---|---|
-| TriggerRouter cohesion | Mild violation (2 methods) | Clean |
-| Dependency duplication | None | High (4 deps twice) |
-| Index sync future risk | N/A (one owner) | Real footgun |
-| Blast radius | Minimal | Larger |
-| Repo pattern fit | Follows | Departs |
-
-**Recommendation: Candidate 1.**
-
-The TriggerRouter cohesion concern is the weakest objection in context. `dispatch()` reuses the same injected dependencies as `route()`. Adding it doesn't change the class's conceptual center. Candidate 2 solves a purity concern by creating a duplication problem that is strictly worse.
+Only one candidate. Proceeding with rebase + squash merge in order.
 
 ---
 
 ## Self-Critique
 
-**Strongest counter-argument:** None compelling. The dependency duplication in Candidate 2 is a concrete cost; the SRP benefit is marginal at this scale.
+**Strongest counter-argument:** None. The approach is dictated by the task.
 
-**Narrower option that lost:** Not exposing the router at all; standalone `dispatchWorkflow()` function. Too narrow -- skips goalTemplate/referenceUrls/agentConfig enrichment and can't serve GET /api/v2/triggers.
+**Assumption that would invalidate this:** If #403 or #392 develop unresolvable conflicts after #397 lands, they would also need rebasing. This is detected by re-checking `--json mergeable` before each merge.
 
-**Broader option:** Full `AutoService` class (like `ConsoleService`) with test file. Only justified if 5+ methods planned. Not justified by current task.
-
-**Pivot condition:** If dynamic trigger reload (hot-reload of triggers.yml) is implemented with multiple consumers -- revisit Candidate 2 at that point.
+**Pivot conditions:** If #403 or #392 show CONFLICTING after #397 merges, apply the same rebase procedure.
 
 ---
 
 ## Open Questions for the Main Agent
 
-1. Should `WorkflowTrigger` carry `referenceUrls` and `agentConfig` (keeping daemon decoupled from trigger types)? **Working assumption: yes -- extend WorkflowTrigger with optional fields.**
-
-2. Should the dispatch endpoint work when triggers are disabled (call `runWorkflow` directly with no enrichment), or require triggers to be enabled? **Working assumption: works independently, no enrichment when router is absent.**
-
-3. Should `mountConsoleRoutes` accept `triggerRouter?: TriggerRouter` or a narrower structural interface? **Working assumption: use TriggerRouter type directly -- one call site doesn't justify a structural interface.**
+None. The task is fully specified and the approach is unambiguous.

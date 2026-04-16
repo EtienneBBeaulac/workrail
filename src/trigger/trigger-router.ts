@@ -23,6 +23,8 @@
  */
 
 import * as crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
@@ -32,6 +34,17 @@ import type {
   WebhookEvent,
   ContextMappingEntry,
 } from './types.js';
+import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
+import type { ExecFn } from './delivery-action.js';
+
+/**
+ * Default production exec function: promisify(execFile).
+ *
+ * WHY execFile over exec: execFile does NOT invoke /bin/sh. User-controlled content
+ * (commit messages, PR titles, file paths) is passed as discrete args and is never
+ * interpolated into a shell string. Shell metacharacters have no effect.
+ */
+const execFileAsync = promisify(execFile) as ExecFn;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -234,18 +247,110 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
 }
 
 // ---------------------------------------------------------------------------
+// Delivery helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Run post-workflow delivery if autoCommit is enabled for this trigger.
+ *
+ * Parses the structured handoff artifact from lastStepNotes and calls runDelivery().
+ * All errors are logged and discarded -- delivery is best-effort and must never affect
+ * the workflow's success/failure state.
+ *
+ * WHY module-level function (not class method): pure helper shared by route() and
+ * dispatch() without coupling to TriggerRouter's private state. Delivery logic
+ * belongs in delivery-action.ts; this is just the wiring.
+ *
+ * @param triggerId - Used in log messages for traceability
+ * @param trigger - Source of workspacePath, autoCommit, autoOpenPR flags
+ * @param result - WorkflowRunResult; only called when _tag === 'success'
+ * @param execFn - Injectable exec function (production: execFileAsync; tests: fake)
+ */
+async function maybeRunDelivery(
+  triggerId: string,
+  trigger: TriggerDefinition,
+  result: WorkflowRunResult,
+  execFn: ExecFn,
+): Promise<void> {
+  // Only deliver on success with autoCommit enabled
+  if (result._tag !== 'success') return;
+  if (result.lastStepNotes === undefined) {
+    if (trigger.autoCommit === true) {
+      console.warn(
+        `[TriggerRouter] Delivery skipped: triggerId=${triggerId} -- ` +
+        `lastStepNotes is absent (agent did not provide notes on the final step). ` +
+        `Ensure the workflow produces a JSON handoff block in its final step notes.`,
+      );
+    }
+    return;
+  }
+  if (trigger.autoCommit !== true) return;
+
+  // Parse the structured handoff artifact from the agent's final step notes
+  const parseResult = parseHandoffArtifact(result.lastStepNotes);
+  if (parseResult.kind === 'err') {
+    console.warn(
+      `[TriggerRouter] Delivery skipped: triggerId=${triggerId} -- ` +
+      `handoff artifact not parseable: ${parseResult.error}. ` +
+      `Ensure the workflow's final step produces a JSON block with commitType, filesChanged, etc.`,
+    );
+    return;
+  }
+
+  const deliveryResult = await runDelivery(
+    parseResult.value,
+    trigger.workspacePath,
+    { autoCommit: trigger.autoCommit, autoOpenPR: trigger.autoOpenPR },
+    execFn,
+  );
+
+  switch (deliveryResult._tag) {
+    case 'committed':
+      console.log(
+        `[TriggerRouter] Delivery committed: triggerId=${triggerId} sha=${deliveryResult.sha}`,
+      );
+      break;
+    case 'pr_opened':
+      console.log(
+        `[TriggerRouter] Delivery PR opened: triggerId=${triggerId} url=${deliveryResult.url}`,
+      );
+      break;
+    case 'skipped':
+      console.log(
+        `[TriggerRouter] Delivery skipped: triggerId=${triggerId} reason=${deliveryResult.reason}`,
+      );
+      break;
+    case 'error':
+      console.warn(
+        `[TriggerRouter] Delivery error: triggerId=${triggerId} phase=${deliveryResult.phase} ` +
+        `details=${deliveryResult.details}`,
+      );
+      break;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // TriggerRouter class
 // ---------------------------------------------------------------------------
 
 export class TriggerRouter {
   private readonly queue = new KeyedAsyncQueue();
+  private readonly execFn: ExecFn;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
     private readonly ctx: V2ToolContext,
     private readonly apiKey: string,
     private readonly runWorkflowFn: RunWorkflowFn,
-  ) {}
+    /**
+     * Injectable exec function for post-workflow delivery.
+     * Defaults to promisify(execFile) in production.
+     * Override in tests to use a fake without calling child_process.
+     */
+    execFn?: ExecFn,
+  ) {
+    this.execFn = execFn ?? execFileAsync;
+  }
 
   /**
    * Route an incoming webhook event.
@@ -369,6 +474,9 @@ export class TriggerRouter {
             `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
         );
       }
+      // Post-workflow delivery: runs after the workflow result is logged.
+      // Best-effort -- errors are logged and discarded, never change the workflow result.
+      await maybeRunDelivery(trigger.id, trigger, result, this.execFn);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
@@ -417,6 +525,10 @@ export class TriggerRouter {
             `error=${result.message} stopReason=${result.stopReason}`,
         );
       }
+      // NOTE: delivery is not run for console-dispatched workflows because WorkflowTrigger
+      // does not carry autoCommit/autoOpenPR flags (those live on TriggerDefinition, keyed
+      // by triggerId). The dispatch() path does not have a triggerId to look up the definition.
+      // TODO(follow-up): accept an optional triggerId in dispatch() to enable delivery here.
     });
     return workflowTrigger.workflowId;
   }
