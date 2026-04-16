@@ -3787,3 +3787,99 @@ This is especially critical when WorkTrain is managing 10 concurrent sessions --
 
 ---
 
+
+---
+
+### Thin spots: ideas that need fuller spec (Apr 16, 2026)
+
+These were mentioned and partially captured but need more detail when the time comes:
+
+**`worktrain feedback` command:**
+Explicit quality feedback loop. `worktrain feedback "the PR #402 review missed the temp file cleanup issue"` appends to `~/.workrail/feedback.jsonl`. The workflow-effectiveness-assessment picks these up alongside statistical patterns. User feedback is weighted higher than inferred signals.
+
+**`worktrain idea` command:**
+Lightweight idea capture without interrupting active work. `worktrain idea "nested subagents up to N depth"` appends to `~/.workrail/ideas-buffer.jsonl`. The `worktrain talk` session reviews the buffer at conversation start and decides what to groom into the backlog. Prevents good ideas from getting lost when 10 agents are running.
+
+**Audience-aware status briefings (`--audience` flag):**
+`worktrain status --audience owner` (full technical detail, default) vs `--audience stakeholder` (capability level, no PR numbers) vs `--audience external` (outcome level, no internal terminology). Same underlying data, different presentation layer. The Haiku-level routine adjusts verbosity and replaces technical terms with plain language.
+
+**`worktrain queue` CLI commands:**
+```bash
+worktrain queue list [--workspace <name>]    # show queue with priorities and status
+worktrain queue pause [--workspace <name>]   # stop draining
+worktrain queue resume [--workspace <name>]  # resume draining
+worktrain queue remove <id>                  # remove item
+worktrain queue bump <id>                    # move to top
+worktrain queue show <id>                    # full item details + pipeline plan
+```
+
+**Workspace-scoped soul and config:**
+Each workspace has its own `daemon-soul.md` at a configurable path. Soul resolution cascade: trigger-level override → workspace soul → global `~/.workrail/daemon-soul.md` → built-in default. Enables TypeScript and Python workspaces to have different behavioral profiles on the same WorkTrain instance.
+
+**Automatic worktree cleanup:**
+After any session completes (success or failure), the daemon automatically runs `git worktree prune` and removes any worktrees whose branches are merged to main. Prevents the main-worktree-lock issue encountered today.
+
+---
+
+### The single-conversation problem: WorkTrain needs multi-threaded interaction (Apr 16, 2026)
+
+A single chat where everything is happening at the same time is not ideal. When WorkTrain is managing 10 concurrent agents, it becomes impossible to know what's been captured vs what's floating, follow any one thread, or distinguish "in progress" from "needs a decision."
+
+**Threaded conversations per work group:**
+Each active work group gets its own conversation thread. You can follow the polling-triggers work in thread A without seeing the spawn/await implementation in thread B. Threads are persistent -- come back 2 hours later and pick up exactly where you left off.
+
+**`worktrain talk` shows a thread list:**
+```
+Threads:
+  ● WorkRail development     [3 active agents, 2 waiting]
+  ● Storyforge chapter work  [idle]
+  → Select thread or type to start a new one
+```
+
+**`worktrain idea` for mid-conversation capture:**
+When a new idea comes up while 10 agents are running, `worktrain idea "..."` appends to an ideas buffer without interrupting active work. The talk session reviews the buffer at the start of each conversation.
+
+**Build order:** thread model → thread list console view → cross-thread notifications → idea capture buffer.
+
+---
+
+### Nested subagent depth: configurable delegation chains (Apr 16, 2026)
+
+WorkTrain should support nested subagents -- an agent spawning a subagent, which spawns its own -- up to a configurable depth limit.
+
+```yaml
+workspaces:
+  workrail:
+    agentDefaults:
+      maxSubagentDepth: 3     # coordinator=0, worker=1, subagent=2, sub-subagent=3
+      maxTotalAgentsPerTask: 10  # hard cap across all depths for a single task
+```
+
+**Depth semantics:**
+- Depth 0: coordinator script (no LLM, pure script)
+- Depth 1: main worker (coding-task, mr-review)
+- Depth 2: subagent from workflow step (routine-context-gathering, etc.)
+- Depth 3: sub-subagent (rare, deep investigation chains)
+- Depth 4+: almost certainly a bug or runaway loop
+
+**The `maxTotalAgentsPerTask` budget** prevents exponential explosion -- a depth-3 tree with 3 agents per node = 27 concurrent agents without this cap.
+
+**Console DAG view** shows nesting depth as indentation. Makes over-delegation immediately visible.
+
+---
+
+### WorkTrain attribution and acting as the user (Apr 16, 2026)
+
+**Attribution / signing:**
+1. **Commit signatures:** commits made by WorkTrain include `Co-Authored-By: WorkTrain <worktrain@etienneb.dev>`. The configured `worktrain-bot` identity is consistent across all workspaces.
+2. **PR/MR description footer:** `---\n🤖 Implemented by WorkTrain · Session: sess_abc123 · Workflows run: coding-task, mr-review`. Links to session for full audit trail.
+3. **Issue/comment attribution:** WorkTrain comments include "WorkTrain investigation" with session link. Clearly not a human.
+
+**Value:** audit trail, trust calibration for reviewers, "how much of our code was WorkTrain-authored?" becomes queryable, open-source visibility.
+
+**Acting as the user:**
+WorkTrain uses the user's git identity and GitHub account (via user's token) to act as them. PRs appear from @EtienneBBeaulac, commits show as Etienne Beaulac.
+
+**Why useful:** normal PR approval flows, no bot account permissions needed, personal git history stays personal even for WorkTrain-authored work.
+
+**Trust guardrails:** `actAsUser: true` explicit opt-in, only for commits/PRs (never emails or Slack without additional permission), PR description always notes "Created by WorkTrain," full audit log in `~/.workrail/actions-as-user.jsonl`.
