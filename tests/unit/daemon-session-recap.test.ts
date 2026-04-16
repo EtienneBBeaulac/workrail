@@ -10,7 +10,8 @@
  * - Single note -> correctly wrapped in <workrail_session_state> XML
  * - Note truncation -> [truncated] marker appended
  * - Exactly MAX_SESSION_RECAP_NOTES notes -> all included
- * - More than MAX_SESSION_RECAP_NOTES notes -> only last N included
+ * NOTE: slicing to the last N notes is loadSessionNotes' responsibility,
+ *   not buildSessionRecap's (see workflow-runner.ts). No test here covers that path.
  */
 
 import { describe, it, expect } from 'vitest';
