@@ -10,7 +10,8 @@
  * - outbox.jsonl is NEVER modified by this command (append-only for the daemon).
  * - Read state is tracked in ~/.workrail/inbox-cursor.json as {lastReadCount: number}.
  * - If the cursor is missing or corrupted, it defaults to 0 (show all messages).
- * - If cursor >= totalLines (outbox was truncated or wiped), cursor resets to 0.
+ * - If cursor > totalLines (outbox was truncated or wiped), cursor resets to 0.
+ *   (cursor === totalLines means "all messages read" -- normal state, no reset.)
  * - Malformed JSON lines are skipped with a warning, not a crash.
  * - --watch is accepted but prints a stub message (daemon coordinator not built yet).
  * - All failures are returned as CliResult failure variants -- never thrown.
@@ -41,7 +42,7 @@ export interface OutboxMessage {
  * Stored in ~/.workrail/inbox-cursor.json.
  */
 export interface InboxCursor {
-  /** Number of lines in outbox.jsonl that have been shown to the user. */
+  /** Number of valid parsed messages in outbox.jsonl that have been shown to the user. */
   readonly lastReadCount: number;
 }
 
