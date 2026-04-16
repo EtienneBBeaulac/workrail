@@ -842,6 +842,7 @@ function validateAndResolveTrigger(
     }
 
     pollingSource = {
+      provider: 'gitlab_poll' as const,
       baseUrl: src.baseUrl!.trim(),
       projectId: src.projectId!.trim(),
       token: tokenResult.value,

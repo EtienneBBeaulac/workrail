@@ -749,6 +749,11 @@ function getSchemas(): Record<string, any> {
           additionalProperties: true,
           description: 'Updated context variables (only changed values).',
         },
+        artifacts: {
+          type: 'array',
+          items: {},
+          description: 'Optional structured artifacts (e.g. wr.assessment submissions). Schema is workflow/contract-defined.',
+        },
       },
       required: ['continueToken'],
     },
@@ -808,8 +813,11 @@ function makeContinueWorkflowTool(
         {
           continueToken: params.continueToken,
           intent: (params.intent ?? 'advance') as 'advance' | 'rehydrate',
-          output: params.notesMarkdown
-            ? { notesMarkdown: params.notesMarkdown }
+          output: (params.notesMarkdown || (Array.isArray(params.artifacts) && params.artifacts.length > 0))
+            ? {
+                ...(params.notesMarkdown ? { notesMarkdown: params.notesMarkdown } : {}),
+                ...(Array.isArray(params.artifacts) && params.artifacts.length > 0 ? { artifacts: params.artifacts } : {}),
+              }
             : undefined,
           context: params.context,
         },

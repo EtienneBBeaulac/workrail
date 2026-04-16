@@ -109,6 +109,11 @@ export interface ContextMapping {
 // ---------------------------------------------------------------------------
 
 export interface GitLabPollingSource {
+  /**
+   * Discriminant for the polling source union.
+   * Always 'gitlab_poll' for GitLabPollingSource.
+   */
+  readonly provider: 'gitlab_poll';
   /** Base URL of the GitLab instance. Example: "https://gitlab.com" */
   readonly baseUrl: string;
   /**
@@ -137,6 +142,66 @@ export interface GitLabPollingSource {
    * and a warning is logged (never two concurrent polls for the same trigger).
    */
   readonly pollIntervalSeconds: number;
+}
+
+// ---------------------------------------------------------------------------
+// GitHubPollingSource: configuration for GitHub issues and PR polling triggers
+//
+// Used when provider === 'github_poll'. The polling scheduler reads this to
+// determine how to poll the GitHub API for new or updated issues and pull requests.
+//
+// Invariants:
+// - token is already resolved from environment (never a $SECRET_NAME ref here).
+// - repo format: "owner/repo" (e.g. "acme/my-project").
+// - events: ["issues.opened", "issues.updated", "pr.opened", "pr.updated"], etc.
+// - excludeAuthors: exact login match (case-sensitive). Items from these authors excluded.
+// - notLabels: items with any of these labels are excluded (client-side filter).
+// - labelFilter: server-side label filter for issues (comma-separated); ignored for PRs.
+// ---------------------------------------------------------------------------
+
+export interface GitHubPollingSource {
+  /**
+   * Discriminant for the polling source union.
+   * Always 'github_poll' for GitHubPollingSource.
+   */
+  readonly provider: 'github_poll';
+  /**
+   * GitHub repository in "owner/repo" format.
+   * Example: "acme/my-project"
+   */
+  readonly repo: string;
+  /**
+   * GitHub personal access token or fine-grained PAT.
+   * Already resolved from environment (never a $SECRET_NAME ref here).
+   * Requires at least read access to issues and pull requests.
+   */
+  readonly token: string;
+  /**
+   * Event types to react to.
+   * Example values: "issues.opened", "issues.updated", "pr.opened", "pr.updated"
+   */
+  readonly events: readonly string[];
+  /**
+   * How often to poll in seconds. Default: 300.
+   */
+  readonly pollIntervalSeconds: number;
+  /**
+   * GitHub login names to exclude from results (exact match, case-sensitive).
+   * Example: ["github-actions[bot]", "dependabot[bot]"]
+   */
+  readonly excludeAuthors: readonly string[];
+  /**
+   * Issue/PR label names that cause an item to be excluded.
+   * Client-side filter applied after fetching.
+   * Example: ["wont-fix", "duplicate"]
+   */
+  readonly notLabels: readonly string[];
+  /**
+   * Label names to include (server-side filter for issues, ignored for PRs).
+   * Only issues with ALL these labels are returned when set.
+   * Example: ["bug", "needs-triage"]
+   */
+  readonly labelFilter: readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -272,7 +337,7 @@ export interface TriggerDefinition {
    *   concurrencyMode: serial    # default, may be omitted
    *   concurrencyMode: parallel  # opt-in to concurrent execution
    */
-  readonly concurrencyMode: 'serial' | 'parallel';
+  readonly concurrencyMode?: 'serial' | 'parallel';
 
   /**
    * Optional HTTP(S) callback URL. When set, TriggerRouter POSTs the
@@ -346,7 +411,7 @@ export interface TriggerDefinition {
    *
    * TODO(follow-up): migrate to discriminated union at adapter #2.
    */
-  readonly pollingSource?: GitLabPollingSource;
+  readonly pollingSource?: GitLabPollingSource | GitHubPollingSource;
 
   /**
    * Optional named workspace this trigger belongs to.
