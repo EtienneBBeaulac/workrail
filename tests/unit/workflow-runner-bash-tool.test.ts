@@ -29,6 +29,7 @@ const CMD_NOOP = 'node -e ""';
 const CMD_STDOUT_AND_STDERR =
   'node -e "process.stdout.write(\'out\'); process.stderr.write(\'err\')"';
 const CMD_EXIT_1 = 'node -e "process.exit(1)"';
+const CMD_EXIT_2 = 'node -e "process.exit(2)"';
 const CMD_EXIT_42 = 'node -e "process.exit(42)"';
 const CMD_STDOUT_THEN_EXIT_1 =
   'node -e "process.stdout.write(\'stdout-content\'); process.exit(1)"';
@@ -36,6 +37,9 @@ const CMD_STDERR_THEN_EXIT_1 =
   'node -e "process.stderr.write(\'stderr-content\'); process.exit(1)"';
 const CMD_BOTH_THEN_EXIT_1 =
   'node -e "process.stdout.write(\'my-out\'); process.stderr.write(\'my-err\'); process.exit(1)"';
+// Exit 2 with stderr -- simulates grep "Usage error" or real grep error
+const CMD_STDERR_THEN_EXIT_2 =
+  'node -e "process.stderr.write(\'grep: invalid option\'); process.exit(2)"';
 
 describe('makeBashTool()', () => {
   describe('success cases (exit 0)', () => {
@@ -82,19 +86,80 @@ describe('makeBashTool()', () => {
     });
   });
 
-  describe('failure cases (non-zero exit)', () => {
-    it('throws an error when command exits with non-zero code', async () => {
+  describe('exit-1 with empty stderr (grep "no match" semantics)', () => {
+    it('returns empty stdout when exit 1 and no stderr (grep finds nothing)', async () => {
+      // Simulates: ls docs/plans/ | grep -i trigger  -- grep finds no lines, exits 1
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      const result = await tool.execute('test-call-id', {
+        command: CMD_EXIT_1,
+        cwd: WORKSPACE,
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      // Should NOT throw; should return "(no output)" since stdout is also empty
+      expect(text).toBe('(no output)');
+    });
+
+    it('returns stdout content when exit 1 and no stderr', async () => {
+      // Edge case: command exits 1 but wrote something to stdout before exiting
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      const result = await tool.execute('test-call-id', {
+        command: CMD_STDOUT_THEN_EXIT_1,
+        cwd: WORKSPACE,
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toContain('stdout-content');
+    });
+
+    it('returns details with stdout and stderr when exit 1 and no stderr', async () => {
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      const result = await tool.execute('test-call-id', {
+        command: CMD_EXIT_1,
+        cwd: WORKSPACE,
+      });
+      const details = result.details as { stdout: string; stderr: string };
+      expect(details).toHaveProperty('stdout');
+      expect(details).toHaveProperty('stderr');
+    });
+
+    it('still throws when exit 1 with non-empty stderr (real grep error)', async () => {
+      // Simulates: grep writes a diagnostic to stderr before exiting 1
       const tool = makeBashTool(WORKSPACE, stubSchemas);
       await expect(
-        tool.execute('test-call-id', { command: CMD_EXIT_1, cwd: WORKSPACE }),
+        tool.execute('test-call-id', { command: CMD_STDERR_THEN_EXIT_1, cwd: WORKSPACE }),
+      ).rejects.toThrow('stderr-content');
+    });
+
+    it('throws when exit 2 regardless of stderr (grep usage/IO error)', async () => {
+      // Exit code 2 from grep always means a real error, never "no match"
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      await expect(
+        tool.execute('test-call-id', { command: CMD_EXIT_2, cwd: WORKSPACE }),
+      ).rejects.toThrow('exit 2');
+    });
+
+    it('throws when exit 2 even with non-empty stderr (grep IO/usage error)', async () => {
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      await expect(
+        tool.execute('test-call-id', { command: CMD_STDERR_THEN_EXIT_2, cwd: WORKSPACE }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('failure cases (non-zero exit)', () => {
+    it('throws an error when command exits with non-zero code and has stderr', async () => {
+      // CMD_EXIT_1 alone no longer throws (exit 1, empty stderr = "no match" semantics).
+      // Use a command that writes to stderr so the throw path is exercised.
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      await expect(
+        tool.execute('test-call-id', { command: CMD_STDERR_THEN_EXIT_1, cwd: WORKSPACE }),
       ).rejects.toThrow();
     });
 
     it('includes the failed command in the thrown error message', async () => {
       const tool = makeBashTool(WORKSPACE, stubSchemas);
       await expect(
-        tool.execute('test-call-id', { command: CMD_EXIT_1, cwd: WORKSPACE }),
-      ).rejects.toThrow(CMD_EXIT_1);
+        tool.execute('test-call-id', { command: CMD_STDERR_THEN_EXIT_1, cwd: WORKSPACE }),
+      ).rejects.toThrow(CMD_STDERR_THEN_EXIT_1);
     });
 
     it('includes the exit code in the thrown error message', async () => {
@@ -104,11 +169,13 @@ describe('makeBashTool()', () => {
       ).rejects.toThrow('42');
     });
 
-    it('includes stdout in the thrown error when command produces output before failing', async () => {
+    it('includes stdout in the thrown error when command writes to stdout and stderr before failing', async () => {
+      // CMD_STDOUT_THEN_EXIT_1 exits 1 with empty stderr, which is now a "no match" success.
+      // Use CMD_BOTH_THEN_EXIT_1 (stdout + stderr + exit 1) to verify the stdout-in-error path.
       const tool = makeBashTool(WORKSPACE, stubSchemas);
       await expect(
-        tool.execute('test-call-id', { command: CMD_STDOUT_THEN_EXIT_1, cwd: WORKSPACE }),
-      ).rejects.toThrow('stdout-content');
+        tool.execute('test-call-id', { command: CMD_BOTH_THEN_EXIT_1, cwd: WORKSPACE }),
+      ).rejects.toThrow('my-out');
     });
 
     it('includes stderr in the thrown error when command writes to stderr before failing', async () => {

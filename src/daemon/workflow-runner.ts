@@ -858,7 +858,9 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
   return {
     name: 'Bash',
     description:
-      'Execute a shell command. Throws on non-zero exit code. ' +
+      'Execute a shell command. Throws on failure (non-zero exit with stderr, or exit code 2+). ' +
+      'Exit code 1 with empty stderr is treated as "no match found" (standard grep semantics) and ' +
+      'returns empty output without throwing. ' +
       `Maximum execution time: ${BASH_TIMEOUT_MS / 1000}s.`,
     inputSchema: schemas['BashParams'],
     label: 'Bash',
@@ -891,6 +893,23 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
         const stderr = String(e.stderr ?? '');
         const rawCode = e.code;
         const signal = e.signal;
+
+        // Exit code 1 with empty stderr is "no match found" -- not a real error.
+        // This is standard POSIX semantics for grep (exit 1 = no lines matched,
+        // exit 2 = genuine error). Applying the same rule to any command that exits
+        // 1 with no error output is safe: a command that fails silently is almost
+        // always reporting "nothing found", not a broken execution.
+        // WHY `rawCode === 1 && !stderr.trim()`: rawCode is a number when set by
+        // normal process exit; the trim() guard ignores purely-whitespace stderr.
+        // This branch is NOT entered for exit 2+ (always an error) or when stderr
+        // is non-empty (the process wrote a diagnostic message, so it is a real error).
+        if (rawCode === 1 && !stderr.trim()) {
+          return {
+            content: [{ type: 'text', text: stdout || '(no output)' }],
+            details: { stdout, stderr },
+          };
+        }
+
         const exitInfo = rawCode != null
           ? `exit ${String(rawCode)}`
           : signal
