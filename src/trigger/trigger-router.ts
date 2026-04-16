@@ -323,18 +323,109 @@ async function maybeRunDelivery(
 }
 
 // ---------------------------------------------------------------------------
+// Semaphore: global concurrency cap for runWorkflow() calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Promise-based counting semaphore.
+ *
+ * WHY a semaphore instead of a simple counter:
+ * A plain counter with "if at capacity, drop" would silently lose dispatches after
+ * the caller has already received a 202 Accepted response. Queue-and-wait is required
+ * so every accepted dispatch eventually executes.
+ *
+ * WHY acquire() is called INSIDE the queue callback (not before enqueue()):
+ * route() and dispatch() must return immediately -- the 202 response is sent before
+ * enqueue(). Acquiring the semaphore before enqueue() would block route()/dispatch()
+ * until a slot is free, breaking the fire-and-forget contract.
+ * Instead, the semaphore is acquired inside the async queue callback, where blocking
+ * is safe: the callback is already running on the promise chain, not on the hot path.
+ *
+ * WHY default max = 3:
+ * A conservative default prevents resource exhaustion for concurrencyMode:'parallel'
+ * triggers without requiring any user configuration. Configurable via
+ * maxConcurrentSessions in ~/.workrail/config.json.
+ *
+ * Invariants:
+ * - acquire() returns a Promise that resolves when a slot is available (FIFO order).
+ * - release() must be called in a finally block -- never conditional.
+ * - max is always >= 1 (enforced by TriggerRouter constructor).
+ */
+class Semaphore {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  constructor(readonly max: number) {}
+
+  acquire(): Promise<void> {
+    if (this.active < this.max) {
+      this.active++;
+      return Promise.resolve();
+    }
+    // At capacity: enqueue a waiter that resolves when a slot opens.
+    return new Promise<void>((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  release(): void {
+    const next = this.waiters.shift();
+    if (next !== undefined) {
+      // Hand the slot directly to the next waiter (active count stays the same).
+      next();
+    } else {
+      this.active--;
+    }
+  }
+
+  /** Current count of active (running) sessions. */
+  get activeCount(): number {
+    return this.active;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // TriggerRouter class
 // ---------------------------------------------------------------------------
 
+/** Default maximum concurrent runWorkflow() calls across all triggers. */
+const DEFAULT_MAX_CONCURRENT_SESSIONS = 3;
+
 export class TriggerRouter {
   private readonly queue = new KeyedAsyncQueue();
+  private readonly semaphore: Semaphore;
+  private readonly _maxConcurrentSessions: number;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
     private readonly ctx: V2ToolContext,
     private readonly apiKey: string,
     private readonly runWorkflowFn: RunWorkflowFn,
-  ) {}
+    maxConcurrentSessions?: number,
+  ) {
+    // Validate and clamp: maxConcurrentSessions must be >= 1.
+    // A value of 0 or negative would deadlock all dispatches -- make it impossible.
+    const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
+    if (requested < 1) {
+      console.warn(
+        `[TriggerRouter] maxConcurrentSessions must be >= 1; received ${requested}, clamping to 1.`,
+      );
+      this._maxConcurrentSessions = 1;
+    } else {
+      this._maxConcurrentSessions = requested;
+    }
+    this.semaphore = new Semaphore(this._maxConcurrentSessions);
+  }
+
+  /** Current count of active (running) runWorkflow() calls. */
+  get activeSessions(): number {
+    return this.semaphore.activeCount;
+  }
+
+  /** Configured maximum concurrent runWorkflow() calls. */
+  get maxConcurrentSessions(): number {
+    return this._maxConcurrentSessions;
+  }
 
   /**
    * Route an incoming webhook event.
@@ -401,7 +492,23 @@ export class TriggerRouter {
       ? `${trigger.id}:${crypto.randomUUID()}`
       : trigger.id;
     void this.queue.enqueue(queueKey, async () => {
-      let result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+      // Acquire the global semaphore before starting runWorkflowFn().
+      // WHY inside the callback (not before enqueue): route() must return immediately.
+      // Blocking here is safe; blocking before enqueue() would break the 202 contract.
+      if (this.semaphore.activeCount >= this._maxConcurrentSessions) {
+        console.warn(
+          `[TriggerRouter] Concurrency limit reached ` +
+          `(${this.semaphore.activeCount}/${this._maxConcurrentSessions} active): ` +
+          `queuing dispatch for triggerId=${trigger.id}`,
+        );
+      }
+      await this.semaphore.acquire();
+      let result: WorkflowRunResult;
+      try {
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+      } finally {
+        this.semaphore.release();
+      }
 
       // POST result to callbackUrl if configured (GAP-3: deliveryContext).
       // WHY: bind delivery target at trigger-config time, post result at completion time.
@@ -484,7 +591,22 @@ export class TriggerRouter {
    */
   dispatch(workflowTrigger: WorkflowTrigger): string {
     void this.queue.enqueue(workflowTrigger.workflowId, async () => {
-      const result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+      // Same semaphore pattern as route(): acquire inside the callback so dispatch()
+      // returns immediately, then wait for a slot before calling runWorkflowFn().
+      if (this.semaphore.activeCount >= this._maxConcurrentSessions) {
+        console.warn(
+          `[TriggerRouter] Concurrency limit reached ` +
+          `(${this.semaphore.activeCount}/${this._maxConcurrentSessions} active): ` +
+          `queuing dispatch for workflowId=${workflowTrigger.workflowId}`,
+        );
+      }
+      await this.semaphore.acquire();
+      let result: WorkflowRunResult;
+      try {
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+      } finally {
+        this.semaphore.release();
+      }
       if (result._tag === 'success') {
         console.log(
           `[TriggerRouter] Dispatch completed: workflowId=${workflowTrigger.workflowId} ` +
