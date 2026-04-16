@@ -1109,20 +1109,26 @@ export async function runWorkflow(
 
   let stopReason = 'stop';
   let errorMessage: string | undefined;
+  // WHY hoisted: timeoutHandle must be accessible in the finally block to cancel the
+  // timer on successful completion. Promise constructor callbacks are synchronous
+  // (ES6 spec), so timeoutHandle is always assigned before the await resolves.
+  // The undefined initial value is required by TypeScript types; the undefined guard
+  // in finally is defensive (technically unreachable in a spec-compliant JS engine).
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
   try {
     // ---- Whole-workflow timeout ----
     // If the agent loop does not complete within sessionTimeoutMs, abort the agent
     // and propagate a timeout through the existing error-handling path.
     // agent.abort() is idempotent (optional-chained on activeRun in pi-agent-core).
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
         if (timeoutReason === null) {
           timeoutReason = 'wall_clock';
         }
         reject(new Error('Workflow timed out'));
-      }, sessionTimeoutMs),
-    );
+      }, sessionTimeoutMs);
+    });
     await Promise.race([agent.prompt(buildUserMessage(initialPrompt)), timeoutPromise])
       .catch((err: unknown) => {
         agent.abort();
@@ -1148,6 +1154,10 @@ export async function runWorkflow(
     stopReason = 'error';
   } finally {
     unsubscribe();
+    // Cancel the wall-clock timer so it does not fire after successful completion
+    // and mutate the closed-over timeoutReason variable. clearTimeout on an
+    // already-fired or undefined handle is a safe no-op.
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }
 
   // ---- Timeout result (wall-clock or max-turn limit) ----

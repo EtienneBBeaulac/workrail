@@ -101,6 +101,17 @@ triggers:
       maxSessionMinutes: -5
 `;
 
+const WITH_NEGATIVE_MAX_TURNS = `
+triggers:
+  - id: test-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    goal: Run workflow
+    agentConfig:
+      maxTurns: -1
+`;
+
 const WITH_ZERO_MAX_SESSION_MINUTES = `
 triggers:
   - id: test-trigger
@@ -178,6 +189,13 @@ describe('trigger-store.ts -- GAP-8 agentConfig limits', () => {
 
     it('rejects trigger when maxTurns is non-numeric', () => {
       const result = loadTriggerConfig(WITH_INVALID_MAX_TURNS_ALPHA);
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
+    });
+
+    it('rejects trigger when maxTurns is negative', () => {
+      const result = loadTriggerConfig(WITH_NEGATIVE_MAX_TURNS);
       expect(result.kind).toBe('ok');
       if (result.kind !== 'ok') return;
       expect(result.value.triggers).toHaveLength(0);

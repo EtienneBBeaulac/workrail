@@ -502,28 +502,34 @@ function validateAndResolveTrigger(
 
     let maxSessionMinutes: number | undefined;
     if (raw.agentConfig.maxSessionMinutes !== undefined) {
-      const parsed = parseInt(raw.agentConfig.maxSessionMinutes, 10);
-      if (isNaN(parsed) || parsed <= 0) {
+      // WHY Number.isInteger instead of parseInt: parseInt('1.5', 10) silently returns 1,
+      // so an operator writing maxSessionMinutes: 1.5 would get 1 minute with no warning.
+      // Number.isInteger(Number(raw)) catches both non-numeric strings (NaN -> false) and
+      // decimal values (1.5 -> false) in one check. Scientific notation integers like 1e2
+      // pass correctly (Number('1e2') === 100, which is a valid integer).
+      const asNumber = Number(raw.agentConfig.maxSessionMinutes);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
         return err({
           kind: 'missing_field',
           field: 'agentConfig.maxSessionMinutes (must be a positive integer)',
           triggerId: rawId,
         });
       }
-      maxSessionMinutes = parsed;
+      maxSessionMinutes = asNumber;
     }
 
     let maxTurns: number | undefined;
     if (raw.agentConfig.maxTurns !== undefined) {
-      const parsed = parseInt(raw.agentConfig.maxTurns, 10);
-      if (isNaN(parsed) || parsed <= 0) {
+      // WHY Number.isInteger: same rationale as maxSessionMinutes above.
+      const asNumber = Number(raw.agentConfig.maxTurns);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
         return err({
           kind: 'missing_field',
           field: 'agentConfig.maxTurns (must be a positive integer)',
           triggerId: rawId,
         });
       }
-      maxTurns = parsed;
+      maxTurns = asNumber;
     }
 
     if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined) {
