@@ -78,14 +78,14 @@ export type RunWorkflowFn = (
  * @param template - The goal template string (e.g. "Review {{$.pull_request.title}}")
  * @param staticGoal - The static fallback goal from the trigger definition
  * @param payload - The parsed webhook payload
- * @param triggerId - Optional trigger ID for diagnostic warning (defaults to "(unknown)")
+ * @param triggerId - Trigger ID for diagnostic warning
  * @returns The interpolated goal, or staticGoal if any token is missing
  */
 export function interpolateGoalTemplate(
   template: string,
   staticGoal: string,
   payload: Readonly<Record<string, unknown>>,
-  triggerId?: string,
+  triggerId: string,
 ): string {
   // Find all {{...}} tokens
   const TOKEN_RE = /\{\{([^}]+)\}\}/g;
@@ -105,8 +105,8 @@ export function interpolateGoalTemplate(
     if (value === undefined || value === null) {
       // Any missing token: warn and fall back to static goal (no partial interpolation)
       console.warn(
-        `[TriggerRouter] goalTemplate variable missing: '${token}' not found in payload ` +
-        `for trigger ${triggerId ?? '(unknown)'}. Falling back to static goal.`,
+        `[TriggerRouter] goalTemplate variable '${token}' not found in payload ` +
+        `for trigger '${triggerId}' (template: '${template}'). Falling back to static goal.`,
       );
       return staticGoal;
     }

@@ -993,15 +993,15 @@ export async function runWorkflow(
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
 
-  // WHY: an explicit imperative at the end of the initial prompt forces the agent
-  // to call continue_workflow immediately rather than reflecting first. Without this,
+  // WHY: an explicit imperative at the end of the initial prompt directs the agent
+  // to complete the step work before calling continue_workflow. Without this,
   // the agent may produce a "thinking aloud" turn before the first tool call, which
   // wastes tokens and delays step execution.
   const initialPrompt =
     (firstStep.pending?.prompt ?? 'No step content available') +
     `\n\ncontinueToken: ${startContinueToken}` +
     contextJson +
-    '\n\nCall continue_workflow with your notes to begin step 1. Do not reflect first -- act immediately.';
+    '\n\nComplete all step work, then call continue_workflow with your notes to begin.';
 
   // ---- Agent (one per runWorkflow() call, not reused) ----
   const { Agent } = await loadPiAgentCore();

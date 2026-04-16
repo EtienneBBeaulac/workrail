@@ -571,6 +571,9 @@ describe('interpolateGoalTemplate', () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('my-trigger'),
     );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Review MR: {{$.pull_request.title}}'),
+    );
     warnSpy.mockRestore();
   });
 
@@ -597,16 +600,16 @@ describe('interpolateGoalTemplate', () => {
     expect(result).toBe('Review MR: My Feature');
   });
 
-  it('uses (unknown) in warn when triggerId is omitted', () => {
+  it('includes triggerId in warn message', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     interpolateGoalTemplate(
       'Review: {{$.missing.token}}',
       'Fallback',
       {},
-      // no triggerId
+      'test-trigger',
     );
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('(unknown)'),
+      expect.stringContaining('test-trigger'),
     );
     warnSpy.mockRestore();
   });
