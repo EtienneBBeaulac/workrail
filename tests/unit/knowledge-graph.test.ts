@@ -12,6 +12,11 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+
+// DuckDB native bindings are not available on Windows — skip the entire suite.
+// The knowledge-graph spike is Linux/macOS-only until cross-platform DuckDB
+// binaries are packaged with the devDependency.
+const SKIP_ON_WINDOWS = process.platform === 'win32';
 import * as path from 'path';
 import {
   buildIndex,
@@ -61,7 +66,7 @@ beforeAll(async () => {
 // Sanity checks
 // ---------------------------------------------------------------------------
 
-describe('knowledge-graph indexer sanity', () => {
+describe.skipIf(SKIP_ON_WINDOWS)('knowledge-graph indexer sanity', () => {
   it('indexes a non-trivial number of nodes and edges', () => {
     expect(nodeCount).toBeGreaterThan(50);
     expect(edgeCount).toBeGreaterThan(20);
@@ -85,7 +90,7 @@ describe('knowledge-graph indexer sanity', () => {
 // Validation Query 1: What imports trigger-router.ts?
 // ---------------------------------------------------------------------------
 
-describe('query 1: what imports trigger-router.ts?', () => {
+describe.skipIf(SKIP_ON_WINDOWS)('query 1: what imports trigger-router.ts?', () => {
   it('returns trigger-listener.ts as an importer', async () => {
     const result = await queryImporters(
       db,
@@ -136,7 +141,7 @@ describe('query 1: what imports trigger-router.ts?', () => {
 // Validation Query 2: What CLI commands are registered?
 // ---------------------------------------------------------------------------
 
-describe('query 2: what CLI commands are registered in cli.ts?', () => {
+describe.skipIf(SKIP_ON_WINDOWS)('query 2: what CLI commands are registered in cli.ts?', () => {
   it('returns all 9 registered commands', async () => {
     const result = await queryCliCommands(db);
 

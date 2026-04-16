@@ -1,12 +1,31 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import * as net from 'net';
 import { createHttpListener, bindWithPortFallback } from '../../../src/mcp/transports/http-listener.js';
 import fetch from 'node-fetch';
+
+/**
+ * Find N consecutive free TCP ports starting from a random high port.
+ * Avoids hardcoded port numbers that collide on parallel CI runners.
+ */
+async function findFreePorts(count: number): Promise<number[]> {
+  const base = 20000 + Math.floor(Math.random() * 10000);
+  const ports: number[] = [];
+  for (let p = base; p < base + 200 && ports.length < count; p++) {
+    const free = await new Promise<boolean>((resolve) => {
+      const s = net.createServer();
+      s.once('error', () => resolve(false));
+      s.listen(p, '127.0.0.1', () => s.close(() => resolve(true)));
+    });
+    if (free) ports.push(p);
+  }
+  if (ports.length < count) throw new Error(`Could not find ${count} free ports`);
+  return ports;
+}
 
 describe('HttpListener', () => {
   let listeners: ReturnType<typeof createHttpListener>[] = [];
 
   afterEach(async () => {
-    // Clean up all listeners
     for (const listener of listeners) {
       await listener.stop();
     }
@@ -16,67 +35,54 @@ describe('HttpListener', () => {
   it('creates a listener with the specified port', () => {
     const listener = createHttpListener(3200);
     listeners.push(listener);
-    
     expect(listener.requestedPort).toBe(3200);
     expect(listener.getBoundPort()).toBeNull(); // Not started yet
     expect(listener.app).toBeDefined();
   });
 
   it('starts successfully and binds to the requested port', async () => {
-    const listener = createHttpListener(13300);
+    const [port] = await findFreePorts(1);
+    const listener = createHttpListener(port);
     listeners.push(listener);
-    
     await listener.start();
-    
-    expect(listener.getBoundPort()).toBe(13300);
-    
-    // Verify it's listening by making a request
-    const response = await fetch(`http://localhost:13300/nonexistent`);
-    expect(response.status).toBe(404); // Express default 404
+    expect(listener.getBoundPort()).toBe(port);
+    const response = await fetch(`http://localhost:${port}/nonexistent`);
+    expect(response.status).toBe(404);
   });
 
   it('supports ephemeral ports (port=0, OS assigns)', async () => {
     const listener = createHttpListener(0);
     listeners.push(listener);
-    
     expect(listener.requestedPort).toBe(0);
-    expect(listener.getBoundPort()).toBeNull(); // Not started yet
-    
+    expect(listener.getBoundPort()).toBeNull();
     await listener.start();
-    
     const boundPort = listener.getBoundPort();
-    expect(boundPort).toBeGreaterThan(0); // OS assigned a real port
-    
-    // Verify it's actually listening on that port
+    expect(boundPort).toBeGreaterThan(0);
     const response = await fetch(`http://localhost:${boundPort}/test`);
     expect(response.status).toBe(404);
   });
 
   it('throws on EADDRINUSE when port is already in use', async () => {
-    const listener1 = createHttpListener(13200);
-    const listener2 = createHttpListener(13200);
+    const [port] = await findFreePorts(1);
+    const listener1 = createHttpListener(port);
+    const listener2 = createHttpListener(port);
     listeners.push(listener1, listener2);
-    
     await listener1.start();
-    
-    await expect(listener2.start()).rejects.toThrow(
-      'Port 13200 is already in use'
-    );
+    await expect(listener2.start()).rejects.toThrow('already in use');
   });
 
   it('throws when start() is called twice on the same listener', async () => {
-    const listener = createHttpListener(13301);
+    const [port] = await findFreePorts(1);
+    const listener = createHttpListener(port);
     listeners.push(listener);
-    
     await listener.start();
-    
     await expect(listener.start()).rejects.toThrow('Already started');
   });
 
   it('stop() is idempotent (can be called multiple times)', async () => {
-    const listener = createHttpListener(13302);
+    const [port] = await findFreePorts(1);
+    const listener = createHttpListener(port);
     listeners.push(listener);
-    
     await listener.start();
     await listener.stop();
     await listener.stop(); // Should not throw
@@ -85,23 +91,19 @@ describe('HttpListener', () => {
   it('stop() on non-started listener is a no-op', async () => {
     const listener = createHttpListener(3201);
     listeners.push(listener);
-    
     await listener.stop(); // Should not throw
   });
 
   it('allows mounting routes on the Express app before starting', async () => {
-    const listener = createHttpListener(13303);
+    const [port] = await findFreePorts(1);
+    const listener = createHttpListener(port);
     listeners.push(listener);
-
     listener.app.get('/test', (req, res) => {
       res.json({ message: 'test route' });
     });
-
     await listener.start();
-
-    const response = await fetch(`http://localhost:13303/test`);
+    const response = await fetch(`http://localhost:${port}/test`);
     const data: any = await response.json();
-
     expect(data.message).toBe('test route');
   });
 });
@@ -117,38 +119,35 @@ describe('bindWithPortFallback', () => {
   });
 
   it('binds to startPort when it is available', async () => {
-    const listener = await bindWithPortFallback(13400, 13410);
+    const [port] = await findFreePorts(1);
+    const listener = await bindWithPortFallback(port, port + 10);
     boundListeners.push(listener);
-
-    expect(listener.getBoundPort()).toBe(13400);
+    expect(listener.getBoundPort()).toBe(port);
   });
 
   it('falls back to the next available port when startPort is busy', async () => {
-    // Occupy 13400 first
-    const occupier = createHttpListener(13400);
+    const [port] = await findFreePorts(2);
+    const occupier = createHttpListener(port);
     await occupier.start();
     boundListeners.push(occupier);
-
-    const listener = await bindWithPortFallback(13400, 13410);
+    const listener = await bindWithPortFallback(port, port + 10);
     boundListeners.push(listener);
-
-    // Should have bound to 13401 (or higher) since 13400 is taken
     const boundPort = listener.getBoundPort();
     expect(boundPort).not.toBeNull();
-    expect(boundPort!).toBeGreaterThan(13400);
-    expect(boundPort!).toBeLessThanOrEqual(13410);
+    expect(boundPort!).toBeGreaterThan(port);
+    expect(boundPort!).toBeLessThanOrEqual(port + 10);
   });
 
   it('throws when no port in range is available', async () => {
-    // Occupy all ports in a small range
-    const occupiers = [createHttpListener(13420), createHttpListener(13421)];
+    const [p1, p2] = await findFreePorts(2);
+    const occupiers = [createHttpListener(p1), createHttpListener(p2)];
     for (const occ of occupiers) {
       await occ.start();
       boundListeners.push(occ);
     }
-
-    await expect(bindWithPortFallback(13420, 13421)).rejects.toThrow(
-      'No available port in range 13420-13421'
+    const range = `${p1}-${p2}`;
+    await expect(bindWithPortFallback(p1, p2)).rejects.toThrow(
+      `No available port in range ${range}`,
     );
   });
 });
