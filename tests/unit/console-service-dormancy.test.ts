@@ -83,9 +83,12 @@ describe('ConsoleService dormancy', () => {
     expect(sessions[0].status).toBe('in_progress');
   });
 
-  it('returns in_progress for a session modified exactly at the threshold boundary', async () => {
-    // Exactly 1 hour ago is NOT dormant — the check is strictly greater-than.
-    const lastModifiedMs = Date.now() - THRESHOLD_MS;
+  it('returns in_progress for a session modified at the threshold boundary', async () => {
+    // A session modified THRESHOLD_MS - 100ms ago is NOT dormant (strictly less than threshold).
+    // We use -100ms of buffer rather than exactly -THRESHOLD_MS because even a 1ms clock tick
+    // between Date.now() here and inside getSessionList() would push the session past the
+    // boundary and make the test flake.
+    const lastModifiedMs = Date.now() - THRESHOLD_MS + 100;
     const service = makeService([{ name: 'sess_cccccccccccccccccccccccc', mtimeMs: lastModifiedMs }]);
 
     const result = await service.getSessionList();
