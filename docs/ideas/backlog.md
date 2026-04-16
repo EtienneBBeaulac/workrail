@@ -1271,3 +1271,25 @@ WorkTrain updated to v4.1.0 ✦ One new capability to configure:
 
   Press Enter to continue, or 's' to skip this setup.
 ```
+
+---
+
+### Multi-agent support: concurrent sessions + agent collaboration (high importance, post-MVP)
+
+**Concurrent sessions (near-term):**
+WorkTrain should run multiple workflows in parallel -- different agents on different repos or different tasks simultaneously. The current architecture supports this (per-session state files, `KeyedAsyncQueue` serializes per trigger ID), but the global concurrency cap from the arch audit needs implementing:
+- `maxConcurrentSessions: N` config in `~/.workrail/config.json`
+- Global semaphore in `TriggerRouter` -- queues new dispatches when at capacity
+- Console shows all concurrent sessions in QueuePane
+- Mobile monitoring shows live count
+
+**Agent collaboration on a single task (longer-term):**
+Multiple agents coordinating on one task. Two patterns:
+
+1. **Coordinator + worker subagents** -- already possible today via WorkRail's existing `mcp__nested-subagent__Task` delegation in workflow steps. A coordinator workflow spawns subagents with scoped tasks (e.g. one agent writes Android code, another writes iOS). Each subagent has its own WorkRail session and reports back to the coordinator.
+
+2. **Parallel agent teams** -- multiple agents working independently on separate parts of a task (e.g. separate feature branches) with a final merge/review step. Requires cross-repo execution and a workflow that understands how to partition and recombine work.
+
+**MVP path:** Concurrent sessions with `maxConcurrentSessions` first (small change). Coordinator + subagent delegation second (already works, just needs workflow authoring). Full parallel teams is the longer-term investment.
+
+**Key open question:** When two agents work on the same repo concurrently, file conflicts are possible. The right answer is git worktrees -- each agent gets its own worktree, merges at the end. This is what the `cw` command does for human developers. WorkTrain should do the same autonomously.
