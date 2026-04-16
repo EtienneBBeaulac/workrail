@@ -671,15 +671,25 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
           details: { stdout, stderr },
         };
       } catch (err: unknown) {
-        // Node's child_process.exec errors (ExecException) attach stdout and stderr
-        // as own properties on the error object. Extract them so the agent can
-        // reason about what went wrong and retry intelligently.
-        const e = err as { stdout?: unknown; stderr?: unknown; code?: unknown };
+        // Node's child_process.exec errors (ExecException) attach stdout, stderr,
+        // code, and signal as own properties. Extract them so the agent can reason
+        // about what went wrong and retry intelligently.
+        // WHY rawCode: `code` is null (not a number) when the process was killed by
+        // a signal (e.g. SIGTERM on exec timeout). Check rawCode before coalescing
+        // so the signal branch is reachable -- `rawCode ?? 'unknown'` would collapse
+        // null to 'unknown' and make signal unreachable.
+        const e = err as { stdout?: unknown; stderr?: unknown; code?: unknown; signal?: unknown };
         const stdout = String(e.stdout ?? '');
         const stderr = String(e.stderr ?? '');
-        const code = e.code ?? 'unknown';
+        const rawCode = e.code;
+        const signal = e.signal;
+        const exitInfo = rawCode != null
+          ? `exit ${String(rawCode)}`
+          : signal
+            ? `signal ${String(signal)}`
+            : 'exit unknown';
         throw new Error(
-          `Command failed: ${params.command} (exit ${code})\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
+          `Command failed: ${params.command} (${exitInfo})\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
         );
       }
     },
