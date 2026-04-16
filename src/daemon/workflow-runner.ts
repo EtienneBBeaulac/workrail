@@ -12,10 +12,13 @@
  *   The daemon must not call createWorkRailEngine() -- engineActive guard blocks reuse.
  * - Tools THROW on failure (pi-mono contract). runWorkflow() catches and returns
  *   a WorkflowRunResult discriminated union (errors-as-data at the outer boundary).
+ * - The daemon calls executeStartWorkflow() directly before creating the Agent --
+ *   this avoids one full LLM turn per session. start_workflow is NOT in the tools
+ *   list; the LLM only ever calls continue_workflow for subsequent steps.
  * - continueToken + checkpointToken are persisted atomically to
- *   ~/.workrail/daemon-sessions/<sessionId>.json BEFORE returning from each
- *   continue_workflow tool call. Each concurrent session has its own file --
- *   they never clobber each other. Crash recovery invariant.
+ *   ~/.workrail/daemon-sessions/<sessionId>.json BEFORE the agent loop begins and
+ *   BEFORE returning from each continue_workflow tool call. Each concurrent session
+ *   has its own file -- they never clobber each other. Crash recovery invariant.
  */
 
 import 'reflect-metadata';
@@ -339,14 +342,6 @@ async function getSchemas(): Promise<Record<string, any>> {
   if (_schemas) return _schemas;
   const { Type } = await loadPiAi();
   _schemas = {
-    StartWorkflowParams: Type.Object({
-      workflowId: Type.String({ description: 'Workflow ID to start (e.g. coding-task-workflow-agentic)' }),
-      workspacePath: Type.String({ description: 'Absolute path to the workspace directory' }),
-      goal: Type.String({ description: 'Short description of what you are trying to accomplish' }),
-      context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
-        description: 'Initial workflow context variables',
-      })),
-    }),
     ContinueWorkflowParams: Type.Object({
       continueToken: Type.String({
         description: 'The continueToken from the previous start_workflow or continue_workflow call. Round-trip exactly as received.',
@@ -379,70 +374,6 @@ async function getSchemas(): Promise<Record<string, any>> {
 // ---------------------------------------------------------------------------
 // Tool factories
 // ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeStartWorkflowTool(
-  sessionId: string,
-  ctx: V2ToolContext,
-  onComplete: (notes: string) => void,
-  schemas: Record<string, any>,
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): AgentTool<any> {
-  return {
-    name: 'start_workflow',
-    description: 'Start a WorkRail workflow session. Call this first to get the initial step.',
-    parameters: schemas['StartWorkflowParams'],
-    label: 'Start Workflow',
-
-    execute: async (
-      _toolCallId: string,
-      params: any,
-    ): Promise<AgentToolResult<unknown>> => {
-      const result = await executeStartWorkflow(
-        {
-          workflowId: params.workflowId,
-          workspacePath: params.workspacePath,
-          goal: params.goal,
-        },
-        ctx,
-        // Mark this session as autonomous. The daemon sets this at session creation
-        // so isAutonomous is derivable from the event log even after restart.
-        { is_autonomous: 'true' },
-      );
-
-      if (result.isErr()) {
-        throw new Error(`start_workflow failed: ${result.error.kind} -- ${JSON.stringify(result.error)}`);
-      }
-
-      const out = result.value.response;
-
-      // Persist tokens before returning to the agent -- crash safety invariant.
-      const continueToken = out.continueToken ?? '';
-      const checkpointToken = out.checkpointToken ?? null;
-      if (continueToken) {
-        await persistTokens(sessionId, continueToken, checkpointToken);
-      }
-
-      if (out.isComplete) {
-        onComplete('Workflow completed immediately after start.');
-        return {
-          content: [{ type: 'text', text: 'Workflow is already complete.' }],
-          details: out,
-        };
-      }
-
-      const pending = out.pending;
-      const stepText = pending
-        ? `## Step: ${pending.title}\n\n${pending.prompt}\n\ncontinueToken: ${continueToken}`
-        : `Workflow started. continueToken: ${continueToken}`;
-
-      return {
-        content: [{ type: 'text', text: stepText }],
-        details: out,
-      };
-    },
-  };
-}
 
 function makeContinueWorkflowTool(
   sessionId: string,
@@ -616,7 +547,6 @@ export function buildSystemPrompt(
     'You are WorkRail Auto, an autonomous agent that executes workflows step by step.',
     '',
     '## Your tools',
-    '- `start_workflow`: Start a WorkRail workflow. Call this first with the workflowId and goal.',
     '- `continue_workflow`: Advance to the next step. Call this after completing each step\'s work.',
     '  Always include your notes in notesMarkdown and round-trip the continueToken exactly.',
     '- `Bash`: Run shell commands. Use for building, testing, running scripts.',
@@ -624,11 +554,10 @@ export function buildSystemPrompt(
     '- `Write`: Write files.',
     '',
     '## Execution contract',
-    '1. Call `start_workflow` first to get the initial step.',
-    '2. Read the step carefully. Do ALL the work the step asks for.',
-    '3. Call `continue_workflow` with your notes. Include the continueToken exactly.',
-    '4. Repeat until the workflow reports it is complete.',
-    '5. Do NOT skip steps. Do NOT call `continue_workflow` without completing the step\'s work.',
+    '1. Read the step carefully. Do ALL the work the step asks for.',
+    '2. Call `continue_workflow` with your notes. Include the continueToken exactly.',
+    '3. Repeat until the workflow reports it is complete.',
+    '4. Do NOT skip steps. Do NOT call `continue_workflow` without completing the step\'s work.',
     '',
     `<workrail_session_state>${sessionState}</workrail_session_state>`,
     '',
@@ -768,14 +697,56 @@ export async function runWorkflow(
     isComplete = true;
   };
 
+  // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
+  // WHY: the daemon has all required context (workflowId, workspacePath, goal) at
+  // startup. Calling executeStartWorkflow() here avoids one full LLM turn per session
+  // and ensures tokens are persisted to disk BEFORE the agent loop begins (crash safety).
+  // The LLM receives the first step's content as its initial prompt instead of being
+  // told to call a start_workflow tool.
+  const startResult = await executeStartWorkflow(
+    { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
+    ctx,
+    // Mark this session as autonomous so isAutonomous is derivable from the event log.
+    { is_autonomous: 'true' },
+  );
+
+  if (startResult.isErr()) {
+    daemonRegistry?.unregister(sessionId, 'failed');
+    return {
+      _tag: 'error',
+      workflowId: trigger.workflowId,
+      message: `start_workflow failed: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
+      stopReason: 'error',
+    };
+  }
+
+  const firstStep = startResult.value.response;
+  const startContinueToken = firstStep.continueToken ?? '';
+  const startCheckpointToken = firstStep.checkpointToken ?? null;
+
+  // Crash safety: persist tokens before starting the agent loop. A crash between
+  // this point and the first continue_workflow call leaves a recoverable state file.
+  if (startContinueToken) {
+    await persistTokens(sessionId, startContinueToken, startCheckpointToken);
+  }
+
+  // Edge case: workflow completes immediately on start (single-step workflow with
+  // no pending continuation). Return success without creating an Agent.
+  if (firstStep.isComplete) {
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    daemonRegistry?.unregister(sessionId, 'completed');
+    return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
+  }
+
   // ---- Schemas (lazy ESM load) ----
   const schemas = await getSchemas();
 
   // ---- Tools ----
   // Cast through unknown to satisfy AgentTool<TSchema> -- each tool factory
   // produces a concrete TypeBox schema type; the agent loop accepts the base type.
+  // start_workflow is NOT in this list: the daemon calls executeStartWorkflow()
+  // directly above so the LLM cannot call it again.
   const tools: AgentTool<TSchema>[] = [
-    makeStartWorkflowTool(sessionId, ctx, onComplete, schemas) as unknown as AgentTool<TSchema>,
     makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas) as unknown as AgentTool<TSchema>,
     makeBashTool(trigger.workspacePath, schemas) as unknown as AgentTool<TSchema>,
     makeReadTool(schemas) as unknown as AgentTool<TSchema>,
@@ -790,6 +761,19 @@ export async function runWorkflow(
     loadDaemonSoul(),
     loadWorkspaceContext(trigger.workspacePath),
   ]);
+
+  // ---- Initial prompt: first step content from start_workflow ----
+  // The daemon has already called executeStartWorkflow() and has the first step.
+  // Pass the step content directly -- the LLM starts working on step 1 immediately.
+  // Appending the continueToken so the LLM can pass it to continue_workflow.
+  const contextJson = trigger.context
+    ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
+    : '';
+
+  const initialPrompt =
+    (firstStep.pending?.prompt ?? 'No step content available') +
+    `\n\ncontinueToken: ${startContinueToken}` +
+    contextJson;
 
   // ---- Agent (one per runWorkflow() call, not reused) ----
   const { Agent } = await loadPiAgentCore();
@@ -824,22 +808,6 @@ export async function runWorkflow(
     // If isComplete, do not call steer() -- agent exits naturally on next turn
     // when there are no tool calls and no queued steering messages.
   });
-
-  // ---- Initial prompt ----
-  const contextJson = trigger.context
-    ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
-    : '';
-
-  // The initial prompt must be imperative -- the agent should call start_workflow
-  // immediately, not describe what it would do. Using "Call start_workflow now"
-  // forces tool invocation rather than a conversational response.
-  const initialPrompt =
-    `Call the \`start_workflow\` tool now with these parameters:\n` +
-    `- workflowId: "${trigger.workflowId}"\n` +
-    `- workspacePath: "${trigger.workspacePath}"\n` +
-    `- goal: "${trigger.goal}"\n` +
-    `\nDo not respond with text. Call the tool immediately.` +
-    contextJson;
 
   let stopReason = 'stop';
   let errorMessage: string | undefined;
