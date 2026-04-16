@@ -1441,74 +1441,89 @@ The main agent should own: decisions, synthesis, and implementation. Everything 
 - The wiring check in the fast path becomes: "query the graph for all registrations of type `CliCommand`, confirm the new command is in the set" -- not "read index.ts, cli.ts, and hope you find all the entry points"
 - Session history is queryable: "what sessions touched `session-lock` in the last 30 days?" -- useful for debugging and for not re-investigating known issues
 
-**Market research needed before building:**
-Several tools in this space worth evaluating before building from scratch:
+**The target architecture: vector + graph hybrid (not just a relational index)**
 
-- **CodeGraph / Tree-sitter based indexes** -- open source, parse-based symbol graphs. Fast to build, no LLM required, but only structural (no semantic edges).
-- **Sourcegraph** -- enterprise code search + graph. Well-proven at scale. Question: does it expose an API suitable for agent context bundle queries? Overkill for solo/small team.
-- **Microsoft GraphRAG** -- LLM-built knowledge graphs with community detection. Research project, but directly relevant architecture. Slower to build (LLM-driven), richer semantic edges.
-- **Cognee** -- open source knowledge graph + RAG, designed for agent workflows. Active project, worth a close look.
-- **Mem0** -- agent memory layer with graph backend. Simpler than Cognee but less code-specific.
-- **tree-sitter + DuckDB** -- build-it-yourself option: tree-sitter parses symbols + call graph, DuckDB stores and queries. Full control, no external dependency, fits WorkRail's freestanding philosophy.
+The knowledge graph vision is more than a queryable symbol index. The real goal is a system where an agent asks "give me everything related to trigger-router.ts" and the system surfaces things that are *semantically relevant* -- not just things explicitly linked by import edges, but files that implement the same pattern, functions with similar signatures, sessions that touched related concepts. This is closer to a neural network for knowledge than to a SQL database.
 
-**Recommended approach:** research Cognee and tree-sitter+DuckDB first. Cognee may already solve 80% of this. If not, tree-sitter+DuckDB is the build path -- it fits the "scripts over agent" principle (the graph is built by a deterministic parser, not by asking an LLM to summarize files).
+This requires two complementary layers:
 
-**WorkRail fits:** the graph is a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph` and `update_knowledge_graph` tools. Workflow steps call those tools instead of running file sweeps. The daemon updates the graph after each session completes (script, not agent).
+**Layer 1: Structural graph (hard edges, deterministic)**
+Built by parsing the codebase. Captures known, explicit relationships:
+- `imports`, `calls`, `exports`, `implements`, `extends`
+- `registers_in` (DI container, CLI command map, router)
+- `tested_by`, `modified_in_session`
 
-**Cross-project note:** Storyforge will likely need the same graph layer. Worth building it once in WorkRail and making it available to both -- the node/edge schema is different (code vs narrative) but the architecture (derived layer, provenance, context bundles, session-driven updates) is identical.
+This layer answers precise questions with certainty: "what imports trigger-router.ts?", "what CLI commands are registered?", "what did session X touch?" Built by scripts (ts-morph for TypeScript, equivalent parsers for other languages), never by an LLM. Fast, deterministic, always correct.
+
+**Layer 2: Vector similarity (soft weights, semantic)**
+Every node in the structural graph also gets an **embedding** -- a vector encoding its semantic meaning (function name + signature + docstring + surrounding context). Nodes that are semantically similar end up geometrically close in vector space, regardless of whether they have an explicit edge between them.
+
+This layer answers fuzzy questions: "what is conceptually related to this?", "what files implement patterns similar to this one?", "what past sessions are relevant to this bug?" It surfaces things the agent didn't know to look for.
+
+**Together:** the structural graph provides the skeleton; the vector layer provides the connective tissue. An agent query resolves both: exact structural neighbors first, semantically similar nodes ranked by distance second. Per-repo and per-module scoping is handled naturally -- intra-repo edges are hard structural links, cross-repo relevance falls back to vector similarity.
+
+**Technology layers:**
+
+| Layer | Technology | Role |
+|-------|-----------|------|
+| Structural parsing | ts-morph (TypeScript), tree-sitter (other langs) | Extract hard edges deterministically |
+| Structural storage + traversal | DuckDB | Store nodes/edges, recursive reachability queries |
+| Vector embeddings | Local embedding model (e.g. `nomic-embed-text` via Ollama, or `@xenova/transformers`) | Encode every node as a vector |
+| Vector storage + similarity search | LanceDB (embedded, TypeScript-native) or Qdrant (self-hosted) | ANN search over embeddings |
+| Unified query layer | WorkTrain MCP tool | Single `query_knowledge_graph(intent)` call returns merged structural + semantic results |
+
+LanceDB is the strongest fit for the vector layer: embedded (no server process), TypeScript-native, local-first, co-locates vector and metadata in the same store. It pairs cleanly with DuckDB handling the structural/relational queries.
+
+**Build order (spike first, hybrid later):**
+
+The structural layer (ts-morph + DuckDB) is the right first spike because:
+1. It answers the immediately valuable questions (wiring checks, import graphs, CLI registration)
+2. It produces the nodes that the vector layer will embed -- you can't embed nothing
+3. It proves the foundation before adding semantic complexity
+
+Once the structural spike works, add the vector layer: embed each node's name + context, store in LanceDB, expose a similarity query alongside the structural query. The two layers are additive -- the structural layer doesn't get replaced, it gets augmented.
+
+**Per-repo and per-module scoping:**
+Each repo gets its own structural graph partition and its own vector namespace. Cross-repo queries join partitions explicitly (structural) or search across namespaces with a distance penalty (semantic). The system handles this automatically once the partition boundaries are defined at index time. Finer-grained module-level scoping falls out naturally from the structural graph -- the subgraph rooted at a module's entry point is the module's partition.
+
+**WorkRail fits:** the graph becomes a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph(intent)`. Workflow steps call it instead of running file sweeps. The daemon runs the indexer post-session as a script (structural layer: re-index changed files; vector layer: re-embed changed nodes).
+
+**Cross-project note:** the same architecture applies to any domain pack. Storyforge's graph has narrative nodes (characters, promises, locations) instead of code nodes, and a different parser (YAML/markdown instead of ts-morph), but the same two-layer design -- structural edges + vector embeddings -- gives it both "what chapters does this character appear in?" (structural) and "what story elements are thematically related to this scene?" (semantic).
 
 ---
 
 ### Knowledge graph candidate research findings (Apr 15, 2026)
 
-Four discovery subagents evaluated Cognee, GraphRAG, LightRAG, Mem0, Zep, Sourcegraph, LSP, ctags, tree-sitter, ts-morph, and DuckDB. Findings were unanimous.
+Four discovery subagents evaluated Cognee, GraphRAG, LightRAG, Mem0, Zep, Sourcegraph, LSP, ctags, tree-sitter, ts-morph, and DuckDB against a pure relational/structural framing. Findings below, updated with the corrected hybrid architecture understanding.
 
-**Decision: ts-morph + DuckDB. Spike it now.**
+**Structural layer decision: ts-morph + DuckDB for the spike.**
 
-**Why the others lost:**
+- **ts-morph**: wraps the real TypeScript Compiler API, not a generic parser. Extracts exports, imports, call sites, class implementations, DI `.bind()` patterns, CLI registration maps. In-process, zero external dependencies. Strictly better than tree-sitter for a TypeScript codebase.
+- **DuckDB**: embedded SQL with recursive CTEs. Handles structural reachability queries. No server process. A 1-day spike, not a 2-week project.
+- **LSP**: correct answers but requires managing a long-running server process -- wrong operational model.
+- **ctags**: definitions only, no call edges. Too shallow.
+- **Sourcegraph**: right idea, enterprise weight. Overkill for local daemon use.
 
-- **Cognee**: Python-only SDK, no TypeScript client, no code-aware indexing primitives. Built for document RAG not code graphs. Watch list only.
-- **GraphRAG / LightRAG**: Use LLMs to build the graph -- violates the "scripts over agent" principle. Non-deterministic output, expensive, no TypeScript client. Skip.
-- **Mem0 / Zep**: Conversational/session memory, not code graphs. Orthogonal problem. Skip for this use case.
-- **Sourcegraph**: Enterprise-scale, heavy Docker infrastructure. Overkill for local daemon use. Skip.
-- **LSP (typescript-language-server)**: Queryable from Node.js but requires managing a separate long-running process with stdio IPC. Correct answers, wrong operational model for a daemon.
-- **universal-ctags**: Definitions only, no call edges or cross-file references. Too shallow.
-- **tree-sitter**: Generic parser, good but requires custom TypeScript-specific traversal logic. ts-morph is strictly better for a TypeScript codebase because it uses the real TypeScript compiler.
+**Vector layer decision: LanceDB (deferred to post-spike).**
 
-**Why ts-morph + DuckDB wins:**
+- **LanceDB**: embedded, TypeScript-native, local-first. Best fit for the vector layer alongside DuckDB.
+- **Qdrant**: self-hosted, strong ANN performance. Good alternative if LanceDB proves insufficient at scale.
+- **Weaviate**: vector + graph hybrid in one system. Worth revisiting if maintaining two separate stores becomes painful -- it does both layers but is heavier to self-host.
 
-- **ts-morph** wraps the TypeScript Compiler API directly -- it understands TypeScript semantics, types, and scopes, not just syntax. Extracts exports, imports, call sites, class implementations, DI `.bind()` patterns, and CLI registration maps out of the box. Runs in-process, zero external dependencies.
-- **DuckDB** is embedded SQL with recursive CTE support. Graph reachability queries work today with `WITH RECURSIVE`. Fast, local, no server process.
-- Combined: a 1-day spike, not a 2-week project.
+**Why GraphRAG/Cognee/LightRAG don't fit (even with the hybrid architecture):**
+These tools use LLMs to *build* the graph -- entity extraction, relationship identification, summarization all require LLM calls during indexing. That violates the scripts-over-agent principle. The structural layer must be deterministic (parser-built); the vector layer uses an embedding model (deterministic given the same input), not a generative LLM. GraphRAG's semantic richness is real but the wrong tradeoff for a system that needs to re-index after every session without burning tokens.
 
-**Schema (from subagent):**
-```sql
-nodes  (id, file, name, kind, scope)
-  -- kind: "function" | "class" | "interface" | "constant" | "export" | "di_binding" | "cli_command"
+**The spike (structural layer, build now):**
+1. `npm install ts-morph @duckdb/node-api`
+2. 50-line indexer: `project.getSourceFiles()` → walk exports, imports, call expressions → rows into DuckDB nodes/edges tables
+3. One MCP tool: `query_knowledge_graph(query: string)` running SQL, returning a context bundle
+4. Validation: "what imports trigger-router.ts?" and "what CLI commands are registered?" must return correct answers
 
-edges  (from_id, to_id, kind, line)
-  -- kind: "calls" | "imports" | "exports" | "registers_in" | "provides"
+**Post-spike (vector layer):**
+1. `npm install vectordb` (LanceDB) + local embedding model via Ollama or `@xenova/transformers`
+2. After each structural node is created, embed `name + file + context snippet` → store vector alongside node ID in LanceDB
+3. Extend `query_knowledge_graph` to merge: structural neighbors (DuckDB) + semantic neighbors (LanceDB ANN search) → unified ranked context bundle
+4. Validate: "what is related to trigger-router.ts?" should surface files not directly imported but implementing the same webhook/routing pattern
 
-provenance  (node_id, source_file, source_line, session_id, indexed_at)
-```
-
-**Reachability query example:**
-```sql
-WITH RECURSIVE reachable AS (
-  SELECT id FROM nodes WHERE name = 'executeVersionCommand'
-  UNION ALL
-  SELECT e.to_id FROM edges e JOIN reachable r ON e.from_id = r.id
-)
-SELECT n.* FROM nodes n WHERE n.id IN (SELECT id FROM reachable);
-```
-
-**The spike (what to build first):**
-1. `npm install ts-morph @duckdb/node-api` -- both are available today
-2. Write a 50-line indexer: `project.getSourceFiles()` → walk exports, imports, and call expressions → emit rows to DuckDB nodes/edges tables
-3. Write one MCP tool: `query_knowledge_graph(query: string)` that runs SQL and returns a context bundle
-4. Test it against the WorkRail `src/` directory: can it answer "what imports trigger-router.ts?" and "what CLI commands are registered?"
-
-If the spike answers those two questions correctly, the foundation is proven and we build out incrementally from there.
-
-**Incremental update model (post-spike):**
-After each daemon session completes, run the indexer only on files that appear in the session's `filesChanged` list (from the handoff artifact). Full re-index only on first run or when the schema changes. This is a script the daemon runs post-workflow, not an agent task.
+**Incremental update model:**
+After each daemon session completes, re-index only files in the handoff artifact's `filesChanged` list (structural: ts-morph re-parse; vector: re-embed changed nodes). Full rebuild only on first run or schema changes. Script, not agent.
