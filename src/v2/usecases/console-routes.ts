@@ -1,7 +1,10 @@
 /**
- * Console API routes — read-only endpoints for the v2 Console UI.
+ * Console API routes for the v2 Console UI.
  *
- * All routes are GET-only (invariant: Console is read-only).
+ * Mostly read-only GET endpoints. POST /api/v2/auto/dispatch is an intentional
+ * exception for the autonomous dispatch feature -- it fires a workflow run
+ * asynchronously and returns immediately (fire-and-forget).
+ *
  * Response shape: { success: true, data: T } | { success: false, error: string }
  * (matches existing HttpServer.ts pattern)
  */
@@ -15,6 +18,9 @@ import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingEntry, ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 import { isDevMode } from '../../mcp/dev-mode.js';
+import type { TriggerRouter } from '../../trigger/trigger-router.js';
+import type { V2ToolContext } from '../../mcp/types.js';
+import { runWorkflow } from '../../daemon/workflow-runner.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -118,6 +124,8 @@ export function mountConsoleRoutes(
   timingRingBuffer?: ToolCallTimingRingBuffer,
   toolCallsPerfFile?: string,
   serverVersion?: string,
+  v2ToolContext?: V2ToolContext,
+  triggerRouter?: TriggerRouter,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -477,6 +485,94 @@ export function mountConsoleRoutes(
       }
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // AUTO dispatch endpoint
+  //
+  // POST /api/v2/auto/dispatch
+  //
+  // Accepts a workflow dispatch request and fires it asynchronously. Returns
+  // immediately -- the workflow runs in the background. The caller can track
+  // progress via GET /api/v2/sessions once the daemon registers the session.
+  //
+  // Returns 503 when no V2ToolContext is available (daemon not running in same
+  // process, or v2 tools disabled).
+  // ---------------------------------------------------------------------------
+  app.post('/api/v2/auto/dispatch', express.json(), async (req: Request, res: Response) => {
+    if (!v2ToolContext) {
+      res.status(503).json({ success: false, error: 'Autonomous dispatch requires v2 tools enabled.' });
+      return;
+    }
+
+    const body = req.body as { workflowId?: unknown; goal?: unknown; workspacePath?: unknown; context?: unknown };
+    const workflowId = typeof body.workflowId === 'string' ? body.workflowId.trim() : '';
+    const goal = typeof body.goal === 'string' ? body.goal.trim() : '';
+    const workspacePath = typeof body.workspacePath === 'string' ? body.workspacePath.trim() : '';
+
+    if (!workflowId || !goal || !workspacePath) {
+      res.status(400).json({ success: false, error: 'workflowId, goal, and workspacePath are required.' });
+      return;
+    }
+
+    const context = body.context && typeof body.context === 'object' && !Array.isArray(body.context)
+      ? (body.context as Record<string, unknown>)
+      : undefined;
+
+    // Resolve API key from environment -- the dispatch endpoint has the same
+    // credential requirements as the daemon CLI.
+    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    if (!apiKey && !process.env['AWS_PROFILE'] && !process.env['AWS_ACCESS_KEY_ID']) {
+      res.status(503).json({ success: false, error: 'No LLM credentials available. Set ANTHROPIC_API_KEY or AWS_PROFILE.' });
+      return;
+    }
+
+    // If TriggerRouter is available, use its queue (serializes by workflowId).
+    // Otherwise, fire directly using the shared runWorkflow() function.
+    if (triggerRouter) {
+      triggerRouter.dispatch({ workflowId, goal, workspacePath, context });
+    } else {
+      // Direct fire-and-forget: no queue serialization in this path.
+      void runWorkflow(
+        { workflowId, goal, workspacePath, context },
+        v2ToolContext,
+        apiKey ?? '',
+      ).then((result) => {
+        if (result._tag === 'success') {
+          console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
+        } else {
+          console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
+        }
+      });
+    }
+
+    res.json({ success: true, data: { status: 'dispatched', workflowId } });
+  });
+
+  // ---------------------------------------------------------------------------
+  // AUTO triggers list endpoint
+  //
+  // GET /api/v2/triggers
+  //
+  // Returns the current trigger index. When the trigger system is disabled
+  // (no triggerRouter), returns an empty list rather than an error -- the
+  // console handles the empty case gracefully.
+  // ---------------------------------------------------------------------------
+  app.get('/api/v2/triggers', (_req: Request, res: Response) => {
+    if (!triggerRouter) {
+      res.json({ success: true, data: { triggers: [] } });
+      return;
+    }
+
+    const triggers = triggerRouter.listTriggers().map((t) => ({
+      id: t.id,
+      provider: t.provider,
+      workflowId: t.workflowId,
+      workspacePath: t.workspacePath,
+      goal: t.goal,
+    }));
+
+    res.json({ success: true, data: { triggers } });
+  });
 
   // --- Static file serving for Console UI ---
 

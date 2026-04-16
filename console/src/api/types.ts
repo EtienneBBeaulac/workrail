@@ -307,3 +307,37 @@ export interface ConsoleGhostStep {
   readonly stepId: string;
   readonly stepLabel: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// AUTO dispatch types
+// ---------------------------------------------------------------------------
+
+/** Summary of a single trigger loaded from triggers.yml. */
+export interface TriggerSummary {
+  readonly id: string;
+  readonly provider: string;
+  readonly workflowId: string;
+  readonly workspacePath: string;
+  readonly goal: string;
+  /** ISO 8601 timestamp of the last time this trigger fired, if available. */
+  readonly lastFiredAt?: string;
+}
+
+/** Response from GET /api/v2/triggers */
+export interface TriggerListResponse {
+  readonly triggers: readonly TriggerSummary[];
+}
+
+/** Request body for POST /api/v2/auto/dispatch */
+export interface AutoDispatchRequest {
+  readonly workflowId: string;
+  readonly goal: string;
+  readonly workspacePath: string;
+  readonly context?: Record<string, unknown>;
+}
+
+/** Response from POST /api/v2/auto/dispatch */
+export interface AutoDispatchResponse {
+  readonly status: 'dispatched';
+  readonly workflowId: string;
+}

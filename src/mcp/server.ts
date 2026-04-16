@@ -313,6 +313,10 @@ export async function composeServer(): Promise<ComposedServerInternal> {
       timingRingBuffer,
       toolCallsPerfFile ?? undefined,
       serverVersion,
+      // v2ToolContext enables autonomous dispatch (POST /api/v2/auto/dispatch).
+      // The TriggerRouter is not available in the MCP server process; the dispatch
+      // endpoint calls runWorkflow() directly when no triggerRouter is provided.
+      ctx.v2 ? ctx as import('../mcp/types.js').V2ToolContext : undefined,
     ));
     console.error('[Console] v2 Console API routes mounted at /api/v2/');
   }

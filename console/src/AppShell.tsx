@@ -6,6 +6,7 @@ import { SessionDetail } from './views/SessionDetail';
 import { WorkflowsView } from './views/WorkflowsView';
 import { WorkflowDetail } from './views/WorkflowDetail';
 import { PerformanceView } from './views/PerformanceView';
+import { AutoView } from './views/AutoView';
 import { CutCornerBox } from './components/CutCornerBox';
 import { BracketBadge } from './components/BracketBadge';
 import { PathBreadcrumb } from './components/PathBreadcrumb';
@@ -28,6 +29,7 @@ import { useSessionDetailViewModel } from './hooks/useSessionDetailViewModel';
 const TAB_ORDER = [
   { id: 'workspace' as const, path: '/' },
   { id: 'workflows' as const, path: '/workflows' },
+  { id: 'auto' as const, path: '/auto' },
   { id: 'perf' as const, path: '/perf' },
 ];
 
@@ -44,12 +46,15 @@ export function AppShell() {
   const workflowsMatch = matchRoute({ to: '/workflows' });
   const workflowDetailMatch = matchRoute({ to: '/workflows/$workflowId' });
   const perfMatch = matchRoute({ to: '/perf' });
+  const autoMatch = matchRoute({ to: '/auto' });
 
   // Single source of truth for active tab -- structurally impossible for two tabs to be active.
   const activeTab = workflowsMatch !== false || workflowDetailMatch !== false
     ? 'workflows' as const
     : perfMatch !== false
     ? 'perf' as const
+    : autoMatch !== false
+    ? 'auto' as const
     : 'workspace' as const;
 
   const isInSessionDetail = sessionMatch !== false;
@@ -301,6 +306,29 @@ export function AppShell() {
             </button>
             <button
               role="tab"
+              id="tab-auto"
+              aria-selected={activeTab === 'auto'}
+              aria-controls="panel-auto"
+              tabIndex={activeTab === 'auto' ? 0 : -1}
+              onClick={() => handleTabClick('auto', () => void navigate({ to: '/auto' }))}
+              className={[
+                'tab-btn px-4 py-2.5 font-mono text-[10px] uppercase tracking-[0.30em] transition-colors duration-150',
+                'focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none',
+                activeTab === 'auto'
+                  ? 'tab-btn--active text-[var(--accent)] text-glow-amber'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+                activatingTab === 'auto' ? 'tab-activating' : '',
+              ].join(' ')}
+              style={activeTab === 'auto' ? { backgroundColor: 'rgba(244, 196, 48, 0.06)' } : undefined}
+            >
+              <span className="tab-corner tab-corner--tl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--tr" aria-hidden="true" />
+              <span className="tab-corner tab-corner--bl" aria-hidden="true" />
+              <span className="tab-corner tab-corner--br" aria-hidden="true" />
+              Auto
+            </button>
+            <button
+              role="tab"
               id="tab-perf"
               aria-selected={activeTab === 'perf'}
               aria-controls="panel-perf"
@@ -353,7 +381,7 @@ export function AppShell() {
           id="panel-workspace"
           role="tabpanel"
           aria-labelledby="tab-workspace"
-          hidden={activeTab === 'workflows' || activeTab === 'perf'}
+          hidden={activeTab === 'workflows' || activeTab === 'perf' || activeTab === 'auto'}
         >
           {/* WorkspaceView is always mounted -- hidden via CSS only so scroll
               position in scrollYRef and expandStateRef survive back-navigation
@@ -376,6 +404,17 @@ export function AppShell() {
             ) : (
               <WorkflowsView viewModel={workflowsViewModel} />
             )}
+          </div>
+        )}
+
+        {/* AUTO panel */}
+        {activeTab === 'auto' && (
+          <div
+            id="panel-auto"
+            role="tabpanel"
+            aria-labelledby="tab-auto"
+          >
+            <AutoView />
           </div>
         )}
 

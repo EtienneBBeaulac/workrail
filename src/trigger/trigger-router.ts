@@ -55,6 +55,58 @@ export type RunWorkflowFn = (
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------
+// Goal template interpolation
+// ---------------------------------------------------------------------------
+
+/**
+ * Interpolate a goalTemplate string by replacing `{{$.dot.path}}` tokens
+ * with values extracted from the webhook payload.
+ *
+ * Falls back to the static `goal` string if:
+ * - The template is absent or empty.
+ * - ANY token resolves to undefined (partial interpolation would produce
+ *   a broken goal string, so we fall back entirely).
+ *
+ * Token syntax: `{{$.dot.path}}` or `{{dot.path}}` (leading "$." optional).
+ * The same dot-path extraction rules apply as for contextMapping.
+ *
+ * @param template - The goal template string (e.g. "Review {{$.pull_request.title}}")
+ * @param staticGoal - The static fallback goal from the trigger definition
+ * @param payload - The parsed webhook payload
+ * @returns The interpolated goal, or staticGoal if any token is missing
+ */
+export function interpolateGoalTemplate(
+  template: string,
+  staticGoal: string,
+  payload: Readonly<Record<string, unknown>>,
+): string {
+  // Find all {{...}} tokens
+  const TOKEN_RE = /\{\{([^}]+)\}\}/g;
+  const tokens: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = TOKEN_RE.exec(template)) !== null) {
+    if (match[1] !== undefined) tokens.push(match[1]);
+  }
+
+  // If no tokens, return template as-is (it's effectively a static string)
+  if (tokens.length === 0) return template;
+
+  // Extract all token values first; bail on any missing value
+  const resolved = new Map<string, string>();
+  for (const token of tokens) {
+    const value = extractDotPath(payload, token);
+    if (value === undefined || value === null) {
+      // Any missing token: fall back to static goal (no partial interpolation)
+      return staticGoal;
+    }
+    resolved.set(token, String(value));
+  }
+
+  // Replace all tokens with their resolved values
+  return template.replace(TOKEN_RE, (_, token: string) => resolved.get(token) ?? staticGoal);
+}
+
+// ---------------------------------------------------------------------------
 // Context mapping: dot-path extraction
 // ---------------------------------------------------------------------------
 
@@ -221,11 +273,18 @@ export class TriggerRouter {
       workflowContext = { payload: event.payload };
     }
 
+    // Interpolate goal from template if configured; fall back to static goal
+    const goal = trigger.goalTemplate
+      ? interpolateGoalTemplate(trigger.goalTemplate, trigger.goal, event.payload)
+      : trigger.goal;
+
     const workflowTrigger: WorkflowTrigger = {
       workflowId: trigger.workflowId,
-      goal: trigger.goal,
+      goal,
       workspacePath: trigger.workspacePath,
       context: workflowContext,
+      ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
+      ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
     };
 
     // Enqueue asynchronously -- serialize per triggerId to prevent token corruption
@@ -246,5 +305,46 @@ export class TriggerRouter {
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
+  }
+
+  /**
+   * Dispatch a workflow run directly (without a webhook event).
+   *
+   * Used by the console AUTO dispatch endpoint (POST /api/v2/auto/dispatch).
+   * Unlike route(), this bypasses HMAC validation and trigger lookup -- the
+   * caller provides a fully-formed WorkflowTrigger directly.
+   *
+   * Fires and forgets via KeyedAsyncQueue (same serialization semantics as route()).
+   * Uses workflowId as the queue key to serialize concurrent dispatches for the same workflow.
+   *
+   * @returns The workflowId that was dispatched.
+   */
+  dispatch(workflowTrigger: WorkflowTrigger): string {
+    void this.queue.enqueue(workflowTrigger.workflowId, async () => {
+      const result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+      if (result._tag === 'success') {
+        console.log(
+          `[TriggerRouter] Dispatch completed: workflowId=${workflowTrigger.workflowId} ` +
+          `stopReason=${result.stopReason}`,
+        );
+      } else {
+        console.log(
+          `[TriggerRouter] Dispatch failed: workflowId=${workflowTrigger.workflowId} ` +
+          `error=${result.message} stopReason=${result.stopReason}`,
+        );
+      }
+    });
+    return workflowTrigger.workflowId;
+  }
+
+  /**
+   * List all triggers currently loaded in the router index.
+   *
+   * Used by the console AUTO triggers endpoint (GET /api/v2/triggers).
+   * Returns a snapshot of the trigger index at call time -- does not reflect
+   * any in-flight reloads (triggers don't reload in MVP).
+   */
+  listTriggers(): readonly TriggerDefinition[] {
+    return [...this.index.values()];
   }
 }

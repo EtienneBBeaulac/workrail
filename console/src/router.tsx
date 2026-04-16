@@ -52,6 +52,12 @@ const perfRoute = createRoute({
   component: () => null,
 });
 
+const autoRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/auto',
+  component: () => null,
+});
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -62,6 +68,7 @@ const routeTree = rootRoute.addChildren([
   workflowsRoute,
   workflowDetailRoute,
   perfRoute,
+  autoRoute,
 ]);
 
 export const router = createRouter({

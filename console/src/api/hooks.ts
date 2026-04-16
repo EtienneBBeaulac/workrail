@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse, TriggerListResponse, AutoDispatchRequest, AutoDispatchResponse } from './types';
 import { mapPerfQueryToResult } from './perf-state';
 
 // Typed HTTP error so callers can check status without brittle string parsing.
@@ -132,6 +132,48 @@ export function useWorkflowDetail(workflowId: string | null) {
     staleTime: Infinity,
     refetchInterval: false,
   });
+}
+
+/**
+ * Fetches the list of triggers currently loaded by the trigger system.
+ * Returns an empty list when the trigger system is disabled (503).
+ */
+export function useTriggerList() {
+  return useQuery({
+    queryKey: ['triggers'],
+    queryFn: async () => {
+      try {
+        return await fetchApi<TriggerListResponse>('/api/v2/triggers');
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 503) {
+          // Trigger system not enabled -- return empty list rather than error state
+          return { triggers: [] } satisfies TriggerListResponse;
+        }
+        throw err;
+      }
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000, // triggers don't change often
+  });
+}
+
+/**
+ * Dispatch a workflow run autonomously.
+ * Returns the response or throws on HTTP/network error.
+ */
+export async function dispatchWorkflow(req: AutoDispatchRequest): Promise<AutoDispatchResponse> {
+  const res = await fetch('/api/v2/auto/dispatch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+    throw new HttpError(res.status, json.error ?? res.statusText);
+  }
+  const json: ApiResponse<AutoDispatchResponse> = await res.json();
+  if (!json.success || !json.data) throw new Error(json.error ?? 'Dispatch failed');
+  return json.data;
 }
 
 /**

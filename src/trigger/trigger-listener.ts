@@ -48,6 +48,12 @@ export type TriggerListenerError =
 
 export interface TriggerListenerHandle {
   readonly port: number;
+  /**
+   * The TriggerRouter instance created by this listener.
+   * Exposed so callers (e.g. console API routes) can access dispatch() and
+   * listTriggers() without re-creating the router or duplicating dependencies.
+   */
+  readonly router: TriggerRouter;
   stop(): Promise<void>;
 }
 
@@ -232,6 +238,7 @@ export async function startTriggerListener(
       console.log(`[TriggerListener] Webhook server listening on port ${actualPort}`);
       resolve({
         port: actualPort,
+        router,
         stop: () =>
           new Promise<void>((res, rej) => {
             server.close((e) => (e ? rej(e) : res()));

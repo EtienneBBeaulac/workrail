@@ -81,6 +81,59 @@ export interface TriggerDefinition {
    * When absent, the raw payload is passed as context.payload.
    */
   readonly contextMapping?: ContextMapping;
+
+  /**
+   * Mustache-style goal template. Tokens `{{$.dot.path}}` are replaced with
+   * values extracted from the webhook payload at dispatch time.
+   * Falls back to the static `goal` field if any token resolves to undefined.
+   *
+   * Example: "Review MR: {{$.pull_request.title}} by {{$.user.login}}"
+   */
+  readonly goalTemplate?: string;
+
+  /**
+   * Reference URLs injected into the system prompt so the agent can fetch
+   * and read them before starting work.
+   *
+   * In YAML, specify as a space-separated scalar (MVP limitation -- the narrow
+   * parser does not support YAML sequences):
+   *   referenceUrls: "https://doc1 https://doc2"
+   *
+   * TODO(follow-up): support native YAML list syntax when the parser is extended.
+   */
+  readonly referenceUrls?: readonly string[];
+
+  /**
+   * Optional agent configuration overrides for this trigger.
+   * When absent, the default model selection (env-based) is used.
+   */
+  readonly agentConfig?: {
+    /**
+     * Model to use in provider/model-id format.
+     * Example: "amazon-bedrock/claude-sonnet-4-6"
+     * When absent, env-based model detection applies.
+     */
+    readonly model?: string;
+  };
+
+  /**
+   * Completion hook configuration (parsed but NOT executed in MVP).
+   * Emits a load-time warning for runOn !== 'success'.
+   *
+   * TODO(follow-up): implement execution for all runOn values.
+   */
+  readonly onComplete?: {
+    /**
+     * When to run the completion hook.
+     * Only 'success' is planned for implementation. 'failure' and 'always'
+     * are accepted by the parser but log a warning and are not executed.
+     */
+    readonly runOn: 'success' | 'failure' | 'always';
+    /** Workflow to run on completion. When absent, no workflow is triggered. */
+    readonly workflowId?: string;
+    /** Goal passed to the completion workflow. */
+    readonly goal?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

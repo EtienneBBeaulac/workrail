@@ -79,6 +79,19 @@ export interface WorkflowTrigger {
   readonly workspacePath: string;
   /** Initial context variables to pass to the workflow. */
   readonly context?: Readonly<Record<string, unknown>>;
+  /**
+   * Reference URLs to inject into the system prompt so the agent can fetch
+   * and read them before starting. Sourced from TriggerDefinition.referenceUrls.
+   * Kept here so workflow-runner.ts remains decoupled from trigger system types.
+   */
+  readonly referenceUrls?: readonly string[];
+  /**
+   * Agent configuration overrides. Sourced from TriggerDefinition.agentConfig.
+   * Kept here so workflow-runner.ts remains decoupled from trigger system types.
+   */
+  readonly agentConfig?: {
+    readonly model?: string;
+  };
 }
 
 /** Successful completion of a workflow run. */
@@ -412,7 +425,7 @@ function makeWriteTool(schemas: Record<string, any>// eslint-disable-next-line @
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(trigger: WorkflowTrigger, sessionState: string): string {
-  return [
+  const lines = [
     'You are WorkRail Auto, an autonomous agent that executes workflows step by step.',
     '',
     '## Your tools',
@@ -433,7 +446,25 @@ function buildSystemPrompt(trigger: WorkflowTrigger, sessionState: string): stri
     `<workrail_session_state>${sessionState}</workrail_session_state>`,
     '',
     `## Workspace: ${trigger.workspacePath}`,
-  ].join('\n');
+  ];
+
+  // Append reference URLs section when provided.
+  // Why: some tasks require background context (specs, design docs, ADRs) that
+  // the agent should fetch and read before starting work. Providing the URLs in
+  // the system prompt ensures they are visible from the first turn.
+  if (trigger.referenceUrls && trigger.referenceUrls.length > 0) {
+    lines.push('');
+    lines.push('## Reference documents');
+    lines.push(
+      'Before starting, fetch and read these reference documents: ' +
+      trigger.referenceUrls.join(' '),
+    );
+    lines.push(
+      'If you cannot fetch any of these documents, note their unavailability and proceed.',
+    );
+  }
+
+  return lines.join('\n');
 }
 
 function buildUserMessage(text: string): UserMessage {
@@ -482,16 +513,32 @@ export async function runWorkflow(
   daemonRegistry?.register(sessionId, trigger.workflowId);
 
   // ---- Model setup ----
-  // Use Bedrock when AWS_PROFILE is set (Zillow's corp account), otherwise
-  // fall back to direct Anthropic API. This avoids personal API key charges.
+  // Priority: agentConfig.model (trigger-specific override) > env-based detection.
+  // agentConfig.model format: "provider/model-id" (e.g. "amazon-bedrock/claude-sonnet-4-6").
+  // Why: per-trigger model overrides allow using different model tiers for different
+  // workload types (e.g. a faster/cheaper model for simple automation tasks).
   let model;
   try {
     const { getModel } = await loadPiAi();
-    const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
-    if (usesBedrock) {
-      model = getModel('amazon-bedrock', 'us.anthropic.claude-sonnet-4-6');
+    if (trigger.agentConfig?.model) {
+      // Parse "provider/model-id" -- split on the first slash only
+      const slashIdx = trigger.agentConfig.model.indexOf('/');
+      if (slashIdx === -1) {
+        throw new Error(
+          `agentConfig.model must be in "provider/model-id" format, got: "${trigger.agentConfig.model}"`,
+        );
+      }
+      const provider = trigger.agentConfig.model.slice(0, slashIdx);
+      const modelId = trigger.agentConfig.model.slice(slashIdx + 1);
+      model = getModel(provider, modelId);
     } else {
-      model = getModel('anthropic', 'claude-sonnet-4-5');
+      // Default: use Bedrock when AWS credentials are present (avoids personal API key charges)
+      const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+      if (usesBedrock) {
+        model = getModel('amazon-bedrock', 'us.anthropic.claude-sonnet-4-6');
+      } else {
+        model = getModel('anthropic', 'claude-sonnet-4-5');
+      }
     }
   } catch (err) {
     daemonRegistry?.unregister(sessionId, 'failed');

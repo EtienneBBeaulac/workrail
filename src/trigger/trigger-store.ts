@@ -87,6 +87,10 @@ interface ParsedTriggerRaw {
   goal?: string;
   hmacSecret?: string;
   contextMapping?: { [key: string]: string };
+  goalTemplate?: string;
+  referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
+  agentConfig?: { model?: string };
+  onComplete?: { runOn?: string; workflowId?: string; goal?: string };
 }
 
 /**
@@ -265,6 +269,85 @@ function parseTriggersYaml(
         continue;
       }
 
+      if (key === 'agentConfig') {
+        // agentConfig is a sub-object block with scalar string values.
+        // Baseline indent: lineIndent (indent of the "agentConfig:" key line).
+        lineIndex++;
+        const agentConfig: { model?: string } = {};
+        while (lineIndex < lines.length) {
+          const acLine = lines[lineIndex];
+          if (acLine === undefined) break;
+          const acTrimmed = acLine.trim();
+          if (acTrimmed === '' || acTrimmed.startsWith('#')) {
+            lineIndex++;
+            continue;
+          }
+          const acIndent = acLine.search(/\S/);
+          if (acIndent <= lineIndent) break;
+
+          const acColonIdx = acTrimmed.indexOf(':');
+          if (acColonIdx === -1) {
+            return err({
+              kind: 'parse_error',
+              message: `Missing colon in agentConfig entry at line ${lineIndex + 1}: "${acTrimmed}"`,
+              lineNumber: lineIndex + 1,
+            });
+          }
+          const acKey = acTrimmed.slice(0, acColonIdx).trim();
+          const acRawValue = acTrimmed.slice(acColonIdx + 1).trim();
+          if (acRawValue !== '') {
+            const acValueResult = parseScalar(acRawValue, lineIndex + 1);
+            if (acValueResult.kind === 'err') return acValueResult;
+            if (acKey === 'model') agentConfig.model = acValueResult.value;
+          }
+          lineIndex++;
+        }
+        trigger.agentConfig = agentConfig;
+        continue;
+      }
+
+      if (key === 'onComplete') {
+        // onComplete is a sub-object block with scalar string values.
+        // Baseline indent: lineIndent (indent of the "onComplete:" key line).
+        lineIndex++;
+        const onComplete: { runOn?: string; workflowId?: string; goal?: string } = {};
+        while (lineIndex < lines.length) {
+          const ocLine = lines[lineIndex];
+          if (ocLine === undefined) break;
+          const ocTrimmed = ocLine.trim();
+          if (ocTrimmed === '' || ocTrimmed.startsWith('#')) {
+            lineIndex++;
+            continue;
+          }
+          const ocIndent = ocLine.search(/\S/);
+          if (ocIndent <= lineIndent) break;
+
+          const ocColonIdx = ocTrimmed.indexOf(':');
+          if (ocColonIdx === -1) {
+            return err({
+              kind: 'parse_error',
+              message: `Missing colon in onComplete entry at line ${lineIndex + 1}: "${ocTrimmed}"`,
+              lineNumber: lineIndex + 1,
+            });
+          }
+          const ocKey = ocTrimmed.slice(0, ocColonIdx).trim();
+          const ocRawValue = ocTrimmed.slice(ocColonIdx + 1).trim();
+          if (ocRawValue !== '') {
+            const ocValueResult = parseScalar(ocRawValue, lineIndex + 1);
+            if (ocValueResult.kind === 'err') return ocValueResult;
+            switch (ocKey) {
+              case 'runOn':      onComplete.runOn = ocValueResult.value; break;
+              case 'workflowId': onComplete.workflowId = ocValueResult.value; break;
+              case 'goal':       onComplete.goal = ocValueResult.value; break;
+              default: break; // unknown sub-keys silently ignored
+            }
+          }
+          lineIndex++;
+        }
+        trigger.onComplete = onComplete;
+        continue;
+      }
+
       if (rawValue === '') {
         // Empty value after key -- skip (e.g. contextMapping: with block below was handled)
         lineIndex++;
@@ -284,7 +367,8 @@ function parseTriggersYaml(
 }
 
 /**
- * Set a known field on a raw trigger map. Unknown fields are silently ignored.
+ * Set a known scalar field on a raw trigger map. Unknown fields are silently ignored.
+ * Sub-object fields (contextMapping, agentConfig, onComplete) are handled separately.
  */
 function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string): void {
   switch (key) {
@@ -294,7 +378,9 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'workspacePath': trigger.workspacePath = value; break;
     case 'goal':          trigger.goal = value; break;
     case 'hmacSecret':    trigger.hmacSecret = value; break;
-    // contextMapping is handled separately (sub-object block)
+    case 'goalTemplate':  trigger.goalTemplate = value; break;
+    case 'referenceUrls': trigger.referenceUrls = value; break;
+    // contextMapping, agentConfig, onComplete handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
       break;
@@ -376,6 +462,42 @@ function validateAndResolveTrigger(
     hmacSecret = secretResult.value;
   }
 
+  // Assemble optional new fields
+  const goalTemplate = raw.goalTemplate?.trim();
+  const referenceUrlsRaw = raw.referenceUrls?.trim();
+  // referenceUrls is stored as space-separated string in YAML (narrow parser limitation).
+  // Split on whitespace and filter empty strings.
+  const referenceUrls = referenceUrlsRaw
+    ? referenceUrlsRaw.split(/\s+/).filter(Boolean)
+    : undefined;
+
+  // agentConfig: only include if at least one sub-field is present
+  const agentConfig = raw.agentConfig?.model?.trim()
+    ? { model: raw.agentConfig.model.trim() }
+    : undefined;
+
+  // onComplete: emit load-time warning for unsupported runOn values.
+  // Why: runOn !== 'success' is parsed and stored but NOT executed in the MVP.
+  // The warning ensures users know the field is not active yet.
+  let onComplete: TriggerDefinition['onComplete'] | undefined;
+  if (raw.onComplete) {
+    const rawRunOn = raw.onComplete.runOn?.trim();
+    if (rawRunOn && rawRunOn !== 'success') {
+      console.warn(
+        `[TriggerStore] UNSUPPORTED: onComplete.runOn='${rawRunOn}' is not implemented yet. ` +
+        `This trigger will NOT execute a completion hook on ${rawRunOn}. ` +
+        `Only runOn: 'success' is planned for a future release.`,
+      );
+    }
+    if (rawRunOn === 'success' || rawRunOn === 'failure' || rawRunOn === 'always') {
+      onComplete = {
+        runOn: rawRunOn,
+        ...(raw.onComplete.workflowId?.trim() ? { workflowId: raw.onComplete.workflowId.trim() } : {}),
+        ...(raw.onComplete.goal?.trim() ? { goal: raw.onComplete.goal.trim() } : {}),
+      };
+    }
+  }
+
   const trigger: TriggerDefinition = {
     id: asTriggerId(rawId),
     provider,
@@ -386,6 +508,10 @@ function validateAndResolveTrigger(
     ...(raw.contextMapping !== undefined
       ? { contextMapping: assembleContextMapping(raw.contextMapping) }
       : {}),
+    ...(goalTemplate ? { goalTemplate } : {}),
+    ...(referenceUrls !== undefined && referenceUrls.length > 0 ? { referenceUrls } : {}),
+    ...(agentConfig !== undefined ? { agentConfig } : {}),
+    ...(onComplete !== undefined ? { onComplete } : {}),
   };
 
   return ok(trigger);
