@@ -536,6 +536,11 @@ export class AgentLoop {
         return 'tool_use';
       case 'end_turn':
         return 'end_turn';
+      case 'max_tokens':
+        // WHY end_turn: max_tokens means the model was truncated at the token limit,
+        // not that an error occurred. Treating it as end_turn lets the loop continue
+        // on the next turn so the agent can pick up where it left off.
+        return 'end_turn';
       default:
         return 'error';
     }

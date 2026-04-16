@@ -1204,6 +1204,10 @@ export async function runWorkflow(
   // The daemon has already called executeStartWorkflow() and has the first step.
   // Pass the step content directly -- the LLM starts working on step 1 immediately.
   // Appending the continueToken so the LLM can pass it to continue_workflow.
+  // WHY closing directive: an explicit imperative at the end of the initial prompt directs
+  // the agent to complete the step work before calling continue_workflow. Without this,
+  // the agent may produce a "thinking aloud" turn before the first tool call, which
+  // wastes tokens and delays step execution.
   const contextJson = trigger.context
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
