@@ -2376,3 +2376,121 @@ Drag-to-reorder for priority. Click to expand and see the full pipeline plan. Bu
 #### Relationship to worktrain spawn/await
 
 `worktrain spawn` / `worktrain await` are for coordinator *scripts* -- explicit programmatic orchestration. The work queue is for *ambient* drain -- WorkTrain autonomously pulls items when capacity is free. Both use the same underlying session engine. The difference is who's driving: a script (spawn/await) or the queue drain loop. They compose naturally: a queue item might be a coordinator script that spawns its own child sessions via spawn/await.
+
+---
+
+### Work queue refinements: filtering, catch-all mode, and deadline-aware prioritization (Apr 15, 2026)
+
+#### Issue/ticket filtering
+
+The external pull sources need richer filtering than just a label. Real teams organize work by project, team, component, sprint, and assignee -- all of these should be filterable:
+
+```yaml
+workspaces:
+  workrail:
+    queue:
+      sources:
+        - type: github_issues
+          integration: github
+          filter:
+            labels: ['worktrain-queue']     # optional -- if omitted, pulls all open issues
+            milestone: 'Sprint 12'          # optional
+            assignee: 'worktrain-bot'       # optional -- only issues assigned to WorkTrain
+            notLabels: ['needs-human', 'blocked', 'wontfix']  # always exclude these
+
+        - type: jira
+          integration: jira
+          filter:
+            project: ENG                    # required -- scope to one project
+            sprint: active                  # 'active', 'backlog', or sprint name
+            assignee: worktrain             # Jira user
+            issueTypes: ['Bug', 'Task']     # not Stories/Epics
+            notStatuses: ['Done', 'Closed']
+
+        - type: linear
+          integration: linear
+          filter:
+            team: platform                  # Linear team slug
+            state: triage                   # pull from triage queue
+            priority: [urgent, high]        # only urgent and high priority
+```
+
+**Catch-all mode:** if `filter` is omitted entirely, WorkTrain pulls everything open and unassigned in the project/repo. This is the "let WorkTrain go find work" mode -- useful for batch grooming sessions but should require explicit opt-in (`catchAll: true`) since it could pull thousands of items.
+
+```yaml
+- type: github_issues
+  integration: github
+  catchAll: true                # pulls ALL open issues, no label required
+  filter:
+    notLabels: ['needs-human', 'wontfix']
+  maxItemsPerCycle: 5           # drain slowly, not everything at once
+```
+
+---
+
+#### Deadline-aware prioritization
+
+WorkTrain should be able to determine priority not just from labels, but from deadlines it finds anywhere:
+
+**Sources WorkTrain reads for deadline context:**
+- Issue/ticket due dates (Jira, Linear, GitHub milestones)
+- Epic end dates (Jira epics, Linear projects)
+- Sprint end date (current active sprint)
+- Release/milestone dates from the repo
+- Calendar events (via Glean or Google Calendar integration)
+- Confluence/Notion pages that mention deadlines
+- Docs in the repo (`ROADMAP.md`, `docs/milestones.md`, etc.)
+
+**What WorkTrain does with deadlines:**
+The classify-task-workflow (or a new `prioritize-queue` workflow) reads the deadline context and produces an adjusted priority score:
+
+```
+base_priority = from label/assignee (low/medium/high)
+deadline_urgency = days_until_deadline:
+  < 2 days  → +3 (critical)
+  < 7 days  → +2 (high)
+  < 14 days → +1 (medium)
+  > 14 days → +0 (no adjustment)
+  past due  → +4 (overdue, surface immediately)
+
+adjusted_priority = base_priority + deadline_urgency
+```
+
+Items are queued in adjusted_priority order, not just the label order. A medium-priority task due tomorrow beats a high-priority task due in 3 months.
+
+**Glean integration for deadline discovery:**
+Glean indexes everything -- Jira, Confluence, Google Docs, Slack, emails. WorkTrain can query Glean: "what are the deadlines affecting the workrail project this month?" and get a synthesized view across all systems. This is especially powerful for deadline context that lives in documents rather than tickets (e.g. a Confluence roadmap page that says "feature X must ship by Q2").
+
+```yaml
+workspaces:
+  workrail:
+    queue:
+      deadlineContext:
+        sources:
+          - type: glean
+            query: "workrail deadlines milestones due dates"
+            maxResults: 10
+          - type: github_milestones
+            integration: github
+          - type: jira_epics
+            integration: jira
+            project: ENG
+        refreshInterval: 3600   # re-fetch deadline context every hour
+```
+
+**The prioritize-queue routine:**
+A cheap, fast routine (one step, Haiku model) that runs after each external sync and re-scores the queue. Reads: current queue items + deadline context. Outputs: reordered queue with deadline annotations. The coordinator's drain loop always reads the latest ordering.
+
+```
+Input: queue items + deadline context
+Output: same items reordered, each with:
+  - adjustedPriority (critical/high/medium/low)
+  - deadlineReason: "Sprint 12 ends in 3 days" or "Epic ENG-200 due June 1"
+  - deadlineSource: URL or doc reference
+```
+
+**Escalation when deadlines are at risk:**
+If a queue item has a deadline within 48 hours and hasn't been started yet, the watchdog notifies: "WORKRAIL-410 (GitHub polling adapter) is due in 2 days and hasn't been started. Current queue position: 8. Bumping to position 1." Posts to Slack + the message outbox. The user can override via message queue if they disagree.
+
+**Why this is powerful:**
+WorkTrain effectively becomes your sprint manager. It knows what's due, in what order things need to happen, and it works the highest-urgency items first -- without anyone having to manually reorder a board. The deadline context is always fresh (re-fetched every hour), so if a Confluence page updates the roadmap, the queue re-prioritizes automatically.
