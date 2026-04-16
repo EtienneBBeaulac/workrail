@@ -37,6 +37,7 @@ import {
   type TriggerDefinition,
   type ContextMapping,
   type ContextMappingEntry,
+  type GitLabPollingSource,
   asTriggerId,
 } from './types.js';
 
@@ -57,7 +58,7 @@ export type TriggerStoreError =
 // Supported providers (extensible: add post-MVP providers here)
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_PROVIDERS = new Set(['generic']);
+const SUPPORTED_PROVIDERS = new Set(['generic', 'gitlab_poll']);
 
 // ---------------------------------------------------------------------------
 // Narrow YAML parser
@@ -91,6 +92,17 @@ interface ParsedTriggerRaw {
   referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
   agentConfig?: { model?: string };
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
+  autoCommit?: string;   // 'true' | 'false' scalar
+  autoOpenPR?: string;   // 'true' | 'false' scalar
+  // Polling trigger source (present only when provider === 'gitlab_poll').
+  // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
+  source?: {
+    baseUrl?: string;
+    projectId?: string;
+    token?: string;          // may be a $SECRET_REF, resolved at assembly time
+    events?: string;         // space-separated scalar in YAML; split at assemble time
+    pollIntervalSeconds?: string; // numeric string; parsed to number at assembly time
+  };
 }
 
 /**
@@ -348,6 +360,51 @@ function parseTriggersYaml(
         continue;
       }
 
+      if (key === 'source') {
+        // source: is a sub-object block for gitlab_poll triggers.
+        // Contains baseUrl, projectId, token, events, pollIntervalSeconds.
+        // Baseline indent: lineIndent (indent of the "source:" key line).
+        lineIndex++;
+        const source: NonNullable<ParsedTriggerRaw['source']> = {};
+        while (lineIndex < lines.length) {
+          const srcLine = lines[lineIndex];
+          if (srcLine === undefined) break;
+          const srcTrimmed = srcLine.trim();
+          if (srcTrimmed === '' || srcTrimmed.startsWith('#')) {
+            lineIndex++;
+            continue;
+          }
+          const srcIndent = srcLine.search(/\S/);
+          if (srcIndent <= lineIndent) break;
+
+          const srcColonIdx = srcTrimmed.indexOf(':');
+          if (srcColonIdx === -1) {
+            return err({
+              kind: 'parse_error',
+              message: `Missing colon in source entry at line ${lineIndex + 1}: "${srcTrimmed}"`,
+              lineNumber: lineIndex + 1,
+            });
+          }
+          const srcKey = srcTrimmed.slice(0, srcColonIdx).trim();
+          const srcRawValue = srcTrimmed.slice(srcColonIdx + 1).trim();
+          if (srcRawValue !== '') {
+            const srcValueResult = parseScalar(srcRawValue, lineIndex + 1);
+            if (srcValueResult.kind === 'err') return srcValueResult;
+            switch (srcKey) {
+              case 'baseUrl':              source.baseUrl = srcValueResult.value; break;
+              case 'projectId':            source.projectId = srcValueResult.value; break;
+              case 'token':                source.token = srcValueResult.value; break;
+              case 'events':               source.events = srcValueResult.value; break;
+              case 'pollIntervalSeconds':  source.pollIntervalSeconds = srcValueResult.value; break;
+              default: break; // unknown sub-keys silently ignored
+            }
+          }
+          lineIndex++;
+        }
+        trigger.source = source;
+        continue;
+      }
+
       if (rawValue === '') {
         // Empty value after key -- skip (e.g. contextMapping: with block below was handled)
         lineIndex++;
@@ -380,6 +437,8 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'hmacSecret':    trigger.hmacSecret = value; break;
     case 'goalTemplate':  trigger.goalTemplate = value; break;
     case 'referenceUrls': trigger.referenceUrls = value; break;
+    case 'autoCommit':    trigger.autoCommit = value; break;
+    case 'autoOpenPR':    trigger.autoOpenPR = value; break;
     // contextMapping, agentConfig, onComplete handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -512,6 +571,96 @@ function validateAndResolveTrigger(
     }
   }
 
+  // Parse autoCommit / autoOpenPR boolean flags.
+  // Both default to false when absent (opt-in semantics: never commit without explicit true).
+  const autoCommit = raw.autoCommit?.trim().toLowerCase() === 'true';
+  const autoOpenPR = raw.autoOpenPR?.trim().toLowerCase() === 'true';
+
+  // Warn if autoOpenPR is set without autoCommit -- a PR requires a commit.
+  // WHY soft warning (not hard error): allows users to add autoOpenPR first and
+  // configure autoCommit later without breaking the config load. Delivery is
+  // gated in code (runDelivery checks flags.autoCommit !== true).
+  if (autoOpenPR && !autoCommit) {
+    console.warn(
+      `[TriggerStore] Warning: trigger "${rawId}" has autoOpenPR: true but autoCommit is not true. ` +
+      `A PR requires a commit -- delivery will be skipped unless autoCommit is also set to true.`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // pollingSource assembly (gitlab_poll only)
+  //
+  // Invariants enforced here:
+  // - provider === 'gitlab_poll' requires source: block (missing_field error if absent)
+  // - provider !== 'gitlab_poll' with source: block logs a warning (block is ignored)
+  // - token is resolved from env if it is a $SECRET_REF
+  // - events is split from space-separated scalar to string[]
+  // - pollIntervalSeconds is parsed to a positive integer (default 60)
+  // ---------------------------------------------------------------------------
+
+  let pollingSource: GitLabPollingSource | undefined;
+
+  if (provider === 'gitlab_poll') {
+    if (!raw.source) {
+      return err({ kind: 'missing_field', field: 'source', triggerId: rawId });
+    }
+
+    const src = raw.source;
+
+    // Validate required source sub-fields
+    const requiredSourceFields: Array<'baseUrl' | 'projectId' | 'token' | 'events'> = [
+      'baseUrl', 'projectId', 'token', 'events',
+    ];
+    for (const field of requiredSourceFields) {
+      if (!src[field]?.trim()) {
+        return err({ kind: 'missing_field', field: `source.${field}`, triggerId: rawId });
+      }
+    }
+
+    // Resolve token from env if it is a $SECRET_REF
+    const tokenRaw = src.token!.trim();
+    const tokenResult = resolveSecret(tokenRaw, rawId, env);
+    if (tokenResult.kind === 'err') return tokenResult;
+
+    // Parse events: space-separated scalar -> string array
+    const eventsRaw = src.events!.trim();
+    const events = eventsRaw.split(/\s+/).filter(Boolean);
+    if (events.length === 0) {
+      return err({ kind: 'missing_field', field: 'source.events (empty)', triggerId: rawId });
+    }
+
+    // Parse pollIntervalSeconds: optional, must be a positive integer, defaults to 60
+    const intervalRaw = src.pollIntervalSeconds?.trim();
+    let pollIntervalSeconds = 60;
+    if (intervalRaw) {
+      const parsed = parseInt(intervalRaw, 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        return err({
+          kind: 'missing_field',
+          field: `source.pollIntervalSeconds (must be a positive integer, got: ${intervalRaw})`,
+          triggerId: rawId,
+        });
+      }
+      pollIntervalSeconds = parsed;
+    }
+
+    pollingSource = {
+      baseUrl: src.baseUrl!.trim(),
+      projectId: src.projectId!.trim(),
+      token: tokenResult.value,
+      events,
+      pollIntervalSeconds,
+    };
+  } else if (raw.source) {
+    // provider !== 'gitlab_poll' but source: is present -- warn, do not error.
+    // The source: block is only meaningful for provider='gitlab_poll'.
+    console.warn(
+      `[TriggerStore] WARNING: trigger '${rawId}' has provider='${provider}' but also ` +
+      `defines a source: block. The source: block is only used for provider='gitlab_poll'. ` +
+      `It will be ignored for this trigger.`,
+    );
+  }
+
   const trigger: TriggerDefinition = {
     id: asTriggerId(rawId),
     provider,
@@ -526,6 +675,9 @@ function validateAndResolveTrigger(
     ...(referenceUrls !== undefined && referenceUrls.length > 0 ? { referenceUrls } : {}),
     ...(agentConfig !== undefined ? { agentConfig } : {}),
     ...(onComplete !== undefined ? { onComplete } : {}),
+    ...(autoCommit ? { autoCommit } : {}),
+    ...(autoOpenPR ? { autoOpenPR } : {}),
+    ...(pollingSource !== undefined ? { pollingSource } : {}),
   };
 
   return ok(trigger);
