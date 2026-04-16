@@ -471,20 +471,6 @@ function validateAndResolveTrigger(
     ? referenceUrlsRaw.split(/\s+/).filter(Boolean)
     : undefined;
 
-  // Validate each referenceUrl is a safe HTTP(S) URL (no file://, private IPs, etc.)
-  if (referenceUrls) {
-    for (const url of referenceUrls) {
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-          return err({ kind: 'missing_field', field: `referenceUrls (non-HTTP URL rejected: ${url})`, triggerId: raw.id ?? '?' });
-        }
-      } catch {
-        return err({ kind: 'missing_field', field: `referenceUrls (invalid URL: ${url})`, triggerId: raw.id ?? '?' });
-      }
-    }
-  }
-
   // agentConfig: only include if at least one sub-field is present
   const agentConfig = raw.agentConfig?.model?.trim()
     ? { model: raw.agentConfig.model.trim() }

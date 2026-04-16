@@ -16,6 +16,7 @@ import { useState, useEffect, useRef } from 'react';
 import { BracketBadge } from './BracketBadge';
 import { MonoLabel } from './MonoLabel';
 import { useWorkflowList, useTriggerList, dispatchWorkflow } from '../api/hooks';
+import { formatRelativeTime } from '../utils/time';
 
 // ---------------------------------------------------------------------------
 // MRU: most-recently-used workflow (persisted across sessions)
@@ -213,7 +214,11 @@ export function DispatchPane() {
                   <div className="font-mono text-[var(--text-primary)] text-[11px]">{t.id}</div>
                   <div className="text-[var(--text-muted)]">{t.workflowId}</div>
                   <div className="text-[var(--text-muted)] truncate">{t.goal}</div>
-                  {/* lastFiredAt: not yet tracked server-side */}
+                  {t.lastFiredAt && (
+                    <div className="text-[var(--text-muted)] opacity-70">
+                      last fired {formatRelativeTime(new Date(t.lastFiredAt).getTime())}
+                    </div>
+                  )}
                 </div>
               ))
             )}
