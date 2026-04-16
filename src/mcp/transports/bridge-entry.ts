@@ -32,7 +32,7 @@
  */
 
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
-import { registerFatalHandlers } from './fatal-exit.js';
+import { registerFatalHandlers, logStartup } from './fatal-exit.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -328,9 +328,8 @@ export async function startBridgeServer(
 ): Promise<void> {
   // Register early — before any async work — so that exceptions thrown
   // during bridge startup exit cleanly rather than spinning. See fatal-exit.ts.
-  registerFatalHandlers();
-
-  console.error(`[Bridge] Forwarding stdio → http://localhost:${primaryPort}/mcp`);
+  registerFatalHandlers('bridge');
+  logStartup('bridge', { primaryPort });
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { StreamableHTTPClientTransport } = await import(
@@ -367,7 +366,10 @@ export async function startBridgeServer(
   const performShutdown = (reason: string): void => {
     if (shutdownSignal.aborted) return;
     shutdownController.abort();
-    console.error(`[Bridge] Shutting down: ${reason}`);
+    // Structured shutdown log — visible in stderr and parseable for monitoring.
+    process.stderr.write(
+      `[Bridge] Shutdown pid=${process.pid} reason="${reason}" ts=${new Date().toISOString()}\n`,
+    );
     const state = connectionState;
     void (state.kind === 'connected' ? state.transport.close() : Promise.resolve()).finally(
       () => process.exit(0),

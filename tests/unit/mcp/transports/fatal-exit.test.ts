@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Tests for fatal-exit.ts — last-resort error handler for all transport entry points.
+ * Tests for fatal-exit.ts — last-resort error handler and startup observability.
  *
- * We test fatalExit in isolation by importing it after resetting module state.
- * process.exit is replaced with a throw so tests can assert on it without
- * actually exiting the test process.
+ * We test fatalExit and logStartup in isolation by importing after module reset.
+ * process.exit is replaced with a throw so tests can assert without actually exiting.
  */
 
 describe('fatalExit', () => {
@@ -17,17 +16,15 @@ describe('fatalExit', () => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   });
 
-  it('writes the error message and stack trace to stderr then exits 1', async () => {
+  it('writes the error message and full stack trace to stderr then exits 1', async () => {
     const { fatalExit } = await import('../../../../src/mcp/transports/fatal-exit.js');
     const err = new Error('boom');
     expect(() => fatalExit('Uncaught exception', err)).toThrow('process.exit(1)');
     expect(process.stderr.write).toHaveBeenCalledWith(
       expect.stringContaining('Uncaught exception'),
     );
-    // Should include the stack, not just the message
-    expect(process.stderr.write).toHaveBeenCalledWith(
-      expect.stringContaining('Error: boom'),
-    );
+    // Must include stack, not just message
+    expect(process.stderr.write).toHaveBeenCalledWith(expect.stringContaining('Error: boom'));
   });
 
   it('includes the full stack trace for Error instances', async () => {
@@ -35,7 +32,7 @@ describe('fatalExit', () => {
     const err = new Error('stack test');
     try { fatalExit('label', err); } catch { /* exit mock */ }
     const written = vi.mocked(process.stderr.write).mock.calls[0]?.[0] as string;
-    expect(written).toContain('at '); // stack trace lines start with "at "
+    expect(written).toContain('at '); // stack frames start with "at "
   });
 
   it('handles non-Error thrown values (strings, objects)', async () => {
@@ -49,9 +46,7 @@ describe('fatalExit', () => {
   it('is re-entrant safe — second call is a no-op', async () => {
     const { fatalExit } = await import('../../../../src/mcp/transports/fatal-exit.js');
     try { fatalExit('first', new Error('first')); } catch { /* exit mock */ }
-    // Second call must not throw again (process.exit already fired)
     expect(() => fatalExit('second', new Error('second'))).not.toThrow();
-    // stderr should only have been written once
     expect(process.stderr.write).toHaveBeenCalledTimes(1);
   });
 
@@ -59,5 +54,64 @@ describe('fatalExit', () => {
     vi.mocked(process.stderr.write).mockImplementation(() => { throw new Error('EBADF'); });
     const { fatalExit } = await import('../../../../src/mcp/transports/fatal-exit.js');
     expect(() => fatalExit('label', new Error('test'))).toThrow('process.exit(1)');
+  });
+});
+
+describe('registerFatalHandlers', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    // Remove any handlers added by previous test runs
+    process.removeAllListeners('uncaughtException');
+    process.removeAllListeners('unhandledRejection');
+  });
+
+  it('registers handlers that exit on uncaughtException', async () => {
+    const { registerFatalHandlers } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    registerFatalHandlers('stdio');
+    expect(() =>
+      process.emit('uncaughtException', new Error('test'), 'uncaughtException'),
+    ).toThrow('exit');
+  });
+
+  it('registers handlers that exit on unhandledRejection', async () => {
+    const { registerFatalHandlers } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    registerFatalHandlers('http');
+    expect(() =>
+      process.emit('unhandledRejection', new Error('test'), Promise.reject()),
+    ).toThrow('exit');
+  });
+});
+
+describe('logStartup', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  });
+
+  it('emits transport, pid, and version', async () => {
+    const { logStartup } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    logStartup('stdio');
+    const written = vi.mocked(process.stderr.write).mock.calls[0]?.[0] as string;
+    expect(written).toContain('transport=stdio');
+    expect(written).toContain(`pid=${process.pid}`);
+    expect(written).toContain('version=');
+    expect(written).toContain('[Startup]');
+  });
+
+  it('includes extra fields when provided', async () => {
+    const { logStartup } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    logStartup('bridge', { primaryPort: 3100 });
+    const written = vi.mocked(process.stderr.write).mock.calls[0]?.[0] as string;
+    expect(written).toContain('primaryPort=3100');
+  });
+
+  it('emits http transport with port', async () => {
+    const { logStartup } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    logStartup('http', { port: 3100 });
+    const written = vi.mocked(process.stderr.write).mock.calls[0]?.[0] as string;
+    expect(written).toContain('transport=http');
+    expect(written).toContain('port=3100');
   });
 });

@@ -14,7 +14,7 @@
 import { composeServer } from '../server.js';
 import { bindWithPortFallback } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
-import { registerFatalHandlers } from './fatal-exit.js';
+import { registerFatalHandlers, logStartup } from './fatal-exit.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
@@ -23,7 +23,8 @@ const HTTP_PORT_SCAN_END = 3199;
 
 export async function startHttpServer(port: number): Promise<void> {
   // Register early — before composeServer() — so startup failures exit cleanly.
-  registerFatalHandlers();
+  registerFatalHandlers('http');
+  logStartup('http', { port });
 
   const { server, ctx } = await composeServer();
 

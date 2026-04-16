@@ -7,7 +7,7 @@
 
 import { composeServer } from '../server.js';
 import { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } from './shutdown-hooks.js';
-import { registerFatalHandlers } from './fatal-exit.js';
+import { registerFatalHandlers, logStartup } from './fatal-exit.js';
 
 const INITIAL_ROOTS_TIMEOUT_MS = 1000;
 
@@ -30,7 +30,8 @@ export async function startStdioServer(): Promise<void> {
   // Register last-resort fatal handlers early — before any async work —
   // so that exceptions thrown during startup are caught and the process exits
   // cleanly rather than spinning in an infinite loop. See fatal-exit.ts.
-  registerFatalHandlers();
+  registerFatalHandlers('stdio');
+  logStartup('stdio');
 
   const { server, ctx, rootsManager } = await composeServer();
 
