@@ -1,156 +1,106 @@
-# Design Candidates: WorkRail Auto Task Input MVP
-
-**Date:** 2026-04-14
-**Status:** Ready for main-agent review
-
----
+# Design Candidates: PR #405 Review Findings
 
 ## Problem Understanding
 
-### Core Tensions
-
-1. **TriggerRouter cohesion vs dispatch seam**: `TriggerRouter` was designed to route webhook events only. Adding `dispatch()` and `getTriggers()` extends its responsibility. But it already owns all needed dependencies (`index`, `runWorkflowFn`, `ctx`, `apiKey`). Any alternative boundary would duplicate those injections.
-
-2. **console-routes read-only invariant vs mutating dispatch endpoint**: `console-routes.ts` has a comment stating "All routes are GET-only (invariant: Console is read-only)". The task explicitly requires `POST /api/v2/auto/dispatch`. Resolution: update the comment; add `express.json()` only for that path; keep GET routes unchanged.
-
-3. **WorkflowTrigger interface scope**: The task requires `buildSystemPrompt()` and model setup in `workflow-runner.ts` to read `trigger.referenceUrls` and `trigger.agentConfig`. `WorkflowTrigger` is the type passed to `runWorkflow()`. Extending it with optional fields is additive; the alternative (passing `TriggerDefinition` separately) would couple the daemon to the trigger system types.
-
-4. **TriggerRouter lifecycle vs console route availability**: `TriggerRouter` is only instantiated when `WORKRAIL_TRIGGERS_ENABLED=true`. `mountConsoleRoutes` must handle `undefined` router gracefully (503 from dispatch, empty list from GET /api/v2/triggers).
-
-### What Makes This Hard
-
-1. **YAML parser extension for nested blocks**: `agentConfig` and `onComplete` are sub-objects in the narrow YAML parser. Each requires a new block parser similar to the existing `contextMapping` special-case.
-
-2. **`goalTemplate` interpolation fallback**: `{{$.dot.path}}` tokens must extract values from the webhook payload. If ANY token is missing, the entire template must fall back to the static `goal`. Partial interpolation produces broken goal strings.
-
-3. **TriggerRouter exposure in server.ts**: `startTriggerListener()` currently returns a `TriggerListenerHandle` but does not expose the router. The router must be accessible to thread to `mountConsoleRoutes()`.
-
-4. **`ContextMappingEntry.required` already exists**: Do NOT add it again -- already defined in `types.ts` at line 41.
+### Tensions
+1. **Verify completeness vs. readability** -- adding 5 new verify items (4 from F5, 1 from F15) risks making the block unwieldy. But missing checks means pipeline invariants go unenforced.
+2. **Dead code removal vs. behavior preservation** -- the OR branch `affectedDomains is unclear` is dead (any array, including `[]`, passes), but removing it must not change effective behavior for any valid input. Confirmed safe: the procedure always produces an array value.
+3. **Documentation verbosity in procedural JSON** -- F1 asks for explanatory text inside a decision list used by an LLM. Mixing prose with selection rules risks agent misinterpretation.
 
 ### Likely Seam
+All changes are within `promptBlocks` of the single step `classify-task` in `workflows/classify-task-workflow.json`:
+- `verify` array: F5 (4 items) + F15 (1 item)
+- `procedure` array item [1] (large classification string): F14 (simplify wr.discovery), F15 (add Large rule), F1 (chore note)
+- `constraints` array: F6 (single-line array constraint)
 
-The natural seam for the HTTP dispatch entry point is `TriggerRouter`, which already owns the full dispatch dependency set. The `console-routes.ts` file is the right location for mounting the new endpoints (follows the established pattern for optional features).
+### What Makes It Hard
+- The procedure is a single long escaped JSON string -- surgical edits required to avoid breaking JSON syntax.
+- F15 has two interdependent parts (verify check + procedure rule) that must be internally consistent.
+- F1 requires a judgment call on placement: inline note vs. new rule bullet vs. metaGuidance.
 
 ---
 
 ## Philosophy Constraints
 
-From `/Users/etienneb/CLAUDE.md` (primary) and codebase patterns:
+From `CLAUDE.md`:
+- **Make illegal states unrepresentable** -- verify block is the enforcement mechanism; incomplete verify = unrepresented invariants
+- **YAGNI with discipline** -- remove dead OR branch, don't leave speculative code
+- **Document 'why', not 'what'** -- F1 fix must explain intent behind chore pipeline inclusion
+- **Determinism over cleverness** -- verify checks must be unambiguous conditionals
+- **Immutability by default** -- change only what is necessary
 
-- **Immutability by default**: All new `TriggerDefinition` fields must be `readonly`.
-- **Make illegal states unrepresentable**: `onComplete.runOn` must be `'success' | 'failure' | 'always'` literal union.
-- **Errors are data**: Dispatch endpoint returns `{ error: string }` JSON, never throws.
-- **Validate at boundaries, trust inside**: YAML parsing is the boundary for all new fields. Runtime dispatch trusts a valid `WorkflowTrigger`.
-- **YAGNI with discipline**: Don't implement `onComplete.runOn !== 'success'` -- emit warning only. Don't build full JSONPath -- only `{{$.dot.path}}` templates.
-- **Document "why", not "what"**: Comments explain intent of the warning for unimplemented `onComplete.runOn` values.
-
-**Conflict:** `console-routes.ts` comment says read-only invariant. Task requires POST. Resolution: update the comment.
+No philosophy conflicts detected.
 
 ---
 
 ## Impact Surface
 
-- `TriggerListenerHandle` interface (exposed publicly) -- adding `router` field is additive
-- `mountConsoleRoutes` function signature -- adding optional `triggerRouter?` follows existing optional-param pattern
-- `WorkflowTrigger` interface -- adding optional fields is non-breaking for all existing callers
-- `buildSystemPrompt()` signature -- no change needed; reads from `trigger` which is already a parameter
-- All existing trigger-store and trigger-router tests must pass unchanged
-- TypeScript must compile clean: all new types must be consistent
+- No runtime code depends on this JSON file's internal prompt text
+- Schema validation (`workrail validate`) must still pass
+- PR test plan examples (4 scenarios) must remain valid under the updated logic
+- The `touchesArchitecture` definition in the procedure already mentions Large implies true -- F15 makes this explicit as a rule and a verify check, which is consistent
 
 ---
 
 ## Candidates
 
-### Candidate 1: Minimal additive -- extend TriggerRouter, pass as optional param
+### Candidate A: Minimal in-place edits (recommended)
 
-**Summary:** Add `dispatch()` and `getTriggers()` methods to `TriggerRouter`. Expose the router in `TriggerListenerHandle`. Pass it as an optional 7th parameter to `mountConsoleRoutes()`.
+**Summary:** Add verify items using the existing `"If X, Y."` style, simplify the wr.discovery rule in-place, add the Large-rule note as a sentence appended to the touchesArchitecture definition, add a parenthetical note to the coding-task inclusion rule for chore, add a constraint for single-line arrays.
 
-**Tensions resolved:**
-- No dependency duplication: reuses existing injections in TriggerRouter
-- console-routes: single POST route added with comment update, no structural change
-- WorkflowTrigger: extends with optional `referenceUrls?` and `agentConfig?` fields
-
-**Tensions accepted:** Mild TriggerRouter cohesion violation (adds HTTP dispatch semantics to a webhook router).
-
-**Boundary solved at:** `TriggerRouter` -- already owns `index`, `runWorkflowFn`, `ctx`, `apiKey`. Any other boundary duplicates these.
-
-**Why that boundary is the best fit:** `dispatch()` is semantically "route a dispatch request to runWorkflowFn" -- the same thing the class does for webhook events, just with a different input source. The conceptual center of the class doesn't change.
-
-**Failure mode:** If the trigger listener never starts, the optional router is `undefined`, and the dispatch endpoint returns 503. Must be handled explicitly in console-routes.
-
-**Repo-pattern relationship:** Follows the established `mountConsoleRoutes` optional-param pattern (`workflowService?`, `timingRingBuffer?`, etc.).
-
-**Gains:** Minimal blast radius. No new files in `src/trigger/`. Single new dependency edge (console-routes -> TriggerRouter type). All existing tests pass unchanged.
-
-**Losses:** TriggerRouter.dispatch() is technically a second responsibility for the class.
-
-**Impact surface:** server.ts startup sequence needs to store the router from the listener result.
-
-**Scope judgment:** Best-fit. Evidence: `mountConsoleRoutes` already has 4 optional parameters using this exact pattern.
-
-**Philosophy fit:** Honors YAGNI (no new classes), immutability, errors-as-data. Mild conflict with single-responsibility.
+- **Tensions resolved:** Completeness (all invariants now verified). Dead code removed. Documentation added without polluting decision logic.
+- **Tensions accepted:** Inline parenthetical for chore is less visible than a standalone bullet.
+- **Boundary:** `promptBlocks` only. Correct seam.
+- **Failure mode:** The chore parenthetical `-- note: chore is included because chores can require code changes and benefit from review` might be missed in a quick scan. Unlikely to cause agent misinterpretation since it starts with `-- note:`.
+- **Repo-pattern relationship:** Follows exactly -- matches verify and procedure style already in the file.
+- **Gains:** Minimal diff, clean review, no structural changes.
+- **Losses:** Chore rationale is slightly buried.
+- **Scope:** Best-fit. Only the target file changes.
+- **Philosophy fit:** Honors YAGNI, Make Illegal States Unrepresentable, Document 'why'. No conflicts.
 
 ---
 
-### Candidate 2: Extract AutoDispatcher -- dedicated class for HTTP-originated dispatch
+### Candidate B: Chore note as named bullet in pipeline rules
 
-**Summary:** Create `src/trigger/auto-dispatcher.ts` with an `AutoDispatcher` class that wraps `runWorkflowFn`, `ctx`, `apiKey`, and the trigger index, with `dispatch()` and `listTriggers()` methods. Pass this to `mountConsoleRoutes` instead of `TriggerRouter`.
+**Summary:** Same as A except the chore explanation becomes a standalone note bullet in the pipeline rules: `- (Note) chore taskType is included in the coding path because chores can require code changes and benefit from review.`
 
-**Tensions resolved:**
-- TriggerRouter cohesion: stays webhook-only, clean SRP
-
-**Tensions accepted:**
-- Dependency duplication: `AutoDispatcher` and `TriggerRouter` both need the same 4 injected dependencies
-- Index ownership: two holders of the same `Map<string, TriggerDefinition>`
-
-**Boundary solved at:** New `AutoDispatcher` class.
-
-**Failure mode:** Index synchronization -- if triggers reload in the future, both objects must be updated.
-
-**Repo-pattern relationship:** Departs from existing pattern. No existing analogue.
-
-**Gains:** Clean single-responsibility for TriggerRouter.
-
-**Losses:** More files, more injection, future index sync surface.
-
-**Scope judgment:** Too broad for the current task. Creates infrastructure for a minor SRP concern.
-
-**Philosophy fit:** Honors SRP. Conflicts with YAGNI.
+- **Tensions resolved:** More discoverable documentation.
+- **Tensions accepted:** Non-functional bullet mixed into a decision list -- agents may attempt to evaluate it as a selection rule.
+- **Boundary:** Same as A.
+- **Failure mode:** Medium risk -- an LLM reading the pipeline rules might try to interpret the note bullet as a conditional rule and produce incorrect pipelines.
+- **Repo-pattern relationship:** Adapts -- existing pipeline rules are all selection rules, not explanatory notes.
+- **Gains:** Better documentation visibility.
+- **Losses:** Pollutes the decision structure; risk of agent misinterpretation.
+- **Scope:** Best-fit.
+- **Philosophy fit:** Honors Document 'why'. Minor tension with Determinism over cleverness.
 
 ---
 
 ## Comparison and Recommendation
 
-| Tension | Candidate 1 | Candidate 2 |
-|---|---|---|
-| TriggerRouter cohesion | Mild violation (2 methods) | Clean |
-| Dependency duplication | None | High (4 deps twice) |
-| Index sync future risk | N/A (one owner) | Real footgun |
-| Blast radius | Minimal | Larger |
-| Repo pattern fit | Follows | Departs |
+**Recommendation: Candidate A**
 
-**Recommendation: Candidate 1.**
+The pipeline rules section is a decision list used by the LLM to produce `recommendedPipeline`. Adding a non-rule bullet (Candidate B) risks the agent treating it as a selection rule. The parenthetical in Candidate A appended to the existing coding-task inclusion rule is unambiguous advisory prose that does not add a new decision branch.
 
-The TriggerRouter cohesion concern is the weakest objection in context. `dispatch()` reuses the same injected dependencies as `route()`. Adding it doesn't change the class's conceptual center. Candidate 2 solves a purity concern by creating a duplication problem that is strictly worse.
+Candidate A also follows existing repo patterns exactly and produces the smallest possible diff.
 
 ---
 
 ## Self-Critique
 
-**Strongest counter-argument:** None compelling. The dependency duplication in Candidate 2 is a concrete cost; the SRP benefit is marginal at this scale.
+**Strongest counter-argument:** A parenthetical inline note is easy to miss during a quick scan. Candidate B makes the rationale more visible.
 
-**Narrower option that lost:** Not exposing the router at all; standalone `dispatchWorkflow()` function. Too narrow -- skips goalTemplate/referenceUrls/agentConfig enrichment and can't serve GET /api/v2/triggers.
+**Narrower option that lost:** Omit F1 entirely. Lost because the task explicitly requires documenting the decision.
 
-**Broader option:** Full `AutoService` class (like `ConsoleService`) with test file. Only justified if 5+ methods planned. Not justified by current task.
+**Broader option considered:** Move the chore explanation to a `metaGuidance` entry. No evidence that authors regularly consult metaGuidance for pipeline rationale -- would be non-standard placement.
 
-**Pivot condition:** If dynamic trigger reload (hot-reload of triggers.yml) is implemented with multiple consumers -- revisit Candidate 2 at that point.
+**Invalidating assumption:** If the LLM agent treats `-- note:` parentheticals differently than expected. Low risk given clear advisory framing.
+
+**Pivot condition:** If review feedback says the inline parenthetical is too subtle, upgrade to Candidate B or add the note to `metaGuidance`.
 
 ---
 
 ## Open Questions for the Main Agent
 
-1. Should `WorkflowTrigger` carry `referenceUrls` and `agentConfig` (keeping daemon decoupled from trigger types)? **Working assumption: yes -- extend WorkflowTrigger with optional fields.**
-
-2. Should the dispatch endpoint work when triggers are disabled (call `runWorkflow` directly with no enrichment), or require triggers to be enabled? **Working assumption: works independently, no enrichment when router is absent.**
-
-3. Should `mountConsoleRoutes` accept `triggerRouter?: TriggerRouter` or a narrower structural interface? **Working assumption: use TriggerRouter type directly -- one call site doesn't justify a structural interface.**
+1. F1 asks to document why chore includes coding+review, OR alternatively add chore to the exclusion list alongside `docs` and `investigation`. The task description says the intent is to document the inclusion -- confirm this is correct.
+2. The F15 verify check reads: "If `taskComplexity` is `Large`, `touchesArchitecture` must be `true`." Confirm this wording is acceptable.
