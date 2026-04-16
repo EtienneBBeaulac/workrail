@@ -320,7 +320,6 @@ export interface TriggerSummary {
   readonly workspacePath: string;
   readonly goal: string;
   /** ISO 8601 timestamp of the last time this trigger fired, if available. */
-  readonly lastFiredAt?: string;
 }
 
 /** Response from GET /api/v2/triggers */

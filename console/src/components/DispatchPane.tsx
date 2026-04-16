@@ -214,11 +214,7 @@ export function DispatchPane() {
                   <div className="font-mono text-[var(--text-primary)] text-[11px]">{t.id}</div>
                   <div className="text-[var(--text-muted)]">{t.workflowId}</div>
                   <div className="text-[var(--text-muted)] truncate">{t.goal}</div>
-                  {t.lastFiredAt && (
-                    <div className="text-[var(--text-muted)] opacity-70">
-                      last fired {formatRelativeTime(new Date(t.lastFiredAt).getTime())}
-                    </div>
-                  )}
+                  {/* lastFiredAt: not yet tracked server-side */}
                 </div>
               ))
             )}
