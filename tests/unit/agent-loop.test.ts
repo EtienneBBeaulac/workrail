@@ -177,6 +177,30 @@ describe('AgentLoop', () => {
       expect(lastAssistant?.stopReason).toBe('end_turn');
       expect(lastAssistant?.errorMessage).toBeUndefined();
     });
+
+    it('treats max_tokens stop_reason as end_turn and exits cleanly', async () => {
+      // WHY: max_tokens means the model was truncated at the token limit, not that an
+      // error occurred. _mapStopReason maps 'max_tokens' -> 'end_turn' so the loop exits
+      // cleanly rather than propagating a spurious error to the caller.
+      const maxTokensMsg: Anthropic.Message = { ...makeEndTurnMessage(), stop_reason: 'max_tokens' };
+      const client = new FakeAnthropicClient([maxTokensMsg]);
+      const agent = new AgentLoop({
+        systemPrompt: 'System prompt.',
+        tools: [],
+        client,
+        modelId: 'claude-test',
+      });
+
+      await agent.prompt(USER_MSG);
+
+      const messages = agent.state.messages;
+      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant') as
+        | { role: 'assistant'; stopReason: string; errorMessage?: string }
+        | undefined;
+      expect(lastAssistant).toBeDefined();
+      expect(lastAssistant?.stopReason).toBe('end_turn');
+      expect(lastAssistant?.errorMessage).toBeUndefined();
+    });
   });
 
   describe('tool execution', () => {

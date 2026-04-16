@@ -1,7 +1,7 @@
 /**
  * WorkRail Daemon: Autonomous Workflow Runner
  *
- * Drives a WorkRail session to completion using pi-mono's Agent loop.
+ * Drives a WorkRail session to completion using the first-party AgentLoop (src/daemon/agent-loop.ts).
  * Calls WorkRail's own engine directly (in-process, shared DI) rather than over HTTP.
  *
  * Design decisions:
@@ -10,7 +10,7 @@
  *   otherwise stop, adding an unnecessary extra LLM turn per workflow step.
  * - V2ToolContext is injected by the caller (shared with MCP server in same process).
  *   The daemon must not call createWorkRailEngine() -- engineActive guard blocks reuse.
- * - Tools THROW on failure (pi-mono contract). runWorkflow() catches and returns
+ * - Tools THROW on failure (AgentLoop contract). runWorkflow() catches and returns
  *   a WorkflowRunResult discriminated union (errors-as-data at the outer boundary).
  * - The daemon calls executeStartWorkflow() directly before creating the Agent --
  *   this avoids one full LLM turn per session. start_workflow is NOT in the tools
@@ -681,7 +681,7 @@ async function loadSessionNotes(
 }
 
 // ---------------------------------------------------------------------------
-// Tool parameter schemas (TypeBox -- built lazily via loadPiAi() for ESM compat)
+// Tool parameter schemas (plain JSON Schema -- no TypeBox or external loader needed)
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1296,7 +1296,7 @@ export async function runWorkflow(
     // ---- Whole-workflow timeout ----
     // If the agent loop does not complete within sessionTimeoutMs, abort the agent
     // and propagate a timeout through the existing error-handling path.
-    // agent.abort() is idempotent (optional-chained on activeRun in pi-agent-core).
+    // agent.abort() is idempotent -- AgentLoop sets activeRun to null after abort.
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
         if (timeoutReason === null) {
