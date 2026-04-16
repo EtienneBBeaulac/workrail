@@ -4,11 +4,17 @@ import {
   reconnectWithBackoff,
   handleReconnectOutcome,
   spawnPrimary,
+  acquireSpawnLock,
+  releaseSpawnLock,
   DEFAULT_BRIDGE_CONFIG,
   type ConnectionState,
   type FetchLike,
+  type HealthResponse,
   type ReconnectOutcome,
   type SpawnLike,
+  type WriteFileSyncLike,
+  type StatSyncLike,
+  type UnlinkSyncLike,
 } from '../../../../src/mcp/transports/bridge-entry.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
@@ -23,8 +29,10 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
 const fakeTransport = { send: async () => {}, close: async () => {} };
 
+const FAKE_PRIMARY_PID = 12345;
+
 const workrailOk = (): Response =>
-  ({ ok: true, json: async () => ({ service: 'workrail' }) } as unknown as Response);
+  ({ ok: true, json: async () => ({ service: 'workrail', pid: FAKE_PRIMARY_PID }) } as unknown as Response);
 const wrongService = (): Response =>
   ({ ok: true, json: async () => ({ service: 'nginx' }) } as unknown as Response);
 
@@ -33,9 +41,9 @@ const wrongService = (): Response =>
 // ---------------------------------------------------------------------------
 
 describe('detectHealthyPrimary', () => {
-  it('returns port when /workrail-health says {service:"workrail"}', async () => {
+  it('returns { port, pid } when /workrail-health says {service:"workrail"}', async () => {
     const fetch: FetchLike = vi.fn().mockResolvedValue(workrailOk());
-    expect(await detectHealthyPrimary(3100, { fetch, retries: 1 })).toBe(3100);
+    expect(await detectHealthyPrimary(3100, { fetch, retries: 1 })).toEqual<HealthResponse>({ port: 3100, pid: FAKE_PRIMARY_PID });
   });
 
   it('returns null for a non-WorkRail server (false-positive guard)', async () => {
@@ -53,7 +61,7 @@ describe('detectHealthyPrimary', () => {
       .fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
       .mockResolvedValue(workrailOk());
-    expect(await detectHealthyPrimary(3100, { fetch, retries: 2, baseDelayMs: 0 })).toBe(3100);
+    expect(await detectHealthyPrimary(3100, { fetch, retries: 2, baseDelayMs: 0 })).toEqual<HealthResponse>({ port: 3100, pid: FAKE_PRIMARY_PID });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
@@ -140,7 +148,7 @@ describe('handleReconnectOutcome', () => {
     await handleReconnectOutcome(
       { kind: 'reconnected' },
       reconnecting(3),
-      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop: vi.fn(), startWaitLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
     );
     expect(setConnectionState).not.toHaveBeenCalled();
   });
@@ -151,7 +159,7 @@ describe('handleReconnectOutcome', () => {
     await handleReconnectOutcome(
       { kind: 'aborted' },
       reconnecting(3),
-      { setConnectionState, performShutdown, startReconnectLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+      { setConnectionState, performShutdown, startReconnectLoop: vi.fn(), startWaitLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
     );
     expect(setConnectionState).not.toHaveBeenCalled();
     expect(performShutdown).not.toHaveBeenCalled();
@@ -164,7 +172,7 @@ describe('handleReconnectOutcome', () => {
     await handleReconnectOutcome(
       { kind: 'exhausted' },
       reconnecting(2),
-      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, triggerSpawn, config: cfg },
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, startWaitLoop: vi.fn(), triggerSpawn, config: cfg },
     );
     expect(triggerSpawn).toHaveBeenCalledTimes(1);
     expect(setConnectionState).toHaveBeenCalledWith(
@@ -181,28 +189,118 @@ describe('handleReconnectOutcome', () => {
     await handleReconnectOutcome(
       { kind: 'exhausted' },
       reconnecting(3),
-      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, startWaitLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
     );
     expect(states[0]).toMatchObject({ kind: 'reconnecting', respawnBudget: 2 });
 
     await handleReconnectOutcome(
       { kind: 'exhausted' },
       reconnecting(2),
-      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
+      { setConnectionState, performShutdown: vi.fn(), startReconnectLoop, startWaitLoop: vi.fn(), triggerSpawn: vi.fn().mockResolvedValue(undefined), config: cfg },
     );
     expect(states[1]).toMatchObject({ kind: 'reconnecting', respawnBudget: 1 });
   });
 
-  it('shuts down on exhausted when budget is 0', async () => {
+  it('enters waiting_for_primary (not shutdown) on exhausted when budget is 0', async () => {
     const performShutdown = vi.fn();
+    const startWaitLoop = vi.fn();
+    const setConnectionState = vi.fn();
     const triggerSpawn = vi.fn();
     await handleReconnectOutcome(
       { kind: 'exhausted' },
       reconnecting(0),
-      { setConnectionState: vi.fn(), performShutdown, startReconnectLoop: vi.fn(), triggerSpawn, config: cfg },
+      { setConnectionState, performShutdown, startReconnectLoop: vi.fn(), startWaitLoop, triggerSpawn, config: cfg },
     );
+    // Bridge no longer shuts down — it enters slow-poll mode instead
     expect(triggerSpawn).not.toHaveBeenCalled();
-    expect(performShutdown).toHaveBeenCalledWith(expect.stringContaining('budget exhausted'));
+    expect(performShutdown).not.toHaveBeenCalled();
+    expect(setConnectionState).toHaveBeenCalledWith({ kind: 'waiting_for_primary' });
+    expect(startWaitLoop).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// acquireSpawnLock — O_EXCL coordinator lock
+// ---------------------------------------------------------------------------
+
+describe('acquireSpawnLock', () => {
+  const PORT = 3100;
+  const STALE_MS = 30_000;
+
+  it('returns acquired when the lock file does not exist', () => {
+    const writeFileSync: WriteFileSyncLike = vi.fn();
+    const result = acquireSpawnLock(PORT, STALE_MS, { writeFileSync });
+    expect(result.kind).toBe('acquired');
+    expect(writeFileSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns skipped with reason "lock held by another bridge" when EEXIST and lock is fresh', () => {
+    const writeFileSync: WriteFileSyncLike = vi.fn().mockImplementation(() => {
+      const err: NodeJS.ErrnoException = new Error('EEXIST');
+      err.code = 'EEXIST';
+      throw err;
+    });
+    const statSync: StatSyncLike = vi.fn().mockReturnValue({ mtimeMs: Date.now() - 100 }); // fresh, 100ms old
+    const result = acquireSpawnLock(PORT, STALE_MS, { writeFileSync, statSync });
+    expect(result.kind).toBe('skipped');
+    if (result.kind === 'skipped') {
+      expect(result.reason).toContain('lock held');
+    }
+  });
+
+  it('acquires lock after reclaiming a stale one (mtime > staleMs)', () => {
+    let callCount = 0;
+    const writeFileSync: WriteFileSyncLike = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: EEXIST (stale lock exists)
+        const err: NodeJS.ErrnoException = new Error('EEXIST');
+        err.code = 'EEXIST';
+        throw err;
+      }
+      // Second call after stale reclaim: succeeds
+    });
+    const statSync: StatSyncLike = vi.fn().mockReturnValue({ mtimeMs: Date.now() - 60_000 }); // 60s old, stale
+    const unlinkSync: UnlinkSyncLike = vi.fn();
+    const result = acquireSpawnLock(PORT, STALE_MS, { writeFileSync, statSync, unlinkSync });
+    expect(result.kind).toBe('acquired');
+    expect(unlinkSync).toHaveBeenCalledTimes(1); // stale lock was deleted
+    expect(writeFileSync).toHaveBeenCalledTimes(2); // first failed, second succeeded
+  });
+
+  it('returns skipped when losing the race after stale reclaim', () => {
+    let callCount = 0;
+    const writeFileSync: WriteFileSyncLike = vi.fn().mockImplementation(() => {
+      callCount++;
+      // Both calls fail with EEXIST
+      const err: NodeJS.ErrnoException = new Error('EEXIST');
+      err.code = 'EEXIST';
+      throw err;
+    });
+    const statSync: StatSyncLike = vi.fn().mockReturnValue({ mtimeMs: Date.now() - 60_000 }); // stale
+    const unlinkSync: UnlinkSyncLike = vi.fn();
+    const result = acquireSpawnLock(PORT, STALE_MS, { writeFileSync, statSync, unlinkSync });
+    expect(result.kind).toBe('skipped');
+    if (result.kind === 'skipped') {
+      expect(result.reason).toContain('race');
+    }
+  });
+});
+
+describe('releaseSpawnLock', () => {
+  it('calls unlinkSync with the lock path', () => {
+    const unlinkSync: UnlinkSyncLike = vi.fn();
+    releaseSpawnLock(3100, { unlinkSync });
+    expect(unlinkSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not throw when the lock file is missing (ENOENT)', () => {
+    const unlinkSync: UnlinkSyncLike = vi.fn().mockImplementation(() => {
+      const err: NodeJS.ErrnoException = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    });
+    expect(() => releaseSpawnLock(3100, { unlinkSync })).not.toThrow();
   });
 });
 
@@ -322,6 +420,17 @@ describe('ConnectionState dispatch', () => {
     expect(sentToIde).toHaveLength(0);
   });
 
+  it('returns JSON-RPC error immediately when waiting_for_primary (slow-poll mode)', async () => {
+    // waiting_for_primary means spawn budget spent -- bridge is alive but primary is down.
+    // It should return an error just like reconnecting, not hang.
+    const sentToIde: JSONRPCMessage[] = [];
+    dispatch({ kind: 'waiting_for_primary' }, req, async (m) => { sentToIde.push(m); });
+    await new Promise((r) => setTimeout(r, 0));
+    const resp = sentToIde[0] as { id: number; error: { code: number } };
+    expect(resp.id).toBe(42);
+    expect(resp.error.code).toBe(-32603);
+  });
+
   it('no-ops when closed', () => {
     const sent: JSONRPCMessage[] = [];
     dispatch({ kind: 'closed' }, req);
@@ -354,6 +463,15 @@ describe('t.onclose idempotency', () => {
     expect(loopStartCount).toBe(0);
   });
 
+  it('does not start a loop when in waiting_for_primary (wait loop already running)', () => {
+    // waiting_for_primary means the slow-poll loop is already active.
+    // A second t.onclose should not start a competing loop.
+    let loopStartCount = 0;
+    const onclose = simulateOnClose({ kind: 'waiting_for_primary' }, () => { loopStartCount++; });
+    onclose();
+    expect(loopStartCount).toBe(0);
+  });
+
   it('starts the loop when state is connected (primary died)', () => {
     let loopStartCount = 0;
     const onclose = simulateOnClose(
@@ -362,6 +480,88 @@ describe('t.onclose idempotency', () => {
     );
     onclose();
     expect(loopStartCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orphan detection — bridges exit when primary PID changes
+// ---------------------------------------------------------------------------
+
+describe('orphan detection', () => {
+  /**
+   * Simulate the detect lambda inside startReconnectLoop.
+   * Mirrors the exact logic in bridge-entry.ts so we can unit-test
+   * orphan detection without spinning up a real bridge server.
+   */
+  function simulateDetect(opts: {
+    originalPrimaryPid: number;
+    detectedHealth: HealthResponse | null;
+    performShutdown: () => void;
+  }): boolean {
+    const { originalPrimaryPid, detectedHealth, performShutdown } = opts;
+    if (detectedHealth == null) return false;
+
+    if (originalPrimaryPid > 0 && detectedHealth.pid > 0 && detectedHealth.pid !== originalPrimaryPid) {
+      performShutdown();
+      return false;
+    }
+
+    return true; // would proceed to buildConnectedTransport
+  }
+
+  it('calls performShutdown when primary PID changes', () => {
+    const performShutdown = vi.fn();
+    const result = simulateDetect({
+      originalPrimaryPid: 12345,
+      detectedHealth: { port: 3100, pid: 99999 },
+      performShutdown,
+    });
+    expect(performShutdown).toHaveBeenCalledTimes(1);
+    expect(result).toBe(false);
+  });
+
+  it('does not call performShutdown when primary PID matches', () => {
+    const performShutdown = vi.fn();
+    const result = simulateDetect({
+      originalPrimaryPid: 12345,
+      detectedHealth: { port: 3100, pid: 12345 },
+      performShutdown,
+    });
+    expect(performShutdown).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it('skips orphan check when originalPrimaryPid is 0 (old primary, no pid support)', () => {
+    const performShutdown = vi.fn();
+    const result = simulateDetect({
+      originalPrimaryPid: 0,
+      detectedHealth: { port: 3100, pid: 99999 }, // different PID, but should not trigger
+      performShutdown,
+    });
+    expect(performShutdown).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it('skips orphan check when primary does not return pid (detected pid is 0)', () => {
+    const performShutdown = vi.fn();
+    const result = simulateDetect({
+      originalPrimaryPid: 12345,
+      detectedHealth: { port: 3100, pid: 0 }, // old primary without pid field
+      performShutdown,
+    });
+    expect(performShutdown).not.toHaveBeenCalled();
+    expect(result).toBe(true);
+  });
+
+  it('returns false (not orphan) when detected health is null (primary down)', () => {
+    const performShutdown = vi.fn();
+    const result = simulateDetect({
+      originalPrimaryPid: 12345,
+      detectedHealth: null,
+      performShutdown,
+    });
+    expect(performShutdown).not.toHaveBeenCalled();
+    expect(result).toBe(false);
   });
 });
 
@@ -379,9 +579,12 @@ function dispatch(
       void state.transport.send(msg);
       return;
     case 'connecting':
-    // falls through — same behavior as reconnecting
+    // falls through — same behavior as reconnecting/waiting
     // eslint-disable-next-line no-fallthrough
     case 'reconnecting':
+    // falls through — same behavior as waiting_for_primary
+    // eslint-disable-next-line no-fallthrough
+    case 'waiting_for_primary':
       if ('id' in msg && msg.id != null && sendToIde) {
         void sendToIde({
           jsonrpc: '2.0',
@@ -401,7 +604,11 @@ function simulateOnClose(
 ): () => void {
   // Mirrors the t.onclose logic in startBridgeServer.
   return () => {
-    if (currentState.kind === 'connecting' || currentState.kind === 'reconnecting') return;
+    if (
+      currentState.kind === 'connecting' ||
+      currentState.kind === 'reconnecting' ||
+      currentState.kind === 'waiting_for_primary'
+    ) return;
     startReconnectLoop();
   };
 }

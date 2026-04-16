@@ -33,9 +33,20 @@ export type BridgeEvent =
   | { readonly kind: 'reconnected'; readonly attempt: number }
   | { readonly kind: 'spawn_primary'; readonly port: number }
   | { readonly kind: 'spawn_skipped'; readonly reason: string }
-  | { readonly kind: 'budget_exhausted'; readonly budgetUsed: number }
+  | { readonly kind: 'spawn_lock_acquired'; readonly port: number }
+  | { readonly kind: 'spawn_lock_skipped'; readonly reason: string }
+  | { readonly kind: 'budget_exhausted'; readonly budgetUsed: number; readonly respawnBudget: number }
+  | { readonly kind: 'waiting_for_primary'; readonly port: number }
+  | { readonly kind: 'primary_found_after_wait'; readonly port: number }
   | { readonly kind: 'reconnect_loop_error'; readonly message: string; readonly stack: string | null }
-  | { readonly kind: 'shutdown'; readonly reason: string };
+  | { readonly kind: 'shutdown'; readonly reason: string }
+  /**
+   * Fired when a bridge detects it has outlived its original primary session.
+   * The bridge connected to a primary with PID `expectedPid`, but on reconnect
+   * it found a different primary with PID `actualPid`. The bridge exits cleanly
+   * rather than hijacking the new session.
+   */
+  | { readonly kind: 'orphaned'; readonly expectedPid: number; readonly actualPid: number };
 
 // ---------------------------------------------------------------------------
 // Append
