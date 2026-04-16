@@ -20,6 +20,7 @@ import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
 import type { TriggerDefinition, WebhookEvent } from '../../src/trigger/types.js';
 import { asTriggerId } from '../../src/trigger/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
+import { tmpPath } from '../helpers/platform.js';
 
 // ---------------------------------------------------------------------------
 // Fakes and helpers
@@ -315,7 +316,7 @@ describe('startTriggerListener feature flag', () => {
   it('starts with empty config when triggers.yml is missing', async () => {
     const { fn } = makeFakeRunWorkflow();
     const result = await startTriggerListener(FAKE_CTX, {
-      workspacePath: '/tmp/nonexistent-workspace-xyz',
+      workspacePath: tmpPath('nonexistent-workspace-xyz'),
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
       runWorkflowFn: fn,
