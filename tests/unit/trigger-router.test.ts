@@ -37,6 +37,7 @@ function makeTrigger(overrides: Partial<TriggerDefinition> = {}): TriggerDefinit
     workflowId: 'coding-task-workflow-agentic',
     workspacePath: '/workspace',
     goal: 'Review this MR',
+    concurrencyMode: 'serial',
     ...overrides,
   };
 }
@@ -263,6 +264,91 @@ describe('TriggerRouter.route', () => {
       expect(calls[0]?.workflowId).toBe('mr-review-workflow-agentic');
       expect(calls[0]?.goal).toBe('Review this MR carefully');
       expect(calls[0]?.workspacePath).toBe('/my/workspace');
+    });
+  });
+
+  describe('concurrencyMode', () => {
+    /**
+     * Helper: creates a runWorkflowFn that blocks until the returned release() is called.
+     * Tracks how many calls are currently in-flight (started but not yet released).
+     */
+    function makeLatchedRunWorkflow(): {
+      fn: RunWorkflowFn;
+      inFlight: () => number;
+      releaseAll: () => void;
+    } {
+      let inFlightCount = 0;
+      const releaseFns: Array<() => void> = [];
+
+      const fn: RunWorkflowFn = async (trigger) => {
+        inFlightCount++;
+        await new Promise<void>((resolve) => {
+          releaseFns.push(resolve);
+        });
+        inFlightCount--;
+        return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
+      };
+
+      return {
+        fn,
+        inFlight: () => inFlightCount,
+        releaseAll: () => releaseFns.forEach((r) => r()),
+      };
+    }
+
+    it('serial trigger: second call does not start until first completes (same queue key)', async () => {
+      // Proves the serial ternary: queueKey = trigger.id (not trigger.id:UUID).
+      // If the ternary were inverted to 'parallel', BOTH calls would be in-flight
+      // after the first flush and this test would fail.
+      const trigger = makeTrigger({ concurrencyMode: 'serial' });
+      const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+      // Fire two events without awaiting -- the queue processes them serially.
+      router.route(makeEvent());
+      router.route(makeEvent());
+
+      // Drain the microtask queue so KeyedAsyncQueue has had a chance to start
+      // the first call (and NOT start the second, since they share the same key).
+      await new Promise<void>((r) => setImmediate(r));
+
+      // Only the first call should be in-flight; second is queued, not started.
+      expect(inFlight()).toBe(1);
+
+      // Release the first call and drain again -- second should now start.
+      releaseAll();
+      await new Promise<void>((r) => setImmediate(r));
+      expect(inFlight()).toBe(1); // second call is now running
+
+      // Release the second call and confirm everything completes.
+      releaseAll();
+      await new Promise<void>((r) => setImmediate(r));
+      expect(inFlight()).toBe(0);
+    });
+
+    it('parallel trigger: both calls start simultaneously (different queue keys per invocation)', async () => {
+      // Proves the parallel ternary: queueKey = trigger.id:UUID (unique per fire).
+      // If the ternary were inverted to 'serial', only one call would be in-flight
+      // after the flush and this test would fail.
+      const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+      const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+      // Fire two events without awaiting -- each gets its own queue key, so both
+      // start concurrently without waiting for the other.
+      router.route(makeEvent());
+      router.route(makeEvent());
+
+      // Drain the microtask queue -- both calls should now be in-flight.
+      await new Promise<void>((r) => setImmediate(r));
+
+      // Both calls must be in-flight simultaneously, proving unique queue keys.
+      expect(inFlight()).toBe(2);
+
+      // Release both and confirm completion.
+      releaseAll();
+      await new Promise<void>((r) => setImmediate(r));
+      expect(inFlight()).toBe(0);
     });
   });
 });

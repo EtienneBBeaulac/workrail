@@ -1566,3 +1566,75 @@ triggers:
 **This is the preferred trigger model for external integrations.** Webhooks remain available for high-volume or latency-sensitive use cases, but polling is the default for everything else -- it works behind firewalls, requires no admin access, and fits `worktrain init` naturally (just ask for a token).
 
 **Tradeoff:** up to `pollIntervalSeconds` latency (60s default). Acceptable for MR reviews and most agentic tasks. Not acceptable for real-time chat bots.
+
+**Market research needed before building:**
+Several tools in this space worth evaluating before building from scratch:
+
+- **CodeGraph / Tree-sitter based indexes** -- open source, parse-based symbol graphs. Fast to build, no LLM required, but only structural (no semantic edges).
+- **Sourcegraph** -- enterprise code search + graph. Well-proven at scale. Question: does it expose an API suitable for agent context bundle queries? Overkill for solo/small team.
+- **Microsoft GraphRAG** -- LLM-built knowledge graphs with community detection. Research project, but directly relevant architecture. Slower to build (LLM-driven), richer semantic edges.
+- **Cognee** -- open source knowledge graph + RAG, designed for agent workflows. Active project, worth a close look.
+- **Mem0** -- agent memory layer with graph backend. Simpler than Cognee but less code-specific.
+- **tree-sitter + DuckDB** -- build-it-yourself option: tree-sitter parses symbols + call graph, DuckDB stores and queries. Full control, no external dependency, fits WorkRail's freestanding philosophy.
+
+**Recommended approach:** research Cognee and tree-sitter+DuckDB first. Cognee may already solve 80% of this. If not, tree-sitter+DuckDB is the build path -- it fits the "scripts over agent" principle (the graph is built by a deterministic parser, not by asking an LLM to summarize files).
+
+**WorkRail fits:** the graph is a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph` and `update_knowledge_graph` tools. Workflow steps call those tools instead of running file sweeps. The daemon updates the graph after each session completes (script, not agent).
+
+**Cross-project note:** Storyforge will likely need the same graph layer. Worth building it once in WorkRail and making it available to both -- the node/edge schema is different (code vs narrative) but the architecture (derived layer, provenance, context bundles, session-driven updates) is identical.
+
+---
+
+### Knowledge graph candidate research findings (Apr 15, 2026)
+
+Four discovery subagents evaluated Cognee, GraphRAG, LightRAG, Mem0, Zep, Sourcegraph, LSP, ctags, tree-sitter, ts-morph, and DuckDB. Findings were unanimous.
+
+**Decision: ts-morph + DuckDB. Spike it now.**
+
+**Why the others lost:**
+
+- **Cognee**: Python-only SDK, no TypeScript client, no code-aware indexing primitives. Built for document RAG not code graphs. Watch list only.
+- **GraphRAG / LightRAG**: Use LLMs to build the graph -- violates the "scripts over agent" principle. Non-deterministic output, expensive, no TypeScript client. Skip.
+- **Mem0 / Zep**: Conversational/session memory, not code graphs. Orthogonal problem. Skip for this use case.
+- **Sourcegraph**: Enterprise-scale, heavy Docker infrastructure. Overkill for local daemon use. Skip.
+- **LSP (typescript-language-server)**: Queryable from Node.js but requires managing a separate long-running process with stdio IPC. Correct answers, wrong operational model for a daemon.
+- **universal-ctags**: Definitions only, no call edges or cross-file references. Too shallow.
+- **tree-sitter**: Generic parser, good but requires custom TypeScript-specific traversal logic. ts-morph is strictly better for a TypeScript codebase because it uses the real TypeScript compiler.
+
+**Why ts-morph + DuckDB wins:**
+
+- **ts-morph** wraps the TypeScript Compiler API directly -- it understands TypeScript semantics, types, and scopes, not just syntax. Extracts exports, imports, call sites, class implementations, DI `.bind()` patterns, and CLI registration maps out of the box. Runs in-process, zero external dependencies.
+- **DuckDB** is embedded SQL with recursive CTE support. Graph reachability queries work today with `WITH RECURSIVE`. Fast, local, no server process.
+- Combined: a 1-day spike, not a 2-week project.
+
+**Schema (from subagent):**
+```sql
+nodes  (id, file, name, kind, scope)
+  -- kind: "function" | "class" | "interface" | "constant" | "export" | "di_binding" | "cli_command"
+
+edges  (from_id, to_id, kind, line)
+  -- kind: "calls" | "imports" | "exports" | "registers_in" | "provides"
+
+provenance  (node_id, source_file, source_line, session_id, indexed_at)
+```
+
+**Reachability query example:**
+```sql
+WITH RECURSIVE reachable AS (
+  SELECT id FROM nodes WHERE name = 'executeVersionCommand'
+  UNION ALL
+  SELECT e.to_id FROM edges e JOIN reachable r ON e.from_id = r.id
+)
+SELECT n.* FROM nodes n WHERE n.id IN (SELECT id FROM reachable);
+```
+
+**The spike (what to build first):**
+1. `npm install ts-morph @duckdb/node-api` -- both are available today
+2. Write a 50-line indexer: `project.getSourceFiles()` → walk exports, imports, and call expressions → emit rows to DuckDB nodes/edges tables
+3. Write one MCP tool: `query_knowledge_graph(query: string)` that runs SQL and returns a context bundle
+4. Test it against the WorkRail `src/` directory: can it answer "what imports trigger-router.ts?" and "what CLI commands are registered?"
+
+If the spike answers those two questions correctly, the foundation is proven and we build out incrementally from there.
+
+**Incremental update model (post-spike):**
+After each daemon session completes, run the indexer only on files that appear in the session's `filesChanged` list (from the handoff artifact). Full re-index only on first run or when the schema changes. This is a script the daemon runs post-workflow, not an agent task.
