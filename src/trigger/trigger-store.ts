@@ -629,6 +629,24 @@ function validateAndResolveTrigger(
       return err({ kind: 'missing_field', field: 'source.events (empty)', triggerId: rawId });
     }
 
+    // Warn on unknown event types so operators notice typos at load time.
+    // Unknown events are NOT rejected -- the poller treats them as "match all open MRs"
+    // as a fallback, which is safe but may be surprising.
+    const KNOWN_MR_EVENT_TYPES = new Set([
+      'merge_request.opened',
+      'merge_request.updated',
+      'merge_request.merged',
+      'merge_request.closed',
+    ]);
+    for (const event of events) {
+      if (!KNOWN_MR_EVENT_TYPES.has(event)) {
+        console.warn(
+          `[TriggerStore] Unknown polling event type '${event}' for trigger '${rawId}' -- ` +
+          `will match all open MRs as fallback`,
+        );
+      }
+    }
+
     // Parse pollIntervalSeconds: optional, must be a positive integer, defaults to 60
     const intervalRaw = src.pollIntervalSeconds?.trim();
     let pollIntervalSeconds = 60;

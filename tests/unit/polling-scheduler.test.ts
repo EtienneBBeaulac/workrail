@@ -339,6 +339,64 @@ describe('PollingScheduler WorkflowTrigger context', () => {
 });
 
 // ---------------------------------------------------------------------------
+// setInterval lifecycle: start() / stop() wiring
+// ---------------------------------------------------------------------------
+
+describe('PollingScheduler setInterval lifecycle', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fires doPoll via setInterval after pollIntervalMs and stops cleanly', async () => {
+    vi.useFakeTimers();
+
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router } = makeRouter();
+
+    // Fetch returns empty MRs -- we only care that doPoll is called
+    const fetchFn = makeMRResponse([]);
+
+    const trigger = makePollingTrigger({ pollingSource: {
+      baseUrl: 'https://gitlab.example.com',
+      projectId: '12345',
+      token: 'test-token',
+      events: ['merge_request.opened'],
+      pollIntervalSeconds: 30,
+    }});
+
+    const scheduler = new PollingScheduler([trigger], router, store, fetchFn);
+
+    // Spy on doPoll before start() so we capture the wired calls
+    const doPollSpy = vi.spyOn(
+      scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> },
+      'doPoll',
+    );
+
+    scheduler.start();
+
+    // Advance past one full interval (30s + 1ms); the first poll (setTimeout 5s)
+    // also fires within this window.
+    await vi.advanceTimersByTimeAsync(30_001);
+
+    // doPoll should have been called at least once (interval tick + possibly first-poll timeout)
+    expect(doPollSpy).toHaveBeenCalled();
+    const callCountAfterStart = doPollSpy.mock.calls.length;
+
+    // Stop the scheduler and reset the spy call count
+    scheduler.stop();
+    doPollSpy.mockClear();
+
+    // Advance well beyond another interval -- no further calls should fire
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(doPollSpy).not.toHaveBeenCalled();
+    // Confirm at least one call was observed before stop
+    expect(callCountAfterStart).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Skip-cycle guard
 // ---------------------------------------------------------------------------
 

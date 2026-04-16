@@ -197,11 +197,29 @@ export class PolledEventStore {
 
     const serialized = JSON.stringify({ processedIds: pruned, lastPollAt: state.lastPollAt }, null, 2);
 
-    // Atomic write: write to tmp, then rename
+    // Atomic write: write to tmp, fsync(file), rename, fsync(dir)
+    // This matches the session-store pattern: if power fails mid-write the tmp
+    // file is incomplete but the target file is still intact (or fully updated).
     const tmpPath = `${filePath}.${randomUUID()}.tmp`;
     try {
       await fs.writeFile(tmpPath, serialized, 'utf8');
+      // fsync the tmp file before rename so the data is durable on disk.
+      // Without this, a power failure after rename could leave an empty or
+      // partial file in place of the successfully-named target (Linux ext4 issue).
+      const fh = await fs.open(tmpPath, 'r+');
+      try {
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
       await fs.rename(tmpPath, filePath);
+      // fsync the directory so the rename (directory entry update) is durable.
+      const dirFh = await fs.open(dir, 'r');
+      try {
+        await dirFh.sync();
+      } finally {
+        await dirFh.close();
+      }
       return ok(undefined);
     } catch (e) {
       // Clean up tmp file if it exists
