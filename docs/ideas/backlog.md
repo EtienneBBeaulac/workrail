@@ -1638,3 +1638,94 @@ If the spike answers those two questions correctly, the foundation is proven and
 
 **Incremental update model (post-spike):**
 After each daemon session completes, run the indexer only on files that appear in the session's `filesChanged` list (from the handoff artifact). Full re-index only on first run or when the schema changes. This is a script the daemon runs post-workflow, not an agent task.
+
+---
+
+### Live queue grooming: real-time queue updates without polling latency (Apr 15, 2026)
+
+**The problem with polling-only:** the queue is as fresh as the last poll cycle. A critical bug filed in Jira might not appear in the queue for 5 minutes. A deadline that just moved to tomorrow might not re-prioritize for an hour. The work queue should feel live -- changes in external systems should surface in the queue within seconds, not minutes.
+
+**Two mechanisms for live updates:**
+
+**1. Push sources (webhooks from external systems)**
+When an external system supports webhooks, WorkTrain should register a receiver and process events immediately -- no polling lag.
+
+```yaml
+workspaces:
+  workrail:
+    queue:
+      sources:
+        - type: github_issues
+          integration: github
+          mode: push              # vs poll -- receives webhook, processes immediately
+          webhookSecret: $GITHUB_WEBHOOK_SECRET
+          filter:
+            labels: ['worktrain-queue']
+
+        - type: jira
+          integration: jira
+          mode: push              # Jira webhook on issue create/update/transition
+          webhookSecret: $JIRA_WEBHOOK_SECRET
+          filter:
+            project: ENG
+```
+
+A new GitHub issue labeled `worktrain-queue` fires a webhook → WorkTrain adds it to the queue within milliseconds. A Jira ticket assigned to WorkTrain → in the queue before the assignee closes the tab.
+
+**2. The message queue as live input**
+`worktrain tell "add X to the queue"` is already instantaneous -- it appends to `message-queue.jsonl` which the daemon drains between sessions. This is the live grooming path for manual items. It's also how you reorder, prioritize, remove, or modify queue items in real time:
+
+```bash
+worktrain tell "move the GitHub polling adapter to the top of the queue"
+worktrain tell "remove the documentation update task -- no longer needed"
+worktrain tell "bump the maxConcurrentSessions task to high priority, we need it for the demo"
+```
+
+The daemon's coordinator loop reads these messages, interprets them as queue operations, and applies them immediately.
+
+**3. Live re-prioritization via deadline watcher**
+The deadline context refresh (already spec'd) runs every hour. For live grooming, the deadline watcher should also subscribe to calendar/milestone change events via webhook where available:
+- GitHub milestone due date changed → immediate re-prioritization
+- Jira sprint end date changed → immediate re-scoring
+- Google Calendar event added/moved → immediate re-scoring
+
+**The live queue architecture:**
+
+```
+External events (webhooks) ──→ POST /webhook/queue-push
+                                │
+                                ▼
+                          QueueEventProcessor
+                                │
+                          ┌─────┴──────┐
+                          │            │
+                    Add to queue   Re-prioritize
+                    immediately    affected items
+                          │            │
+                          └─────┬──────┘
+                                ▼
+                          queue.jsonl updated
+                                │
+                                ▼
+                    Console Queue tab refreshes (SSE)
+                    Coordinator picks up next item
+```
+
+**The queue tab in the console is live:**
+The console Queue tab streams updates via SSE (same pattern as the live session badge already implemented). When a new item is added via webhook or message queue, it appears in the tab within milliseconds -- no page refresh needed. When re-prioritization happens, items smoothly reorder. This is the always-on view of what WorkTrain is working on and what's coming next.
+
+**Grooming operations the live queue supports:**
+
+| Operation | How |
+|-----------|-----|
+| Add item | `worktrain tell`, webhook, `worktrain enqueue` |
+| Remove item | `worktrain tell "remove X"`, `worktrain queue remove <id>` |
+| Reprioritize | `worktrain tell "prioritize X"`, deadline watcher, manual drag in console |
+| Pause item | `worktrain queue pause <id>` -- holds in place, not worked until resumed |
+| Block item | System-set when dependencies not met (auto-resolves when deps complete) |
+| Split item | `worktrain tell "split X into smaller tasks"` → runs decomposition workflow |
+| Merge items | `worktrain tell "X and Y are the same thing, merge them"` |
+| Add context | `worktrain tell "for X, the BRD is at <url>"` → attaches to queue item |
+
+**Why this changes the interaction model:**
+With polling-only queues, you have to trust that WorkTrain will eventually see the work. With live queuing, WorkTrain is always current. You file a critical bug at 11pm, the webhook fires, it's at the top of the queue, and WorkTrain starts investigating within seconds. You push a doc link into `worktrain tell`, the queue item gets the context immediately. The queue feels like a shared workspace, not a batch job.
