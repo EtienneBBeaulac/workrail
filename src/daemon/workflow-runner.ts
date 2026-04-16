@@ -107,36 +107,12 @@ const WORKSPACE_CONTEXT_CANDIDATE_PATHS = [
   '.github/AGENTS.md',
 ] as const;
 
-/**
- * Default content for the agent rules section when no daemon-soul.md exists.
- * WHY: Provides sensible baseline behavior for any codebase without requiring
- * the operator to create a soul file on first run.
- */
-export const DAEMON_SOUL_DEFAULT = `\
-- Write code that follows the patterns already established in the codebase
-- Never skip tests. Run existing tests before and after changes
-- Prefer small, focused changes over large rewrites
-- If a step asks you to write code, write actual code -- do not write pseudocode or placeholders
-- Commit your work when you complete a logical unit`;
-
-/**
- * Template written to ~/.workrail/daemon-soul.md on first run.
- * WHY: Gives operators a documented starting point for customizing agent behavior.
- * The file is created once and then read on every subsequent daemon session.
- */
-const DAEMON_SOUL_TEMPLATE = `\
-# WorkRail Daemon Soul
-#
-# This file is injected into every WorkRail Auto daemon session system prompt under
-# "## Agent Rules and Philosophy". Edit it to customize the agent's behavior for
-# your environment: coding conventions, commit style, tool preferences, etc.
-#
-# Changes take effect on the next daemon session -- no restart required.
-#
-# The defaults below reflect general best practices. Override them freely.
-
-${DAEMON_SOUL_DEFAULT}
-`;
+// WHY: Soul content is defined in soul-template.ts (zero imports) so the CLI
+// init command can import the template without pulling in this module's heavy
+// dependency graph (LLM agent SDK). workflow-runner.ts re-exports both symbols
+// for backward compatibility with callers that already import this module.
+import { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
+export { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
 
 // ---------------------------------------------------------------------------
 // Public types
