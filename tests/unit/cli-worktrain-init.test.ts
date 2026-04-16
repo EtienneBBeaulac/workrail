@@ -1,5 +1,5 @@
 /**
- * Unit tests for executeWorktainInitCommand
+ * Unit tests for executeWorktrainInitCommand
  *
  * Uses fake deps (pre-canned answers array, in-memory file system state).
  * No vi.mock() -- follows repo pattern of "prefer fakes over mocks".
@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'node:path';
 import {
-  executeWorktainInitCommand,
+  executeWorktrainInitCommand,
   type WorktrainInitCommandDeps,
   type WorktrainInitCommandOpts,
 } from '../../src/cli/commands/worktrain-init.js';
@@ -56,6 +56,7 @@ function makeTestDeps(
       return fsState.existingPaths.has(checkPath);
     },
     homedir: () => '/home/testuser',
+    cwd: () => '/fake/cwd',
     joinPath: path.join,
     runSmoke: async () => ({ ok: true, output: 'my-workflow (1.0.0)' }),
     print: () => undefined,
@@ -68,7 +69,7 @@ function makeTestDeps(
 // TESTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('executeWorktainInitCommand', () => {
+describe('executeWorktrainInitCommand', () => {
   let fsState: FakeFsState;
 
   beforeEach(() => {
@@ -87,7 +88,7 @@ describe('executeWorktainInitCommand', () => {
       '',                           // SCM token: Enter = skip
     ];
     const deps = makeTestDeps(answers, fsState);
-    const result = await executeWorktainInitCommand(deps);
+    const result = await executeWorktrainInitCommand(deps);
 
     expect(result.kind).toBe('success');
   });
@@ -95,7 +96,7 @@ describe('executeWorktainInitCommand', () => {
   it('full happy path: writes config.json with WORKRAIL_DEFAULT_WORKSPACE', async () => {
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState);
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const configPath = path.join('/home/testuser', '.workrail', 'config.json');
     const configContent = fsState.files.get(configPath);
@@ -108,7 +109,7 @@ describe('executeWorktainInitCommand', () => {
   it('full happy path: writes daemon-soul.md with correct content', async () => {
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState);
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const soulPath = path.join('/home/testuser', '.workrail', 'daemon-soul.md');
     const soulContent = fsState.files.get(soulPath);
@@ -118,7 +119,7 @@ describe('executeWorktainInitCommand', () => {
   it('full happy path: writes triggers.yml in workspace', async () => {
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState);
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const triggersPath = path.join('/home/testuser/my-repo', 'triggers.yml');
     const triggersContent = fsState.files.get(triggersPath);
@@ -139,7 +140,7 @@ describe('executeWorktainInitCommand', () => {
       { print: (l) => printed.push(l) },
       { AWS_PROFILE: 'my-sso-profile' },
     );
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const credLine = printed.find((l) => l.includes('Bedrock credentials detected'));
     expect(credLine).toBeDefined();
@@ -154,7 +155,7 @@ describe('executeWorktainInitCommand', () => {
       { print: (l) => printed.push(l) },
       { ANTHROPIC_API_KEY: 'sk-ant-test' },
     );
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const credLine = printed.find((l) => l.includes('Anthropic API key detected'));
     expect(credLine).toBeDefined();
@@ -168,7 +169,7 @@ describe('executeWorktainInitCommand', () => {
       '',
     ];
     const deps = makeTestDeps(answers, fsState, { print: (l) => printed.push(l) });
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const bedrockLine = printed.find((l) => l.includes('AWS_PROFILE'));
     expect(bedrockLine).toBeDefined();
@@ -178,7 +179,7 @@ describe('executeWorktainInitCommand', () => {
     const printed: string[] = [];
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState, { print: (l) => printed.push(l) });
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const anthropicLine = printed.find((l) => l.includes('ANTHROPIC_API_KEY'));
     expect(anthropicLine).toBeDefined();
@@ -194,25 +195,27 @@ describe('executeWorktainInitCommand', () => {
       { prompt: async () => { promptCalled = true; return ''; } },
     );
     const opts: WorktrainInitCommandOpts = { yes: true };
-    const result = await executeWorktainInitCommand(deps, opts);
+    const result = await executeWorktrainInitCommand(deps, opts);
 
     expect(result.kind).toBe('success');
     expect(promptCalled).toBe(false);
   });
 
-  it('--yes mode: writes config.json with homedir as workspace', async () => {
+  it('--yes mode: writes config.json with process.cwd() as workspace', async () => {
     const deps = makeTestDeps([], fsState, {}, {});
-    await executeWorktainInitCommand(deps, { yes: true });
+    await executeWorktrainInitCommand(deps, { yes: true });
 
     const configPath = path.join('/home/testuser', '.workrail', 'config.json');
     const config = JSON.parse(fsState.files.get(configPath) ?? '{}') as Record<string, unknown>;
-    expect(typeof config['WORKRAIL_DEFAULT_WORKSPACE']).toBe('string');
+    // Default workspace in --yes mode must be cwd (not homedir) so triggers.yml
+    // lands in the project root, not the user's home directory.
+    expect(config['WORKRAIL_DEFAULT_WORKSPACE']).toBe('/fake/cwd');
   });
 
   it('--yes mode: skips SCM token section', async () => {
     const printed: string[] = [];
     const deps = makeTestDeps([], fsState, { print: (l) => printed.push(l) });
-    await executeWorktainInitCommand(deps, { yes: true });
+    await executeWorktrainInitCommand(deps, { yes: true });
 
     const scmLine = printed.find((l) => l.includes('SCM token setup skipped'));
     expect(scmLine).toBeDefined();
@@ -228,7 +231,7 @@ describe('executeWorktainInitCommand', () => {
     const printed: string[] = [];
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState, { print: (l) => printed.push(l) });
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     // Confirm the file was NOT overwritten
     expect(fsState.files.get(soulPath)).toBe('# custom soul');
@@ -244,7 +247,7 @@ describe('executeWorktainInitCommand', () => {
     const printed: string[] = [];
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState, { print: (l) => printed.push(l) });
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     // Confirm the file was NOT overwritten
     expect(fsState.files.get(triggersPath)).toBe('# existing triggers');
@@ -257,7 +260,7 @@ describe('executeWorktainInitCommand', () => {
 
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState);
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const merged = JSON.parse(fsState.files.get(configPath) ?? '{}') as Record<string, unknown>;
     expect(merged['CACHE_TTL']).toBe('0');
@@ -275,7 +278,7 @@ describe('executeWorktainInitCommand', () => {
       fsState,
       { print: (l) => printed.push(l) },
     );
-    const result = await executeWorktainInitCommand(deps);
+    const result = await executeWorktrainInitCommand(deps);
 
     expect(result.kind).toBe('success');
     const warningLine = printed.find((l) => l.includes('Directory not found'));
@@ -295,7 +298,7 @@ describe('executeWorktainInitCommand', () => {
         runSmoke: async () => ({ ok: true, output: 'workflow-1 (1.0.0)\nworkflow-2 (2.0.0)' }),
       },
     );
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const smokeLine = printed.find((l) => l.includes('workrail list succeeded'));
     expect(smokeLine).toBeDefined();
@@ -310,7 +313,7 @@ describe('executeWorktainInitCommand', () => {
         runSmoke: async () => ({ ok: false, output: 'workrail: command not found' }),
       },
     );
-    const result = await executeWorktainInitCommand(deps);
+    const result = await executeWorktrainInitCommand(deps);
 
     // Smoke test failure is a warning, not a fatal error
     expect(result.kind).toBe('success');
@@ -326,7 +329,7 @@ describe('executeWorktainInitCommand', () => {
       'ghp_test_token_12345',                       // SCM token
     ];
     const deps = makeTestDeps(answers, fsState, { print: (l) => printed.push(l) });
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const tokenLine = printed.find((l) => l.includes('GITHUB_TOKEN=ghp_test_token_12345'));
     expect(tokenLine).toBeDefined();
@@ -346,7 +349,7 @@ describe('executeWorktainInitCommand', () => {
       { print: (l) => printed.push(l) },
       { GITHUB_TOKEN: 'existing-token' },
     );
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const skipLine = printed.find((l) => l.includes('GITHUB_TOKEN already set'));
     expect(skipLine).toBeDefined();
@@ -367,7 +370,7 @@ describe('executeWorktainInitCommand', () => {
         },
       },
     );
-    const result = await executeWorktainInitCommand(deps);
+    const result = await executeWorktrainInitCommand(deps);
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -380,7 +383,7 @@ describe('executeWorktainInitCommand', () => {
   it('triggers.yml template uses provider: generic and has all required fields', async () => {
     const answers = ['2', '/home/testuser/my-repo', ''];
     const deps = makeTestDeps(answers, fsState);
-    await executeWorktainInitCommand(deps);
+    await executeWorktrainInitCommand(deps);
 
     const triggersPath = path.join('/home/testuser/my-repo', 'triggers.yml');
     const content = fsState.files.get(triggersPath)!;

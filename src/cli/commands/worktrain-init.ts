@@ -42,6 +42,8 @@ export interface WorktrainInitCommandDeps {
   readonly exists: (path: string) => Promise<boolean>;
   /** Return the user's home directory. */
   readonly homedir: () => string;
+  /** Return the current working directory. Used as the default workspace in --yes mode. */
+  readonly cwd: () => string;
   /** Join path segments (same semantics as node:path join). */
   readonly joinPath: (...paths: string[]) => string;
   /** Run the workrail binary and return stdout + success flag. */
@@ -224,7 +226,9 @@ async function runWorkspaceSection(
 
   let workspacePath: string;
   if (opts.yes) {
-    workspacePath = deps.homedir();
+    // Default to cwd (the repo root) rather than homedir -- most users run this
+    // from inside their project directory and don't want triggers.yml in ~.
+    workspacePath = deps.cwd();
     deps.print(`  Using default workspace: ${workspacePath} (--yes mode)`);
   } else {
     deps.print('');
@@ -367,8 +371,7 @@ async function runTriggersSection(
     };
   }
 
-  const effectivePath = opts.yes ? workspacePath : workspacePath;
-  const content = buildTriggersYml(effectivePath);
+  const content = buildTriggersYml(workspacePath);
 
   try {
     // Workspace directory may not exist yet (user was warned above)
@@ -452,7 +455,7 @@ async function runSmokeSection(
  * Returns CliResult success if the flow completes (even if some sections have warnings).
  * Returns CliResult failure only for unrecoverable errors (e.g., config write failure).
  */
-export async function executeWorktainInitCommand(
+export async function executeWorktrainInitCommand(
   deps: WorktrainInitCommandDeps,
   opts: WorktrainInitCommandOpts = {},
 ): Promise<CliResult> {
@@ -497,19 +500,15 @@ export async function executeWorktainInitCommand(
   deps.print('[ 4/6 ] triggers.yml');
   const triggersResult = await runTriggersSection(deps, opts, workspacePath);
   printSectionResult(deps, triggersResult);
-  if (triggersResult.kind === 'error') {
-    // Non-fatal: warn but continue
-    deps.print(`  Warning: ${triggersResult.message}`);
-  }
+  // printSectionResult already prints the error message for kind: 'error' -- no extra print needed.
+  // Execution continues regardless (triggers.yml failure is non-fatal).
 
   // Section 5: daemon-soul.md
   deps.print('[ 5/6 ] daemon-soul.md');
   const soulResult = await runDaemonSoulSection(deps);
   printSectionResult(deps, soulResult);
-  if (soulResult.kind === 'error') {
-    // Non-fatal: warn but continue
-    deps.print(`  Warning: ${soulResult.message}`);
-  }
+  // printSectionResult already prints the error message for kind: 'error' -- no extra print needed.
+  // Execution continues regardless (daemon-soul.md failure is non-fatal).
 
   // Section 6: Smoke test
   deps.print('[ 6/6 ] Smoke test');

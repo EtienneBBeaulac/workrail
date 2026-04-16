@@ -25,7 +25,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
-import { executeWorktainInitCommand } from './cli/commands/index.js';
+import { executeWorktrainInitCommand } from './cli/commands/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -60,7 +60,7 @@ program
     const rl = createInterface({ input, output, terminal: true });
 
     try {
-      const result = await executeWorktainInitCommand(
+      const result = await executeWorktrainInitCommand(
         {
           prompt: async (question: string, defaultValue?: string): Promise<string> => {
             if (options.yes) {
@@ -81,6 +81,7 @@ program
             }
           },
           homedir: os.homedir,
+          cwd: process.cwd,
           joinPath: path.join,
           runSmoke: async () => {
             try {
