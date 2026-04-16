@@ -1200,3 +1200,28 @@ Concurrent session serialization. Prerequisite for daemon safety. Prevents token
 **Auto-inject `AGENTS.md` / `CLAUDE.md`** -- daemon scans `workspacePath` for `.claude/CLAUDE.md`, `CLAUDE.md`, `AGENTS.md`, `.github/AGENTS.md` (in priority order) and injects into system prompt under `## Workspace Context`. Combined 32KB limit, truncated with notice if over. Enables the daemon to adapt to different repos' coding standards and conventions automatically -- same as how Claude Code uses these files.
 
 **Daemon calls `start_workflow` directly** -- removes the "Call the start_workflow tool now" LLM indirection. Daemon calls `executeStartWorkflow()` directly, gets step 1, passes it as the initial prompt. More reliable, cheaper (one fewer LLM turn), and the agent starts working immediately instead of being told to call a tool.
+
+---
+
+### WorkTrain onboarding: `worktrain init` guided setup (high priority, post-MVP)
+
+**Goal:** A guided CLI onboarding that sets up everything WorkTrain needs to work well, asked once, never asked again.
+
+**What it configures (in order):**
+
+1. **LLM provider** -- Bedrock (AWS SSO profile) or direct Anthropic API key. Validates the credentials actually work before proceeding.
+2. **Workspace** -- default workspacePath for daemon sessions. Offer to auto-detect from git repos in common locations.
+3. **Daemon soul** -- create `~/.workrail/daemon-soul.md` interactively. Ask: "What language/framework does your main project use? Any coding conventions the agent should follow? Commit style?" Write the soul file from answers.
+4. **Trigger configuration** -- set up the first trigger. Ask: what workflow? (list available) what webhook source? (GitHub/GitLab/Jira/manual) Configure `triggers.yml`.
+5. **Common-Ground** -- if detected, offer to sync the team's AGENTS.md and workflows.
+6. **Notification** -- optional Slack/Telegram webhook for session completion/failure notifications.
+7. **Verification** -- fire a smoke-test workflow (cheap, non-destructive) to confirm end-to-end works. Show the result.
+
+**Design principles:**
+- Skip sections that are already configured (idempotent)
+- `--reconfigure <section>` to re-run a specific section
+- All answers stored in `~/.workrail/config.json` (already exists) + `daemon-soul.md` + `triggers.yml`
+- Should complete in under 5 minutes for a typical setup
+- The soul questionnaire is the most important part -- a well-written soul dramatically improves output quality
+
+**Longer term:** A WorkTrain hosted onboarding that teams can share via a URL (`worktrain init --from https://worktrain.io/teams/mercury-mobile`) -- imports team-specific soul, triggers, and workflow config in one command.
