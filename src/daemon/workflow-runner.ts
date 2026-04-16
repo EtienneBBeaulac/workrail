@@ -803,6 +803,7 @@ function makeContinueWorkflowTool(
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      console.log(`[WorkflowRunner] Tool: continue_workflow sessionId=${sessionId}`);
       const result = await executeContinueWorkflow(
         {
           continueToken: params.continueToken,
@@ -869,6 +870,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
       const cwd = params.cwd ?? workspacePath;
       try {
         const { stdout, stderr } = await execAsync(params.command, {
@@ -1369,6 +1371,7 @@ export async function runWorkflow(
         reject(new Error('Workflow timed out'));
       }, sessionTimeoutMs);
     });
+    console.log(`[WorkflowRunner] Agent loop started: sessionId=${sessionId} workflowId=${trigger.workflowId} modelId=${modelId}`);
     await Promise.race([agent.prompt(buildUserMessage(initialPrompt)), timeoutPromise])
       .catch((err: unknown) => {
         agent.abort();
@@ -1398,6 +1401,7 @@ export async function runWorkflow(
     // and mutate the closed-over timeoutReason variable. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
   }
 
   // ---- Timeout result (wall-clock or max-turn limit) ----
