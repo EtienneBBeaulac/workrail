@@ -65,6 +65,15 @@ const WORKFLOW_TIMEOUT_MS = 30 * 60 * 1000;
 export const DAEMON_SESSIONS_DIR = path.join(os.homedir(), '.workrail', 'daemon-sessions');
 
 /**
+ * Maximum age for an orphaned session file before it is treated as definitely stale.
+ *
+ * Sessions older than this threshold are cleared immediately during startup recovery
+ * without additional checks. Tokens from a 2h+ old crash are expired in all realistic
+ * configurations -- retaining them is noise.
+ */
+const MAX_ORPHAN_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+/**
  * Root directory for WorkRail user data (crash recovery, soul file, etc.).
  * WHY: daemon-soul.md lives alongside daemon-sessions/ in ~/.workrail/, not in
  * the data/ subdirectory controlled by WORKRAIL_DATA_DIR. This is consistent with
@@ -174,6 +183,25 @@ export interface WorkflowRunError {
 /** Result of a runWorkflow() call. Never throws. */
 export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError;
 
+/**
+ * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
+ *
+ * Each active runWorkflow() call writes a per-session file to DAEMON_SESSIONS_DIR.
+ * A file that survives daemon restart is an orphan: the session that created it
+ * did not complete cleanly (crash or kill). readAllDaemonSessions() surfaces these
+ * so runStartupRecovery() can log and clear them.
+ */
+export interface OrphanedSession {
+  /** The process-local UUID that was used to key the session file. */
+  readonly sessionId: string;
+  /** The last persisted continueToken for this session. */
+  readonly continueToken: string;
+  /** The last persisted checkpointToken (null if none was written). */
+  readonly checkpointToken: string | null;
+  /** Unix timestamp (ms) when the token was last written. Used for staleness checks. */
+  readonly ts: number;
+}
+
 // ---------------------------------------------------------------------------
 // Token persistence (crash safety)
 // ---------------------------------------------------------------------------
@@ -219,6 +247,176 @@ export async function readDaemonSessionState(
   } catch {
     // ENOENT or parse error -- treat as no persisted state
     return null;
+  }
+}
+
+/**
+ * Read all orphaned session files from ~/.workrail/daemon-sessions/.
+ *
+ * Returns an array of valid, parseable session entries. Corrupt files (JSON parse
+ * errors, missing required fields) are skipped and logged -- they will be cleared
+ * by runStartupRecovery() via a separate readdir pass.
+ *
+ * Returns an empty array if the directory does not exist (ENOENT on first run) or
+ * if no valid session files are found. Never throws.
+ *
+ * WHY exported: called by runStartupRecovery() and testable in isolation without
+ * starting the full daemon listener.
+ *
+ * @param sessionsDir - Optional override for the sessions directory. Defaults to
+ *   DAEMON_SESSIONS_DIR. Pass a temp dir in tests to avoid touching real state.
+ */
+export async function readAllDaemonSessions(
+  sessionsDir: string = DAEMON_SESSIONS_DIR,
+): Promise<OrphanedSession[]> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch (err: unknown) {
+    const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+    if (!isEnoent) {
+      console.warn(
+        `[WorkflowRunner] Could not read sessions directory ${sessionsDir}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return [];
+  }
+
+  const sessions: OrphanedSession[] = [];
+
+  for (const entry of entries) {
+    // Only consider complete session files. Temp files are named <sessionId>.json.tmp
+    // (i.e. they end with .tmp, not .json) -- the endsWith('.json') check already
+    // excludes them. The belt-and-suspenders check keeps this robust to naming changes.
+    if (!entry.endsWith('.json')) continue;
+
+    const sessionId = entry.slice(0, -5); // strip .json
+    const filePath = path.join(sessionsDir, entry);
+
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const parsed = JSON.parse(raw) as {
+        continueToken?: unknown;
+        checkpointToken?: unknown;
+        ts?: unknown;
+      };
+
+      if (typeof parsed.continueToken !== 'string' || typeof parsed.ts !== 'number') {
+        console.warn(`[WorkflowRunner] Skipping malformed session file: ${filePath}`);
+        continue;
+      }
+
+      sessions.push({
+        sessionId,
+        continueToken: parsed.continueToken,
+        checkpointToken: typeof parsed.checkpointToken === 'string' ? parsed.checkpointToken : null,
+        ts: parsed.ts,
+      });
+    } catch (err: unknown) {
+      console.warn(
+        `[WorkflowRunner] Skipping unreadable session file ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  return sessions;
+}
+
+/**
+ * Scan DAEMON_SESSIONS_DIR for orphaned session files and clear them.
+ *
+ * Called once during daemon startup, before the HTTP server begins accepting
+ * webhook requests. This ensures no new workflow triggers arrive while recovery
+ * is in progress.
+ *
+ * WHY this function and not a rehydrate call: clearing orphans satisfies the
+ * crash recovery invariant (abandoned sessions do not persist indefinitely).
+ * Calling executeContinueWorkflow({ intent: 'rehydrate' }) would only add a
+ * 'token valid vs. expired' log distinction while requiring a V2ToolContext
+ * dependency and risking transient engine startup errors. Clear-regardless-of-result
+ * is the correct MVP behavior.
+ *
+ * KNOWN LIMITATION: a planned deployment restart clears in-flight sessions just as
+ * a crash does. Distinguishing crash from planned restart requires out-of-band
+ * state (e.g. a shutdown token written on clean stop). Not implemented at MVP.
+ *
+ * Non-fatal: any error during recovery is caught and logged. The daemon starts
+ * regardless of whether recovery succeeds.
+ *
+ * @param sessionsDir - Optional override for the sessions directory. Defaults to
+ *   DAEMON_SESSIONS_DIR. Pass a temp dir in tests to avoid touching real state.
+ */
+export async function runStartupRecovery(
+  sessionsDir: string = DAEMON_SESSIONS_DIR,
+): Promise<void> {
+  // Read all parseable session files.
+  const sessions = await readAllDaemonSessions(sessionsDir);
+
+  if (sessions.length === 0) {
+    // Also attempt to clear any stray .tmp files left from a crash mid-write.
+    await clearStrayTmpFiles(sessionsDir);
+    return;
+  }
+
+  console.log(`[WorkflowRunner] Startup recovery: found ${sessions.length} orphaned session(s).`);
+
+  const now = Date.now();
+  let cleared = 0;
+
+  for (const session of sessions) {
+    const ageMs = now - session.ts;
+    const isStale = ageMs > MAX_ORPHAN_AGE_MS;
+    const ageSec = Math.round(ageMs / 1000);
+
+    const label = isStale ? 'stale orphaned session' : 'orphaned session';
+    console.log(
+      `[WorkflowRunner] Clearing ${label}: sessionId=${session.sessionId} age=${ageSec}s`,
+    );
+
+    try {
+      await fs.unlink(path.join(sessionsDir, `${session.sessionId}.json`));
+      cleared++;
+    } catch (err: unknown) {
+      // Best-effort: ENOENT means already gone, any other error is logged.
+      const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+      if (!isEnoent) {
+        console.warn(
+          `[WorkflowRunner] Could not clear session file ${session.sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  // Also clear any stray .tmp files left from a crash mid-write.
+  await clearStrayTmpFiles(sessionsDir);
+
+  console.log(`[WorkflowRunner] Startup recovery complete: cleared ${cleared}/${sessions.length} orphaned session(s).`);
+}
+
+/**
+ * Best-effort cleanup of stray .tmp files in the sessions directory.
+ *
+ * These are written by persistTokens() as part of the atomic temp-rename pattern.
+ * If the daemon crashes between writeFile(tmp) and rename(tmp, final), the .tmp
+ * file is orphaned. It holds no useful state (the rename never completed), so we
+ * discard it unconditionally.
+ */
+async function clearStrayTmpFiles(sessionsDir: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch {
+    return; // ENOENT or permission error -- nothing to clean up
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith('.tmp')) continue;
+    try {
+      await fs.unlink(path.join(sessionsDir, entry));
+      console.log(`[WorkflowRunner] Cleared stray temp file: ${entry}`);
+    } catch {
+      // Best-effort -- ignore all errors
+    }
   }
 }
 
