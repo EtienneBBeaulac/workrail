@@ -7,7 +7,7 @@
 
 import { composeServer } from '../server.js';
 import { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } from './shutdown-hooks.js';
-import { registerFatalHandlers, logStartup } from './fatal-exit.js';
+import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
 
 const INITIAL_ROOTS_TIMEOUT_MS = 1000;
 
@@ -34,6 +34,12 @@ export async function startStdioServer(): Promise<void> {
   logStartup('stdio');
 
   const { server, ctx, rootsManager } = await composeServer();
+
+  // Register graceful shutdown so that fatalExit() stops the HTTP server cleanly
+  // before calling process.exit(1). The 3s timeout gives the HTTP server a real
+  // opportunity to close open connections while guaranteeing the process exits.
+  // Bridge processes do not register — they have their own performShutdown() path.
+  registerGracefulShutdown(async () => { await ctx.httpServer?.stop(); });
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const {

@@ -14,7 +14,7 @@
 import { composeServer } from '../server.js';
 import { bindWithPortFallback } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
-import { registerFatalHandlers, logStartup } from './fatal-exit.js';
+import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
@@ -34,6 +34,15 @@ export async function startHttpServer(port: number): Promise<void> {
   // policy lives here at the transport entry point where it belongs.
   const scanEnd = Math.max(port, HTTP_PORT_SCAN_END);
   const listener = await bindWithPortFallback(port, scanEnd);
+
+  // Register graceful shutdown so that fatalExit() stops the HTTP servers cleanly
+  // before calling process.exit(1). Stops both the MCP HTTP listener and the
+  // dashboard HTTP server. The 3s timeout guarantees exit within a bounded window.
+  // Bridge processes do not register — they have their own performShutdown() path.
+  registerGracefulShutdown(async () => {
+    await listener.stop();
+    await ctx.httpServer?.stop();
+  });
 
   const { StreamableHTTPServerTransport } = await import(
     '@modelcontextprotocol/sdk/server/streamableHttp.js'

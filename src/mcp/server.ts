@@ -434,37 +434,64 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   // Register CallTool handler.
   // Snapshots workspace root URIs once at the request boundary so handlers
   // receive deterministic, immutable input for their duration.
+  //
+  // The outer try/catch is a last-resort boundary: any exception that escapes
+  // withToolCallTiming() or createHandler()'s inner catch (e.g. an exception
+  // thrown inside the timing sink itself, or a handler registered without
+  // createHandler()) is caught here and returned as an INTERNAL_ERROR response
+  // rather than becoming an unhandled promise rejection that kills the process.
+  // "Errors are data" / "validate at boundaries" — this is the outermost seam.
   server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<any> => {
-    const { name, arguments: args } = request.params;
-    // Capture start time at the very top so unknown-tool elapsed time is accurate.
-    const handlerStartMs = Date.now();
-    const handlerStartHr = performance.now();
+    try {
+      const { name, arguments: args } = request.params;
+      // Capture start time at the very top so unknown-tool elapsed time is accurate.
+      const handlerStartMs = Date.now();
+      const handlerStartHr = performance.now();
 
-    const handler = handlers[name];
-    if (!handler) {
-      // Record unknown tool as a timing observation so gaps are visible in perf data
-      const unknownResult = {
-        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+      const handler = handlers[name];
+      if (!handler) {
+        // Record unknown tool as a timing observation so gaps are visible in perf data
+        const unknownResult = {
+          content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+          isError: true,
+        };
+        const durationMs = Math.round((performance.now() - handlerStartHr) * 100) / 100;
+        try {
+          timingSink({ toolName: name ?? '(unknown)', startedAtMs: handlerStartMs, durationMs, outcome: 'unknown_tool' });
+        } catch {
+          // Timing is observability, not correctness.
+        }
+        return unknownResult;
+      }
+
+      const requestCtx: ToolContext = ctx.v2
+        ? { ...ctx, v2: { ...ctx.v2, resolvedRootUris: rootsManager.getCurrentRootUris() } }
+        : ctx;
+
+      return await withToolCallTiming(
+        name,
+        () => handler(args ?? {}, requestCtx),
+        timingSink,
+      );
+    } catch (err) {
+      // An exception escaped the tool handler boundary. This must not crash the
+      // server — return a structured error response and keep running.
+      // Log to stderr so the crash is visible in server logs (surface information).
+      process.stderr.write(
+        `[WorkRail] Unhandled exception at CallTool boundary: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+      );
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            code: 'INTERNAL_ERROR',
+            message: 'WorkRail encountered an unexpected error. This is not caused by your input.',
+            retry: { kind: 'retryable', suggestedDelayMs: 0 },
+          }),
+        }],
         isError: true,
       };
-      const durationMs = Math.round((performance.now() - handlerStartHr) * 100) / 100;
-      try {
-        timingSink({ toolName: name ?? '(unknown)', startedAtMs: handlerStartMs, durationMs, outcome: 'unknown_tool' });
-      } catch {
-        // Timing is observability, not correctness.
-      }
-      return unknownResult;
     }
-
-    const requestCtx: ToolContext = ctx.v2
-      ? { ...ctx, v2: { ...ctx.v2, resolvedRootUris: rootsManager.getCurrentRootUris() } }
-      : ctx;
-
-    return withToolCallTiming(
-      name,
-      () => handler(args ?? {}, requestCtx),
-      timingSink,
-    );
   });
 
   // Register ListResources handler — exposes the workrail://tags catalog resource.

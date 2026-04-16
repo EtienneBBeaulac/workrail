@@ -35,11 +35,26 @@ export type TransportKind = 'stdio' | 'http' | 'bridge';
 
 // ---------------------------------------------------------------------------
 // Module-level state — intentionally mutable (last-resort handlers)
+//
+// These variables are module-scoped singletons. Mutability is acceptable here
+// because last-resort exit handlers cannot use immutable patterns — they are
+// the safety net that runs when all other invariants have already been violated.
+//
+// gracefulShutdownFn: optional async cleanup registered by transport entry
+// points. Called with a hard timeout before process.exit(1) on fatal exit.
+// Use registerGracefulShutdown(fn) to set, registerGracefulShutdown(null) to
+// clear (useful for test isolation). Bridge processes do not register — they
+// have their own performShutdown() path.
 // ---------------------------------------------------------------------------
 
 const fatalHandlerActive = { value: false };
 let registeredTransport: TransportKind | null = null;
 const startedAtMs = Date.now();
+
+// Graceful shutdown — set by transport entry points after composing the server.
+// null means no cleanup is registered (default).
+let gracefulShutdownFn: (() => Promise<void>) | null = null;
+let gracefulShutdownTimeoutMs = 3000;
 
 // ---------------------------------------------------------------------------
 // Crash log
@@ -106,13 +121,43 @@ export function formatFatal(reason: unknown): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Register an async cleanup function to call before process.exit(1) on fatal
+ * exit. The function is called with a hard timeout: if it does not complete
+ * within `timeoutMs` milliseconds, process.exit(1) fires regardless.
+ *
+ * Call with `null` to clear the registered function (useful for test isolation).
+ *
+ * Intended for transport entry points (stdio, http) to register their HTTP
+ * server teardown. Bridge processes should NOT call this — they have their own
+ * performShutdown() path that closes the primary connection before exit.
+ *
+ * @param fn       Async cleanup function, or null to clear.
+ * @param timeoutMs  Hard exit timeout in ms. Defaults to 3000ms.
+ *                   Must be less than HttpServer's own 5s close timeout to be
+ *                   meaningful; 3s gives the shutdown fn a real opportunity.
+ */
+export function registerGracefulShutdown(
+  fn: (() => Promise<void>) | null,
+  timeoutMs = 3000,
+): void {
+  gracefulShutdownFn = fn;
+  gracefulShutdownTimeoutMs = timeoutMs;
+}
+
+/**
  * Write a fatal error message to stderr and crash.log, then exit with code 1.
  * Re-entrant calls (e.g. if stderr.write itself throws) are silently ignored.
+ *
+ * If a graceful shutdown function has been registered via registerGracefulShutdown(),
+ * it is called before exit with a hard timeout. The sync crash log write and
+ * stderr write always happen first — they survive even if the async path hangs.
  */
 export function fatalExit(label: string, reason: unknown): void {
   if (fatalHandlerActive.value) return;
   fatalHandlerActive.value = true;
 
+  // Sync writes first — these must complete before any async work begins.
+  // They survive process death even if the graceful shutdown path hangs.
   writeCrashLog(label, reason);
 
   try {
@@ -121,7 +166,36 @@ export function fatalExit(label: string, reason: unknown): void {
     // stderr itself failed — nothing we can do, just exit
   }
 
-  process.exit(1);
+  if (gracefulShutdownFn !== null) {
+    // Attempt graceful shutdown with a hard exit timeout.
+    //
+    // WHY dual-path (setTimeout + Promise.then) instead of Promise.race():
+    // The dual-path is easier to reason about and makes the clearTimeout +
+    // process.exit(1) sequencing explicit. Whichever path completes first
+    // (graceful fn or timeout), the other is cancelled.
+    //
+    // WHY Promise.resolve().then(() => fn()):
+    // A bare fn() call that throws synchronously would escape the .catch()
+    // handler. Wrapping in .then() converts sync throws to rejected promises
+    // so .catch() handles them correctly.
+    const fn = gracefulShutdownFn;
+    const timeout = gracefulShutdownTimeoutMs;
+    try {
+      process.stderr.write(`[FatalExit] Attempting graceful shutdown (${timeout}ms timeout)\n`);
+    } catch {
+      // ignore
+    }
+    const hardExit = setTimeout(() => process.exit(1), timeout);
+    void Promise.resolve()
+      .then(() => fn())
+      .catch(() => { /* shutdown errors must not block exit — we're already crashing */ })
+      .finally(() => {
+        clearTimeout(hardExit);
+        process.exit(1);
+      });
+  } else {
+    process.exit(1);
+  }
 }
 
 // ---------------------------------------------------------------------------

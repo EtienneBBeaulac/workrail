@@ -187,10 +187,18 @@ export async function spawnPrimary(
   deps: { spawn: SpawnLike; fetch?: FetchLike },
 ): Promise<void> {
   // Jitter: reduces stampede when multiple bridges exhaust at the same time.
-  await sleep(Math.random() * 300);
+  //
+  // WHY 2000ms (not 300ms): primary startup typically takes 500-1000ms.
+  // With 300ms jitter, multiple bridges clear the window before the primary is up,
+  // all check health (retries: 1), all see "not up yet", and all spawn — spawn storm.
+  // With 2000ms jitter, bridges stagger across a window wider than startup time,
+  // so the first to clear will find the primary already up via the post-jitter check.
+  await sleep(Math.random() * 2000);
 
   // Post-jitter check: another bridge may have already spawned the primary.
-  const alreadyUp = await detectHealthyPrimary(port, { retries: 1, fetch: deps.fetch });
+  // 3 retries with 500ms base delay gives up to 3.5s of polling (0 + 500 + 1000ms),
+  // which covers primaries that started late in the jitter window.
+  const alreadyUp = await detectHealthyPrimary(port, { retries: 3, baseDelayMs: 500, fetch: deps.fetch });
   if (alreadyUp != null) {
     logBridgeEvent({ kind: 'spawn_skipped', reason: 'primary already up after jitter' });
     console.error('[Bridge] Primary already available after jitter — skipping spawn');
