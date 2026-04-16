@@ -2795,3 +2795,111 @@ workspaces:
       - type: local
         path: ~/git/personal/workrail/workflows
 ```
+
+---
+
+### Workflow effectiveness assessment and self-improvement proposals (Apr 15, 2026)
+
+**The idea:** WorkTrain runs workflows hundreds of times. It accumulates more data about workflow effectiveness than any human author ever could. It should use that data to propose improvements back -- to the workflow library, to the workflow authors, and to the community.
+
+This closes the self-improvement loop: WorkTrain uses workflows → measures outcomes → proposes improvements → workflows get better → WorkTrain produces better results.
+
+---
+
+#### What WorkTrain measures per workflow run
+
+Every session already stores rich data in the session store. From this, WorkTrain can derive:
+
+**Efficiency metrics:**
+- Steps skipped (condition gates that always skip for a given workflow type) → candidate for removal or restructuring
+- Steps that consistently take the most tokens/time → candidates for subagent offloading or simplification
+- Steps where the agent calls `continue_workflow` immediately with minimal work → the step prompt may be too vague or redundant
+- Steps where the agent hits `requireConfirmation` and always gets the same response → the gate is unnecessary for autonomous use
+
+**Quality metrics:**
+- Sessions that produced PRs: how many had MR review findings? How severe?
+- Sessions where findings required multiple fix passes → the workflow may not be thorough enough in those areas
+- Sessions where the final output was rejected or required manual correction → workflow produced low-quality output
+- Verification gate pass rate (build_correctness, invariant_preservation) → how often does the workflow produce code that actually works?
+
+**Completion metrics:**
+- Sessions that completed vs hit max_turns or timeout → workflow may be too long for the given task type
+- Steps where the agent loops unexpectedly (loop_control: continue more than expected) → loop exit conditions may be wrong
+- Steps with unusually high token consumption → prompt may be bloated
+
+---
+
+#### The assessment workflow
+
+A new `workflow-effectiveness-assessment` workflow (or routine) that:
+
+1. Reads session store history for a given workflowId (last N sessions)
+2. Computes the metrics above
+3. Identifies the top 3-5 issues with evidence (specific sessions, specific steps)
+4. Proposes concrete changes:
+   - "Step `phase-1b-design-quick` was skipped in 87% of sessions because `rigorMode != QUICK`. Consider making this condition more permissive or removing the step."
+   - "Step `phase-4-plan-audit` consumed an average of 4,200 tokens per session. The loop runs 1.8 times on average. Consider reducing `maxIterations` from 2 to 1 for QUICK rigor mode."
+   - "3 of the last 8 `coding-task-workflow-agentic` sessions produced PRs with Critical MR review findings. The workflow's verification step may not be catching these issues."
+
+5. Outputs a structured proposal:
+
+```json
+{
+  "workflowId": "coding-task-workflow-agentic.lean.v2",
+  "assessmentPeriod": "last 30 sessions",
+  "proposedChanges": [
+    {
+      "stepId": "phase-1b-design-quick",
+      "issue": "Skipped in 87% of sessions",
+      "evidence": ["sess_abc", "sess_def", "sess_ghi"],
+      "proposedChange": "Remove or restructure -- not exercised enough to justify its existence",
+      "confidence": 0.85,
+      "impactEstimate": "Saves ~200 tokens per session, no quality impact"
+    }
+  ],
+  "overallHealthScore": 0.72,
+  "recommendation": "Run workflow-for-workflows on this workflow with assessment findings attached"
+}
+```
+
+---
+
+#### How proposals flow back
+
+**To WorkRail (the open-source project):**
+WorkTrain creates a GitHub issue on `EtienneBBeaulac/workrail` with the assessment findings and proposed changes. The issue includes:
+- The assessment data (anonymized session stats, no content)
+- The proposed changes with rationale
+- Label: `workflow-improvement-proposal`
+
+Any WorkTrain user can contribute workflow improvements back to the community just by running WorkTrain and enabling assessments.
+
+**To workflow authors (for non-bundled workflows):**
+If the workflow came from an org workflow library (`workflowSources: git`), WorkTrain opens a PR against that repo with the proposed changes. The workflow author reviews and merges.
+
+**To the local workflow library:**
+WorkTrain can automatically apply low-risk changes (reordering steps, updating prompt text) to the user's local workflow copy. High-risk changes (removing steps, changing conditions) require human review. Same governed/autonomous split as everywhere else.
+
+---
+
+#### Continuous improvement loop
+
+```
+WorkTrain runs workflows
+  → session store accumulates data
+  → weekly: assessment routine analyzes patterns
+  → proposals generated per workflow
+  → low-confidence proposals: GitHub issue for human review
+  → high-confidence, low-risk proposals: auto-applied to local copy + PR to community
+  → workflow gets better
+  → WorkTrain produces better results
+  → loop repeats
+```
+
+**The compounding effect:** every WorkTrain instance that runs assessments contributes signal. A workflow used by 100 teams accumulates 10x the data of a workflow used by 10 teams. The more WorkTrain is used, the better its workflows get -- for everyone. This is the flywheel that makes WorkTrain's workflow library genuinely better than hand-authored alternatives over time.
+
+**What makes this different from manual workflow improvement:**
+Humans improve workflows based on intuition and memorable failures. WorkTrain improves workflows based on statistical patterns across hundreds of runs. It finds issues that no human would notice -- like a step that's almost always skipped, or a loop that almost always terminates on the first pass, or a prompt fragment that correlates with lower-quality output.
+
+**Integration with `workflow-for-workflows`:**
+The assessment output is designed to feed directly into `workflow-for-workflows`. Assessment findings become the context for authoring improved workflow versions. WorkTrain literally uses its own meta-workflow to improve its own workflows, informed by real execution data.
