@@ -7,6 +7,7 @@
 
 import { composeServer } from '../server.js';
 import { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } from './shutdown-hooks.js';
+import { registerFatalHandlers, logStartup } from './fatal-exit.js';
 
 const INITIAL_ROOTS_TIMEOUT_MS = 1000;
 
@@ -26,24 +27,11 @@ export async function startStdioServer(): Promise<void> {
   // terminates. Without these, crashes are silent (exit code 1, no message).
   // Note: wireStdoutShutdown() handles the primary EPIPE crash path;
   // these handlers catch anything else that slips through.
-  // Re-entrancy guard: if the error handler itself throws, we must not loop.
-  // Uses process.stderr.write instead of console.error — the inspector hooks
-  // console.error which can itself throw or re-enter, causing an infinite loop
-  // that pegs the process at 100% CPU instead of exiting.
-  let fatalHandlerActive = false;
-  const fatalExit = (label: string, reason: unknown): void => {
-    if (fatalHandlerActive) return; // prevent re-entrant loop
-    fatalHandlerActive = true;
-    try {
-      process.stderr.write(`[MCP] ${label}: ${String(reason)}\n`);
-    } catch {
-      // stderr itself failed — nothing we can do, just exit
-    }
-    process.exit(1);
-  };
-
-  process.on('uncaughtException', (err) => fatalExit('Uncaught exception', err));
-  process.on('unhandledRejection', (reason) => fatalExit('Unhandled promise rejection', reason));
+  // Register last-resort fatal handlers early — before any async work —
+  // so that exceptions thrown during startup are caught and the process exits
+  // cleanly rather than spinning in an infinite loop. See fatal-exit.ts.
+  registerFatalHandlers('stdio');
+  logStartup('stdio');
 
   const { server, ctx, rootsManager } = await composeServer();
 
