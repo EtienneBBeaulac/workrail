@@ -1566,3 +1566,80 @@ triggers:
 **This is the preferred trigger model for external integrations.** Webhooks remain available for high-volume or latency-sensitive use cases, but polling is the default for everything else -- it works behind firewalls, requires no admin access, and fits `worktrain init` naturally (just ask for a token).
 
 **Tradeoff:** up to `pollIntervalSeconds` latency (60s default). Acceptable for MR reviews and most agentic tasks. Not acceptable for real-time chat bots.
+
+**Market research needed before building:**
+Several tools in this space worth evaluating before building from scratch:
+
+- **CodeGraph / Tree-sitter based indexes** -- open source, parse-based symbol graphs. Fast to build, no LLM required, but only structural (no semantic edges).
+- **Sourcegraph** -- enterprise code search + graph. Well-proven at scale. Question: does it expose an API suitable for agent context bundle queries? Overkill for solo/small team.
+- **Microsoft GraphRAG** -- LLM-built knowledge graphs with community detection. Research project, but directly relevant architecture. Slower to build (LLM-driven), richer semantic edges.
+- **Cognee** -- open source knowledge graph + RAG, designed for agent workflows. Active project, worth a close look.
+- **Mem0** -- agent memory layer with graph backend. Simpler than Cognee but less code-specific.
+- **tree-sitter + DuckDB** -- build-it-yourself option: tree-sitter parses symbols + call graph, DuckDB stores and queries. Full control, no external dependency, fits WorkRail's freestanding philosophy.
+
+**Recommended approach:** research Cognee and tree-sitter+DuckDB first. Cognee may already solve 80% of this. If not, tree-sitter+DuckDB is the build path -- it fits the "scripts over agent" principle (the graph is built by a deterministic parser, not by asking an LLM to summarize files).
+
+**WorkRail fits:** the graph is a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph` and `update_knowledge_graph` tools. Workflow steps call those tools instead of running file sweeps. The daemon updates the graph after each session completes (script, not agent).
+
+**Cross-project note:** Storyforge will likely need the same graph layer. Worth building it once in WorkRail and making it available to both -- the node/edge schema is different (code vs narrative) but the architecture (derived layer, provenance, context bundles, session-driven updates) is identical.
+
+---
+
+## WorkTrain sprint: Apr 15-16, 2026 -- shipped and in-flight
+
+### Shipped to main (Apr 15, 2026)
+
+**Daemon hardening -- all GAPs from the Candidate B gap analysis:**
+- ✅ **GAP-1** (PR #389): Crash recovery reader -- `readAllDaemonSessions()` + `runStartupRecovery()` before `server.listen()`. Per-sessionId file model also resolves GAP-7 structurally.
+- ✅ **GAP-2** (PR #392): Session state injection -- last 3 step notes injected into system prompt at Agent construction via `buildSessionRecap()`.
+- ✅ **GAP-4** (PR #378): `daemon-soul.md` behavioral principles -- confirmed shipped.
+- ✅ **GAP-5** (PR #387): `concurrencyMode` on `TriggerDefinition` -- serial (default) or parallel, latch-based behavioral tests.
+- ✅ **GAP-6** (PR #385): Bash tool error content -- structured error with command, exit code/signal, stdout, stderr.
+- ✅ **GAP-7**: Resolved by GAP-1's per-sessionId file model. Structurally impossible to overwrite.
+
+**Quality and maintenance:**
+- ✅ **PR #383**: `workrail version` CLI command.
+- ✅ **PR #390**: CI fix -- `posix_tmp_literal` replaced with `tmpPath()` helper.
+- ✅ **PR #391**: TS6 tsconfig fix -- `moduleResolution: "bundler"` in `tsconfig.web.json`.
+- ✅ **PR #357**: `.mcp.json` trailing comma fix.
+- ✅ **PR #346**: Confirmed superseded by #273. Closed.
+
+**Workflows and docs:**
+- ✅ **PR #384**: Fast-path step rewritten -- full wiring verification, build + tests, structured handoff artifact.
+- ✅ Scripts-over-agent principle documented.
+- ✅ Domain packs vision documented -- WorkTrain as generic engine.
+- ✅ Knowledge graph architecture documented -- vector + graph hybrid (ts-morph + LanceDB).
+- ✅ Polling trigger model documented -- zero-external-config integrations.
+- ✅ Issue #393 filed -- `loadSessionNotes` test coverage gap.
+
+### In-flight (agents running, PRs pending, Apr 15, 2026)
+
+- 🔄 **GAP-3**: `callbackUrl` delivery -- POST results to GitLab/Slack after workflow completes.
+- 🔄 **GAP-8**: Wall-clock timeout + max-turn limit.
+- 🔄 **Issue #377**: `goalTemplate` + `referenceUrls` gap analysis.
+- 🔄 **Knowledge graph structural spike**: ts-morph + DuckDB indexer + validation queries.
+- 🔄 **Auto-commit / auto-PR**: Daemon reads handoff artifact, runs `git commit` + `gh pr create` as scripts.
+- 🔄 **`worktrain init` onboarding**: Guided CLI setup for credentials, workspace, triggers.yml, smoke test.
+- 🔄 **Polling triggers**: `PollingTriggerSource` + `PolledEventStore` + GitLab MR polling adapter.
+
+### Next priorities (groomed Apr 15, 2026)
+
+**Tier 1 -- Close the autonomous loop (in-flight):**
+1. Auto-commit / auto-PR
+2. `worktrain init` onboarding
+3. Polling triggers
+
+**Tier 2 -- Harden:**
+4. GAP-3 deliveryContext / callbackUrl (in-flight)
+5. GAP-8 wall-clock timeout (in-flight)
+6. `maxConcurrentSessions` global semaphore (~small, not started)
+7. Autonomous workflow variants -- audit `requireConfirmation` gates for unattended operation
+
+**Tier 3 -- Knowledge and context:**
+8. Knowledge graph structural spike (in-flight)
+9. Vector layer on top of spike (LanceDB, post-spike)
+
+**Tier 4 -- Platform growth:**
+10. Mobile monitoring console
+11. Domain packs (formalize after Storyforge MVP)
+12. Cloud hosting / multi-user
