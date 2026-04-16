@@ -1,5 +1,17 @@
 /**
- * ESM interop shim for pi-mono packages.
+ * @deprecated Use src/daemon/agent-loop.ts instead.
+ *
+ * This module previously loaded @mariozechner/pi-agent-core and @mariozechner/pi-ai
+ * (private npm packages). Those packages have been replaced by the first-party
+ * AgentLoop in src/daemon/agent-loop.ts, which uses @anthropic-ai/sdk and
+ * @anthropic-ai/bedrock-sdk (both public packages on npm).
+ *
+ * This file is kept for backward compatibility but is no longer imported by
+ * workflow-runner.ts. It will be removed in a future version.
+ *
+ * ---
+ *
+ * ESM interop shim for pi-mono packages (DEPRECATED).
  *
  * pi-mono is ESM-only. WorkRail compiles to CommonJS. Node.js allows CJS modules
  * to load ESM via dynamic import() but not via static require(). This module
@@ -15,9 +27,10 @@
  * a true ESM dynamic import at runtime, bypassing the CJS require() rewrite.
  */
 
-// Types are erased at runtime -- safe to import statically from ESM.
-export type { Agent, AgentTool, AgentToolResult, AgentEvent, AgentLoopConfig } from '@mariozechner/pi-agent-core';
-export type { Model, TSchema } from '@mariozechner/pi-ai';
+// Type exports removed: @mariozechner/pi-agent-core and @mariozechner/pi-ai are no
+// longer in package.json. The export lines were deleted because tsc fails on a clean
+// install when they reference packages that do not exist. This file is now a
+// deprecated no-op kept for reference only.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyModule = Record<string, any>;

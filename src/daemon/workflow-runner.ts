@@ -28,10 +28,10 @@ import * as os from 'node:os';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { loadPiAi, loadPiAgentCore } from "./pi-mono-loader.js";
-import type { Agent, AgentTool, AgentToolResult, AgentEvent } from "./pi-mono-loader.js";
-import type { TSchema } from "./pi-mono-loader.js";
-import type { UserMessage } from '@mariozechner/pi-ai';
+import Anthropic from '@anthropic-ai/sdk';
+import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
+import { AgentLoop } from "./agent-loop.js";
+import type { AgentTool, AgentToolResult, AgentEvent } from "./agent-loop.js";
 import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
@@ -687,36 +687,61 @@ async function loadSessionNotes(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _schemas: Record<string, any> | null = null;
 
+// WHY plain JSON Schema: the Anthropic SDK's Tool.input_schema accepts
+// Record<string, unknown>. TypeBox was only needed because pi-agent-core's
+// AgentTool<TSchema> required a TypeBox schema type. The new AgentTool interface
+// (from agent-loop.ts) accepts plain JSON Schema directly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function getSchemas(): Promise<Record<string, any>> {
+function getSchemas(): Record<string, any> {
   if (_schemas) return _schemas;
-  const { Type } = await loadPiAi();
   _schemas = {
-    ContinueWorkflowParams: Type.Object({
-      continueToken: Type.String({
-        description: 'The continueToken from the previous start_workflow or continue_workflow call. Round-trip exactly as received.',
-      }),
-      intent: Type.Optional(Type.Union([Type.Literal('advance'), Type.Literal('rehydrate')], {
-        description: 'advance: I completed this step. rehydrate: remind me what the current step is.',
-      })),
-      notesMarkdown: Type.Optional(Type.String({
-        description: 'Notes on what you did in this step (10-30 lines, markdown).',
-      })),
-      context: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
-        description: 'Updated context variables (only changed values).',
-      })),
-    }),
-    BashParams: Type.Object({
-      command: Type.String({ description: 'Shell command to execute' }),
-      cwd: Type.Optional(Type.String({ description: 'Working directory for the command' })),
-    }),
-    ReadParams: Type.Object({
-      filePath: Type.String({ description: 'Absolute path to the file to read' }),
-    }),
-    WriteParams: Type.Object({
-      filePath: Type.String({ description: 'Absolute path to the file to write' }),
-      content: Type.String({ description: 'Content to write to the file' }),
-    }),
+    ContinueWorkflowParams: {
+      type: 'object',
+      properties: {
+        continueToken: {
+          type: 'string',
+          description: 'The continueToken from the previous start_workflow or continue_workflow call. Round-trip exactly as received.',
+        },
+        intent: {
+          type: 'string',
+          enum: ['advance', 'rehydrate'],
+          description: 'advance: I completed this step. rehydrate: remind me what the current step is.',
+        },
+        notesMarkdown: {
+          type: 'string',
+          description: 'Notes on what you did in this step (10-30 lines, markdown).',
+        },
+        context: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Updated context variables (only changed values).',
+        },
+      },
+      required: ['continueToken'],
+    },
+    BashParams: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell command to execute' },
+        cwd: { type: 'string', description: 'Working directory for the command' },
+      },
+      required: ['command'],
+    },
+    ReadParams: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Absolute path to the file to read' },
+      },
+      required: ['filePath'],
+    },
+    WriteParams: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Absolute path to the file to write' },
+        content: { type: 'string', description: 'Content to write to the file' },
+      },
+      required: ['filePath', 'content'],
+    },
   };
   return _schemas;
 }
@@ -732,14 +757,13 @@ function makeContinueWorkflowTool(
   onComplete: (notes: string | undefined) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): AgentTool<any> {
+): AgentTool {
   return {
     name: 'continue_workflow',
     description:
       'Advance the WorkRail workflow to the next step. Call this after completing all work ' +
       'required by the current step. Include your notes in notesMarkdown.',
-    parameters: schemas['ContinueWorkflowParams'],
+    inputSchema: schemas['ContinueWorkflowParams'],
     label: 'Continue Workflow',
 
     execute: async (
@@ -797,14 +821,13 @@ function makeContinueWorkflowTool(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeBashTool(workspacePath: string, schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): AgentTool<any> {
+export function makeBashTool(workspacePath: string, schemas: Record<string, any>): AgentTool {
   return {
     name: 'Bash',
     description:
       'Execute a shell command. Throws on non-zero exit code. ' +
       `Maximum execution time: ${BASH_TIMEOUT_MS / 1000}s.`,
-    parameters: schemas['BashParams'],
+    inputSchema: schemas['BashParams'],
     label: 'Bash',
 
     execute: async (
@@ -849,12 +872,11 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeReadTool(schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): AgentTool<any> {
+function makeReadTool(schemas: Record<string, any>): AgentTool {
   return {
     name: 'Read',
     description: 'Read the contents of a file at the given absolute path.',
-    parameters: schemas['ReadParams'],
+    inputSchema: schemas['ReadParams'],
     label: 'Read',
 
     execute: async (
@@ -871,12 +893,11 @@ function makeReadTool(schemas: Record<string, any>// eslint-disable-next-line @t
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeWriteTool(schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
-): AgentTool<any> {
+function makeWriteTool(schemas: Record<string, any>): AgentTool {
   return {
     name: 'Write',
     description: 'Write content to a file at the given absolute path. Creates parent directories if needed.',
-    parameters: schemas['WriteParams'],
+    inputSchema: schemas['WriteParams'],
     label: 'Write',
 
     execute: async (
@@ -998,7 +1019,8 @@ export function buildSystemPrompt(
   return lines.join('\n');
 }
 
-function buildUserMessage(text: string): UserMessage {
+/** Build a user message for the agent loop. */
+function buildUserMessage(text: string): { role: 'user'; content: string; timestamp: number } {
   return {
     role: 'user',
     content: text,
@@ -1043,42 +1065,43 @@ export async function runWorkflow(
   // ---- DaemonRegistry: register session ----
   daemonRegistry?.register(sessionId, trigger.workflowId);
 
-  // ---- Model setup ----
+  // ---- Client and model setup ----
   // Priority: agentConfig.model (trigger-specific override) > env-based detection.
   // agentConfig.model format: "provider/model-id" (e.g. "amazon-bedrock/claude-sonnet-4-6").
-  // Why: per-trigger model overrides allow using different model tiers for different
+  // WHY: per-trigger model overrides allow using different model tiers for different
   // workload types (e.g. a faster/cheaper model for simple automation tasks).
-  let model;
-  try {
-    const { getModel } = await loadPiAi();
-    if (trigger.agentConfig?.model) {
-      // Parse "provider/model-id" -- split on the first slash only
-      const slashIdx = trigger.agentConfig.model.indexOf('/');
-      if (slashIdx === -1) {
-        throw new Error(
-          `agentConfig.model must be in "provider/model-id" format, got: "${trigger.agentConfig.model}"`,
-        );
-      }
-      const provider = trigger.agentConfig.model.slice(0, slashIdx);
-      const modelId = trigger.agentConfig.model.slice(slashIdx + 1);
-      model = getModel(provider, modelId);
-    } else {
-      // Default: use Bedrock when AWS credentials are present (avoids personal API key charges)
-      const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
-      if (usesBedrock) {
-        model = getModel('amazon-bedrock', 'us.anthropic.claude-sonnet-4-6');
-      } else {
-        model = getModel('anthropic', 'claude-sonnet-4-5');
-      }
+  //
+  // WHY @anthropic-ai/sdk + @anthropic-ai/bedrock-sdk: both provide the identical
+  // .messages.create() API, so AgentLoop works with either without any format conversion.
+  // Bedrock uses AWS credentials from env (AWS_PROFILE, AWS_ACCESS_KEY_ID) automatically.
+  let agentClient: Anthropic | AnthropicBedrock;
+  let modelId: string;
+
+  if (trigger.agentConfig?.model) {
+    // Parse "provider/model-id" -- split on the first slash only
+    const slashIdx = trigger.agentConfig.model.indexOf('/');
+    if (slashIdx === -1) {
+      daemonRegistry?.unregister(sessionId, 'failed');
+      return {
+        _tag: 'error',
+        workflowId: trigger.workflowId,
+        message: `agentConfig.model must be in "provider/model-id" format, got: "${trigger.agentConfig.model}"`,
+        stopReason: 'error',
+      };
     }
-  } catch (err) {
-    daemonRegistry?.unregister(sessionId, 'failed');
-    return {
-      _tag: 'error',
-      workflowId: trigger.workflowId,
-      message: `Model not found: ${err instanceof Error ? err.message : String(err)}`,
-      stopReason: 'error',
-    };
+    const provider = trigger.agentConfig.model.slice(0, slashIdx);
+    modelId = trigger.agentConfig.model.slice(slashIdx + 1);
+    agentClient = provider === 'amazon-bedrock' ? new AnthropicBedrock() : new Anthropic({ apiKey });
+  } else {
+    // Default: use Bedrock when AWS credentials are present (avoids personal API key charges).
+    const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+    if (usesBedrock) {
+      agentClient = new AnthropicBedrock();
+      modelId = 'us.anthropic.claude-sonnet-4-6';
+    } else {
+      agentClient = new Anthropic({ apiKey });
+      modelId = 'claude-sonnet-4-5';
+    }
   }
 
   // ---- Completion bridge ----
@@ -1144,19 +1167,17 @@ export async function runWorkflow(
     return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
   }
 
-  // ---- Schemas (lazy ESM load) ----
-  const schemas = await getSchemas();
+  // ---- Schemas ----
+  const schemas = getSchemas();
 
   // ---- Tools ----
-  // Cast through unknown to satisfy AgentTool<TSchema> -- each tool factory
-  // produces a concrete TypeBox schema type; the agent loop accepts the base type.
   // start_workflow is NOT in this list: the daemon calls executeStartWorkflow()
   // directly above so the LLM cannot call it again.
-  const tools: AgentTool<TSchema>[] = [
-    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas) as unknown as AgentTool<TSchema>,
-    makeBashTool(trigger.workspacePath, schemas) as unknown as AgentTool<TSchema>,
-    makeReadTool(schemas) as unknown as AgentTool<TSchema>,
-    makeWriteTool(schemas) as unknown as AgentTool<TSchema>,
+  const tools: AgentTool[] = [
+    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas),
+    makeBashTool(trigger.workspacePath, schemas),
+    makeReadTool(schemas),
+    makeWriteTool(schemas),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----
@@ -1183,6 +1204,10 @@ export async function runWorkflow(
   // The daemon has already called executeStartWorkflow() and has the first step.
   // Pass the step content directly -- the LLM starts working on step 1 immediately.
   // Appending the continueToken so the LLM can pass it to continue_workflow.
+  // WHY closing directive: an explicit imperative at the end of the initial prompt directs
+  // the agent to complete the step work before calling continue_workflow. Without this,
+  // the agent may produce a "thinking aloud" turn before the first tool call, which
+  // wastes tokens and delays step execution.
   const contextJson = trigger.context
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
@@ -1197,22 +1222,16 @@ export async function runWorkflow(
     contextJson +
     '\n\nComplete all step work, then call continue_workflow with your notes to begin.';
 
-  // ---- Agent (one per runWorkflow() call, not reused) ----
-  const { Agent } = await loadPiAgentCore();
-  const agent = new Agent({
-    initialState: {
-      systemPrompt: buildSystemPrompt(trigger, sessionState, soulContent, workspaceContext),
-      // Future: for mid-session context re-injection after context window compaction,
-      // call agent.steer(buildUserMessage(buildSessionRecap(freshNotes))) in the
-      // turn_end handler after each continue_workflow advance. Not implemented yet --
-      // the system prompt recap is sufficient for the current use case.
-      model,
-      tools,
-    },
-    // Bedrock uses AWS credentials from env (AWS_PROFILE etc.) -- no API key needed.
-    // For direct Anthropic, pass the provided key.
-    getApiKey: async (_provider: string) => apiKey ?? '',
-
+  // ---- AgentLoop (one per runWorkflow() call, not reused) ----
+  // WHY AgentLoop instead of pi-agent-core's Agent: AgentLoop is the first-party
+  // replacement that uses @anthropic-ai/sdk directly, eliminating the private npm
+  // package dependency. The client (Anthropic or AnthropicBedrock) is injected --
+  // AgentLoop has no knowledge of API keys or AWS credentials.
+  const agent = new AgentLoop({
+    systemPrompt: buildSystemPrompt(trigger, sessionState, soulContent, workspaceContext),
+    modelId,
+    tools,
+    client: agentClient,
     // Sequential execution: continue_workflow must complete before Bash begins
     // on the next step. Workflow tools have ordering requirements.
     toolExecution: 'sequential',
