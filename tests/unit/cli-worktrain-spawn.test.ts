@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
+import { tmpPath } from '../helpers/platform.js';
 import {
   executeWorktrainSpawnCommand,
   type WorktrainSpawnCommandDeps,
@@ -61,7 +62,7 @@ function makeBaseDeps(overrides: Partial<WorktrainSpawnCommandDeps> = {}): {
 const VALID_OPTS = {
   workflow: 'coding-task-workflow-agentic',
   goal: 'test goal',
-  workspace: '/tmp/workspace',
+  workspace: tmpPath('workspace'),
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
