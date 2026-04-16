@@ -645,7 +645,7 @@ function makeContinueWorkflowTool(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeBashTool(workspacePath: string, schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function makeBashTool(workspacePath: string, schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): AgentTool<any> {
   return {
     name: 'Bash',
@@ -660,15 +660,28 @@ function makeBashTool(workspacePath: string, schemas: Record<string, any>// esli
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       const cwd = params.cwd ?? workspacePath;
-      const { stdout, stderr } = await execAsync(params.command, {
-        cwd,
-        timeout: BASH_TIMEOUT_MS,
-      });
-      const output = [stdout, stderr].filter(Boolean).join('\n');
-      return {
-        content: [{ type: 'text', text: output || '(no output)' }],
-        details: { stdout, stderr },
-      };
+      try {
+        const { stdout, stderr } = await execAsync(params.command, {
+          cwd,
+          timeout: BASH_TIMEOUT_MS,
+        });
+        const output = [stdout, stderr].filter(Boolean).join('\n');
+        return {
+          content: [{ type: 'text', text: output || '(no output)' }],
+          details: { stdout, stderr },
+        };
+      } catch (err: unknown) {
+        // Node's child_process.exec errors (ExecException) attach stdout and stderr
+        // as own properties on the error object. Extract them so the agent can
+        // reason about what went wrong and retry intelligently.
+        const e = err as { stdout?: unknown; stderr?: unknown; code?: unknown };
+        const stdout = String(e.stdout ?? '');
+        const stderr = String(e.stderr ?? '');
+        const code = e.code ?? 'unknown';
+        throw new Error(
+          `Command failed: ${params.command} (exit ${code})\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
+        );
+      }
     },
   };
 }
