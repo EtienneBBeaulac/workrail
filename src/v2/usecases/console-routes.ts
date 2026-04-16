@@ -565,7 +565,12 @@ export function mountConsoleRoutes(
           console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
         } else if (result._tag === 'timeout') {
           console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
+        } else if (result._tag === 'delivery_failed') {
+          // delivery_failed not expected here -- this path has no callbackUrl.
+          // Handled to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+          console.log(`[ConsoleRoutes] Auto dispatch delivery failed: workflowId=${workflowId} stopReason=${result.stopReason}`);
         } else {
+          // result._tag === 'error'
           console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
         }
       });

@@ -23,9 +23,10 @@
  */
 
 import * as crypto from 'node:crypto';
-import type { WorkflowTrigger, WorkflowRunResult } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
+import { post as deliveryPost } from './delivery-client.js';
 import type {
   TriggerDefinition,
   WebhookEvent,
@@ -311,11 +312,50 @@ export class TriggerRouter {
       ? `${trigger.id}:${crypto.randomUUID()}`
       : trigger.id;
     void this.queue.enqueue(queueKey, async () => {
-      const result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+      let result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+
+      // POST result to callbackUrl if configured (GAP-3: deliveryContext).
+      // WHY: bind delivery target at trigger-config time, post result at completion time.
+      // A failed POST produces a 'delivery_failed' result so the failure is never silent.
+      // TODO(follow-up): add retry, auth headers, $ENV_VAR_NAME resolution for callbackUrl.
+      // Capture _tag before potential reassignment so log messages accurately reflect the
+      // original workflow outcome (success vs error) when delivery also fails.
+      const originalTag = result._tag;
+      if (trigger.callbackUrl) {
+        const deliveryResult = await deliveryPost(trigger.callbackUrl, result);
+        if (deliveryResult.kind === 'err') {
+          const deliveryError =
+            deliveryResult.error.kind === 'http_error'
+              ? `HTTP ${deliveryResult.error.status}: ${deliveryResult.error.body}`
+              : deliveryResult.error.message;
+          console.error(
+            `[TriggerRouter] Delivery failed: triggerId=${trigger.id} ` +
+              `callbackUrl=${trigger.callbackUrl} error=${deliveryError}`,
+          );
+          const deliveryFailed: WorkflowDeliveryFailed = {
+            _tag: 'delivery_failed',
+            workflowId: trigger.workflowId,
+            stopReason: result.stopReason,
+            deliveryError,
+          };
+          result = deliveryFailed;
+        }
+      }
+
       if (result._tag === 'success') {
         console.log(
           `[TriggerRouter] Workflow completed: triggerId=${trigger.id} ` +
-          `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
+            `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
+        );
+      } else if (result._tag === 'delivery_failed') {
+        // Delivery error already logged above; this log is for correlation.
+        // Use originalTag to distinguish whether the workflow itself succeeded or failed.
+        const outcomeLabel = originalTag === 'success'
+          ? 'Workflow succeeded but delivery failed'
+          : 'Workflow failed and delivery also failed';
+        console.log(
+          `[TriggerRouter] ${outcomeLabel}: triggerId=${trigger.id} ` +
+            `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
         );
       } else if (result._tag === 'timeout') {
         console.log(
@@ -323,9 +363,10 @@ export class TriggerRouter {
           `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
         );
       } else {
+        // result._tag === 'error'
         console.log(
           `[TriggerRouter] Workflow failed: triggerId=${trigger.id} ` +
-          `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
+            `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
         );
       }
     });
@@ -343,6 +384,10 @@ export class TriggerRouter {
    * Fires and forgets via KeyedAsyncQueue (same serialization semantics as route()).
    * Uses workflowId as the queue key to serialize concurrent dispatches for the same workflow.
    *
+   * NOTE: dispatch() does not support callbackUrl. WorkflowTrigger does not carry
+   * delivery routing info -- only TriggerDefinition (used by route()) does.
+   * TODO(follow-up): add callbackUrl to WorkflowTrigger if dispatch callers need delivery.
+   *
    * @returns The workflowId that was dispatched.
    */
   dispatch(workflowTrigger: WorkflowTrigger): string {
@@ -351,7 +396,14 @@ export class TriggerRouter {
       if (result._tag === 'success') {
         console.log(
           `[TriggerRouter] Dispatch completed: workflowId=${workflowTrigger.workflowId} ` +
-          `stopReason=${result.stopReason}`,
+            `stopReason=${result.stopReason}`,
+        );
+      } else if (result._tag === 'delivery_failed') {
+        // delivery_failed not expected from dispatch() -- WorkflowTrigger has no callbackUrl.
+        // Handled here to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        console.log(
+          `[TriggerRouter] Dispatch delivery failed: workflowId=${workflowTrigger.workflowId} ` +
+            `stopReason=${result.stopReason} deliveryError=${result.deliveryError}`,
         );
       } else if (result._tag === 'timeout') {
         console.log(
@@ -359,9 +411,10 @@ export class TriggerRouter {
           `reason=${result.reason} message=${result.message}`,
         );
       } else {
+        // result._tag === 'error'
         console.log(
           `[TriggerRouter] Dispatch failed: workflowId=${workflowTrigger.workflowId} ` +
-          `error=${result.message} stopReason=${result.stopReason}`,
+            `error=${result.message} stopReason=${result.stopReason}`,
         );
       }
     });

@@ -91,6 +91,7 @@ interface ParsedTriggerRaw {
   goalTemplate?: string;
   referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
   concurrencyMode?: string; // validated as 'serial' | 'parallel' at assemble time
+  callbackUrl?: string;
   // Note: maxSessionMinutes and maxTurns are stored as raw strings here because
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
@@ -388,6 +389,7 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'goalTemplate':     trigger.goalTemplate = value; break;
     case 'referenceUrls':    trigger.referenceUrls = value; break;
     case 'concurrencyMode':  trigger.concurrencyMode = value; break;
+    case 'callbackUrl':      trigger.callbackUrl = value; break;
     // contextMapping, agentConfig, onComplete handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -493,6 +495,23 @@ function validateAndResolveTrigger(
     }
   }
 
+  // callbackUrl: validate as a static http(s) URL if present.
+  // WHY: fail-fast at load time (same pattern as referenceUrls validation).
+  // $ENV_VAR_NAME resolution is not supported for callbackUrl in MVP.
+  let callbackUrl: string | undefined;
+  if (raw.callbackUrl?.trim()) {
+    const rawCb = raw.callbackUrl.trim();
+    try {
+      const parsedCb = new URL(rawCb);
+      if (parsedCb.protocol !== 'https:' && parsedCb.protocol !== 'http:') {
+        return err({ kind: 'invalid_field_value', field: `callbackUrl (non-HTTP URL rejected: ${rawCb})`, triggerId: rawId });
+      }
+    } catch {
+      return err({ kind: 'invalid_field_value', field: `callbackUrl (invalid URL: ${rawCb})`, triggerId: rawId });
+    }
+    callbackUrl = rawCb;
+  }
+
   // agentConfig: only include if at least one sub-field is present.
   // maxSessionMinutes and maxTurns are stored as strings by the YAML parser
   // (all scalars are strings). Convert to integers here at the validation boundary.
@@ -591,6 +610,7 @@ function validateAndResolveTrigger(
     ...(goalTemplate ? { goalTemplate } : {}),
     ...(referenceUrls !== undefined && referenceUrls.length > 0 ? { referenceUrls } : {}),
     ...(agentConfig !== undefined ? { agentConfig } : {}),
+    ...(callbackUrl !== undefined ? { callbackUrl } : {}),
     ...(onComplete !== undefined ? { onComplete } : {}),
   };
 

@@ -215,8 +215,26 @@ export interface WorkflowRunTimeout {
   readonly stopReason: string;
 }
 
+/**
+ * Workflow completed successfully, but the delivery POST to callbackUrl failed.
+ *
+ * WHY a separate discriminant: this outcome is categorically different from a
+ * workflow failure. The workflow ran to completion -- the work is done. Only the
+ * result delivery (HTTP callback) failed. Collapsing this into WorkflowRunError
+ * would make it impossible for a caller to distinguish "job done, notification
+ * failed" from "job never finished". See GAP-3 in docs/design/daemon-gap-analysis.md.
+ */
+export interface WorkflowDeliveryFailed {
+  readonly _tag: 'delivery_failed';
+  readonly workflowId: string;
+  /** stopReason from the underlying WorkflowRunSuccess or WorkflowRunError. */
+  readonly stopReason: string;
+  /** Human-readable description of why the delivery POST failed. */
+  readonly deliveryError: string;
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowDeliveryFailed;
 
 /**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.

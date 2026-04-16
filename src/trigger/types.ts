@@ -175,6 +175,22 @@ export interface TriggerDefinition {
   readonly concurrencyMode: 'serial' | 'parallel';
 
   /**
+   * Optional HTTP(S) callback URL. When set, TriggerRouter POSTs the
+   * WorkflowRunResult JSON to this URL after runWorkflow() completes,
+   * regardless of whether the workflow succeeded or failed.
+   *
+   * A failed POST produces a WorkflowRunResult with _tag: 'delivery_failed'
+   * so the failure is never silent. A missing or failing callbackUrl never
+   * causes the daemon to throw -- errors are represented as data.
+   *
+   * Must be a static http:// or https:// URL. $ENV_VAR_NAME resolution is
+   * not supported for this field in MVP.
+   *
+   * TODO(follow-up): add retry, auth headers, and $ENV_VAR_NAME resolution.
+   */
+  readonly callbackUrl?: string;
+
+  /**
    * Completion hook configuration (parsed but NOT executed in MVP).
    * Emits a load-time warning for runOn !== 'success'.
    *
