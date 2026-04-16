@@ -238,6 +238,7 @@ program
   .option('-w, --workspace <path>', 'Path to workspace containing triggers.yml')
   .action(async (options: { workspace?: string }) => {
     const { startTriggerListener } = await import('./trigger/trigger-listener.js');
+    const { startDaemonConsole } = await import('./trigger/daemon-console.js');
 
     await initializeContainer({ runtimeMode: { kind: 'cli' } });
     const { createToolContext } = await import('./mcp/server.js');
@@ -296,9 +297,40 @@ program
     // Orphaned session files from a previous daemon crash are detected and cleared
     // automatically. See runStartupRecovery() in src/daemon/workflow-runner.ts.
 
+    // Start the daemon-owned HTTP console on port 3456.
+    // The console stays up as long as the daemon runs, regardless of MCP server state.
+    // Pass handle.router so POST /api/v2/auto/dispatch goes through the daemon's queue.
+    // Server version is read from package.json for perf record stamping.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pkg = require('../package.json') as { version: string };
+    const consoleResult = await startDaemonConsole(ctx, {
+      triggerRouter: handle.router,
+      serverVersion: pkg.version,
+      workflowService: rawCtx.workflowService,
+    });
+
+    let consoleHandle: import('./trigger/daemon-console.js').DaemonConsoleHandle | null = null;
+    if (consoleResult.kind === 'ok') {
+      consoleHandle = consoleResult.value;
+      // Startup banner is logged inside startDaemonConsole() on success.
+    } else if (consoleResult.error.kind === 'port_conflict') {
+      console.warn(
+        `[DaemonConsole] Port ${consoleResult.error.port} is already held (likely by an MCP server). ` +
+        `The daemon is running but the console is unavailable. ` +
+        `Restart the MCP server while the daemon is running to enable the daemon console.`,
+      );
+    } else {
+      console.warn(
+        `[DaemonConsole] Could not start console: ${consoleResult.error.message}`,
+      );
+    }
+
     // Keep alive
     const shutdown = async () => {
       console.log('\nShutting down daemon...');
+      if (consoleHandle) {
+        await consoleHandle.stop();
+      }
       await handle.stop();
       process.exit(0);
     };
