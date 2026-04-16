@@ -2635,3 +2635,163 @@ The team doesn't have to remember to trigger WorkTrain -- they just do their nor
 - **Governed projects**: WorkTrain integrates with existing process rather than bypassing it. PMs and designers work normally; WorkTrain picks up when the handoff is ready. No one has to remember to trigger it.
 - **Autonomous projects**: WorkTrain is a full solo developer -- it discovers, designs, decomposes, implements, reviews, and ships. The only human touchpoint is approving the final PR (or enabling auto-merge for fully vetted changes).
 - **The queue is the unifying interface**: both modes feed the same queue. The pipeline policy determines what happens when an item is picked up.
+
+---
+
+### Templates, living docs, and external workflow ingestion (Apr 15, 2026)
+
+---
+
+#### Templates: consistent output formatting across all systems
+
+WorkTrain should know the templates used in each workspace and apply them automatically when creating artifacts. No more agents writing PRs in inconsistent formats or Jira tickets missing required fields.
+
+**Template types:**
+
+```yaml
+workspaces:
+  my-work-project:
+    templates:
+      pullRequest:
+        source: .github/pull_request_template.md   # repo-local
+      mergeRequest:
+        source: .gitlab/merge_request_templates/default.md
+      jiraTicket:
+        source: confluence://ENG/ticket-template   # from Confluence
+        requiredFields: [summary, description, acceptanceCriteria, storyPoints, component]
+      jiraBug:
+        source: confluence://ENG/bug-template
+        requiredFields: [summary, description, stepsToReproduce, expectedVsActual, severity]
+      shapeup:
+        source: notion://templates/shapeup-pitch
+      brd:
+        source: confluence://templates/brd-template
+      designSpec:
+        source: notion://templates/design-spec
+      incidentPostmortem:
+        source: confluence://templates/postmortem
+```
+
+When WorkTrain creates a PR, it reads the PR template and structures its output to match. When it files a Jira bug from an investigation, it reads the bug template and fills every required field. When it writes a BRD in autonomous mode, it uses the BRD template so the output looks like what the team expects.
+
+Templates are resolved at session start and injected as context. The agent is told: "When creating a [type], use this template structure exactly." The handoff artifact for the auto-commit/PR path includes the PR body pre-formatted to match the template.
+
+**Template sources:**
+- Local files in the repo (`.github/`, `.gitlab/`, `docs/templates/`)
+- Confluence pages
+- Notion databases/templates
+- Google Docs
+- Inline in `triggers.yml`
+
+---
+
+#### Living docs: on-demand generation and continuous updates
+
+WorkTrain maintains documentation as a first-class output, not an afterthought. Docs can be generated on-demand and kept current automatically.
+
+**On-demand doc generation:**
+
+```bash
+worktrain doc generate --type architecture-overview --workspace workrail
+worktrain doc generate --type api-reference --workspace workrail
+worktrain doc generate --type runbook "How to debug a stuck daemon session"
+worktrain doc generate --type adr "Why we replaced pi-mono with a first-party agent loop"
+```
+
+Each generates a doc by pulling from all available sources:
+- Knowledge graph (structural understanding of the codebase)
+- Session store (recent decisions and findings)
+- Backlog (design decisions and rationale)
+- GitHub PRs (what changed and why -- from PR descriptions)
+- Confluence/Notion (existing docs to extend, not duplicate)
+
+**Continuous doc updates:**
+When code changes, affected docs are flagged for update. WorkTrain runs a `doc-drift-scan` (part of the periodic analysis agents) that identifies docs whose described behavior no longer matches the code. When drift is detected, a queue item is created: "Update architecture-overview.md -- AgentLoop class was added, pi-mono removed."
+
+```yaml
+workspaces:
+  workrail:
+    docs:
+      autoUpdate: true
+      docPaths:
+        - docs/architecture/
+        - docs/design/
+        - README.md
+      driftCheck:
+        schedule: "0 8 * * 1"    # Monday morning
+        onDrift: queue            # or: pr, notify, ignore
+```
+
+**Doc sources it pulls from:**
+
+| Source | What it provides |
+|--------|-----------------|
+| Knowledge graph | Symbol relationships, module structure, call paths |
+| Session store | Recent decisions, investigation findings, design rationale |
+| Backlog | Why things were built the way they were |
+| Git log | What changed, when, linked PRs |
+| Confluence/Notion | Existing team knowledge to incorporate |
+| Glean | Cross-system knowledge synthesis |
+| Code comments and JSDoc | Inline documentation |
+
+**Doc formats it produces:**
+- Architecture overview (modules, dependencies, data flow)
+- API reference (from TypeScript types + JSDoc)
+- Runbook (operational procedures)
+- ADR (Architecture Decision Record -- from backlog decisions)
+- Postmortem (from incident investigation sessions)
+- Sprint recap (from completed queue items)
+- Onboarding guide (from architecture + setup docs)
+
+---
+
+#### External workflow ingestion
+
+WorkTrain can already discover and run workflows from external repos via managed sources (`[[workflow_repos]]` in Common-Ground config). This should be a first-class feature, not just a Common-Ground integration.
+
+**How it works today (via managed sources):**
+Any workflow JSON file in a configured directory or git repo is automatically available. `workrail list` shows all workflows from all sources.
+
+**What to add:**
+
+**1. Workflow registry / marketplace:**
+A curated list of community workflows that WorkTrain can pull from. `worktrain workflow install <id>` fetches a workflow from the registry and adds it to the user's workflow library.
+
+```bash
+worktrain workflow install community/postgres-migration-workflow
+worktrain workflow install company/my-company-mr-review      # private org registry
+worktrain workflow install ./local-custom-workflow.json      # local file
+```
+
+**2. Workflow composition:**
+A workflow that calls another workflow as a step (already possible via `templateCall`, extend to full `workflowCall`). A coordinator workflow can invoke specialized workflows as phases:
+
+```json
+{
+  "id": "full-feature-pipeline",
+  "steps": [
+    { "workflowCall": { "workflowId": "classify-task-workflow" } },
+    { "workflowCall": { "workflowId": "wr.discovery", "when": "taskComplexity != Small" } },
+    { "workflowCall": { "workflowId": "coding-task-workflow-agentic" } },
+    { "workflowCall": { "workflowId": "mr-review-workflow.agentic.v2" } }
+  ]
+}
+```
+
+**3. Workflow sharing between workspaces:**
+A workflow authored for workrail can be shared to storyforge without copying it. Workflows are linked by reference, not copied. Updates to the source propagate automatically (or on explicit sync).
+
+**4. Org-level workflow libraries:**
+Teams publish their workflow libraries to a git repo. WorkTrain pulls from it. Every team member's WorkTrain automatically gets the team's curated workflow set. This is exactly what Common-Ground's `[[workflow_repos]]` does today -- make it a first-class WorkTrain config option without requiring Common-Ground.
+
+```yaml
+workspaces:
+  my-work-project:
+    workflowSources:
+      - type: git
+        url: https://github.com/mycompany/worktrain-workflows
+        branch: main
+        syncInterval: 3600
+      - type: local
+        path: ~/git/personal/workrail/workflows
+```
