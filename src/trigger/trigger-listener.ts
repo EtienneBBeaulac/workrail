@@ -219,9 +219,8 @@ export async function startTriggerListener(
   const maxConcurrencyRaw = workrailConfig.kind === 'ok'
     ? workrailConfig.value['maxConcurrentSessions']
     : undefined;
-  const maxConcurrentSessions = maxConcurrencyRaw !== undefined
-    ? (parseInt(maxConcurrencyRaw, 10) || undefined)
-    : undefined;
+  const parsed = parseInt(maxConcurrencyRaw ?? '', 10);
+  const maxConcurrentSessions = !isNaN(parsed) ? parsed : undefined;
 
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;

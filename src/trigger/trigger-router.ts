@@ -422,15 +422,19 @@ export class TriggerRouter {
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
-    if (requested < 1) {
+    // WHY: ?? does not catch NaN (NaN is type number, not null/undefined). If NaN reaches
+    // Semaphore(), acquire() deadlocks silently because 0 < NaN is false.
+    const cap = Number.isNaN(requested) ? DEFAULT_MAX_CONCURRENT_SESSIONS : requested;
+    if (cap < 1) {
       console.warn(
-        `[TriggerRouter] maxConcurrentSessions must be >= 1; received ${requested}, clamping to 1.`,
+        `[TriggerRouter] maxConcurrentSessions must be >= 1; received ${cap}, clamping to 1.`,
       );
       this._maxConcurrentSessions = 1;
     } else {
-      this._maxConcurrentSessions = requested;
+      this._maxConcurrentSessions = cap;
     }
     this.semaphore = new Semaphore(this._maxConcurrentSessions);
+    console.log(`[TriggerRouter] maxConcurrentSessions=${this._maxConcurrentSessions}`);
   }
 
   /** Current count of active (running) runWorkflow() calls. */
