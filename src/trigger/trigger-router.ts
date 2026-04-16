@@ -67,18 +67,24 @@ export type RunWorkflowFn = (
  * - ANY token resolves to undefined (partial interpolation would produce
  *   a broken goal string, so we fall back entirely).
  *
+ * When a token is missing, emits a `console.warn` with the missing token name
+ * and the triggerId (R2 from design review -- helps operators debug misconfigured
+ * templates without requiring them to monitor session titles).
+ *
  * Token syntax: `{{$.dot.path}}` or `{{dot.path}}` (leading "$." optional).
  * The same dot-path extraction rules apply as for contextMapping.
  *
  * @param template - The goal template string (e.g. "Review {{$.pull_request.title}}")
  * @param staticGoal - The static fallback goal from the trigger definition
  * @param payload - The parsed webhook payload
+ * @param triggerId - Optional trigger ID for diagnostic warning (defaults to "(unknown)")
  * @returns The interpolated goal, or staticGoal if any token is missing
  */
 export function interpolateGoalTemplate(
   template: string,
   staticGoal: string,
   payload: Readonly<Record<string, unknown>>,
+  triggerId?: string,
 ): string {
   // Find all {{...}} tokens
   const TOKEN_RE = /\{\{([^}]+)\}\}/g;
@@ -96,7 +102,11 @@ export function interpolateGoalTemplate(
   for (const token of tokens) {
     const value = extractDotPath(payload, token);
     if (value === undefined || value === null) {
-      // Any missing token: fall back to static goal (no partial interpolation)
+      // Any missing token: warn and fall back to static goal (no partial interpolation)
+      console.warn(
+        `[TriggerRouter] goalTemplate variable missing: '${token}' not found in payload ` +
+        `for trigger ${triggerId ?? '(unknown)'}. Falling back to static goal.`,
+      );
       return staticGoal;
     }
     resolved.set(token, String(value));
@@ -275,7 +285,7 @@ export class TriggerRouter {
 
     // Interpolate goal from template if configured; fall back to static goal
     const goal = trigger.goalTemplate
-      ? interpolateGoalTemplate(trigger.goalTemplate, trigger.goal, event.payload)
+      ? interpolateGoalTemplate(trigger.goalTemplate, trigger.goal, event.payload, trigger.id)
       : trigger.goal;
 
     const workflowTrigger: WorkflowTrigger = {

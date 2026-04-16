@@ -7,6 +7,8 @@
  * - Trigger not found (unknown triggerId)
  * - Open trigger (no HMAC configured)
  * - runWorkflow() called with correct workflowId, goal, workspacePath, context
+ * - goalTemplate interpolation, fallback, warn on missing token
+ * - referenceUrls forwarding to WorkflowTrigger
  * - Feature flag gate in startTriggerListener()
  * - Port conflict handling
  * - triggers.yml file-not-found handling (empty config)
@@ -14,7 +16,7 @@
 
 import * as crypto from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { TriggerRouter } from '../../src/trigger/trigger-router.js';
+import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
 import type { TriggerDefinition, WebhookEvent } from '../../src/trigger/types.js';
@@ -450,5 +452,109 @@ describe('createTriggerApp routes', () => {
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// interpolateGoalTemplate: unit tests
+// ---------------------------------------------------------------------------
+
+describe('interpolateGoalTemplate', () => {
+  it('interpolates all tokens from payload', () => {
+    const result = interpolateGoalTemplate(
+      'Review MR: {{$.pull_request.title}} by {{$.user.login}}',
+      'Review this MR',
+      { pull_request: { title: 'Fix bug' }, user: { login: 'alice' } },
+      'test-trigger',
+    );
+    expect(result).toBe('Review MR: Fix bug by alice');
+  });
+
+  it('falls back to staticGoal and warns when a token is missing from payload', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = interpolateGoalTemplate(
+      'Review MR: {{$.pull_request.title}}',
+      'Review this MR',
+      { pull_request: {} }, // title is missing
+      'my-trigger',
+    );
+    expect(result).toBe('Review this MR');
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('$.pull_request.title'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('my-trigger'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('returns template as-is when no tokens are present', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = interpolateGoalTemplate(
+      'Review this PR',
+      'Fallback goal',
+      { pull_request: { title: 'irrelevant' } },
+      'test-trigger',
+    );
+    expect(result).toBe('Review this PR');
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('handles token path without leading $. prefix', () => {
+    const result = interpolateGoalTemplate(
+      'Review MR: {{pull_request.title}}',
+      'Review this MR',
+      { pull_request: { title: 'My Feature' } },
+      'test-trigger',
+    );
+    expect(result).toBe('Review MR: My Feature');
+  });
+
+  it('uses (unknown) in warn when triggerId is omitted', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    interpolateGoalTemplate(
+      'Review: {{$.missing.token}}',
+      'Fallback',
+      {},
+      // no triggerId
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('(unknown)'),
+    );
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.route: referenceUrls forwarding
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.route referenceUrls forwarding', () => {
+  it('forwards referenceUrls to runWorkflow when present', async () => {
+    const trigger = makeTrigger({
+      referenceUrls: ['https://doc1.example.com', 'https://doc2.example.com'],
+    });
+    const { fn, calls } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    router.route(makeEvent());
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls[0]?.referenceUrls).toEqual([
+      'https://doc1.example.com',
+      'https://doc2.example.com',
+    ]);
+  });
+
+  it('omits referenceUrls from workflowTrigger when absent', async () => {
+    const trigger = makeTrigger({ referenceUrls: undefined });
+    const { fn, calls } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    router.route(makeEvent());
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls[0]?.referenceUrls).toBeUndefined();
   });
 });
