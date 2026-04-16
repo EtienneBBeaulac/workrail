@@ -47,11 +47,17 @@ const execAsync = promisify(exec);
 const BASH_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Maximum wall-clock time allowed for a single workflow run (30 minutes).
+ * Default wall-clock time limit (in minutes) for a single workflow run.
+ *
+ * WHY: a stuck tool call, infinite retry loop, or runaway LLM can hold a
+ * queue slot indefinitely. This cap is the safety valve.
+ *
+ * This default is used when no agentConfig.maxSessionMinutes is configured.
+ * Per-trigger overrides are set via triggers.yml agentConfig.maxSessionMinutes.
  * If the agent loop does not complete within this window, runWorkflow() aborts
- * the agent and returns { _tag: 'error', message: 'Workflow timed out' }.
+ * the agent and returns { _tag: 'timeout', reason: 'wall_clock' }.
  */
-const WORKFLOW_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
 
 /**
  * Directory that holds per-session crash-recovery state files.
@@ -162,6 +168,18 @@ export interface WorkflowTrigger {
    */
   readonly agentConfig?: {
     readonly model?: string;
+    /**
+     * Maximum wall-clock time (in minutes) for this workflow run.
+     * See TriggerDefinition.agentConfig.maxSessionMinutes for full documentation.
+     * Default: 30 minutes.
+     */
+    readonly maxSessionMinutes?: number;
+    /**
+     * Maximum number of LLM response turns for this workflow run.
+     * See TriggerDefinition.agentConfig.maxTurns for full documentation.
+     * Default: no limit.
+     */
+    readonly maxTurns?: number;
   };
 }
 
@@ -180,8 +198,31 @@ export interface WorkflowRunError {
   readonly stopReason: string;
 }
 
+/**
+ * Workflow run aborted due to a configurable time or turn limit.
+ *
+ * WHY a separate discriminant: timeout is categorically different from a
+ * workflow-logic error. Callers (delivery systems, alerting) need to
+ * distinguish "this workflow ran too long / looped" from "a tool failed".
+ * Encoding this as a string inside WorkflowRunError.message would require
+ * string-parsing, violating 'make illegal states unrepresentable'.
+ */
+export interface WorkflowRunTimeout {
+  readonly _tag: 'timeout';
+  readonly workflowId: string;
+  /**
+   * Which limit was hit.
+   * - 'wall_clock': the configured maxSessionMinutes elapsed
+   * - 'max_turns': the configured maxTurns count was reached
+   */
+  readonly reason: 'wall_clock' | 'max_turns';
+  readonly message: string;
+  /** Always 'aborted' -- the agent loop was stopped via agent.abort(). */
+  readonly stopReason: string;
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
 
 /**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
@@ -1020,12 +1061,41 @@ export async function runWorkflow(
     toolExecution: 'sequential',
   });
 
-  // ---- Event subscription: steer() for step injection ----
+  // ---- Session limits (wall-clock timeout + max-turn limit) ----
+  // Resolved from trigger.agentConfig with hardcoded defaults as fallback.
+  // WHY: per-trigger configurability lets operators tune limits per workflow type
+  // (e.g. a fast code-review trigger vs. a slow coding-task trigger).
+  const sessionTimeoutMs =
+    (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
+  const maxTurns = trigger.agentConfig?.maxTurns ?? 0; // 0 = no limit
+
+  // ---- Timeout reason flag ----
+  // Tracks which limit fired first. Set synchronously before agent.abort() so the
+  // catch block can read it on the next microtask tick. JS single-thread guarantees
+  // no race condition. Guard: first writer wins -- ignore if already set.
+  let timeoutReason: 'wall_clock' | 'max_turns' | null = null;
+
+  // ---- Turn counter ----
+  // Incremented on each turn_end event (one complete LLM response turn).
+  let turnCount = 0;
+
+  // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
   // Using steer() NOT followUp(): steer fires after each tool batch inside the
   // inner loop; followUp fires only when the agent would otherwise stop
   // (adding an extra LLM turn per workflow step).
   const unsubscribe = agent.subscribe(async (event: AgentEvent) => {
     if (event.type !== 'turn_end') return;
+
+    // Track turns for the max-turn limit.
+    turnCount++;
+
+    // Max-turn limit: abort if the turn count reaches the configured limit.
+    // Guard: skip if wall-clock timeout already fired.
+    if (maxTurns > 0 && turnCount >= maxTurns && timeoutReason === null) {
+      timeoutReason = 'max_turns';
+      agent.abort();
+      return; // Do not inject the next step -- we are aborting.
+    }
 
     // If a step was advanced and workflow is not yet complete, inject the next step.
     if (pendingSteerText !== null && !isComplete) {
@@ -1042,11 +1112,16 @@ export async function runWorkflow(
 
   try {
     // ---- Whole-workflow timeout ----
-    // If the agent loop does not complete within WORKFLOW_TIMEOUT_MS, abort the
-    // agent and propagate a timeout error through the existing error-handling path.
+    // If the agent loop does not complete within sessionTimeoutMs, abort the agent
+    // and propagate a timeout through the existing error-handling path.
     // agent.abort() is idempotent (optional-chained on activeRun in pi-agent-core).
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Workflow timed out')), WORKFLOW_TIMEOUT_MS),
+      setTimeout(() => {
+        if (timeoutReason === null) {
+          timeoutReason = 'wall_clock';
+        }
+        reject(new Error('Workflow timed out'));
+      }, sessionTimeoutMs),
     );
     await Promise.race([agent.prompt(buildUserMessage(initialPrompt)), timeoutPromise])
       .catch((err: unknown) => {
@@ -1073,6 +1148,23 @@ export async function runWorkflow(
     stopReason = 'error';
   } finally {
     unsubscribe();
+  }
+
+  // ---- Timeout result (wall-clock or max-turn limit) ----
+  // timeoutReason is set before agent.abort() in both abort paths; by the time we
+  // reach here the catch has completed and it is safe to read synchronously.
+  if (timeoutReason !== null) {
+    daemonRegistry?.unregister(sessionId, 'failed');
+    const limitDescription = timeoutReason === 'wall_clock'
+      ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
+      : `${trigger.agentConfig?.maxTurns} turns`;
+    return {
+      _tag: 'timeout',
+      workflowId: trigger.workflowId,
+      reason: timeoutReason,
+      message: `Workflow ${timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
+      stopReason: 'aborted',
+    };
   }
 
   if (stopReason === 'error' || errorMessage) {

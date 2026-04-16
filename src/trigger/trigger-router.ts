@@ -317,6 +317,11 @@ export class TriggerRouter {
           `[TriggerRouter] Workflow completed: triggerId=${trigger.id} ` +
           `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
         );
+      } else if (result._tag === 'timeout') {
+        console.log(
+          `[TriggerRouter] Workflow timed out: triggerId=${trigger.id} ` +
+          `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
+        );
       } else {
         console.log(
           `[TriggerRouter] Workflow failed: triggerId=${trigger.id} ` +
@@ -347,6 +352,11 @@ export class TriggerRouter {
         console.log(
           `[TriggerRouter] Dispatch completed: workflowId=${workflowTrigger.workflowId} ` +
           `stopReason=${result.stopReason}`,
+        );
+      } else if (result._tag === 'timeout') {
+        console.log(
+          `[TriggerRouter] Dispatch timed out: workflowId=${workflowTrigger.workflowId} ` +
+          `reason=${result.reason} message=${result.message}`,
         );
       } else {
         console.log(
