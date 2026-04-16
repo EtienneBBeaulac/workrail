@@ -21,6 +21,8 @@ import { isDevMode } from '../../mcp/dev-mode.js';
 import type { TriggerRouter } from '../../trigger/trigger-router.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import { runWorkflow } from '../../daemon/workflow-runner.js';
+import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
+import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -550,25 +552,86 @@ export function mountConsoleRoutes(
       return;
     }
 
+    // ---------------------------------------------------------------------------
+    // Synchronous session creation: allocate a session ID before enqueuing the
+    // agent loop. This allows returning a stable sessionHandle to the caller so
+    // tools like `worktrain spawn` can track the session via GET /api/v2/sessions/:id.
+    //
+    // WHY synchronous: the session store write is fast (~10-50ms, no LLM call).
+    // The agent loop still runs asynchronously -- only session creation is foreground.
+    //
+    // WHY executeStartWorkflow() here instead of inside runWorkflow(): runWorkflow()
+    // calls executeStartWorkflow() internally. To avoid double-session-creation,
+    // we pass the pre-allocated response via WorkflowTrigger._preAllocatedStartResponse.
+    // runWorkflow() skips its own executeStartWorkflow() call when this field is set.
+    // ---------------------------------------------------------------------------
+    const startResult = await executeStartWorkflow(
+      { workflowId, workspacePath, goal },
+      v2ToolContext,
+      // Mark as autonomous so isAutonomous is derivable from the event log.
+      { is_autonomous: 'true' },
+    );
+
+    if (startResult.isErr()) {
+      const errDetail = `${startResult.error.kind}${
+        'message' in startResult.error ? `: ${(startResult.error as { message: string }).message}` : ''
+      }`;
+      res.status(400).json({ success: false, error: `Session creation failed: ${errDetail}` });
+      return;
+    }
+
+    const startResponse = startResult.value.response;
+    const startContinueToken = startResponse.continueToken;
+
+    // Decode the session ID from the continueToken so we can return it as the handle.
+    // WHY decode instead of returning sessionId from executeStartWorkflow directly:
+    // The public V2StartWorkflowOutputSchema does not expose sessionId (to avoid a
+    // breaking schema change). parseContinueTokenOrFail() is the established in-process
+    // path used by workflow-runner.ts loadSessionNotes() for the same purpose.
+    let sessionHandle: string;
+    if (startContinueToken) {
+      const tokenResult = await parseContinueTokenOrFail(
+        startContinueToken,
+        v2ToolContext.v2.tokenCodecPorts,
+        v2ToolContext.v2.tokenAliasStore,
+      );
+      if (tokenResult.isErr()) {
+        // This is an internal error -- the session was just created, the token
+        // should always be decodable. Log and return 500 so the caller is informed.
+        console.error(
+          `[ConsoleRoutes] Failed to decode session handle from continueToken: ${tokenResult.error.message}`,
+        );
+        res.status(500).json({ success: false, error: 'Internal error: could not extract session handle.' });
+        return;
+      }
+      sessionHandle = tokenResult.value.sessionId;
+    } else {
+      // isComplete=true on start means the workflow completed immediately (single-step).
+      // No agent loop needed; use workflowId as a fallback handle.
+      sessionHandle = workflowId;
+    }
+
     // If TriggerRouter is available, use its queue (serializes by workflowId).
     // Otherwise, fire directly using the shared runWorkflow() function.
+    // In both cases, pass _preAllocatedStartResponse to skip re-creating the session.
+    const trigger = { workflowId, goal, workspacePath, context, _preAllocatedStartResponse: startResponse };
     if (triggerRouter) {
-      triggerRouter.dispatch({ workflowId, goal, workspacePath, context });
+      triggerRouter.dispatch(trigger);
     } else {
       // Direct fire-and-forget: no queue serialization in this path.
       void runWorkflow(
-        { workflowId, goal, workspacePath, context },
+        trigger,
         v2ToolContext,
         apiKey ?? '',
       ).then((result) => {
         if (result._tag === 'success') {
           console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
         } else if (result._tag === 'timeout') {
-          console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
+          console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId}`);
         } else if (result._tag === 'delivery_failed') {
           // delivery_failed not expected here -- this path has no callbackUrl.
           // Handled to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
-          console.log(`[ConsoleRoutes] Auto dispatch delivery failed: workflowId=${workflowId} stopReason=${result.stopReason}`);
+          console.log(`[ConsoleRoutes] Auto dispatch delivery failed: workflowId=${workflowId}`);
         } else {
           // result._tag === 'error'
           console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
@@ -576,7 +639,7 @@ export function mountConsoleRoutes(
       });
     }
 
-    res.json({ success: true, data: { status: 'dispatched', workflowId } });
+    res.json({ success: true, data: { status: 'dispatched', workflowId, sessionHandle } });
   });
 
   // ---------------------------------------------------------------------------
