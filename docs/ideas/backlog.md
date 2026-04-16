@@ -2023,3 +2023,66 @@ trigger: monitoring alert (CPU spike, error rate increase, latency P99 > thresho
 ```
 
 The operator gets paged with a complete picture: what happened, likely why, what was already done automatically, and exactly what decision they need to make. No more waking up to an alert with no context.
+
+---
+
+### Interactive ideation: WorkTrain as a thinking partner with full project context (Apr 15, 2026)
+
+**What this is:** The ability to have a conversation with WorkTrain the way we've been talking today -- bouncing ideas, asking "what if", surfacing tradeoffs, refining designs -- and have WorkTrain respond with full awareness of what's been built, what's in flight, what's in the backlog, and what decisions were made and why.
+
+Today this requires a human (Claude Code + a long conversation) to maintain context across everything. WorkTrain should be able to do this natively because it already has:
+- The session store (every step note from every session ever run)
+- The knowledge graph (structural understanding of the codebase)
+- The backlog (design decisions, research findings, priorities)
+- In-flight agent state (what's running, what's been found)
+
+**The gap:** there's no conversational interface that pulls all of this together. The console shows sessions. The backlog is a markdown file. There's no "talk to WorkTrain about the project" entry point.
+
+**What it needs:**
+
+1. **A "talk" command** -- `worktrain talk` opens an interactive session that starts with a synthesized context bundle: recent session outcomes, open PRs, backlog top items, any findings from in-flight agents. The user types naturally; WorkTrain responds with awareness of all of it.
+
+2. **Project memory** -- WorkTrain maintains a synthesized "project state" that's updated after each coordinator run or major session batch. Answers questions like: "what did we build today?", "why did we choose polling triggers over webhooks?", "what's the biggest gap right now?", "what would happen if we removed pi-mono?" without requiring the user to re-explain context.
+
+3. **Idea capture** -- when the conversation surfaces something new (a gap, an architectural insight, a design decision), WorkTrain should offer to record it to the backlog or open a GitHub issue immediately, right from the conversation.
+
+4. **Context awareness** -- WorkTrain knows which agents are running, what they've found so far, and can report on it during a conversation: "the #400 review just came back with a fetch timeout blocker -- want me to queue a fix agent?"
+
+**What makes this different from just using Claude Code:** Claude Code has no persistent project context -- every conversation starts from scratch. WorkTrain's ideation session starts with everything loaded: session history, knowledge graph results for relevant files, backlog items, open PRs. The conversation is grounded in the actual project state, not just what the user remembers to paste in.
+
+**Architecture:** this is a new `talk` workflow -- a conversational loop workflow with no fixed step count. The agent has access to `query_knowledge_graph`, `read_session_notes`, `read_backlog`, `list_in_flight_agents`, and `append_to_backlog` as tools. It maintains the conversation as a standard message history. The session never "completes" -- it ends when the user exits.
+
+---
+
+### Automatic gap and improvement detection: proactive WorkTrain (Apr 15, 2026)
+
+**What this is:** WorkTrain notices things without being asked. After a batch of work lands, it scans for gaps, inconsistencies, missed connections, and improvement opportunities -- and surfaces them proactively.
+
+**Examples of what it would have caught today without human prompting:**
+- "PR #400 delivery client has no fetch timeout -- delivery could hang indefinitely" (caught by MR review, but WorkTrain could catch this pre-review)
+- "PR #391 picked up GAP-1 crash recovery code it shouldn't have -- scope leak" (caught by the reviewer)
+- "The backlog says knowledge graph should be persistent but the spike uses in-memory DuckDB" (gap between spec and impl)
+- "Three open PRs all modify workflow-runner.ts -- they're going to conflict when merged sequentially"
+- "Issue #393 filed for loadSessionNotes coverage -- this is related to the GAP-2 PR that's open, might as well fix both together"
+- "The classify-task-workflow was just authored but it's not referenced in the coordinator spec yet"
+
+**Two modes:**
+
+**1. Event-triggered scans** -- fires after significant events:
+- After a batch of PRs merge: scan for spec/impl gaps, check if any backlog items are now addressable
+- After a new workflow is authored: check if it should be added to the coordinator pipeline
+- After a bug is filed: check if any recent changes are likely culprits
+- After a coordinator run: check if findings surfaced any architectural concerns not in the backlog
+
+**2. Periodic health checks** -- runs on a schedule (e.g. weekly):
+- Are there backlog items that have all their prerequisites met but haven't been started?
+- Are there open issues that are actually already fixed by merged PRs?
+- Are there PRs that have been approved but not merged for more than N days?
+- Is the knowledge graph stale (files changed since last index)?
+- Are any daemon sessions orphaned (in daemon-sessions/ but older than 24h)?
+
+**Architecture:** a `watchdog` workflow that runs on a cron trigger. It queries the knowledge graph, reads recent session notes, lists open PRs and issues, reads the backlog priorities, and produces a `gap-report.md` with actionable findings. Each finding is either: auto-actionable (spawn a fix agent), conversation-worthy (add to the ideation queue), or escalation-worthy (post to Slack/file a GitHub issue).
+
+**The key difference from the coordinator:** the coordinator executes a known plan. The watchdog discovers things that aren't in any plan yet. It's the system's immune response -- continuously scanning for drift between intention and reality.
+
+**What makes this tractable:** WorkTrain already has all the inputs. The knowledge graph has the structural state. The session store has the history. The backlog has the intentions. The gap detection is the synthesis layer that connects them -- "what was planned" vs "what was built" vs "what's in flight". This is exactly the kind of thing an LLM is good at: cross-referencing multiple sources and identifying inconsistencies.
