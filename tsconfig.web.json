@@ -6,17 +6,16 @@
     "maxNodeModuleJsDepth": 1,
     
     // Better IDE support for web files
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["web/assets/*"]
+      "@/*": ["./web/assets/*"]
     },
-    
+
     // DOM types for web files
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    
+
     // Module resolution
     "module": "ES2022",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "target": "ES2022",
     "esModuleInterop": true,
     "skipLibCheck": true,
