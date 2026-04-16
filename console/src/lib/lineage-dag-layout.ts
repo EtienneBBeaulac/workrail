@@ -392,6 +392,7 @@ export interface PositionedGhostNode {
 }
 
 export interface GhostNodeLayout {
+  readonly requiredHeight: number;
   readonly nodes: readonly PositionedGhostNode[];
   readonly requiredWidth: number;
 }
@@ -401,12 +402,12 @@ export function positionGhostNodes(
   model: LineageDagModel,
 ): GhostNodeLayout {
   if (skippedSteps.length === 0) {
-    return { nodes: [], requiredWidth: 0 };
+    return { nodes: [], requiredWidth: 0, requiredHeight: 0 };
   }
 
   const activeNodes = model.nodes.filter((n) => n.isActiveLineage);
   if (activeNodes.length === 0) {
-    return { nodes: [], requiredWidth: 0 };
+    return { nodes: [], requiredWidth: 0, requiredHeight: 0 };
   }
 
   const maxActiveDepth = activeNodes.reduce((max, n) => Math.max(max, n.depth), 0);
@@ -421,6 +422,7 @@ export function positionGhostNodes(
   }));
 
   const requiredWidth = ghostX + ACTIVE_NODE_WIDTH + LINEAGE_SCROLL_OVERHANG;
+  const requiredHeight = LINEAGE_PADDING + skippedSteps.length * LINEAGE_ROW_HEIGHT + ACTIVE_NODE_HEIGHT;
 
-  return { nodes, requiredWidth };
+  return { nodes, requiredWidth, requiredHeight };
 }
