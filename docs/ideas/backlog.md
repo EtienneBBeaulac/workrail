@@ -2255,3 +2255,124 @@ These are all monitorable from `~/.workrail/data/sessions/` with no external dep
 **Medium-term:** Sentry/Datadog/CloudWatch adapters as polling sources. Same pattern as GitLab -- poll the API, deduplicate events, dispatch workflow.
 
 **Long-term:** real-time metric ingestion (push rather than pull), time-series storage in DuckDB alongside the knowledge graph, analytics dashboard in the console.
+
+---
+
+### Per-workspace work queue: proactive task drain instead of pure event-driven (Apr 15, 2026)
+
+**The insight:** triggers make WorkTrain reactive (something happens, WorkTrain responds). A work queue makes WorkTrain proactive -- it pulls the next item when capacity is available, works it to completion, pulls the next. This is how a real development team operates: you have a sprint board you drain, not just a webhook listener.
+
+**The queue is the backlog made executable.** Every item in the backlog, every GitHub issue labeled for autonomous work, every `worktrain enqueue "..."` from the terminal -- all normalized into one ordered list per workspace that WorkTrain drains continuously.
+
+---
+
+#### How it works
+
+**Internal queue format:** `~/.workrail/workspaces/<name>/queue.jsonl` -- append-only, one item per line. The daemon's coordinator loop checks this file between sessions and pulls the next item when under `maxConcurrentSessions`. Items are consumed in priority order, then FIFO.
+
+```jsonl
+{"id":"q_001","goal":"implement maxConcurrentSessions global semaphore","priority":"high","source":"manual","createdAt":"2026-04-15T22:00:00Z","workflow":null,"status":"pending"}
+{"id":"q_002","goal":"add GitHub polling adapter","priority":"medium","source":"github_issue","issueNumber":410,"createdAt":"2026-04-15T22:01:00Z","workflow":null,"status":"pending"}
+{"id":"q_003","goal":"investigate flaky timing test in console-service-dormancy","priority":"low","source":"manual","createdAt":"2026-04-15T22:02:00Z","workflow":"bug-investigation.agentic.v2","status":"pending"}
+```
+
+**CLI interface:**
+```bash
+worktrain enqueue "implement X" --workspace workrail --priority high
+worktrain enqueue "investigate this bug" --workspace workrail --workflow bug-investigation.agentic.v2
+worktrain queue list --workspace workrail          # show pending items
+worktrain queue pause --workspace workrail         # stop draining
+worktrain queue resume --workspace workrail        # resume draining
+worktrain queue remove <id> --workspace workrail   # remove an item
+```
+
+**External pull sources (normalized into the internal queue):**
+```yaml
+workspaces:
+  workrail:
+    path: ~/git/personal/workrail
+    queue:
+      maxConcurrentSessions: 3
+      sources:
+        - type: github_issues
+          integration: github
+          filter: 'label:worktrain-queue'
+          priority:
+            - label: 'priority:high'   → high
+            - label: 'priority:medium' → medium
+            - default:                 → low
+        - type: internal              # always included
+```
+
+When a GitHub issue is labeled `worktrain-queue`, a poll cycle picks it up and normalizes it into the internal queue. When WorkTrain completes the work, it removes the label (or transitions status) and closes the issue. The team uses GitHub issues as their task interface; WorkTrain drains them autonomously.
+
+**Supported external sources:**
+- GitHub issues (label filter)
+- GitLab issues (label filter)
+- Jira sprint board (active sprint items assigned to worktrain user)
+- Linear (triage queue or assignee filter)
+- Internal queue.jsonl (always available, zero config)
+
+---
+
+#### Queue + message queue + talk: the full interface
+
+Three modes, all async-safe, all persisted:
+
+| Interface | Use case | Latency |
+|-----------|----------|---------|
+| **Work queue** | "do this when you have capacity" | Whenever a slot is free |
+| **Message queue** (`worktrain tell`) | "do this now, between current sessions" | End of current batch |
+| **Talk** (`worktrain talk`) | "let's discuss and decide together" | Interactive |
+
+You can send a thought from your phone at 2am via `worktrain tell`, and separately have a queue of 10 backlog items WorkTrain is draining during the day. The talk session can inspect the queue, reorder items, and add new ones -- all from natural conversation.
+
+---
+
+#### Queue-aware coordinator loop
+
+The coordinator's main loop becomes:
+
+```typescript
+while (daemon.running) {
+  // 1. Drain message queue (direction changes, questions)
+  const messages = await readMessageQueue();
+  for (const msg of messages) await handleMessage(msg);
+
+  // 2. Pull next queue items up to maxConcurrentSessions
+  const active = await getActiveSessions();
+  const slots = maxConcurrentSessions - active.length;
+  if (slots > 0) {
+    const items = await dequeueItems(slots);
+    for (const item of items) {
+      const pipeline = await classifyAndBuildPipeline(item.goal);
+      await spawnCoordinatorSession(pipeline, item);
+    }
+  }
+
+  // 3. Check external pull sources for new items
+  await syncExternalSources();
+
+  await sleep(5_000);  // 5s coordinator tick
+}
+```
+
+The queue is the thing that makes WorkTrain feel like a teammate rather than a service -- it has its own work to do, it makes progress autonomously, and you can check in on it rather than having to drive every task manually.
+
+---
+
+#### Queue visibility in the console
+
+The console adds a **Queue tab** (alongside Sessions and AUTO):
+- Pending items (ordered by priority, FIFO within priority)
+- Active items (with live session link)
+- Completed items (with outcome, duration, PR link if applicable)
+- Paused/blocked items (with reason)
+
+Drag-to-reorder for priority. Click to expand and see the full pipeline plan. Button to pause/resume the queue. "Add item" form that goes to `worktrain enqueue`.
+
+---
+
+#### Relationship to worktrain spawn/await
+
+`worktrain spawn` / `worktrain await` are for coordinator *scripts* -- explicit programmatic orchestration. The work queue is for *ambient* drain -- WorkTrain autonomously pulls items when capacity is free. Both use the same underlying session engine. The difference is who's driving: a script (spawn/await) or the queue drain loop. They compose naturally: a queue item might be a coordinator script that spawns its own child sessions via spawn/await.
