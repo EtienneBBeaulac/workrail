@@ -523,3 +523,193 @@ triggers:
     expect(result.value.triggers).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Workspace namespacing (Phase 1)
+// ---------------------------------------------------------------------------
+
+describe('workspace namespacing (Phase 1)', () => {
+  const WORKSPACE_MAP = {
+    'my-project': { path: '/Users/me/git/my-project' },
+    'with-soul': { path: '/Users/me/git/with-soul', soulFile: '/home/me/.workrail/workspaces/with-soul/daemon-soul.md' },
+  };
+
+  it('happy path: resolves workspacePath from workspaceName', () => {
+    const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: my-project
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, WORKSPACE_MAP);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(1);
+    const trigger = result.value.triggers[0]!;
+    expect(trigger.workspacePath).toBe('/Users/me/git/my-project');
+    expect(trigger.workspaceName).toBe('my-project');
+    expect(trigger.soulFile).toBeUndefined();
+  });
+
+  it('resolves workspace soulFile into trigger soulFile when no trigger-level override', () => {
+    const yaml = `
+triggers:
+  - id: soul-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: with-soul
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, WORKSPACE_MAP);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0]!;
+    expect(trigger.soulFile).toBe('/home/me/.workrail/workspaces/with-soul/daemon-soul.md');
+  });
+
+  it('trigger-level soulFile overrides workspace soulFile', () => {
+    const yaml = `
+triggers:
+  - id: override-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: with-soul
+    soulFile: /custom/soul.md
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, WORKSPACE_MAP);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0]!;
+    expect(trigger.soulFile).toBe('/custom/soul.md');
+  });
+
+  it('trigger with soulFile only (no workspaceName) stores soulFile directly', () => {
+    const yaml = `
+triggers:
+  - id: soul-only-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    soulFile: /my/soul.md
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0]!;
+    expect(trigger.soulFile).toBe('/my/soul.md');
+    expect(trigger.workspaceName).toBeUndefined();
+    expect(trigger.workspacePath).toBe('/path/to/repo');
+  });
+
+  it('emits unknown_workspace per-trigger error when workspaceName not in map', () => {
+    const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: nonexistent
+    goal: Review this MR
+  - id: good-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, WORKSPACE_MAP);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // bad-trigger is skipped; good-trigger loads successfully
+    expect(result.value.triggers).toHaveLength(1);
+    expect(result.value.triggers[0]!.id).toBe('good-trigger');
+  });
+
+  it('warns and uses workspaceName when both workspaceName and workspacePath are specified', () => {
+    const yaml = `
+triggers:
+  - id: conflict-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: my-project
+    workspacePath: /some/other/path
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, WORKSPACE_MAP);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0]!;
+    // workspaceName takes precedence
+    expect(trigger.workspacePath).toBe('/Users/me/git/my-project');
+  });
+
+  it('rejects workspaceName with invalid format (contains slash)', () => {
+    const yaml = `
+triggers:
+  - id: bad-name-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: my/project
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, WORKSPACE_MAP);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Invalid format -- trigger is skipped
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('rejects workspace config with relative path', () => {
+    const workspacesWithRelative = {
+      'relative': { path: 'relative/path' },
+    };
+    const yaml = `
+triggers:
+  - id: relative-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: relative
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, workspacesWithRelative);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Trigger skipped due to relative path in workspace config
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('backward compat: existing triggers without workspaceName work unchanged', () => {
+    const yaml = `
+triggers:
+  - id: existing-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /existing/path
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, {}); // no workspaces map
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(1);
+    expect(result.value.triggers[0]!.workspacePath).toBe('/existing/path');
+    expect(result.value.triggers[0]!.workspaceName).toBeUndefined();
+  });
+
+  it('backward compat: calling without workspaces param works (existing API)', () => {
+    const yaml = `
+triggers:
+  - id: compat-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /compat/path
+    goal: Review this MR
+`;
+    // Calling with only 2 params (existing callers) still works
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(1);
+  });
+});

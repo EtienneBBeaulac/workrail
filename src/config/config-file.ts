@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import { z } from 'zod';
 import type { Result } from '../runtime/result.js';
 import { ok } from '../runtime/result.js';
+import type { WorkspaceConfig } from '../trigger/types.js';
 
 // =============================================================================
 // Allowed keys (all supported env var names, minus excluded set)
@@ -201,4 +202,81 @@ export function loadWorkrailConfigFile(): Result<Record<string, string>, ConfigF
   }
 
   return ok(validated);
+}
+
+// =============================================================================
+// Workspace config loader
+// =============================================================================
+
+const WorkspaceConfigEntrySchema = z.object({
+  path: z.string().min(1),
+  soulFile: z.string().min(1).optional(),
+});
+
+/**
+ * Load the "workspaces" map from ~/.workrail/config.json.
+ *
+ * Returns ok(Record<string, WorkspaceConfig>) on success.
+ * Returns ok({}) when:
+ * - Config file is absent (ENOENT)
+ * - Config file has no "workspaces" key
+ * - VITEST is set (test isolation -- never reads disk in tests)
+ * Invalid entries are warned about and skipped; the rest are returned.
+ * This function NEVER errors -- callers can always trust ok(result).
+ *
+ * WHY a separate function from loadWorkrailConfigFile:
+ * The existing loader returns a flat Record<string, string> for env-merging.
+ * The workspace map is a nested object serving a different consumer (trigger loading).
+ */
+export function loadWorkspacesFromConfigFile(): Result<Record<string, WorkspaceConfig>, never> {
+  if (process.env['VITEST']) return ok({});
+
+  const configPath = path.join(os.homedir(), '.workrail', 'config.json');
+
+  let rawContent: string;
+  try {
+    rawContent = fs.readFileSync(configPath, 'utf-8');
+  } catch {
+    return ok({});
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return ok({});
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return ok({});
+  }
+
+  const workspacesRaw = (parsed as Record<string, unknown>)['workspaces'];
+
+  if (workspacesRaw === undefined || workspacesRaw === null) {
+    return ok({});
+  }
+
+  if (typeof workspacesRaw !== 'object' || Array.isArray(workspacesRaw)) {
+    console.warn(
+      '[WorkRail] config file: "workspaces" must be an object (map of name -> { path, soulFile? }). Ignoring.',
+    );
+    return ok({});
+  }
+
+  const result: Record<string, WorkspaceConfig> = {};
+  for (const [name, entry] of Object.entries(workspacesRaw as Record<string, unknown>)) {
+    const parseResult = WorkspaceConfigEntrySchema.safeParse(entry);
+    if (!parseResult.success) {
+      console.warn(
+        `[WorkRail] config file: workspace "${name}" has invalid shape -- skipped. ` +
+        `Expected { path: string; soulFile?: string }. ` +
+        `Issues: ${parseResult.error.issues.map((i) => i.message).join(', ')}`,
+      );
+      continue;
+    }
+    result[name] = parseResult.data;
+  }
+
+  return ok(result);
 }
