@@ -367,10 +367,15 @@ describe('PollingScheduler setInterval lifecycle', () => {
 
     const scheduler = new PollingScheduler([trigger], router, store, fetchFn);
 
-    // Spy on doPoll before start() so we capture the wired calls
-    const doPollSpy = vi.spyOn(
-      scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> },
-      'doPoll',
+    // Spy on runPollCycle before start() so we capture calls from both the
+    // first-poll setTimeout (5s) and the setInterval (30s).
+    // We use runPollCycle rather than doPoll because the skip-cycle guard can
+    // prevent doPoll from being called a second time if the first async doPoll
+    // is still in progress (real I/O pending). runPollCycle is called at every
+    // timer firing regardless of the in-progress guard.
+    const pollCycleSpy = vi.spyOn(
+      scheduler as unknown as { runPollCycle(t: TriggerDefinition): Promise<void> },
+      'runPollCycle',
     );
 
     scheduler.start();
@@ -379,20 +384,21 @@ describe('PollingScheduler setInterval lifecycle', () => {
     // also fires within this window.
     await vi.advanceTimersByTimeAsync(30_001);
 
-    // doPoll should have been called at least once (interval tick + possibly first-poll timeout)
-    expect(doPollSpy).toHaveBeenCalled();
-    const callCountAfterStart = doPollSpy.mock.calls.length;
+    // runPollCycle should have been called at least once (interval tick + possibly first-poll timeout)
+    expect(pollCycleSpy).toHaveBeenCalled();
+    const callCountAfterStart = pollCycleSpy.mock.calls.length;
 
     // Stop the scheduler and reset the spy call count
     scheduler.stop();
-    doPollSpy.mockClear();
+    pollCycleSpy.mockClear();
 
     // Advance well beyond another interval -- no further calls should fire
     await vi.advanceTimersByTimeAsync(60_000);
 
-    expect(doPollSpy).not.toHaveBeenCalled();
-    // Confirm at least one call was observed before stop
-    expect(callCountAfterStart).toBeGreaterThanOrEqual(1);
+    expect(pollCycleSpy).not.toHaveBeenCalled();
+    // Confirm at least 2 calls were observed before stop:
+    // both the 5s first-poll timeout AND the 30s interval should have fired within 30001ms.
+    expect(callCountAfterStart).toBeGreaterThanOrEqual(2);
   });
 });
 

@@ -938,6 +938,12 @@ function validateAndResolveTrigger(
           `omitting excludeAuthors will cause infinite self-review loops. ` +
           `Set excludeAuthors to your WorkTrain bot account login (e.g. "worktrain-bot").`,
         );
+      } else if (event === 'merge_request.merged' || event === 'merge_request.closed') {
+        console.warn(
+          `[TriggerStore] Event type '${event}' for trigger '${rawId}' cannot be observed ` +
+          `with state=opened polling (GitLab only returns open MRs). ` +
+          `Use a webhook trigger for merge/close events.`,
+        );
       }
 
       pollingSource = {

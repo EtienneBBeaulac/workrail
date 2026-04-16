@@ -15,7 +15,7 @@
 
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadTriggerConfig } from '../../src/trigger/trigger-store.js';
 
 // ---------------------------------------------------------------------------
@@ -980,5 +980,43 @@ triggers:
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.value.triggers[0]?.pollingSource).toBeUndefined();
+  });
+
+  it('warns when merge_request.merged or merge_request.closed events are configured', () => {
+    const yaml = `
+triggers:
+  - id: mr-close-trigger
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: Review MR
+    source:
+      baseUrl: https://gitlab.com
+      projectId: "12345"
+      token: mytoken
+      events: merge_request.merged merge_request.closed
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = loadTriggerConfig(yaml, {});
+
+    // Trigger still loads despite the warning
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') {
+      warnSpy.mockRestore();
+      return;
+    }
+    expect(result.value.triggers).toHaveLength(1);
+
+    // Warning fires for each unreachable event type
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("cannot be observed with state=opened polling"),
+    );
+    // Both events generate a warning
+    const calls = warnSpy.mock.calls.map((args) => String(args[0]));
+    expect(calls.some((msg) => msg.includes('merge_request.merged'))).toBe(true);
+    expect(calls.some((msg) => msg.includes('merge_request.closed'))).toBe(true);
+
+    warnSpy.mockRestore();
   });
 });
