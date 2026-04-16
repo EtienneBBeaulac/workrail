@@ -16,6 +16,8 @@
  *   It is an optional additive field on TriggerDefinition alongside the webhook fields.
  *   This is a stepping-stone design -- at 3+ polling adapter types, migrate to a
  *   discriminated union on TriggerDefinition. TODO(follow-up): migrate at adapter #2.
+ * - WorkspaceName / WorkspaceConfig implement Phase 1 of workspace namespacing.
+ *   Phase 2 (session metadata) and Phase 3 (per-workspace concurrency) are deferred.
  */
 
 // ---------------------------------------------------------------------------
@@ -26,6 +28,43 @@ export type TriggerId = string & { readonly _brand: 'TriggerId' };
 
 export function asTriggerId(value: string): TriggerId {
   return value as TriggerId;
+}
+
+// ---------------------------------------------------------------------------
+// WorkspaceName: branded string to prevent bare-string substitution
+//
+// Identifies a named workspace entry in ~/.workrail/config.json.
+// Format: ^[a-zA-Z0-9_-]+$ (validated at parse time by trigger-store.ts).
+// Follows the same pattern as TriggerId.
+// ---------------------------------------------------------------------------
+
+export type WorkspaceName = string & { readonly _brand: 'WorkspaceName' };
+
+export function asWorkspaceName(value: string): WorkspaceName {
+  return value as WorkspaceName;
+}
+
+// ---------------------------------------------------------------------------
+// WorkspaceConfig: per-workspace configuration entry from ~/.workrail/config.json
+//
+// Phase 1: path + soulFile only.
+// Phase 3 (future): add maxConcurrentSessions when the concurrency gate ships.
+//   Do NOT add maxConcurrentSessions here until then.
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceConfig {
+  /** Absolute path to the workspace directory. */
+  readonly path: string;
+  /**
+   * Optional workspace-specific daemon soul file path.
+   * Cascade (most-to-least specific):
+   *   1. TriggerDefinition.soulFile (trigger-level override in triggers.yml)
+   *   2. WorkspaceConfig.soulFile (this field -- workspace default)
+   *   3. ~/.workrail/daemon-soul.md (global fallback, applied at runtime)
+   *   4. DAEMON_SOUL_DEFAULT (built-in constant)
+   * Resolved at trigger parse time by trigger-store.ts into TriggerDefinition.soulFile.
+   */
+  readonly soulFile?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +347,24 @@ export interface TriggerDefinition {
    * TODO(follow-up): migrate to discriminated union at adapter #2.
    */
   readonly pollingSource?: GitLabPollingSource;
+
+  /**
+   * Optional named workspace this trigger belongs to.
+   * When set, trigger-store.ts resolves workspacePath from WorkspaceConfig.path
+   * at parse time. Unknown names cause a per-trigger soft error (daemon continues).
+   * Format: ^[a-zA-Z0-9_-]+$ (validated at parse time).
+   * Phase 2 (future): DaemonEntry.workspaceName for console filtering.
+   */
+  readonly workspaceName?: WorkspaceName;
+
+  /**
+   * Optional resolved soul file path for this trigger's agent runs.
+   * Set by trigger-store.ts after cascade resolution:
+   *   trigger YAML soulFile -> workspace soulFile -> undefined.
+   * When absent, workflow-runner.ts falls back to ~/.workrail/daemon-soul.md.
+   * In YAML:   soulFile: "~/.workrail/workspaces/my-project/daemon-soul.md"
+   */
+  readonly soulFile?: string;
 }
 
 // ---------------------------------------------------------------------------

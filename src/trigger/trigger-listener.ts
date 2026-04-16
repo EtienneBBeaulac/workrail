@@ -26,9 +26,9 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js';
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
-import { loadWorkrailConfigFile } from '../config/config-file.js';
+import { loadWorkrailConfigFile, loadWorkspacesFromConfigFile } from '../config/config-file.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
-import type { WebhookEvent } from './types.js';
+import type { WebhookEvent, WorkspaceConfig } from './types.js';
 import { asTriggerId } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,13 @@ export interface StartTriggerListenerOptions {
   readonly env?: Record<string, string | undefined>;
   /** Override runWorkflow() for testing. */
   readonly runWorkflowFn?: RunWorkflowFn;
+  /**
+   * Optional workspace map for workspace namespacing (Phase 1).
+   * When provided, trigger workspaceName fields are resolved against this map.
+   * When absent, loadWorkspacesFromConfigFile() is called to load from config.json.
+   * Pass {} to explicitly disable workspace namespacing (e.g. in tests).
+   */
+  readonly workspaces?: Readonly<Record<string, WorkspaceConfig>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,8 +190,17 @@ export async function startTriggerListener(
     return { _kind: 'err', error: { kind: 'missing_api_key' } };
   }
 
+  // Load workspace namespacing map (Phase 1).
+  // If workspaces is explicitly provided (e.g. in tests), use it directly.
+  // Otherwise load from ~/.workrail/config.json.
+  // loadWorkspacesFromConfigFile() never errors (error type is `never`), so the kind
+  // is always 'ok'. The discriminant check satisfies TypeScript's narrowing requirement.
+  const workspaceResult = loadWorkspacesFromConfigFile();
+  const loadedWorkspaces = workspaceResult.kind === 'ok' ? workspaceResult.value : {};
+  const workspaces = options.workspaces ?? loadedWorkspaces;
+
   // Load triggers.yml
-  const configResult = await loadTriggerConfigFromFile(options.workspacePath, env);
+  const configResult = await loadTriggerConfigFromFile(options.workspacePath, env, workspaces);
 
   let triggerIndex: Map<string, import('./types.js').TriggerDefinition>;
 

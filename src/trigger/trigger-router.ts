@@ -497,6 +497,8 @@ export class TriggerRouter {
       context: workflowContext,
       ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
       ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
+      // soulFile is cascade-resolved in trigger-store.ts (trigger -> workspace -> undefined).
+      ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
     };
 
     // Enqueue asynchronously.

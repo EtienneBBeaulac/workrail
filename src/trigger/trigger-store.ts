@@ -28,6 +28,7 @@
  *   goal: Review: MR #123     # Parse error
  */
 
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { Result } from '../runtime/result.js';
@@ -38,7 +39,10 @@ import {
   type ContextMapping,
   type ContextMappingEntry,
   type GitLabPollingSource,
+  type WorkspaceConfig,
+  type WorkspaceName,
   asTriggerId,
+  asWorkspaceName,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +55,7 @@ export type TriggerStoreError =
   | { readonly kind: 'missing_field'; readonly field: string; readonly triggerId: string }
   | { readonly kind: 'invalid_field_value'; readonly field: string; readonly triggerId: string }
   | { readonly kind: 'unknown_provider'; readonly provider: string; readonly triggerId: string }
+  | { readonly kind: 'unknown_workspace'; readonly workspaceName: string; readonly triggerId: string }
   | { readonly kind: 'file_not_found'; readonly filePath: string }
   | { readonly kind: 'io_error'; readonly message: string }
   | { readonly kind: 'duplicate_id'; readonly triggerId: string };
@@ -100,6 +105,9 @@ interface ParsedTriggerRaw {
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
   autoOpenPR?: string;   // 'true' | 'false' scalar
+  // Workspace namespacing (Phase 1).
+  workspaceName?: string;  // raw string; validated + branded in validateAndResolveTrigger
+  soulFile?: string;       // raw path; cascade-resolved in validateAndResolveTrigger
   // Polling trigger source (present only when provider === 'gitlab_poll').
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   source?: {
@@ -449,11 +457,33 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'callbackUrl':      trigger.callbackUrl = value; break;
     case 'autoCommit':       trigger.autoCommit = value; break;
     case 'autoOpenPR':       trigger.autoOpenPR = value; break;
-    // contextMapping, agentConfig, onComplete handled as sub-object blocks
+    case 'workspaceName':    trigger.workspaceName = value; break;
+    case 'soulFile':         trigger.soulFile = value; break;
+    // contextMapping, agentConfig, onComplete, source handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
       break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Path utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Expand a leading `~/` in a file path to the user's home directory.
+ *
+ * WHY: Node.js `fs.readFile` (and all other fs APIs) do NOT perform shell-style
+ * tilde expansion. A path like `~/.workrail/soul.md` passed directly to fs will
+ * produce ENOENT because `~` is treated as a literal directory name, not the
+ * home directory. This function converts `~/foo` to `/home/<user>/foo` so that
+ * paths written with the common shell convention work correctly.
+ *
+ * Only the `~/` prefix is handled (the most common case). `~username/` forms are
+ * not supported and are returned unchanged.
+ */
+function expandTildePath(p: string): string {
+  return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
 // ---------------------------------------------------------------------------
@@ -499,16 +529,17 @@ function assembleContextMapping(
 function validateAndResolveTrigger(
   raw: ParsedTriggerRaw,
   env: Record<string, string | undefined>,
+  workspaces: Readonly<Record<string, WorkspaceConfig>> = {},
 ): Result<TriggerDefinition, TriggerStoreError> {
   const rawId = raw.id?.trim() ?? '';
   if (!rawId) {
     return err({ kind: 'missing_field', field: 'id', triggerId: '(unknown)' });
   }
 
-  const requiredStringFields: Array<Extract<keyof ParsedTriggerRaw, 'provider' | 'workflowId' | 'workspacePath' | 'goal'>> = [
+  // Fields required unconditionally (workspacePath is handled separately below).
+  const requiredStringFields: Array<Extract<keyof ParsedTriggerRaw, 'provider' | 'workflowId' | 'goal'>> = [
     'provider',
     'workflowId',
-    'workspacePath',
     'goal',
   ];
   for (const field of requiredStringFields) {
@@ -521,6 +552,81 @@ function validateAndResolveTrigger(
   const provider = raw.provider!.trim();
   if (!SUPPORTED_PROVIDERS.has(provider)) {
     return err({ kind: 'unknown_provider', provider, triggerId: rawId });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Workspace namespacing (Phase 1): resolve workspacePath and soulFile.
+  //
+  // If workspaceName is provided:
+  //   1. Validate format: ^[a-zA-Z0-9_-]+$
+  //   2. Look up in workspaces map (unknown_workspace = per-trigger soft error)
+  //   3. Validate path is absolute
+  //   4. Soul cascade: trigger YAML soulFile > workspace soulFile > undefined
+  // If workspaceName is absent, workspacePath is required.
+  // If both are provided, warn and use workspaceName.
+  // ---------------------------------------------------------------------------
+  let resolvedWorkspacePath: string;
+  let resolvedWorkspaceName: WorkspaceName | undefined;
+  let resolvedSoulFile: string | undefined;
+
+  const rawWorkspaceName = raw.workspaceName?.trim();
+  const rawWorkspacePath = raw.workspacePath?.trim();
+  const rawSoulFile = raw.soulFile?.trim();
+
+  if (rawWorkspaceName) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(rawWorkspaceName)) {
+      return err({
+        kind: 'invalid_field_value',
+        field: `workspaceName (must match ^[a-zA-Z0-9_-]+$, got: "${rawWorkspaceName}")`,
+        triggerId: rawId,
+      });
+    }
+
+    const workspaceConfig = workspaces[rawWorkspaceName];
+    if (!workspaceConfig) {
+      return err({ kind: 'unknown_workspace', workspaceName: rawWorkspaceName, triggerId: rawId });
+    }
+
+    if (!path.isAbsolute(workspaceConfig.path)) {
+      return err({
+        kind: 'invalid_field_value',
+        field: `workspace "${rawWorkspaceName}".path (must be absolute, got: "${workspaceConfig.path}")`,
+        triggerId: rawId,
+      });
+    }
+
+    if (rawWorkspacePath) {
+      console.warn(
+        `[TriggerStore] WARNING: trigger "${rawId}" has both workspaceName and workspacePath. ` +
+        `workspaceName takes precedence; workspacePath "${rawWorkspacePath}" is ignored.`,
+      );
+    }
+
+    resolvedWorkspacePath = workspaceConfig.path;
+    resolvedWorkspaceName = asWorkspaceName(rawWorkspaceName);
+    resolvedSoulFile = rawSoulFile ?? workspaceConfig.soulFile;
+  } else {
+    if (!rawWorkspacePath) {
+      return err({ kind: 'missing_field', field: 'workspacePath', triggerId: rawId });
+    }
+    resolvedWorkspacePath = rawWorkspacePath;
+    resolvedSoulFile = rawSoulFile;
+  }
+
+  // Expand `~/` tilde prefix in soulFile, if present.
+  // Node.js fs APIs do not perform shell-style tilde expansion; without this, a
+  // path like `~/.workrail/soul.md` would produce ENOENT and silently fall through
+  // to the default soul with no warning.
+  if (resolvedSoulFile) {
+    resolvedSoulFile = expandTildePath(resolvedSoulFile);
+  }
+
+  // Validate soulFile absoluteness after tilde expansion.
+  // WHY: a relative soulFile silently resolves against process.cwd(), which is almost
+  // certainly wrong. This mirrors the workspace.path absoluteness check above and
+  // ensures fail-fast at load time rather than a confusing runtime failure.
+  if (resolvedSoulFile && !path.isAbsolute(resolvedSoulFile)) {
+    return err({ kind: 'invalid_field_value', field: 'soulFile', triggerId: rawId });
   }
 
   // Resolve hmacSecret if present
@@ -756,7 +862,8 @@ function validateAndResolveTrigger(
     id: asTriggerId(rawId),
     provider,
     workflowId: raw.workflowId!.trim(),
-    workspacePath: raw.workspacePath!.trim(),
+    // workspacePath: always set -- from workspaceName resolution or from raw YAML.
+    workspacePath: resolvedWorkspacePath,
     goal: raw.goal!.trim(),
     concurrencyMode,
     ...(hmacSecret !== undefined ? { hmacSecret } : {}),
@@ -771,6 +878,9 @@ function validateAndResolveTrigger(
     ...(autoCommit ? { autoCommit } : {}),
     ...(autoOpenPR ? { autoOpenPR } : {}),
     ...(pollingSource !== undefined ? { pollingSource } : {}),
+    // Workspace namespacing (Phase 1).
+    ...(resolvedWorkspaceName !== undefined ? { workspaceName: resolvedWorkspaceName } : {}),
+    ...(resolvedSoulFile ? { soulFile: resolvedSoulFile } : {}),
   };
 
   return ok(trigger);
@@ -791,6 +901,7 @@ function validateAndResolveTrigger(
 export function loadTriggerConfig(
   yamlContent: string,
   env: Record<string, string | undefined> = process.env,
+  workspaces: Readonly<Record<string, WorkspaceConfig>> = {},
 ): Result<TriggerConfig, TriggerStoreError> {
   const parsedResult = parseTriggersYaml(yamlContent);
   if (parsedResult.kind === 'err') return parsedResult;
@@ -800,7 +911,7 @@ export function loadTriggerConfig(
   const validTriggers: TriggerDefinition[] = [];
   const validationErrors: TriggerStoreError[] = [];
   for (const rawTrigger of parsedResult.value) {
-    const triggerResult = validateAndResolveTrigger(rawTrigger, env);
+    const triggerResult = validateAndResolveTrigger(rawTrigger, env, workspaces);
     if (triggerResult.kind === 'err') {
       console.warn(`[TriggerStore] Skipping invalid trigger: ${JSON.stringify(triggerResult.error)}`);
       validationErrors.push(triggerResult.error);
@@ -831,6 +942,7 @@ export function loadTriggerConfig(
 export async function loadTriggerConfigFromFile(
   workspacePath: string,
   env: Record<string, string | undefined> = process.env,
+  workspaces: Readonly<Record<string, WorkspaceConfig>> = {},
 ): Promise<Result<TriggerConfig, TriggerStoreError>> {
   const filePath = path.join(workspacePath, 'triggers.yml');
 
@@ -845,7 +957,7 @@ export async function loadTriggerConfigFromFile(
     return err({ kind: 'io_error', message: error.message ?? String(e) });
   }
 
-  return loadTriggerConfig(content, env);
+  return loadTriggerConfig(content, env, workspaces);
 }
 
 /**

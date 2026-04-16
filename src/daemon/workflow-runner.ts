@@ -196,6 +196,13 @@ export interface WorkflowTrigger {
    * dispatch HTTP handler.
    */
   readonly _preAllocatedStartResponse?: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  /**
+   * Optional resolved soul file path. Sourced from TriggerDefinition.soulFile
+   * (already cascade-resolved by trigger-store.ts: trigger soulFile -> workspace soulFile).
+   * When absent, loadDaemonSoul() falls back to ~/.workrail/daemon-soul.md.
+   * Kept here so workflow-runner.ts remains decoupled from trigger system types.
+   */
+  readonly soulFile?: string;
 }
 
 /** Successful completion of a workflow run. */
@@ -511,17 +518,22 @@ async function clearStrayTmpFiles(sessionsDir: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Load the operator-customizable agent rules from ~/.workrail/daemon-soul.md.
+ * Load the operator-customizable agent rules from a soul file.
  *
- * On first run (file absent), writes a template to disk so the operator can
- * discover and customize it. The write is best-effort: if it fails (e.g. read-only
- * filesystem), the warning is logged and the default content is returned anyway.
+ * @param resolvedPath - Optional resolved path from the cascade in trigger-store.ts:
+ *   TriggerDefinition.soulFile (trigger override) -> WorkspaceConfig.soulFile (workspace default).
+ *   When absent, falls back to ~/.workrail/daemon-soul.md (global default).
  *
- * WHY synchronous default path: soul content must be ready before Agent construction.
- * The function is async only because first-run template creation requires an fs.writeFile.
+ * On first run (file absent), writes a template to disk so the operator can discover
+ * and customize it. The write is best-effort: if it fails, the warning is logged and
+ * DAEMON_SOUL_DEFAULT is returned anyway.
+ *
+ * WHY path.dirname(soulPath) for mkdir: for workspace-scoped paths like
+ * ~/.workrail/workspaces/my-project/daemon-soul.md, the parent dir must be created --
+ * not WORKRAIL_DIR (~/.workrail) which is already present.
  */
-async function loadDaemonSoul(): Promise<string> {
-  const soulPath = path.join(WORKRAIL_DIR, 'daemon-soul.md');
+async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
+  const soulPath = resolvedPath ?? path.join(WORKRAIL_DIR, 'daemon-soul.md');
   try {
     return await fs.readFile(soulPath, 'utf8');
   } catch (err: unknown) {
@@ -531,7 +543,7 @@ async function loadDaemonSoul(): Promise<string> {
     if (isEnoent) {
       // Best-effort template creation -- failure is logged but never fatal.
       try {
-        await fs.mkdir(WORKRAIL_DIR, { recursive: true });
+        await fs.mkdir(path.dirname(soulPath), { recursive: true });
         await fs.writeFile(soulPath, DAEMON_SOUL_TEMPLATE, 'utf8');
         console.log(`[WorkflowRunner] Created daemon-soul.md template at ${soulPath}`);
       } catch (writeErr: unknown) {
@@ -1223,8 +1235,10 @@ export async function runWorkflow(
   // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
   // not before. Populating the system prompt at construction time is the correct
   // pre-step-1 injection point.
+  // trigger.soulFile is already cascade-resolved by trigger-store.ts:
+  //   trigger soulFile -> workspace soulFile -> undefined (global fallback in loadDaemonSoul)
   const [soulContent, workspaceContext, sessionNotes] = await Promise.all([
-    loadDaemonSoul(),
+    loadDaemonSoul(trigger.soulFile),
     loadWorkspaceContext(trigger.workspacePath),
     startContinueToken ? loadSessionNotes(startContinueToken, ctx) : Promise.resolve([] as readonly string[]),
   ]);
