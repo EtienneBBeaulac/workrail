@@ -563,6 +563,8 @@ export function mountConsoleRoutes(
       ).then((result) => {
         if (result._tag === 'success') {
           console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
+        } else if (result._tag === 'timeout') {
+          console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
         } else {
           console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
         }

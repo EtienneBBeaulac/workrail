@@ -114,6 +114,36 @@ export interface TriggerDefinition {
      * When absent, env-based model detection applies.
      */
     readonly model?: string;
+    /**
+     * Maximum wall-clock time (in minutes) for a single workflow run.
+     * If the agent loop does not complete within this window, the run is
+     * aborted and returns { _tag: 'timeout', reason: 'wall_clock' }.
+     *
+     * WHY: a stuck tool call, infinite retry loop, or runaway LLM can hold a
+     * queue slot indefinitely. This cap is the safety valve.
+     *
+     * Default: 30 minutes (when absent or undefined).
+     * Must be a positive integer (>= 1). Value of 0 is invalid -- omit the field
+     * to use the default.
+     */
+    readonly maxSessionMinutes?: number;
+    /**
+     * Maximum number of LLM response turns allowed for a single workflow run.
+     * If the agent exceeds this count, the run is aborted and returns
+     * { _tag: 'timeout', reason: 'max_turns' }.
+     *
+     * WHY: an LLM that loops (repeatedly calling tools without advancing the
+     * workflow) would otherwise run until the wall-clock timeout. A turn limit
+     * catches this class of runaway loop more aggressively.
+     *
+     * A "turn" is one complete LLM response (which may include multiple tool
+     * calls). Counted via pi-agent-core's turn_end event.
+     *
+     * Default: no limit (when absent or undefined).
+     * Must be a positive integer (>= 1). Value of 0 is invalid -- omit the field
+     * for no turn limit.
+     */
+    readonly maxTurns?: number;
   };
 
   /**

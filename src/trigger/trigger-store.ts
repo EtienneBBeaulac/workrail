@@ -91,7 +91,10 @@ interface ParsedTriggerRaw {
   goalTemplate?: string;
   referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
   concurrencyMode?: string; // validated as 'serial' | 'parallel' at assemble time
-  agentConfig?: { model?: string };
+  // Note: maxSessionMinutes and maxTurns are stored as raw strings here because
+  // the YAML parser returns all scalars as strings. Numeric conversion and
+  // validation happen in validateAndResolveTrigger at the boundary.
+  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string };
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
 }
 
@@ -275,7 +278,7 @@ function parseTriggersYaml(
         // agentConfig is a sub-object block with scalar string values.
         // Baseline indent: lineIndent (indent of the "agentConfig:" key line).
         lineIndex++;
-        const agentConfig: { model?: string } = {};
+        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string } = {};
         while (lineIndex < lines.length) {
           const acLine = lines[lineIndex];
           if (acLine === undefined) break;
@@ -301,6 +304,8 @@ function parseTriggersYaml(
             const acValueResult = parseScalar(acRawValue, lineIndex + 1);
             if (acValueResult.kind === 'err') return acValueResult;
             if (acKey === 'model') agentConfig.model = acValueResult.value;
+            else if (acKey === 'maxSessionMinutes') agentConfig.maxSessionMinutes = acValueResult.value;
+            else if (acKey === 'maxTurns') agentConfig.maxTurns = acValueResult.value;
           }
           lineIndex++;
         }
@@ -488,10 +493,53 @@ function validateAndResolveTrigger(
     }
   }
 
-  // agentConfig: only include if at least one sub-field is present
-  const agentConfig = raw.agentConfig?.model?.trim()
-    ? { model: raw.agentConfig.model.trim() }
-    : undefined;
+  // agentConfig: only include if at least one sub-field is present.
+  // maxSessionMinutes and maxTurns are stored as strings by the YAML parser
+  // (all scalars are strings). Convert to integers here at the validation boundary.
+  let agentConfig: TriggerDefinition['agentConfig'] | undefined;
+  if (raw.agentConfig) {
+    const model = raw.agentConfig.model?.trim() || undefined;
+
+    let maxSessionMinutes: number | undefined;
+    if (raw.agentConfig.maxSessionMinutes !== undefined) {
+      // WHY Number.isInteger instead of parseInt: parseInt('1.5', 10) silently returns 1,
+      // so an operator writing maxSessionMinutes: 1.5 would get 1 minute with no warning.
+      // Number.isInteger(Number(raw)) catches both non-numeric strings (NaN -> false) and
+      // decimal values (1.5 -> false) in one check. Scientific notation integers like 1e2
+      // pass correctly (Number('1e2') === 100, which is a valid integer).
+      const asNumber = Number(raw.agentConfig.maxSessionMinutes);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        return err({
+          kind: 'missing_field',
+          field: 'agentConfig.maxSessionMinutes (must be a positive integer)',
+          triggerId: rawId,
+        });
+      }
+      maxSessionMinutes = asNumber;
+    }
+
+    let maxTurns: number | undefined;
+    if (raw.agentConfig.maxTurns !== undefined) {
+      // WHY Number.isInteger: same rationale as maxSessionMinutes above.
+      const asNumber = Number(raw.agentConfig.maxTurns);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        return err({
+          kind: 'missing_field',
+          field: 'agentConfig.maxTurns (must be a positive integer)',
+          triggerId: rawId,
+        });
+      }
+      maxTurns = asNumber;
+    }
+
+    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined) {
+      agentConfig = {
+        ...(model !== undefined ? { model } : {}),
+        ...(maxSessionMinutes !== undefined ? { maxSessionMinutes } : {}),
+        ...(maxTurns !== undefined ? { maxTurns } : {}),
+      };
+    }
+  }
 
   // concurrencyMode: validate and default to 'serial' at parse time (not at use time).
   // Why: the default must be explicit in the TriggerDefinition so the router never
