@@ -61,6 +61,65 @@ const WORKFLOW_TIMEOUT_MS = 30 * 60 * 1000;
  */
 export const DAEMON_SESSIONS_DIR = path.join(os.homedir(), '.workrail', 'daemon-sessions');
 
+/**
+ * Root directory for WorkRail user data (crash recovery, soul file, etc.).
+ * WHY: daemon-soul.md lives alongside daemon-sessions/ in ~/.workrail/, not in
+ * the data/ subdirectory controlled by WORKRAIL_DATA_DIR. This is consistent with
+ * other files in the ~/.workrail/ root that are not part of the structured data store.
+ */
+const WORKRAIL_DIR = path.join(os.homedir(), '.workrail');
+
+/**
+ * Maximum combined byte size of all workspace context files.
+ * WHY: Prevents context window bloat from large CLAUDE.md / AGENTS.md files.
+ * Approximates 8000 tokens at ~4 bytes/token.
+ */
+const WORKSPACE_CONTEXT_MAX_BYTES = 32 * 1024;
+
+/**
+ * Candidate workspace context files in priority order.
+ * WHY: Higher-priority files (repo-specific Claude config) are included first.
+ * If the combined size exceeds WORKSPACE_CONTEXT_MAX_BYTES, lower-priority files
+ * are truncated or dropped so the most relevant context always fits.
+ */
+const WORKSPACE_CONTEXT_CANDIDATE_PATHS = [
+  '.claude/CLAUDE.md',
+  'CLAUDE.md',
+  'AGENTS.md',
+  '.github/AGENTS.md',
+] as const;
+
+/**
+ * Default content for the agent rules section when no daemon-soul.md exists.
+ * WHY: Provides sensible baseline behavior for any codebase without requiring
+ * the operator to create a soul file on first run.
+ */
+export const DAEMON_SOUL_DEFAULT = `\
+- Write code that follows the patterns already established in the codebase
+- Never skip tests. Run existing tests before and after changes
+- Prefer small, focused changes over large rewrites
+- If a step asks you to write code, write actual code -- do not write pseudocode or placeholders
+- Commit your work when you complete a logical unit`;
+
+/**
+ * Template written to ~/.workrail/daemon-soul.md on first run.
+ * WHY: Gives operators a documented starting point for customizing agent behavior.
+ * The file is created once and then read on every subsequent daemon session.
+ */
+const DAEMON_SOUL_TEMPLATE = `\
+# WorkRail Daemon Soul
+#
+# This file is injected into every WorkRail Auto daemon session system prompt under
+# "## Agent Rules and Philosophy". Edit it to customize the agent's behavior for
+# your environment: coding conventions, commit style, tool preferences, etc.
+#
+# Changes take effect on the next daemon session -- no restart required.
+#
+# The defaults below reflect general best practices. Override them freely.
+
+${DAEMON_SOUL_DEFAULT}
+`;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -158,6 +217,114 @@ export async function readDaemonSessionState(
     // ENOENT or parse error -- treat as no persisted state
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Context loaders (daemon soul + workspace context)
+// ---------------------------------------------------------------------------
+
+/**
+ * Load the operator-customizable agent rules from ~/.workrail/daemon-soul.md.
+ *
+ * On first run (file absent), writes a template to disk so the operator can
+ * discover and customize it. The write is best-effort: if it fails (e.g. read-only
+ * filesystem), the warning is logged and the default content is returned anyway.
+ *
+ * WHY synchronous default path: soul content must be ready before Agent construction.
+ * The function is async only because first-run template creation requires an fs.writeFile.
+ */
+async function loadDaemonSoul(): Promise<string> {
+  const soulPath = path.join(WORKRAIL_DIR, 'daemon-soul.md');
+  try {
+    return await fs.readFile(soulPath, 'utf8');
+  } catch (err: unknown) {
+    // ENOENT = first run. Write the template, then return the default content.
+    // Any other error (permissions, etc.) is treated the same way.
+    const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+    if (isEnoent) {
+      // Best-effort template creation -- failure is logged but never fatal.
+      try {
+        await fs.mkdir(WORKRAIL_DIR, { recursive: true });
+        await fs.writeFile(soulPath, DAEMON_SOUL_TEMPLATE, 'utf8');
+        console.log(`[WorkflowRunner] Created daemon-soul.md template at ${soulPath}`);
+      } catch (writeErr: unknown) {
+        console.warn(
+          `[WorkflowRunner] Warning: could not write daemon-soul.md template: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
+        );
+      }
+    } else {
+      console.warn(
+        `[WorkflowRunner] Warning: could not read daemon-soul.md: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return DAEMON_SOUL_DEFAULT;
+  }
+}
+
+/**
+ * Scan the workspace for CLAUDE.md / AGENTS.md context files and combine them
+ * into a single string for injection into the system prompt.
+ *
+ * Files are read in priority order (WORKSPACE_CONTEXT_CANDIDATE_PATHS). Combined
+ * size is capped at WORKSPACE_CONTEXT_MAX_BYTES to prevent context window bloat.
+ * If the cap is exceeded, a notice is appended so the agent knows content was cut.
+ *
+ * Returns null if no context files were found (section is omitted from the prompt).
+ *
+ * WHY best-effort: these files are optional. Missing or unreadable files are silently
+ * skipped (or logged at warn level for non-ENOENT errors). The agent can still run
+ * without workspace context.
+ */
+async function loadWorkspaceContext(workspacePath: string): Promise<string | null> {
+  const parts: string[] = [];
+  let combinedBytes = 0;
+  let truncated = false;
+
+  for (const relativePath of WORKSPACE_CONTEXT_CANDIDATE_PATHS) {
+    if (truncated) break;
+
+    const fullPath = path.join(workspacePath, relativePath);
+    let content: string;
+    try {
+      content = await fs.readFile(fullPath, 'utf8');
+    } catch (err: unknown) {
+      const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+      if (!isEnoent) {
+        // Unexpected error (permissions, etc.) -- log and skip.
+        console.warn(
+          `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      continue;
+    }
+
+    const contentBytes = Buffer.byteLength(content, 'utf8');
+    if (combinedBytes + contentBytes > WORKSPACE_CONTEXT_MAX_BYTES) {
+      // Fit as much of this file as will fill the remaining budget.
+      const remaining = WORKSPACE_CONTEXT_MAX_BYTES - combinedBytes;
+      const truncatedContent = content.slice(0, remaining);
+      parts.push(`### ${relativePath}\n${truncatedContent}`);
+      truncated = true;
+    } else {
+      parts.push(`### ${relativePath}\n${content}`);
+      combinedBytes += contentBytes;
+    }
+  }
+
+  if (parts.length === 0) return null;
+
+  let combined = parts.join('\n\n');
+  if (truncated) {
+    combined += '\n\n[Workspace context truncated: combined size exceeded 32 KB limit. Some files may be missing.]';
+  }
+
+  console.log(
+    `[WorkflowRunner] Injecting workspace context from: ${WORKSPACE_CONTEXT_CANDIDATE_PATHS.filter(
+      (p) => parts.some((part) => part.startsWith(`### ${p}`)),
+    ).join(', ')}`,
+  );
+
+  return combined;
 }
 
 // ---------------------------------------------------------------------------
@@ -424,7 +591,27 @@ function makeWriteTool(schemas: Record<string, any>// eslint-disable-next-line @
 // System prompt
 // ---------------------------------------------------------------------------
 
-function buildSystemPrompt(trigger: WorkflowTrigger, sessionState: string): string {
+/**
+ * Build the system prompt for the daemon agent.
+ *
+ * This function is intentionally synchronous and pure -- all I/O (soul file,
+ * workspace context) is resolved by the caller before invoking this function.
+ * WHY: keeps the function unit-testable by passing pre-loaded strings directly,
+ * without requiring fs mocking or real disk access in tests.
+ *
+ * @param trigger - The workflow trigger containing workspacePath and referenceUrls.
+ * @param sessionState - Serialized WorkRail session state (may be empty string).
+ * @param soulContent - Loaded content of daemon-soul.md (always a string; caller
+ *   provides the hardcoded default if the file was absent).
+ * @param workspaceContext - Combined workspace context from CLAUDE.md / AGENTS.md,
+ *   or null if no workspace context files were found.
+ */
+export function buildSystemPrompt(
+  trigger: WorkflowTrigger,
+  sessionState: string,
+  soulContent: string,
+  workspaceContext: string | null,
+): string {
   const lines = [
     'You are WorkRail Auto, an autonomous agent that executes workflows step by step.',
     '',
@@ -445,11 +632,24 @@ function buildSystemPrompt(trigger: WorkflowTrigger, sessionState: string): stri
     '',
     `<workrail_session_state>${sessionState}</workrail_session_state>`,
     '',
+    '## Agent Rules and Philosophy',
+    soulContent,
+    '',
     `## Workspace: ${trigger.workspacePath}`,
   ];
 
+  // Inject workspace context (CLAUDE.md / AGENTS.md) when available.
+  // WHY: these files define repo-specific coding conventions, commit style, and
+  // tooling preferences. Injecting them here gives the agent the same context
+  // it would have if invoked by Claude Code or another agent-aware tool.
+  if (workspaceContext !== null) {
+    lines.push('');
+    lines.push('## Workspace Context (from AGENTS.md / CLAUDE.md)');
+    lines.push(workspaceContext);
+  }
+
   // Append reference URLs section when provided.
-  // Why: some tasks require background context (specs, design docs, ADRs) that
+  // WHY: some tasks require background context (specs, design docs, ADRs) that
   // the agent should fetch and read before starting work. Providing the URLs in
   // the system prompt ensures they are visible from the first turn.
   if (trigger.referenceUrls && trigger.referenceUrls.length > 0) {
@@ -582,11 +782,20 @@ export async function runWorkflow(
     makeWriteTool(schemas) as unknown as AgentTool<TSchema>,
   ];
 
+  // ---- Context loading (soul + workspace) ----
+  // WHY: load before Agent construction -- the system prompt is set at init
+  // time and is not mutable after. Both loads are best-effort; errors are
+  // logged but never abort the session.
+  const [soulContent, workspaceContext] = await Promise.all([
+    loadDaemonSoul(),
+    loadWorkspaceContext(trigger.workspacePath),
+  ]);
+
   // ---- Agent (one per runWorkflow() call, not reused) ----
   const { Agent } = await loadPiAgentCore();
   const agent = new Agent({
     initialState: {
-      systemPrompt: buildSystemPrompt(trigger, ''),
+      systemPrompt: buildSystemPrompt(trigger, '', soulContent, workspaceContext),
       model,
       tools,
     },
@@ -621,10 +830,15 @@ export async function runWorkflow(
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
 
+  // The initial prompt must be imperative -- the agent should call start_workflow
+  // immediately, not describe what it would do. Using "Call start_workflow now"
+  // forces tool invocation rather than a conversational response.
   const initialPrompt =
-    `Start the workflow \`${trigger.workflowId}\`.\n` +
-    `Goal: ${trigger.goal}\n` +
-    `workspacePath: ${trigger.workspacePath}` +
+    `Call the \`start_workflow\` tool now with these parameters:\n` +
+    `- workflowId: "${trigger.workflowId}"\n` +
+    `- workspacePath: "${trigger.workspacePath}"\n` +
+    `- goal: "${trigger.goal}"\n` +
+    `\nDo not respond with text. Call the tool immediately.` +
     contextJson;
 
   let stopReason = 'stop';
