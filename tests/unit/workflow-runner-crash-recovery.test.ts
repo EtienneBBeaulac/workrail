@@ -220,7 +220,7 @@ describe('runStartupRecovery()', () => {
     ).rejects.toThrow();
   });
 
-  it('clears corrupt session files during .tmp cleanup pass (skipped in read, still deleteable)', async () => {
+  it('does not throw when corrupt session files are present; corrupt files remain on disk', async () => {
     // A corrupt file is skipped by readAllDaemonSessions() but should not prevent
     // the recovery from running for other sessions. The corrupt file itself remains
     // (runStartupRecovery only deletes files found by readAllDaemonSessions).
