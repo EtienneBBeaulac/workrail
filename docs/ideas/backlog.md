@@ -1971,3 +1971,40 @@ WorkTrain wakes up at 9am, reviews every open PR, fixes everything it can, merge
 5. **No-feedback policy encoding** -- document the MR review finding classification schema so coordinator workflows can reliably parse and act on it.
 
 **This is the most important architectural work remaining in WorkTrain.** Everything else -- polling triggers, onboarding, knowledge graph -- makes WorkTrain better. This makes it genuinely autonomous.
+
+---
+
+### Message queue: async communication with WorkTrain from anywhere (Apr 15, 2026)
+
+**The problem:** working with WorkTrain today requires you to be in the terminal, watching notifications, responding in real time. But the most valuable moments are often asynchronous -- you have a thought at 2am, want to redirect a running agent from your phone, or want to queue a direction before the current batch finishes.
+
+**The design:** a persistent message queue that decouples when you send a message from when WorkTrain acts on it.
+
+```bash
+worktrain tell "skip the architecture review for the polling triggers PR, it's low risk"
+worktrain tell "add knowledge graph vector layer to next sprint"
+worktrain tell "stop the worktrain-init agent, I changed my mind on the UX"
+```
+
+Each command appends to `~/.workrail/message-queue.jsonl` (append-only, one JSON line per message). The daemon drains the queue between agent completions -- never mid-run, always at a natural break point. Messages are delivered in order and never lost across restarts.
+
+**What the queue enables:**
+
+- **Direction changes while agents run** -- "actually, use polling not webhooks" can be queued while 6 agents are running; the coordinator picks it up before spawning the next batch
+- **Mobile input** -- a mobile app (or simple HTTP endpoint) writes to the queue; WorkTrain processes when ready
+- **Async ideation** -- thoughts queued whenever they occur, not forced into a synchronous conversation window
+- **Stop/pause signals** -- `worktrain tell "pause after current batch"` is queue-delivered; coordinator checks for pause signals before each spawn
+- **Priority override** -- `worktrain tell "prioritize the shell injection fix, it's blocking"` bumps a task to the front of the coordinator's work list
+
+**Outbox (WorkTrain → user):**
+The same pattern in reverse. WorkTrain appends notifications to `~/.workrail/outbox.jsonl` -- agent completions, findings that need human judgment, questions that require a decision. A mobile client polls this file (or an HTTP SSE endpoint wraps it) and pushes to the user's phone. The user reads the notification, taps a response, it goes into the message queue. Full async loop with no real-time presence required.
+
+**Architecture:**
+- `~/.workrail/message-queue.jsonl` -- inbound, append-only, drained in order
+- `~/.workrail/outbox.jsonl` -- outbound, append-only, read by clients
+- `worktrain tell <message>` CLI command -- appends to message-queue
+- `worktrain inbox` CLI command -- reads unread outbox items
+- Coordinator loop checks message-queue at the start of each cycle before spawning new agents
+- The `talk` session (interactive ideation) consumes from the same queue -- seamless transition between async messages and live conversation
+
+**This is the foundation for mobile monitoring.** The mobile app is just a client that reads outbox and writes to message-queue. No new daemon capability needed -- just a thin client over these two files.
