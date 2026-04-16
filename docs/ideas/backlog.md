@@ -3925,3 +3925,43 @@ More critically: if a session is restarted by the daemon but then stalls (Bedroc
 3. **Orphaned session cleanup should be user-facing.** `worktrain cleanup` or `worktrain status` should surface orphaned sessions with their age and offer to clear them. Right now they silently accumulate.
 
 4. **Better logging when runWorkflow() swallows errors.** The `void runWorkflow(...)` pattern in `console-routes.ts` and `trigger-router.ts` drops errors silently. Every path that ends in silence (no log, no session advance, no error) should at minimum log `[WorkflowRunner] Session died silently` with the session ID.
+
+---
+
+### Daemon owns the HTTP console (Apr 16, 2026)
+
+**The problem:** The console dashboard goes down whenever the MCP server crashes or Claude Code restarts, because the console is hosted by whichever MCP server wins the primary election. The daemon -- the actual long-running process -- has no role in hosting the console today.
+
+**The fix:** The daemon should start and own the HTTP console directly on port 3456. As long as the daemon is running, the console is up. MCP servers become pure bridges -- they never need to win primary election, they just forward tool calls.
+
+**Implementation:** In `src/trigger/trigger-listener.ts` (or a new `startDaemonConsole()` function), after starting the webhook server on port 3200, also call `mountConsoleRoutes()` on a new HTTP server bound to port 3456. The daemon already has the V2ToolContext and session store -- the same dependencies `mountConsoleRoutes()` needs.
+
+**Result:**
+- `localhost:3200` -- webhook trigger endpoint (existing)
+- `localhost:3456` -- console dashboard (new, always up while daemon runs)
+- MCP servers -- pure bridges, no primary election needed for console
+- Spawn storm eliminated -- bridges have nothing to compete for
+
+---
+
+### MCP server must not die silently (Apr 16, 2026)
+
+**The problem:** The MCP server keeps dying and getting killed throughout the session. This is unacceptable -- it disconnects Claude Code from WorkRail tools mid-session, loses in-flight context, and requires manual restart. The crash pattern:
+
+1. Something causes an uncaught exception or unhandled rejection
+2. The fatal-exit handler calls `process.exit()`
+3. The bridge process detects the primary died
+4. All bridges try to respawn a primary simultaneously (spawn storm)
+5. Primary comes back but console is down, session state is disrupted
+
+**Root causes seen today:**
+- `fatal-exit.test.ts` running alongside live MCP server -- fixed in #440
+- Memory pressure from zombie processes accumulating across sessions -- should be fixed by `worktrain cleanup` automation
+- Potentially other uncaught exceptions that need to be caught and logged rather than killing the process
+
+**What needs to happen:**
+1. **Audit all `process.exit()` paths** -- fatal-exit.ts should log the crash and attempt graceful shutdown, not hard exit. At minimum, write to crash.log before exiting.
+2. **MCP server resilience** -- uncaught exceptions in tool handlers should be caught at the handler boundary and returned as errors, not crash the whole process. The `registerFatalHandlers()` approach is too aggressive for a server that needs to stay up.
+3. **Daemon owns the console** (see above) -- removes the dependency on MCP server staying alive for console availability.
+4. **Automatic zombie cleanup** -- `worktrain cleanup` should run automatically at session start to kill stale MCP processes before they accumulate into memory pressure.
+5. **MCP server watchdog** -- if the primary MCP server crashes, the bridge should wait longer before attempting to spawn a new primary, giving the system time to stabilize. Current jitter is too short.
