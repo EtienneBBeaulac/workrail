@@ -2008,3 +2008,130 @@ The same pattern in reverse. WorkTrain appends notifications to `~/.workrail/out
 - The `talk` session (interactive ideation) consumes from the same queue -- seamless transition between async messages and live conversation
 
 **This is the foundation for mobile monitoring.** The mobile app is just a client that reads outbox and writes to message-queue. No new daemon capability needed -- just a thin client over these two files.
+
+---
+
+### Autonomous merge: WorkTrain approves and merges its own PRs after full vetting (Apr 15, 2026)
+
+**The idea:** after the full verification chain passes (unit tests, MR review clean, all required audits green), WorkTrain runs `gh pr review --approve && gh pr merge --squash` itself. No human needed in the loop for PRs that pass all gates.
+
+**This is already mostly built.** The coordinator script already calls `gh pr merge` -- we've been doing it today. The gap is formalizing the policy that makes auto-merge safe: what gates must pass, what findings are acceptable, and what always requires a human.
+
+---
+
+#### The auto-merge policy (what makes it safe)
+
+**Auto-merge allowed when ALL of:**
+- All required verification gates pass (defined by task classification)
+- MR review: 0 Critical, 0 Major findings
+- If `riskLevel=High`: production audit also passes
+- If `touchesArchitecture=true`: architecture audit also passes
+- CI is green (all required checks pass)
+- No `needs-human-review` label on the PR
+- The PR is not to a protected branch that requires human approval (configurable)
+
+**Auto-merge blocked when ANY of:**
+- Any Critical or Major finding in any review/audit
+- CI is failing
+- The PR was authored by a human (WorkTrain only auto-merges its own PRs)
+- The PR touches security-sensitive paths (auth, credentials, network exposure) -- configurable blocklist
+- Circuit breaker has fired (3+ fix attempts on same finding = escalate to human)
+- `riskLevel=Critical` (always human approval for highest-risk changes)
+
+**Human always required for:**
+- Schema changes (breaking changes to public API contracts)
+- Dependency upgrades (major version)
+- Infrastructure/CI/CD changes
+- Changes to WorkTrain's own merge policy
+- Anything the watchdog flags as a drift-from-spec
+
+---
+
+#### Implementation
+
+This is a coordinator script policy, not a new capability. The required pieces:
+
+1. **Proof record gates** (in progress -- verification chain spec) -- the coordinator checks the proof record before calling merge
+2. **`--admin` merge bypass for CI false positives** -- already used today; coordinator should note when it uses `--admin` and why
+3. **`needs-human-review` label escape hatch** -- any human can block auto-merge by adding this label; WorkTrain respects it
+4. **Merge audit log** -- every auto-merge appended to `~/.workrail/merge-log.jsonl`: which PR, which gates passed, which were skipped and why, timestamp. The watchdog checks this log.
+
+**The coordinator script merge gate:**
+```typescript
+const proofRecord = await getProofRecord(prNumber);
+const canAutoMerge =
+  proofRecord.gates.unit_tests === 'pass' &&
+  proofRecord.gates.mr_review === 'approved_clean' &&  // 0 Critical, 0 Major
+  (riskLevel !== 'High' || proofRecord.gates.production_audit === 'pass') &&
+  (touchesArchitecture !== true || proofRecord.gates.architecture_audit === 'pass') &&
+  !prLabels.includes('needs-human-review') &&
+  prAuthor.startsWith('worktrain-');  // only merge own PRs
+
+if (canAutoMerge) {
+  await exec(`gh pr merge ${prNumber} --squash`);
+  appendMergeLog({ prNumber, gates: proofRecord.gates, timestamp: new Date() });
+} else {
+  await notifyHuman(prNumber, proofRecord);  // post to Slack with what's blocking
+}
+```
+
+**The trust boundary is the proof record.** WorkTrain doesn't decide "this looks fine" -- it checks whether each required gate has a recorded pass. The merge decision is deterministic. A human can always override by adding `needs-human-review`. The audit log makes every auto-merge traceable.
+
+**Why this is safe even though it sounds scary:**
+The risk of auto-merge is "something bad gets into main." The mitigations are: the review agent is adversarial (actively looks for problems), the production audit checks for runtime risks, CI validates behavior, and the proof record is the immutable record of what was checked. A human reviewing the PR manually doesn't add much signal beyond what 3 specialized audit agents already found. The real human value is in edge cases -- which is exactly what `needs-human-review` and the `riskLevel=Critical` block handle.
+
+**Near-term:** WorkTrain already merges in the coordinator script (we've done it today). Formalizing the policy above just makes it explicit and auditable rather than ad-hoc.
+
+---
+
+### Periodic analysis agents: continuous project health scanning (Apr 15, 2026)
+
+**The idea:** WorkTrain runs agents on a schedule to proactively identify issues, gaps, improvement opportunities, and ideas -- without being asked. The watchdog (already spec'd) handles drift detection. These are deeper, domain-specific scans that run weekly or monthly.
+
+**The agent zoo:**
+
+**Weekly: Code health scan**
+Runs `architecture-scalability-audit` on modules that haven't been audited in 30 days. Scans for: coupling violations, growing complexity hotspots (files with most churn), missing abstractions that are emerging across multiple recent PRs, performance anti-patterns introduced in the last sprint. Output: `code-health-report.md` + GitHub issues filed for actionable findings.
+
+**Weekly: Test coverage scan**
+Identifies files modified in the last 30 days with zero or low test coverage. Files with new exported symbols that have no tests. Critical paths (error handling, auth, external API boundaries) with only happy-path tests. Output: files a missing test coverage filed as GitHub issues with suggested test scenarios.
+
+**Weekly: Documentation drift scan**
+Checks if recently merged PRs changed behavior that's described in docs. Identifies code that lacks inline documentation for non-obvious logic. Finds CLAUDE.md / AGENTS.md that haven't been updated to reflect new modules or conventions. Output: `doc-drift-report.md` + PRs to fix the most important gaps.
+
+**Monthly: Dependency health scan**
+Goes beyond just "is it outdated?" -- assesses: are there known CVEs? are there active forks or replacements? are there lighter alternatives for heavy dependencies? is pi-mono still the right choice or should it be replaced? Output: `dependency-health-report.md` with recommendations ranked by impact.
+
+**Monthly: Performance baseline**
+Runs a set of benchmark scenarios: startup time, first workflow step latency, session store read/write throughput, knowledge graph query time on a real repo. Compares against the previous month's baseline. Flags regressions > 10%. Output: `performance-baseline-YYYY-MM.md` + issues for regressions.
+
+**Continuous: Security scan**
+On every PR merge: scan changed files for OWASP top 10 patterns -- hardcoded secrets, command injection vectors (like the `exec()` issue we found in #402), missing input validation at boundaries, unsafe deserialization. Output: findings posted as PR comments before merge if not already reviewed.
+
+**Monthly: Ideas generation**
+The most interesting one. Runs `wr.discovery` on the current state of the codebase + backlog + recent session history and asks: "what's the most impactful thing we could build next that we haven't thought of yet?" Cross-references with competitor landscape (GraphRAG, LangGraph, nexus-core updates), recent AI research, and user pain points in the session notes. Output: `ideas-YYYY-MM.md` -- a list of concrete improvement opportunities with rough effort estimates. The best ideas get promoted to the backlog by the watchdog.
+
+**How this works with the coordinator:**
+All of these are just cron triggers in `triggers.yml`. The coordinator script for each runs the appropriate workflow, reads the output, files GitHub issues for actionable findings, and posts a summary to Slack. No human needed to kick them off -- they just run.
+
+```yaml
+triggers:
+  - id: weekly-code-health
+    type: cron
+    schedule: "0 8 * * 1"   # Monday 8am
+    workflowId: architecture-scalability-audit
+    goal: "Weekly code health scan: identify coupling violations, complexity hotspots, missing abstractions"
+    workspacePath: ~/git/personal/workrail
+    agentConfig:
+      model: claude-sonnet-4-6
+    callbackUrl: http://localhost:3200/internal/file-issues
+
+  - id: monthly-ideas
+    type: cron
+    schedule: "0 9 1 * *"   # 1st of every month
+    workflowId: wr.discovery
+    goal: "Monthly ideas generation: what's the most impactful improvement we haven't thought of yet?"
+    workspacePath: ~/git/personal/workrail
+```
+
+**The meta-point:** WorkTrain running these agents on the WorkRail/WorkTrain repo means the product improves itself on a schedule. Every Monday it finds its own architectural problems. Every month it generates ideas for its own improvement. Every PR gets a security scan before it merges. The codebase gets continuously healthier without anyone managing it.
