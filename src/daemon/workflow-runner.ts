@@ -36,6 +36,9 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
+import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
+import { asSessionId } from '../v2/durable-core/ids/index.js';
+import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 
 const execAsync = promisify(exec);
 
@@ -47,11 +50,32 @@ const execAsync = promisify(exec);
 const BASH_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Maximum wall-clock time allowed for a single workflow run (30 minutes).
- * If the agent loop does not complete within this window, runWorkflow() aborts
- * the agent and returns { _tag: 'error', message: 'Workflow timed out' }.
+ * Maximum number of prior step notes injected into the session state recap.
+ * WHY: Caps context window usage. Three notes (~200 tokens each) gives the agent
+ * meaningful continuity without bloating the system prompt.
  */
-const WORKFLOW_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_SESSION_RECAP_NOTES = 3;
+
+/**
+ * Maximum characters per note in the session state recap.
+ * WHY: Individual step notes can be long (30+ lines). Truncating at 800 chars
+ * preserves the summary while preventing a single verbose note from consuming
+ * the entire session state budget.
+ */
+const MAX_SESSION_NOTE_CHARS = 800;
+
+/**
+ * Default wall-clock time limit (in minutes) for a single workflow run.
+ *
+ * WHY: a stuck tool call, infinite retry loop, or runaway LLM can hold a
+ * queue slot indefinitely. This cap is the safety valve.
+ *
+ * This default is used when no agentConfig.maxSessionMinutes is configured.
+ * Per-trigger overrides are set via triggers.yml agentConfig.maxSessionMinutes.
+ * If the agent loop does not complete within this window, runWorkflow() aborts
+ * the agent and returns { _tag: 'timeout', reason: 'wall_clock' }.
+ */
+const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
 
 /**
  * Directory that holds per-session crash-recovery state files.
@@ -138,6 +162,18 @@ export interface WorkflowTrigger {
    */
   readonly agentConfig?: {
     readonly model?: string;
+    /**
+     * Maximum wall-clock time (in minutes) for this workflow run.
+     * See TriggerDefinition.agentConfig.maxSessionMinutes for full documentation.
+     * Default: 30 minutes.
+     */
+    readonly maxSessionMinutes?: number;
+    /**
+     * Maximum number of LLM response turns for this workflow run.
+     * See TriggerDefinition.agentConfig.maxTurns for full documentation.
+     * Default: no limit.
+     */
+    readonly maxTurns?: number;
   };
 }
 
@@ -166,8 +202,49 @@ export interface WorkflowRunError {
   readonly stopReason: string;
 }
 
+/**
+ * Workflow run aborted due to a configurable time or turn limit.
+ *
+ * WHY a separate discriminant: timeout is categorically different from a
+ * workflow-logic error. Callers (delivery systems, alerting) need to
+ * distinguish "this workflow ran too long / looped" from "a tool failed".
+ * Encoding this as a string inside WorkflowRunError.message would require
+ * string-parsing, violating 'make illegal states unrepresentable'.
+ */
+export interface WorkflowRunTimeout {
+  readonly _tag: 'timeout';
+  readonly workflowId: string;
+  /**
+   * Which limit was hit.
+   * - 'wall_clock': the configured maxSessionMinutes elapsed
+   * - 'max_turns': the configured maxTurns count was reached
+   */
+  readonly reason: 'wall_clock' | 'max_turns';
+  readonly message: string;
+  /** Always 'aborted' -- the agent loop was stopped via agent.abort(). */
+  readonly stopReason: string;
+}
+
+/**
+ * Workflow completed successfully, but the delivery POST to callbackUrl failed.
+ *
+ * WHY a separate discriminant: this outcome is categorically different from a
+ * workflow failure. The workflow ran to completion -- the work is done. Only the
+ * result delivery (HTTP callback) failed. Collapsing this into WorkflowRunError
+ * would make it impossible for a caller to distinguish "job done, notification
+ * failed" from "job never finished". See GAP-3 in docs/design/daemon-gap-analysis.md.
+ */
+export interface WorkflowDeliveryFailed {
+  readonly _tag: 'delivery_failed';
+  readonly workflowId: string;
+  /** stopReason from the underlying WorkflowRunSuccess or WorkflowRunError. */
+  readonly stopReason: string;
+  /** Human-readable description of why the delivery POST failed. */
+  readonly deliveryError: string;
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowDeliveryFailed;
 
 /**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
@@ -514,6 +591,124 @@ async function loadWorkspaceContext(workspacePath: string): Promise<string | nul
   );
 
   return combined;
+}
+
+// ---------------------------------------------------------------------------
+// Session notes loader (GAP-2: session state injection)
+// ---------------------------------------------------------------------------
+
+/**
+ * Load prior step notes from the WorkRail session store for context injection.
+ *
+ * Returns a slice of the most recent step notes (capped at MAX_SESSION_RECAP_NOTES)
+ * and returns an empty array so the daemon session can continue without context.
+ * WHY: session state is a continuity aid, not a correctness requirement. A
+ * session that starts without a recap still functions correctly -- it just has
+ * no awareness of prior steps from the same checkpoint-resumed session.
+ *
+ * WHY system prompt injection instead of agent.steer():
+ * The daemon calls executeStartWorkflow() BEFORE constructing the Agent.
+ * Populating the system prompt at Agent construction time satisfies
+ * "after start_workflow fires, before first LLM call" -- steer() would fire
+ * AFTER the first LLM response (incorrect ordering for pre-step-1 context).
+ *
+ * @param continueToken - The continueToken from executeStartWorkflow (used to
+ *   extract the sessionId via the alias store, without schema changes).
+ * @param ctx - V2ToolContext providing tokenCodecPorts, tokenAliasStore, sessionStore.
+ */
+async function loadSessionNotes(
+  continueToken: string,
+  ctx: V2ToolContext,
+): Promise<readonly string[]> {
+  try {
+    // Decode the continueToken to extract the sessionId.
+    // WHY token decode instead of returning sessionId from executeStartWorkflow:
+    // Adding sessionId to V2StartWorkflowOutputSchema is a public schema change
+    // (GAP-7 territory). Token decode via the alias store is the correct in-process
+    // path that avoids breaking the public API contract.
+    const resolvedResult = await parseContinueTokenOrFail(
+      continueToken,
+      ctx.v2.tokenCodecPorts,
+      ctx.v2.tokenAliasStore,
+    );
+
+    if (resolvedResult.isErr()) {
+      console.warn(
+        `[WorkflowRunner] Warning: could not decode continueToken for session recap: ${resolvedResult.error.message}`,
+      );
+      return [];
+    }
+
+    const sessionId = asSessionId(resolvedResult.value.sessionId);
+
+    // Load the session event log (read-only -- no state mutation).
+    const loadResult = await ctx.v2.sessionStore.load(sessionId);
+    if (loadResult.isErr()) {
+      console.warn(
+        `[WorkflowRunner] Warning: could not load session store for recap: ${loadResult.error.code} -- ${loadResult.error.message}`,
+      );
+      return [];
+    }
+
+    // Project node outputs to extract step notes.
+    const projectionResult = projectNodeOutputsV2(loadResult.value.events);
+    if (projectionResult.isErr()) {
+      console.warn(
+        `[WorkflowRunner] Warning: could not project session outputs for recap: ${projectionResult.error.code} -- ${projectionResult.error.message}`,
+      );
+      return [];
+    }
+
+    // Collect all recap-channel notes across all nodes, in event order.
+    // WHY recap channel only: 'artifact' outputs are references, not human-readable notes.
+    const allNotes: string[] = [];
+    for (const nodeView of Object.values(projectionResult.value.nodesById)) {
+      for (const output of nodeView.currentByChannel.recap) {
+        if (output.payload.payloadKind === 'notes') {
+          // Truncate each note to prevent per-note context bloat.
+          const note = output.payload.notesMarkdown.length > MAX_SESSION_NOTE_CHARS
+            ? output.payload.notesMarkdown.slice(0, MAX_SESSION_NOTE_CHARS) + '\n[truncated]'
+            : output.payload.notesMarkdown;
+          allNotes.push(note);
+        }
+      }
+    }
+
+    // Take only the last N notes (most recent context is most relevant).
+    return allNotes.slice(-MAX_SESSION_RECAP_NOTES);
+  } catch (err) {
+    console.warn(
+      `[WorkflowRunner] Warning: unexpected error loading session notes for recap: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
+}
+
+/**
+ * Format prior step notes into a concise session state recap string.
+ *
+ * This is a pure function -- all I/O (note loading, truncation decisions) is
+ * handled by the caller. WHY pure: unit-testable without mocking the session
+ * store or token codec.
+ *
+ * Returns an empty string when `notes` is empty so the caller can guard on
+ * `recap !== ''` before injecting it into the system prompt.
+ *
+ * WHY `<workrail_session_state>` tag: `buildSystemPrompt()` already reserves
+ * this XML slot in the system prompt. Using the existing tag ensures the agent
+ * parses it consistently with the documented schema.
+ *
+ * @param notes - Prior step notes (already limited to MAX_SESSION_RECAP_NOTES
+ *   entries and truncated to MAX_SESSION_NOTE_CHARS each by the caller).
+ */
+export function buildSessionRecap(notes: readonly string[]): string {
+  if (notes.length === 0) return '';
+
+  const formattedNotes = notes
+    .map((note, i) => `### Prior step ${i + 1}\n${note}`)
+    .join('\n\n');
+
+  return `<workrail_session_state>\nThe following notes summarize prior steps from this session:\n\n${formattedNotes}\n</workrail_session_state>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -989,14 +1184,25 @@ export async function runWorkflow(
     makeWriteTool(schemas),
   ];
 
-  // ---- Context loading (soul + workspace) ----
+  // ---- Context loading (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init
-  // time and is not mutable after. Both loads are best-effort; errors are
+  // time and is not mutable after. All loads are best-effort; errors are
   // logged but never abort the session.
-  const [soulContent, workspaceContext] = await Promise.all([
+  //
+  // loadSessionNotes decodes startContinueToken to get the WorkRail sessionId,
+  // then reads the session store for prior step notes. For fresh sessions (no
+  // node_output_appended events yet), this returns [] and sessionState is ''.
+  // For checkpoint-resumed sessions, it returns prior step notes for continuity.
+  // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
+  // not before. Populating the system prompt at construction time is the correct
+  // pre-step-1 injection point.
+  const [soulContent, workspaceContext, sessionNotes] = await Promise.all([
     loadDaemonSoul(),
     loadWorkspaceContext(trigger.workspacePath),
+    startContinueToken ? loadSessionNotes(startContinueToken, ctx) : Promise.resolve([] as readonly string[]),
   ]);
+
+  const sessionState = buildSessionRecap(sessionNotes);
 
   // ---- Initial prompt: first step content from start_workflow ----
   // The daemon has already called executeStartWorkflow() and has the first step.
@@ -1022,7 +1228,7 @@ export async function runWorkflow(
   // package dependency. The client (Anthropic or AnthropicBedrock) is injected --
   // AgentLoop has no knowledge of API keys or AWS credentials.
   const agent = new AgentLoop({
-    systemPrompt: buildSystemPrompt(trigger, '', soulContent, workspaceContext),
+    systemPrompt: buildSystemPrompt(trigger, sessionState, soulContent, workspaceContext),
     modelId,
     tools,
     client: agentClient,
@@ -1031,12 +1237,41 @@ export async function runWorkflow(
     toolExecution: 'sequential',
   });
 
-  // ---- Event subscription: steer() for step injection ----
+  // ---- Session limits (wall-clock timeout + max-turn limit) ----
+  // Resolved from trigger.agentConfig with hardcoded defaults as fallback.
+  // WHY: per-trigger configurability lets operators tune limits per workflow type
+  // (e.g. a fast code-review trigger vs. a slow coding-task trigger).
+  const sessionTimeoutMs =
+    (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
+  const maxTurns = trigger.agentConfig?.maxTurns ?? 0; // 0 = no limit
+
+  // ---- Timeout reason flag ----
+  // Tracks which limit fired first. Set synchronously before agent.abort() so the
+  // catch block can read it on the next microtask tick. JS single-thread guarantees
+  // no race condition. Guard: first writer wins -- ignore if already set.
+  let timeoutReason: 'wall_clock' | 'max_turns' | null = null;
+
+  // ---- Turn counter ----
+  // Incremented on each turn_end event (one complete LLM response turn).
+  let turnCount = 0;
+
+  // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
   // Using steer() NOT followUp(): steer fires after each tool batch inside the
   // inner loop; followUp fires only when the agent would otherwise stop
   // (adding an extra LLM turn per workflow step).
   const unsubscribe = agent.subscribe(async (event: AgentEvent) => {
     if (event.type !== 'turn_end') return;
+
+    // Track turns for the max-turn limit.
+    turnCount++;
+
+    // Max-turn limit: abort if the turn count reaches the configured limit.
+    // Guard: skip if wall-clock timeout already fired.
+    if (maxTurns > 0 && turnCount >= maxTurns && timeoutReason === null) {
+      timeoutReason = 'max_turns';
+      agent.abort();
+      return; // Do not inject the next step -- we are aborting.
+    }
 
     // If a step was advanced and workflow is not yet complete, inject the next step.
     if (pendingSteerText !== null && !isComplete) {
@@ -1050,15 +1285,26 @@ export async function runWorkflow(
 
   let stopReason = 'stop';
   let errorMessage: string | undefined;
+  // WHY hoisted: timeoutHandle must be accessible in the finally block to cancel the
+  // timer on successful completion. Promise constructor callbacks are synchronous
+  // (ES6 spec), so timeoutHandle is always assigned before the await resolves.
+  // The undefined initial value is required by TypeScript types; the undefined guard
+  // in finally is defensive (technically unreachable in a spec-compliant JS engine).
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
   try {
     // ---- Whole-workflow timeout ----
-    // If the agent loop does not complete within WORKFLOW_TIMEOUT_MS, abort the
-    // agent and propagate a timeout error through the existing error-handling path.
+    // If the agent loop does not complete within sessionTimeoutMs, abort the agent
+    // and propagate a timeout through the existing error-handling path.
     // agent.abort() is idempotent (optional-chained on activeRun in pi-agent-core).
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Workflow timed out')), WORKFLOW_TIMEOUT_MS),
-    );
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        if (timeoutReason === null) {
+          timeoutReason = 'wall_clock';
+        }
+        reject(new Error('Workflow timed out'));
+      }, sessionTimeoutMs);
+    });
     await Promise.race([agent.prompt(buildUserMessage(initialPrompt)), timeoutPromise])
       .catch((err: unknown) => {
         agent.abort();
@@ -1084,6 +1330,27 @@ export async function runWorkflow(
     stopReason = 'error';
   } finally {
     unsubscribe();
+    // Cancel the wall-clock timer so it does not fire after successful completion
+    // and mutate the closed-over timeoutReason variable. clearTimeout on an
+    // already-fired or undefined handle is a safe no-op.
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+
+  // ---- Timeout result (wall-clock or max-turn limit) ----
+  // timeoutReason is set before agent.abort() in both abort paths; by the time we
+  // reach here the catch has completed and it is safe to read synchronously.
+  if (timeoutReason !== null) {
+    daemonRegistry?.unregister(sessionId, 'failed');
+    const limitDescription = timeoutReason === 'wall_clock'
+      ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
+      : `${trigger.agentConfig?.maxTurns} turns`;
+    return {
+      _tag: 'timeout',
+      workflowId: trigger.workflowId,
+      reason: timeoutReason,
+      message: `Workflow ${timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
+      stopReason: 'aborted',
+    };
   }
 
   if (stopReason === 'error' || errorMessage) {

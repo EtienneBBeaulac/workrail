@@ -23,9 +23,9 @@
  */
 
 import * as crypto from 'node:crypto';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { WorkflowTrigger, WorkflowRunResult } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
 import type {
@@ -36,7 +36,14 @@ import type {
 import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecFn } from './delivery-action.js';
 
-const execAsync = promisify(exec) as ExecFn;
+/**
+ * Default production exec function: promisify(execFile).
+ *
+ * WHY execFile over exec: execFile does NOT invoke /bin/sh. User-controlled content
+ * (commit messages, PR titles, file paths from webhook payloads) is passed as discrete
+ * args and never interpolated into a shell string. Shell injection is impossible.
+ */
+const execFileAsync = promisify(execFile) as ExecFn;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -246,7 +253,7 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
  * @param triggerId - Used in log messages for traceability
  * @param trigger - Source of workspacePath, autoCommit, autoOpenPR flags
  * @param result - WorkflowRunResult; only called when _tag === 'success'
- * @param execFn - Injectable exec function (production: execAsync; tests: fake)
+ * @param execFn - Injectable exec function (production: execFileAsync; tests: fake)
  */
 async function maybeRunDelivery(
   triggerId: string,
@@ -396,7 +403,20 @@ export class TriggerRouter {
           `[TriggerRouter] Workflow completed: triggerId=${trigger.id} ` +
           `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
         );
+      } else if (result._tag === 'timeout') {
+        console.log(
+          `[TriggerRouter] Workflow timed out: triggerId=${trigger.id} ` +
+          `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
+        );
+      } else if (result._tag === 'delivery_failed') {
+        // delivery_failed not expected here (no callbackUrl wiring in this path).
+        // Handled to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        console.log(
+          `[TriggerRouter] Workflow delivery failed: triggerId=${trigger.id} ` +
+          `workflowId=${trigger.workflowId} deliveryError=${result.deliveryError}`,
+        );
       } else {
+        // result._tag === 'error'
         console.log(
           `[TriggerRouter] Workflow failed: triggerId=${trigger.id} ` +
           `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
@@ -404,7 +424,7 @@ export class TriggerRouter {
       }
       // Post-workflow delivery: runs after the workflow result is logged.
       // Best-effort -- errors are logged and discarded, never change the workflow result.
-      await maybeRunDelivery(trigger.id, trigger, result, execAsync);
+      await maybeRunDelivery(trigger.id, trigger, result, execFileAsync);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
@@ -430,7 +450,20 @@ export class TriggerRouter {
           `[TriggerRouter] Dispatch completed: workflowId=${workflowTrigger.workflowId} ` +
           `stopReason=${result.stopReason}`,
         );
+      } else if (result._tag === 'delivery_failed') {
+        // delivery_failed not expected from dispatch() -- WorkflowTrigger has no callbackUrl.
+        // Handled here to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        console.log(
+          `[TriggerRouter] Dispatch delivery failed: workflowId=${workflowTrigger.workflowId} ` +
+          `stopReason=${result.stopReason} deliveryError=${result.deliveryError}`,
+        );
+      } else if (result._tag === 'timeout') {
+        console.log(
+          `[TriggerRouter] Dispatch timed out: workflowId=${workflowTrigger.workflowId} ` +
+          `reason=${result.reason} message=${result.message}`,
+        );
       } else {
+        // result._tag === 'error'
         console.log(
           `[TriggerRouter] Dispatch failed: workflowId=${workflowTrigger.workflowId} ` +
           `error=${result.message} stopReason=${result.stopReason}`,
