@@ -48,6 +48,7 @@ export type TriggerStoreError =
   | { readonly kind: 'parse_error'; readonly message: string; readonly lineNumber?: number }
   | { readonly kind: 'missing_secret'; readonly envVarName: string; readonly triggerId: string }
   | { readonly kind: 'missing_field'; readonly field: string; readonly triggerId: string }
+  | { readonly kind: 'invalid_field_value'; readonly field: string; readonly triggerId: string }
   | { readonly kind: 'unknown_provider'; readonly provider: string; readonly triggerId: string }
   | { readonly kind: 'file_not_found'; readonly filePath: string }
   | { readonly kind: 'io_error'; readonly message: string }
@@ -479,10 +480,10 @@ function validateAndResolveTrigger(
       try {
         const parsed = new URL(url);
         if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-          return err({ kind: 'missing_field', field: `referenceUrls (non-HTTP URL rejected: ${url})`, triggerId: raw.id ?? '?' });
+          return err({ kind: 'invalid_field_value', field: `referenceUrls (non-HTTP URL rejected: ${url})`, triggerId: raw.id ?? '?' });
         }
       } catch {
-        return err({ kind: 'missing_field', field: `referenceUrls (invalid URL: ${url})`, triggerId: raw.id ?? '?' });
+        return err({ kind: 'invalid_field_value', field: `referenceUrls (invalid URL: ${url})`, triggerId: raw.id ?? '?' });
       }
     }
   }
@@ -499,7 +500,7 @@ function validateAndResolveTrigger(
   const rawConcurrencyMode = raw.concurrencyMode?.trim();
   if (rawConcurrencyMode !== undefined && rawConcurrencyMode !== 'serial' && rawConcurrencyMode !== 'parallel') {
     return err({
-      kind: 'missing_field',
+      kind: 'invalid_field_value',
       field: `concurrencyMode (invalid value: "${rawConcurrencyMode}"; must be "serial" or "parallel")`,
       triggerId: rawId,
     });

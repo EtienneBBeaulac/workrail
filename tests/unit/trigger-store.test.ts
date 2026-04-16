@@ -271,6 +271,91 @@ triggers:
       expect(result.value.triggers).toHaveLength(0);
     });
 
+    it('skips trigger with wrong-cased concurrencyMode "Serial" (case-sensitive)', () => {
+      const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    concurrencyMode: Serial
+`;
+      const result = loadTriggerConfig(yaml, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
+    });
+
+    it('skips trigger with wrong-cased concurrencyMode "PARALLEL" (case-sensitive)', () => {
+      const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    concurrencyMode: PARALLEL
+`;
+      const result = loadTriggerConfig(yaml, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
+    });
+
+    it('skips trigger with numeric concurrencyMode value (parsed as string "1" by narrow parser)', () => {
+      const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    concurrencyMode: 1
+`;
+      const result = loadTriggerConfig(yaml, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
+    });
+
+    it('loads trigger as serial when concurrencyMode has unquoted empty value (defaults to serial)', () => {
+      // Unquoted empty value after colon: the narrow parser skips the field entirely
+      // (rawValue === '' -> field not set -> raw.concurrencyMode is undefined -> defaults to 'serial').
+      // This is the expected silent-default behavior.
+      const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    concurrencyMode:
+`;
+      const result = loadTriggerConfig(yaml, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(1);
+      expect(result.value.triggers[0]?.concurrencyMode).toBe('serial');
+    });
+
+    it('skips trigger with quoted empty string concurrencyMode ""', () => {
+      // Quoted empty string is explicitly stored as '' and rejected as an invalid value.
+      const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    concurrencyMode: ""
+`;
+      const result = loadTriggerConfig(yaml, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers).toHaveLength(0);
+    });
+
     it('rejects config without "triggers:" root key', () => {
       const yaml = `
 workflows:

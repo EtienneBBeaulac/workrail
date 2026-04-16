@@ -13,8 +13,9 @@
  * Design notes:
  * - HMAC uses crypto.timingSafeEqual (timing-safe). Length difference short-circuits
  *   before the call -- this is safe because HMAC-SHA256 digest length is constant (32 bytes).
- * - KeyedAsyncQueue key = triggerId. Two concurrent webhooks for the same trigger are
- *   serialized; webhooks for different triggers run concurrently.
+ * - KeyedAsyncQueue key strategy: serial mode uses triggerId (same-trigger fires are serialized
+ *   FIFO); parallel mode uses triggerId:UUID (each fire gets its own queue slot and runs
+ *   concurrently). Webhooks for different triggers always run concurrently.
  * - runWorkflow() is called AFTER the 202 response is sent. The caller (listener) fires
  *   the route call as a background task; the result is logged, not returned.
  * - contextMapping dot-path: "$.pull_request.html_url" -> payload.pull_request.html_url.

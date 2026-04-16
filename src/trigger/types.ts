@@ -128,6 +128,16 @@ export interface TriggerDefinition {
    * This field is always present after parse (never undefined). The default 'serial' is
    * applied at parse time in trigger-store.ts, not at use time.
    *
+   * WARNING -- capacity and safety:
+   * - 'serial' mode queues fires in an unbounded promise chain. Under burst load (many
+   *   webhook fires in rapid succession), the chain can grow without bound. Each queued
+   *   run holds a promise in memory until it executes.
+   * - 'parallel' mode places no limit on concurrent runWorkflow() calls. Each fire
+   *   launches an independent agent session immediately. Without a maxConcurrentSessions
+   *   cap, this can exhaust API rate limits or machine resources.
+   * Recommendation: use 'parallel' only when workflows are short-lived (seconds to
+   * low minutes) or when a maxConcurrentSessions cap is configured in your deployment.
+   *
    * In YAML:
    *   concurrencyMode: serial    # default, may be omitted
    *   concurrencyMode: parallel  # opt-in to concurrent execution

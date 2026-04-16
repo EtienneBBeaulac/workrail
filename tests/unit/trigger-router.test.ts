@@ -268,31 +268,87 @@ describe('TriggerRouter.route', () => {
   });
 
   describe('concurrencyMode', () => {
-    it('serial trigger: two concurrent fires both execute (serialized via queue)', async () => {
+    /**
+     * Helper: creates a runWorkflowFn that blocks until the returned release() is called.
+     * Tracks how many calls are currently in-flight (started but not yet released).
+     */
+    function makeLatchedRunWorkflow(): {
+      fn: RunWorkflowFn;
+      inFlight: () => number;
+      releaseAll: () => void;
+    } {
+      let inFlightCount = 0;
+      const releaseFns: Array<() => void> = [];
+
+      const fn: RunWorkflowFn = async (trigger) => {
+        inFlightCount++;
+        await new Promise<void>((resolve) => {
+          releaseFns.push(resolve);
+        });
+        inFlightCount--;
+        return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
+      };
+
+      return {
+        fn,
+        inFlight: () => inFlightCount,
+        releaseAll: () => releaseFns.forEach((r) => r()),
+      };
+    }
+
+    it('serial trigger: second call does not start until first completes (same queue key)', async () => {
+      // Proves the serial ternary: queueKey = trigger.id (not trigger.id:UUID).
+      // If the ternary were inverted to 'parallel', BOTH calls would be in-flight
+      // after the first flush and this test would fail.
       const trigger = makeTrigger({ concurrencyMode: 'serial' });
-      const { fn, calls } = makeFakeRunWorkflow();
+      const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
       const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
 
+      // Fire two events without awaiting -- the queue processes them serially.
       router.route(makeEvent());
       router.route(makeEvent());
-      // Wait for both to complete through the queue
-      await new Promise((r) => setTimeout(r, 30));
 
-      // Both fires should result in runWorkflow() being called
-      expect(calls).toHaveLength(2);
+      // Drain the microtask queue so KeyedAsyncQueue has had a chance to start
+      // the first call (and NOT start the second, since they share the same key).
+      await new Promise<void>((r) => setImmediate(r));
+
+      // Only the first call should be in-flight; second is queued, not started.
+      expect(inFlight()).toBe(1);
+
+      // Release the first call and drain again -- second should now start.
+      releaseAll();
+      await new Promise<void>((r) => setImmediate(r));
+      expect(inFlight()).toBe(1); // second call is now running
+
+      // Release the second call and confirm everything completes.
+      releaseAll();
+      await new Promise<void>((r) => setImmediate(r));
+      expect(inFlight()).toBe(0);
     });
 
-    it('parallel trigger: two concurrent fires both execute immediately (different queue keys)', async () => {
+    it('parallel trigger: both calls start simultaneously (different queue keys per invocation)', async () => {
+      // Proves the parallel ternary: queueKey = trigger.id:UUID (unique per fire).
+      // If the ternary were inverted to 'serial', only one call would be in-flight
+      // after the flush and this test would fail.
       const trigger = makeTrigger({ concurrencyMode: 'parallel' });
-      const { fn, calls } = makeFakeRunWorkflow();
+      const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
       const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
 
+      // Fire two events without awaiting -- each gets its own queue key, so both
+      // start concurrently without waiting for the other.
       router.route(makeEvent());
       router.route(makeEvent());
-      await new Promise((r) => setTimeout(r, 30));
 
-      // Both fires should result in runWorkflow() being called
-      expect(calls).toHaveLength(2);
+      // Drain the microtask queue -- both calls should now be in-flight.
+      await new Promise<void>((r) => setImmediate(r));
+
+      // Both calls must be in-flight simultaneously, proving unique queue keys.
+      expect(inFlight()).toBe(2);
+
+      // Release both and confirm completion.
+      releaseAll();
+      await new Promise<void>((r) => setImmediate(r));
+      expect(inFlight()).toBe(0);
     });
   });
 });
