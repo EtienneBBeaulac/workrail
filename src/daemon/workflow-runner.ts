@@ -254,8 +254,10 @@ export async function readDaemonSessionState(
  * Read all orphaned session files from ~/.workrail/daemon-sessions/.
  *
  * Returns an array of valid, parseable session entries. Corrupt files (JSON parse
- * errors, missing required fields) are skipped and logged -- they will be cleared
- * by runStartupRecovery() via a separate readdir pass.
+ * errors, missing required fields) are skipped with a warning log and left on disk --
+ * runStartupRecovery() only deletes files returned by this function. This is an
+ * accepted limitation: cleaning up corrupt files would require a second readdir pass,
+ * which is not implemented at MVP.
  *
  * Returns an empty array if the directory does not exist (ENOENT on first run) or
  * if no valid session files are found. Never throws.
