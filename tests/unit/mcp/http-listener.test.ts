@@ -63,11 +63,16 @@ describe('HttpListener', () => {
   });
 
   it('throws on EADDRINUSE when port is already in use', async () => {
-    const [port] = await findFreePorts(1);
-    const listener1 = createHttpListener(port);
-    const listener2 = createHttpListener(port);
-    listeners.push(listener1, listener2);
+    // Use port 0 for listener1 so OS assigns a guaranteed-free port,
+    // then use the bound port for listener2. Avoids race between findFreePorts
+    // and listener1.start() where another process could grab the port.
+    const listener1 = createHttpListener(0);
+    listeners.push(listener1);
     await listener1.start();
+    const boundPort = listener1.getBoundPort()!;
+
+    const listener2 = createHttpListener(boundPort);
+    listeners.push(listener2);
     await expect(listener2.start()).rejects.toThrow('already in use');
   });
 
