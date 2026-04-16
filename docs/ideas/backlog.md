@@ -2903,3 +2903,509 @@ Humans improve workflows based on intuition and memorable failures. WorkTrain im
 
 **Integration with `workflow-for-workflows`:**
 The assessment output is designed to feed directly into `workflow-for-workflows`. Assessment findings become the context for authoring improved workflow versions. WorkTrain literally uses its own meta-workflow to improve its own workflows, informed by real execution data.
+
+
+**The problem with polling-only:** the queue is as fresh as the last poll cycle. A critical bug filed in Jira might not appear in the queue for 5 minutes. A deadline that just moved to tomorrow might not re-prioritize for an hour. The work queue should feel live -- changes in external systems should surface in the queue within seconds, not minutes.
+
+**Two mechanisms for live updates:**
+
+**1. Push sources (webhooks from external systems)**
+When an external system supports webhooks, WorkTrain should register a receiver and process events immediately -- no polling lag.
+
+```yaml
+workspaces:
+  workrail:
+    queue:
+      sources:
+        - type: github_issues
+          integration: github
+          mode: push              # vs poll -- receives webhook, processes immediately
+          webhookSecret: $GITHUB_WEBHOOK_SECRET
+          filter:
+            labels: ['worktrain-queue']
+
+        - type: jira
+          integration: jira
+          mode: push              # Jira webhook on issue create/update/transition
+          webhookSecret: $JIRA_WEBHOOK_SECRET
+          filter:
+            project: ENG
+```
+
+A new GitHub issue labeled `worktrain-queue` fires a webhook → WorkTrain adds it to the queue within milliseconds. A Jira ticket assigned to WorkTrain → in the queue before the assignee closes the tab.
+
+**2. The message queue as live input**
+`worktrain tell "add X to the queue"` is already instantaneous -- it appends to `message-queue.jsonl` which the daemon drains between sessions. This is the live grooming path for manual items. It's also how you reorder, prioritize, remove, or modify queue items in real time:
+
+```bash
+worktrain tell "move the GitHub polling adapter to the top of the queue"
+worktrain tell "remove the documentation update task -- no longer needed"
+worktrain tell "bump the maxConcurrentSessions task to high priority, we need it for the demo"
+```
+
+The daemon's coordinator loop reads these messages, interprets them as queue operations, and applies them immediately.
+
+**3. Live re-prioritization via deadline watcher**
+The deadline context refresh (already spec'd) runs every hour. For live grooming, the deadline watcher should also subscribe to calendar/milestone change events via webhook where available:
+- GitHub milestone due date changed → immediate re-prioritization
+- Jira sprint end date changed → immediate re-scoring
+- Google Calendar event added/moved → immediate re-scoring
+
+**The live queue architecture:**
+
+```
+External events (webhooks) ──→ POST /webhook/queue-push
+                                │
+                                ▼
+                          QueueEventProcessor
+                                │
+                          ┌─────┴──────┐
+                          │            │
+                    Add to queue   Re-prioritize
+                    immediately    affected items
+                          │            │
+                          └─────┬──────┘
+                                ▼
+                          queue.jsonl updated
+                                │
+                                ▼
+                    Console Queue tab refreshes (SSE)
+                    Coordinator picks up next item
+```
+
+**The queue tab in the console is live:**
+The console Queue tab streams updates via SSE (same pattern as the live session badge already implemented). When a new item is added via webhook or message queue, it appears in the tab within milliseconds -- no page refresh needed. When re-prioritization happens, items smoothly reorder. This is the always-on view of what WorkTrain is working on and what's coming next.
+
+**Grooming operations the live queue supports:**
+
+| Operation | How |
+|-----------|-----|
+| Add item | `worktrain tell`, webhook, `worktrain enqueue` |
+| Remove item | `worktrain tell "remove X"`, `worktrain queue remove <id>` |
+| Reprioritize | `worktrain tell "prioritize X"`, deadline watcher, manual drag in console |
+| Pause item | `worktrain queue pause <id>` -- holds in place, not worked until resumed |
+| Block item | System-set when dependencies not met (auto-resolves when deps complete) |
+| Split item | `worktrain tell "split X into smaller tasks"` → runs decomposition workflow |
+| Merge items | `worktrain tell "X and Y are the same thing, merge them"` |
+| Add context | `worktrain tell "for X, the BRD is at <url>"` → attaches to queue item |
+
+**Why this changes the interaction model:**
+With polling-only queues, you have to trust that WorkTrain will eventually see the work. With live queuing, WorkTrain is always current. You file a critical bug at 11pm, the webhook fires, it's at the top of the queue, and WorkTrain starts investigating within seconds. You push a doc link into `worktrain tell`, the queue item gets the context immediately. The queue feels like a shared workspace, not a batch job.
+
+---
+
+### Live status briefings: WorkTrain narrates its own work in human terms (Apr 15, 2026)
+
+**The problem:** WorkTrain is doing a lot. Sessions are running, PRs are open, the queue has items. But the raw view -- session IDs, PR numbers, branch names -- is only meaningful to someone who's been following along. A user who checks in after a few hours needs a human-readable briefing, not a list of `sess_abc123` entries.
+
+**The vision:** WorkTrain can produce a live status briefing at any time -- a clear, plain-language summary of what's happening, why, and what comes next. Like a teammate giving you a standup.
+
+---
+
+#### The `worktrain status` command
+
+```bash
+worktrain status --workspace workrail
+```
+
+Example output:
+```
+WorkTrain — workrail workspace  [16 Apr 2026, 14:32]
+
+ACTIVE (3 sessions running)
+  ● Implementing GitHub polling adapter
+    → Adding support for GitHub Issues/PRs without requiring webhooks
+    → Step 4 of 8: writing the polling scheduler integration tests
+    → Running ~22 min, estimated 15 min remaining
+
+  ● Reviewing PR #406: first-party agent loop
+    → Critical dependency removal: eliminates private npm package blocking public install
+    → Step 2 of 6: analyzing tool schema migration
+    → Running ~8 min
+
+  ● Fixing PR #402: auto-commit shell injection
+    → Security fix: replacing exec() with execFile() to prevent shell injection
+    → Step 6 of 8: running verification
+    → Running ~31 min
+
+QUEUE (next 5 items)
+  1. [HIGH]  Implement maxConcurrentSessions semaphore
+             → Prevents token burn under high load
+  2. [HIGH]  worktrain tell/inbox message queue CLI
+             → Enables async communication from mobile
+  3. [MED]   Proof record schema for verification chain
+             → Gates the auto-merge capability
+  4. [MED]   Workspace namespacing groundwork
+             → Prerequisite for multi-project support
+  5. [MED]   Native cron trigger provider
+
+RECENTLY COMPLETED (last 6 hours)
+  ✓ PR #403 merged  — worktrain init onboarding command (now: npm install -g + worktrain init = running)
+  ✓ PR #397 merged  — Session timeout + max-turn limit (prevents runaway LLM loops)
+  ✓ PR #392 merged  — Prior session context injection (agent remembers previous work)
+  ✓ PR #405 merged  — classify-task workflow (coordinator can now route pipelines)
+
+BLOCKED / WAITING
+  ⏸ PR #406 review returned changes — fixing 2 issues (tsc breakage + max_tokens handling)
+     Will resume automatically once fixed and re-reviewed
+
+UPCOMING MILESTONES
+  → First-party agent loop (#406) — unblocks: public npm install without private packages
+  → worktrain spawn/await — unblocks: script-driven coordinator orchestration
+  → Auto-merge on proof records — unblocks: fully autonomous merge without human approval
+```
+
+---
+
+#### How it works
+
+The briefing is assembled by a `build-status-briefing` routine (not a full workflow -- a single fast step) that reads:
+- Active sessions from the session store (what's running, which step, how long)
+- Queue state from `queue.jsonl`
+- Recent completions from the merge audit log + session store
+- Blocked/waiting items from the queue
+- Milestone dependencies from the backlog (which items unblock what)
+
+The routine summarizes each session in 2-3 plain English lines:
+- What is being built (not the PR number, the capability)
+- Why it matters (how it connects to the user's goals)
+- Where it is (which step, estimated remaining time)
+
+This requires WorkTrain to maintain a brief "plain English description" for each queue item and active session -- either extracted from the goal text, or generated when the item is enqueued.
+
+---
+
+#### Live view in the console
+
+The console gains a **Status tab** (the default view when you open the console):
+
+```
+┌─────────────────────────────────────────────┐
+│ WorkTrain — workrail                    Live │
+├─────────────────────────────────────────────┤
+│ ACTIVE                                    3 │
+│                                             │
+│ ● GitHub polling adapter          22m  ████ │
+│   Step 4/8: writing tests                   │
+│                                             │
+│ ● PR #406 agent loop review        8m  ██   │
+│   Step 2/6: schema analysis                 │
+│                                             │
+│ ● PR #402 shell injection fix     31m  ████ │
+│   Step 6/8: verification                    │
+├─────────────────────────────────────────────┤
+│ QUEUE                                     8 │
+│  1 ▲ maxConcurrentSessions (HIGH)           │
+│  2   message queue CLI (HIGH)               │
+│  3   proof record schema (MED)              │
+│  4 ▼ workspace namespacing (MED)            │
+├─────────────────────────────────────────────┤
+│ DONE TODAY                               12 │
+│  ✓ worktrain init    ✓ session timeout      │
+│  ✓ classify-task     ✓ session context      │
+└─────────────────────────────────────────────┘
+```
+
+Updates via SSE -- the progress bars move in real time, completed items slide up to DONE, new queue items animate in. Click any row to expand the full session detail or queue item.
+
+---
+
+#### Push notifications to mobile/Slack
+
+The same briefing data drives push notifications:
+
+**Milestone completions:**
+> "WorkTrain shipped: worktrain init is live. You can now run `npm install -g @exaudeus/workrail && worktrain init` to set up a new instance in under 5 minutes. 3 more PRs in review."
+
+**Blockers surfaced:**
+> "PR #406 (first-party agent loop) came back with 2 issues -- one causes tsc to fail on clean install. Fixing automatically, estimated 20 min."
+
+**Daily digest (optional, configurable):**
+> "WorkTrain daily summary — 6 sessions completed, 3 PRs merged, 2 in review. Top priority tomorrow: spawn/await CLI (unblocks coordinator scripts). Queue has 8 items, 3 high priority."
+
+The briefing is generated by a fast, cheap routine (Haiku model) that translates raw state into the right level of detail for the audience. Technical details available on request; the default is executive summary.
+
+---
+
+#### Context-aware summarization
+
+The briefing adapts to who's asking and what they know:
+
+- **Owner/developer** (you): full detail -- PR numbers, session steps, technical blockers
+- **Stakeholder** (PM, manager): capability level -- "implementing X which enables Y, shipping this week"
+- **External** (customer, blog post): outcome level -- "automated code review is live, auto-merge coming next sprint"
+
+`worktrain status --audience stakeholder` generates the right level of detail automatically. The underlying data is the same; the presentation layer changes.
+
+This is also what the `worktrain talk` session uses as its opening context -- before any conversation, WorkTrain gives itself a briefing on the current state so it can answer questions accurately.
+
+---
+
+### WorkTrain analytics: stats, time saved, and quality metrics (Apr 15, 2026)
+
+**The principle:** WorkTrain should be accountable. Not just "it did work" but "did it do good work?" Stats without quality metrics are vanity. Quality metrics without stats lack context. Both together tell you whether WorkTrain is actually worth running.
+
+---
+
+#### Volume stats (what got done)
+
+Derived from session store + merge audit log + GitHub/Jira API:
+
+```
+WorkTrain — workrail workspace  [last 30 days]
+
+VOLUME
+  PRs opened:          23   (18 merged, 3 in review, 2 closed)
+  PRs reviewed:        31   (autonomous MR review sessions)
+  Bugs investigated:    8   (bug-investigation workflow runs)
+  Tasks completed:     19   (coding-task workflow runs → merged PRs)
+  Discoveries run:     12   (wr.discovery workflow runs)
+  Issues filed:         6   (by WorkTrain based on findings)
+  Issues resolved:      4   (WorkTrain opened and closed)
+
+QUEUE THROUGHPUT
+  Items added:         34
+  Items completed:     27
+  Items in progress:    4
+  Items deferred:       3
+  Average queue time:  2.4h  (enqueue → session start)
+```
+
+---
+
+#### Time saved estimates
+
+"Time saved" is directionally useful but must be honest about what it's estimating. WorkTrain shouldn't claim 40 hours saved if a human would have done the same work in 30 minutes.
+
+**Estimation model:**
+
+Each workflow type has a calibrated human-equivalent time estimate, validated against real data where possible:
+
+| Workflow | Human equivalent | Basis |
+|----------|-----------------|-------|
+| MR review (STANDARD) | 25 min | Industry average for 200-line diff |
+| MR review (THOROUGH) | 45 min | Complex architectural changes |
+| Bug investigation | 60 min | Triage + root cause hypothesis |
+| Coding task (Small) | 30 min | Estimate based on task complexity |
+| Coding task (Medium) | 2h | |
+| Coding task (Large) | 6h | |
+| Discovery run | 45 min | Research + synthesis |
+
+```
+TIME SAVINGS (estimated)
+  MR reviews:      31 × 25 min  =  12.9h
+  Bug investigation: 8 × 60 min =   8.0h
+  Coding tasks:    19 tasks      =  32.5h  (mix of Small/Medium)
+  Discovery:       12 × 45 min  =   9.0h
+  ─────────────────────────────────────────
+  Total estimate:                  62.4h  ≈ 1.5 engineer-weeks
+
+COST
+  Total LLM tokens used:   4.2M
+  Estimated API cost:      $12.40
+  Cost per hour saved:     $0.20/h
+
+  NOTE: These are estimates. Actual time savings depend on task complexity
+  and whether the work would otherwise have been done at all.
+```
+
+The honesty note matters. "Time saved" is only real if the work would have been done by a human. Tasks that were deprioritized indefinitely until WorkTrain did them represent more value than 25-minute estimates suggest.
+
+---
+
+#### Quality metrics (is WorkTrain actually doing a good job?)
+
+This is the most important section. Volume without quality is noise.
+
+**Output quality:**
+
+```
+QUALITY — last 30 days
+
+MR REVIEWS
+  Reviews with 0 findings:        14 / 31  (45%)  -- clean PRs, reviewed correctly
+  Reviews that caught Critical:     4 / 31  (13%)  -- high-value catches
+  Reviews where human disagreed:    2 / 31   (6%)  -- false positives / misses
+  Review finding accuracy:         94%             -- verified against merge outcomes
+
+CODING TASKS
+  PRs merged without rework:       13 / 18  (72%)
+  PRs that needed 1 fix cycle:      4 / 18  (22%)
+  PRs that needed 2+ fix cycles:    1 / 18   (6%)
+  PRs that were rejected/closed:    0 / 18   (0%)
+  
+  Post-merge bugs filed (30d):      1         -- bug traced to WorkTrain PR
+  Post-merge bugs rate:           5.6%        -- 1 in 18 PRs caused a bug
+
+BUG INVESTIGATIONS
+  Correct root cause identified:    6 / 8   (75%)
+  Confidence was too high:          1 / 8   (13%)  -- confidently wrong
+  Insufficient context:             1 / 8   (13%)  -- escalated correctly
+
+OVERALL QUALITY SCORE:  78 / 100
+  Trend:  ↑ +6 vs last month
+```
+
+**What the failure rate means:**
+A 5.6% post-merge bug rate on coding tasks means roughly 1 in 18 WorkTrain PRs introduced a bug that was later filed as an issue. That's comparable to junior developer rates (industry average ~10-15%). If it rises above 10%, there's a systemic problem to investigate -- maybe the verification step isn't thorough enough, maybe certain task types are too risky for autonomous work.
+
+The quality score is a weighted composite:
+- Review accuracy (40%)
+- Coding task success rate (35%)
+- Investigation accuracy (25%)
+
+It's the single number that answers "is WorkTrain doing good work?" A score below 70 should trigger a `workflow-effectiveness-assessment` run automatically.
+
+---
+
+#### Quality feedback loop
+
+WorkTrain actively solicits quality signals:
+
+1. **Post-merge outcome tracking:** when a PR merged by WorkTrain has a bug filed against it within 30 days, the session that produced that PR is flagged. The bug filing creates a data point that reduces the quality score.
+
+2. **MR review validation:** when WorkTrain reviews a PR and the PR author disputes a finding (e.g. closes without fixing what WorkTrain flagged, or fixes something WorkTrain missed), that's a signal. WorkTrain tracks these via webhook: if a PR that WorkTrain reviewed APPROVE ships a Critical bug, that review retroactively becomes a miss.
+
+3. **Human override tracking:** when a human changes a WorkTrain decision (reorders the queue, rejects a proposed change, overrides an auto-merge), those are signals that WorkTrain got something wrong. Each override is logged with a reason (if provided) and fed into the quality model.
+
+4. **Explicit feedback:** `worktrain feedback "the PR #402 review missed the temp file cleanup issue"` appends to a feedback log. The workflow effectiveness assessment picks these up.
+
+---
+
+#### The quality dashboard (console Analytics tab)
+
+```
+┌─────────────────────────────────────────────────────┐
+│ WorkTrain Analytics — workrail          Last 30 days │
+├─────────────────────────────────────────────────────┤
+│ QUALITY SCORE    78/100  ↑+6       COST  $12.40     │
+│ ████████████████░░░░                                 │
+├─────────────────────────────────────────────────────┤
+│ VOLUME                    QUALITY                   │
+│ PRs opened:    23         Merge success:   94%      │
+│ PRs reviewed:  31         Review accuracy: 94%      │
+│ Tasks done:    19         Post-merge bugs:  5.6%    │
+│ Bugs found:     8         Bug investigation: 75%    │
+├─────────────────────────────────────────────────────┤
+│ TIME SAVED (estimated)                              │
+│ Total: ~62h  Cost/hour: $0.20                       │
+│ ████████████████████████████░░░ (62/80h budget)     │
+├─────────────────────────────────────────────────────┤
+│ TREND  ──────────────────────────────────           │
+│ Quality score by week:                              │
+│  W1: 68  W2: 71  W3: 74  W4: 78  ↑ improving       │
+│                                                     │
+│ Post-merge bug rate by workflow:                    │
+│  coding-task (Small): 0%  (Medium): 8%  (Large): 0%│
+│  → Medium tasks have highest bug rate, investigate  │
+└─────────────────────────────────────────────────────┘
+```
+
+The "investigate" callout in the trend section is important -- the analytics dashboard doesn't just show numbers, it flags anomalies and links to the `workflow-effectiveness-assessment` that would address them. Stats → insight → action is the full loop.
+
+---
+
+### Pattern and architecture validation: WorkTrain enforces team conventions (Apr 15, 2026)
+
+**The idea:** beyond just reviewing code for bugs, WorkTrain validates that the code matches the patterns and architecture the team expects. Not "does it work?" but "does it fit?"
+
+**Two levels:**
+
+**1. Philosophy lens (already partially built)**
+The coding-task workflow already applies the user's coding philosophy as a review lens -- flagging violations by principle name. This needs to be extended to be:
+- **Per-workspace configurable** -- different projects have different conventions
+- **Machine-checkable** -- some patterns can be verified structurally (no direct db access outside the repository layer, no console.log in production code, no any types) rather than relying on the LLM to catch them
+
+**2. Architectural invariant checking (new)**
+Explicit rules about what the codebase's structure must look like:
+
+```yaml
+workspaces:
+  workrail:
+    architectureRules:
+      # Layer boundaries
+      - id: no-daemon-imports-from-mcp
+        rule: "src/daemon/** must not import from src/mcp/**"
+        type: import_boundary
+        severity: error
+
+      - id: no-di-calls-in-daemon
+        rule: "src/daemon/** must not call initializeContainer() or container.resolve()"
+        type: forbidden_call
+        severity: error
+
+      # Pattern enforcement
+      - id: errors-as-data
+        rule: "No throw statements in src/daemon/**, src/trigger/** -- use Result types"
+        type: no_throw
+        severity: warning
+        exceptions: ["constructor", "assertExhaustive"]
+
+      - id: no-exec-shell
+        rule: "No child_process.exec() -- use execFile() with args array"
+        type: forbidden_call
+        severity: error
+
+      - id: no-hardcoded-tmp
+        rule: "No '/tmp/' string literals -- use os.tmpdir()"
+        type: forbidden_literal
+        severity: warning
+```
+
+These rules run as scripts (static analysis, not LLM) -- fast, deterministic, zero tokens. They're checked:
+- During the coding-task workflow (before the agent commits anything)
+- As part of the CI gate (same `posix_tmp_literal` rule we fixed in PR #390 -- this is exactly that pattern generalized)
+- By the periodic architecture scan
+
+**What this enables combined with quality metrics:**
+If WorkTrain's coding tasks have a 5.6% post-merge bug rate AND those bugs consistently violate the same architectural rule, the pattern validation catches it before merge next time. Quality metrics identify the problem; architecture rules prevent recurrence. The self-improvement loop: bugs found → rule added → violations caught earlier → bug rate drops.
+
+**The self-improvement connection:**
+When the `workflow-effectiveness-assessment` runs and finds that a certain class of bug appears repeatedly in WorkTrain's output (e.g. "3 of the last 5 coding tasks had shell injection risks"), it can propose a new architecture rule (`no-exec-shell`) that prevents the pattern going forward. Rules start as soft warnings, graduate to errors after being validated. WorkTrain learns from its own failure patterns and codifies them as invariants.
+
+---
+
+### Resource management: preventing agent congestion under high concurrency (Apr 15, 2026)
+
+**Observed problem:** running 10 simultaneous agents bogs down the system -- API rate limits, token exhaustion, context degradation from too many concurrent Bedrock/Anthropic calls, and the host machine running hot. The `maxConcurrentSessions` semaphore addresses the daemon-level cap, but the broader resource management problem has several dimensions.
+
+**The dimensions:**
+
+**1. API rate limits**
+Anthropic and Bedrock both have tokens-per-minute limits. 10 concurrent agents each hitting the API at once creates bursts that exceed the limit, causing retries and backpressure. The daemon needs a token-bucket rate limiter shared across all sessions: before each LLM call, acquire a slot from the bucket. If the bucket is empty, wait.
+
+**2. Host machine resources**
+Each agent loop runs in-process, consuming RAM and CPU. Node.js is single-threaded but I/O is concurrent -- 10 agents making parallel API calls is fine until they all get responses simultaneously and saturate the JS event loop with JSON parsing and session store writes. The right limit is not "10 sessions" but "N sessions where N is calibrated to the host's memory and the model's response size."
+
+**3. Tiered concurrency by task type**
+Not all sessions are equal. A `wr.discovery` session is cheap (mostly reads, fast). A `coding-task-workflow-agentic` session is expensive (many tool calls, long responses). Running 10 coding tasks simultaneously is very different from running 10 discovery sessions.
+
+```yaml
+workspaces:
+  workrail:
+    concurrency:
+      maxTotal: 6                  # global cap
+      perWorkflowType:
+        coding-task-workflow-agentic: 2    # expensive, cap low
+        mr-review-workflow.agentic.v2: 3   # medium cost
+        wr.discovery: 5                    # cheap, allow more
+        bug-investigation.agentic.v2: 2
+```
+
+**4. Queue-aware throttling**
+When the queue has a mix of high-priority and low-priority items, WorkTrain should prefer starting high-priority items even if slots are available for low-priority ones. If all slots are taken by low-priority work, high-priority items wait unnecessarily.
+
+**5. Graceful degradation**
+When the system is under load, WorkTrain should degrade gracefully rather than failing hard. Options:
+- Slow down polling intervals (less frequent API calls)
+- Prefer fast/cheap workflows over slow/expensive ones
+- Pause the queue drain and process the backlog sequentially
+
+**Build order:**
+1. `maxConcurrentSessions` semaphore (in flight -- simple global cap)
+2. Token-bucket rate limiter in the agent loop (prevents API bursts)
+3. Per-workflow-type concurrency limits (tiered caps)
+4. Queue-aware slot allocation (high-priority first)
+5. Adaptive throttling based on observed latency (automatic backpressure)
+
+**The meta-point:** WorkTrain running at full capacity on itself is the best stress test for these constraints. Every day we run 10 simultaneous agents, we discover the edges of what the system can handle. Those discoveries should directly inform the resource management implementation.
