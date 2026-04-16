@@ -1729,3 +1729,150 @@ The console Queue tab streams updates via SSE (same pattern as the live session 
 
 **Why this changes the interaction model:**
 With polling-only queues, you have to trust that WorkTrain will eventually see the work. With live queuing, WorkTrain is always current. You file a critical bug at 11pm, the webhook fires, it's at the top of the queue, and WorkTrain starts investigating within seconds. You push a doc link into `worktrain tell`, the queue item gets the context immediately. The queue feels like a shared workspace, not a batch job.
+
+---
+
+### Live status briefings: WorkTrain narrates its own work in human terms (Apr 15, 2026)
+
+**The problem:** WorkTrain is doing a lot. Sessions are running, PRs are open, the queue has items. But the raw view -- session IDs, PR numbers, branch names -- is only meaningful to someone who's been following along. A user who checks in after a few hours needs a human-readable briefing, not a list of `sess_abc123` entries.
+
+**The vision:** WorkTrain can produce a live status briefing at any time -- a clear, plain-language summary of what's happening, why, and what comes next. Like a teammate giving you a standup.
+
+---
+
+#### The `worktrain status` command
+
+```bash
+worktrain status --workspace workrail
+```
+
+Example output:
+```
+WorkTrain — workrail workspace  [16 Apr 2026, 14:32]
+
+ACTIVE (3 sessions running)
+  ● Implementing GitHub polling adapter
+    → Adding support for GitHub Issues/PRs without requiring webhooks
+    → Step 4 of 8: writing the polling scheduler integration tests
+    → Running ~22 min, estimated 15 min remaining
+
+  ● Reviewing PR #406: first-party agent loop
+    → Critical dependency removal: eliminates private npm package blocking public install
+    → Step 2 of 6: analyzing tool schema migration
+    → Running ~8 min
+
+  ● Fixing PR #402: auto-commit shell injection
+    → Security fix: replacing exec() with execFile() to prevent shell injection
+    → Step 6 of 8: running verification
+    → Running ~31 min
+
+QUEUE (next 5 items)
+  1. [HIGH]  Implement maxConcurrentSessions semaphore
+             → Prevents token burn under high load
+  2. [HIGH]  worktrain tell/inbox message queue CLI
+             → Enables async communication from mobile
+  3. [MED]   Proof record schema for verification chain
+             → Gates the auto-merge capability
+  4. [MED]   Workspace namespacing groundwork
+             → Prerequisite for multi-project support
+  5. [MED]   Native cron trigger provider
+
+RECENTLY COMPLETED (last 6 hours)
+  ✓ PR #403 merged  — worktrain init onboarding command (now: npm install -g + worktrain init = running)
+  ✓ PR #397 merged  — Session timeout + max-turn limit (prevents runaway LLM loops)
+  ✓ PR #392 merged  — Prior session context injection (agent remembers previous work)
+  ✓ PR #405 merged  — classify-task workflow (coordinator can now route pipelines)
+
+BLOCKED / WAITING
+  ⏸ PR #406 review returned changes — fixing 2 issues (tsc breakage + max_tokens handling)
+     Will resume automatically once fixed and re-reviewed
+
+UPCOMING MILESTONES
+  → First-party agent loop (#406) — unblocks: public npm install without private packages
+  → worktrain spawn/await — unblocks: script-driven coordinator orchestration
+  → Auto-merge on proof records — unblocks: fully autonomous merge without human approval
+```
+
+---
+
+#### How it works
+
+The briefing is assembled by a `build-status-briefing` routine (not a full workflow -- a single fast step) that reads:
+- Active sessions from the session store (what's running, which step, how long)
+- Queue state from `queue.jsonl`
+- Recent completions from the merge audit log + session store
+- Blocked/waiting items from the queue
+- Milestone dependencies from the backlog (which items unblock what)
+
+The routine summarizes each session in 2-3 plain English lines:
+- What is being built (not the PR number, the capability)
+- Why it matters (how it connects to the user's goals)
+- Where it is (which step, estimated remaining time)
+
+This requires WorkTrain to maintain a brief "plain English description" for each queue item and active session -- either extracted from the goal text, or generated when the item is enqueued.
+
+---
+
+#### Live view in the console
+
+The console gains a **Status tab** (the default view when you open the console):
+
+```
+┌─────────────────────────────────────────────┐
+│ WorkTrain — workrail                    Live │
+├─────────────────────────────────────────────┤
+│ ACTIVE                                    3 │
+│                                             │
+│ ● GitHub polling adapter          22m  ████ │
+│   Step 4/8: writing tests                   │
+│                                             │
+│ ● PR #406 agent loop review        8m  ██   │
+│   Step 2/6: schema analysis                 │
+│                                             │
+│ ● PR #402 shell injection fix     31m  ████ │
+│   Step 6/8: verification                    │
+├─────────────────────────────────────────────┤
+│ QUEUE                                     8 │
+│  1 ▲ maxConcurrentSessions (HIGH)           │
+│  2   message queue CLI (HIGH)               │
+│  3   proof record schema (MED)              │
+│  4 ▼ workspace namespacing (MED)            │
+├─────────────────────────────────────────────┤
+│ DONE TODAY                               12 │
+│  ✓ worktrain init    ✓ session timeout      │
+│  ✓ classify-task     ✓ session context      │
+└─────────────────────────────────────────────┘
+```
+
+Updates via SSE -- the progress bars move in real time, completed items slide up to DONE, new queue items animate in. Click any row to expand the full session detail or queue item.
+
+---
+
+#### Push notifications to mobile/Slack
+
+The same briefing data drives push notifications:
+
+**Milestone completions:**
+> "WorkTrain shipped: worktrain init is live. You can now run `npm install -g @exaudeus/workrail && worktrain init` to set up a new instance in under 5 minutes. 3 more PRs in review."
+
+**Blockers surfaced:**
+> "PR #406 (first-party agent loop) came back with 2 issues -- one causes tsc to fail on clean install. Fixing automatically, estimated 20 min."
+
+**Daily digest (optional, configurable):**
+> "WorkTrain daily summary — 6 sessions completed, 3 PRs merged, 2 in review. Top priority tomorrow: spawn/await CLI (unblocks coordinator scripts). Queue has 8 items, 3 high priority."
+
+The briefing is generated by a fast, cheap routine (Haiku model) that translates raw state into the right level of detail for the audience. Technical details available on request; the default is executive summary.
+
+---
+
+#### Context-aware summarization
+
+The briefing adapts to who's asking and what they know:
+
+- **Owner/developer** (you): full detail -- PR numbers, session steps, technical blockers
+- **Stakeholder** (PM, manager): capability level -- "implementing X which enables Y, shipping this week"
+- **External** (customer, blog post): outcome level -- "automated code review is live, auto-merge coming next sprint"
+
+`worktrain status --audience stakeholder` generates the right level of detail automatically. The underlying data is the same; the presentation layer changes.
+
+This is also what the `worktrain talk` session uses as its opening context -- before any conversation, WorkTrain gives itself a briefing on the current state so it can answer questions accurately.
