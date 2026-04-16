@@ -68,6 +68,9 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
 
   // response format keys
   'WORKRAIL_JSON_RESPONSES',
+
+  // daemon workspace default -- written by `worktrain init`, read by the daemon command
+  'WORKRAIL_DEFAULT_WORKSPACE',
 ]);
 
 // =============================================================================

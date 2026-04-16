@@ -12,7 +12,8 @@
   },
   "homepage": "https://github.com/EtienneBBeaulac/workrail#readme",
   "bin": {
-    "workrail": "dist/mcp-server.js"
+    "workrail": "dist/mcp-server.js",
+    "worktrain": "dist/cli-worktrain.js"
   },
   "exports": {
     ".": "./dist/mcp-server.js",

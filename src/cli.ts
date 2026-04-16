@@ -29,6 +29,8 @@ import { createValidateWorkflowFileUseCasePipeline } from './application/use-cas
 import { WorkflowCompiler } from './application/services/workflow-compiler.js';
 import { normalizeV1WorkflowToPinnedSnapshot } from './v2/read-only/v1-to-v2-shim.js';
 
+import { loadWorkrailConfigFile } from './config/config-file.js';
+
 import { interpretCliResult, interpretCliResultWithoutDI } from './cli/interpret-result.js';
 import { printResult } from './cli/output-formatter.js';
 import {
@@ -231,8 +233,10 @@ program
 program
   .command('daemon')
   .description('Start the autonomous WorkRail daemon (trigger webhook server on port 3200)')
-  .option('-w, --workspace <path>', 'Path to workspace containing triggers.yml', process.cwd())
-  .action(async (options: { workspace: string }) => {
+  // Default is undefined so the action body can distinguish "not provided" from "provided as process.cwd()".
+  // Precedence: --workspace flag > WORKRAIL_DEFAULT_WORKSPACE in ~/.workrail/config.json > process.cwd()
+  .option('-w, --workspace <path>', 'Path to workspace containing triggers.yml')
+  .action(async (options: { workspace?: string }) => {
     const { startTriggerListener } = await import('./trigger/trigger-listener.js');
 
     await initializeContainer({ runtimeMode: { kind: 'cli' } });
@@ -246,6 +250,20 @@ program
     }
     const ctx = v2Guard.ctx;
 
+    // Resolve workspace path with explicit precedence:
+    //   1. --workspace flag (explicit user choice)
+    //   2. WORKRAIL_DEFAULT_WORKSPACE from ~/.workrail/config.json (set by `worktrain init`)
+    //   3. process.cwd() (fallback for backward compatibility)
+    let workspacePath: string;
+    if (options.workspace) {
+      workspacePath = options.workspace;
+    } else {
+      const configResult = loadWorkrailConfigFile();
+      const configWorkspace =
+        configResult.kind === 'ok' ? configResult.value['WORKRAIL_DEFAULT_WORKSPACE'] : undefined;
+      workspacePath = configWorkspace?.trim() || process.cwd();
+    }
+
     // Use AWS Bedrock when AWS_PROFILE is set (Zillow corp account).
     // Otherwise require ANTHROPIC_API_KEY for direct Anthropic access.
     const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
@@ -256,7 +274,7 @@ program
     }
 
     const handle = await startTriggerListener(ctx, {
-      workspacePath: options.workspace,
+      workspacePath,
       apiKey: apiKey,
       env: process.env,
     });
@@ -271,7 +289,7 @@ program
     }
 
     console.log(`WorkRail daemon running on port ${handle.port}`);
-    console.log(`Workspace: ${options.workspace}`);
+    console.log(`Workspace: ${workspacePath}`);
     console.log('Waiting for webhook triggers...');
 
     // Crash recovery runs inside startTriggerListener() before server.listen().

@@ -20,3 +20,8 @@ export {
   type MigrateFileDeps,
   type MigrateFileOptions,
 } from './migrate.js';
+export {
+  executeWorktainInitCommand,
+  type WorktrainInitCommandDeps,
+  type WorktrainInitCommandOpts,
+} from './worktrain-init.js';
