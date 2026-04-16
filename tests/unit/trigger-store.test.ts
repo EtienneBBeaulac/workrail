@@ -405,3 +405,76 @@ triggers:
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// goalTemplate and referenceUrls field parsing
+// ---------------------------------------------------------------------------
+
+describe('goalTemplate and referenceUrls field parsing', () => {
+  it('parses goalTemplate field', () => {
+    const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+    goal: Review this MR
+    goalTemplate: "Review MR: {{$.pull_request.title}}"
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]?.goalTemplate).toBe('Review MR: {{$.pull_request.title}}');
+  });
+
+  it('parses referenceUrls as an array split on whitespace', () => {
+    const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+    goal: Review this MR
+    referenceUrls: "https://doc1.example.com https://doc2.example.com"
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]?.referenceUrls).toEqual([
+      'https://doc1.example.com',
+      'https://doc2.example.com',
+    ]);
+  });
+
+  it('omits referenceUrls when field is absent', () => {
+    const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]?.referenceUrls).toBeUndefined();
+  });
+
+  it('skips trigger when referenceUrls contains a non-HTTP URL', () => {
+    const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+    goal: Review this MR
+    referenceUrls: "file:///etc/passwd"
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Invalid trigger is skipped; valid subset (empty here) is returned
+    expect(result.value.triggers).toHaveLength(0);
+  });
+});
