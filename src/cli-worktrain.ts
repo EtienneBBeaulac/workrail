@@ -3,11 +3,11 @@
  * WorkTrain CLI - Composition Root
  *
  * Entry point for the `worktrain` binary. Thin composition root:
- * 1. Wires dependencies for the init command
+ * 1. Wires dependencies for each command
  * 2. Interprets CliResult into process termination
  * 3. Contains NO business logic
  *
- * All business logic lives in src/cli/commands/worktrain-init.ts
+ * All business logic lives in src/cli/commands/worktrain-*.ts
  *
  * Process lifecycle note:
  * readline.createInterface() keeps the Node.js event loop alive until rl.close()
@@ -15,7 +15,7 @@
  * the process exits cleanly after the command completes.
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { createInterface } from 'readline/promises';
 import { stdin as input, stdout as output, env } from 'process';
 import fs from 'fs';
@@ -23,9 +23,15 @@ import path from 'path';
 import os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { randomUUID } from 'crypto';
 
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
-import { executeWorktrainInitCommand } from './cli/commands/index.js';
+import {
+  executeWorktrainInitCommand,
+  executeWorktrainTellCommand,
+  executeWorktrainInboxCommand,
+  type Priority,
+} from './cli/commands/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -107,6 +113,63 @@ program
     } finally {
       rl.close();
     }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TELL COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('tell <message>')
+  .description('Queue an async message for the WorkTrain daemon (~/.workrail/message-queue.jsonl)')
+  .option('-w, --workspace <name>', 'Workspace hint for the daemon (optional)')
+  .addOption(
+    new Option('-p, --priority <level>', 'Message priority: high, normal, or low')
+      .choices(['high', 'normal', 'low'])
+      .default('normal'),
+  )
+  .action(async (message: string, options: { workspace?: string; priority?: string }) => {
+    const result = await executeWorktrainTellCommand(
+      message,
+      {
+        appendFile: (p: string, content: string) =>
+          fs.promises.appendFile(p, content, 'utf-8'),
+        mkdir: (p: string, opts: { recursive: boolean }) => fs.promises.mkdir(p, opts),
+        homedir: os.homedir,
+        joinPath: path.join,
+        print: (line: string) => console.log(line),
+        now: () => new Date().toISOString(),
+        generateId: () => randomUUID(),
+      },
+      {
+        workspace: options.workspace,
+        priority: (options.priority ?? 'normal') as Priority,
+      },
+    );
+    interpretCliResultWithoutDI(result);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INBOX COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('inbox')
+  .description('Read unread messages from the WorkTrain daemon (~/.workrail/outbox.jsonl)')
+  .option('-w, --watch', 'Watch for new messages in real time (not yet implemented)')
+  .action(async (options: { watch?: boolean }) => {
+    const result = await executeWorktrainInboxCommand(
+      {
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        writeFile: (p: string, content: string) => fs.promises.writeFile(p, content, 'utf-8'),
+        mkdir: (p: string, opts: { recursive: boolean }) => fs.promises.mkdir(p, opts),
+        homedir: os.homedir,
+        joinPath: path.join,
+        print: (line: string) => console.log(line),
+      },
+      { watch: options.watch },
+    );
+    interpretCliResultWithoutDI(result);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
