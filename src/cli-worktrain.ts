@@ -30,6 +30,8 @@ import {
   executeWorktrainInitCommand,
   executeWorktrainTellCommand,
   executeWorktrainInboxCommand,
+  executeWorktrainSpawnCommand,
+  executeWorktrainAwaitCommand,
   type Priority,
 } from './cli/commands/index.js';
 
@@ -169,6 +171,76 @@ program
       },
       { watch: options.watch },
     );
+    interpretCliResultWithoutDI(result);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SPAWN COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('spawn')
+  .description('Start a workflow session non-interactively. Prints session handle to stdout.')
+  .requiredOption('-w, --workflow <id>', 'Workflow ID to run')
+  .requiredOption('-g, --goal <text>', 'One-sentence goal for the workflow session')
+  .requiredOption('-W, --workspace <path>', 'Absolute path to the workspace directory')
+  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
+  .action(async (options: { workflow: string; goal: string; workspace: string; port?: number }) => {
+    const result = await executeWorktrainSpawnCommand(
+      {
+        fetch: (url, opts) => globalThis.fetch(url, opts),
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        stdout: (line: string) => process.stdout.write(line + '\n'),
+        stderr: (line: string) => process.stderr.write(line + '\n'),
+        homedir: os.homedir,
+        joinPath: path.join,
+        pathIsAbsolute: path.isAbsolute,
+        statPath: (p: string) => fs.promises.stat(p),
+      },
+      {
+        workflow: options.workflow,
+        goal: options.goal,
+        workspace: options.workspace,
+        port: options.port,
+      },
+    );
+
+    interpretCliResultWithoutDI(result);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AWAIT COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('await')
+  .description('Block until workflow sessions complete. Prints JSON results to stdout.')
+  .requiredOption('-s, --sessions <handles>', 'Comma-separated list of session handles to wait for')
+  .option('-m, --mode <mode>', "Wait mode: 'all' (default) or 'any'", 'all')
+  .option('-t, --timeout <duration>', 'Timeout (e.g. "30m", "1h", "90s"). Default: 30m', '30m')
+  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
+  .action(async (options: { sessions: string; mode?: string; timeout?: string; port?: number }) => {
+    const mode = options.mode === 'any' ? 'any' : 'all';
+
+    const result = await executeWorktrainAwaitCommand(
+      {
+        fetch: (url: string) => globalThis.fetch(url),
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        stdout: (line: string) => process.stdout.write(line + '\n'),
+        stderr: (line: string) => process.stderr.write(line + '\n'),
+        homedir: os.homedir,
+        joinPath: path.join,
+        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+        now: () => Date.now(),
+      },
+      {
+        sessions: options.sessions,
+        mode,
+        timeout: options.timeout,
+        port: options.port,
+      },
+    );
+
     interpretCliResultWithoutDI(result);
   });
 

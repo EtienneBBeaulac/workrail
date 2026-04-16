@@ -39,3 +39,17 @@ export {
   type WorktrainInboxCommandDeps,
   type WorktrainInboxCommandOpts,
 } from './worktrain-inbox.js';
+export {
+  executeWorktrainSpawnCommand,
+  type WorktrainSpawnCommandDeps,
+  type WorktrainSpawnCommandOpts,
+} from './worktrain-spawn.js';
+export {
+  executeWorktrainAwaitCommand,
+  parseDurationMs,
+  type WorktrainAwaitCommandDeps,
+  type WorktrainAwaitCommandOpts,
+  type SessionOutcome,
+  type SessionResult,
+  type AwaitResult,
+} from './worktrain-await.js';

@@ -36,6 +36,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
+import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
@@ -175,6 +176,33 @@ export interface WorkflowTrigger {
      */
     readonly maxTurns?: number;
   };
+  /**
+   * Pre-allocated session start result from a caller that already called executeStartWorkflow().
+   *
+   * WHY: The `worktrain spawn` CLI command calls executeStartWorkflow() synchronously
+   * in the HTTP handler so it can return a session ID to the caller before the agent
+   * loop starts. It passes the resulting response here so runWorkflow() skips its own
+   * executeStartWorkflow() call and starts the agent loop from this pre-created session.
+   *
+   * INVARIANT: When set, runWorkflow() MUST NOT call executeStartWorkflow() again.
+   * The session is already created -- calling it again would create a duplicate session.
+   *
+   * WHY store the full response (not just the continueToken): runWorkflow() uses
+   * `response.pending?.prompt` to build the initial LLM prompt and `response.isComplete`
+   * to detect single-step workflows that complete immediately. Both are needed.
+   *
+   * WHY underscore prefix: signals this is an internal implementation detail, not
+   * a user-facing field. Script authors do not set this -- it is set only by the
+   * dispatch HTTP handler.
+   */
+  readonly _preAllocatedStartResponse?: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  /**
+   * Optional resolved soul file path. Sourced from TriggerDefinition.soulFile
+   * (already cascade-resolved by trigger-store.ts: trigger soulFile -> workspace soulFile).
+   * When absent, loadDaemonSoul() falls back to ~/.workrail/daemon-soul.md.
+   * Kept here so workflow-runner.ts remains decoupled from trigger system types.
+   */
+  readonly soulFile?: string;
 }
 
 /** Successful completion of a workflow run. */
@@ -490,17 +518,22 @@ async function clearStrayTmpFiles(sessionsDir: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Load the operator-customizable agent rules from ~/.workrail/daemon-soul.md.
+ * Load the operator-customizable agent rules from a soul file.
  *
- * On first run (file absent), writes a template to disk so the operator can
- * discover and customize it. The write is best-effort: if it fails (e.g. read-only
- * filesystem), the warning is logged and the default content is returned anyway.
+ * @param resolvedPath - Optional resolved path from the cascade in trigger-store.ts:
+ *   TriggerDefinition.soulFile (trigger override) -> WorkspaceConfig.soulFile (workspace default).
+ *   When absent, falls back to ~/.workrail/daemon-soul.md (global default).
  *
- * WHY synchronous default path: soul content must be ready before Agent construction.
- * The function is async only because first-run template creation requires an fs.writeFile.
+ * On first run (file absent), writes a template to disk so the operator can discover
+ * and customize it. The write is best-effort: if it fails, the warning is logged and
+ * DAEMON_SOUL_DEFAULT is returned anyway.
+ *
+ * WHY path.dirname(soulPath) for mkdir: for workspace-scoped paths like
+ * ~/.workrail/workspaces/my-project/daemon-soul.md, the parent dir must be created --
+ * not WORKRAIL_DIR (~/.workrail) which is already present.
  */
-async function loadDaemonSoul(): Promise<string> {
-  const soulPath = path.join(WORKRAIL_DIR, 'daemon-soul.md');
+async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
+  const soulPath = resolvedPath ?? path.join(WORKRAIL_DIR, 'daemon-soul.md');
   try {
     return await fs.readFile(soulPath, 'utf8');
   } catch (err: unknown) {
@@ -510,7 +543,7 @@ async function loadDaemonSoul(): Promise<string> {
     if (isEnoent) {
       // Best-effort template creation -- failure is logged but never fatal.
       try {
-        await fs.mkdir(WORKRAIL_DIR, { recursive: true });
+        await fs.mkdir(path.dirname(soulPath), { recursive: true });
         await fs.writeFile(soulPath, DAEMON_SOUL_TEMPLATE, 'utf8');
         console.log(`[WorkflowRunner] Created daemon-soul.md template at ${soulPath}`);
       } catch (writeErr: unknown) {
@@ -1132,24 +1165,34 @@ export async function runWorkflow(
   // and ensures tokens are persisted to disk BEFORE the agent loop begins (crash safety).
   // The LLM receives the first step's content as its initial prompt instead of being
   // told to call a start_workflow tool.
-  const startResult = await executeStartWorkflow(
-    { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
-    ctx,
-    // Mark this session as autonomous so isAutonomous is derivable from the event log.
-    { is_autonomous: 'true' },
-  );
+  //
+  // If _preAllocatedStartResponse is provided (set by the dispatch HTTP handler when
+  // the session was pre-created synchronously to return a session ID to the caller),
+  // skip executeStartWorkflow() to avoid creating a duplicate session. The session
+  // and its initial events are already written to the store.
+  let firstStep: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  if (trigger._preAllocatedStartResponse !== undefined) {
+    firstStep = trigger._preAllocatedStartResponse;
+  } else {
+    const startResult = await executeStartWorkflow(
+      { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
+      ctx,
+      // Mark this session as autonomous so isAutonomous is derivable from the event log.
+      { is_autonomous: 'true' },
+    );
 
-  if (startResult.isErr()) {
-    daemonRegistry?.unregister(sessionId, 'failed');
-    return {
-      _tag: 'error',
-      workflowId: trigger.workflowId,
-      message: `start_workflow failed: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
-      stopReason: 'error',
-    };
+    if (startResult.isErr()) {
+      daemonRegistry?.unregister(sessionId, 'failed');
+      return {
+        _tag: 'error',
+        workflowId: trigger.workflowId,
+        message: `start_workflow failed: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
+        stopReason: 'error',
+      };
+    }
+    firstStep = startResult.value.response;
   }
 
-  const firstStep = startResult.value.response;
   const startContinueToken = firstStep.continueToken ?? '';
   const startCheckpointToken = firstStep.checkpointToken ?? null;
 
@@ -1192,8 +1235,10 @@ export async function runWorkflow(
   // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
   // not before. Populating the system prompt at construction time is the correct
   // pre-step-1 injection point.
+  // trigger.soulFile is already cascade-resolved by trigger-store.ts:
+  //   trigger soulFile -> workspace soulFile -> undefined (global fallback in loadDaemonSoul)
   const [soulContent, workspaceContext, sessionNotes] = await Promise.all([
-    loadDaemonSoul(),
+    loadDaemonSoul(trigger.soulFile),
     loadWorkspaceContext(trigger.workspacePath),
     startContinueToken ? loadSessionNotes(startContinueToken, ctx) : Promise.resolve([] as readonly string[]),
   ]);
