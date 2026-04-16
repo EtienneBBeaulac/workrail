@@ -335,7 +335,7 @@ export async function startBridgeServer(
   // during bridge startup exit cleanly rather than spinning. See fatal-exit.ts.
   registerFatalHandlers('bridge');
   logStartup('bridge', { primaryPort });
-  logBridgeEvent({ kind: 'started', primaryPort });
+  logBridgeEvent({ kind: 'started', primaryPort, ppid: process.ppid });
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { StreamableHTTPClientTransport } = await import(
@@ -472,6 +472,12 @@ export async function startBridgeServer(
         // swallowed by the void discard. The loop is dead at this point; if the
         // primary is still alive the bridge will continue forwarding; if not, the
         // next t.onclose will start a fresh loop.
+        const errObj = err instanceof Error ? err : new Error(String(err));
+        logBridgeEvent({
+          kind: 'reconnect_loop_error',
+          message: errObj.message,
+          stack: errObj.stack ?? null,
+        });
         console.error('[Bridge] Unexpected error in reconnect loop:', err);
       });
   };

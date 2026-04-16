@@ -26,7 +26,7 @@ const BRIDGE_LOG_MAX_BYTES = 512 * 1024; // 512 KB
 // ---------------------------------------------------------------------------
 
 export type BridgeEvent =
-  | { readonly kind: 'started'; readonly primaryPort: number }
+  | { readonly kind: 'started'; readonly primaryPort: number; readonly ppid: number }
   | { readonly kind: 'connected'; readonly primaryPort: number }
   | { readonly kind: 'disconnected' }
   | { readonly kind: 'reconnect_attempt'; readonly attempt: number; readonly maxAttempts: number }
@@ -34,6 +34,7 @@ export type BridgeEvent =
   | { readonly kind: 'spawn_primary'; readonly port: number }
   | { readonly kind: 'spawn_skipped'; readonly reason: string }
   | { readonly kind: 'budget_exhausted'; readonly budgetUsed: number }
+  | { readonly kind: 'reconnect_loop_error'; readonly message: string; readonly stack: string | null }
   | { readonly kind: 'shutdown'; readonly reason: string };
 
 // ---------------------------------------------------------------------------
