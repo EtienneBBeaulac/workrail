@@ -1934,3 +1934,123 @@ triggers:
 ```
 
 **The meta-point:** WorkTrain running these agents on the WorkRail/WorkTrain repo means the product improves itself on a schedule. Every Monday it finds its own architectural problems. Every month it generates ideas for its own improvement. Every PR gets a security scan before it merges. The codebase gets continuously healthier without anyone managing it.
+
+---
+
+### Monitoring, analytics, and autonomous remediation (Apr 15, 2026)
+
+**The idea:** WorkTrain watches your application's health metrics in real time, identifies anomalies, investigates root causes, and resolves what it can -- automatically. This closes the full loop from "something went wrong" to "it's fixed and here's why."
+
+---
+
+#### What WorkTrain monitors
+
+**Application metrics (via polling or push):**
+- Error rate (Sentry, Datadog, CloudWatch, custom endpoint)
+- Latency P50/P95/P99 (per endpoint, per workflow step)
+- Memory and CPU usage of the daemon itself
+- Session success/failure rate (from the daemon's own session store)
+- Workflow completion time trends (are sessions getting slower?)
+- Queue depth (are triggers backing up?)
+
+**Codebase health metrics (derived from WorkTrain's own data):**
+- Test coverage trends (going up or down over time?)
+- Build time trends
+- PR cycle time (time from open to merge)
+- Number of open findings by severity across all open PRs
+- Number of sessions that ended in `_tag: 'error'` vs `'success'` in the last 7 days
+- Workflow steps most likely to fail (from session store analysis)
+
+**Custom metrics (user-defined):**
+```yaml
+# triggers.yml
+monitoring:
+  - id: session-error-rate
+    type: metric_threshold
+    source: daemon_sessions    # reads from ~/.workrail/data/sessions/
+    query: "error_rate_7d > 0.15"   # >15% session failure rate
+    workflowId: bug-investigation.agentic.v2
+    goal: "Investigate high daemon session error rate: {{$.error_rate}}% failures in last 7 days"
+    workspacePath: ~/git/personal/workrail
+
+  - id: sentry-errors
+    type: sentry_poll
+    project: workrail
+    token: $SENTRY_TOKEN
+    threshold: new_error_rate_1h > 5
+    workflowId: bug-investigation.agentic.v2
+    goalTemplate: "Investigate Sentry error spike: {{$.error.type}} -- {{$.error.message}}"
+```
+
+---
+
+#### The monitoring loop
+
+```
+monitor: detect anomaly
+  │
+  ├── classify severity (script -- based on threshold breach magnitude)
+  │     Critical: > 3x normal, affects production users
+  │     High: > 2x normal, degraded but functional
+  │     Low: trending bad but within bounds
+  │
+  ├── [if Critical] page immediately
+  │     script: post to Slack #incidents with metric data + session link
+  │
+  ├── investigate
+  │     workflow: bug-investigation.agentic.v2
+  │     inputs: metric data, recent commits, error logs, affected code paths
+  │     outputs: root cause hypothesis, affected files, confidence score
+  │
+  ├── [if confidence >= 0.8 AND severity <= High] attempt auto-remediation
+  │     ├── [if config/feature-flag fix] flip flag (script, instant)
+  │     ├── [if code fix, well-understood] spawn coding-task → review → merge
+  │     └── [if rollback needed] create rollback PR → review → merge
+  │
+  ├── [if confidence < 0.8 OR severity == Critical] escalate
+  │     script: post full investigation findings to Slack + file GitHub issue
+  │
+  └── follow-up check
+        cron: 30 min later → has the metric recovered? post update.
+```
+
+---
+
+#### WorkTrain analytics dashboard
+
+Beyond alerting, WorkTrain maintains a persistent analytics layer that answers questions like:
+
+- "What's our average PR cycle time this month vs last month?"
+- "Which workflow steps fail most often?"
+- "How much did autonomous sessions cost in tokens this week?"
+- "What percentage of bugs were auto-fixed vs escalated?"
+- "Which modules have the most open findings from MR reviews?"
+- "How many sessions ran today / this week / this month?"
+
+This data lives in the knowledge graph (structured, queryable) and is visualized in the console. The `worktrain talk` interface can answer these questions conversationally: "how are we doing this week?" → pulls the analytics and gives a natural language summary.
+
+---
+
+#### Self-monitoring: WorkTrain watching itself
+
+The most immediately useful instance is WorkTrain monitoring its own daemon:
+
+- Session error rate rising → investigate what kinds of tasks are failing
+- Queue depth growing → daemon may be overloaded → reduce poll frequency or spawn fewer concurrent sessions
+- Session duration outliers → some sessions are running way too long → investigate which workflow step is stuck
+- Memory leak → daemon process growing unbounded → restart + file bug
+- Disk usage → session store growing too large → prune old sessions
+
+These are all monitorable from `~/.workrail/data/sessions/` with no external dependency. WorkTrain can watch itself with zero additional infrastructure.
+
+---
+
+#### Implementation path
+
+**Now (no new features needed):** cron trigger → `wr.discovery` workflow that reads session store metrics → posts summary to Slack. This gives analytics immediately.
+
+**Near-term (needs `metric_threshold` trigger type):** new `PollingMonitorSource` that evaluates a metric expression on a schedule and fires only when threshold breaches. Same polling infrastructure as `gitlab_poll`.
+
+**Medium-term:** Sentry/Datadog/CloudWatch adapters as polling sources. Same pattern as GitLab -- poll the API, deduplicate events, dispatch workflow.
+
+**Long-term:** real-time metric ingestion (push rather than pull), time-series storage in DuckDB alongside the knowledge graph, analytics dashboard in the console.
