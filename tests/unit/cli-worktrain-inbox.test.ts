@@ -207,7 +207,7 @@ describe('executeWorktrainInboxCommand', () => {
 
   // ── Cursor desync ────────────────────────────────────────────────────────
 
-  it('resets cursor to 0 when cursor >= totalLines (outbox truncated)', async () => {
+  it('resets cursor to 0 when cursor > totalLines (outbox truncated)', async () => {
     fsState.files.set(outboxPath, makeOutbox([
       { message: 'new message after truncation' },
     ]));
