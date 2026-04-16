@@ -1190,3 +1190,13 @@ Concurrent session serialization. Prerequisite for daemon safety. Prevents token
 - Per-org session paths (`~/.workrail/sessions/default/`) → adding orgId prefix later is migration
 - Feature flags on everything → merge incrementally
 - Generic webhook → all integrations (GitLab, Jira, Slack) via config, zero code per integration
+
+---
+
+### Daemon context customization (implemented Apr 15, 2026)
+
+**`~/.workrail/daemon-soul.md`** -- operator-customizable agent rules injected into every daemon session system prompt. Analogous to nexus-core's `SOUL.md` and Common-Ground's `AGENTS.md`. Default created on first run with commented instructions. Override per-workspace or globally.
+
+**Auto-inject `AGENTS.md` / `CLAUDE.md`** -- daemon scans `workspacePath` for `.claude/CLAUDE.md`, `CLAUDE.md`, `AGENTS.md`, `.github/AGENTS.md` (in priority order) and injects into system prompt under `## Workspace Context`. Combined 32KB limit, truncated with notice if over. Enables the daemon to adapt to different repos' coding standards and conventions automatically -- same as how Claude Code uses these files.
+
+**Daemon calls `start_workflow` directly** -- removes the "Call the start_workflow tool now" LLM indirection. Daemon calls `executeStartWorkflow()` directly, gets step 1, passes it as the initial prompt. More reliable, cheaper (one fewer LLM turn), and the agent starts working immediately instead of being told to call a tool.
