@@ -756,7 +756,6 @@ export async function startBridgeServer(
     if (stateAtStart.kind !== 'waiting_for_primary') return;
 
     void (async () => {
-      logBridgeEvent({ kind: 'waiting_for_primary', port: primaryPort });
       while (!shutdownSignal.aborted) {
         await sleep(config.waitForPrimaryPollMs);
         if (shutdownSignal.aborted) return;
