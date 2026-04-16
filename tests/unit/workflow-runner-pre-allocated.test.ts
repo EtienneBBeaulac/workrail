@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { tmpPath } from '../helpers/platform.js';
 
 // ── Mock variables (hoisted alongside vi.mock) ────────────────────────────────
 //
@@ -94,7 +95,7 @@ describe('runWorkflow() with _preAllocatedStartResponse', () => {
     const trigger: WorkflowTrigger = {
       workflowId: 'coding-task-workflow-agentic',
       goal: 'test goal',
-      workspacePath: '/tmp/test-workspace',
+      workspacePath: tmpPath('test-workspace'),
       _preAllocatedStartResponse: makePreAllocatedResponse({ isComplete: true }),
     };
 
