@@ -64,6 +64,34 @@ ReadRepo(repo: "ios", path: "Sources/Messaging/ZIMGallery.swift")
 
 ---
 
+### Long-term vision: WorkTrain as a general engine, domain packs as configuration (Apr 15, 2026)
+
+WorkTrain is not just a coding tool. The underlying engine -- session management, workflow enforcement, daemon, agent loop, knowledge graph, context bundle assembly -- is domain-agnostic. What makes it a "coding tool" today is entirely configuration: the workflows, the graph schema, the context bundle queries, the trigger definitions.
+
+**Domain packs** are the abstraction that makes this general:
+
+A domain pack is a self-contained configuration bundle that specializes WorkTrain for a specific problem domain:
+- a set of workflows (the step structure and agent instructions for that domain)
+- a knowledge graph schema (the node and edge types relevant to that domain)
+- context bundle query definitions (what "give me everything relevant to X" means in that domain)
+- trigger definitions (what events kick off work in that domain)
+- a daemon soul template (default agent persona and principles for that domain)
+
+**Examples of domain packs:**
+- `worktrain-coding` -- software engineering (the current default)
+- `worktrain-research` -- literature review, synthesis, citation tracking
+- `worktrain-creative` -- narrative generation, continuity tracking, style enforcement
+- `worktrain-ops` -- incident response, runbook execution, alert-to-action
+- `worktrain-data` -- pipeline validation, schema monitoring, anomaly investigation
+
+**The core engine is shared across all of them.** A domain pack author writes workflows, a graph schema, and context bundle queries -- they don't reimplement session management, token protocols, daemon loops, or the console.
+
+**Why this matters for WorkTrain's positioning:** most autonomous agent platforms are either too generic (the user has to build everything) or too specific (locked to one use case). Domain packs give WorkTrain a middle path: powerful enough to be opinionated about engineering workflows today, open enough to run any structured agentic domain tomorrow. New domains get the session durability, enforcement, observability, and knowledge graph for free.
+
+**What to build first:** nothing new for now. The architecture already supports this -- the domain pack concept is latent in the current design. The right time to make it explicit is when a second domain (creative writing, ops, research) is ready to be added. At that point, extract the coding-specific pieces into `worktrain-coding` and establish the domain pack contract.
+
+---
+
 ### Core architectural principle: WorkRail drives itself
 
 **The daemon doesn't bypass WorkRail -- it IS WorkRail.**
@@ -1292,4 +1320,210 @@ Multiple agents coordinating on one task. Two patterns:
 
 **MVP path:** Concurrent sessions with `maxConcurrentSessions` first (small change). Coordinator + subagent delegation second (already works, just needs workflow authoring). Full parallel teams is the longer-term investment.
 
+---
+
+### Core daemon design principle: scripts over agent (permanent)
+
+**The agent is expensive, inconsistent, and slow. Scripts are free, deterministic, and instant.**
+
+Any operation the daemon can perform with a shell script, git command, or API call should be done that way -- not delegated to the LLM. The agent's job is cognition: understanding the task, making decisions, writing code. Everything else is mechanical work that scripts do better.
+
+**Concrete rule:** if an operation is deterministic and has no ambiguity, it is a script. Examples:
+
+- `git add -A && git commit -m "..."` -- script (daemon reads the handoff artifact the agent produced and runs this itself)
+- `gh pr create --title "..." --body "..."` -- script (daemon reads PR title/body from the agent's handoff note)
+- running the build (`npm run build`, `gradle assembleDebug`) -- script
+- running tests (`npm test`, `./gradlew test`) -- script
+- reading a file to check if it exists -- script (use Read tool, not ask the agent)
+- detecting which workflow to run for a given trigger -- script (workflowId is in `triggers.yml`)
+- formatting output, writing JSON state files, sending HTTP requests -- scripts
+
+**The agent only does what requires judgment:**
+
+- understanding what files need to change and how
+- evaluating whether an approach matches the repo's patterns
+- generating commit messages and PR descriptions (because those require understanding the change)
+- deciding whether a test failure is a real issue or a flaky test
+- making tradeoff decisions when there are competing valid approaches
+
+**Auto-commit and auto-PR design (near-term daemon work):**
+
+The workflow's final step produces a structured handoff artifact with `commitType`, `commitScope`, `commitSubject`, `prTitle`, `prBody`, and `filesChanged`. The daemon reads this artifact after the workflow completes and runs git commands directly:
+
+```typescript
+// After runWorkflow() resolves successfully:
+const handoff = extractHandoffArtifact(result); // parse notes for the structured block
+if (handoff && triggerConfig.autoCommit) {
+  await execa('git', ['add', ...handoff.filesChanged], { cwd: workspacePath });
+  await execa('git', ['commit', '-m', handoff.commitMessage], { cwd: workspacePath });
+}
+if (handoff && triggerConfig.autoOpenPR) {
+  await execa('gh', ['pr', 'create', '--title', handoff.prTitle, '--body', handoff.prBody], { cwd: workspacePath });
+}
+```
+
+`autoCommit` and `autoOpenPR` are opt-in flags in `triggers.yml`. Default off. The daemon never commits without explicit config.
+
+**Why this matters for quality:** LLM-run git commands have non-deterministic output, can hallucinate flags, and burn tokens on mechanical work. A script-run commit is always correct, always fast, always auditable. The agent writes the message; the daemon runs the command. That split is the right architecture.
+
 **Key open question:** When two agents work on the same repo concurrently, file conflicts are possible. The right answer is git worktrees -- each agent gets its own worktree, merges at the end. This is what the `cw` command does for human developers. WorkTrain should do the same autonomously.
+
+---
+
+### Workflow complexity routing: fast-path thoroughness and subagent offloading (design questions, Apr 15, 2026)
+
+Three open questions that should be resolved before the lean.v2 workflow is considered stable for autonomous use:
+
+---
+
+**Q1: Is one step enough for Small tasks?**
+
+Currently: Small tasks take one step (phase-5-small-task-fast-path). That step now requires wiring verification, build, tests, and a handoff artifact. But it is still one LLM context doing everything.
+
+The real risk is not the number of steps -- it is context overload within that one step. If the task is genuinely small (add a CLI flag, fix a one-line bug), one focused context is fine and lower cost. But if "Small" is being misclassified -- or if the task is technically small but requires non-obvious wiring across several files -- a single context is likely to miss things.
+
+**Tentative answer:** the classification is the real gate, not the step count. The fix is making Phase 0 classify more conservatively and making it easier to reclassify upward after the fast path discovers unexpected scope. A `reclassifyToMedium` escape hatch in the fast path step (sets a context var that routes to phase-3 planning) would cover the "started small, turned out bigger" case without forcing every Small task through the full path.
+
+---
+
+**Q2: Should Medium tasks get a dedicated path?**
+
+Currently: Medium falls into the same non-Small path as Large, which includes the full design review, plan audit, and final verification loops. For genuinely Medium tasks (well-understood, moderate scope, low architectural uncertainty), that path is too heavy.
+
+**Tentative answer:** add a QUICK rigor path for Medium. The existing `rigorMode=QUICK` conditions already skip the hypothesis, deep design, and plan audit steps -- so Medium+QUICK already produces a lighter path. The issue is that the workflow doesn't explicitly name "Medium fast path" anywhere. Document that `taskComplexity=Medium + rigorMode=QUICK` is the intended Medium track. No new steps needed -- just make the intended routing explicit in Phase 0 guidance.
+
+---
+
+**Q3: Subagent offloading for classification and context gathering**
+
+The main agent's context is expensive and degrades as it fills up. The right architecture is:
+
+- **Phase 0 (classify)**: delegate to a cheap subagent. It reads the task description, scans relevant files, and returns: `taskComplexity`, `riskLevel`, `rigorMode`, `candidateFiles`, `invariants`. Main agent reviews and accepts/overrides. Cost: one cheap context instead of part of the main context.
+
+- **Context gathering (phase-1)**: already delegates to `routine-context-gathering` subagents. That's the right model. The question is whether those subagents share results via a persistent layer (knowledge graph) or repeat sweeps every session.
+
+- **Design review, plan audit, final verification**: already delegate to routine subagents. Good.
+
+The main agent should own: decisions, synthesis, and implementation. Everything else should be offloaded.
+
+**Dependency:** subagent offloading at scale requires a reliable handoff/knowledge-sharing system. Right now subagent results live in step notes and context variables -- ephemeral, per-session. If agents are going to stop repeating repo sweeps, something needs to persist knowledge between sessions.
+
+---
+
+### Knowledge graph for agent context (high importance, research needed, Apr 15, 2026)
+
+**The problem:** every session starts with a full repo sweep. Context gathering subagents re-read the same files, re-trace the same call chains, re-identify the same invariants. This is expensive, slow, and scales badly as the codebase and team grow. The same problem appears in Storyforge (see `~/git/personal/storyforge/docs/architecture/design-notes/graph-memory-mcp.md`).
+
+**The idea:** a persistent, derived knowledge graph that agents build incrementally and query instead of sweeping. Key properties from Storyforge's design thinking that apply directly to WorkRail:
+
+- **Derived, not authoritative.** Source files are ground truth. The graph is a compiled/indexed view with provenance pointers back to source. Graph state never silently outranks a file read.
+- **Context bundles, not raw queries.** An agent doesn't query individual nodes -- it requests a context bundle: "give me everything relevant to `src/trigger/trigger-router.ts` for a bug investigation." The graph assembles and returns one scoped bundle.
+- **Provenance on every fact.** Every node/edge records: which file it came from, which session created it, which agent, when. Stale facts are detectable.
+- **Incremental, session-driven updates.** After each session completes, the daemon updates the graph with what the agent learned (new files read, new relationships traced, new invariants recorded). The graph grows session by session without requiring a full sweep.
+
+**Node types for a code knowledge graph:**
+- `file` (path, language, last_modified, last_indexed)
+- `symbol` (function, class, type, constant -- with file + line)
+- `call_edge` (caller -> callee with file/line provenance)
+- `invariant` (named constraint with the files it spans)
+- `workflow_session` (what task was done, which files changed, what was found)
+- `dependency` (npm/gradle package with version)
+- `test` (test file -> symbols under test)
+
+**Edge types:**
+- `imports`, `calls`, `exports`, `implements`, `extends`
+- `tested_by`, `modified_in_session`, `invariant_spans`
+- `depends_on`, `registered_in` (DI container, CLI map, router)
+
+**What this solves for WorkRail:**
+- Context gathering drops from "sweep 200 files" to "query the graph for the relevant subgraph + fetch the 5-10 source files that are actually going to change"
+- Agents can ask "what other files import `trigger-router.ts`?" in one graph query instead of a grep sweep
+- The wiring check in the fast path becomes: "query the graph for all registrations of type `CliCommand`, confirm the new command is in the set" -- not "read index.ts, cli.ts, and hope you find all the entry points"
+- Session history is queryable: "what sessions touched `session-lock` in the last 30 days?" -- useful for debugging and for not re-investigating known issues
+
+**The target architecture: vector + graph hybrid (not just a relational index)**
+
+The knowledge graph vision is more than a queryable symbol index. The real goal is a system where an agent asks "give me everything related to trigger-router.ts" and the system surfaces things that are *semantically relevant* -- not just things explicitly linked by import edges, but files that implement the same pattern, functions with similar signatures, sessions that touched related concepts. This is closer to a neural network for knowledge than to a SQL database.
+
+This requires two complementary layers:
+
+**Layer 1: Structural graph (hard edges, deterministic)**
+Built by parsing the codebase. Captures known, explicit relationships:
+- `imports`, `calls`, `exports`, `implements`, `extends`
+- `registers_in` (DI container, CLI command map, router)
+- `tested_by`, `modified_in_session`
+
+This layer answers precise questions with certainty: "what imports trigger-router.ts?", "what CLI commands are registered?", "what did session X touch?" Built by scripts (ts-morph for TypeScript, equivalent parsers for other languages), never by an LLM. Fast, deterministic, always correct.
+
+**Layer 2: Vector similarity (soft weights, semantic)**
+Every node in the structural graph also gets an **embedding** -- a vector encoding its semantic meaning (function name + signature + docstring + surrounding context). Nodes that are semantically similar end up geometrically close in vector space, regardless of whether they have an explicit edge between them.
+
+This layer answers fuzzy questions: "what is conceptually related to this?", "what files implement patterns similar to this one?", "what past sessions are relevant to this bug?" It surfaces things the agent didn't know to look for.
+
+**Together:** the structural graph provides the skeleton; the vector layer provides the connective tissue. An agent query resolves both: exact structural neighbors first, semantically similar nodes ranked by distance second. Per-repo and per-module scoping is handled naturally -- intra-repo edges are hard structural links, cross-repo relevance falls back to vector similarity.
+
+**Technology layers:**
+
+| Layer | Technology | Role |
+|-------|-----------|------|
+| Structural parsing | ts-morph (TypeScript), tree-sitter (other langs) | Extract hard edges deterministically |
+| Structural storage + traversal | DuckDB | Store nodes/edges, recursive reachability queries |
+| Vector embeddings | Local embedding model (e.g. `nomic-embed-text` via Ollama, or `@xenova/transformers`) | Encode every node as a vector |
+| Vector storage + similarity search | LanceDB (embedded, TypeScript-native) or Qdrant (self-hosted) | ANN search over embeddings |
+| Unified query layer | WorkTrain MCP tool | Single `query_knowledge_graph(intent)` call returns merged structural + semantic results |
+
+LanceDB is the strongest fit for the vector layer: embedded (no server process), TypeScript-native, local-first, co-locates vector and metadata in the same store. It pairs cleanly with DuckDB handling the structural/relational queries.
+
+**Build order (spike first, hybrid later):**
+
+The structural layer (ts-morph + DuckDB) is the right first spike because:
+1. It answers the immediately valuable questions (wiring checks, import graphs, CLI registration)
+2. It produces the nodes that the vector layer will embed -- you can't embed nothing
+3. It proves the foundation before adding semantic complexity
+
+Once the structural spike works, add the vector layer: embed each node's name + context, store in LanceDB, expose a similarity query alongside the structural query. The two layers are additive -- the structural layer doesn't get replaced, it gets augmented.
+
+**Per-repo and per-module scoping:**
+Each repo gets its own structural graph partition and its own vector namespace. Cross-repo queries join partitions explicitly (structural) or search across namespaces with a distance penalty (semantic). The system handles this automatically once the partition boundaries are defined at index time. Finer-grained module-level scoping falls out naturally from the structural graph -- the subgraph rooted at a module's entry point is the module's partition.
+
+**WorkRail fits:** the graph becomes a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph(intent)`. Workflow steps call it instead of running file sweeps. The daemon runs the indexer post-session as a script (structural layer: re-index changed files; vector layer: re-embed changed nodes).
+
+**Cross-project note:** the same architecture applies to any domain pack. Storyforge's graph has narrative nodes (characters, promises, locations) instead of code nodes, and a different parser (YAML/markdown instead of ts-morph), but the same two-layer design -- structural edges + vector embeddings -- gives it both "what chapters does this character appear in?" (structural) and "what story elements are thematically related to this scene?" (semantic).
+
+---
+
+### Knowledge graph candidate research findings (Apr 15, 2026)
+
+Four discovery subagents evaluated Cognee, GraphRAG, LightRAG, Mem0, Zep, Sourcegraph, LSP, ctags, tree-sitter, ts-morph, and DuckDB against a pure relational/structural framing. Findings below, updated with the corrected hybrid architecture understanding.
+
+**Structural layer decision: ts-morph + DuckDB for the spike.**
+
+- **ts-morph**: wraps the real TypeScript Compiler API, not a generic parser. Extracts exports, imports, call sites, class implementations, DI `.bind()` patterns, CLI registration maps. In-process, zero external dependencies. Strictly better than tree-sitter for a TypeScript codebase.
+- **DuckDB**: embedded SQL with recursive CTEs. Handles structural reachability queries. No server process. A 1-day spike, not a 2-week project.
+- **LSP**: correct answers but requires managing a long-running server process -- wrong operational model.
+- **ctags**: definitions only, no call edges. Too shallow.
+- **Sourcegraph**: right idea, enterprise weight. Overkill for local daemon use.
+
+**Vector layer decision: LanceDB (deferred to post-spike).**
+
+- **LanceDB**: embedded, TypeScript-native, local-first. Best fit for the vector layer alongside DuckDB.
+- **Qdrant**: self-hosted, strong ANN performance. Good alternative if LanceDB proves insufficient at scale.
+- **Weaviate**: vector + graph hybrid in one system. Worth revisiting if maintaining two separate stores becomes painful -- it does both layers but is heavier to self-host.
+
+**Why GraphRAG/Cognee/LightRAG don't fit (even with the hybrid architecture):**
+These tools use LLMs to *build* the graph -- entity extraction, relationship identification, summarization all require LLM calls during indexing. That violates the scripts-over-agent principle. The structural layer must be deterministic (parser-built); the vector layer uses an embedding model (deterministic given the same input), not a generative LLM. GraphRAG's semantic richness is real but the wrong tradeoff for a system that needs to re-index after every session without burning tokens.
+
+**The spike (structural layer, build now):**
+1. `npm install ts-morph @duckdb/node-api`
+2. 50-line indexer: `project.getSourceFiles()` → walk exports, imports, call expressions → rows into DuckDB nodes/edges tables
+3. One MCP tool: `query_knowledge_graph(query: string)` running SQL, returning a context bundle
+4. Validation: "what imports trigger-router.ts?" and "what CLI commands are registered?" must return correct answers
+
+**Post-spike (vector layer):**
+1. `npm install vectordb` (LanceDB) + local embedding model via Ollama or `@xenova/transformers`
+2. After each structural node is created, embed `name + file + context snippet` → store vector alongside node ID in LanceDB
+3. Extend `query_knowledge_graph` to merge: structural neighbors (DuckDB) + semantic neighbors (LanceDB ANN search) → unified ranked context bundle
+4. Validate: "what is related to trigger-router.ts?" should surface files not directly imported but implementing the same webhook/routing pattern
+
+**Incremental update model:**
+After each daemon session completes, re-index only files in the handoff artifact's `filesChanged` list (structural: ts-morph re-parse; vector: re-embed changed nodes). Full rebuild only on first run or schema changes. Script, not agent.
