@@ -783,3 +783,178 @@ describe('TriggerRouter.route callbackUrl delivery', () => {
     logSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// maxConcurrentSessions: global semaphore
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter maxConcurrentSessions semaphore', () => {
+  /**
+   * Helper: creates a RunWorkflowFn that blocks until release() is called per call.
+   * Each call increments inFlightCount on start and decrements on release.
+   * releaseNext() resolves the oldest pending call.
+   * releaseAll() resolves all pending calls.
+   */
+  function makeLatchedRunWorkflow(): {
+    fn: RunWorkflowFn;
+    inFlight: () => number;
+    releaseNext: () => void;
+    releaseAll: () => void;
+  } {
+    let inFlightCount = 0;
+    const releaseFns: Array<() => void> = [];
+
+    const fn: RunWorkflowFn = async (trigger) => {
+      inFlightCount++;
+      await new Promise<void>((resolve) => {
+        releaseFns.push(resolve);
+      });
+      inFlightCount--;
+      return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
+    };
+
+    return {
+      fn,
+      inFlight: () => inFlightCount,
+      releaseNext: () => { releaseFns.shift()?.(); },
+      releaseAll: () => { releaseFns.splice(0).forEach((r) => r()); },
+    };
+  }
+
+  it('limits concurrent runWorkflow() calls to maxConcurrentSessions', async () => {
+    // Proves the semaphore caps at the configured limit.
+    // With cap=2 and 3 fires: first two should start, third should be queued.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 2);
+
+    router.route(makeEvent());
+    router.route(makeEvent());
+    router.route(makeEvent());
+
+    // Drain: give semaphore time to start the first two (third is blocked, waiting for slot).
+    await new Promise<void>((r) => setImmediate(r));
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(inFlight()).toBe(2);
+    expect(router.activeSessions).toBe(2);
+    expect(router.maxConcurrentSessions).toBe(2);
+
+    releaseAll();
+    // Multiple drains needed: releaseAll() unblocks latches, but the third dispatch
+    // still needs to acquire the semaphore and run -- give it time.
+    await new Promise<void>((r) => setTimeout(r, 20));
+    releaseAll(); // release the third dispatch (which started after first two completed)
+    await new Promise<void>((r) => setTimeout(r, 20));
+    expect(inFlight()).toBe(0);
+  });
+
+  it('queue-and-wait: third dispatch proceeds after one of the first two completes', async () => {
+    // Proves that queued dispatches are not dropped -- they execute once a slot opens.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    const { fn, inFlight, releaseNext, releaseAll } = makeLatchedRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 2);
+
+    router.route(makeEvent());
+    router.route(makeEvent());
+    router.route(makeEvent());
+
+    await new Promise<void>((r) => setImmediate(r));
+    await new Promise<void>((r) => setImmediate(r));
+
+    // First two in-flight, third queued
+    expect(inFlight()).toBe(2);
+
+    // Release one slot -- third should start
+    releaseNext();
+    await new Promise<void>((r) => setImmediate(r));
+    await new Promise<void>((r) => setImmediate(r));
+
+    // Second original + third should now be in-flight
+    expect(inFlight()).toBe(2);
+
+    releaseAll();
+    await new Promise<void>((r) => setImmediate(r));
+    await new Promise<void>((r) => setImmediate(r));
+    expect(inFlight()).toBe(0);
+  });
+
+  it('releases semaphore slot when runWorkflowFn returns error result (finally block)', async () => {
+    // ORANGE-1: proves the finally block releases the slot even when runWorkflowFn
+    // returns an error result (workflow failed but slot must still be freed).
+    // Without the finally block, a failing workflow would permanently consume a slot.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    let firstCallUnblock!: () => void;
+    let secondCallResolved = false;
+
+    const fn: RunWorkflowFn = async (t) => {
+      if (!firstCallUnblock) {
+        // First call: block until explicitly unblocked, then return error result
+        await new Promise<void>((resolve) => { firstCallUnblock = resolve; });
+        return { _tag: 'error', workflowId: t.workflowId, message: 'simulated failure', stopReason: 'stop' };
+      }
+      // Second call: resolves immediately -- proves slot was released after first finished
+      secondCallResolved = true;
+      return { _tag: 'success', workflowId: t.workflowId, stopReason: 'stop' };
+    };
+
+    // cap=1 so second dispatch can only run after first releases the semaphore slot
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 1);
+
+    router.route(makeEvent());
+    await new Promise<void>((r) => setImmediate(r));
+
+    // First call is running -- second is queued (cap=1)
+    router.route(makeEvent());
+    expect(secondCallResolved).toBe(false);
+
+    // Unblock the first call (returns error) -- finally MUST release the slot
+    firstCallUnblock();
+    await new Promise<void>((r) => setTimeout(r, 20));
+
+    // Second call must have run (slot was released by finally even though first returned error)
+    expect(secondCallResolved).toBe(true);
+  });
+
+  it('defaults to 3 concurrent sessions when maxConcurrentSessions is not specified', async () => {
+    // Proves the default is 3, not unlimited.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
+    // No maxConcurrentSessions argument -- should default to 3
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    expect(router.maxConcurrentSessions).toBe(3);
+
+    // Fire 4 dispatches -- only 3 should be in-flight simultaneously
+    router.route(makeEvent());
+    router.route(makeEvent());
+    router.route(makeEvent());
+    router.route(makeEvent());
+
+    await new Promise<void>((r) => setImmediate(r));
+    await new Promise<void>((r) => setImmediate(r));
+
+    expect(inFlight()).toBe(3);
+
+    releaseAll();
+    // Fourth dispatch was queued -- now it starts. Release it too.
+    await new Promise<void>((r) => setTimeout(r, 20));
+    releaseAll();
+    await new Promise<void>((r) => setTimeout(r, 20));
+    expect(inFlight()).toBe(0);
+  });
+
+  it('clamps maxConcurrentSessions=0 to 1 and warns', () => {
+    // Proves the illegal-state invariant: 0 or negative is clamped to 1.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const trigger = makeTrigger({ concurrencyMode: 'serial' });
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 0);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('clamping to 1'));
+    expect(router.maxConcurrentSessions).toBe(1);
+
+    warnSpy.mockRestore();
+  });
+});

@@ -71,6 +71,11 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
 
   // daemon workspace default -- written by `worktrain init`, read by the daemon command
   'WORKRAIL_DEFAULT_WORKSPACE',
+
+  // daemon concurrency settings (numeric; NOT merged into process.env -- parsed directly
+  // in trigger-listener.ts and passed to TriggerRouter as a number).
+  // Example in config.json: "maxConcurrentSessions": "3"
+  'maxConcurrentSessions',
 ]);
 
 // =============================================================================

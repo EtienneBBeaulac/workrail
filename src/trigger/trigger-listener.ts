@@ -26,6 +26,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js';
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
+import { loadWorkrailConfigFile } from '../config/config-file.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
 import type { WebhookEvent } from './types.js';
 import { asTriggerId } from './types.js';
@@ -210,9 +211,20 @@ export async function startTriggerListener(
     );
   }
 
+  // Read maxConcurrentSessions from ~/.workrail/config.json.
+  // The config-file loader returns a flat Record<string, string>; the value is a
+  // string (schema constraint) and must be parsed to an integer here.
+  // A missing or non-numeric value falls back to TriggerRouter's default (3).
+  const workrailConfig = loadWorkrailConfigFile();
+  const maxConcurrencyRaw = workrailConfig.kind === 'ok'
+    ? workrailConfig.value['maxConcurrentSessions']
+    : undefined;
+  const parsed = parseInt(maxConcurrencyRaw ?? '', 10);
+  const maxConcurrentSessions = !isNaN(parsed) ? parsed : undefined;
+
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions);
   const app = createTriggerApp(router);
 
   // Startup crash recovery: detect and clear any orphaned session files left by a
