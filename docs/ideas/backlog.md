@@ -1638,3 +1638,135 @@ If the spike answers those two questions correctly, the foundation is proven and
 
 **Incremental update model (post-spike):**
 After each daemon session completes, run the indexer only on files that appear in the session's `filesChanged` list (from the handoff artifact). Full re-index only on first run or when the schema changes. This is a script the daemon runs post-workflow, not an agent task.
+
+---
+
+### Native multi-agent orchestration: coordinator sessions + session DAG (HIGH PRIORITY, Apr 15, 2026)
+
+**The problem:** Everything we can do manually today -- spawn parallel agents, chain discovery→implement→review→fix, react to findings, merge when clean -- WorkTrain should be able to do natively, fully autonomously, with full observability, and without any user feedback.
+
+Today this requires a human (or Claude Code) to:
+- Read completion notifications
+- Interpret findings
+- Decide what follow-up agents to spawn
+- Track which PRs are clean vs need fixes
+- Trigger the merge sequence when everything is ready
+
+None of that should require a human. It's all policy that belongs in a coordinator workflow.
+
+---
+
+#### New primitives required
+
+**`spawn_session` tool** (available inside workflow steps)
+Starts a child session with a given workflowId + goal. Non-blocking -- returns a `sessionHandle` immediately. The coordinator continues executing the current step.
+
+```typescript
+spawn_session({
+  workflowId: 'mr-review-workflow-agentic',
+  goal: `Review PR #${prNumber}: ${prTitle}`,
+  workspacePath: '/path/to/repo',
+  context: { prNumber, prTitle, prDiff }
+}) → { sessionHandle: 'sess_abc123' }
+```
+
+**`await_sessions` tool** (available inside workflow steps)
+Blocks until one or all of a set of session handles complete. Returns their results and output artifacts (notes, handoff artifacts, MR review findings).
+
+```typescript
+await_sessions({
+  handles: ['sess_abc123', 'sess_def456'],
+  mode: 'all'  // or 'any'
+}) → [{ handle, result, outputs: { notes, findings, artifacts } }]
+```
+
+**Coordinator session type**
+A session that owns child sessions. Parent-child relationship stored in the session store. Killing a coordinator kills all its children. The console DAG view shows the full tree.
+
+**Result routing**
+Child session outputs are automatically available when `await_sessions` resolves -- the coordinator doesn't manually query the session store.
+
+---
+
+#### Coordinator workflow pattern
+
+A coordinator workflow uses a `while` loop step with `spawn_session` + `await_sessions` to drive a dynamic DAG:
+
+```
+Phase 1: Gather work items (e.g. open PRs, open issues, failing tests)
+Phase 2: Spawn workers in parallel (one per work item)
+Phase 3: Await all workers
+Phase 4: Classify results
+  - Clean items: queue for merge/close
+  - Items with findings: spawn fix agents
+  - Items with blockers: escalate to human (fire onComplete notification)
+Phase 5: Await fix agents, re-review if needed (circuit breaker: max 3 attempts)
+Phase 6: Execute final action (merge sequence, create summary, post to Slack)
+```
+
+This is what we did manually all day. It should be a workflow anyone can run with a single trigger.
+
+---
+
+#### Observability: session DAG view in console
+
+The QueuePane shows a flat list today. For coordinator workflows it must show a tree:
+
+```
+● coordinator: groom and fix all PRs          [running, 47 min]
+  ├── ✓ sess_abc: GAP-1 implement             [merged, 18 min]
+  ├── ✓ sess_def: GAP-1 MR review             [approved, 4 min]
+  ├── ✓ sess_ghi: GAP-6 implement             [merged, 12 min]
+  ├── ● sess_jkl: GAP-6 MR review fix         [running, 3 min]
+  │     └── ✓ sess_mno: GAP-6 findings fix    [complete, 8 min]
+  └── ✓ sess_pqr: TS6 tsconfig fix            [merged, 6 min]
+```
+
+Each node: status icon, workflow type, goal snippet, duration. Expand to see step notes. Parent-child edges visible. Critical path highlighted.
+
+---
+
+#### No-user-feedback policy logic
+
+The coordinator workflow encodes the policy as workflow step instructions:
+
+- **Critical/Major finding** → block merge, spawn fix agent, re-review (max 3 passes), escalate if still failing
+- **Minor finding** → spawn fix agent if auto-fixable, else log and proceed
+- **Nit** → log, proceed without fix
+- **Clean** → queue for merge
+- **Merge sequence** → serial (one at a time, pull before each merge to avoid conflicts)
+- **Circuit breaker** → after 3 failed fix attempts on same finding, post to Slack/GitLab and pause
+
+This policy lives in the coordinator workflow, not in the daemon code. Different teams can have different policies by using different coordinator workflows.
+
+---
+
+#### What this unlocks
+
+A single trigger fires the entire development cycle autonomously:
+
+```yaml
+# triggers.yml
+- id: daily-grooming
+  type: cron
+  schedule: "0 9 * * 1-5"   # 9am weekdays
+  workflowId: coordinator-groom-and-ship
+  goal: "Review all open PRs, fix findings, merge clean PRs, file issues for blockers"
+  workspacePath: ~/git/my-project
+  autoCommit: true
+  autoOpenPR: true
+```
+
+WorkTrain wakes up at 9am, reviews every open PR, fixes everything it can, merges what's clean, posts a summary to Slack, and files GitHub issues for anything that needs human judgment. No human involved unless the circuit breaker fires.
+
+---
+
+#### Build order
+
+1. **`spawn_session` + `await_sessions` tools** -- the core primitives. These are new MCP tools exposed to workflow steps, backed by a new `SpawnedSessionRegistry` in the DI container.
+2. **Parent-child session relationship in session store** -- `parentSessionId` field on session creation event.
+3. **Console DAG view** -- new `CoordinatorView` component that renders the session tree from the parent-child graph.
+4. **Coordinator workflow templates** -- `coordinator-groom-and-ship`, `coordinator-review-all-prs`, `coordinator-investigate-and-fix` as bundled workflows.
+5. **No-feedback policy encoding** -- document the MR review finding classification schema so coordinator workflows can reliably parse and act on it.
+
+**This is the most important architectural work remaining in WorkTrain.** Everything else -- polling triggers, onboarding, knowledge graph -- makes WorkTrain better. This makes it genuinely autonomous.
