@@ -2494,3 +2494,144 @@ If a queue item has a deadline within 48 hours and hasn't been started yet, the 
 
 **Why this is powerful:**
 WorkTrain effectively becomes your sprint manager. It knows what's due, in what order things need to happen, and it works the highest-urgency items first -- without anyone having to manually reorder a board. The deadline context is always fresh (re-fetched every hour), so if a Confluence page updates the roadmap, the queue re-prioritizes automatically.
+
+---
+
+### Workspace pipeline policy: artifact gates vs autonomous decomposition (Apr 15, 2026)
+
+**The core tension:** some workspaces have rigorous pre-implementation processes (BRD required, design approved, shapeup doc reviewed). Others are solo/small-team projects where you figure it out as you go. WorkTrain should respect both -- waiting patiently in governed workspaces, doing the work itself in autonomous workspaces.
+
+---
+
+#### Two workspace modes
+
+**Governed mode** -- for projects with existing process gates:
+
+```yaml
+workspaces:
+  my-work-project:
+    path: ~/git/work/my-project
+    pipelinePolicy:
+      mode: governed
+      requiredArtifacts:
+        - type: brd                    # Business Requirements Document
+          sources: [confluence, jira_epic, google_docs]
+          searchQuery: "BRD {{ticket.key}}"
+        - type: design                 # UI/UX designs
+          sources: [figma, confluence]
+          searchQuery: "designs {{ticket.key}}"
+        - type: shapeup                # Shape Up pitch/bet
+          sources: [notion, confluence]
+      onMissingArtifacts: wait         # 'wait', 'skip', or 'escalate'
+      waitCheckInterval: 3600          # re-check every hour
+      waitTimeout: 168h                # escalate after 7 days of waiting
+      escalationMessage: "Ticket {{ticket.key}} has been waiting for required artifacts for {{wait_duration}}. Manual review needed."
+```
+
+When WorkTrain picks up a ticket in governed mode, it first searches for the required artifacts using the configured sources and search queries. If they're not found:
+- `wait`: holds the ticket in a "waiting" state, re-checks every hour, notifies when artifacts appear
+- `skip`: moves to the next ticket, re-queues this one later
+- `escalate`: posts to Slack + blocks the ticket, requires human to resolve
+
+When artifacts are found, WorkTrain automatically extracts context from them, attaches them as `referenceUrls` to the session, and proceeds with implementation -- skipping the discovery/design phases since those artifacts already contain the answer.
+
+**Autonomous mode** -- for projects without pre-existing process:
+
+```yaml
+workspaces:
+  workrail:
+    path: ~/git/personal/workrail
+    pipelinePolicy:
+      mode: autonomous
+      # No required artifacts -- WorkTrain does its own discovery and design
+      # Uses the full pipeline: classify → discovery → design → arch review → implement → review
+      decompositionEnabled: true       # can break large tasks into sub-tickets
+      decompositionThreshold: Large    # tasks classified Large get decomposed
+```
+
+In autonomous mode, WorkTrain runs the full pipeline including discovery, UX design (if `hasUI`), architecture review (if `touchesArchitecture`), and implementation. It doesn't wait for external artifacts because there are none -- it generates them itself.
+
+---
+
+#### Automatic task decomposition
+
+When a task is classified as `Large` (or Medium with high complexity), WorkTrain decomposes it into sub-tickets before starting implementation. The sub-tickets go into the workspace queue and are worked in order.
+
+**Decomposition workflow** (new, needs authoring):
+```
+Input: task description + context from discovery
+Output: ordered list of sub-tickets, each with:
+  - title (imperative, specific)
+  - goal (1-2 sentence description)
+  - estimatedComplexity (Small/Medium)
+  - dependencies (which sub-tickets must complete first)
+  - workflowId (which workflow to use)
+```
+
+**Example:** task "implement polling triggers system"
+```
+Decomposed into:
+  1. [Small] Add PollingTriggerSource type to TriggerDefinition   → depends: none
+  2. [Small] Implement PolledEventStore with atomic persistence    → depends: 1
+  3. [Small] Implement GitLab MR polling adapter                  → depends: 2
+  4. [Small] Implement PollingScheduler with setInterval          → depends: 2,3
+  5. [Small] Wire PollingScheduler into TriggerListener           → depends: 4
+  6. [Small] Add unit tests for all new modules                   → depends: 1-5
+```
+
+Each sub-ticket is Small or Medium -- never Large. If a sub-ticket comes out Large during decomposition, it gets recursively decomposed. The decomposition agent enforces this invariant.
+
+Sub-tickets are added to the queue with:
+- `parentTicketId` linking back to the original task
+- `dependsOn` list preventing out-of-order execution
+- Same priority as the parent ticket
+- Auto-label so they're visually grouped in GitHub/Jira
+
+**Queue behavior with dependencies:**
+The queue drain loop respects `dependsOn` -- a sub-ticket is only picked up when all its dependencies are completed. The coordinator naturally serializes dependent work and parallelizes independent work (sub-tickets with no shared dependencies can run concurrently).
+
+---
+
+#### Hybrid: governed workspace with autonomous decomposition
+
+Some workspaces need both -- a BRD required before implementation starts, but the implementation itself gets decomposed autonomously:
+
+```yaml
+workspaces:
+  my-work-project:
+    pipelinePolicy:
+      mode: governed
+      requiredArtifacts:
+        - type: brd
+          onMissingArtifacts: wait
+      decompositionEnabled: true       # once BRD is found, decompose into sub-tickets
+      decompositionThreshold: Medium   # decompose Medium and Large tasks
+```
+
+Flow: ticket filed → WorkTrain finds BRD → reads BRD for context → classifies task → if Medium/Large decomposes into sub-tickets → works sub-tickets in order. The BRD gates the start; decomposition handles the execution.
+
+---
+
+#### The "patiently waiting" UX
+
+In the console Queue tab, tickets waiting for artifacts show a distinct state:
+
+```
+⏳ WORKRAIL-410: Implement new auth flow        [waiting for: BRD, designs]
+   Waiting 2d 4h · Last checked: 5 min ago · Artifacts: 0/2 found
+   
+   → Found: none
+   → Searched: Confluence ("BRD WORKRAIL-410"), Figma ("WORKRAIL-410 designs")
+```
+
+WorkTrain posts a Slack message when it starts waiting: "I picked up WORKRAIL-410 but it's missing required artifacts (BRD, designs). I'll check hourly and start automatically when they're ready." Then posts again when artifacts are found: "Found BRD and designs for WORKRAIL-410. Starting implementation now."
+
+The team doesn't have to remember to trigger WorkTrain -- they just do their normal process (write the BRD, create the designs) and WorkTrain starts automatically.
+
+---
+
+#### Why this matters
+
+- **Governed projects**: WorkTrain integrates with existing process rather than bypassing it. PMs and designers work normally; WorkTrain picks up when the handoff is ready. No one has to remember to trigger it.
+- **Autonomous projects**: WorkTrain is a full solo developer -- it discovers, designs, decomposes, implements, reviews, and ships. The only human touchpoint is approving the final PR (or enabling auto-merge for fully vetted changes).
+- **The queue is the unifying interface**: both modes feed the same queue. The pipeline policy determines what happens when an item is picked up.
