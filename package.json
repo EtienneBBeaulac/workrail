@@ -85,8 +85,8 @@
     "prepare": "bash scripts/setup-hooks.sh"
   },
   "dependencies": {
-    "@mariozechner/pi-agent-core": "0.67.2",
-    "@mariozechner/pi-ai": "0.67.2",
+    "@anthropic-ai/bedrock-sdk": "^0.28.1",
+    "@anthropic-ai/sdk": "^0.73.0",
     "@modelcontextprotocol/sdk": "^1.24.0",
     "@scure/base": "1.1.9",
     "ajv": "^8.17.1",
