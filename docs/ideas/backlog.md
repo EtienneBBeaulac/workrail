@@ -3907,3 +3907,21 @@ WorkTrain uses the user's git identity and GitHub account (via user's token) to 
 4. Plain-English status line ("Step 3/8: analyzing diff" vs just a spinner)
 
 This makes the console genuinely useful as a standalone monitoring surface -- not just for developers who understand the DAG topology, but for anyone who wants to know if WorkTrain is doing useful work or spinning.
+
+---
+
+### Orphaned daemon session state: smarter recovery (Apr 16, 2026)
+
+**The problem:** When the daemon is killed mid-session, the session's in-process `KeyedAsyncQueue` promise chain is lost. On restart, the startup recovery reads orphaned session files and clears them from disk -- but the `serial` concurrency queue key based on `trigger.id` is an in-memory construct. Any external state (e.g. a lock file, a flag in the session store) that was tied to the queue is now inconsistent.
+
+More critically: if a session is restarted by the daemon but then stalls (Bedrock call hangs, exception suppressed), the daemon log shows nothing after "Injecting workspace context" -- no error, no completion. The session is in limbo.
+
+**What needs to happen:**
+
+1. **Startup recovery should also clear any pending queue slots.** If a session file exists in `~/.workrail/daemon-sessions/` at startup, that trigger's queue key should be treated as free -- no prior promise is alive.
+
+2. **Session liveness detection.** If a session has been `in_progress` for more than N minutes with no `advance_recorded` events, the daemon watchdog should log a warning and optionally abort the session. Currently a hung session is invisible.
+
+3. **Orphaned session cleanup should be user-facing.** `worktrain cleanup` or `worktrain status` should surface orphaned sessions with their age and offer to clear them. Right now they silently accumulate.
+
+4. **Better logging when runWorkflow() swallows errors.** The `void runWorkflow(...)` pattern in `console-routes.ts` and `trigger-router.ts` drops errors silently. Every path that ends in silence (no log, no session advance, no error) should at minimum log `[WorkflowRunner] Session died silently` with the session ID.
