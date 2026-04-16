@@ -1876,3 +1876,274 @@ The briefing adapts to who's asking and what they know:
 `worktrain status --audience stakeholder` generates the right level of detail automatically. The underlying data is the same; the presentation layer changes.
 
 This is also what the `worktrain talk` session uses as its opening context -- before any conversation, WorkTrain gives itself a briefing on the current state so it can answer questions accurately.
+
+---
+
+### WorkTrain analytics: stats, time saved, and quality metrics (Apr 15, 2026)
+
+**The principle:** WorkTrain should be accountable. Not just "it did work" but "did it do good work?" Stats without quality metrics are vanity. Quality metrics without stats lack context. Both together tell you whether WorkTrain is actually worth running.
+
+---
+
+#### Volume stats (what got done)
+
+Derived from session store + merge audit log + GitHub/Jira API:
+
+```
+WorkTrain — workrail workspace  [last 30 days]
+
+VOLUME
+  PRs opened:          23   (18 merged, 3 in review, 2 closed)
+  PRs reviewed:        31   (autonomous MR review sessions)
+  Bugs investigated:    8   (bug-investigation workflow runs)
+  Tasks completed:     19   (coding-task workflow runs → merged PRs)
+  Discoveries run:     12   (wr.discovery workflow runs)
+  Issues filed:         6   (by WorkTrain based on findings)
+  Issues resolved:      4   (WorkTrain opened and closed)
+
+QUEUE THROUGHPUT
+  Items added:         34
+  Items completed:     27
+  Items in progress:    4
+  Items deferred:       3
+  Average queue time:  2.4h  (enqueue → session start)
+```
+
+---
+
+#### Time saved estimates
+
+"Time saved" is directionally useful but must be honest about what it's estimating. WorkTrain shouldn't claim 40 hours saved if a human would have done the same work in 30 minutes.
+
+**Estimation model:**
+
+Each workflow type has a calibrated human-equivalent time estimate, validated against real data where possible:
+
+| Workflow | Human equivalent | Basis |
+|----------|-----------------|-------|
+| MR review (STANDARD) | 25 min | Industry average for 200-line diff |
+| MR review (THOROUGH) | 45 min | Complex architectural changes |
+| Bug investigation | 60 min | Triage + root cause hypothesis |
+| Coding task (Small) | 30 min | Estimate based on task complexity |
+| Coding task (Medium) | 2h | |
+| Coding task (Large) | 6h | |
+| Discovery run | 45 min | Research + synthesis |
+
+```
+TIME SAVINGS (estimated)
+  MR reviews:      31 × 25 min  =  12.9h
+  Bug investigation: 8 × 60 min =   8.0h
+  Coding tasks:    19 tasks      =  32.5h  (mix of Small/Medium)
+  Discovery:       12 × 45 min  =   9.0h
+  ─────────────────────────────────────────
+  Total estimate:                  62.4h  ≈ 1.5 engineer-weeks
+
+COST
+  Total LLM tokens used:   4.2M
+  Estimated API cost:      $12.40
+  Cost per hour saved:     $0.20/h
+
+  NOTE: These are estimates. Actual time savings depend on task complexity
+  and whether the work would otherwise have been done at all.
+```
+
+The honesty note matters. "Time saved" is only real if the work would have been done by a human. Tasks that were deprioritized indefinitely until WorkTrain did them represent more value than 25-minute estimates suggest.
+
+---
+
+#### Quality metrics (is WorkTrain actually doing a good job?)
+
+This is the most important section. Volume without quality is noise.
+
+**Output quality:**
+
+```
+QUALITY — last 30 days
+
+MR REVIEWS
+  Reviews with 0 findings:        14 / 31  (45%)  -- clean PRs, reviewed correctly
+  Reviews that caught Critical:     4 / 31  (13%)  -- high-value catches
+  Reviews where human disagreed:    2 / 31   (6%)  -- false positives / misses
+  Review finding accuracy:         94%             -- verified against merge outcomes
+
+CODING TASKS
+  PRs merged without rework:       13 / 18  (72%)
+  PRs that needed 1 fix cycle:      4 / 18  (22%)
+  PRs that needed 2+ fix cycles:    1 / 18   (6%)
+  PRs that were rejected/closed:    0 / 18   (0%)
+  
+  Post-merge bugs filed (30d):      1         -- bug traced to WorkTrain PR
+  Post-merge bugs rate:           5.6%        -- 1 in 18 PRs caused a bug
+
+BUG INVESTIGATIONS
+  Correct root cause identified:    6 / 8   (75%)
+  Confidence was too high:          1 / 8   (13%)  -- confidently wrong
+  Insufficient context:             1 / 8   (13%)  -- escalated correctly
+
+OVERALL QUALITY SCORE:  78 / 100
+  Trend:  ↑ +6 vs last month
+```
+
+**What the failure rate means:**
+A 5.6% post-merge bug rate on coding tasks means roughly 1 in 18 WorkTrain PRs introduced a bug that was later filed as an issue. That's comparable to junior developer rates (industry average ~10-15%). If it rises above 10%, there's a systemic problem to investigate -- maybe the verification step isn't thorough enough, maybe certain task types are too risky for autonomous work.
+
+The quality score is a weighted composite:
+- Review accuracy (40%)
+- Coding task success rate (35%)
+- Investigation accuracy (25%)
+
+It's the single number that answers "is WorkTrain doing good work?" A score below 70 should trigger a `workflow-effectiveness-assessment` run automatically.
+
+---
+
+#### Quality feedback loop
+
+WorkTrain actively solicits quality signals:
+
+1. **Post-merge outcome tracking:** when a PR merged by WorkTrain has a bug filed against it within 30 days, the session that produced that PR is flagged. The bug filing creates a data point that reduces the quality score.
+
+2. **MR review validation:** when WorkTrain reviews a PR and the PR author disputes a finding (e.g. closes without fixing what WorkTrain flagged, or fixes something WorkTrain missed), that's a signal. WorkTrain tracks these via webhook: if a PR that WorkTrain reviewed APPROVE ships a Critical bug, that review retroactively becomes a miss.
+
+3. **Human override tracking:** when a human changes a WorkTrain decision (reorders the queue, rejects a proposed change, overrides an auto-merge), those are signals that WorkTrain got something wrong. Each override is logged with a reason (if provided) and fed into the quality model.
+
+4. **Explicit feedback:** `worktrain feedback "the PR #402 review missed the temp file cleanup issue"` appends to a feedback log. The workflow effectiveness assessment picks these up.
+
+---
+
+#### The quality dashboard (console Analytics tab)
+
+```
+┌─────────────────────────────────────────────────────┐
+│ WorkTrain Analytics — workrail          Last 30 days │
+├─────────────────────────────────────────────────────┤
+│ QUALITY SCORE    78/100  ↑+6       COST  $12.40     │
+│ ████████████████░░░░                                 │
+├─────────────────────────────────────────────────────┤
+│ VOLUME                    QUALITY                   │
+│ PRs opened:    23         Merge success:   94%      │
+│ PRs reviewed:  31         Review accuracy: 94%      │
+│ Tasks done:    19         Post-merge bugs:  5.6%    │
+│ Bugs found:     8         Bug investigation: 75%    │
+├─────────────────────────────────────────────────────┤
+│ TIME SAVED (estimated)                              │
+│ Total: ~62h  Cost/hour: $0.20                       │
+│ ████████████████████████████░░░ (62/80h budget)     │
+├─────────────────────────────────────────────────────┤
+│ TREND  ──────────────────────────────────           │
+│ Quality score by week:                              │
+│  W1: 68  W2: 71  W3: 74  W4: 78  ↑ improving       │
+│                                                     │
+│ Post-merge bug rate by workflow:                    │
+│  coding-task (Small): 0%  (Medium): 8%  (Large): 0%│
+│  → Medium tasks have highest bug rate, investigate  │
+└─────────────────────────────────────────────────────┘
+```
+
+The "investigate" callout in the trend section is important -- the analytics dashboard doesn't just show numbers, it flags anomalies and links to the `workflow-effectiveness-assessment` that would address them. Stats → insight → action is the full loop.
+
+---
+
+### Pattern and architecture validation: WorkTrain enforces team conventions (Apr 15, 2026)
+
+**The idea:** beyond just reviewing code for bugs, WorkTrain validates that the code matches the patterns and architecture the team expects. Not "does it work?" but "does it fit?"
+
+**Two levels:**
+
+**1. Philosophy lens (already partially built)**
+The coding-task workflow already applies the user's coding philosophy as a review lens -- flagging violations by principle name. This needs to be extended to be:
+- **Per-workspace configurable** -- different projects have different conventions
+- **Machine-checkable** -- some patterns can be verified structurally (no direct db access outside the repository layer, no console.log in production code, no any types) rather than relying on the LLM to catch them
+
+**2. Architectural invariant checking (new)**
+Explicit rules about what the codebase's structure must look like:
+
+```yaml
+workspaces:
+  workrail:
+    architectureRules:
+      # Layer boundaries
+      - id: no-daemon-imports-from-mcp
+        rule: "src/daemon/** must not import from src/mcp/**"
+        type: import_boundary
+        severity: error
+
+      - id: no-di-calls-in-daemon
+        rule: "src/daemon/** must not call initializeContainer() or container.resolve()"
+        type: forbidden_call
+        severity: error
+
+      # Pattern enforcement
+      - id: errors-as-data
+        rule: "No throw statements in src/daemon/**, src/trigger/** -- use Result types"
+        type: no_throw
+        severity: warning
+        exceptions: ["constructor", "assertExhaustive"]
+
+      - id: no-exec-shell
+        rule: "No child_process.exec() -- use execFile() with args array"
+        type: forbidden_call
+        severity: error
+
+      - id: no-hardcoded-tmp
+        rule: "No '/tmp/' string literals -- use os.tmpdir()"
+        type: forbidden_literal
+        severity: warning
+```
+
+These rules run as scripts (static analysis, not LLM) -- fast, deterministic, zero tokens. They're checked:
+- During the coding-task workflow (before the agent commits anything)
+- As part of the CI gate (same `posix_tmp_literal` rule we fixed in PR #390 -- this is exactly that pattern generalized)
+- By the periodic architecture scan
+
+**What this enables combined with quality metrics:**
+If WorkTrain's coding tasks have a 5.6% post-merge bug rate AND those bugs consistently violate the same architectural rule, the pattern validation catches it before merge next time. Quality metrics identify the problem; architecture rules prevent recurrence. The self-improvement loop: bugs found → rule added → violations caught earlier → bug rate drops.
+
+**The self-improvement connection:**
+When the `workflow-effectiveness-assessment` runs and finds that a certain class of bug appears repeatedly in WorkTrain's output (e.g. "3 of the last 5 coding tasks had shell injection risks"), it can propose a new architecture rule (`no-exec-shell`) that prevents the pattern going forward. Rules start as soft warnings, graduate to errors after being validated. WorkTrain learns from its own failure patterns and codifies them as invariants.
+
+---
+
+### Resource management: preventing agent congestion under high concurrency (Apr 15, 2026)
+
+**Observed problem:** running 10 simultaneous agents bogs down the system -- API rate limits, token exhaustion, context degradation from too many concurrent Bedrock/Anthropic calls, and the host machine running hot. The `maxConcurrentSessions` semaphore addresses the daemon-level cap, but the broader resource management problem has several dimensions.
+
+**The dimensions:**
+
+**1. API rate limits**
+Anthropic and Bedrock both have tokens-per-minute limits. 10 concurrent agents each hitting the API at once creates bursts that exceed the limit, causing retries and backpressure. The daemon needs a token-bucket rate limiter shared across all sessions: before each LLM call, acquire a slot from the bucket. If the bucket is empty, wait.
+
+**2. Host machine resources**
+Each agent loop runs in-process, consuming RAM and CPU. Node.js is single-threaded but I/O is concurrent -- 10 agents making parallel API calls is fine until they all get responses simultaneously and saturate the JS event loop with JSON parsing and session store writes. The right limit is not "10 sessions" but "N sessions where N is calibrated to the host's memory and the model's response size."
+
+**3. Tiered concurrency by task type**
+Not all sessions are equal. A `wr.discovery` session is cheap (mostly reads, fast). A `coding-task-workflow-agentic` session is expensive (many tool calls, long responses). Running 10 coding tasks simultaneously is very different from running 10 discovery sessions.
+
+```yaml
+workspaces:
+  workrail:
+    concurrency:
+      maxTotal: 6                  # global cap
+      perWorkflowType:
+        coding-task-workflow-agentic: 2    # expensive, cap low
+        mr-review-workflow.agentic.v2: 3   # medium cost
+        wr.discovery: 5                    # cheap, allow more
+        bug-investigation.agentic.v2: 2
+```
+
+**4. Queue-aware throttling**
+When the queue has a mix of high-priority and low-priority items, WorkTrain should prefer starting high-priority items even if slots are available for low-priority ones. If all slots are taken by low-priority work, high-priority items wait unnecessarily.
+
+**5. Graceful degradation**
+When the system is under load, WorkTrain should degrade gracefully rather than failing hard. Options:
+- Slow down polling intervals (less frequent API calls)
+- Prefer fast/cheap workflows over slow/expensive ones
+- Pause the queue drain and process the backlog sequentially
+
+**Build order:**
+1. `maxConcurrentSessions` semaphore (in flight -- simple global cap)
+2. Token-bucket rate limiter in the agent loop (prevents API bursts)
+3. Per-workflow-type concurrency limits (tiered caps)
+4. Queue-aware slot allocation (high-priority first)
+5. Adaptive throttling based on observed latency (automatic backpressure)
+
+**The meta-point:** WorkTrain running at full capacity on itself is the best stress test for these constraints. Every day we run 10 simultaneous agents, we discover the edges of what the system can handle. Those discoveries should directly inform the resource management implementation.
