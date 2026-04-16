@@ -27,9 +27,10 @@
  * a true ESM dynamic import at runtime, bypassing the CJS require() rewrite.
  */
 
-// Types are erased at runtime -- safe to import statically from ESM.
-export type { Agent, AgentTool, AgentToolResult, AgentEvent, AgentLoopConfig } from '@mariozechner/pi-agent-core';
-export type { Model, TSchema } from '@mariozechner/pi-ai';
+// Type exports removed: @mariozechner/pi-agent-core and @mariozechner/pi-ai are no
+// longer in package.json. The export lines were deleted because tsc fails on a clean
+// install when they reference packages that do not exist. This file is now a
+// deprecated no-op kept for reference only.
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyModule = Record<string, any>;
