@@ -28,6 +28,7 @@
  *   goal: Review: MR #123     # Parse error
  */
 
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import type { Result } from '../runtime/result.js';
@@ -466,6 +467,26 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
 }
 
 // ---------------------------------------------------------------------------
+// Path utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Expand a leading `~/` in a file path to the user's home directory.
+ *
+ * WHY: Node.js `fs.readFile` (and all other fs APIs) do NOT perform shell-style
+ * tilde expansion. A path like `~/.workrail/soul.md` passed directly to fs will
+ * produce ENOENT because `~` is treated as a literal directory name, not the
+ * home directory. This function converts `~/foo` to `/home/<user>/foo` so that
+ * paths written with the common shell convention work correctly.
+ *
+ * Only the `~/` prefix is handled (the most common case). `~username/` forms are
+ * not supported and are returned unchanged.
+ */
+function expandTildePath(p: string): string {
+  return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+// ---------------------------------------------------------------------------
 // Secret resolution
 //
 // Values starting with "$" are treated as environment variable references.
@@ -590,6 +611,22 @@ function validateAndResolveTrigger(
     }
     resolvedWorkspacePath = rawWorkspacePath;
     resolvedSoulFile = rawSoulFile;
+  }
+
+  // Expand `~/` tilde prefix in soulFile, if present.
+  // Node.js fs APIs do not perform shell-style tilde expansion; without this, a
+  // path like `~/.workrail/soul.md` would produce ENOENT and silently fall through
+  // to the default soul with no warning.
+  if (resolvedSoulFile) {
+    resolvedSoulFile = expandTildePath(resolvedSoulFile);
+  }
+
+  // Validate soulFile absoluteness after tilde expansion.
+  // WHY: a relative soulFile silently resolves against process.cwd(), which is almost
+  // certainly wrong. This mirrors the workspace.path absoluteness check above and
+  // ensures fail-fast at load time rather than a confusing runtime failure.
+  if (resolvedSoulFile && !path.isAbsolute(resolvedSoulFile)) {
+    return err({ kind: 'invalid_field_value', field: 'soulFile', triggerId: rawId });
   }
 
   // Resolve hmacSecret if present

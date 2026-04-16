@@ -13,6 +13,8 @@
  * - File-not-found handling (loadTriggerConfigFromFile)
  */
 
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { loadTriggerConfig } from '../../src/trigger/trigger-store.js';
 
@@ -711,5 +713,110 @@ triggers:
     expect(result.kind).toBe('ok');
     if (result.kind !== 'ok') return;
     expect(result.value.triggers).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // F1: Tilde path expansion for soulFile
+  // ---------------------------------------------------------------------------
+
+  it('F1: expands ~/... soulFile in trigger YAML (workspacePath branch)', () => {
+    // WHY this test: Node.js fs.readFile does not expand ~; without expandTildePath,
+    // a soulFile: ~/foo/soul.md would produce ENOENT and silently fall through.
+    const yaml = `
+triggers:
+  - id: tilde-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    soulFile: ~/foo/daemon-soul.md
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0]!;
+    expect(trigger.soulFile).toBe(path.join(os.homedir(), 'foo/daemon-soul.md'));
+    // The resolved path must be absolute (no leading ~)
+    expect(trigger.soulFile!.startsWith('~')).toBe(false);
+  });
+
+  it('F1: expands ~/... soulFile from workspace config cascade (workspaceName branch)', () => {
+    // Tilde expansion must also work when the soulFile comes from the workspace map
+    // (not the trigger YAML), since the cascade sets resolvedSoulFile from workspaceConfig.soulFile.
+    const workspacesWithTilde = {
+      'tilde-workspace': { path: '/Users/me/git/project', soulFile: '~/.workrail/workspaces/my/soul.md' },
+    };
+    const yaml = `
+triggers:
+  - id: tilde-ws-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: tilde-workspace
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, workspacesWithTilde);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0]!;
+    expect(trigger.soulFile).toBe(path.join(os.homedir(), '.workrail/workspaces/my/soul.md'));
+    expect(trigger.soulFile!.startsWith('~')).toBe(false);
+  });
+
+  it('F1: does not alter already-absolute soulFile path', () => {
+    const yaml = `
+triggers:
+  - id: abs-soul-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    soulFile: /absolute/soul.md
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]!.soulFile).toBe('/absolute/soul.md');
+  });
+
+  // ---------------------------------------------------------------------------
+  // F2: Absoluteness validation for soulFile after tilde expansion
+  // ---------------------------------------------------------------------------
+
+  it('F2: rejects trigger with relative soulFile (trigger-level, workspacePath branch)', () => {
+    // WHY: a relative soulFile silently resolves against process.cwd(), which is
+    // almost certainly wrong. Mirrors workspace.path absoluteness check.
+    const yaml = `
+triggers:
+  - id: relative-soul-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    soulFile: relative/soul.md
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Trigger with relative soulFile is skipped
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('F2: rejects trigger with relative soulFile from workspace config cascade', () => {
+    const workspacesWithRelativeSoul = {
+      'relative-soul-ws': { path: '/Users/me/git/project', soulFile: 'relative/soul.md' },
+    };
+    const yaml = `
+triggers:
+  - id: relative-soul-ws-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspaceName: relative-soul-ws
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {}, workspacesWithRelativeSoul);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Trigger with relative soulFile from workspace cascade is skipped
+    expect(result.value.triggers).toHaveLength(0);
   });
 });

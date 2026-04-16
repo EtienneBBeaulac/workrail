@@ -275,7 +275,16 @@ export function loadWorkspacesFromConfigFile(): Result<Record<string, WorkspaceC
       );
       continue;
     }
-    result[name] = parseResult.data;
+    const data = parseResult.data;
+    // Expand `~/` tilde prefix in soulFile defensively at config-load time.
+    // WHY: Node.js fs APIs do not perform shell-style tilde expansion. Expanding
+    // here ensures WorkspaceConfig objects never carry unexpanded tilde paths,
+    // even before they reach validateAndResolveTrigger.
+    if (data.soulFile?.startsWith('~/')) {
+      result[name] = { ...data, soulFile: path.join(os.homedir(), data.soulFile.slice(2)) };
+    } else {
+      result[name] = data;
+    }
   }
 
   return ok(result);
