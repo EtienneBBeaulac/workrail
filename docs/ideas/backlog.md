@@ -1225,3 +1225,49 @@ Concurrent session serialization. Prerequisite for daemon safety. Prevents token
 - The soul questionnaire is the most important part -- a well-written soul dramatically improves output quality
 
 **Longer term:** A WorkTrain hosted onboarding that teams can share via a URL (`worktrain init --from https://worktrain.io/teams/mercury-mobile`) -- imports team-specific soul, triggers, and workflow config in one command.
+
+---
+
+### Post-update onboarding: contextual feature announcements
+
+**Goal:** When WorkTrain updates to a new version with significant new capabilities, it prompts the user to configure the new feature -- once, the first time they run after updating.
+
+**How it works:**
+
+Each significant feature ships with a `migration step` keyed to a minimum version:
+```json
+// ~/.workrail/config.json
+{
+  "onboardingCompleted": "3.17.0",
+  "featureStepsCompleted": ["daemon-soul", "bedrock-setup", "triggers-v2"]
+}
+```
+
+On startup, WorkTrain checks: current version > `onboardingCompleted`? Any new `featureSteps` not in `featureStepsCompleted`? If yes, run those steps interactively before continuing.
+
+**What triggers a feature onboarding step:**
+- New capability that requires user configuration to activate (e.g. daemon soul file, Bedrock credentials, new trigger source)
+- Breaking change to config format that needs migration (e.g. triggers.yml schema v2)
+- Feature that's opt-in and valuable but off by default (e.g. AGENTS.md auto-injection)
+
+**What does NOT trigger it:**
+- Bug fixes and performance improvements
+- New workflows added to the library
+- Any change that works without user input
+
+**Tone:** Brief, useful, never annoying. Each step should take < 60 seconds. Show what changed, ask what's needed, confirm it works. Skip if already configured.
+
+**Example:**
+```
+WorkTrain updated to v4.1.0 ✦ One new capability to configure:
+
+  Workspace Context Injection
+  WorkTrain can now automatically read AGENTS.md and CLAUDE.md from
+  your repos and inject them into every agent session.
+
+  → Your workspaces will be scanned automatically. No action needed.
+  → To add custom rules for all sessions: ~/.workrail/daemon-soul.md
+     (run: workrail init --section soul)
+
+  Press Enter to continue, or 's' to skip this setup.
+```
