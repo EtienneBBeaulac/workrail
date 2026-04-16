@@ -658,7 +658,11 @@ export class HttpServer {
         // HTTP responsiveness is NOT a reliable signal -- a busy event loop (e.g.
         // processing a tool call) will fail a 2s health check while the process is
         // perfectly healthy. Yield unconditionally to the existing primary.
-        console.error(`[Dashboard] Secondary mode: primary lock valid (PID ${lockData.pid}), yielding`);
+        //
+        // WHY process.stderr.write: reclaimStaleLock runs during startup. If the MCP
+        // client disconnects immediately after spawning, stderr may be a broken pipe.
+        // console.error() would throw EPIPE here (confirmed in crash.log). See printBanner().
+        try { process.stderr.write(`[Dashboard] Secondary mode: primary lock valid (PID ${lockData.pid}), yielding\n`); } catch { /* ignore */ }
         return false;
       } else {
         // shouldReclaimLock() determined the lock should be reclaimed (version mismatch,
@@ -669,7 +673,7 @@ export class HttpServer {
         // 3456, startAsPrimary() will throw EADDRINUSE and fall back to legacy mode on
         // port 3457+. That is the correct outcome -- the old instance keeps its port
         // and its sessions; the new instance starts on an available port.
-        console.error(`[Dashboard] Lock reclaim needed: ${reason}`);
+        try { process.stderr.write(`[Dashboard] Lock reclaim needed: ${reason}\n`); } catch { /* ignore */ }
       }
 
       // ATOMIC RECLAIM: Write new lock to temp file, then rename
@@ -706,35 +710,35 @@ export class HttpServer {
           }
         }
         
-        console.error('[Dashboard] Lock reclaimed successfully');
+        try { process.stderr.write('[Dashboard] Lock reclaimed successfully\n'); } catch { /* ignore */ }
         this.isPrimary = true;
         this.setupPrimaryCleanup();
         this.heartbeat.start();
         return true;
-        
+
       } catch (error: any) {
         // Clean up temp file on any error
         await fs.unlink(tempPath).catch(() => {});
-        
+
         if (error.code === 'ENOENT') {
           // Lock file was deleted by another process - try fresh
-          console.error('[Dashboard] Lock deleted during reclaim, trying fresh');
+          try { process.stderr.write('[Dashboard] Lock deleted during reclaim, trying fresh\n'); } catch { /* ignore */ }
           return await this.tryBecomePrimary();
         }
-        
+
         // Other error (permission, disk full, etc.)
-        console.error('[Dashboard] Lock reclaim failed:', error.message);
+        try { process.stderr.write(`[Dashboard] Lock reclaim failed: ${(error as Error).message}\n`); } catch { /* ignore */ }
         return false;
       }
-      
+
     } catch (error: any) {
       if (error.code === 'ENOENT') {
         // Lock file deleted - try to become primary fresh
         return await this.tryBecomePrimary();
       }
-      
+
       // Corrupt JSON or other read error
-      console.error('[Dashboard] Lock file corrupted, attempting fresh claim');
+      try { process.stderr.write('[Dashboard] Lock file corrupted, attempting fresh claim\n'); } catch { /* ignore */ }
       await fs.unlink(this.lockFile).catch(() => {});
       return await this.tryBecomePrimary();
     }
@@ -874,17 +878,24 @@ export class HttpServer {
   
   /**
    * Print startup banner
+   *
+   * WHY process.stderr.write with try/catch instead of console.error:
+   * This runs right after the HTTP server starts listening. If the MCP client
+   * disconnects almost immediately (fast restart, test reconnect), both stdout
+   * and stderr pipes may already be broken. console.error() writes through
+   * Node's console.value() which does a synchronous socket write -- on a broken
+   * pipe it throws EPIPE with no handler, crashing the process. Confirmed in
+   * crash.log. See shutdown-hooks.ts for the full pattern explanation.
    */
   private printBanner(): void {
     const line = '═'.repeat(60);
-    console.error(`\n${line}`);
-    console.error(`🔧 Workrail MCP Server Started`);
-    console.error(line);
-    console.error(`📊 Dashboard: ${this.baseUrl} ${this.isPrimary ? '(PRIMARY - All Projects)' : '(Legacy Mode)'}`);
-    console.error(`💾 Sessions:  ${this.sessionManager.getSessionsRoot()}`);
-    console.error(`🏗️  Project:   ${this.sessionManager.getProjectId()}`);
-    console.error(line);
-    console.error();
+    try { process.stderr.write(`\n${line}\n`); } catch { /* ignore */ }
+    try { process.stderr.write(`🔧 Workrail MCP Server Started\n`); } catch { /* ignore */ }
+    try { process.stderr.write(`${line}\n`); } catch { /* ignore */ }
+    try { process.stderr.write(`📊 Dashboard: ${this.baseUrl} ${this.isPrimary ? '(PRIMARY - All Projects)' : '(Legacy Mode)'}\n`); } catch { /* ignore */ }
+    try { process.stderr.write(`💾 Sessions:  ${this.sessionManager.getSessionsRoot()}\n`); } catch { /* ignore */ }
+    try { process.stderr.write(`🏗️  Project:   ${this.sessionManager.getProjectId()}\n`); } catch { /* ignore */ }
+    try { process.stderr.write(`${line}\n\n`); } catch { /* ignore */ }
   }
   
   /**

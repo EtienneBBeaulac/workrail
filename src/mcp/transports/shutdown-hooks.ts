@@ -81,11 +81,14 @@ export function wireShutdownHooks(opts: ShutdownHookOptions): void {
 
     void (async () => {
       try {
-        console.error(`[Shutdown] Requested by ${event.signal}. Stopping services...`);
+        // WHY process.stderr.write: see wireStdoutShutdown for full explanation.
+        // Shutdown handlers fire when the connection is closing -- stderr may be
+        // a broken pipe at this point, so console.error would throw a second EPIPE.
+        try { process.stderr.write(`[Shutdown] Requested by ${event.signal}. Stopping services...\n`); } catch { /* ignore */ }
         await opts.onBeforeTerminate();
         terminator.terminate({ kind: 'success' });
       } catch (err) {
-        console.error('[Shutdown] Error while stopping services:', err);
+        try { process.stderr.write(`[Shutdown] Error while stopping services: ${(err as Error)?.stack ?? String(err)}\n`); } catch { /* ignore */ }
         terminator.terminate({ kind: 'failure' });
       }
     })();
@@ -123,13 +126,20 @@ export function wireStdoutShutdown(opts?: StdoutShutdownOptions): void {
 
   stdout.on('error', (err) => {
     const code = (err as NodeJS.ErrnoException).code;
+    // WHY process.stderr.write with try/catch instead of console.error:
+    // In an MCP stdio process, process.stderr is a Socket pipe to the host.
+    // When the client closes the connection, both stdout AND stderr break.
+    // console.error() calls console.value() internally which does a synchronous
+    // socket write -- if stderr is also broken it throws a second EPIPE with no
+    // handler, crashing the process. process.stderr.write() wrapped in try/catch
+    // absorbs that failure safely. See fatal-exit.ts for the canonical explanation.
     if (code === 'EPIPE' || code === 'ERR_STREAM_DESTROYED') {
       // Pipe broken: MCP client disconnected. Initiate clean shutdown rather
       // than crashing -- this ensures the HTTP server and lock files are
       // cleaned up gracefully.
-      console.error('[MCP] stdout pipe broken (client disconnected), initiating shutdown');
+      try { process.stderr.write('[MCP] stdout pipe broken (client disconnected), initiating shutdown\n'); } catch { /* ignore */ }
     } else {
-      console.error('[MCP] stdout error:', err);
+      try { process.stderr.write(`[MCP] stdout error: ${(err as Error).message}\n`); } catch { /* ignore */ }
     }
     shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });
@@ -163,7 +173,9 @@ export function wireStdinShutdown(opts?: StdinShutdownOptions): void {
   // Using once prevents listener accumulation if wireStdinShutdown() is ever
   // called more than once in the same process.
   stdin.once('end', () => {
-    console.error('[MCP] stdin closed, initiating shutdown');
+    // WHY process.stderr.write: see wireStdoutShutdown for full explanation.
+    // stdin 'end' fires on client disconnect -- stderr may be broken at this point.
+    try { process.stderr.write('[MCP] stdin closed, initiating shutdown\n'); } catch { /* ignore */ }
     shutdownEvents.emit({ kind: 'shutdown_requested', signal: 'SIGHUP' });
   });
 }
