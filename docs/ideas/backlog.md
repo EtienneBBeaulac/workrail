@@ -1292,4 +1292,50 @@ Multiple agents coordinating on one task. Two patterns:
 
 **MVP path:** Concurrent sessions with `maxConcurrentSessions` first (small change). Coordinator + subagent delegation second (already works, just needs workflow authoring). Full parallel teams is the longer-term investment.
 
+---
+
+### Core daemon design principle: scripts over agent (permanent)
+
+**The agent is expensive, inconsistent, and slow. Scripts are free, deterministic, and instant.**
+
+Any operation the daemon can perform with a shell script, git command, or API call should be done that way -- not delegated to the LLM. The agent's job is cognition: understanding the task, making decisions, writing code. Everything else is mechanical work that scripts do better.
+
+**Concrete rule:** if an operation is deterministic and has no ambiguity, it is a script. Examples:
+
+- `git add -A && git commit -m "..."` -- script (daemon reads the handoff artifact the agent produced and runs this itself)
+- `gh pr create --title "..." --body "..."` -- script (daemon reads PR title/body from the agent's handoff note)
+- running the build (`npm run build`, `gradle assembleDebug`) -- script
+- running tests (`npm test`, `./gradlew test`) -- script
+- reading a file to check if it exists -- script (use Read tool, not ask the agent)
+- detecting which workflow to run for a given trigger -- script (workflowId is in `triggers.yml`)
+- formatting output, writing JSON state files, sending HTTP requests -- scripts
+
+**The agent only does what requires judgment:**
+
+- understanding what files need to change and how
+- evaluating whether an approach matches the repo's patterns
+- generating commit messages and PR descriptions (because those require understanding the change)
+- deciding whether a test failure is a real issue or a flaky test
+- making tradeoff decisions when there are competing valid approaches
+
+**Auto-commit and auto-PR design (near-term daemon work):**
+
+The workflow's final step produces a structured handoff artifact with `commitType`, `commitScope`, `commitSubject`, `prTitle`, `prBody`, and `filesChanged`. The daemon reads this artifact after the workflow completes and runs git commands directly:
+
+```typescript
+// After runWorkflow() resolves successfully:
+const handoff = extractHandoffArtifact(result); // parse notes for the structured block
+if (handoff && triggerConfig.autoCommit) {
+  await execa('git', ['add', ...handoff.filesChanged], { cwd: workspacePath });
+  await execa('git', ['commit', '-m', handoff.commitMessage], { cwd: workspacePath });
+}
+if (handoff && triggerConfig.autoOpenPR) {
+  await execa('gh', ['pr', 'create', '--title', handoff.prTitle, '--body', handoff.prBody], { cwd: workspacePath });
+}
+```
+
+`autoCommit` and `autoOpenPR` are opt-in flags in `triggers.yml`. Default off. The daemon never commits without explicit config.
+
+**Why this matters for quality:** LLM-run git commands have non-deterministic output, can hallucinate flags, and burn tokens on mechanical work. A script-run commit is always correct, always fast, always auditable. The agent writes the message; the daemon runs the command. That split is the right architecture.
+
 **Key open question:** When two agents work on the same repo concurrently, file conflicts are possible. The right answer is git worktrees -- each agent gets its own worktree, merges at the end. This is what the `cw` command does for human developers. WorkTrain should do the same autonomously.
