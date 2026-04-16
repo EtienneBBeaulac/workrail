@@ -29,6 +29,9 @@ import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
 import type { WebhookEvent } from './types.js';
 import { asTriggerId } from './types.js';
+import { PollingScheduler } from './polling-scheduler.js';
+import { PolledEventStore } from './polled-event-store.js';
+import type { FetchFn } from './adapters/gitlab-poller.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,6 +71,11 @@ export interface StartTriggerListenerOptions {
   readonly env?: Record<string, string | undefined>;
   /** Override runWorkflow() for testing. */
   readonly runWorkflowFn?: RunWorkflowFn;
+  /**
+   * Override the fetch function for polling adapters (for testing).
+   * When absent, globalThis.fetch is used.
+   */
+  readonly fetchFn?: FetchFn;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +223,25 @@ export async function startTriggerListener(
   const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn);
   const app = createTriggerApp(router);
 
+  // Create and start the polling scheduler.
+  // The scheduler manages polling loops for all gitlab_poll triggers.
+  // It filters the trigger index internally to only start loops for
+  // triggers with pollingSource configured.
+  //
+  // Ordering: start scheduler BEFORE the HTTP server. This ensures all
+  // polling triggers are active from the first moment the daemon is ready.
+  // The scheduler uses the same TriggerRouter as the webhook server, so
+  // dispatched events go through the same KeyedAsyncQueue.
+  const allTriggers = [...triggerIndex.values()];
+  const polledEventStore = new PolledEventStore(env);
+  const pollingScheduler = new PollingScheduler(
+    allTriggers,
+    router,
+    polledEventStore,
+    options.fetchFn,
+  );
+  pollingScheduler.start();
+
   // Startup crash recovery: detect and clear any orphaned session files left by a
   // previous daemon crash. Run BEFORE server.listen() so no new webhooks can arrive
   // while recovery is in progress.
@@ -238,8 +265,11 @@ export async function startTriggerListener(
 
     server.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'EADDRINUSE') {
+        // Stop the polling scheduler before returning the error
+        pollingScheduler.stop();
         resolve({ _kind: 'err', error: { kind: 'port_conflict', port } });
       } else {
+        pollingScheduler.stop();
         resolve({ _kind: 'err', error: { kind: 'io_error', message: error.message } });
       }
     });
@@ -252,10 +282,14 @@ export async function startTriggerListener(
       resolve({
         port: actualPort,
         router,
-        stop: () =>
-          new Promise<void>((res, rej) => {
+        stop: async () => {
+          // Stop polling BEFORE closing the HTTP server to prevent dispatch()
+          // calls after the router's queue has been drained.
+          pollingScheduler.stop();
+          return new Promise<void>((res, rej) => {
             server.close((e) => (e ? rej(e) : res()));
-          }),
+          });
+        },
       });
     });
   });

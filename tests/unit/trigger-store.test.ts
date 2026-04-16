@@ -261,3 +261,165 @@ triggers:
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// gitlab_poll provider: source block parsing
+// ---------------------------------------------------------------------------
+
+describe('gitlab_poll provider parsing', () => {
+  const GITLAB_POLL_YAML = `
+triggers:
+  - id: new-mrs
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: "Review MR"
+    goalTemplate: "Review MR !{{$.iid}}: {{$.title}}"
+    source:
+      baseUrl: https://gitlab.com
+      projectId: "12345"
+      token: $GITLAB_TOKEN
+      events: merge_request.opened merge_request.updated
+      pollIntervalSeconds: 30
+`;
+
+  it('parses a valid gitlab_poll trigger', () => {
+    const result = loadTriggerConfig(GITLAB_POLL_YAML, { GITLAB_TOKEN: 'glpat-test' });
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+
+    const trigger = result.value.triggers[0];
+    expect(trigger?.provider).toBe('gitlab_poll');
+    expect(trigger?.pollingSource).toBeDefined();
+    expect(trigger?.pollingSource?.baseUrl).toBe('https://gitlab.com');
+    expect(trigger?.pollingSource?.projectId).toBe('12345');
+    expect(trigger?.pollingSource?.token).toBe('glpat-test');
+    expect(trigger?.pollingSource?.events).toEqual(['merge_request.opened', 'merge_request.updated']);
+    expect(trigger?.pollingSource?.pollIntervalSeconds).toBe(30);
+    expect(trigger?.goalTemplate).toBe('Review MR !{{$.iid}}: {{$.title}}');
+  });
+
+  it('resolves $GITLAB_TOKEN from env', () => {
+    const result = loadTriggerConfig(GITLAB_POLL_YAML, { GITLAB_TOKEN: 'my-secret-token' });
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]?.pollingSource?.token).toBe('my-secret-token');
+  });
+
+  it('skips trigger when $GITLAB_TOKEN env var is missing', () => {
+    const result = loadTriggerConfig(GITLAB_POLL_YAML, {}); // no env vars
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('defaults pollIntervalSeconds to 60 when absent', () => {
+    const yaml = `
+triggers:
+  - id: new-mrs
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: Review MR
+    source:
+      baseUrl: https://gitlab.com
+      projectId: "12345"
+      token: mytoken
+      events: merge_request.opened
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]?.pollingSource?.pollIntervalSeconds).toBe(60);
+  });
+
+  it('skips trigger when source: block is missing for gitlab_poll', () => {
+    const yaml = `
+triggers:
+  - id: new-mrs
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: Review MR
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('skips trigger when source.baseUrl is missing', () => {
+    const yaml = `
+triggers:
+  - id: new-mrs
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: Review MR
+    source:
+      projectId: "12345"
+      token: mytoken
+      events: merge_request.opened
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('skips trigger when source.events is empty string', () => {
+    const yaml = `
+triggers:
+  - id: new-mrs
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: Review MR
+    source:
+      baseUrl: https://gitlab.com
+      projectId: "12345"
+      token: mytoken
+      events: "   "
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('skips trigger when source.pollIntervalSeconds is not a positive integer', () => {
+    const yaml = `
+triggers:
+  - id: new-mrs
+    provider: gitlab_poll
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /workspace
+    goal: Review MR
+    source:
+      baseUrl: https://gitlab.com
+      projectId: "12345"
+      token: mytoken
+      events: merge_request.opened
+      pollIntervalSeconds: "notanumber"
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('pollingSource is absent for generic triggers', () => {
+    const yaml = `
+triggers:
+  - id: my-trigger
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers[0]?.pollingSource).toBeUndefined();
+  });
+});
