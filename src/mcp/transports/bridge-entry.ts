@@ -33,6 +33,7 @@
 
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { registerFatalHandlers, logStartup } from './fatal-exit.js';
+import { logBridgeEvent } from './bridge-events.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -191,6 +192,7 @@ export async function spawnPrimary(
   // Post-jitter check: another bridge may have already spawned the primary.
   const alreadyUp = await detectHealthyPrimary(port, { retries: 1, fetch: deps.fetch });
   if (alreadyUp != null) {
+    logBridgeEvent({ kind: 'spawn_skipped', reason: 'primary already up after jitter' });
     console.error('[Bridge] Primary already available after jitter — skipping spawn');
     return;
   }
@@ -201,6 +203,7 @@ export async function spawnPrimary(
     return;
   }
 
+  logBridgeEvent({ kind: 'spawn_primary', port });
   console.error('[Bridge] Spawning new WorkRail primary process');
   try {
     const child = deps.spawn(process.execPath, [scriptPath], {
@@ -290,6 +293,7 @@ export async function handleReconnectOutcome(
     case 'reconnected':
       // State was set to 'connected' atomically inside buildConnectedTransport
       // when t.start() resolved. Single owner; no duplicate set here.
+      logBridgeEvent({ kind: 'reconnected', attempt: reconnectingState.attempt });
       console.error('[Bridge] Reconnected to primary');
       return;
 
@@ -309,6 +313,7 @@ export async function handleReconnectOutcome(
         });
         deps.startReconnectLoop();
       } else {
+        logBridgeEvent({ kind: 'budget_exhausted', budgetUsed: reconnectingState.maxAttempts });
         deps.setConnectionState({ kind: 'closed' });
         deps.performShutdown('respawn budget exhausted — primary repeatedly unavailable');
       }
@@ -330,6 +335,7 @@ export async function startBridgeServer(
   // during bridge startup exit cleanly rather than spinning. See fatal-exit.ts.
   registerFatalHandlers('bridge');
   logStartup('bridge', { primaryPort });
+  logBridgeEvent({ kind: 'started', primaryPort });
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const { StreamableHTTPClientTransport } = await import(
@@ -366,7 +372,7 @@ export async function startBridgeServer(
   const performShutdown = (reason: string): void => {
     if (shutdownSignal.aborted) return;
     shutdownController.abort();
-    // Structured shutdown log — visible in stderr and parseable for monitoring.
+    logBridgeEvent({ kind: 'shutdown', reason });
     process.stderr.write(
       `[Bridge] Shutdown pid=${process.pid} reason="${reason}" ts=${new Date().toISOString()}\n`,
     );
@@ -400,6 +406,7 @@ export async function startBridgeServer(
       if (shutdownSignal.aborted) return;
       const current = connectionState;
       if (current.kind === 'connecting' || current.kind === 'reconnecting') return;
+      logBridgeEvent({ kind: 'disconnected' });
       console.error('[Bridge] Primary connection lost — reconnecting');
       setConnectionState({
         kind: 'reconnecting',
@@ -437,6 +444,7 @@ export async function startBridgeServer(
       signal: shutdownSignal,
       config,
       detect: async (attempt) => {
+        logBridgeEvent({ kind: 'reconnect_attempt', attempt: attempt + 1, maxAttempts: config.reconnectMaxAttempts });
         console.error(`[Bridge] Reconnect attempt ${attempt + 1}/${config.reconnectMaxAttempts}`);
         const detected = await detectHealthyPrimary(primaryPort, { retries: 1, fetch: deps.fetch });
         if (detected == null) return false;
@@ -512,6 +520,7 @@ export async function startBridgeServer(
   if (initialTransport == null) {
     throw new Error(`[Bridge] Failed to connect to primary on port ${primaryPort}`);
   }
+  logBridgeEvent({ kind: 'connected', primaryPort });
   console.error('[Bridge] Connected to primary');
 
   process.stdout.on('error', (err) => {

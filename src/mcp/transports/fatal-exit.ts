@@ -71,6 +71,8 @@ function writeCrashLog(label: string, reason: unknown): void {
     const entry = {
       ts: new Date().toISOString(),
       pid: process.pid,
+      ppid: process.ppid,       // which process spawned us — identifies orphans
+      cwd: process.cwd(),       // which project/worktree this process belongs to
       transport: registeredTransport ?? 'unknown',
       uptimeMs: Date.now() - startedAtMs,
       label,
