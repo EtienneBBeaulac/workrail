@@ -25,3 +25,17 @@ export {
   type WorktrainInitCommandDeps,
   type WorktrainInitCommandOpts,
 } from './worktrain-init.js';
+export {
+  executeWorktrainTellCommand,
+  type Priority,
+  type QueuedMessage,
+  type WorktrainTellCommandDeps,
+  type WorktrainTellCommandOpts,
+} from './worktrain-tell.js';
+export {
+  executeWorktrainInboxCommand,
+  type OutboxMessage,
+  type InboxCursor,
+  type WorktrainInboxCommandDeps,
+  type WorktrainInboxCommandOpts,
+} from './worktrain-inbox.js';
