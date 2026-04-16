@@ -1566,3 +1566,44 @@ triggers:
 **This is the preferred trigger model for external integrations.** Webhooks remain available for high-volume or latency-sensitive use cases, but polling is the default for everything else -- it works behind firewalls, requires no admin access, and fits `worktrain init` naturally (just ask for a token).
 
 **Tradeoff:** up to `pollIntervalSeconds` latency (60s default). Acceptable for MR reviews and most agentic tasks. Not acceptable for real-time chat bots.
+
+---
+
+### Zero-repo install: packaging blockers and path to `npm install -g @exaudeus/workrail` (Apr 15, 2026)
+
+The npm package already exists and `npx -y @exaudeus/workrail` works for the MCP server. The daemon is in the same binary. These are the gaps between "works if you have the repo" and "works for anyone":
+
+**Blocker 1 (critical): Replace pi-mono with a first-party agent loop**
+`@mariozechner/pi-agent-core` is a private npm package resolved at runtime via the ESM dynamic import shim in `src/daemon/pi-mono-loader.ts`. It is not on the public npm registry. Anyone who runs `npm install @exaudeus/workrail` gets a daemon that crashes on first run with module-not-found -- silently broken for everyone outside the dev environment.
+
+The fix is a first-party ~150 LOC agent loop that removes this hard dependency entirely:
+- WorkTrain already owns tool definitions, system prompt, and session management
+- The pi-mono `Agent` class does exactly: construct with tools + system prompt → loop → call LLM → execute tools → steer() after tool batch → repeat until done
+- Replacing it removes the ESM/CJS interop shim (`pi-mono-loader.ts`), makes the package fully self-contained, and removes a maintenance dependency on a package WorkTrain doesn't control
+- The Bedrock provider (also from pi-ai) would need to be either replicated (~50 LOC using the AWS SDK directly) or the first-party loop should accept any LLM client that speaks the Anthropic messages API
+
+**This is the single most important pre-launch task.** Nothing else matters for public availability if the daemon crashes on install.
+
+**Blocker 2: `worktrain init` onboarding** (in-flight)
+Without it, new users manually write `triggers.yml` and `config.json`. With it, `workrail init --daemon` handles everything interactively in < 5 minutes.
+
+**Blocker 3: Bedrock credential story for non-Zillow users**
+Bedrock is Zillow-specific (requires AWS SSO). Public users need a clear Anthropic key path. `worktrain init` handles the prompting but the error message for missing credentials needs to be user-friendly.
+
+**Post-blocker: install script (optional)**
+```bash
+curl -fsSL https://worktrain.io/install.sh | sh
+```
+Same pattern as Homebrew, Bun, Volta. Not required but dramatically lowers friction.
+
+**Target zero-repo install flow (after all blockers resolved):**
+```bash
+npm install -g @exaudeus/workrail
+workrail init --daemon
+# → asks: Anthropic key or Bedrock profile?
+# → asks: workspace path?
+# → writes ~/.workrail/config.json + triggers.yml + daemon-soul.md
+# → smoke test passes
+workrail daemon --workspace ~/my-project
+# → polls GitLab every 60s, runs reviews autonomously, posts results back
+```
