@@ -4104,7 +4104,6 @@ This is especially critical when WorkTrain is managing 10 concurrent sessions --
 ---
 
 
-
 ---
 
 ### Thin spots: ideas that need fuller spec (Apr 16, 2026)
