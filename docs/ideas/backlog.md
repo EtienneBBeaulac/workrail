@@ -2305,3 +2305,33 @@ A session in `workrail` gets `workrail` context by default. If it calls `query_k
 - Session store (project A's sessions should not appear in project B's console view by default)
 - Concurrency limits (project A should not starve project B)
 - Triggers and polling sources (each workspace has its own event sources)
+
+---
+
+### Never worktree main: branch safety rules for WorkTrain (Apr 16, 2026)
+
+**Critical invariant:** WorkTrain must never check out `main` or `master` into a worktree. Locking main in a worktree blocks all other agents from checking out main and prevents fast-forward merges.
+
+**The rule:**
+- All agent worktrees must use feature branches, never `main` or `master` or any protected branch
+- When creating a worktree for a task, WorkTrain always creates a new branch: `git worktree add <path> -b <branch-name>`
+- If an agent needs to read main's state, it uses `git show origin/main:<file>` without checking out the branch
+- Stale worktrees (branches that have been merged) must be cleaned up automatically after session completion
+
+**How it breaks today:**
+The `--isolation worktree` flag on subagents creates a worktree. If the agent's task involves reading and committing to main directly (e.g. a merge task), it can end up with main locked. This happened during today's session.
+
+**The fix (two parts):**
+
+1. **In the daemon worktree creation code:** before creating a worktree, check if the requested branch is `main`, `master`, or any branch in a configurable `protectedBranches` list. If so, create a new branch from it instead.
+
+2. **In the daemon-soul.md:** add explicit rule:
+```
+## Branch Safety
+- NEVER check out main, master, or any protected branch into a worktree
+- NEVER use 'git checkout main' -- always work on a feature branch
+- When merging to main, use 'gh pr merge' (via PR), never direct git push
+- After a PR merges, immediately clean up the local worktree
+```
+
+3. **Automatic stale worktree cleanup:** after each session completes (success or failure), the daemon should run `git worktree prune` and remove any worktrees whose branches have been merged to main.
