@@ -13,8 +13,9 @@
  * Design notes:
  * - HMAC uses crypto.timingSafeEqual (timing-safe). Length difference short-circuits
  *   before the call -- this is safe because HMAC-SHA256 digest length is constant (32 bytes).
- * - KeyedAsyncQueue key = triggerId. Two concurrent webhooks for the same trigger are
- *   serialized; webhooks for different triggers run concurrently.
+ * - KeyedAsyncQueue key strategy: serial mode uses triggerId (same-trigger fires are serialized
+ *   FIFO); parallel mode uses triggerId:UUID (each fire gets its own queue slot and runs
+ *   concurrently). Webhooks for different triggers always run concurrently.
  * - runWorkflow() is called AFTER the 202 response is sent. The caller (listener) fires
  *   the route call as a background task; the result is logged, not returned.
  * - contextMapping dot-path: "$.pull_request.html_url" -> payload.pull_request.html_url.
@@ -22,9 +23,10 @@
  */
 
 import * as crypto from 'node:crypto';
-import type { WorkflowTrigger, WorkflowRunResult } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
+import { post as deliveryPost } from './delivery-client.js';
 import type {
   TriggerDefinition,
   WebhookEvent,
@@ -67,18 +69,24 @@ export type RunWorkflowFn = (
  * - ANY token resolves to undefined (partial interpolation would produce
  *   a broken goal string, so we fall back entirely).
  *
+ * When a token is missing, emits a `console.warn` with the missing token name
+ * and the triggerId (R2 from design review -- helps operators debug misconfigured
+ * templates without requiring them to monitor session titles).
+ *
  * Token syntax: `{{$.dot.path}}` or `{{dot.path}}` (leading "$." optional).
  * The same dot-path extraction rules apply as for contextMapping.
  *
  * @param template - The goal template string (e.g. "Review {{$.pull_request.title}}")
  * @param staticGoal - The static fallback goal from the trigger definition
  * @param payload - The parsed webhook payload
+ * @param triggerId - Trigger ID for diagnostic warning
  * @returns The interpolated goal, or staticGoal if any token is missing
  */
 export function interpolateGoalTemplate(
   template: string,
   staticGoal: string,
   payload: Readonly<Record<string, unknown>>,
+  triggerId: string,
 ): string {
   // Find all {{...}} tokens
   const TOKEN_RE = /\{\{([^}]+)\}\}/g;
@@ -96,7 +104,11 @@ export function interpolateGoalTemplate(
   for (const token of tokens) {
     const value = extractDotPath(payload, token);
     if (value === undefined || value === null) {
-      // Any missing token: fall back to static goal (no partial interpolation)
+      // Any missing token: warn and fall back to static goal (no partial interpolation)
+      console.warn(
+        `[TriggerRouter] goalTemplate variable '${token}' not found in payload ` +
+        `for trigger '${triggerId}' (template: '${template}'). Falling back to static goal.`,
+      );
       return staticGoal;
     }
     resolved.set(token, String(value));
@@ -275,7 +287,7 @@ export class TriggerRouter {
 
     // Interpolate goal from template if configured; fall back to static goal
     const goal = trigger.goalTemplate
-      ? interpolateGoalTemplate(trigger.goalTemplate, trigger.goal, event.payload)
+      ? interpolateGoalTemplate(trigger.goalTemplate, trigger.goal, event.payload, trigger.id)
       : trigger.goal;
 
     const workflowTrigger: WorkflowTrigger = {
@@ -287,14 +299,63 @@ export class TriggerRouter {
       ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
     };
 
-    // Enqueue asynchronously -- serialize per triggerId to prevent token corruption
-    // when two webhooks fire concurrently for the same trigger.
-    void this.queue.enqueue(trigger.id, async () => {
-      const result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+    // Enqueue asynchronously.
+    // Queue key strategy:
+    // - 'serial' (default): use trigger.id as the key so concurrent webhook fires for
+    //   the same trigger are serialized. serial-per-trigger is intentional for MVP --
+    //   it prevents token corruption when two webhooks fire for the same trigger
+    //   concurrently. This is the safe default and should not be changed without
+    //   understanding the concurrency invariants in the agent session layer.
+    // - 'parallel': use a unique key per invocation so each fire gets its own queue
+    //   slot. Use only when concurrent runs for this trigger are intentional and safe.
+    const queueKey = trigger.concurrencyMode === 'parallel'
+      ? `${trigger.id}:${crypto.randomUUID()}`
+      : trigger.id;
+    void this.queue.enqueue(queueKey, async () => {
+      let result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+
+      // POST result to callbackUrl if configured (GAP-3: deliveryContext).
+      // WHY: bind delivery target at trigger-config time, post result at completion time.
+      // A failed POST produces a 'delivery_failed' result so the failure is never silent.
+      // TODO(follow-up): add retry, auth headers, $ENV_VAR_NAME resolution for callbackUrl.
+      // Capture _tag before potential reassignment so log messages accurately reflect the
+      // original workflow outcome (success vs error) when delivery also fails.
+      const originalTag = result._tag;
+      if (trigger.callbackUrl) {
+        const deliveryResult = await deliveryPost(trigger.callbackUrl, result);
+        if (deliveryResult.kind === 'err') {
+          const deliveryError =
+            deliveryResult.error.kind === 'http_error'
+              ? `HTTP ${deliveryResult.error.status}: ${deliveryResult.error.body}`
+              : deliveryResult.error.message;
+          console.error(
+            `[TriggerRouter] Delivery failed: triggerId=${trigger.id} ` +
+              `callbackUrl=${trigger.callbackUrl} error=${deliveryError}`,
+          );
+          const deliveryFailed: WorkflowDeliveryFailed = {
+            _tag: 'delivery_failed',
+            workflowId: trigger.workflowId,
+            stopReason: result.stopReason,
+            deliveryError,
+          };
+          result = deliveryFailed;
+        }
+      }
+
       if (result._tag === 'success') {
         console.log(
           `[TriggerRouter] Workflow completed: triggerId=${trigger.id} ` +
-          `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
+            `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
+        );
+      } else if (result._tag === 'delivery_failed') {
+        // Delivery error already logged above; this log is for correlation.
+        // Use originalTag to distinguish whether the workflow itself succeeded or failed.
+        const outcomeLabel = originalTag === 'success'
+          ? 'Workflow succeeded but delivery failed'
+          : 'Workflow failed and delivery also failed';
+        console.log(
+          `[TriggerRouter] ${outcomeLabel}: triggerId=${trigger.id} ` +
+            `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
         );
       } else if (result._tag === 'timeout') {
         console.log(
@@ -302,9 +363,10 @@ export class TriggerRouter {
           `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
         );
       } else {
+        // result._tag === 'error'
         console.log(
           `[TriggerRouter] Workflow failed: triggerId=${trigger.id} ` +
-          `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
+            `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
         );
       }
     });
@@ -322,6 +384,10 @@ export class TriggerRouter {
    * Fires and forgets via KeyedAsyncQueue (same serialization semantics as route()).
    * Uses workflowId as the queue key to serialize concurrent dispatches for the same workflow.
    *
+   * NOTE: dispatch() does not support callbackUrl. WorkflowTrigger does not carry
+   * delivery routing info -- only TriggerDefinition (used by route()) does.
+   * TODO(follow-up): add callbackUrl to WorkflowTrigger if dispatch callers need delivery.
+   *
    * @returns The workflowId that was dispatched.
    */
   dispatch(workflowTrigger: WorkflowTrigger): string {
@@ -330,7 +396,14 @@ export class TriggerRouter {
       if (result._tag === 'success') {
         console.log(
           `[TriggerRouter] Dispatch completed: workflowId=${workflowTrigger.workflowId} ` +
-          `stopReason=${result.stopReason}`,
+            `stopReason=${result.stopReason}`,
+        );
+      } else if (result._tag === 'delivery_failed') {
+        // delivery_failed not expected from dispatch() -- WorkflowTrigger has no callbackUrl.
+        // Handled here to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        console.log(
+          `[TriggerRouter] Dispatch delivery failed: workflowId=${workflowTrigger.workflowId} ` +
+            `stopReason=${result.stopReason} deliveryError=${result.deliveryError}`,
         );
       } else if (result._tag === 'timeout') {
         console.log(
@@ -338,9 +411,10 @@ export class TriggerRouter {
           `reason=${result.reason} message=${result.message}`,
         );
       } else {
+        // result._tag === 'error'
         console.log(
           `[TriggerRouter] Dispatch failed: workflowId=${workflowTrigger.workflowId} ` +
-          `error=${result.message} stopReason=${result.stopReason}`,
+            `error=${result.message} stopReason=${result.stopReason}`,
         );
       }
     });

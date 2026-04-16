@@ -36,6 +36,9 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
+import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
+import { asSessionId } from '../v2/durable-core/ids/index.js';
+import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 
 const execAsync = promisify(exec);
 
@@ -45,6 +48,21 @@ const execAsync = promisify(exec);
 
 /** Maximum wall-clock time allowed for a single Bash tool invocation. */
 const BASH_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Maximum number of prior step notes injected into the session state recap.
+ * WHY: Caps context window usage. Three notes (~200 tokens each) gives the agent
+ * meaningful continuity without bloating the system prompt.
+ */
+const MAX_SESSION_RECAP_NOTES = 3;
+
+/**
+ * Maximum characters per note in the session state recap.
+ * WHY: Individual step notes can be long (30+ lines). Truncating at 800 chars
+ * preserves the summary while preventing a single verbose note from consuming
+ * the entire session state budget.
+ */
+const MAX_SESSION_NOTE_CHARS = 800;
 
 /**
  * Default wall-clock time limit (in minutes) for a single workflow run.
@@ -107,36 +125,12 @@ const WORKSPACE_CONTEXT_CANDIDATE_PATHS = [
   '.github/AGENTS.md',
 ] as const;
 
-/**
- * Default content for the agent rules section when no daemon-soul.md exists.
- * WHY: Provides sensible baseline behavior for any codebase without requiring
- * the operator to create a soul file on first run.
- */
-export const DAEMON_SOUL_DEFAULT = `\
-- Write code that follows the patterns already established in the codebase
-- Never skip tests. Run existing tests before and after changes
-- Prefer small, focused changes over large rewrites
-- If a step asks you to write code, write actual code -- do not write pseudocode or placeholders
-- Commit your work when you complete a logical unit`;
-
-/**
- * Template written to ~/.workrail/daemon-soul.md on first run.
- * WHY: Gives operators a documented starting point for customizing agent behavior.
- * The file is created once and then read on every subsequent daemon session.
- */
-const DAEMON_SOUL_TEMPLATE = `\
-# WorkRail Daemon Soul
-#
-# This file is injected into every WorkRail Auto daemon session system prompt under
-# "## Agent Rules and Philosophy". Edit it to customize the agent's behavior for
-# your environment: coding conventions, commit style, tool preferences, etc.
-#
-# Changes take effect on the next daemon session -- no restart required.
-#
-# The defaults below reflect general best practices. Override them freely.
-
-${DAEMON_SOUL_DEFAULT}
-`;
+// WHY: Soul content is defined in soul-template.ts (zero imports) so the CLI
+// init command can import the template without pulling in this module's heavy
+// dependency graph (LLM agent SDK). workflow-runner.ts re-exports both symbols
+// for backward compatibility with callers that already import this module.
+import { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
+export { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -221,8 +215,26 @@ export interface WorkflowRunTimeout {
   readonly stopReason: string;
 }
 
+/**
+ * Workflow completed successfully, but the delivery POST to callbackUrl failed.
+ *
+ * WHY a separate discriminant: this outcome is categorically different from a
+ * workflow failure. The workflow ran to completion -- the work is done. Only the
+ * result delivery (HTTP callback) failed. Collapsing this into WorkflowRunError
+ * would make it impossible for a caller to distinguish "job done, notification
+ * failed" from "job never finished". See GAP-3 in docs/design/daemon-gap-analysis.md.
+ */
+export interface WorkflowDeliveryFailed {
+  readonly _tag: 'delivery_failed';
+  readonly workflowId: string;
+  /** stopReason from the underlying WorkflowRunSuccess or WorkflowRunError. */
+  readonly stopReason: string;
+  /** Human-readable description of why the delivery POST failed. */
+  readonly deliveryError: string;
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowDeliveryFailed;
 
 /**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
@@ -571,6 +583,93 @@ async function loadWorkspaceContext(workspacePath: string): Promise<string | nul
   return combined;
 }
 
+/**
+ * Load prior step notes from the WorkRail session store for recap injection.
+ *
+ * Best-effort: any failure (token decode, store load, projection) logs a WARN
+ * and returns an empty array so the daemon session can continue without context.
+ * WHY: session state is a continuity aid, not a correctness requirement. A
+ * session that starts without a recap still functions correctly -- it just has
+ * no awareness of prior steps from the same checkpoint-resumed session.
+ *
+ * WHY system prompt injection instead of agent.steer():
+ * The daemon calls executeStartWorkflow() BEFORE constructing the Agent.
+ * Populating the system prompt at Agent construction time satisfies
+ * "after start_workflow fires, before first LLM call" -- steer() would fire
+ * AFTER the first LLM response (incorrect ordering for pre-step-1 context).
+ *
+ * @param continueToken - The continueToken from executeStartWorkflow (used to
+ *   extract the sessionId via the alias store, without schema changes).
+ * @param ctx - V2ToolContext providing tokenCodecPorts, tokenAliasStore, sessionStore.
+ */
+async function loadSessionNotes(
+  continueToken: string,
+  ctx: V2ToolContext,
+): Promise<readonly string[]> {
+  try {
+    // Decode the continueToken to extract the sessionId.
+    // WHY token decode instead of returning sessionId from executeStartWorkflow:
+    // Adding sessionId to V2StartWorkflowOutputSchema is a public schema change
+    // (GAP-7 territory). Token decode via the alias store is the correct in-process
+    // path that avoids breaking the public API contract.
+    const resolvedResult = await parseContinueTokenOrFail(
+      continueToken,
+      ctx.v2.tokenCodecPorts,
+      ctx.v2.tokenAliasStore,
+    );
+
+    if (resolvedResult.isErr()) {
+      console.warn(
+        `[WorkflowRunner] Warning: could not decode continueToken for session recap: ${resolvedResult.error.message}`,
+      );
+      return [];
+    }
+
+    const sessionId = asSessionId(resolvedResult.value.sessionId);
+
+    // Load the session event log (read-only -- no state mutation).
+    const loadResult = await ctx.v2.sessionStore.load(sessionId);
+    if (loadResult.isErr()) {
+      console.warn(
+        `[WorkflowRunner] Warning: could not load session store for recap: ${loadResult.error.code} -- ${loadResult.error.message}`,
+      );
+      return [];
+    }
+
+    // Project node outputs to extract step notes.
+    const projectionResult = projectNodeOutputsV2(loadResult.value.events);
+    if (projectionResult.isErr()) {
+      console.warn(
+        `[WorkflowRunner] Warning: could not project session outputs for recap: ${projectionResult.error.code} -- ${projectionResult.error.message}`,
+      );
+      return [];
+    }
+
+    // Collect all recap-channel notes across all nodes, in event order.
+    // WHY recap channel only: 'artifact' outputs are references, not human-readable notes.
+    const allNotes: string[] = [];
+    for (const nodeView of Object.values(projectionResult.value.nodesById)) {
+      for (const output of nodeView.currentByChannel.recap) {
+        if (output.payload.payloadKind === 'notes') {
+          // Truncate each note to prevent per-note context bloat.
+          const note = output.payload.notesMarkdown.length > MAX_SESSION_NOTE_CHARS
+            ? output.payload.notesMarkdown.slice(0, MAX_SESSION_NOTE_CHARS) + '\n[truncated]'
+            : output.payload.notesMarkdown;
+          allNotes.push(note);
+        }
+      }
+    }
+
+    // Take only the last N notes (most recent context is most relevant).
+    return allNotes.slice(-MAX_SESSION_RECAP_NOTES);
+  } catch (err) {
+    console.warn(
+      `[WorkflowRunner] Warning: unexpected error loading session notes for recap: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tool parameter schemas (TypeBox -- built lazily via loadPiAi() for ESM compat)
 // ---------------------------------------------------------------------------
@@ -686,7 +785,7 @@ function makeContinueWorkflowTool(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeBashTool(workspacePath: string, schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function makeBashTool(workspacePath: string, schemas: Record<string, any>// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): AgentTool<any> {
   return {
     name: 'Bash',
@@ -701,15 +800,38 @@ function makeBashTool(workspacePath: string, schemas: Record<string, any>// esli
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       const cwd = params.cwd ?? workspacePath;
-      const { stdout, stderr } = await execAsync(params.command, {
-        cwd,
-        timeout: BASH_TIMEOUT_MS,
-      });
-      const output = [stdout, stderr].filter(Boolean).join('\n');
-      return {
-        content: [{ type: 'text', text: output || '(no output)' }],
-        details: { stdout, stderr },
-      };
+      try {
+        const { stdout, stderr } = await execAsync(params.command, {
+          cwd,
+          timeout: BASH_TIMEOUT_MS,
+        });
+        const output = [stdout, stderr].filter(Boolean).join('\n');
+        return {
+          content: [{ type: 'text', text: output || '(no output)' }],
+          details: { stdout, stderr },
+        };
+      } catch (err: unknown) {
+        // Node's child_process.exec errors (ExecException) attach stdout, stderr,
+        // code, and signal as own properties. Extract them so the agent can reason
+        // about what went wrong and retry intelligently.
+        // WHY rawCode: `code` is null (not a number) when the process was killed by
+        // a signal (e.g. SIGTERM on exec timeout). Check rawCode before coalescing
+        // so the signal branch is reachable -- `rawCode ?? 'unknown'` would collapse
+        // null to 'unknown' and make signal unreachable.
+        const e = err as { stdout?: unknown; stderr?: unknown; code?: unknown; signal?: unknown };
+        const stdout = String(e.stdout ?? '');
+        const stderr = String(e.stderr ?? '');
+        const rawCode = e.code;
+        const signal = e.signal;
+        const exitInfo = rawCode != null
+          ? `exit ${String(rawCode)}`
+          : signal
+            ? `signal ${String(signal)}`
+            : 'exit unknown';
+        throw new Error(
+          `Command failed: ${params.command} (${exitInfo})\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,
+        );
+      }
     },
   };
 }
@@ -762,6 +884,33 @@ function makeWriteTool(schemas: Record<string, any>// eslint-disable-next-line @
 // ---------------------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------------------
+
+/**
+ * Format prior step notes into a concise session state recap string.
+ *
+ * This is a pure function -- all I/O (note loading, truncation decisions) is
+ * handled by the caller. WHY pure: unit-testable without mocking the session
+ * store or token codec.
+ *
+ * Returns an empty string when `notes` is empty so the caller can guard on
+ * `recap !== ''` before injecting it into the system prompt.
+ *
+ * WHY `<workrail_session_state>` tag: `buildSystemPrompt()` already reserves
+ * this XML slot in the system prompt. Using the existing tag ensures the agent
+ * parses it consistently with the documented schema.
+ *
+ * @param notes - Prior step notes (already limited to MAX_SESSION_RECAP_NOTES
+ *   entries and truncated to MAX_SESSION_NOTE_CHARS each by the caller).
+ */
+export function buildSessionRecap(notes: readonly string[]): string {
+  if (notes.length === 0) return '';
+
+  const formattedNotes = notes
+    .map((note, i) => `### Prior step ${i + 1}\n${note}`)
+    .join('\n\n');
+
+  return `<workrail_session_state>\nThe following notes summarize prior steps from this session:\n\n${formattedNotes}\n</workrail_session_state>`;
+}
 
 /**
  * Build the system prompt for the daemon agent.
@@ -994,14 +1143,25 @@ export async function runWorkflow(
     makeWriteTool(schemas) as unknown as AgentTool<TSchema>,
   ];
 
-  // ---- Context loading (soul + workspace) ----
+  // ---- Context loading (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init
-  // time and is not mutable after. Both loads are best-effort; errors are
+  // time and is not mutable after. All loads are best-effort; errors are
   // logged but never abort the session.
-  const [soulContent, workspaceContext] = await Promise.all([
+  //
+  // loadSessionNotes decodes startContinueToken to get the WorkRail sessionId,
+  // then reads the session store for prior step notes. For fresh sessions (no
+  // node_output_appended events yet), this returns [] and sessionState is ''.
+  // For checkpoint-resumed sessions, it returns prior step notes for continuity.
+  // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
+  // not before. Populating the system prompt at construction time is the correct
+  // pre-step-1 injection point.
+  const [soulContent, workspaceContext, sessionNotes] = await Promise.all([
     loadDaemonSoul(),
     loadWorkspaceContext(trigger.workspacePath),
+    startContinueToken ? loadSessionNotes(startContinueToken, ctx) : Promise.resolve([] as readonly string[]),
   ]);
+
+  const sessionState = buildSessionRecap(sessionNotes);
 
   // ---- Initial prompt: first step content from start_workflow ----
   // The daemon has already called executeStartWorkflow() and has the first step.
@@ -1011,16 +1171,25 @@ export async function runWorkflow(
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
 
+  // WHY: an explicit imperative at the end of the initial prompt directs the agent
+  // to complete the step work before calling continue_workflow. Without this,
+  // the agent may produce a "thinking aloud" turn before the first tool call, which
+  // wastes tokens and delays step execution.
   const initialPrompt =
     (firstStep.pending?.prompt ?? 'No step content available') +
     `\n\ncontinueToken: ${startContinueToken}` +
-    contextJson;
+    contextJson +
+    '\n\nComplete all step work, then call continue_workflow with your notes to begin.';
 
   // ---- Agent (one per runWorkflow() call, not reused) ----
   const { Agent } = await loadPiAgentCore();
   const agent = new Agent({
     initialState: {
-      systemPrompt: buildSystemPrompt(trigger, '', soulContent, workspaceContext),
+      systemPrompt: buildSystemPrompt(trigger, sessionState, soulContent, workspaceContext),
+      // Future: for mid-session context re-injection after context window compaction,
+      // call agent.steer(buildUserMessage(buildSessionRecap(freshNotes))) in the
+      // turn_end handler after each continue_workflow advance. Not implemented yet --
+      // the system prompt recap is sufficient for the current use case.
       model,
       tools,
     },
