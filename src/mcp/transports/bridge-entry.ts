@@ -43,7 +43,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import { registerFatalHandlers, logStartup } from './fatal-exit.js';
 import { logBridgeEvent } from './bridge-events.js';
 import { readTombstone } from './primary-tombstone.js';
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, statSync as fsStatSync, unlinkSync as fsUnlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -279,8 +279,8 @@ export function acquireSpawnLock(
 ): SpawnLockResult {
   const lockPath = spawnLockPath(port);
   const writeFn = deps.writeFileSync ?? writeFileSync;
-  const statFn = deps.statSync ?? (require('fs') as typeof import('fs')).statSync;
-  const unlinkFn = deps.unlinkSync ?? (require('fs') as typeof import('fs')).unlinkSync;
+  const statFn = deps.statSync ?? fsStatSync;
+  const unlinkFn = deps.unlinkSync ?? fsUnlinkSync;
 
   // Ensure ~/.workrail exists before attempting to create the lock.
   // Mirrors the pattern in bridge-events.ts (mkdirSync before appendFileSync).
@@ -347,7 +347,7 @@ export function releaseSpawnLock(
   port: number,
   deps: { readonly unlinkSync?: UnlinkSyncLike } = {},
 ): void {
-  const unlinkFn = deps.unlinkSync ?? (require('fs') as typeof import('fs')).unlinkSync;
+  const unlinkFn = deps.unlinkSync ?? fsUnlinkSync;
   try {
     unlinkFn(spawnLockPath(port));
   } catch {
