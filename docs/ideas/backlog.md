@@ -2054,3 +2054,254 @@ These are all monitorable from `~/.workrail/data/sessions/` with no external dep
 **Medium-term:** Sentry/Datadog/CloudWatch adapters as polling sources. Same pattern as GitLab -- poll the API, deduplicate events, dispatch workflow.
 
 **Long-term:** real-time metric ingestion (push rather than pull), time-series storage in DuckDB alongside the knowledge graph, analytics dashboard in the console.
+
+---
+
+### Universal integration layer: WorkTrain interfaces with everything (Apr 15, 2026)
+
+**The principle:** WorkTrain is not opinionated about your stack. It works with whatever version control, project management, communication, monitoring, and documentation systems you use -- cloud or self-hosted, SaaS or on-prem. The integration layer is the boundary where WorkTrain connects to the outside world.
+
+---
+
+#### Integration categories
+
+**Version control**
+| System | Interface | Notes |
+|--------|-----------|-------|
+| GitHub (cloud) | REST API + polling | Primary target, already designed |
+| GitLab (cloud + self-hosted) | REST API + polling | Already in polling triggers |
+| Bitbucket | REST API + polling | Same pattern as GitLab |
+| Azure DevOps | REST API + polling | Large enterprise share |
+| Gitea / Forgejo | REST API + polling | Self-hosted open source |
+| Gerrit | REST API | Google's code review system |
+| Raw git | git CLI + filesystem | No API needed -- just a remote |
+
+All VCS integrations share the same polling adapter pattern. The difference is the API schema -- the `GitLabPoller` becomes a template: implement `fetchEvents(since: Date): Event[]` and WorkTrain handles the rest.
+
+**Project management / ticketing**
+| System | Interface | Notes |
+|--------|-----------|-------|
+| GitHub Issues | REST API (same token as VCS) | Zero extra config for GitHub users |
+| GitLab Issues | REST API (same token as VCS) | Zero extra config for GitLab users |
+| Jira (Cloud + Server + Data Center) | REST API + polling | Dominant enterprise tracker |
+| Linear | GraphQL API | Dominant startup tracker |
+| Asana | REST API | Common in non-engineering teams |
+| Notion | REST API | Database + docs hybrid |
+| Monday.com | REST API | Common in agencies/SMB |
+| Azure Boards | REST API | Azure ecosystem |
+| Shortcut (formerly Clubhouse) | REST API | Engineering-focused |
+
+WorkTrain reads tickets to understand context, writes comments/status updates when work completes, creates new tickets when investigations surface issues, and transitions ticket status when PRs merge.
+
+**Communication / notifications**
+| System | Interface | Notes |
+|--------|-----------|-------|
+| Slack | Incoming webhooks + Bot API | Most common dev team chat |
+| Microsoft Teams | Incoming webhooks + Graph API | Enterprise dominant |
+| Discord | Webhooks + Bot API | Common in open source |
+| Telegram | Bot API | Common for personal/small team |
+| Email | SMTP | Universal fallback |
+| PagerDuty | Events API | Incident escalation |
+| OpsGenie | REST API | Alerting + on-call |
+| Webhook (generic) | HTTP POST | Any system that accepts webhooks |
+
+WorkTrain posts to the right channel based on the event type: PR review findings → the team's dev channel, critical incidents → #incidents + on-call, weekly health summary → #engineering, ideas → #product.
+
+**Monitoring / observability**
+| System | Interface | Notes |
+|--------|-----------|-------|
+| Sentry | REST API + polling | Error tracking |
+| Datadog | REST API + polling | Metrics, traces, logs |
+| New Relic | REST API | APM |
+| Grafana / Prometheus | HTTP API | Self-hosted metrics |
+| PagerDuty | Events API | Incident triggers |
+| CloudWatch | AWS SDK | AWS-native |
+| Custom HTTP endpoint | HTTP GET/POST | Any system with an API |
+
+WorkTrain polls for threshold breaches (same `PollingTriggerSource` pattern as VCS), investigates anomalies, and posts findings back.
+
+**Documentation**
+| System | Interface | Notes |
+|--------|-----------|-------|
+| Confluence (Cloud + Server) | REST API | Most common enterprise wiki |
+| Notion | REST API | Also a project management system |
+| Google Docs / Drive | Google API | Common in startups |
+| Markdown in repo | git + filesystem | Zero extra config |
+| ReadTheDocs / Sphinx | Filesystem | Generated docs |
+| Docusaurus | Filesystem | Modern static docs |
+
+WorkTrain reads doc systems as reference context for agents (same as `referenceUrls` today). It writes back when documentation needs updating after code changes.
+
+---
+
+#### The integration architecture
+
+**Three integration modes:**
+
+1. **Polling source** (already built for GitLab) -- WorkTrain calls the external API on a schedule, deduplicates events, dispatches workflows. Works for: VCS (new PRs/issues), ticketing (new tickets), monitoring (threshold breaches).
+
+2. **Delivery target** (already built for `callbackUrl`) -- WorkTrain POSTs results to an external system when a workflow completes. Works for: Slack/Teams/Discord notifications, Jira status updates, GitLab MR comments, PagerDuty incident resolution.
+
+3. **Reference context** (already built for `referenceUrls`) -- WorkTrain fetches external documents and injects them into the agent's context. Works for: Confluence pages, Google Docs, Notion databases, external API docs.
+
+**The integration manifest in triggers.yml:**
+```yaml
+integrations:
+  github:
+    token: $GITHUB_TOKEN
+    baseUrl: https://api.github.com    # override for GitHub Enterprise
+  
+  jira:
+    token: $JIRA_TOKEN
+    baseUrl: https://mycompany.atlassian.net
+    projectKey: ENG
+  
+  slack:
+    webhookUrl: $SLACK_WEBHOOK_URL
+    channels:
+      reviews: "#code-review"
+      incidents: "#incidents"
+      weekly: "#engineering"
+  
+  datadog:
+    apiKey: $DATADOG_API_KEY
+    appKey: $DATADOG_APP_KEY
+
+triggers:
+  - id: new-jira-bug
+    type: jira_poll
+    source:
+      integration: jira
+      jql: "project = ENG AND issuetype = Bug AND status = Open AND created >= -1h"
+      pollIntervalSeconds: 300
+    workflowId: bug-investigation.agentic.v2
+    goalTemplate: "Investigate Jira bug {{$.key}}: {{$.fields.summary}}"
+    callbackUrl: "{{jira.baseUrl}}/rest/api/3/issue/{{$.key}}/comment"
+```
+
+**The adapter pattern:**
+Each integration is a standalone adapter module in `src/trigger/adapters/`:
+- `github-poller.ts` -- `fetchEvents(since): GitHubEvent[]`
+- `gitlab-poller.ts` -- (already exists) `fetchEvents(since): GitLabMR[]`
+- `jira-poller.ts` -- `fetchEvents(since): JiraIssue[]`
+- `linear-poller.ts` -- `fetchEvents(since): LinearIssue[]`
+- `sentry-poller.ts` -- `fetchEvents(since): SentryError[]`
+- `datadog-poller.ts` -- `fetchEvents(since): DatadogAlert[]`
+
+Each adapter implements the same interface. The `PollingScheduler` doesn't know which adapter it's running -- it just calls `fetchEvents()` and dispatches. Adding a new integration is: implement the adapter, add a type to `TriggerDefinition`, handle it in `trigger-store.ts`. No changes to the scheduler or router.
+
+**Delivery adapters** follow the same pattern for writing back:
+- `slack-delivery.ts` -- formats and POSTs to Slack webhook
+- `jira-delivery.ts` -- adds comment to Jira issue, transitions status
+- `github-delivery.ts` -- posts PR review comment, creates issue
+- `pagerduty-delivery.ts` -- resolves or escalates incident
+
+**The `callbackUrl` field becomes `deliveryTarget`** with a richer schema:
+```yaml
+deliveryTarget:
+  type: slack           # or: jira, github, gitlab, pagerduty, webhook
+  integration: slack    # reference to integrations block
+  channel: "#code-review"
+  # OR for generic webhook:
+  url: https://hooks.example.com/worktrain
+```
+
+---
+
+#### What this enables
+
+A fully connected WorkTrain for a typical engineering team:
+
+```
+New Jira bug filed
+  → WorkTrain investigates → posts findings as Jira comment
+  → if auto-fixable → opens GitHub PR → reviews it → merges
+  → transitions Jira ticket to "In Review" / "Done"
+  → posts to #engineering: "Fixed JIRA-1234 autonomously -- PR #456"
+
+Datadog alert fires
+  → WorkTrain investigates logs + recent commits
+  → posts to #incidents with root cause + affected files
+  → if config fix → deploys fix → resolves PagerDuty incident
+  → updates Confluence runbook with new pattern
+
+Weekly
+  → WorkTrain posts health summary to #engineering
+  → files Linear tickets for technical debt items found in audit
+  → updates Google Doc "Architecture Notes" with recent decisions
+```
+
+Zero humans needed unless the circuit breaker fires.
+
+---
+
+#### Build order
+
+**Now (already works):** generic `callbackUrl` (HTTP POST to any endpoint). Any system that accepts webhooks works immediately.
+
+**Near-term:** GitHub polling adapter (same as GitLab, already written as template), Slack delivery adapter (format + post to webhook).
+
+**Medium-term:** Jira polling + delivery (high enterprise value), Linear polling (high startup value), PagerDuty delivery (incident escalation).
+
+**Long-term:** the full matrix above. Each adapter is a bounded, testable, independently shippable unit. The architecture supports adding them without touching the core engine.
+
+---
+
+### Multi-project WorkTrain: workspace isolation vs cross-project knowledge (to investigate, Apr 15, 2026)
+
+**The problem:** WorkTrain needs to handle multiple completely unrelated projects simultaneously, but some projects are related and need to share knowledge. These are contradictory requirements if handled naively.
+
+**Three axes of tension:**
+
+1. **Isolation vs shared context** -- project A's TypeScript symbols should never pollute project B's Python context. But if A and B share architectural patterns (both use WorkTrain, both follow the same auth pattern), that shared knowledge is valuable.
+
+2. **Independent execution vs cross-project tasks** -- most tasks are scoped to one project. But some tasks span projects: "update the mobile app AND the backend API for this feature", "apply the same refactor pattern we used in workrail to storyforge".
+
+3. **One daemon vs many** -- one daemon is easier to manage (one config, one console, one binary). Multiple daemons give true blast-radius isolation. The right answer is probably workspace namespacing inside one process, but with cross-namespace knowledge queries for when projects are related.
+
+**The cross-project knowledge requirement:**
+When two projects are related (share patterns, have a dependency relationship, or are being worked on together), the knowledge graph should be queryable across project boundaries -- but opt-in, not default. A session working on project A can explicitly query "what's the equivalent pattern in project B?" but never sees project B's context by default.
+
+**Proposed model:** workspace namespacing with explicit cross-workspace links
+
+```yaml
+workspaces:
+  workrail:
+    path: ~/git/personal/workrail
+    soul: ~/.workrail/souls/workrail.md
+    knowledgeGraph: ~/.workrail/graphs/workrail.db
+    maxConcurrentSessions: 3
+    relatedWorkspaces: [storyforge]   # can query storyforge graph when explicitly needed
+    
+  storyforge:
+    path: ~/git/personal/storyforge
+    soul: ~/.workrail/souls/storyforge.md
+    knowledgeGraph: ~/.workrail/graphs/storyforge.db
+    maxConcurrentSessions: 1
+    relatedWorkspaces: [workrail]
+```
+
+A session in `workrail` gets `workrail` context by default. If it calls `query_knowledge_graph(workspace: 'storyforge', ...)`, it gets storyforge context explicitly. The coordinator script can spawn workers in multiple workspaces for cross-project tasks.
+
+**Investigation needed (discovery agent running):**
+- Is workspace namespacing inside one process the right architecture, or should each project run a separate daemon?
+- What exactly needs to be workspace-scoped vs globally shared?
+- How do cross-project coordinator tasks work? (spawn worker in workspace A, spawn worker in workspace B, coordinator synthesizes)
+- What's the knowledge graph query interface for cross-workspace queries?
+- How does the console show multi-workspace activity without being overwhelming?
+- What's the blast radius if one workspace's agent goes rogue?
+
+**What CAN be shared globally (no namespace needed):**
+- The WorkTrain binary and workflow library
+- Token usage / billing tracking
+- The message queue (`~/.workrail/message-queue.jsonl`)
+- The merge audit log
+- The outbox (notifications to the user)
+- The `worktrain talk` session (can discuss any workspace)
+
+**What MUST be workspace-scoped:**
+- Knowledge graph (symbols from different codebases must not mix)
+- daemon-soul.md (different stacks need different principles)
+- Session store (project A's sessions should not appear in project B's console view by default)
+- Concurrency limits (project A should not starve project B)
+- Triggers and polling sources (each workspace has its own event sources)
