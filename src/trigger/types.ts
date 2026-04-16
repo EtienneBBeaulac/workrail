@@ -12,6 +12,10 @@
  *   field that targets a non-array value instead.
  * - TriggerSource carries delivery context so a future result-posting system can
  *   route the workflow output back to the originating system (e.g. post MR comment).
+ * - GitLabPollingSource is the first polling trigger source type (provider: gitlab_poll).
+ *   It is an optional additive field on TriggerDefinition alongside the webhook fields.
+ *   This is a stepping-stone design -- at 3+ polling adapter types, migrate to a
+ *   discriminated union on TriggerDefinition. TODO(follow-up): migrate at adapter #2.
  */
 
 // ---------------------------------------------------------------------------
@@ -46,6 +50,57 @@ export interface ContextMapping {
 }
 
 // ---------------------------------------------------------------------------
+// GitLabPollingSource: configuration for GitLab MR polling triggers
+//
+// Used when provider === 'gitlab_poll'. The polling scheduler reads this to
+// determine how to poll the GitLab API for new or updated merge requests.
+//
+// Invariants:
+// - token is already resolved from environment (never a $SECRET_NAME ref here).
+// - events is stored as a string array (space-separated in YAML, split at parse time).
+//   Example YAML: "events: merge_request.opened merge_request.updated"
+//   Parsed to: ["merge_request.opened", "merge_request.updated"]
+// - pollIntervalSeconds defaults to 60 if not specified in YAML.
+//
+// The GitLab MR list API does not filter by event type -- all open MRs updated
+// since lastPollAt are fetched, then filtered client-side against the events list.
+//
+// TODO(follow-up): when a second polling adapter type (e.g. github_poll) is added,
+// migrate TriggerDefinition to a discriminated union.
+// ---------------------------------------------------------------------------
+
+export interface GitLabPollingSource {
+  /** Base URL of the GitLab instance. Example: "https://gitlab.com" */
+  readonly baseUrl: string;
+  /**
+   * GitLab project ID (numeric string) or namespace/project path.
+   * Example: "12345" or "my-group/my-project"
+   */
+  readonly projectId: string;
+  /**
+   * GitLab personal access token or project access token.
+   * Already resolved from environment (never a $SECRET_NAME ref here).
+   * Requires at least read_api scope.
+   */
+  readonly token: string;
+  /**
+   * Event types to react to. Used as a client-side filter on poll results.
+   * Supported values: "merge_request.opened", "merge_request.updated"
+   *
+   * Specified as space-separated scalar in triggers.yml (same pattern as
+   * referenceUrls -- the narrow YAML parser does not support inline arrays).
+   * Example: "events: merge_request.opened merge_request.updated"
+   */
+  readonly events: readonly string[];
+  /**
+   * How often to poll in seconds. Default: 60.
+   * If a poll cycle takes longer than this interval, the next cycle is skipped
+   * and a warning is logged (never two concurrent polls for the same trigger).
+   */
+  readonly pollIntervalSeconds: number;
+}
+
+// ---------------------------------------------------------------------------
 // TriggerDefinition: a single configured trigger loaded from triggers.yml
 // ---------------------------------------------------------------------------
 
@@ -54,9 +109,13 @@ export interface TriggerDefinition {
   readonly id: TriggerId;
 
   /**
-   * Provider name. MVP supports "generic" only.
-   * "generic" = any HTTP POST with optional HMAC validation.
-   * Post-MVP: "gitlab", "github", "jira", "cron".
+   * Provider name.
+   * "generic"     = any HTTP POST with optional HMAC validation (webhook trigger).
+   * "gitlab_poll" = polling trigger that fetches GitLab MRs on a schedule.
+   *
+   * When provider === 'gitlab_poll', pollingSource must be present.
+   * When provider === 'generic', pollingSource must be absent.
+   * Validated at load time by validateAndResolveTrigger().
    */
   readonly provider: string;
 
@@ -73,12 +132,14 @@ export interface TriggerDefinition {
    * HMAC-SHA256 secret for validating X-WorkRail-Signature header.
    * Already resolved from environment (never a $SECRET_NAME ref here).
    * When absent, HMAC validation is skipped (open trigger).
+   * Only applies to provider === 'generic' triggers.
    */
   readonly hmacSecret?: string;
 
   /**
    * Optional mapping from payload fields to workflow context variables.
    * When absent, the raw payload is passed as context.payload.
+   * Only applies to provider === 'generic' triggers.
    */
   readonly contextMapping?: ContextMapping;
 
@@ -145,6 +206,30 @@ export interface TriggerDefinition {
   readonly concurrencyMode: 'serial' | 'parallel';
 
   /**
+   * When true, the daemon automatically runs `git add <filesChanged> && git commit`
+   * after a successful workflow run. Reads the structured handoff artifact from the
+   * last step's notes to build the commit message.
+   *
+   * WHY scripts over agent: committing is deterministic and has no ambiguity.
+   * The daemon reads the agent's handoff note and runs git commands itself --
+   * never delegates this to the LLM. See docs/ideas/backlog.md "scripts over agent".
+   *
+   * Default: false (opt-in only). The daemon never commits without explicit true.
+   */
+  readonly autoCommit?: boolean;
+
+  /**
+   * When true (and autoCommit is also true), the daemon runs `gh pr create` after
+   * a successful commit. Reads prTitle and prBody from the handoff artifact.
+   *
+   * Requires autoCommit: true. If autoOpenPR is true but autoCommit is false or
+   * absent, a warning is emitted at config load time and delivery is skipped.
+   *
+   * Default: false.
+   */
+  readonly autoOpenPR?: boolean;
+
+  /**
    * Completion hook configuration (parsed but NOT executed in MVP).
    * Emits a load-time warning for runOn !== 'success'.
    *
@@ -162,6 +247,21 @@ export interface TriggerDefinition {
     /** Goal passed to the completion workflow. */
     readonly goal?: string;
   };
+
+  /**
+   * Polling source configuration. Present only when provider === 'gitlab_poll'.
+   * Absent for webhook (generic) triggers.
+   *
+   * The polling scheduler uses this to determine how and when to poll the
+   * external API. The webhook routing path (TriggerRouter.route()) never reads
+   * this field -- it is only consumed by PollingScheduler.
+   *
+   * NOTE: This is a stepping-stone design. When a second polling adapter type
+   * is added, migrate to a discriminated union on TriggerDefinition.
+   *
+   * TODO(follow-up): migrate to discriminated union at adapter #2.
+   */
+  readonly pollingSource?: GitLabPollingSource;
 }
 
 // ---------------------------------------------------------------------------
