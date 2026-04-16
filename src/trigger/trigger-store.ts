@@ -504,10 +504,10 @@ function validateAndResolveTrigger(
     try {
       const parsedCb = new URL(rawCb);
       if (parsedCb.protocol !== 'https:' && parsedCb.protocol !== 'http:') {
-        return err({ kind: 'missing_field', field: `callbackUrl (non-HTTP URL rejected: ${rawCb})`, triggerId: rawId });
+        return err({ kind: 'invalid_field_value', field: `callbackUrl (non-HTTP URL rejected: ${rawCb})`, triggerId: rawId });
       }
     } catch {
-      return err({ kind: 'missing_field', field: `callbackUrl (invalid URL: ${rawCb})`, triggerId: rawId });
+      return err({ kind: 'invalid_field_value', field: `callbackUrl (invalid URL: ${rawCb})`, triggerId: rawId });
     }
     callbackUrl = rawCb;
   }

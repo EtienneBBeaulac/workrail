@@ -47,11 +47,14 @@ export async function post(
   callbackUrl: string,
   result: WorkflowRunResult,
 ): Promise<Result<void, DeliveryError>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
   try {
     const res = await fetch(callbackUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(result),
+      signal: controller.signal,
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -60,5 +63,7 @@ export async function post(
     return ok(undefined);
   } catch (e: unknown) {
     return err({ kind: 'network_error', message: String(e) });
+  } finally {
+    clearTimeout(timer);
   }
 }

@@ -15,7 +15,7 @@
  */
 
 import * as crypto from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
@@ -541,7 +541,6 @@ describe('createTriggerApp routes', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // interpolateGoalTemplate: unit tests
 // ---------------------------------------------------------------------------
 
@@ -645,5 +644,72 @@ describe('TriggerRouter.route referenceUrls forwarding', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(calls[0]?.referenceUrls).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.route: callbackUrl delivery
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.route callbackUrl delivery', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('delivers workflow result to callbackUrl when workflow succeeds and delivery succeeds', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '',
+    }));
+
+    const trigger = makeTrigger({ callbackUrl: 'https://example.com/callback' });
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const result = router.route(makeEvent());
+
+    expect(result._tag).toBe('enqueued');
+    // Wait for async queue to process
+    await new Promise((r) => setTimeout(r, 20));
+
+    // fetch was called: once for the delivery POST
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock).toHaveBeenCalled();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://example.com/callback');
+    expect(init.method).toBe('POST');
+  });
+
+  it('logs delivery_failed when callbackUrl is set, workflow succeeds, but delivery fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => 'Service Unavailable',
+    }));
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const trigger = makeTrigger({ callbackUrl: 'https://example.com/callback' });
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    router.route(makeEvent());
+
+    // Wait for async queue to process
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Should log a delivery failure error
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Delivery failed'),
+    );
+    // Should log the outcome with the correct "succeeded but delivery failed" message
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Workflow succeeded but delivery failed'),
+    );
+
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });

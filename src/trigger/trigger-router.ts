@@ -318,6 +318,9 @@ export class TriggerRouter {
       // WHY: bind delivery target at trigger-config time, post result at completion time.
       // A failed POST produces a 'delivery_failed' result so the failure is never silent.
       // TODO(follow-up): add retry, auth headers, $ENV_VAR_NAME resolution for callbackUrl.
+      // Capture _tag before potential reassignment so log messages accurately reflect the
+      // original workflow outcome (success vs error) when delivery also fails.
+      const originalTag = result._tag;
       if (trigger.callbackUrl) {
         const deliveryResult = await deliveryPost(trigger.callbackUrl, result);
         if (deliveryResult.kind === 'err') {
@@ -346,8 +349,12 @@ export class TriggerRouter {
         );
       } else if (result._tag === 'delivery_failed') {
         // Delivery error already logged above; this log is for correlation.
+        // Use originalTag to distinguish whether the workflow itself succeeded or failed.
+        const outcomeLabel = originalTag === 'success'
+          ? 'Workflow succeeded but delivery failed'
+          : 'Workflow failed and delivery also failed';
         console.log(
-          `[TriggerRouter] Workflow completed but delivery failed: triggerId=${trigger.id} ` +
+          `[TriggerRouter] ${outcomeLabel}: triggerId=${trigger.id} ` +
             `workflowId=${trigger.workflowId} stopReason=${result.stopReason}`,
         );
       } else if (result._tag === 'timeout') {
