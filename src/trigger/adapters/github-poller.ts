@@ -336,8 +336,11 @@ export async function pollGitHubPRs(
 function applyIssueFilters(issues: GitHubIssue[], source: GitHubPollingSource): GitHubIssue[] {
   return issues.filter(issue => {
     // excludeAuthors filter -- runs BEFORE dispatch (invariant: never dispatch for excluded authors)
-    if (source.excludeAuthors.length > 0 && issue.user?.login !== undefined) {
-      if (source.excludeAuthors.includes(issue.user.login)) return false;
+    // Fail-safe: if login is absent (deleted/ghost account), treat as excluded -- we cannot
+    // verify the author is safe, so the safer behavior is to drop the item.
+    if (source.excludeAuthors.length > 0) {
+      const login = issue.user?.login;
+      if (!login || source.excludeAuthors.includes(login)) return false;
     }
     // notLabels filter
     if (source.notLabels.length > 0 && issue.labels) {
@@ -355,8 +358,11 @@ function applyIssueFilters(issues: GitHubIssue[], source: GitHubPollingSource): 
 function applyPRFilters(prs: GitHubPR[], source: GitHubPollingSource): GitHubPR[] {
   return prs.filter(pr => {
     // excludeAuthors filter -- runs BEFORE dispatch
-    if (source.excludeAuthors.length > 0 && pr.user?.login !== undefined) {
-      if (source.excludeAuthors.includes(pr.user.login)) return false;
+    // Fail-safe: if login is absent (deleted/ghost account), treat as excluded -- we cannot
+    // verify the author is safe, so the safer behavior is to drop the item.
+    if (source.excludeAuthors.length > 0) {
+      const login = pr.user?.login;
+      if (!login || source.excludeAuthors.includes(login)) return false;
     }
     // notLabels filter
     if (source.notLabels.length > 0 && pr.labels) {

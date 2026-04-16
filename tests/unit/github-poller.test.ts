@@ -451,6 +451,20 @@ describe('pollGitHubPRs', () => {
     expect(capturedUrl).not.toContain('labels=');
   });
 
+  it('does NOT include labels param when labelFilter is set (PRs API does not support it)', async () => {
+    // labelFilter is silently ignored for github_prs_poll -- the PRs list endpoint has no
+    // labels parameter. This test guards against accidentally adding labels= for PRs.
+    let capturedUrl: string | undefined;
+    const fetchFn: FetchFn = (url) => {
+      capturedUrl = url;
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]), headers: { get: () => null } } as unknown as Response);
+    };
+
+    await pollGitHubPRs(makeSource({ labelFilter: ['bug'] }), SINCE, fetchFn);
+
+    expect(capturedUrl).not.toContain('labels=');
+  });
+
   it('filters out PRs with updated_at <= since (client-side filter)', async () => {
     const oldPR = makePR({ id: 2001, updated_at: '2026-04-14T08:00:00.000Z' }); // before SINCE
     const newPR = makePR({ id: 2002, updated_at: '2026-04-15T10:00:00.000Z' }); // after SINCE

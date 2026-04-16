@@ -251,7 +251,6 @@ export class PollingScheduler {
       triggerId,
       pollStartAt,
       mrs.map(mr => String(mr.id)),
-      new Map<string, GitLabMR>(mrs.map(mr => [String(mr.id), mr])),
       (id) => {
         const mr = mrs.find(m => String(m.id) === id);
         return mr ? buildGitLabWorkflowTrigger(trigger, mr) : null;
@@ -295,7 +294,6 @@ export class PollingScheduler {
       triggerId,
       pollStartAt,
       items.map(item => String(item.id)),
-      new Map<string, Item>(items.map(item => [String(item.id), item])),
       (id) => {
         const item = items.find(i => String(i.id) === id);
         return item ? buildGitHubWorkflowTrigger(trigger, item) : null;
@@ -315,7 +313,6 @@ export class PollingScheduler {
     triggerId: TriggerId,
     pollStartAt: string,
     candidateIds: string[],
-    _itemMap: Map<string, unknown>,
     buildTrigger: (id: string) => WorkflowTrigger | null,
   ): Promise<void> {
     if (candidateIds.length === 0) {
