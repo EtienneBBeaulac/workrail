@@ -22,7 +22,10 @@
         {
           "id": "design_soundness",
           "purpose": "Design decision is made, tradeoffs are recorded, and there is no remaining ambiguity about the chosen approach.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -33,7 +36,10 @@
         {
           "id": "design_gaps",
           "purpose": "Active scan completed: either no material gaps were found, or any found were addressed or explicitly filed.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -44,7 +50,10 @@
         {
           "id": "plan_completeness",
           "purpose": "Slices have clear boundaries and acceptance criteria. The agent knows what done looks like for each.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -55,7 +64,10 @@
         {
           "id": "invariant_clarity",
           "purpose": "Named invariants are checkable in the implementation. Non-goals are stated and will prevent scope creep.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -66,7 +78,10 @@
         {
           "id": "plan_gaps",
           "purpose": "Active scan completed: either no material gaps were found, or any found were addressed or explicitly filed.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -77,7 +92,10 @@
         {
           "id": "build_correctness",
           "purpose": "Build succeeds and tests pass. No compilation errors or failing assertions.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -88,7 +106,10 @@
         {
           "id": "invariant_preservation",
           "purpose": "Each named invariant from the plan has been verified in the implementation.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -99,7 +120,10 @@
         {
           "id": "implementation_gaps",
           "purpose": "Active scan completed: gaps found are either fixed inline, filed as follow-up tickets, or explicitly deferred with rationale.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     }
@@ -260,7 +284,9 @@
       ],
       "assessmentConsequences": [
         {
-          "when": { "anyEqualsLevel": "low" },
+          "when": {
+            "anyEqualsLevel": "low"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "Address whichever gate scored low: design_soundness low -- the design decision is still ambiguous; commit to an approach and record the rationale before proceeding. design_gaps low -- the gap scan was not completed or found unaddressed gaps; either resolve them or explicitly file them before proceeding."
@@ -361,7 +387,9 @@
       ],
       "assessmentConsequences": [
         {
-          "when": { "anyEqualsLevel": "low" },
+          "when": {
+            "anyEqualsLevel": "low"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "Address whichever gate scored low: plan_completeness low -- one or more slices lack clear boundaries or verifiable acceptance criteria; sharpen them before implementation begins. invariant_clarity low -- invariants or non-goals are too vague to verify against; make them concrete. plan_gaps low -- the gap scan was not completed or found unaddressed gaps; resolve or file them before proceeding."
@@ -472,7 +500,7 @@
         "var": "taskComplexity",
         "equals": "Small"
       },
-      "prompt": "For Small tasks, fast does not mean shallow. Every item below is required.\n\n**1. Confirm all wiring points with tools.**\nDon't assume a file you create is reachable. Check every public entry point:\n- Does the new symbol need to be exported from an index file?\n- Does it need to be imported and registered somewhere (CLI command map, router, DI container, plugin registry)?\n- Is there a test file that needs to reference it?\nTrace the full call path from the public interface down to your new code before writing anything.\n\n**2. Implement the smallest correct change.**\nChange exactly what needs changing. No drive-by refactors, no extra abstractions.\n\n**3. Verify end-to-end.**\n- Run build and tests. Both must pass.\n- Manually trace the new behavior through the public entry point (e.g. run the CLI command, check the export resolves, hit the endpoint). If you can't do this deterministically with tools, say why.\n- Apply the user's coding philosophy as the review lens. Flag any violation by principle name.\n\n**4. Produce a handoff note.**\nOutput a notes artifact containing:\n- `commitType`: feat / fix / chore / refactor / docs / test / perf (pick one)\n- `commitScope`: product area only (console / mcp / workflows / engine / schema / docs)\n- `commitSubject`: imperative mood, max 72 chars total with type(scope): prefix, no period\n- `prTitle`: same as full commit first line\n- `prBody`: markdown with ## Summary (bullets) and ## Test plan (checklist)\n- `followUpTickets`: list of deferred items, or empty\n- `filesChanged`: list of every file you created or modified\n\nThe daemon will use this artifact to run git commit and open the PR. Do not commit or push yourself.\n\nDo not create heavyweight planning artifacts unless risk unexpectedly grows.",
+      "prompt": "For Small tasks, fast does not mean shallow. Every item below is required.\n\n**1. Confirm all wiring points with tools.**\nDon't assume a file you create is reachable. Check every public entry point:\n- Does the new symbol need to be exported from an index file?\n- Does it need to be imported and registered somewhere (CLI command map, router, DI container, plugin registry)?\n- Is there a test file that needs to reference it?\nTrace the full call path from the public interface down to your new code before writing anything.\n\n**2. Implement the smallest correct change.**\nChange exactly what needs changing. No drive-by refactors, no extra abstractions.\n\n**3. Verify end-to-end.**\n- Run build and tests. Both must pass.\n- Manually trace the new behavior through the public entry point (e.g. run the CLI command, check the export resolves, hit the endpoint). If you can't do this deterministically with tools, say why.\n- Apply the user's coding philosophy as the review lens. Flag any violation by principle name.\n\n**4. Produce a handoff note.**\nOutput a notes artifact containing a JSON fenced block with the following fields.\nThe daemon reads this block to run `git commit` and `gh pr create` -- write it exactly as shown:\n\n```json\n{\n  \"commitType\": \"feat\",\n  \"commitScope\": \"mcp\",\n  \"commitSubject\": \"imperative mood, max 72 chars total with type(scope): prefix, no period\",\n  \"prTitle\": \"same as full commit first line\",\n  \"prBody\": \"markdown with ## Summary (bullets) and ## Test plan (checklist)\",\n  \"followUpTickets\": [],\n  \"filesChanged\": [\"src/path/to/file.ts\", \"tests/unit/file.test.ts\"]\n}\n```\n\nFields:\n- `commitType`: feat / fix / chore / refactor / docs / test / perf (pick one)\n- `commitScope`: product area only (console / mcp / workflows / engine / schema / docs)\n- `commitSubject`: imperative mood, max 72 chars total with type(scope): prefix, no period\n- `prTitle`: same as full commit first line\n- `prBody`: markdown with ## Summary (bullets) and ## Test plan (checklist)\n- `followUpTickets`: list of deferred items, or empty array\n- `filesChanged`: list of every file you created or modified (required -- do not omit)\n\nThe daemon will use this artifact to run git commit and open the PR. Do not commit or push yourself.\n\nDo not create heavyweight planning artifacts unless risk unexpectedly grows.",
       "requireConfirmation": false
     },
     {
@@ -594,7 +622,9 @@
           ],
           "assessmentConsequences": [
             {
-              "when": { "anyEqualsLevel": "low" },
+              "when": {
+                "anyEqualsLevel": "low"
+              },
               "effect": {
                 "kind": "require_followup",
                 "guidance": "Address whichever gate scored low: build_correctness low -- the build or tests are still failing; fix them before this step can complete. invariant_preservation low -- one or more invariants from the plan are violated; fix the implementation. implementation_gaps low -- the gap scan was not completed or found unaddressed gaps; fix them inline, file as follow-up tickets, or explicitly defer with rationale."
@@ -606,7 +636,7 @@
         {
           "id": "phase-7c-loop-decision",
           "title": "Final Verification Loop Decision",
-          "prompt": "Decide whether final verification needs another pass or whether we're done.\n\nThis loop gets up to two verify/fix passes.\n- If verification found real issues and you fixed them, keep going so the fixes get re-verified.\n- If the issues are clean or resolved, stop.\n- If you've hit the limit, stop and record what remains.\n\nWhen you stop, include:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- a concise PR/MR draft (why, test plan, rollout notes)\n- follow-up tickets\n- any philosophy tensions you accepted on purpose\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether final verification needs another pass or whether we're done.\n\nThis loop gets up to two verify/fix passes.\n- If verification found real issues and you fixed them, keep going so the fixes get re-verified.\n- If the issues are clean or resolved, stop.\n- If you've hit the limit, stop and record what remains.\n\nWhen you stop, include:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- follow-up tickets\n- any philosophy tensions you accepted on purpose\n\n**Handoff block (required for daemon auto-commit):**\nInclude a JSON fenced block in your notes. The daemon reads this to run `git commit` and `gh pr create`:\n\n```json\n{\n  \"commitType\": \"feat\",\n  \"commitScope\": \"mcp\",\n  \"commitSubject\": \"imperative mood, max 72 chars total with type(scope): prefix, no period\",\n  \"prTitle\": \"same as full commit first line\",\n  \"prBody\": \"markdown with ## Summary (bullets) and ## Test plan (checklist)\",\n  \"followUpTickets\": [],\n  \"filesChanged\": [\"src/path/to/file.ts\", \"tests/unit/file.test.ts\"]\n}\n```\n\nFields: `commitType` (feat/fix/chore/refactor/docs/test/perf), `commitScope` (product area only: console/mcp/workflows/engine/schema/docs), `commitSubject` (imperative, <=72 chars including prefix, no period), `prTitle` (same as commit first line), `prBody` (markdown), `followUpTickets` (array), `filesChanged` (required -- every file created or modified).\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
