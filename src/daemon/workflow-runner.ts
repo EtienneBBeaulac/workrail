@@ -783,13 +783,15 @@ function getSchemas(): Record<string, any> {
 // Tool factories
 // ---------------------------------------------------------------------------
 
-function makeContinueWorkflowTool(
+export function makeContinueWorkflowTool(
   sessionId: string,
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
   onComplete: (notes: string | undefined) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
+  // Optional injection point for testing -- defaults to the real implementation.
+  _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
 ): AgentTool {
   return {
     name: 'continue_workflow',
@@ -804,7 +806,7 @@ function makeContinueWorkflowTool(
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: continue_workflow sessionId=${sessionId}`);
-      const result = await executeContinueWorkflow(
+      const result = await _executeContinueWorkflowFn(
         {
           continueToken: params.continueToken,
           intent: (params.intent ?? 'advance') as 'advance' | 'rehydrate',
@@ -823,10 +825,62 @@ function makeContinueWorkflowTool(
       const out = result.value.response;
 
       // Persist tokens atomically before returning -- crash safety invariant.
+      // WHY continueToken vs retryToken: for a blocked response, nextCall.params.continueToken
+      // is the retry token (retryContinueToken for retryable, or continueToken for non-retryable).
+      // Persisting this ensures crash recovery resumes with the correct token.
       const continueToken = out.continueToken ?? '';
       const checkpointToken = out.checkpointToken ?? null;
-      if (continueToken) {
-        await persistTokens(sessionId, continueToken, checkpointToken);
+      const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? continueToken;
+      if (persistToken) {
+        await persistTokens(sessionId, persistToken, checkpointToken);
+      }
+
+      // WHY: when the engine returns a blocked response, the step did NOT advance.
+      // Calling onAdvance() would erroneously signal advancement and cause the agent
+      // to loop forever believing it moved forward. Return feedback instead so the
+      // agent knows what to fix and can retry the same step.
+      if (out.kind === 'blocked') {
+        const retryToken = out.nextCall?.params.continueToken ?? continueToken;
+        const lines: string[] = ['## Step blocked -- action required\n'];
+
+        for (const blocker of out.blockers.blockers) {
+          lines.push(blocker.message);
+          if (blocker.suggestedFix) {
+            lines.push(`\nWhat to do: ${blocker.suggestedFix}`);
+          }
+          lines.push('');
+        }
+
+        if (out.validation) {
+          if (out.validation.issues.length > 0) {
+            lines.push('**Issues:**');
+            for (const issue of out.validation.issues) lines.push(`- ${issue}`);
+            lines.push('');
+          }
+          if (out.validation.suggestions.length > 0) {
+            lines.push('**Suggestions:**');
+            for (const s of out.validation.suggestions) lines.push(`- ${s}`);
+            lines.push('');
+          }
+        }
+
+        if (out.assessmentFollowup) {
+          lines.push(`**Follow-up required:** ${out.assessmentFollowup.title}`);
+          lines.push(out.assessmentFollowup.guidance);
+          lines.push('');
+        }
+
+        if (out.retryable) {
+          lines.push(`Retry the same step with corrected output.\n\ncontinueToken: ${retryToken}`);
+        } else {
+          lines.push(`You cannot proceed without resolving this. Inform the user and wait for their response, then call continue_workflow.\n\ncontinueToken: ${retryToken}`);
+        }
+
+        const feedback = lines.join('\n');
+        return {
+          content: [{ type: 'text', text: feedback }],
+          details: out,
+        };
       }
 
       if (out.isComplete) {
