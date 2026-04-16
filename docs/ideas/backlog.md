@@ -1971,3 +1971,76 @@ WorkTrain wakes up at 9am, reviews every open PR, fixes everything it can, merge
 5. **No-feedback policy encoding** -- document the MR review finding classification schema so coordinator workflows can reliably parse and act on it.
 
 **This is the most important architectural work remaining in WorkTrain.** Everything else -- polling triggers, onboarding, knowledge graph -- makes WorkTrain better. This makes it genuinely autonomous.
+
+---
+
+### Communication agent: Slack monitoring, email management, and suggested responses (Apr 16, 2026)
+
+**The idea:** WorkTrain monitors your communication channels, understands context, and either responds on your behalf or prepares vetted drafts for you to send.
+
+**Slack:**
+- Monitor specified channels and DMs for messages that mention you, reference your projects, or require a response
+- Understand context: "who is asking, what do they need, what's the relevant project state?"
+- Options: auto-respond for routine questions ("what's the status of X?" → WorkTrain knows), draft a response for you to review and send, or surface with a notification "someone needs your input on Y"
+- Configurable per-channel: some channels auto-respond, some always require your review
+- Filter noise: identify which Slack threads are actually important vs chatter
+
+**Email:**
+- Same pattern as Slack -- monitor inbox, understand context, draft responses
+- Suggest email filters, folder rules, and unsubscribe candidates based on patterns WorkTrain observes
+- "You've received 47 newsletters this month from 12 senders and never opened them -- want me to unsubscribe?"
+- Priority surfacing: "3 emails in your inbox need a response, here are the drafts"
+
+**Important constraint:** WorkTrain never sends on your behalf without explicit approval for anything that goes to other people. Auto-respond is opt-in per-channel, with a review window before sending. You always see what was sent and can recall/edit.
+
+---
+
+### Local file organization and maintenance (Apr 16, 2026)
+
+- WorkTrain scans specified directories for stale, duplicate, and disorganized files
+- Suggests folder structures based on file content and usage patterns
+- Identifies documents that are out of date and offers to update them
+- Keeps project-related files in sync with the repo (e.g. local design files linked to Figma specs, local notes linked to Confluence pages)
+- "~/Downloads has 847 files, most untouched for 6 months -- here's what's safe to delete and what should be archived"
+- Connects to the knowledge graph: files that reference code or projects get indexed alongside the code
+
+---
+
+### Git worktrees and branch management as a first-class capability (Apr 16, 2026)
+
+**Critical for parallel work.** WorkTrain needs native, sophisticated git management -- not just running git commands but understanding the full branching topology and managing it intelligently.
+
+**What this means:**
+
+**Worktree management:**
+- Create, list, switch between, and clean up worktrees automatically
+- Each concurrent task gets its own worktree (WorkTrain already does this via `.claude/worktrees/`)
+- Detect and warn about stale worktrees (branches that have been merged or abandoned)
+- The `cw <branch>` command pattern already exists -- WorkTrain should be able to invoke it for any task that needs isolation
+
+**Branch lifecycle:**
+- Know which branches are: active (being worked on), stale (no commits in N days), merged (on main), or orphaned (created but abandoned)
+- Automatic cleanup proposals: "14 branches are merged and safe to delete, 3 are stale, 2 have uncommitted work"
+- Rebase management: when main advances, WorkTrain knows which in-flight branches need rebasing and does it automatically (or queues it)
+- Conflict detection: before spawning a new session, check if any in-flight branch would conflict with the planned changes
+
+**Parallel work coordination:**
+- When multiple tasks touch the same files, WorkTrain detects potential conflicts before they happen
+- Sequences tasks that would conflict, parallelizes those that won't
+- Maintains a "file lock" mental model: this file is being modified by session A, session B should wait or work on a different scope
+- When a feature branch is ready, WorkTrain handles the full merge/rebase/PR creation flow
+
+**Branch naming and organization:**
+- Enforces consistent branch naming conventions (already partially done via daemon soul)
+- Groups related branches: `feat/github-polling-*` are all part of the same epic
+- Links branches to tickets/queue items: opening a PR creates the Jira transition, closing a PR cleans up the branch
+
+**The `worktrain worktree` command family:**
+```bash
+worktrain worktree list                    # all worktrees and their status
+worktrain worktree clean                   # remove merged/stale worktrees
+worktrain worktree new <branch> [--task]   # create worktree + optionally link to queue item
+worktrain worktree status                  # which files are locked by active sessions
+```
+
+This is especially critical when WorkTrain is managing 10 concurrent sessions -- without explicit worktree management, two sessions could clobber each other's changes on the same branch.
