@@ -26,7 +26,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js';
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
-import { runWorkflow } from '../daemon/workflow-runner.js';
+import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
 import type { WebhookEvent } from './types.js';
 import { asTriggerId } from './types.js';
 
@@ -214,6 +214,19 @@ export async function startTriggerListener(
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
   const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn);
   const app = createTriggerApp(router);
+
+  // Startup crash recovery: detect and clear any orphaned session files left by a
+  // previous daemon crash. Run BEFORE server.listen() so no new webhooks can arrive
+  // while recovery is in progress.
+  // WHY: runStartupRecovery() is non-fatal -- any error is caught internally and the
+  // daemon starts regardless. The additional catch here defends against unexpected
+  // throws from the function's own error-handling path.
+  await runStartupRecovery().catch((err: unknown) => {
+    console.warn(
+      '[TriggerListener] Startup recovery encountered an unexpected error:',
+      err instanceof Error ? err.message : String(err),
+    );
+  });
 
   // Determine port
   const portEnv = env['WORKRAIL_TRIGGER_PORT'];
