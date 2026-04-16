@@ -64,6 +64,34 @@ ReadRepo(repo: "ios", path: "Sources/Messaging/ZIMGallery.swift")
 
 ---
 
+### Long-term vision: WorkTrain as a general engine, domain packs as configuration (Apr 15, 2026)
+
+WorkTrain is not just a coding tool. The underlying engine -- session management, workflow enforcement, daemon, agent loop, knowledge graph, context bundle assembly -- is domain-agnostic. What makes it a "coding tool" today is entirely configuration: the workflows, the graph schema, the context bundle queries, the trigger definitions.
+
+**Domain packs** are the abstraction that makes this general:
+
+A domain pack is a self-contained configuration bundle that specializes WorkTrain for a specific problem domain:
+- a set of workflows (the step structure and agent instructions for that domain)
+- a knowledge graph schema (the node and edge types relevant to that domain)
+- context bundle query definitions (what "give me everything relevant to X" means in that domain)
+- trigger definitions (what events kick off work in that domain)
+- a daemon soul template (default agent persona and principles for that domain)
+
+**Examples of domain packs:**
+- `worktrain-coding` -- software engineering (the current default)
+- `worktrain-research` -- literature review, synthesis, citation tracking
+- `worktrain-creative` -- narrative generation, continuity tracking, style enforcement
+- `worktrain-ops` -- incident response, runbook execution, alert-to-action
+- `worktrain-data` -- pipeline validation, schema monitoring, anomaly investigation
+
+**The core engine is shared across all of them.** A domain pack author writes workflows, a graph schema, and context bundle queries -- they don't reimplement session management, token protocols, daemon loops, or the console.
+
+**Why this matters for WorkTrain's positioning:** most autonomous agent platforms are either too generic (the user has to build everything) or too specific (locked to one use case). Domain packs give WorkTrain a middle path: powerful enough to be opinionated about engineering workflows today, open enough to run any structured agentic domain tomorrow. New domains get the session durability, enforcement, observability, and knowledge graph for free.
+
+**What to build first:** nothing new for now. The architecture already supports this -- the domain pack concept is latent in the current design. The right time to make it explicit is when a second domain (creative writing, ops, research) is ready to be added. At that point, extract the coding-specific pieces into `worktrain-coding` and establish the domain pack contract.
+
+---
+
 ### Core architectural principle: WorkRail drives itself
 
 **The daemon doesn't bypass WorkRail -- it IS WorkRail.**
