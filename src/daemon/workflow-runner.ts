@@ -182,6 +182,16 @@ export interface WorkflowRunSuccess {
   readonly _tag: 'success';
   readonly workflowId: string;
   readonly stopReason: string;
+  /**
+   * The notesMarkdown from the last continue_workflow call (the final step's notes).
+   * Populated when the agent calls continue_workflow with output.notesMarkdown on the
+   * completing step. Undefined if the agent did not provide notes on the final step.
+   *
+   * WHY this field exists: the daemon's trigger layer reads this to extract the
+   * structured handoff artifact (commitType, prTitle, filesChanged, etc.) and run
+   * git commit + gh pr create as scripts. See src/trigger/delivery-action.ts.
+   */
+  readonly lastStepNotes?: string;
 }
 
 /** Failed workflow run (tool error, agent error, engine error, etc.). */
@@ -719,7 +729,7 @@ function makeContinueWorkflowTool(
   sessionId: string,
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
-  onComplete: (notes: string) => void,
+  onComplete: (notes: string | undefined) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -762,7 +772,9 @@ function makeContinueWorkflowTool(
       }
 
       if (out.isComplete) {
-        onComplete('Workflow session complete.');
+        // Pass the agent's notes from this final step to onComplete so the trigger
+        // layer can extract the structured handoff artifact for delivery.
+        onComplete(params.notesMarkdown as string | undefined);
         return {
           content: [{ type: 'text', text: 'Workflow complete. All steps have been executed.' }],
           details: out,
@@ -1076,6 +1088,9 @@ export async function runWorkflow(
   // tool execution is sequential (toolExecution: 'sequential').
   let isComplete = false;
   let pendingSteerText: string | null = null;
+  // lastStepNotes is populated by onComplete when the agent's final continue_workflow
+  // call includes output.notesMarkdown. Used by the trigger layer for delivery (git commit/PR).
+  let lastStepNotes: string | undefined;
 
   const onAdvance = (stepText: string, _continueToken: string): void => {
     pendingSteerText = stepText;
@@ -1083,8 +1098,9 @@ export async function runWorkflow(
     daemonRegistry?.heartbeat(sessionId);
   };
 
-  const onComplete = (_notes: string): void => {
+  const onComplete = (notes: string | undefined): void => {
     isComplete = true;
+    lastStepNotes = notes;
   };
 
   // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
@@ -1341,5 +1357,6 @@ export async function runWorkflow(
     _tag: 'success',
     workflowId: trigger.workflowId,
     stopReason,
+    ...(lastStepNotes !== undefined ? { lastStepNotes } : {}),
   };
 }
