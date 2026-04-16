@@ -89,6 +89,7 @@ interface ParsedTriggerRaw {
   contextMapping?: { [key: string]: string };
   goalTemplate?: string;
   referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
+  concurrencyMode?: string; // validated as 'serial' | 'parallel' at assemble time
   agentConfig?: { model?: string };
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
 }
@@ -372,14 +373,15 @@ function parseTriggersYaml(
  */
 function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string): void {
   switch (key) {
-    case 'id':            trigger.id = value; break;
-    case 'provider':      trigger.provider = value; break;
-    case 'workflowId':    trigger.workflowId = value; break;
-    case 'workspacePath': trigger.workspacePath = value; break;
-    case 'goal':          trigger.goal = value; break;
-    case 'hmacSecret':    trigger.hmacSecret = value; break;
-    case 'goalTemplate':  trigger.goalTemplate = value; break;
-    case 'referenceUrls': trigger.referenceUrls = value; break;
+    case 'id':               trigger.id = value; break;
+    case 'provider':         trigger.provider = value; break;
+    case 'workflowId':       trigger.workflowId = value; break;
+    case 'workspacePath':    trigger.workspacePath = value; break;
+    case 'goal':             trigger.goal = value; break;
+    case 'hmacSecret':       trigger.hmacSecret = value; break;
+    case 'goalTemplate':     trigger.goalTemplate = value; break;
+    case 'referenceUrls':    trigger.referenceUrls = value; break;
+    case 'concurrencyMode':  trigger.concurrencyMode = value; break;
     // contextMapping, agentConfig, onComplete handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -490,6 +492,20 @@ function validateAndResolveTrigger(
     ? { model: raw.agentConfig.model.trim() }
     : undefined;
 
+  // concurrencyMode: validate and default to 'serial' at parse time (not at use time).
+  // Why: the default must be explicit in the TriggerDefinition so the router never
+  // needs a runtime fallback. See trigger-router.ts queue.enqueue() for the product
+  // decision this protects.
+  const rawConcurrencyMode = raw.concurrencyMode?.trim();
+  if (rawConcurrencyMode !== undefined && rawConcurrencyMode !== 'serial' && rawConcurrencyMode !== 'parallel') {
+    return err({
+      kind: 'missing_field',
+      field: `concurrencyMode (invalid value: "${rawConcurrencyMode}"; must be "serial" or "parallel")`,
+      triggerId: rawId,
+    });
+  }
+  const concurrencyMode: 'serial' | 'parallel' = rawConcurrencyMode === 'parallel' ? 'parallel' : 'serial';
+
   // onComplete: emit load-time warning for unsupported runOn values.
   // Why: runOn !== 'success' is parsed and stored but NOT executed in the MVP.
   // The warning ensures users know the field is not active yet.
@@ -518,6 +534,7 @@ function validateAndResolveTrigger(
     workflowId: raw.workflowId!.trim(),
     workspacePath: raw.workspacePath!.trim(),
     goal: raw.goal!.trim(),
+    concurrencyMode,
     ...(hmacSecret !== undefined ? { hmacSecret } : {}),
     ...(raw.contextMapping !== undefined
       ? { contextMapping: assembleContextMapping(raw.contextMapping) }

@@ -117,6 +117,24 @@ export interface TriggerDefinition {
   };
 
   /**
+   * Concurrency mode for this trigger.
+   *
+   * - 'serial' (default): concurrent webhook fires for this trigger are serialized via
+   *   KeyedAsyncQueue. Only one run executes at a time per trigger. This is the safe
+   *   default -- it prevents token corruption when two webhooks fire concurrently.
+   * - 'parallel': each webhook fire gets its own queue slot (unique key per invocation).
+   *   Use only when concurrent runs for this trigger are intentional and safe.
+   *
+   * This field is always present after parse (never undefined). The default 'serial' is
+   * applied at parse time in trigger-store.ts, not at use time.
+   *
+   * In YAML:
+   *   concurrencyMode: serial    # default, may be omitted
+   *   concurrencyMode: parallel  # opt-in to concurrent execution
+   */
+  readonly concurrencyMode: 'serial' | 'parallel';
+
+  /**
    * Completion hook configuration (parsed but NOT executed in MVP).
    * Emits a load-time warning for runOn !== 'success'.
    *

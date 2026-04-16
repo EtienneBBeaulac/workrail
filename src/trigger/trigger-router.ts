@@ -287,9 +287,19 @@ export class TriggerRouter {
       ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
     };
 
-    // Enqueue asynchronously -- serialize per triggerId to prevent token corruption
-    // when two webhooks fire concurrently for the same trigger.
-    void this.queue.enqueue(trigger.id, async () => {
+    // Enqueue asynchronously.
+    // Queue key strategy:
+    // - 'serial' (default): use trigger.id as the key so concurrent webhook fires for
+    //   the same trigger are serialized. serial-per-trigger is intentional for MVP --
+    //   it prevents token corruption when two webhooks fire for the same trigger
+    //   concurrently. This is the safe default and should not be changed without
+    //   understanding the concurrency invariants in the agent session layer.
+    // - 'parallel': use a unique key per invocation so each fire gets its own queue
+    //   slot. Use only when concurrent runs for this trigger are intentional and safe.
+    const queueKey = trigger.concurrencyMode === 'parallel'
+      ? `${trigger.id}:${crypto.randomUUID()}`
+      : trigger.id;
+    void this.queue.enqueue(queueKey, async () => {
       const result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
       if (result._tag === 'success') {
         console.log(

@@ -37,6 +37,7 @@ function makeTrigger(overrides: Partial<TriggerDefinition> = {}): TriggerDefinit
     workflowId: 'coding-task-workflow-agentic',
     workspacePath: '/workspace',
     goal: 'Review this MR',
+    concurrencyMode: 'serial',
     ...overrides,
   };
 }
@@ -263,6 +264,35 @@ describe('TriggerRouter.route', () => {
       expect(calls[0]?.workflowId).toBe('mr-review-workflow-agentic');
       expect(calls[0]?.goal).toBe('Review this MR carefully');
       expect(calls[0]?.workspacePath).toBe('/my/workspace');
+    });
+  });
+
+  describe('concurrencyMode', () => {
+    it('serial trigger: two concurrent fires both execute (serialized via queue)', async () => {
+      const trigger = makeTrigger({ concurrencyMode: 'serial' });
+      const { fn, calls } = makeFakeRunWorkflow();
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+      router.route(makeEvent());
+      router.route(makeEvent());
+      // Wait for both to complete through the queue
+      await new Promise((r) => setTimeout(r, 30));
+
+      // Both fires should result in runWorkflow() being called
+      expect(calls).toHaveLength(2);
+    });
+
+    it('parallel trigger: two concurrent fires both execute immediately (different queue keys)', async () => {
+      const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+      const { fn, calls } = makeFakeRunWorkflow();
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+      router.route(makeEvent());
+      router.route(makeEvent());
+      await new Promise((r) => setTimeout(r, 30));
+
+      // Both fires should result in runWorkflow() being called
+      expect(calls).toHaveLength(2);
     });
   });
 });
