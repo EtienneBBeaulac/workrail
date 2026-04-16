@@ -40,6 +40,7 @@ import {
   executeStartCommand,
   executeCleanupCommand,
   executeMigrateCommand,
+  executeVersionCommand,
 } from './cli/commands/index.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -308,6 +309,19 @@ program
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+  });
+
+program
+  .command('version')
+  .description('Print the WorkRail version')
+  .action(() => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pkg = require('../package.json') as { version: string };
+    const result = executeVersionCommand({
+      getVersion: () => pkg.version,
+      print: (msg) => console.log(msg),
+    });
+    interpretCliResultWithoutDI(result);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════

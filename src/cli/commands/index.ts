@@ -8,6 +8,7 @@ export { executeListCommand, type ListCommandDeps, type ListCommandOptions } fro
 export { executeValidateCommand, type ValidateCommandDeps } from './validate.js';
 export { executeStartCommand, type StartCommandDeps, type RpcServer } from './start.js';
 export { executeCleanupCommand, type CleanupCommandDeps, type CleanupCommandOptions } from './cleanup.js';
+export { executeVersionCommand, type VersionCommandDeps } from './version.js';
 export {
   executeMigrateCommand,
   migrateWorkflow,
