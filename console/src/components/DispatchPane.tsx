@@ -16,7 +16,6 @@ import { useState, useEffect, useRef } from 'react';
 import { BracketBadge } from './BracketBadge';
 import { MonoLabel } from './MonoLabel';
 import { useWorkflowList, useTriggerList, dispatchWorkflow } from '../api/hooks';
-import { formatRelativeTime } from '../utils/time';
 
 // ---------------------------------------------------------------------------
 // MRU: most-recently-used workflow (persisted across sessions)
