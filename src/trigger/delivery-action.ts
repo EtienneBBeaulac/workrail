@@ -5,7 +5,7 @@
  * to commit the agent's work and optionally open a PR.
  *
  * Design decisions:
- * - Scripts over agent (backlog.md): all delivery runs as child_process.exec calls.
+ * - Scripts over agent (backlog.md): all delivery runs as child_process.execFile calls.
  *   The daemon reads the agent's structured handoff note and runs git/gh commands itself --
  *   never delegates to the LLM.
  * - parseHandoffArtifact() is pure (no I/O) -- testable in isolation.
@@ -14,8 +14,17 @@
  *   WorkflowRunSuccess.
  * - filesChanged empty = skip (no git add -A fallback -- safety invariant).
  * - autoCommit/autoOpenPR default to false; flags.autoCommit !== true gates all delivery.
+ * - ExecFn uses (file, args[]) instead of a shell string to prevent shell injection.
+ *   User-controlled content (prBody, prTitle, file paths) never passes through /bin/sh.
+ * - prBody is written to a temp file and passed via --body-file to avoid shell quoting
+ *   entirely. The temp file is deleted in a finally block.
+ *   Known limitation: temp file is NOT deleted on SIGKILL (OS cleans tmpdir on reboot).
  */
 
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 
@@ -82,10 +91,19 @@ export type DeliveryResult =
 
 /**
  * Injectable exec function for testability.
- * Matches the signature of promisify(exec) but is fakeable in tests.
+ *
+ * Matches the signature of promisify(execFile): takes a binary path and an args array
+ * rather than a shell command string. This makes shell injection impossible -- user-controlled
+ * content (commit messages, PR titles, file paths) is passed as discrete arguments and
+ * is never interpolated into a shell string.
+ *
+ * WHY args array, not shell string: child_process.execFile() does NOT invoke /bin/sh.
+ * Backticks, $(), and other shell metacharacters in the args are passed literally to the
+ * subprocess. There is no shell expansion.
  */
 export type ExecFn = (
-  command: string,
+  file: string,
+  args: string[],
   options: { cwd: string; timeout: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
@@ -124,16 +142,23 @@ export function parseHandoffArtifact(notes: string): Result<HandoffArtifact, str
     return err('notes is empty');
   }
 
-  // Strategy 1: JSON fenced block
-  const jsonBlockMatch = notes.match(/```json\s*\n([\s\S]*?)\n```/);
-  if (jsonBlockMatch && jsonBlockMatch[1]) {
+  // Strategy 1: JSON fenced blocks (try ALL blocks before falling through to line-scan)
+  //
+  // WHY matchAll instead of match: the notes may contain multiple ```json blocks (e.g.
+  // one for context and one for the handoff artifact). If the first block parses as valid
+  // JSON but fails assembleArtifact validation (missing required fields), we must try the
+  // remaining blocks before giving up. Using match() would stop at the first block.
+  const jsonBlockRe = /```json\s*\n([\s\S]*?)\n```/g;
+  for (const blockMatch of notes.matchAll(jsonBlockRe)) {
+    const blockContent = blockMatch[1];
+    if (!blockContent) continue;
     try {
-      const parsed = JSON.parse(jsonBlockMatch[1]) as Record<string, unknown>;
+      const parsed = JSON.parse(blockContent) as Record<string, unknown>;
       const artifact = assembleArtifact(parsed);
-      if (artifact.kind === 'err') return artifact;
-      return ok(artifact.value);
+      if (artifact.kind === 'ok') return ok(artifact.value);
+      // assembleArtifact failed (missing required fields) -- try next block
     } catch {
-      // JSON parse failed -- fall through to line-scan
+      // JSON parse failed -- try next block
     }
   }
 
@@ -259,7 +284,7 @@ function assembleArtifact(raw: Record<string, unknown>): Result<HandoffArtifact,
  * @param artifact - The parsed handoff artifact from the agent's notes
  * @param workspacePath - Absolute path to use as the git working directory (cwd)
  * @param flags - autoCommit and autoOpenPR flags from the trigger definition
- * @param execFn - Injectable exec function (use promisify(exec) in production; fake in tests)
+ * @param execFn - Injectable exec function (use promisify(execFile) in production; fake in tests)
  */
 export async function runDelivery(
   artifact: HandoffArtifact,
@@ -288,17 +313,23 @@ export async function runDelivery(
     : `${artifact.commitType}(${artifact.commitScope}): ${artifact.commitSubject}`;
 
   // Stage and commit the specific files from filesChanged.
-  // WHY quote each file: handles paths with spaces.
-  // WHY not git add -A: only stage files the agent declares it changed.
-  const quotedFiles = artifact.filesChanged.map(f => `"${f.replace(/"/g, '\\"')}"`).join(' ');
-  const commitCommand = `git add ${quotedFiles} && git commit -m "${commitMessage.replace(/"/g, '\\"')}"`;
-
+  //
+  // WHY two separate execFile calls instead of one "git add && git commit" shell string:
+  // execFile does NOT invoke /bin/sh -- it passes args directly to the subprocess.
+  // Shell metacharacters (&&, ;, backticks, $()) in args are passed literally and have
+  // no effect. Chaining commands requires two calls.
+  //
+  // WHY not git add -A: only stage files the agent declares it changed (safety invariant).
+  // Passing files as individual args handles paths with spaces -- no quoting needed.
   let commitStdout: string;
   let commitStderr: string;
   try {
-    const result = await execFn(commitCommand, { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
-    commitStdout = result.stdout;
-    commitStderr = result.stderr;
+    // Step 1: git add <file1> <file2> ...
+    await execFn('git', ['add', ...artifact.filesChanged], { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
+    // Step 2: git commit -m <message>
+    const commitResult = await execFn('git', ['commit', '-m', commitMessage], { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
+    commitStdout = commitResult.stdout;
+    commitStderr = commitResult.stderr;
   } catch (e: unknown) {
     const details = formatExecError(e);
     return { _tag: 'error', phase: 'commit', details };
@@ -314,20 +345,37 @@ export async function runDelivery(
   }
 
   // Open PR via gh pr create.
-  // WHY --no-draft: the agent's workflow is complete; a draft PR would be unexpected.
-  // Escape prTitle and prBody for shell safety.
-  const escapedTitle = artifact.prTitle.replace(/"/g, '\\"');
-  const escapedBody = artifact.prBody.replace(/"/g, '\\"');
-  const prCommand = `gh pr create --title "${escapedTitle}" --body "${escapedBody}"`;
+  //
+  // WHY --body-file instead of --body: prBody is arbitrary markdown that may contain
+  // backticks, $(), newlines, and other characters that are unsafe in shell arguments.
+  // Writing to a temp file sidesteps shell quoting entirely -- the file content is passed
+  // to gh verbatim.
+  //
+  // The temp file is deleted in a finally block. Known limitation: SIGKILL prevents
+  // finally from running, but OS temp dirs are cleaned on reboot.
+  const tmpDir = os.tmpdir();
+  const tmpFile = path.join(tmpDir, `workrail-pr-body-${crypto.randomUUID()}.md`);
 
   let prStdout: string;
   try {
-    const prResult = await execFn(prCommand, { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
-    prStdout = prResult.stdout;
-  } catch (e: unknown) {
-    // Commit already succeeded; PR failed. Log clearly so operator knows.
-    const details = `commit succeeded (sha: ${sha}) but PR creation failed: ${formatExecError(e)}`;
-    return { _tag: 'error', phase: 'pr', details };
+    await fs.writeFile(tmpFile, artifact.prBody, 'utf8');
+    try {
+      const prResult = await execFn(
+        'gh',
+        ['pr', 'create', '--title', artifact.prTitle, '--body-file', tmpFile],
+        { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
+      );
+      prStdout = prResult.stdout;
+    } catch (e: unknown) {
+      // Commit already succeeded; PR failed. Log clearly so operator knows.
+      const details = `commit succeeded (sha: ${sha}) but PR creation failed: ${formatExecError(e)}`;
+      return { _tag: 'error', phase: 'pr', details };
+    }
+  } finally {
+    // Always delete the temp file, even if gh failed or threw.
+    await fs.unlink(tmpFile).catch(() => {
+      // Ignore unlink errors -- the file may already be gone or tmpdir may be read-only.
+    });
   }
 
   // Extract PR URL from gh output (typically the last line)

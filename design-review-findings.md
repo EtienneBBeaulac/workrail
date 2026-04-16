@@ -1,6 +1,6 @@
-# Design Review Findings: WorkRail Auto Task Input MVP
+# Design Review Findings: Merge PRs #397, #403, #392
 
-**Date:** 2026-04-14
+**Date:** 2026-04-15
 **Status:** Ready for main-agent
 
 ---
@@ -9,10 +9,9 @@
 
 | Tradeoff | Status | Condition for Failure |
 |---|---|---|
-| TriggerRouter has 2 responsibilities | Acceptable | Only fails if class grows to 5+ divergent methods |
-| mountConsoleRoutes accepts full TriggerRouter | Acceptable | Only fails if console-routes tests mock TriggerRouter (none exist) |
-| WorkflowTrigger extended with optional fields | Acceptable | Only fails if tests assert exact shape (none do) |
-| onComplete warning-only | Acceptable | Correctly matches task spec |
+| Reactive conflict handling for #403/#392 | Acceptable | Detected via re-check of `--json mergeable` before each merge |
+| Manual conflict resolution in workflow-runner.ts | Acceptable | Verified by grepping for key identifiers post-rebase |
+| force-with-lease push on rebased branch | Acceptable | Fails safely if someone else pushed to the branch |
 
 All tradeoffs pass review.
 
@@ -22,19 +21,16 @@ All tradeoffs pass review.
 
 | Failure Mode | Design Coverage | Risk |
 |---|---|---|
-| Missing express.json() for POST route | Use inline middleware on POST route only | Low |
-| Null router in console-routes returning 500 | Explicit guard returning 503 | Low |
-| YAML parser indent off-by-one for agentConfig | Copy exact pattern from contextMapping block (trigger-store.ts:234-266) | Medium |
-| goalTemplate partial interpolation | Short-circuit on first missing token, fall back to static goal | Low |
-| sessionId not available at dispatch time | Return `{ status: 'dispatched' }` -- ORANGE finding below | ORANGE |
+| Rebase silently drops timeout logic | Grep for `sessionTimeoutMs` or `maxTurns` post-rebase | Medium |
+| Rebase silently drops concurrencyMode changes | Grep for `concurrencyMode` post-rebase | Medium |
+| #403/#392 conflict after #397 merges | Re-check `--json mergeable` before each merge | Low |
+| force-with-lease rejected (remote branch updated) | Stop and investigate; do not force | Low |
 
 ---
 
 ## Runner-Up / Simpler Alternative Review
 
-- Runner-up (AutoDispatcher): Nothing worth borrowing except method naming -- use `listTriggers()` instead of `getTriggers()`.
-- Simpler variant: No meaningful simplification available without dropping required endpoints.
-- referenceUrls YAML: Narrow parser doesn't support YAML sequences. Parse as space-separated scalar, split on whitespace at parse time.
+No runner-up. The rebase + squash merge approach is the only viable path. Attempting to merge CONFLICTING #397 without rebasing would fail at GitHub's merge gate.
 
 ---
 
@@ -42,52 +38,35 @@ All tradeoffs pass review.
 
 | Principle | Status | Notes |
 |---|---|---|
-| Immutability by default | Satisfied | All new fields readonly |
-| Errors are data | Satisfied | JSON errors from dispatch endpoint, Result chain for YAML |
-| Make illegal states unrepresentable | Satisfied | onComplete.runOn is literal union |
-| Validate at boundaries | Satisfied | YAML is boundary; agentConfig/onComplete validated at load time |
-| YAGNI | Satisfied | referenceUrls simplified, onComplete execution deferred |
-| Document why | To implement | Comments for onComplete warning and referenceUrls limitation |
+| NEVER push directly to main | Satisfied | Using `gh pr merge --squash` |
+| Double-check before destructive actions | Satisfied | Checking mergeability before each step |
+| Surface information, don't hide it | Satisfied | Reporting merge results and any skips |
+| Errors are data | Satisfied | Stopping and reporting on any failure |
 
 ---
 
 ## Findings
 
-### ORANGE: sessionId return from dispatch endpoint
+### YELLOW: Post-rebase verification required
 
-The task spec says POST /api/v2/auto/dispatch should return `{ sessionId: string }`. But `runWorkflow()` runs to completion asynchronously (up to 30 min). The WorkRail session ID is only assigned deep in the agent loop, not at dispatch time.
+After rebasing `fix/gap-8-session-timeout`, the file `src/daemon/workflow-runner.ts` must be manually verified to contain both sides of the resolved conflict. Git's auto-merge may silently drop one side.
 
-**Recommended resolution for MVP:** Return `{ status: 'dispatched', workflowId: string }` and add a code comment noting that session tracking is available via `GET /api/v2/sessions` once the daemon starts. This matches existing webhook route behavior (`{ status: 'accepted', triggerId }`).
-
-**Console impact:** DispatchPane success state shows "Dispatched -- check Queue pane" instead of a session link.
+**Mitigation:** Grep for `sessionTimeoutMs` (GAP-8 side) and `concurrencyMode` (main side) after rebase completes.
 
 ---
 
-### YELLOW: referenceUrls YAML parsing limitation
+### YELLOW: Mergeability re-verification required between PRs
 
-The narrow YAML parser doesn't support YAML sequences (`- item` lists). Parse `referenceUrls` as a space-separated scalar string and split on whitespace at parse time. Document in a code comment.
-
----
-
-### YELLOW: console-routes read-only comment
-
-Update from "All routes are GET-only (invariant: Console is read-only)" to reflect the new POST endpoint with an explanation.
+After #397 merges, #403 and #392 both touch `workflow-runner.ts` and their MERGEABLE status is stale. Re-check before each merge.
 
 ---
 
 ## Recommended Revisions
 
-1. **Dispatch return type**: `{ status: 'dispatched', workflowId: string }` instead of `{ sessionId: string }`.
-2. **referenceUrls**: Parse as space-separated scalar, split on whitespace.
-3. **TriggerRouter method name**: Use `listTriggers()` not `getTriggers()`.
-4. **express.json()**: Inline middleware on POST route only (not app-wide).
-5. **Update console-routes comment**: Reflect the new POST endpoint.
-6. **onComplete warning**: Check `runOn !== 'success'` (covers both 'failure' and 'always').
+None -- the design is correct as specified.
 
 ---
 
 ## Residual Concerns
 
-- The console AUTO tab has no ViewModel layer for MVP. Acceptable -- panes own their fetch hooks directly.
-- Fire-and-forget dispatch means no correlation between a dispatch call and the resulting session ID without polling. Known limitation for MVP.
-- YAML sub-object parsing for `onComplete` and `agentConfig` requires careful indent-level handling. Use trigger-store.ts:234-266 as the direct template.
+- If #403 or #392 develop conflicts after #397 merges, the same rebase procedure applies. This is unlikely since the PRs touch different sections of `workflow-runner.ts` (GAP-8 adds timeout constants; GAP-2 adds session recap injection; #403 adds soul template support).

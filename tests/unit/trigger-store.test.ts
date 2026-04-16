@@ -106,6 +106,27 @@ triggers:
     concurrencyMode: auto
 `;
 
+const WITH_AUTO_COMMIT_TRUE_YAML = `
+triggers:
+  - id: auto-commit-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoCommit: "true"
+`;
+
+const WITH_AUTO_OPEN_PR_TRUE_YAML = `
+triggers:
+  - id: auto-pr-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoCommit: "true"
+    autoOpenPR: "true"
+`;
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -189,6 +210,30 @@ describe('loadTriggerConfig', () => {
       expect(result.kind).toBe('ok');
       if (result.kind !== 'ok') return;
       expect(result.value.triggers[0]?.concurrencyMode).toBe('parallel');
+    });
+
+    it('parses autoCommit: "true" as boolean true', () => {
+      // YAML scalars are strings; the store coerces the string 'true' to boolean true.
+      const result = loadTriggerConfig(WITH_AUTO_COMMIT_TRUE_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers[0]?.autoCommit).toBe(true);
+    });
+
+    it('defaults autoCommit to undefined (falsy) when absent from YAML', () => {
+      // When autoCommit is absent, the field is omitted from TriggerDefinition entirely.
+      // The delivery gate checks flags.autoCommit !== true, so undefined is safe (skipped).
+      const result = loadTriggerConfig(MINIMAL_TRIGGER_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers[0]?.autoCommit).toBeUndefined();
+    });
+
+    it('parses autoOpenPR: "true" as boolean true', () => {
+      const result = loadTriggerConfig(WITH_AUTO_OPEN_PR_TRUE_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      expect(result.value.triggers[0]?.autoOpenPR).toBe(true);
     });
   });
 

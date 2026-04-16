@@ -23,7 +23,7 @@
  */
 
 import * as crypto from 'node:crypto';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
 import type { V2ToolContext } from '../mcp/types.js';
@@ -37,7 +37,14 @@ import type {
 import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecFn } from './delivery-action.js';
 
-const execAsync = promisify(exec) as ExecFn;
+/**
+ * Default production exec function: promisify(execFile).
+ *
+ * WHY execFile over exec: execFile does NOT invoke /bin/sh. User-controlled content
+ * (commit messages, PR titles, file paths) is passed as discrete args and is never
+ * interpolated into a shell string. Shell metacharacters have no effect.
+ */
+const execFileAsync = promisify(execFile) as ExecFn;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -257,7 +264,7 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
  * @param triggerId - Used in log messages for traceability
  * @param trigger - Source of workspacePath, autoCommit, autoOpenPR flags
  * @param result - WorkflowRunResult; only called when _tag === 'success'
- * @param execFn - Injectable exec function (production: execAsync; tests: fake)
+ * @param execFn - Injectable exec function (production: execFileAsync; tests: fake)
  */
 async function maybeRunDelivery(
   triggerId: string,
@@ -328,13 +335,22 @@ async function maybeRunDelivery(
 
 export class TriggerRouter {
   private readonly queue = new KeyedAsyncQueue();
+  private readonly execFn: ExecFn;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
     private readonly ctx: V2ToolContext,
     private readonly apiKey: string,
     private readonly runWorkflowFn: RunWorkflowFn,
-  ) {}
+    /**
+     * Injectable exec function for post-workflow delivery.
+     * Defaults to promisify(execFile) in production.
+     * Override in tests to use a fake without calling child_process.
+     */
+    execFn?: ExecFn,
+  ) {
+    this.execFn = execFn ?? execFileAsync;
+  }
 
   /**
    * Route an incoming webhook event.
@@ -460,7 +476,7 @@ export class TriggerRouter {
       }
       // Post-workflow delivery: runs after the workflow result is logged.
       // Best-effort -- errors are logged and discarded, never change the workflow result.
-      await maybeRunDelivery(trigger.id, trigger, result, execAsync);
+      await maybeRunDelivery(trigger.id, trigger, result, this.execFn);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };

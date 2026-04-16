@@ -76,7 +76,9 @@ Some notes here.
       }
     });
 
-    it('rejects JSON block missing required field commitType', () => {
+    it('returns err when all JSON blocks fail validation and line-scan finds nothing', () => {
+      // With matchAll: the block fails assembleArtifact (missing commitType),
+      // falls through to line-scan which also finds no key:value lines -- so err is returned.
       const notes = `
 \`\`\`json
 {
@@ -90,12 +92,11 @@ Some notes here.
 `;
       const result = parseHandoffArtifact(notes);
       expect(result.kind).toBe('err');
-      if (result.kind === 'err') {
-        expect(result.error).toContain('commitType');
-      }
     });
 
-    it('rejects JSON block with empty filesChanged', () => {
+    it('returns err when all JSON blocks have empty filesChanged and line-scan finds nothing', () => {
+      // With matchAll: the block fails assembleArtifact (empty filesChanged),
+      // falls through to line-scan which also finds no key:value lines.
       const notes = `
 \`\`\`json
 {
@@ -110,13 +111,10 @@ Some notes here.
 `;
       const result = parseHandoffArtifact(notes);
       expect(result.kind).toBe('err');
-      if (result.kind === 'err') {
-        expect(result.error).toContain('filesChanged is empty');
-      }
     });
 
-    it('falls through to line-scan if JSON is invalid', () => {
-      // Invalid JSON in the block -- should fall through to line-scan
+    it('falls through to line-scan if JSON is invalid and succeeds', () => {
+      // Invalid JSON in the block -- should fall through to line-scan and succeed.
       const notes = `
 \`\`\`json
 { invalid json here
@@ -130,9 +128,42 @@ Some notes here.
 - filesChanged: docs/README.md
 `;
       const result = parseHandoffArtifact(notes);
-      // Should succeed via line-scan (filesChanged: docs/README.md)
-      // Note: line-scan may parse this -- accept either outcome
-      expect(result.kind).toBeDefined();
+      // Must succeed via line-scan after the invalid JSON block is skipped
+      expect(result.kind).toBe('ok');
+      if (result.kind === 'ok') {
+        expect(result.value.commitType).toBe('chore');
+      }
+    });
+
+    it('tries second JSON block when first block is missing required fields', () => {
+      // First block is valid JSON but missing required fields.
+      // Second block is a complete handoff artifact. matchAll ensures both are tried.
+      const notes = `
+\`\`\`json
+{
+  "someOtherKey": "not a handoff artifact"
+}
+\`\`\`
+
+Some text in between.
+
+\`\`\`json
+{
+  "commitType": "fix",
+  "commitScope": "engine",
+  "commitSubject": "fix(engine): correct retry logic",
+  "prTitle": "fix(engine): correct retry logic",
+  "prBody": "## Summary\\n- Fixed retry\\n\\n## Test plan\\n- [ ] Tests pass",
+  "filesChanged": ["src/engine/retry.ts"]
+}
+\`\`\`
+`;
+      const result = parseHandoffArtifact(notes);
+      expect(result.kind).toBe('ok');
+      if (result.kind === 'ok') {
+        expect(result.value.commitType).toBe('fix');
+        expect(result.value.filesChanged).toEqual(['src/engine/retry.ts']);
+      }
     });
   });
 
@@ -203,9 +234,15 @@ describe('runDelivery', () => {
   });
 
   describe('commit-only (autoOpenPR: false)', () => {
-    it('runs git add + git commit and returns committed', async () => {
-      // git commit output typically contains "[main abc1234] message"
-      const exec = makeFakeExec('[main abc1234] feat(mcp): add auto-commit support\n 2 files changed', '');
+    it('runs git add + git commit as two separate calls and returns committed', async () => {
+      // Two calls: git add (empty output), then git commit (output with SHA).
+      // WHY two calls: execFile does not invoke /bin/sh, so && chaining is impossible.
+      const exec = vi.fn()
+        // Call 0: git add
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        // Call 1: git commit (output contains SHA)
+        .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): add auto-commit support\n 2 files changed', stderr: '' }) as ExecFn;
+
       const result = await runDelivery(
         makeArtifact(),
         '/workspace',
@@ -216,12 +253,24 @@ describe('runDelivery', () => {
       if (result._tag === 'committed') {
         expect(result.sha).toBe('abc1234');
       }
-      expect(exec).toHaveBeenCalledOnce();
-      const [cmd, opts] = (exec as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { cwd: string }];
-      expect(cmd).toContain('git add');
-      expect(cmd).toContain('git commit');
-      expect(cmd).toContain('feat(mcp): add auto-commit support');
-      expect(opts.cwd).toBe('/workspace');
+
+      // Must have been called exactly twice: git add, then git commit
+      expect(exec).toHaveBeenCalledTimes(2);
+
+      // Call 0: git add <files...>
+      const [addFile, addArgs, addOpts] = (exec as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[], { cwd: string }];
+      expect(addFile).toBe('git');
+      expect(addArgs[0]).toBe('add');
+      expect(addArgs).toContain('src/trigger/delivery-action.ts');
+      expect(addOpts.cwd).toBe('/workspace');
+
+      // Call 1: git commit -m <message>
+      const [commitFile, commitArgs, commitOpts] = (exec as ReturnType<typeof vi.fn>).mock.calls[1] as [string, string[], { cwd: string }];
+      expect(commitFile).toBe('git');
+      expect(commitArgs[0]).toBe('commit');
+      expect(commitArgs[1]).toBe('-m');
+      expect(commitArgs[2]).toContain('feat(mcp): add auto-commit support');
+      expect(commitOpts.cwd).toBe('/workspace');
     });
 
     it('returns error when git commit fails', async () => {
@@ -241,9 +290,15 @@ describe('runDelivery', () => {
   });
 
   describe('commit + PR (autoOpenPR: true)', () => {
-    it('runs git commit then gh pr create and returns pr_opened', async () => {
+    it('runs git add, git commit, then gh pr create with --body-file and returns pr_opened', async () => {
+      // Three calls: git add, git commit, gh pr create.
+      // prBody is written to a temp file; gh receives --body-file <path>.
       const exec = vi.fn()
+        // Call 0: git add
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        // Call 1: git commit
         .mockResolvedValueOnce({ stdout: '[main abc5678] feat(mcp): auto-commit\n 2 files changed', stderr: '' })
+        // Call 2: gh pr create
         .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/42\n', stderr: '' }) as ExecFn;
 
       const result = await runDelivery(
@@ -256,15 +311,29 @@ describe('runDelivery', () => {
       if (result._tag === 'pr_opened') {
         expect(result.url).toBe('https://github.com/owner/repo/pull/42');
       }
-      expect(exec).toHaveBeenCalledTimes(2);
-      const [prCmd] = (exec as ReturnType<typeof vi.fn>).mock.calls[1] as [string, unknown];
-      expect(prCmd).toContain('gh pr create');
-      expect(prCmd).toContain('--title');
+
+      // Must have been called exactly 3 times: add, commit, pr create
+      expect(exec).toHaveBeenCalledTimes(3);
+
+      // Call 2: gh pr create --title <title> --body-file <tmpfile>
+      const [prFile, prArgs] = (exec as ReturnType<typeof vi.fn>).mock.calls[2] as [string, string[]];
+      expect(prFile).toBe('gh');
+      expect(prArgs[0]).toBe('pr');
+      expect(prArgs[1]).toBe('create');
+      expect(prArgs[2]).toBe('--title');
+      expect(prArgs[3]).toBe('feat(mcp): add auto-commit support');
+      expect(prArgs[4]).toBe('--body-file');
+      expect(prArgs[5]).toContain('workrail-pr-body-');
+      expect(prArgs[5]).toMatch(/\.md$/);
     });
 
     it('returns error with phase: pr when commit succeeds but gh fails', async () => {
       const exec = vi.fn()
+        // Call 0: git add (success)
+        .mockResolvedValueOnce({ stdout: '', stderr: '' })
+        // Call 1: git commit (success)
         .mockResolvedValueOnce({ stdout: '[main abc9999] feat(mcp): auto-commit', stderr: '' })
+        // Call 2: gh pr create (fails)
         .mockRejectedValueOnce(Object.assign(new Error('gh: command not found'), { stdout: '', stderr: 'gh: command not found' })) as ExecFn;
 
       const result = await runDelivery(

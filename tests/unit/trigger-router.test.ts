@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
+import type { ExecFn } from '../../src/trigger/delivery-action.js';
 import type { TriggerDefinition, WebhookEvent } from '../../src/trigger/types.js';
 import { asTriggerId } from '../../src/trigger/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
@@ -65,17 +66,43 @@ function computeHmac(secret: string, rawBody: Buffer): string {
   return crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
 }
 
-function makeFakeRunWorkflow(result?: Partial<Parameters<RunWorkflowFn>[0]>): {
+function makeFakeRunWorkflow(lastStepNotes?: string): {
   fn: RunWorkflowFn;
   calls: Parameters<RunWorkflowFn>[0][];
 } {
   const calls: Parameters<RunWorkflowFn>[0][] = [];
   const fn: RunWorkflowFn = async (trigger) => {
     calls.push(trigger);
-    return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
+    return {
+      _tag: 'success',
+      workflowId: trigger.workflowId,
+      stopReason: 'stop',
+      ...(lastStepNotes !== undefined ? { lastStepNotes } : {}),
+    };
   };
   return { fn, calls };
 }
+
+/**
+ * A valid JSON handoff block that passes parseHandoffArtifact + assembleArtifact validation.
+ * Used to test the delivery wiring: maybeRunDelivery reaches execFn when autoCommit is true.
+ *
+ * Critical: must include all required fields and a non-empty filesChanged array.
+ * Missing any field causes maybeRunDelivery to warn and return without calling execFn.
+ */
+const VALID_HANDOFF_NOTES = `
+\`\`\`json
+{
+  "commitType": "feat",
+  "commitScope": "mcp",
+  "commitSubject": "feat(mcp): add auto-commit support",
+  "prTitle": "feat(mcp): add auto-commit support",
+  "prBody": "## Summary\\n- Added auto-commit\\n\\n## Test plan\\n- [ ] Tests pass",
+  "filesChanged": ["src/trigger/delivery-action.ts"],
+  "followUpTickets": []
+}
+\`\`\`
+`;
 
 // ---------------------------------------------------------------------------
 // TriggerRouter: HMAC validation
@@ -351,6 +378,49 @@ describe('TriggerRouter.route', () => {
       releaseAll();
       await new Promise<void>((r) => setImmediate(r));
       expect(inFlight()).toBe(0);
+    });
+  });
+
+  describe('delivery wiring (autoCommit)', () => {
+    it('calls execFn when trigger has autoCommit:true and workflow succeeds with lastStepNotes', async () => {
+      // Verifies end-to-end wiring: TriggerRouter.route() -> runWorkflow() ->
+      // maybeRunDelivery() -> execFn. Injectable execFn avoids forking real child processes.
+      //
+      // Critical: runWorkflowFn must return lastStepNotes with a valid JSON handoff block.
+      // Without lastStepNotes, maybeRunDelivery returns early (trigger-router.ts ~line 259).
+      const fakeExec: ExecFn = vi.fn().mockResolvedValue({ stdout: '[main abc1234] feat(mcp): auto-commit\n', stderr: '' });
+
+      const trigger = makeTrigger({ autoCommit: true });
+      const { fn } = makeFakeRunWorkflow(VALID_HANDOFF_NOTES);
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, fakeExec);
+
+      router.route(makeEvent());
+
+      // Wait for the async queue to process (runWorkflow + maybeRunDelivery)
+      await new Promise<void>((r) => setTimeout(r, 50));
+
+      // execFn must have been called at least once (git add is the first call)
+      expect(fakeExec).toHaveBeenCalled();
+
+      // Verify the first call is git add (file='git', args[0]='add')
+      const firstCall = (fakeExec as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string[], unknown];
+      expect(firstCall[0]).toBe('git');
+      expect(firstCall[1][0]).toBe('add');
+    });
+
+    it('does NOT call execFn when autoCommit is false', async () => {
+      // Delivery opt-in gate: autoCommit must be explicitly true.
+      const fakeExec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
+
+      const trigger = makeTrigger({ autoCommit: false });
+      const { fn } = makeFakeRunWorkflow(VALID_HANDOFF_NOTES);
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, fakeExec);
+
+      router.route(makeEvent());
+      await new Promise<void>((r) => setTimeout(r, 50));
+
+      // execFn must NOT be called -- autoCommit is false (opt-in semantics)
+      expect(fakeExec).not.toHaveBeenCalled();
     });
   });
 });
