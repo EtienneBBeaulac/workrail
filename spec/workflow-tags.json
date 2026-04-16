@@ -125,6 +125,7 @@
     "workflow-diagnose-environment": { "tags": ["investigation"] },
     "workflow-for-workflows": { "tags": ["authoring"] },
     "wr.discovery": { "tags": ["design", "investigation"] },
+    "classify-task-workflow": { "tags": ["routines", "coding"] },
     "test-artifact-loop-control": { "tags": ["coding"], "hidden": true },
     "test-session-persistence": { "tags": ["coding"], "hidden": true },
     "test-missing-context": { "tags": ["coding"], "hidden": true }

@@ -1,0 +1,62 @@
+{
+  "id": "classify-task-workflow",
+  "name": "Classify Task",
+  "version": "0.1.0",
+  "description": "Classifies a software task from the session goal into structured output variables used by coordinator scripts to decide which pipeline phases to run.",
+  "about": "## Classify Task Workflow\n\nThis is a fast, single-step classification utility. It reads the session goal and outputs structured variables that coordinator scripts use to decide which pipeline phases to run.\n\n### What it does\n\nGiven a task description, the agent classifies the work along seven dimensions and recommends an ordered pipeline of workflow IDs to execute.\n\n### When to use it\n\nUse this workflow at the start of a coordinator pipeline when you need to decide which downstream workflows to run. It is intentionally fast and cheap -- one LLM step, no subagents, no codebase reads.\n\n### What it produces\n\nA structured classification block in the step notes containing all seven output variables:\n- `taskComplexity` -- Small / Medium / Large\n- `riskLevel` -- Low / Medium / High\n- `hasUI` -- true / false\n- `touchesArchitecture` -- true / false\n- `taskType` -- feature / bug-fix / refactor / investigation / docs / chore\n- `affectedDomains` -- array of likely codebase areas\n- `recommendedPipeline` -- ordered array of workflow IDs\n\n### How to get good results\n\nProvide a specific, concrete task description as the session goal. The more specific the goal, the more accurate the classification. When the goal is ambiguous, the workflow defaults to conservative (higher complexity, more pipeline phases).",
+  "examples": [
+    "Classify: add real-time presence indicators to the messaging inbox UI",
+    "Classify: fix the race condition in the cache invalidation path",
+    "Classify: refactor the payment module to use Result types instead of exceptions",
+    "Classify: investigate why the build server fails on the integration test suite",
+    "Classify: update the onboarding docs to reflect the new CLI commands"
+  ],
+  "validatedAgainstSpecVersion": 3,
+  "recommendedPreferences": {
+    "recommendedAutonomy": "full_auto_never_stop",
+    "recommendedRiskPolicy": "aggressive"
+  },
+  "metaGuidance": [
+    "CONSERVATIVE DEFAULT: when in doubt, classify up -- higher complexity, more pipeline phases. It is safer to recommend an extra phase than to skip a critical one.",
+    "STRUCTURED OUTPUT REQUIRED: output must be a labeled structured block. Free-form prose does not satisfy this workflow's contract.",
+    "NO TOOLS NEEDED: classify from the goal text alone. Do not read files, run commands, or gather context. This workflow is intentionally cheap.",
+    "NO SUBAGENTS: do not delegate. The classification is a single reasoning pass by the main agent.",
+    "PIPELINE SELECTION LOGIC: use the provided decision rules in the step procedure. Do not invent new pipeline logic."
+  ],
+  "steps": [
+    {
+      "id": "classify-task",
+      "title": "Classify Task",
+      "promptBlocks": {
+        "goal": "Read the session goal and classify the software task into all seven required output variables. Produce a structured classification block that a coordinator script can parse reliably.",
+        "constraints": [
+          "Classify from goal text only. Do not read files, search the codebase, or gather context.",
+          "When any dimension is ambiguous, default to the more conservative value (higher complexity, higher risk, more pipeline phases).",
+          "All seven output variables are required. An empty or missing variable is a failure.",
+          "Output the classification block in the exact format shown in the procedure. Use the exact key names."
+        ],
+        "procedure": [
+          "1. Read the session goal carefully.",
+          "2. Classify each dimension using these rules:\n\n   **taskComplexity** (Small / Medium / Large)\n   - Small: isolated change, one component, clear path, low ambiguity (e.g. fix a typo, rename a symbol, update a config value)\n   - Medium: touches 2-4 components, moderate scope, some design decisions needed\n   - Large: cross-cutting change, architectural impact, high ambiguity, or significant new behavior\n   - Default: Medium when unsure\n\n   **riskLevel** (Low / Medium / High)\n   - Low: no user-visible behavior change, reversible, isolated\n   - Medium: user-visible change, moderate blast radius, or touches shared infrastructure\n   - High: data migration, payment/auth paths, production-critical infrastructure, irreversible changes\n   - Default: Medium when unsure\n\n   **hasUI** (true / false)\n   - true: task mentions UI, frontend, visual, screen, component, design, UX, CSS, layout, accessibility, animation, or any user-facing interface\n   - false: otherwise\n   - Default: false when unsure\n\n   **touchesArchitecture** (true / false)\n   - true: task introduces new abstractions, changes system boundaries, affects how components interact, changes APIs, or modifies data models in a non-trivial way\n   - false: otherwise (e.g. bug fix in existing logic, docs update, minor refactor within a component)\n   - Default: false when unsure, but set to true if taskComplexity is Large\n\n   **taskType** (feature / bug-fix / refactor / investigation / docs / chore)\n   - feature: new user-visible functionality\n   - bug-fix: fixing incorrect behavior\n   - refactor: restructuring existing code without changing observable behavior\n   - investigation: diagnosing or understanding a problem without implementing a fix\n   - docs: documentation changes only\n   - chore: tooling, CI, deps, build, internal cleanup with no user impact\n   - Default: feature when unsure\n\n   **affectedDomains** (array)\n   - Scan the goal text for known domain keywords and infer likely areas. Use these domain labels: daemon, trigger, console, mcp, schema, engine, workflows, docs, infra, api, auth, payments, mobile, web\n   - Include a domain if the goal text strongly implies it, even if not named explicitly\n   - Use an empty array only if no domains can be reasonably inferred\n\n   **recommendedPipeline** (array of workflow IDs, in execution order)\n   Apply these selection rules in order:\n   - If taskType = 'bug-fix': prepend 'bug-investigation.agentic.v2'\n   - If taskComplexity is Medium or Large, OR affectedDomains is unclear: include 'wr.discovery'\n   - If hasUI = true: include 'ui-ux-design-workflow'\n   - If touchesArchitecture = true OR riskLevel = High: include 'architecture-scalability-audit'\n   - If taskType is NOT 'investigation' AND taskType is NOT 'docs': include 'coding-task-workflow-agentic'\n   - If 'coding-task-workflow-agentic' is included: include 'mr-review-workflow.agentic.v2' after it\n   - If riskLevel = High: append 'production-readiness-audit' at the end\n   - Order: [bug-investigation?, wr.discovery?, ui-ux-design-workflow?, architecture-scalability-audit?, coding-task-workflow-agentic?, mr-review-workflow.agentic.v2?, production-readiness-audit?]",
+          "3. Output the classification block using this exact format:\n\n```\n## Task Classification\n\ntaskComplexity: <Small|Medium|Large>\nriskLevel: <Low|Medium|High>\nhasUI: <true|false>\ntouchesArchitecture: <true|false>\ntaskType: <feature|bug-fix|refactor|investigation|docs|chore>\naffectedDomains: [\"<domain1>\", \"<domain2>\"]\nrecommendedPipeline: [\"<workflow-id-1>\", \"<workflow-id-2>\"]\n```\n\nAfter the block, add 2-4 sentences of reasoning: why you chose the key values, and what made anything uncertain."
+        ],
+        "outputRequired": {
+          "taskComplexity": "One of: Small / Medium / Large",
+          "riskLevel": "One of: Low / Medium / High",
+          "hasUI": "true or false -- does this task touch any UI, frontend, or visual layer?",
+          "touchesArchitecture": "true or false -- does this introduce new abstractions, change system boundaries, or affect how components interact?",
+          "taskType": "One of: feature / bug-fix / refactor / investigation / docs / chore",
+          "affectedDomains": "Array of likely codebase areas (e.g. [\"daemon\", \"console\"]). Use [] only if none can be inferred.",
+          "recommendedPipeline": "Ordered array of workflow IDs selected using the pipeline selection rules in the procedure."
+        },
+        "verify": [
+          "All seven output variables are present in the classification block.",
+          "Each variable uses the exact key name specified (taskComplexity, riskLevel, hasUI, touchesArchitecture, taskType, affectedDomains, recommendedPipeline).",
+          "recommendedPipeline contains only valid workflow IDs from the available library.",
+          "If taskType is feature, bug-fix, or refactor, recommendedPipeline includes coding-task-workflow-agentic.",
+          "If riskLevel is High, production-readiness-audit is the last item in recommendedPipeline."
+        ]
+      }
+    }
+  ]
+}
