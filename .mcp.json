@@ -3,6 +3,14 @@
     "github": {
       "type": "http",
       "url": "https://api.githubcopilot.com/mcp/"
+    },
+    "workrail": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"],
+      "env": {
+        "WORKFLOW_STORAGE_PATH": "/Users/etienneb/.cg/dist/workflows"
+      }
     }
   }
 }
