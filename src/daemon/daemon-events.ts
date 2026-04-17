@@ -171,7 +171,7 @@ export class DaemonEventEmitter {
 
     await fs.mkdir(this._dir, { recursive: true });
 
-    const line = JSON.stringify({ ts: Date.now(), ...event }) + '\n';
+    const line = JSON.stringify({ ...event, ts: Date.now() }) + '\n';
     await fs.appendFile(filePath, line, 'utf8');
   }
 }

@@ -1304,6 +1304,7 @@ export async function runWorkflow(
   // no pending continuation). Return success without creating an Agent.
   if (firstStep.isComplete) {
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop' });
     daemonRegistry?.unregister(sessionId, 'completed');
     return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
   }
