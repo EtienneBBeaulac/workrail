@@ -313,6 +313,9 @@ jobs:
         continue-on-error: true
         run: npm run validate:authoring-staleness
 
+      - name: Validate authoring spec coverage (required scopes have active rules)
+        run: npm run validate:authoring-coverage
+
       - name: Summary
         if: success()
         run: |
