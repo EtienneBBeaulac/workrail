@@ -1,6 +1,6 @@
 {
   "id": "ui-ux-design-workflow",
-  "name": "UI/UX Design Workflow (v1 \u2022 Process-Enforced \u2022 Evidence-Driven)",
+  "name": "UI/UX Design Workflow",
   "version": "0.1.0",
   "description": "Design UI/UX from scratch with enforced process. Makes problem framing structurally required before solution proposals, forces exploration of multiple design directions before convergence, and applies reviewer families for information architecture, UX laws, accessibility, edge cases, and content. Output: a design spec concrete enough to implement or review.",
   "about": "## UI/UX Design Workflow\n\nThis workflow produces a design spec for a new feature, screen, component, or interaction. It is built around a single principle: problem framing must happen before any solutions are proposed. The workflow makes this structurally impossible to skip, which prevents the most common failure mode in AI-assisted design  -- going straight from \"I need a settings screen\" to a layout without ever asking who uses it or what they are trying to do.\n\n**What it does:**\nPhase 0 frames the problem by reading existing code patterns and asking only what tools cannot answer. Phase 1 generates 2-3 genuinely different design directions before any one is chosen. Phases 2-5 run parallel reviewer families  -- information architecture, UX laws (Hick's Law, Miller's Law, Fitts's Law, and others), accessibility (specific WCAG requirements, not just \"follow WCAG\"), edge cases (empty, error, loading, first-use), and content quality  -- then synthesize their findings, resolve contradictions, and write a spec only after all hard quality gates pass.\n\n**When to use it:**\n- You need to design a new screen, feature, or non-trivial component\n- You want explicit coverage of accessibility, edge states, and UX laws, not just a layout sketch\n- You need a spec concrete enough for an engineer to implement or a designer to review\n- Simple single-component changes also work through a lighter direct-spec path\n\n**What it produces:**\nA design spec with 8 sections: design decision, information architecture, interaction design, all element states, specific accessibility requirements, content copy, reviewer findings with citations, and open questions that still require human visual review.\n\n**How to get good results:**\nPoint the workflow to your codebase so it can read existing components and patterns. Provide the design system location if it is not in the repo. Share any known user pain points or research. The workflow will surface what it cannot determine on its own.",
@@ -24,7 +24,7 @@
   ],
   "metaGuidance": [
     "PROCESS IS THE VALUE: the biggest failure mode in AI-assisted design is skipping to solutions before understanding the problem. This workflow makes that structurally impossible. Do not shortcut Phase 0.",
-    "EVIDENCE OVER PLATITUDES: every finding must cite a specific element from the context packet. 'Consider reducing cognitive load' is not a finding. 'The settings panel has 14 options, violating Miller\u2019s Law (7\u00b12)' is a finding.",
+    "EVIDENCE OVER PLATITUDES: every finding must cite a specific element from the context packet. 'Consider reducing cognitive load' is not a finding. 'The settings panel has 14 options, violating Miller’s Law (7±2)' is a finding.",
     "SIMPLE CRITERIA: designComplexity=Simple is only valid for a single existing component with a minor change, no new user flows, no information architecture changes, and no new interaction patterns. If uncertain, classify upward.",
     "HONEST LIMITS: this workflow produces a text-based design spec. It cannot produce visual mockups, conduct usability testing, or verify visual quality. Say so explicitly in the handoff and flag what still needs human visual review.",
     "CONTEXT BLINDNESS: if the user has not provided design system, existing component patterns, or platform conventions, surface this gap in Phase 0 and ask. Do not silently design without this context.",
@@ -74,14 +74,14 @@
       "promptBlocks": {
         "goal": "Generate 2-3 genuinely different design directions before committing to any one of them.",
         "constraints": [
-          "Directions must be genuinely different \u2014 not variations of the same pattern with different labels.",
+          "Directions must be genuinely different — not variations of the same pattern with different labels.",
           "Each direction needs an information architecture sketch: how is content organized, what is the primary navigation path, what is the visual hierarchy?",
           "Do not select a direction in this phase. Exploration comes before convergence."
         ],
         "procedure": [
           "Generate Direction A: the most conventional approach that follows existing platform patterns and design system. Low risk, familiar to users.",
-          "Generate Direction B: an approach that prioritizes the primary user goal differently \u2014 different IA, different entry point, or different interaction model.",
-          "Generate Direction C (if designComplexity=Complex): a third direction that challenges the assumptions in A and B \u2014 a more radical rethinking of the problem.",
+          "Generate Direction B: an approach that prioritizes the primary user goal differently — different IA, different entry point, or different interaction model.",
+          "Generate Direction C (if designComplexity=Complex): a third direction that challenges the assumptions in A and B — a more radical rethinking of the problem.",
           "For each direction, describe: (1) the primary IA sketch (main sections, navigation path, content hierarchy), (2) the core interaction model (how does the user accomplish their goal?), (3) the key tradeoffs relative to user goals and constraints.",
           "After describing all directions, restate which user goals each direction serves well and where each direction is weakest."
         ],
@@ -107,8 +107,8 @@
       "promptBlocks": {
         "goal": "Assemble a neutral context packet that all reviewer families will use as shared truth, then declare which reviewers are needed.",
         "constraints": [
-          "The context packet is neutral \u2014 it presents the design problem and directions without advocating for any one.",
-          "Select the direction to develop further before running reviewers \u2014 reviewers evaluate a specific direction, not an abstract problem.",
+          "The context packet is neutral — it presents the design problem and directions without advocating for any one.",
+          "Select the direction to develop further before running reviewers — reviewers evaluate a specific direction, not an abstract problem.",
           "All 5 reviewer families are active for Complex designs; IA and UX laws reviewers are always included for Standard."
         ],
         "procedure": [
@@ -151,7 +151,7 @@
         "procedure": [
           "Before delegating, restate the selected direction and the user goal it serves best.",
           "Spawn one WorkRail Executor per selected reviewer family simultaneously. Each executor receives: the designContextPacket, their specific reviewer mission, and the finding format requirement.",
-          "Reviewer family missions: (1) IA reviewer \u2014 evaluate content hierarchy, navigation paths, grouping logic, and information scent against user goals; cite specific IA decisions; (2) UX laws reviewer \u2014 check each relevant law: Hick's Law (decision count), Miller's Law (working memory), Jakob's Law (familiar patterns), Fitts's Law (target size and distance), Peak-End Rule (emotional journey), Tesler's Law (irreducible complexity), Von Restorff Effect (visual differentiation of important elements); cite specific violations or confirmations; (3) accessibility reviewer \u2014 check WCAG requirements: color contrast ratios (4.5:1 normal, 3:1 large text), keyboard navigation path, touch target sizes (44x44px minimum), screen reader labels, focus indicators, animation controls; produce specific requirements not 'follow WCAG'; (4) edge cases reviewer \u2014 for each interactive element, explicitly address: empty state (no data), error state (failed action), loading state, first-use/onboarding, offline or degraded state, destructive actions; flag any state not addressed in the current design; (5) content reviewer \u2014 evaluate every label, button copy, placeholder, error message, and helper text against clarity, user language vs. technical jargon, and actionability of error messages.",
+          "Reviewer family missions: (1) IA reviewer — evaluate content hierarchy, navigation paths, grouping logic, and information scent against user goals; cite specific IA decisions; (2) UX laws reviewer — check each relevant law: Hick's Law (decision count), Miller's Law (working memory), Jakob's Law (familiar patterns), Fitts's Law (target size and distance), Peak-End Rule (emotional journey), Tesler's Law (irreducible complexity), Von Restorff Effect (visual differentiation of important elements); cite specific violations or confirmations; (3) accessibility reviewer — check WCAG requirements: color contrast ratios (4.5:1 normal, 3:1 large text), keyboard navigation path, touch target sizes (44x44px minimum), screen reader labels, focus indicators, animation controls; produce specific requirements not 'follow WCAG'; (4) edge cases reviewer — for each interactive element, explicitly address: empty state (no data), error state (failed action), loading state, first-use/onboarding, offline or degraded state, destructive actions; flag any state not addressed in the current design; (5) content reviewer — evaluate every label, button copy, placeholder, error message, and helper text against clarity, user language vs. technical jargon, and actionability of error messages.",
           "After receiving all executor outputs, synthesize explicitly: what was confirmed, what was new, what looks weak or generic, and what has citations vs. what is speculation.",
           "Set evidenceWeakCount to the number of findings without specific citations."
         ],
@@ -249,13 +249,13 @@
       "promptBlocks": {
         "goal": "Verify all quality gates pass before writing the design spec.",
         "constraints": [
-          "If any gate fails, fix the underlying issue before advancing \u2014 do not write the spec over known gaps."
+          "If any gate fails, fix the underlying issue before advancing — do not write the spec over known gaps."
         ],
         "procedure": [
-          "Gate 1 \u2014 Evidence citations: confirm every finding in reviewerFindings cites a specific design element from the context packet. Flag any finding that is generic advice without a specific reference and either improve it or mark it advisory-only.",
-          "Gate 2 \u2014 Reviewer coverage: confirm every declared reviewer family has at least one substantive finding. If a family has no findings, state explicitly why (e.g., 'IA reviewer found no issues \u2014 the single-screen design has no navigation structure to evaluate').",
-          "Gate 3 \u2014 Edge case coverage: confirm empty state, error state, loading state, and first-use are addressed for each interactive element in the selected design direction. List any that are not yet addressed.",
-          "Gate 4 \u2014 Accessibility specificity: confirm accessibility requirements are listed as specific constraints (color contrast ratios, touch target sizes, keyboard tab order), not as a generic 'follow WCAG' instruction."
+          "Gate 1 — Evidence citations: confirm every finding in reviewerFindings cites a specific design element from the context packet. Flag any finding that is generic advice without a specific reference and either improve it or mark it advisory-only.",
+          "Gate 2 — Reviewer coverage: confirm every declared reviewer family has at least one substantive finding. If a family has no findings, state explicitly why (e.g., 'IA reviewer found no issues — the single-screen design has no navigation structure to evaluate').",
+          "Gate 3 — Edge case coverage: confirm empty state, error state, loading state, and first-use are addressed for each interactive element in the selected design direction. List any that are not yet addressed.",
+          "Gate 4 — Accessibility specificity: confirm accessibility requirements are listed as specific constraints (color contrast ratios, touch target sizes, keyboard tab order), not as a generic 'follow WCAG' instruction."
         ],
         "outputRequired": {
           "notesMarkdown": "Gate check results: which passed, which failed, what was fixed.",
@@ -280,7 +280,7 @@
           "Do not drift into implementation planning (specific component libraries, code) unless explicitly asked."
         ],
         "procedure": [
-          "Write the design spec covering: (1) Design Decision \u2014 which direction was chosen and the specific reason it was chosen over the others; (2) Information Architecture \u2014 content hierarchy, navigation structure, primary user path; (3) Interaction Design \u2014 how each interactive element works, what triggers what, what feedback the user gets; (4) States \u2014 for each element: default, hover/focus, loading, error, empty, first-use, disabled; (5) Accessibility Requirements \u2014 specific requirements (color contrast ratios, keyboard tab order, touch target sizes, screen reader labels); (6) Content \u2014 all copy, labels, error messages, placeholders, and onboarding text; (7) Reviewer Findings \u2014 per-dimension findings with citations that the design should address or has already addressed; (8) Open Questions \u2014 what still needs human input (visual design, usability testing, design system component availability).",
+          "Write the design spec covering: (1) Design Decision — which direction was chosen and the specific reason it was chosen over the others; (2) Information Architecture — content hierarchy, navigation structure, primary user path; (3) Interaction Design — how each interactive element works, what triggers what, what feedback the user gets; (4) States — for each element: default, hover/focus, loading, error, empty, first-use, disabled; (5) Accessibility Requirements — specific requirements (color contrast ratios, keyboard tab order, touch target sizes, screen reader labels); (6) Content — all copy, labels, error messages, placeholders, and onboarding text; (7) Reviewer Findings — per-dimension findings with citations that the design should address or has already addressed; (8) Open Questions — what still needs human input (visual design, usability testing, design system component availability).",
           "Close the spec by naming: what visual review a human designer should perform, and what this workflow cannot verify (visual quality, usability, emotional feel)."
         ],
         "outputRequired": {
