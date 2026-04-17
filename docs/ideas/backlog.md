@@ -4176,3 +4176,42 @@ interface WorkflowStep {
 ```
 
 **Authoring implication:** The `workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
+
+---
+
+### Engine-enforced prep step invariant: assessments declare their evidence sources (Apr 17, 2026)
+
+**The idea:** Assessment dimensions should be able to declare which context keys they consume as evidence -- and the engine should enforce that a preceding step produces those keys before the assessment fires.
+
+**New schema field: `evidenceFrom` on assessment dimensions:**
+```json
+{
+  "id": "philosophy-adherence-gate",
+  "purpose": "The implementation respects the codebase's coding philosophy.",
+  "dimensions": [
+    {
+      "id": "philosophy_adherence",
+      "purpose": "Implementation follows stated principles; violations are named by principle.",
+      "levels": ["low", "high"],
+      "evidenceFrom": ["relevantPrinciples", "philosophyViolations"]
+    }
+  ]
+}
+```
+
+**Engine behavior:**
+When a step carries an `assessmentRef` pointing to a dimension with `evidenceFrom: ["relevantPrinciples"]`, the engine checks that at least one preceding step in the workflow sets `relevantPrinciples` in its context output. If not: validation warning (not hard error in MVP -- warn at workflow-validate time, not at runtime).
+
+**What the engine CAN do:** detect the structural gap -- "this assessment expects `relevantPrinciples` but no prior step produces it."
+
+**What the engine CANNOT do:** generate the prep step content -- the author must define what the prep step does to produce that evidence. The engine flags the missing link; the author (guided by wfw) fills it.
+
+**Full enforcement path (future):**
+1. `evidenceFrom` field added to assessment dimension schema
+2. `workflow-validate` checks that every `evidenceFrom` key is produced by a step before the assessmentRef step
+3. `workflow-for-workflows` phase 2b and 3b explicitly map `evidenceFrom` keys to prep steps
+4. At runtime, the engine could also check that the evidence keys are actually populated before passing control to the assessment step -- soft warning if missing, not hard block
+
+**Why this matters:** It closes the loop between "the workflow says assess philosophy adherence" and "there is actually structured data about which principles apply to this change." Without the structural link, the assessment evaluates whatever the agent happened to gather. With it, the prep step is contractually required before the gate fires.
+
+**Schema change scope:** small -- one optional field on `AssessmentDimension`. Backward compatible (existing dimensions without `evidenceFrom` continue to work). The `wfw` workflow should guide authors to add `evidenceFrom` whenever they add an assessment dimension.
