@@ -126,6 +126,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Configure git remote to use the app token for push authentication.
+          # @semantic-release/git pushes using the remote URL; setting it here ensures
+          # the app token (which has bypass permission) is used, not GITHUB_TOKEN.
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
           # Ensure we use the upgraded global npm (OIDC requires npm >= 11.5.1).
           # npx prepends ./node_modules/.bin to PATH, which can shadow the global npm
           # with a bundled npm package version that does not support trusted publishing.
