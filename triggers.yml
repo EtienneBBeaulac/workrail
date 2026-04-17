@@ -5,6 +5,7 @@ triggers:
     workspacePath: /Users/etienneb/git/personal/workrail
     goal: "What is 2+2? Answer and stop."
     concurrencyMode: parallel
+    autoCommit: false  # daemon cannot commit without explicit config
     agentConfig:
       maxSessionMinutes: 60  # coding tasks need more than 30 min
 
