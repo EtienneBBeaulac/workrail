@@ -1,0 +1,30 @@
+triggers:
+  - id: test-task
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /Users/etienneb/git/personal/workrail
+    goal: "What is 2+2? Answer and stop."
+    concurrencyMode: parallel
+    agentConfig:
+      maxSessionMinutes: 60  # coding tasks need more than 30 min
+
+# FUTURE: GitHub PR review (activate when github_poll is configured)
+# - id: pr-review
+#   provider: github_poll  # not yet implemented, use webhook for now
+#   workflowId: mr-review-workflow.agentic.v2
+#   workspacePath: /Users/etienneb/git/personal/workrail
+#   concurrencyMode: parallel
+#   autoCommit: false  # daemon cannot commit without explicit config
+#   agentConfig:
+#     maxSessionMinutes: 60
+
+# FUTURE: Weekly code health scan
+# - id: weekly-health
+#   provider: cron  # not yet implemented, use OS crontab
+#   schedule: "0 8 * * 1"
+#   workflowId: architecture-scalability-audit
+#   workspacePath: /Users/etienneb/git/personal/workrail
+#   concurrencyMode: serial
+#   autoCommit: false  # daemon cannot commit without explicit config
+#   agentConfig:
+#     maxSessionMinutes: 120

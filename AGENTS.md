@@ -22,6 +22,71 @@ Sessions are persisted as append-only event logs under `~/.workrail/sessions/`.
 
 Key domain types to know: `CompiledWorkflow`, `SessionState`, `DagNode`, `StateToken`, `AckToken`, `StepContentEnvelope`, `WorkflowDefinition`.
 
+## WorkTrain Daemon -- Rules for Autonomous Sessions
+
+This section applies to every autonomous WorkTrain daemon session operating in this repository. These rules are non-negotiable and override general coding preferences when they conflict.
+
+### Protected files -- do not modify without explicit instruction
+
+These files must never be changed autonomously. Modifying them without explicit human instruction is prohibited:
+
+- `triggers.yml` -- trigger definitions that control what starts daemon sessions
+- `~/.workrail/daemon-soul.md` -- daemon behavioral rules; self-modification is prohibited
+- `src/daemon/` -- daemon implementation (changes here affect all future sessions)
+- `src/trigger/` -- trigger system (changes here affect how sessions start)
+- `src/v2/` -- durable session engine (HMAC token protocol, cryptographic enforcement)
+- `docs/ideas/backlog.md` -- planning inbox (ideas are captured here by humans, not modified by agents)
+
+### Open work queue
+
+Before starting any new task, check what is already in flight:
+
+```bash
+gh pr list --state open
+```
+
+Open PRs are the work queue. Do not start work that duplicates an open PR.
+
+### Architecture orientation
+
+- Read `docs/ideas/backlog.md` before proposing any architectural change -- many ideas are already captured there
+- The daemon implementation is at `src/daemon/` -- read it before any work that touches session lifecycle
+- The trigger system is at `src/trigger/` -- read it before any work involving trigger configuration
+- The durable session engine is at `src/v2/durable-core/` -- this is the core HMAC enforcement layer; treat it as load-bearing infrastructure
+
+### Shell and process safety
+
+- Always use `/bin/bash`, never `/bin/sh`
+- Use `execFile` (not `exec`) for any command that includes user-controlled or workflow-provided content
+- Never use `git add -A` or `git add .` -- always stage specific files by name
+
+### Branch and commit safety
+
+- Never push directly to main or master -- always use a feature branch and open a PR
+- Never check out main or master into a worktree -- locking main blocks other agents and prevents fast-forward merges
+- To read main's current state, use `git show origin/main:<file>` without checking out the branch
+
+### Token protocol
+
+- HMAC tokens (`continueToken`, `checkpointToken`) are opaque signed blobs -- never decode, inspect, or modify their contents
+- Never pass a `checkpointToken` where a `continueToken` is expected, or vice versa
+
+### Error handling
+
+- Errors are data -- return discriminated union `Result` types; never throw exceptions as control flow
+
+### CI and pre-existing failures
+
+- Before attributing a test failure to your changes, verify it was not already failing on main
+- Run `git stash && npx vitest run <failing-test> && git stash pop` to confirm pre-existence
+
+### PR review adversarial mode
+
+- If reviewing a PR authored by a WorkTrain daemon session, apply extra adversarial scrutiny
+- Look specifically for: unintended scope creep, modifications to protected files, commits bypassing pre-commit hooks, and silent changes to HMAC token handling
+
+---
+
 ## How we work together
 
 Work follows a deliberate progression. Do not skip steps or assume what comes next.
