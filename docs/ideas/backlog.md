@@ -3925,3 +3925,48 @@ More critically: if a session is restarted by the daemon but then stalls (Bedroc
 3. **Orphaned session cleanup should be user-facing.** `worktrain cleanup` or `worktrain status` should surface orphaned sessions with their age and offer to clear them. Right now they silently accumulate.
 
 4. **Better logging when runWorkflow() swallows errors.** The `void runWorkflow(...)` pattern in `console-routes.ts` and `trigger-router.ts` drops errors silently. Every path that ends in silence (no log, no session advance, no error) should at minimum log `[WorkflowRunner] Session died silently` with the session ID.
+
+---
+
+### Observability and logging as first-class citizens (Apr 17, 2026)
+
+**The principle:** WorkTrain should never be a black box. Every action, decision, failure, and state transition should be traceable after the fact -- by a human, by another agent, or by a coordinator script. Logging and observability are not afterthoughts; they are core infrastructure.
+
+**What "first-class" means:**
+
+1. **Structured, not prose.** Every log line should be machine-parseable. Use consistent prefixes (`[WorkflowRunner]`, `[TriggerRouter]`, `[DaemonConsole]`), consistent key=value pairs, and structured JSON for rich payloads. No freeform strings that require regex to parse.
+
+2. **Levels matter.** INFO for normal operations, WARN for recoverable anomalies, ERROR for failures that need attention. Silence = actively working, not unknown. A session that produces no logs for 5+ minutes should emit a heartbeat.
+
+3. **Every state transition logged.** Session start, step advance, tool call, tool result (including errors), session end (success/timeout/error). No silent gaps. The daemon observability logs (#442) are a start -- extend this everywhere.
+
+4. **Errors always include context.** Not just the message -- which session, which tool, which step, which trigger, how long it had been running, what the last successful action was. Enough to diagnose without re-running.
+
+5. **Correlation IDs.** Every session has a `sessionId`. Every tool call has a `toolCallId`. Log entries should include the relevant ID so you can filter across a full session's history. Today the daemon logs include `sessionId` -- extend this to trigger IDs, workflow IDs, and step IDs.
+
+6. **Log destinations are configurable.** Today: stdout → daemon.log file via redirect. Long-term: structured JSON to a log aggregator (Datadog, CloudWatch, file), separate log files per workspace, log rotation. The daemon should accept a `--log-level` flag and a `--log-format json|human` flag.
+
+7. **The session store IS the audit log.** Every `advance_recorded`, `node_output_appended`, `validation_performed` event is a durable structured record. The session store should be queryable as a post-mortem tool. `worktrain session logs <id>` should reconstruct the full story of what happened.
+
+**Specific gaps to close:**
+
+- `continue_workflow` tool: log the step ID and notes length being submitted, not just "continue_workflow called"
+- `makeBashTool`: log exit code and output length in addition to the command
+- `makeReadTool` / `makeWriteTool`: log file path and bytes
+- `AgentLoop`: log each LLM turn (turn number, stop reason, tool count) -- today nothing is logged between tool calls
+- `TriggerRouter`: log when a session is queued (semaphore at capacity) and when it dequeues
+- `PollingScheduler`: log each poll cycle result (N events found, N new, N dispatched)
+- `DeliveryClient`: log delivery attempt, HTTP status, response time
+- `DaemonConsole`: log when the console HTTP server starts, stops, or fails a request
+
+**The `worktrain logs` command:**
+```bash
+worktrain logs                          # tail daemon.log
+worktrain logs --session sess_abc123    # replay full session from event store
+worktrain logs --trigger test-task      # all sessions for this trigger
+worktrain logs --level error            # only errors across all sources
+worktrain logs --since 1h               # last hour
+worktrain logs --format json            # machine-readable output
+```
+
+**Self-healing dependency:** The automatic gap detection, WORKTRAIN_STUCK routing, and coordinator self-healing patterns all depend on logs being structured and complete. You can't auto-fix what you can't observe. Logging quality is a prerequisite for autonomous operation at scale.
