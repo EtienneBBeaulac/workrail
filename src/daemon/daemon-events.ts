@@ -100,6 +100,23 @@ export interface DeliveryAttemptedEvent {
 }
 
 /**
+ * An agent called report_issue to record a structured issue for the auto-fix coordinator.
+ *
+ * WHY issueKind not kind: `kind` is the union discriminant ('issue_reported'); the
+ * payload field that describes the category of the reported issue is named `issueKind`
+ * to avoid shadowing the discriminant in the interface.
+ */
+export interface IssueReportedEvent {
+  readonly kind: 'issue_reported';
+  readonly sessionId: string;
+  readonly issueKind: 'tool_failure' | 'blocked' | 'unexpected_behavior' | 'needs_human' | 'self_correction';
+  readonly severity: 'info' | 'warn' | 'error' | 'fatal';
+  readonly summary: string;
+  /** Current continueToken, if the agent provided it (enables coordinator resumption). */
+  readonly continueToken?: string;
+}
+
+/**
  * Union of all daemon lifecycle events.
  *
  * Each member has a `kind` discriminant so switch exhaustiveness is enforced
@@ -114,7 +131,8 @@ export type DaemonEvent =
   | ToolErrorEvent
   | StepAdvancedEvent
   | SessionCompletedEvent
-  | DeliveryAttemptedEvent;
+  | DeliveryAttemptedEvent
+  | IssueReportedEvent;
 
 // ---------------------------------------------------------------------------
 // DaemonEventEmitter
