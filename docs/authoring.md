@@ -269,6 +269,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 **Checks**
 - If the workflow delegates work to subagents, declare `wr.features.subagent_guidance`.
+- If the workflow uses optional capabilities (delegation, web, code execution), declare `wr.features.capabilities`.
 - If the workflow uses Memory MCP for context recall or persistence, declare `wr.features.memory_context`.
 - Do not duplicate feature-injected guidance in metaGuidance or step prompts. Let the compiler handle it.
 
@@ -299,6 +300,26 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 **Source refs**
 - `src/application/services/compiler/feature-registry.ts` (runtime) — The registry rejects unknown feature IDs at compile time.
+
+### declare-capabilities-for-optional-tool-use
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.features
+- **Rule**: Declare `wr.features.capabilities` when the workflow depends on optional capabilities (delegation, web access, code execution, etc.) that may not be available in every environment.
+- **Why**: The capabilities feature injects constraint and graceful-degradation guidance at every step. Without it, agents silently assume optional capabilities are available and produce brittle workflows that fail in restricted environments.
+- **Enforced by**: advisory
+
+**Checks**
+- If the workflow uses delegation, web access, code execution, or any other capability that may be unavailable, declare `wr.features.capabilities`.
+- If delegation is also used, declare both `wr.features.capabilities` and `wr.features.subagent_guidance` -- they inject different guidance.
+- Do not declare `wr.features.capabilities` for workflows that only use standard file/tool access available in all environments.
+
+**Anti-patterns**
+- Skipping `wr.features.capabilities` for a workflow that delegates to subagents or fetches from the web, leaving agents with no degradation guidance when the capability is absent
+- Declaring `wr.features.capabilities` for a workflow that only uses universally-available tools like Read, Write, and Bash
+
+**Source refs**
+- `src/application/services/compiler/feature-registry.ts` (runtime) — Canonical feature definition for wr.features.capabilities, including injected constraints and procedure steps.
 
 
 ## Workflow references
@@ -452,7 +473,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 ### assessment-use-for-bounded-judgment
 - **Level**: recommended
 - **Status**: active
-- **Scope**: workflow.assessments, step.assessmentRefs, step.assessmentConsequences
+- **Scope**: workflow.assessments, step.assessment-refs, step.assessment-consequences
 - **Rule**: Use assessment gates when a step needs the agent to submit a bounded, durable judgment before the workflow can safely advance -- not for generic scoring or ceremony.
 - **Why**: Assessment gates force explicit structured reasoning at a decision point and durably record the result. Generic scoring that never affects routing adds noise without value.
 - **Enforced by**: advisory
@@ -491,10 +512,10 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 ### assessment-v1-constraints
 - **Level**: required
 - **Status**: active
-- **Scope**: step.assessmentRefs, step.assessmentConsequences
+- **Scope**: step.assessment-refs, step.assessment-consequences
 - **Rule**: A step may declare one or more assessmentRefs and at most one assessmentConsequences entry. When assessmentConsequences is present, at least one ref is required. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions across all referenced assessments and fires if any equals that level.
 - **Why**: Multiple refs allow composing separate orthogonal assessment definitions (e.g. quality-gate + coverage-gate) behind a single blocking consequence, without forcing unrelated dimensions into one monolithic definition.
-- **Enforced by**: schema
+- **Enforced by**: validator
 
 **Checks**
 - At least one assessmentRefs entry when assessmentConsequences is present.
@@ -845,4 +866,8 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `delegation.context-packet`: Structured context passed to subagents
 - `delegation.result-envelope`: Structured result shape returned by subagents
 - `legacy.patterns`: Older authoring patterns that should now be discouraged or avoided
+- `workflow.references`: The workflow-level references array declaring external documents surfaced at start time.
+- `workflow.assessments`: The workflow-level assessments array declaring reusable assessment gate definitions.
+- `step.assessment-refs`: The step-level assessmentRefs array referencing declared assessment gate definitions.
+- `step.assessment-consequences`: The step-level assessmentConsequences array declaring blocking consequences when gate dimension levels are met.
 

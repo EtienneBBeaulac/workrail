@@ -298,6 +298,15 @@ jobs:
       - name: Validate workflow discovery (workflow_list/workflow_get)
         run: npm run validate:workflow-discovery
 
+      - name: Validate authoring spec (structure and sourceRefs)
+        run: npm run validate:authoring-spec
+
+      - name: Validate authoring docs (generated docs match spec)
+        run: npm run validate:authoring-docs
+
+      - name: Validate feature coverage (all wr.features.* documented in authoring-spec)
+        run: npm run validate:feature-coverage
+
       - name: Summary
         if: success()
         run: |

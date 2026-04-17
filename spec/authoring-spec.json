@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-04-04",
+  "lastReviewed": "2026-04-16",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -200,6 +200,22 @@
     {
       "id": "legacy.patterns",
       "description": "Older authoring patterns that should now be discouraged or avoided"
+    },
+    {
+      "id": "workflow.references",
+      "description": "The workflow-level references array declaring external documents surfaced at start time."
+    },
+    {
+      "id": "workflow.assessments",
+      "description": "The workflow-level assessments array declaring reusable assessment gate definitions."
+    },
+    {
+      "id": "step.assessment-refs",
+      "description": "The step-level assessmentRefs array referencing declared assessment gate definitions."
+    },
+    {
+      "id": "step.assessment-consequences",
+      "description": "The step-level assessmentConsequences array declaring blocking consequences when gate dimension levels are met."
     }
   ],
   "topics": [
@@ -647,6 +663,7 @@
           ],
           "checks": [
             "If the workflow delegates work to subagents, declare `wr.features.subagent_guidance`.",
+            "If the workflow uses optional capabilities (delegation, web, code execution), declare `wr.features.capabilities`.",
             "If the workflow uses Memory MCP for context recall or persistence, declare `wr.features.memory_context`.",
             "Do not duplicate feature-injected guidance in metaGuidance or step prompts. Let the compiler handle it."
           ],
@@ -683,6 +700,35 @@
           ],
           "antiPatterns": [
             "Inventing feature IDs like `wr.features.my_custom_thing`"
+          ]
+        },
+        {
+          "id": "declare-capabilities-for-optional-tool-use",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.features"
+          ],
+          "rule": "Declare `wr.features.capabilities` when the workflow depends on optional capabilities (delegation, web access, code execution, etc.) that may not be available in every environment.",
+          "why": "The capabilities feature injects constraint and graceful-degradation guidance at every step. Without it, agents silently assume optional capabilities are available and produce brittle workflows that fail in restricted environments.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/application/services/compiler/feature-registry.ts",
+              "note": "Canonical feature definition for wr.features.capabilities, including injected constraints and procedure steps."
+            }
+          ],
+          "checks": [
+            "If the workflow uses delegation, web access, code execution, or any other capability that may be unavailable, declare `wr.features.capabilities`.",
+            "If delegation is also used, declare both `wr.features.capabilities` and `wr.features.subagent_guidance` -- they inject different guidance.",
+            "Do not declare `wr.features.capabilities` for workflows that only use standard file/tool access available in all environments."
+          ],
+          "antiPatterns": [
+            "Skipping `wr.features.capabilities` for a workflow that delegates to subagents or fetches from the web, leaving agents with no degradation guidance when the capability is absent",
+            "Declaring `wr.features.capabilities` for a workflow that only uses universally-available tools like Read, Write, and Bash"
           ]
         }
       ]
@@ -941,12 +987,14 @@
           "level": "recommended",
           "scope": [
             "workflow.assessments",
-            "step.assessmentRefs",
-            "step.assessmentConsequences"
+            "step.assessment-refs",
+            "step.assessment-consequences"
           ],
           "rule": "Use assessment gates when a step needs the agent to submit a bounded, durable judgment before the workflow can safely advance -- not for generic scoring or ceremony.",
           "why": "Assessment gates force explicit structured reasoning at a decision point and durably record the result. Generic scoring that never affects routing adds noise without value.",
-          "enforcement": ["advisory"],
+          "enforcement": [
+            "advisory"
+          ],
           "sourceRefs": [
             {
               "kind": "example",
@@ -978,7 +1026,9 @@
           ],
           "rule": "Each dimension in an assessment must capture a distinct failure mode that the other dimensions cannot catch. A dimension that restates existing workflow state (such as a generic 'confidence' dimension that mirrors the workflow's confidence band) adds ceremony without structure.",
           "why": "The value of multiple dimensions is that each one independently blocks advancement for a different reason. Correlated or vague dimensions collapse to a single gate with extra steps.",
-          "enforcement": ["advisory"],
+          "enforcement": [
+            "advisory"
+          ],
           "checks": [
             "Each dimension is independently checkable without needing to know the result of the others.",
             "No dimension restates a context variable the workflow already computes (e.g. recommendationConfidenceBand).",
@@ -995,12 +1045,14 @@
           "status": "active",
           "level": "required",
           "scope": [
-            "step.assessmentRefs",
-            "step.assessmentConsequences"
+            "step.assessment-refs",
+            "step.assessment-consequences"
           ],
           "rule": "A step may declare one or more assessmentRefs and at most one assessmentConsequences entry. When assessmentConsequences is present, at least one ref is required. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions across all referenced assessments and fires if any equals that level.",
           "why": "Multiple refs allow composing separate orthogonal assessment definitions (e.g. quality-gate + coverage-gate) behind a single blocking consequence, without forcing unrelated dimensions into one monolithic definition.",
-          "enforcement": ["schema"],
+          "enforcement": [
+            "validator"
+          ],
           "checks": [
             "At least one assessmentRefs entry when assessmentConsequences is present.",
             "No more than one assessmentConsequences entry per step.",
@@ -1484,12 +1536,5 @@
       ]
     }
   ],
-  "plannedRules": [],
-  "changelog": [
-    {
-      "version": 3,
-      "date": "2026-03-21",
-      "summary": "Baseline version at staleness feature introduction."
-    }
-  ]
+  "plannedRules": []
 }

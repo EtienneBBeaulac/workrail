@@ -183,6 +183,22 @@ npm run dev:mcp
 
 **Config note:** The project `.mcp.json` `workrail` entry should shadow the global `~/.claude/settings.json` entry when Claude Code is started from this repo. Verify via `/mcp` on first use -- if two `workrail` entries appear, rename the `.mcp.json` entry to `workrail-dev`.
 
+## When adding a new engine feature
+
+A "new engine feature" means any of:
+- A new `wr.features.*` entry in `src/application/services/compiler/feature-registry.ts`
+- A new field or behavior in `spec/workflow.schema.json`
+- A new runtime behavior in `src/v2/durable-core/` or `src/mcp/` that workflow authors need to declare, reference, or avoid
+
+**All items required before the PR can merge:**
+
+- [ ] `spec/authoring-spec.json`: add or update a rule covering the new feature. The rule's `checks` or rule text must mention the full feature ID string (e.g. `wr.features.capabilities`) or the schema field name. The rule's `sourceRefs` must include the implementing file.
+- [ ] `spec/authoring-spec.json` `lastReviewed`: update to today's date.
+- [ ] Run `npm run validate:authoring-spec` -- must pass.
+- [ ] Run `npm run validate:feature-coverage` -- must pass.
+- [ ] `docs/authoring-v2.md`: add or update the section explaining when and how to use the feature.
+- [ ] Run `npm run validate:authoring-docs` -- must pass (regenerates `docs/authoring.md` from spec).
+
 ## Release policy
 
 - Releases are automated via semantic-release on merge to main
