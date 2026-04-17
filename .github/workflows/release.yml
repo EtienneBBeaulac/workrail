@@ -171,7 +171,7 @@ jobs:
           git config user.email "workrail-release-bot[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
           git add package.json package-lock.json
-          git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
+          git commit --no-verify -m "chore(release): ${NEW_VERSION} [skip ci]"
           git push origin "${BRANCH}"
 
           PR_URL="$(gh pr create \
