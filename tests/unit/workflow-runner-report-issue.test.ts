@@ -223,6 +223,22 @@ describe('makeReportIssueTool()', () => {
         }),
       ).resolves.not.toThrow();
     });
+
+    it('truncates summary longer than 200 chars to exactly 200 chars', async () => {
+      const longSummary = 'a'.repeat(201);
+      const tool = makeReportIssueTool('sess-abc', undefined, tmpDir);
+      await tool.execute('call-1', {
+        kind: 'tool_failure',
+        severity: 'error',
+        summary: longSummary,
+      });
+
+      await flushAsync();
+
+      const filePath = path.join(tmpDir, 'sess-abc.jsonl');
+      const lines = await readJsonlLines(filePath);
+      expect(lines[0]!['summary']).toBe('a'.repeat(200));
+    });
   });
 
   describe('event emission', () => {

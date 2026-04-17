@@ -179,6 +179,7 @@ describe('DaemonEventEmitter', () => {
       { kind: 'step_advanced', sessionId: 's1' },
       { kind: 'session_completed', sessionId: 's1', workflowId: 'w1', outcome: 'success' },
       { kind: 'delivery_attempted', callbackUrl: 'https://example.com', outcome: 'success' },
+      { kind: 'issue_reported', sessionId: 's1', issueKind: 'tool_failure', severity: 'warn', summary: 'test' },
     ];
 
     for (const event of events) {
