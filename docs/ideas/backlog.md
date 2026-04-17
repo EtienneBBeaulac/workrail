@@ -4077,3 +4077,43 @@ Option B (structured work package with validation) as the primary mechanism. Opt
 **The `context` field in the structured package is the key addition.** Today `worktrain spawn` takes `goal`, `workflowId`, `workspacePath`. Adding a structured `context` object that the platform validates and injects gives subagents the brief they need without depending on the main agent to remember to include it.
 
 **Connection to knowledge graph:** Once the structural knowledge graph is built, `relevantFiles` can be auto-populated from a graph query rather than requiring the main agent to list them. The platform asks "what files are relevant to this goal?" and includes them automatically. This is how the context packaging problem gets solved at scale -- the platform knows what the subagent needs without the main agent having to enumerate it.
+
+**Session knowledge log (extends Option B):**
+As the main agent progresses, it continuously appends to a structured `session-knowledge.jsonl` for the session. Not step notes (those are workflow artifacts) -- this is a running record of things that would matter to any agent picking up this work:
+
+```jsonl
+{"kind":"decision","summary":"Using execFile not exec for all subprocess calls","reason":"Shell injection risk with user-controlled content","ts":1234567890}
+{"kind":"user_pushback","summary":"User rejected the polling approach","detail":"Wants webhook-based solution instead","ts":...}
+{"kind":"relevant_file","path":"src/trigger/trigger-router.ts","why":"Core routing logic, all trigger changes flow through here","ts":...}
+{"kind":"constraint","summary":"Never modify triggers.yml autonomously","source":"daemon-soul.md","ts":...}
+{"kind":"tried_and_failed","summary":"Tried npx approach, got version mismatch","detail":"Local build is different from installed package","ts":...}
+{"kind":"external_ref","url":"https://github.com/...","why":"Design doc for the delivery pattern","ts":...}
+{"kind":"plan","path":"implementation_plan.md","summary":"3-slice plan for the feature","ts":...}
+```
+
+When spawning a subagent, the platform automatically includes the session knowledge log in the work package. The subagent gets the full brief without the main agent having to reconstruct it.
+
+**Blank subagents (intentionally uncontextualized):**
+Sometimes you explicitly DON'T want context from the main session -- fresh eyes are the point. A hypothesis challenge subagent should challenge the leading hypothesis, not be anchored to it. An adversarial reviewer should find problems without knowing the main agent thinks the approach is sound.
+
+The `spawn_session` call should have an explicit `context: 'inherit' | 'blank' | 'custom'` field:
+- `inherit` -- auto-package from session knowledge log (default for most tasks)
+- `blank` -- no session context injected, subagent starts fresh (for adversarial roles)
+- `custom` -- explicit structured package (for precise control)
+
+**Subagent types with specialized system prompts and tools:**
+
+Different tasks need different cognitive profiles. A subagent type bundles: system prompt, available tools, and context mode:
+
+| Type | System prompt focus | Tools | Context |
+|------|---------------------|-------|---------|
+| `researcher` | Thorough, neutral, evidence-first | Read, Bash (read-only), Glob, Grep | inherit |
+| `challenger` | Adversarial, finds holes, challenges assumptions | Read, Bash | blank (intentionally unanchored) |
+| `implementer` | Precise, follows plans, no improvisation | Read, Write, Bash, continue_workflow | inherit |
+| `reviewer` | Finds bugs, security issues, philosophy violations | Read, Bash | blank |
+| `verifier` | Confirms claims with evidence, runs commands | Read, Bash | inherit |
+| `coordinator` | Routes work, reads event streams, dispatches | worktrain_spawn, worktrain_await | inherit |
+
+The type determines the system prompt variant, not just the tools. A `challenger` gets a system prompt that explicitly says "your job is to find problems, not solve them -- do not offer solutions." A `verifier` gets "do not trust claims without running the commands yourself."
+
+This is the WorkTrain equivalent of cognitive specialization -- different agents for different modes of thought, not just different tasks. The workflow step can specify which subagent type to spawn: `spawn_session({ type: 'challenger', goal: '...' })`.
