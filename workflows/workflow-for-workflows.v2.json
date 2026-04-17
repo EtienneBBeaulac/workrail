@@ -141,12 +141,9 @@
         ],
         "procedure": [
           "Read the schema, authoring spec, v2 authoring guides, and the strongest relevant example workflows.",
-          "Decide `authoringMode`: `create` or `modernize_existing`.",
           "Classify the target workflow archetype: `review_audit`, `coding_execution`, `diagnostic_investigation`, `planning_design`, `linear_operational`, or `content_analysis`.",
           "Classify `workflowComplexity`: Simple, Medium, or Complex.",
-          "Choose an `authoringBaseline` for engine-native authoring quality and an `outcomeBaseline` for the kind of job the authored workflow should perform. If no good baseline exists for one of them, set it to `none` and explain why.",
-          "If `authoringMode = modernize_existing`, build a value inventory BEFORE forming opinions about what to change. Read the original and classify each meaningful mechanism: (1) enforcement mechanisms (forcing functions, hard gates, required outputs), (2) domain knowledge (problem-specific principles the agent would not otherwise know), (3) behavioral rules (persistent constraints on how the agent works). This inventory is the preservation checklist.",
-          "If `authoringMode = modernize_existing`, identify what must stay the same about purpose, what feels stale, and what modernization constraints apply."
+          "Choose an `authoringBaseline` for engine-native authoring quality and an `outcomeBaseline` for the kind of job the authored workflow should perform. If no good baseline exists for one of them, set it to `none` and explain why."
         ],
         "outputRequired": {
           "notesMarkdown": "Task understanding, baseline choices, patterns to borrow or avoid, and any real open questions.",
@@ -157,7 +154,25 @@
           "Both authoring and outcome baselines are explicit, or their absence is justified."
         ]
       },
-      "requireConfirmation": true
+      "requireConfirmation": true,
+      "promptFragments": [
+        {
+          "id": "phase-0-modernize-inventory",
+          "when": {
+            "var": "authoringMode",
+            "equals": "modernize_existing"
+          },
+          "text": "Decide `authoringMode`: `create` or `modernize_existing`."
+        },
+        {
+          "id": "phase-0-modernize-scope",
+          "when": {
+            "var": "authoringMode",
+            "equals": "modernize_existing"
+          },
+          "text": "If `authoringMode = modernize_existing`, build a value inventory BEFORE forming opinions about what to change. Read the original and classify each meaningful mechanism: (1) enforcement mechanisms (forcing functions, hard gates, required outputs), (2) domain knowledge (problem-specific principles the agent would not otherwise know), (3) behavioral rules (persistent constraints on how the agent works). This inventory is the preservation checklist."
+        }
+      ]
     },
     {
       "id": "phase-1-define-effectiveness-target",
@@ -187,10 +202,6 @@
     {
       "id": "phase-2-design-workflow-architecture",
       "title": "Phase 2: Design the Workflow Architecture",
-      "runCondition": {
-        "var": "workflowComplexity",
-        "not_equals": "Simple"
-      },
       "promptBlocks": {
         "goal": "Decide the workflow architecture before you write JSON.",
         "constraints": [
@@ -200,8 +211,7 @@
         "procedure": [
           "Decide the phase list, one-line goal for each phase, and overall ordering.",
           "Design loops with explicit exit rules, bounded maxIterations, and real reasons for another pass.",
-          "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance.",
-          "If `authoringMode = modernize_existing`, decide preserve-in-place, restructure, or rewrite. For each item in valueInventory, record: `preserved` (structurally present with equivalent enforcement), `replaced` (new mechanism prevents same failure mode  -- justify equivalence), or `dropped` (intentionally removed  -- justify the loss). Phase-level mapping alone is insufficient; track what was inside each restructured or removed phase."
+          "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance."
         ],
         "outputRequired": {
           "notesMarkdown": "Structured workflow outline, loop design, confirmation design, delegation design, artifact plan, and modernization mapping.",
@@ -213,12 +223,28 @@
       },
       "promptFragments": [
         {
+          "id": "phase-2-simple-scope",
+          "when": {
+            "var": "workflowComplexity",
+            "equals": "Simple"
+          },
+          "text": "This is a Simple workflow. Keep the architecture lightweight: a flat phase list, no loops required, minimal confirmations, no delegation. The goal is clarity and direct execution, not structural sophistication."
+        },
+        {
           "id": "phase-2-simple-direct",
           "when": {
             "var": "workflowComplexity",
             "equals": "Simple"
           },
           "text": "For Simple workflows, keep the architecture linear and compact. Do not invent loops or ceremony unless the task truly needs them."
+        },
+        {
+          "id": "phase-2-modernize-mapping",
+          "when": {
+            "var": "authoringMode",
+            "equals": "modernize_existing"
+          },
+          "text": "If `authoringMode = modernize_existing`, decide preserve-in-place, restructure, or rewrite. For each item in valueInventory, record: `preserved` (structurally present with equivalent enforcement), `replaced` (new mechanism prevents same failure mode  -- justify equivalence), or `dropped` (intentionally removed  -- justify the loss). Phase-level mapping alone is insufficient; track what was inside each restructured or removed phase."
         }
       ],
       "requireConfirmation": {
@@ -249,10 +275,16 @@
           "The authored workflow has an explicit plan for false-confidence resistance and quality review."
         ]
       },
-      "requireConfirmation": {
-        "var": "workflowComplexity",
-        "equals": "Complex"
-      }
+      "promptFragments": [
+        {
+          "id": "phase-3-simple-scope",
+          "when": {
+            "var": "workflowComplexity",
+            "equals": "Simple"
+          },
+          "text": "This is a Simple workflow. Quality architecture should be proportional: identify one primary false-confidence mode and one key hard gate. Skip full reviewer family design -- a single self-executed review pass is sufficient."
+        }
+      ]
     },
     {
       "id": "phase-4-draft-or-revise",
@@ -368,13 +400,13 @@
         "equals": false
       },
       "promptBlocks": {
-        "goal": "Do not silently continue with a structurally broken workflow.",
+        "goal": "Stop execution. A structurally broken workflow must not proceed to the quality gate loop. Surface the errors and require user intervention.",
         "constraints": [
           "Present the situation honestly."
         ],
         "procedure": [
           "List the remaining validation errors and assess their severity.",
-          "Present the options: proceed with known issues documented, or stop so the user can intervene manually."
+          "Stop and require user intervention. Do not proceed into the quality gate loop with a structurally broken workflow. The user must explicitly decide how to resolve each remaining error before this workflow can continue."
         ]
       },
       "requireConfirmation": true
@@ -390,7 +422,7 @@
           "contractRef": "wr.contracts.loop_control",
           "loopId": "quality_gate_loop"
         },
-        "maxIterations": 2
+        "maxIterations": 3
       },
       "body": [
         {
@@ -415,7 +447,21 @@
               "Weak or unused fields are either wired meaningfully or removed."
             ]
           },
-          "requireConfirmation": false
+          "requireConfirmation": false,
+          "assessmentRefs": [
+            "state-economy-gate"
+          ],
+          "assessmentConsequences": [
+            {
+              "when": {
+                "anyEqualsLevel": "low"
+              },
+              "effect": {
+                "kind": "require_followup",
+                "guidance": "state_economy low -- one or more context fields are unused, weakly consumed, or carry no decision weight. Remove or wire them before proceeding: trace a concrete downstream use for each field, or delete it from the workflow."
+              }
+            }
+          ]
         },
         {
           "id": "phase-6b-execution-simulation",
@@ -452,7 +498,21 @@
               "text": "For modernize_existing: after tracing the workflow forward, check each item in valueInventory. For each enforcement mechanism and domain knowledge item: would the modernized workflow produce the same behavior? Any item where the answer is no or weaker is a loss  -- fix it directly or record the accepted tradeoff with justification."
             }
           ],
-          "requireConfirmation": false
+          "requireConfirmation": false,
+          "assessmentRefs": [
+            "simulation-outcome-gate"
+          ],
+          "assessmentConsequences": [
+            {
+              "when": {
+                "anyEqualsLevel": "low"
+              },
+              "effect": {
+                "kind": "require_followup",
+                "guidance": "simulation_outcome low -- the simulation found likely unsatisfying or false-confidence outputs that were not fixed inline. Address the identified weak steps or degraded-path failures before the adversarial review."
+              }
+            }
+          ]
         },
         {
           "id": "phase-6c-adversarial-quality-review",
@@ -464,11 +524,11 @@
               "Reviewer-family or validator output is evidence, not authority."
             ],
             "procedure": [
-              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification  -- score 0 for create mode).",
+              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, and `complexityScaling` (0 = has appropriate fast paths or scope-sensitive branching for simpler inputs; 2 = single-weight, over-engineers simple cases)2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification  -- score 0 for create mode).",
               "Run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
               "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
               "When scoring `falseConfidenceResistance`, explicitly check: do the workflow's quality gates protect edge cases and degraded paths, or only the happy path? A workflow that passes its own checks on ideal input but fails silently on minimal or unexpected input scores 2.",
-              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, or `handoffUtility`.",
+              "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, or `handoffUtility`, and `complexityScaling` (0 = has appropriate fast paths or scope-sensitive branching for simpler inputs; 2 = single-weight, over-engineers simple cases).",
               "Set `authoringIntegrityPassed = true` only if structural and authoring-quality dimensions are all acceptable. Set `outcomeEffectivenessPassed = true` only if the workflow is likely to achieve satisfying results for the user."
             ],
             "outputRequired": {
@@ -494,7 +554,28 @@
             }
           ],
           "requireConfirmation": false,
-          "validationCriteria": []
+          "validationCriteria": [
+            {
+              "type": "contains",
+              "value": "complexityScaling",
+              "message": "Review must score complexityScaling"
+            }
+          ],
+          "assessmentRefs": [
+            "authoring-integrity-gate",
+            "outcome-effectiveness-gate"
+          ],
+          "assessmentConsequences": [
+            {
+              "when": {
+                "anyEqualsLevel": "low"
+              },
+              "effect": {
+                "kind": "require_followup",
+                "guidance": "authoring_integrity low -- structural or quality dimensions are unacceptable; fix voice, ceremony, loop, delegation, or state problems before this workflow can be trusted. outcome_effectiveness low -- task effectiveness, false-confidence resistance, coverage sharpness, or domain fit are materially weak; redesign, do not patch."
+              }
+            }
+          ]
         },
         {
           "id": "phase-6d-redesign-and-revalidate",
@@ -506,7 +587,6 @@
               "If structure changes, re-run real validators before leaving this step."
             ],
             "procedure": [
-              "If `authoringIntegrityPassed` and `outcomeEffectivenessPassed` are both true and `hardGateFailures` is empty, say that no redesign is needed.",
               "Otherwise classify the needed redesign severity as `minor`, `architectural`, or `unsafe_to_ship` and apply the necessary fixes directly to the workflow file.",
               "If the redesign changed structure, run the real validators again and update the validation state before leaving this step."
             ],
@@ -518,7 +598,19 @@
               "Structural redesign problems are handled as redesign problems, not cosmetic ones."
             ]
           },
-          "requireConfirmation": false
+          "requireConfirmation": false,
+          "runCondition": {
+            "or": [
+              {
+                "var": "authoringIntegrityPassed",
+                "equals": false
+              },
+              {
+                "var": "outcomeEffectivenessPassed",
+                "equals": false
+              }
+            ]
+          }
         },
         {
           "id": "phase-6e-quality-loop-decision",
@@ -558,7 +650,7 @@
         "procedure": [
           "Read spec/workflow-tags.json to see the available tags and their 'when' phrases.",
           "Based on the workflow's purpose and description, select 1-3 tags from the closed set (coding, review_audit, investigation, design, documentation, tickets, learning, routines, authoring).",
-          "Add the workflow ID as a new entry under 'workflows' in spec/workflow-tags.json: { \"tags\": [\"<tag1>\"] }.",
+          "Check whether the workflow ID already exists in the `workflows` section. If it does, update the existing entry tags rather than adding a duplicate. If it does not exist, add a new entry under 'workflows' in spec/workflow-tags.json: { \"tags\": [\"<tag1>\"] }.",
           "If the workflow is a test fixture or internal utility not meant for end-user discovery, add 'hidden': true.",
           "Save the tags file. Do not modify any other field.",
           "Write the 'about' field into the workflow JSON: a markdown string (100-400 words) written for a human deciding whether to use this workflow. Cover what it does, when to use it, what it produces, and how to get good results. This is a user-facing surface -- not agent instructions (use metaGuidance for that).",
@@ -606,5 +698,63 @@
       "requireConfirmation": false
     }
   ],
-  "validatedAgainstSpecVersion": 3
+  "validatedAgainstSpecVersion": 3,
+  "assessments": [
+    {
+      "id": "state-economy-gate",
+      "purpose": "Every context field in the authored workflow earns its keep: it is set, consumed, and influences a concrete decision or output.",
+      "dimensions": [
+        {
+          "id": "state_economy",
+          "purpose": "All context fields have a traceable downstream use. No field is captured speculatively or carried without purpose.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "simulation-outcome-gate",
+      "purpose": "A concrete execution simulation has been completed and identified weak steps, likely unsatisfying outputs, and false-confidence modes -- and any found were fixed inline.",
+      "dimensions": [
+        {
+          "id": "simulation_outcome",
+          "purpose": "Simulation completed over at least one happy path and one degraded/edge-case path. Issues found were fixed or explicitly accepted.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "authoring-integrity-gate",
+      "purpose": "The authored workflow is structurally sound and meets authoring quality standards: voice, ceremony, loops, delegation, and state are all acceptable.",
+      "dimensions": [
+        {
+          "id": "authoring_integrity",
+          "purpose": "Structural and authoring-quality dimensions passed the adversarial review. No hard gate failure on voice, ceremony, loopSoundness, delegationBoundedness, or stateMinimality.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "outcome-effectiveness-gate",
+      "purpose": "The authored workflow is likely to produce genuinely satisfying results: task effectiveness, false-confidence resistance, coverage sharpness, domain fit, and handoff utility are all acceptable.",
+      "dimensions": [
+        {
+          "id": "outcome_effectiveness",
+          "purpose": "The workflow passes adversarial review on task effectiveness, falseConfidenceResistance, coverageSharpness, domainFit, and handoffUtility. No hard gate failure on any outcome dimension.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    }
+  ]
 }
