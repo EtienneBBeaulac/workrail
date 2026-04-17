@@ -4,7 +4,7 @@ const breakingReleaseType = allowMajorRelease ? "major" : "minor";
 module.exports = {
   branches: ["main"],
   tagFormat: "v${version}",
-  repositoryUrl: "https://github.com/EtienneBBeaulac/workrail.git",
+  repositoryUrl: `https://x-access-token:${process.env.GITHUB_TOKEN}@github.com/EtienneBBeaulac/workrail.git`,
   plugins: [
     [
       "@semantic-release/commit-analyzer",
