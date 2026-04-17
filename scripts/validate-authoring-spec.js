@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const Ajv = require('ajv');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -132,6 +133,75 @@ function validateRuleIdsAndScopes(spec) {
   }
 }
 
+// Checks whether .ts/.js sourceRef files have been modified more recently than the
+// review date recorded in the spec (rule.lastReviewed ?? spec.lastReviewed).
+//
+// Advisory by default: warns but exits 0 so authors can see the gap without being blocked.
+// Set WORKRAIL_STRICT_STALENESS=1 to hard-fail (useful once review discipline is established).
+//
+// Note: shallow git clones may produce false negatives -- files with history before the
+// shallow boundary appear up-to-date. Advisory mode is the safe default for this reason.
+function checkStaleness(spec) {
+  const strictMode = process.env.WORKRAIL_STRICT_STALENESS === '1';
+  const staleEntries = [];
+
+  // Verify we are inside a git repository before running any git commands.
+  try {
+    execSync('git rev-parse --git-dir', { cwd: repoRoot, stdio: 'ignore' });
+  } catch {
+    console.warn('[staleness] Skipping: not in a git repo or git unavailable.');
+    return;
+  }
+
+  for (const topic of spec.topics) {
+    for (const rule of topic.rules) {
+      for (const ref of rule.sourceRefs ?? []) {
+        if (!ref.path.endsWith('.ts') && !ref.path.endsWith('.js')) continue;
+
+        const fullPath = path.join(repoRoot, ref.path);
+        if (!fs.existsSync(fullPath)) continue;
+
+        // Per-rule date takes precedence when present; fall back to spec-level date.
+        const reviewDate = rule.lastReviewed ?? spec.lastReviewed;
+        if (!reviewDate) {
+          console.warn(`[staleness] No review date for rule "${rule.id}", skipping ${ref.path}`);
+          continue;
+        }
+
+        let gitDate = '';
+        try {
+          gitDate = execSync(`git log -1 --format="%as" -- ${ref.path}`, {
+            cwd: repoRoot,
+            encoding: 'utf8'
+          }).trim();
+        } catch {
+          // git error on this specific file; skip it rather than crashing.
+          continue;
+        }
+
+        if (gitDate && gitDate > reviewDate) {
+          staleEntries.push({ ruleId: rule.id, path: ref.path, gitDate, reviewDate });
+        }
+      }
+    }
+  }
+
+  if (staleEntries.length === 0) {
+    console.log('[staleness] All sourceRefs are up to date.');
+    return;
+  }
+
+  console.warn(`[staleness] ${staleEntries.length} stale sourceRef(s) detected (modified after ${spec.lastReviewed}):`);
+  for (const entry of staleEntries) {
+    console.warn(`  rule "${entry.ruleId}": ${entry.path} (modified ${entry.gitDate}, reviewed ${entry.reviewDate})`);
+  }
+
+  if (strictMode) {
+    console.error('[staleness] WORKRAIL_STRICT_STALENESS=1: failing due to stale sourceRefs.');
+    process.exit(1);
+  }
+}
+
 function main() {
   const schema = readJson(schemaPath);
   const spec = readJson(specPath);
@@ -140,6 +210,10 @@ function main() {
   validateRuleIdsAndScopes(spec);
 
   console.log('authoring-spec validation passed');
+
+  if (process.argv.includes('--check-staleness')) {
+    checkStaleness(spec);
+  }
 }
 
 main();

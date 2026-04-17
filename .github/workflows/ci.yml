@@ -307,6 +307,12 @@ jobs:
       - name: Validate feature coverage (all wr.features.* documented in authoring-spec)
         run: npm run validate:feature-coverage
 
+      - name: Check authoring spec staleness (advisory)
+        # Informational only -- warns when .ts/.js sourceRef files are newer than lastReviewed.
+        # Not a hard gate; set WORKRAIL_STRICT_STALENESS=1 to make it fail.
+        continue-on-error: true
+        run: npm run validate:authoring-staleness
+
       - name: Summary
         if: success()
         run: |

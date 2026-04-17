@@ -45,6 +45,7 @@
     "validate:registry": "node --experimental-strip-types scripts/validate-workflows-registry.ts",
     "stamp-workflow": "node scripts/stamp-workflow.ts",
     "validate:authoring-spec": "node scripts/validate-authoring-spec.js",
+    "validate:authoring-staleness": "node scripts/validate-authoring-spec.js --check-staleness",
     "validate:authoring-docs": "node scripts/generate-authoring-docs.js --check",
     "validate:workflow-discovery": "node scripts/validate-workflow-discovery.js",
     "validate:feature-coverage": "node scripts/validate-feature-coverage.js",
