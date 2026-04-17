@@ -937,6 +937,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
         const { stdout, stderr } = await execAsync(params.command, {
           cwd,
           timeout: BASH_TIMEOUT_MS,
+          shell: '/bin/bash',
         });
         const output = [stdout, stderr].filter(Boolean).join('\n');
         return {
