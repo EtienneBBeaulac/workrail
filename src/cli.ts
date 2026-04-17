@@ -239,6 +239,7 @@ program
   .action(async (options: { workspace?: string }) => {
     const { startTriggerListener } = await import('./trigger/trigger-listener.js');
     const { startDaemonConsole } = await import('./trigger/daemon-console.js');
+    const { DaemonEventEmitter } = await import('./daemon/daemon-events.js');
 
     await initializeContainer({ runtimeMode: { kind: 'cli' } });
     const { createToolContext } = await import('./mcp/server.js');
@@ -274,10 +275,16 @@ program
       process.exit(1);
     }
 
+    // Create the daemon event emitter singleton.
+    // WHY here (before startTriggerListener): the emitter must exist before any
+    // daemon_started event can be emitted inside the listener's server.listen callback.
+    const emitter = new DaemonEventEmitter();
+
     const handle = await startTriggerListener(ctx, {
       workspacePath,
       apiKey: apiKey,
       env: process.env,
+      emitter,
     });
 
     if (handle === null) {

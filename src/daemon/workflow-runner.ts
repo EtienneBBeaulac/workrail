@@ -40,6 +40,7 @@ import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
+import type { DaemonEventEmitter } from './daemon-events.js';
 
 const execAsync = promisify(exec);
 
@@ -795,6 +796,7 @@ export function makeContinueWorkflowTool(
   schemas: Record<string, any>,
   // Optional injection point for testing -- defaults to the real implementation.
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
+  emitter?: DaemonEventEmitter,
 ): AgentTool {
   return {
     name: 'continue_workflow',
@@ -809,6 +811,7 @@ export function makeContinueWorkflowTool(
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: continue_workflow sessionId=${sessionId}`);
+      emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'continue_workflow', summary: (params.intent as string | undefined) ?? 'advance' });
       const result = await _executeContinueWorkflowFn(
         {
           continueToken: params.continueToken,
@@ -912,7 +915,7 @@ export function makeContinueWorkflowTool(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeBashTool(workspacePath: string, schemas: Record<string, any>): AgentTool {
+export function makeBashTool(workspacePath: string, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter): AgentTool {
   return {
     name: 'Bash',
     description:
@@ -928,6 +931,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 80) });
       const cwd = params.cwd ?? workspacePath;
       try {
         const { stdout, stderr } = await execAsync(params.command, {
@@ -983,7 +987,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeReadTool(schemas: Record<string, any>): AgentTool {
+function makeReadTool(schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter): AgentTool {
   return {
     name: 'Read',
     description: 'Read the contents of a file at the given absolute path.',
@@ -994,6 +998,7 @@ function makeReadTool(schemas: Record<string, any>): AgentTool {
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: String(params.filePath).slice(0, 80) });
       const content = await fs.readFile(params.filePath, 'utf8');
       return {
         content: [{ type: 'text', text: content }],
@@ -1004,7 +1009,7 @@ function makeReadTool(schemas: Record<string, any>): AgentTool {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeWriteTool(schemas: Record<string, any>): AgentTool {
+function makeWriteTool(schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter): AgentTool {
   return {
     name: 'Write',
     description: 'Write content to a file at the given absolute path. Creates parent directories if needed.',
@@ -1015,6 +1020,7 @@ function makeWriteTool(schemas: Record<string, any>): AgentTool {
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: String(params.filePath).slice(0, 80) });
       await fs.mkdir(path.dirname(params.filePath), { recursive: true });
       await fs.writeFile(params.filePath, params.content, 'utf8');
       return {
@@ -1157,6 +1163,9 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
  * @param daemonRegistry - Optional registry for tracking live daemon sessions.
  *   When provided, register/heartbeat/unregister are called at the appropriate
  *   lifecycle points. When omitted, registry operations are skipped.
+ * @param emitter - Optional event emitter for structured lifecycle events.
+ *   When provided, emits session_started, tool_called, tool_error, step_advanced,
+ *   and session_completed events. When omitted, no events are emitted (zero overhead).
  * @returns WorkflowRunResult discriminated union. Never throws.
  */
 export async function runWorkflow(
@@ -1164,6 +1173,7 @@ export async function runWorkflow(
   ctx: V2ToolContext,
   apiKey: string,
   daemonRegistry?: DaemonRegistry,
+  emitter?: DaemonEventEmitter,
 ): Promise<WorkflowRunResult> {
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
@@ -1172,6 +1182,14 @@ export async function runWorkflow(
   // is stored as a value inside the file, so crash-resume can retrieve it.
   const sessionId = randomUUID();
   console.log(`[WorkflowRunner] Session started: sessionId=${sessionId} workflowId=${trigger.workflowId}`);
+
+  // Emit session_started event immediately after session ID is assigned.
+  emitter?.emit({
+    kind: 'session_started',
+    sessionId,
+    workflowId: trigger.workflowId,
+    workspacePath: trigger.workspacePath,
+  });
 
   // ---- DaemonRegistry: register session ----
   daemonRegistry?.register(sessionId, trigger.workflowId);
@@ -1230,6 +1248,8 @@ export async function runWorkflow(
     pendingSteerText = stepText;
     // Heartbeat on each step advance -- the session is alive and making progress.
     daemonRegistry?.heartbeat(sessionId);
+    // Emit step_advanced event.
+    emitter?.emit({ kind: 'step_advanced', sessionId });
   };
 
   const onComplete = (notes: string | undefined): void => {
@@ -1295,10 +1315,10 @@ export async function runWorkflow(
   // start_workflow is NOT in this list: the daemon calls executeStartWorkflow()
   // directly above so the LLM cannot call it again.
   const tools: AgentTool[] = [
-    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas),
-    makeBashTool(trigger.workspacePath, schemas),
-    makeReadTool(schemas),
-    makeWriteTool(schemas),
+    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter),
+    makeBashTool(trigger.workspacePath, schemas, sessionId, emitter),
+    makeReadTool(schemas, sessionId, emitter),
+    makeWriteTool(schemas, sessionId, emitter),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----
@@ -1385,6 +1405,14 @@ export async function runWorkflow(
   const unsubscribe = agent.subscribe(async (event: AgentEvent) => {
     if (event.type !== 'turn_end') return;
 
+    // Emit tool_error events for any tool results that reported isError=true.
+    for (const toolResult of event.toolResults) {
+      if (toolResult.isError) {
+        const errorText = toolResult.result?.content[0]?.text ?? 'tool error';
+        emitter?.emit({ kind: 'tool_error', sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200) });
+      }
+    }
+
     // Track turns for the max-turn limit.
     turnCount++;
 
@@ -1465,6 +1493,7 @@ export async function runWorkflow(
   // timeoutReason is set before agent.abort() in both abort paths; by the time we
   // reach here the catch has completed and it is safe to read synchronously.
   if (timeoutReason !== null) {
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'timeout', detail: timeoutReason });
     daemonRegistry?.unregister(sessionId, 'failed');
     const limitDescription = timeoutReason === 'wall_clock'
       ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
@@ -1479,8 +1508,9 @@ export async function runWorkflow(
   }
 
   if (stopReason === 'error' || errorMessage) {
-    daemonRegistry?.unregister(sessionId, 'failed');
     const errMsg = errorMessage ?? 'Agent stopped with error reason';
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200) });
+    daemonRegistry?.unregister(sessionId, 'failed');
     // Append a structured stuck marker so coordinator scripts can detect and act on it.
     // WHY: parseable by worktrain coordinator scripts without LLM involvement --
     // scripts-over-agent for routing decisions.
@@ -1506,6 +1536,7 @@ export async function runWorkflow(
     // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
   });
 
+  emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason });
   daemonRegistry?.unregister(sessionId, 'completed');
 
   return {

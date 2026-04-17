@@ -36,6 +36,7 @@ import type {
 } from './types.js';
 import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecFn } from './delivery-action.js';
+import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -67,6 +68,8 @@ export type RunWorkflowFn = (
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
   apiKey: string,
+  daemonRegistry?: import('../v2/infra/in-memory/daemon-registry/index.js').DaemonRegistry,
+  emitter?: DaemonEventEmitter,
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------
@@ -404,6 +407,7 @@ export class TriggerRouter {
   private readonly execFn: ExecFn;
   private readonly semaphore: Semaphore;
   private readonly _maxConcurrentSessions: number;
+  private readonly emitter: DaemonEventEmitter | undefined;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
@@ -417,8 +421,15 @@ export class TriggerRouter {
      */
     execFn?: ExecFn,
     maxConcurrentSessions?: number,
+    /**
+     * Optional event emitter for structured daemon lifecycle events.
+     * When provided, emits trigger_fired and session_queued events.
+     * When absent, no events are emitted (zero overhead).
+     */
+    emitter?: DaemonEventEmitter,
   ) {
     this.execFn = execFn ?? execFileAsync;
+    this.emitter = emitter;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -501,6 +512,9 @@ export class TriggerRouter {
       ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
     };
 
+    // Emit trigger_fired: the webhook was accepted and validated.
+    this.emitter?.emit({ kind: 'trigger_fired', triggerId: trigger.id, workflowId: trigger.workflowId });
+
     // Enqueue asynchronously.
     // Queue key strategy:
     // - 'serial' (default): use trigger.id as the key so concurrent webhook fires for
@@ -514,6 +528,9 @@ export class TriggerRouter {
       ? `${trigger.id}:${crypto.randomUUID()}`
       : trigger.id;
     void this.queue.enqueue(queueKey, async () => {
+      // Emit session_queued: the run entered the queue (may wait for a semaphore slot).
+      this.emitter?.emit({ kind: 'session_queued', triggerId: trigger.id, workflowId: trigger.workflowId });
+
       // Acquire the global semaphore before starting runWorkflowFn().
       // WHY inside the callback (not before enqueue): route() must return immediately.
       // Blocking here is safe; blocking before enqueue() would break the 202 contract.
@@ -527,7 +544,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter);
       } finally {
         this.semaphore.release();
       }
@@ -544,7 +561,7 @@ export class TriggerRouter {
       const originalTag = result._tag;
       const originalResult = result;
       if (trigger.callbackUrl) {
-        const deliveryResult = await deliveryPost(trigger.callbackUrl, result);
+        const deliveryResult = await deliveryPost(trigger.callbackUrl, result, this.emitter);
         if (deliveryResult.kind === 'err') {
           const deliveryError =
             deliveryResult.error.kind === 'http_error'
@@ -630,7 +647,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter);
       } finally {
         this.semaphore.release();
       }

@@ -20,6 +20,7 @@
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 import type { WorkflowRunResult } from '../daemon/workflow-runner.js';
+import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 
 // ---------------------------------------------------------------------------
 // DeliveryError: discriminated union for POST failure modes
@@ -41,11 +42,14 @@ export type DeliveryError =
  * @param callbackUrl - The delivery target URL (must be http:// or https://).
  *   Validated at load time by trigger-store.ts; trusted here.
  * @param result - The WorkflowRunResult to deliver.
+ * @param emitter - Optional event emitter. When provided, emits delivery_attempted
+ *   after the HTTP POST resolves (success or failure). When absent, no event is emitted.
  * @returns Result<void, DeliveryError>. Never throws.
  */
 export async function post(
   callbackUrl: string,
   result: WorkflowRunResult,
+  emitter?: DaemonEventEmitter,
 ): Promise<Result<void, DeliveryError>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
@@ -58,10 +62,13 @@ export async function post(
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      emitter?.emit({ kind: 'delivery_attempted', callbackUrl, outcome: 'http_error', statusCode: res.status });
       return err({ kind: 'http_error', status: res.status, body });
     }
+    emitter?.emit({ kind: 'delivery_attempted', callbackUrl, outcome: 'success', statusCode: res.status });
     return ok(undefined);
   } catch (e: unknown) {
+    emitter?.emit({ kind: 'delivery_attempted', callbackUrl, outcome: 'network_error' });
     return err({ kind: 'network_error', message: String(e) });
   } finally {
     clearTimeout(timer);

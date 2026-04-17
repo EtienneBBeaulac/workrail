@@ -30,6 +30,7 @@ import { loadWorkrailConfigFile, loadWorkspacesFromConfigFile } from '../config/
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
 import type { WebhookEvent, WorkspaceConfig } from './types.js';
 import { asTriggerId } from './types.js';
+import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -76,6 +77,12 @@ export interface StartTriggerListenerOptions {
    * Pass {} to explicitly disable workspace namespacing (e.g. in tests).
    */
   readonly workspaces?: Readonly<Record<string, WorkspaceConfig>>;
+  /**
+   * Optional event emitter for structured daemon lifecycle events.
+   * When provided, emits daemon_started after the server starts listening.
+   * When absent, no events are emitted (zero overhead).
+   */
+  readonly emitter?: DaemonEventEmitter;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +247,7 @@ export async function startTriggerListener(
 
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter);
   const app = createTriggerApp(router);
 
   // Startup crash recovery: detect and clear any orphaned session files left by a
@@ -277,6 +284,14 @@ export async function startTriggerListener(
       const addr = server.address();
       const actualPort = (addr && typeof addr === 'object') ? addr.port : port;
       console.log(`[TriggerListener] Webhook server listening on port ${actualPort}`);
+
+      // Emit daemon_started event after the server is confirmed listening.
+      options.emitter?.emit({
+        kind: 'daemon_started',
+        port: actualPort,
+        workspacePath: options.workspacePath,
+      });
+
       resolve({
         port: actualPort,
         router,
