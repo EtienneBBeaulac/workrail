@@ -1,6 +1,6 @@
 {
   "id": "bug-investigation-agentic",
-  "name": "Bug Investigation (v2 \u2022 Notes-First \u2022 WorkRail Executor)",
+  "name": "Bug Investigation",
   "version": "2.0.0",
   "description": "Use this to diagnose a bug or unexpected behavior in code. Builds a hypothesis, gathers evidence, and proves or disproves the root cause before concluding.",
   "about": "## Bug Investigation Workflow\n\nThis workflow guides an AI agent through a rigorous, evidence-driven investigation of a bug or unexpected behavior. It is designed to prevent the most common failure mode in AI debugging: jumping to a plausible-sounding conclusion without sufficient proof.\n\n**What it does:**\nThe workflow moves through triage, context gathering, hypothesis generation, evidence planning, iterative evidence collection, diagnosis validation, and a final handoff. It explicitly distinguishes between theories (formed by reading code) and proof (confirmed by running tests or reproducing the failure). The final output is a diagnosis with a confidence rating, the strongest alternative explanations that were ruled out, and a high-level fix direction  -- not a patch.\n\n**When to use it:**\n- You have a specific bug report, failing test, or production incident to investigate\n- The root cause is not immediately obvious and multiple explanations are plausible\n- You want a trustworthy diagnosis before spending time writing a fix\n- The bug carries enough risk that you need to be confident before changing code\n\n**What it produces:**\nA structured investigation handoff covering: root cause type (single cause, multi-factor, working as designed, etc.), proof summary, ruled-out alternatives, residual uncertainty, likely files involved, and verification steps for whoever implements the fix.\n\n**How to get good results:**\nProvide repro steps, observed symptoms, and expected behavior upfront. Include any relevant logs, failing test commands, or environment details you already have. The more concrete the repro, the faster the workflow can gather real evidence rather than theorizing. If the bug is intermittent, say so  -- the workflow adapts its rigor based on reproducibility confidence.",
@@ -57,7 +57,7 @@
   "steps": [
     {
       "id": "phase-0-triage-and-intake",
-      "title": "Phase 0: Triage (Bug Intake \u2022 Risk \u2022 Mode)",
+      "title": "Phase 0: Triage (Bug Intake • Risk • Mode)",
       "prompt": "Understand the bug report and choose the right rigor.\n\nCapture:\n- `bugSummary`: concise statement of the issue\n- `reproSummary`: repro steps, symptoms, expected behavior, environment notes\n- `investigationComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `maxParallelism`: 0 / 2 / 3\n\nDecision guidance:\n- QUICK: clear repro, narrow surface area, low ambiguity\n- STANDARD: moderate ambiguity, moderate system breadth, or meaningful risk\n- THOROUGH: high ambiguity, high-risk production impact, broad surface area, or multiple plausible causes\n\nSet context variables:\n- `bugSummary`\n- `reproSummary`\n- `investigationComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `maxParallelism`\n- `reproducibilityConfidence` (High / Medium / Low)\n\nAsk for confirmation only if the chosen rigor materially affects expectations or if critical repro details are still missing.",
       "requireConfirmation": true
     },
@@ -140,7 +140,7 @@
         {
           "id": "phase-4b-loop-decision",
           "title": "Evidence Loop Decision",
-          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` \u2192 continue\n- else if `unresolvedEvidenceGapCount > 0` \u2192 continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker \u2192 continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available \u2192 stop with bounded uncertainty\n- else \u2192 stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the evidence loop should continue.\n\nDecision rules:\n- if `contradictionCount > 0` → continue\n- else if `unresolvedEvidenceGapCount > 0` → continue\n- else if `hasStrongAlternative = true` and the alternative is not meaningfully weaker → continue\n- else if `diagnosisType = inconclusive_but_narrowed` and further evidence is not realistically available → stop with bounded uncertainty\n- else → stop\n\nOutput exactly:\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
