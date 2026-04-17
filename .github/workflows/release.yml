@@ -142,6 +142,37 @@ jobs:
           # Avoid npx so PATH is not implicitly modified.
           node ./node_modules/semantic-release/bin/semantic-release.js
 
+      - name: Open version-bump PR
+        if: success()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION="$(node -p "require('./package.json').version")"
+          BRANCH="chore/release-${NEW_VERSION}"
+
+          # Only open a PR if package.json was actually changed by prepareCmd
+          if git diff --quiet package.json package-lock.json; then
+            echo "No version bump to commit -- skipping PR."
+            exit 0
+          fi
+
+          git config user.name  "workrail-release-bot[bot]"
+          git config user.email "workrail-release-bot[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          git add package.json package-lock.json
+          git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
+          git push origin "${BRANCH}"
+
+          gh pr create \
+            --title "chore(release): ${NEW_VERSION} [skip ci]" \
+            --body "Automated version bump after publishing v${NEW_VERSION} to npm. Auto-merge enabled." \
+            --base main \
+            --head "${BRANCH}"
+
+          gh pr merge "${BRANCH}" --squash --auto
+
       - name: Cleanup tag on failed publish
         if: failure()
         env:
