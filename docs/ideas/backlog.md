@@ -4117,3 +4117,62 @@ Different tasks need different cognitive profiles. A subagent type bundles: syst
 The type determines the system prompt variant, not just the tools. A `challenger` gets a system prompt that explicitly says "your job is to find problems, not solve them -- do not offer solutions." A `verifier` gets "do not trust claims without running the commands yourself."
 
 This is the WorkTrain equivalent of cognitive specialization -- different agents for different modes of thought, not just different tasks. The workflow step can specify which subagent type to spawn: `spawn_session({ type: 'challenger', goal: '...' })`.
+
+---
+
+### Workflow-scoped system prompts for subagents (Apr 17, 2026)
+
+**The idea:** Workflows (and individual steps within them) can declare a `systemPrompt` field that gets injected into subagent sessions spawned by that workflow step. The workflow author encodes the cognitive mode directly rather than describing it in step prose that the agent has to interpret.
+
+**Why this is the right layer:**
+The workflow already controls: what steps run, what tools are available, what the output contract is, what assessments are required. The cognitive mode -- how the agent should think -- is a natural extension of that. A workflow that says "run as adversarial challenger" should be able to enforce that at the platform level, not just suggest it in a prompt.
+
+**Two levels:**
+
+**1. Workflow-level `systemPrompt`** -- applies to all subagents spawned by this workflow:
+```json
+{
+  "id": "mr-review-workflow.agentic.v2",
+  "systemPrompt": "You are an adversarial code reviewer. Your job is to find problems, not validate the approach. Do not offer solutions -- only surface issues with evidence. Treat every claim as unproven until you verify it yourself.",
+  "steps": [...]
+}
+```
+
+**2. Step-level `systemPrompt`** -- overrides the workflow-level prompt for a specific step:
+```json
+{
+  "id": "phase-hypothesis-challenge",
+  "systemPrompt": "You are a devil's advocate. For every assumption in the hypothesis, find the strongest counterargument. Do not be balanced -- be adversarial.",
+  "prompt": "Challenge the leading hypothesis..."
+}
+```
+
+**How it composes with the base system prompt:**
+The final subagent system prompt is assembled in layers:
+1. WorkTrain base prompt (execution contract, oracle priority, tools)
+2. Workflow-level `systemPrompt` (cognitive mode for this workflow)
+3. Step-level `systemPrompt` (cognitive override for this step)
+4. Soul file (operator behavioral rules)
+5. AGENTS.md / workspace context
+6. Session knowledge log (inherited context, if `context: 'inherit'`)
+7. Step prompt (the actual work instruction)
+
+The workflow author controls layers 2-3. The operator controls layer 4. The platform assembles 1 and 5-7 automatically. Clear separation of concerns.
+
+**This also enables the subagent type system** (from the previous backlog entry) to be workflow-driven rather than call-site-driven. Instead of `spawn_session({ type: 'challenger' })`, the workflow step that spawns a challenger simply declares `systemPrompt: "you are adversarial..."` -- the cognitive mode travels with the workflow definition, not the spawn call.
+
+**Schema addition:**
+```typescript
+interface WorkflowDefinition {
+  systemPrompt?: string;  // workflow-level, injected into all subagent sessions
+  steps: WorkflowStep[];
+}
+
+interface WorkflowStep {
+  systemPrompt?: string;  // step-level, overrides workflow-level for this step
+  prompt: string;
+  // ...existing fields
+}
+```
+
+**Authoring implication:** The `workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
