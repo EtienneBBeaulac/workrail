@@ -1032,8 +1032,221 @@ function makeWriteTool(schemas: Record<string, any>, sessionId?: string, emitter
 }
 
 // ---------------------------------------------------------------------------
+// report_issue tool
+// ---------------------------------------------------------------------------
+
+/**
+ * Append a single JSON issue record to the per-session JSONL file.
+ *
+ * WHY void + catch: issue recording is purely observational. A failed write
+ * (disk full, permission denied) must not propagate to the caller or interrupt
+ * the workflow session. Same fire-and-forget contract as DaemonEventEmitter.
+ *
+ * WHY separate helper: keeps execute() synchronous from the caller's perspective
+ * and makes the async write path independently testable via issuesDirOverride.
+ *
+ * @param issuesDir - Directory for issue files (override in tests; production uses ~/.workrail/issues).
+ * @param sessionId - Session identifier used as the filename.
+ * @param record - The issue payload to serialize as a JSON line.
+ */
+async function appendIssueAsync(
+  issuesDir: string,
+  sessionId: string,
+  record: IssueRecord,
+): Promise<void> {
+  await fs.mkdir(issuesDir, { recursive: true });
+  const filePath = path.join(issuesDir, `${sessionId}.jsonl`);
+  const line = JSON.stringify({ ...record, ts: Date.now() }) + '\n';
+  await fs.appendFile(filePath, line, 'utf8');
+}
+
+/** Input record shape for a report_issue call (before ts is appended). */
+interface IssueRecord {
+  sessionId: string;
+  kind: 'tool_failure' | 'blocked' | 'unexpected_behavior' | 'needs_human' | 'self_correction';
+  severity: 'info' | 'warn' | 'error' | 'fatal';
+  summary: string;
+  context?: string;
+  toolName?: string;
+  command?: string;
+  suggestedFix?: string;
+  continueToken?: string;
+}
+
+/**
+ * Build the report_issue tool.
+ *
+ * Agents call this to record a structured issue for the auto-fix coordinator.
+ * The tool does NOT stop the session -- it creates a record and returns a
+ * confirmation. For fatal severity, the return value instructs the agent to call
+ * continue_workflow with a blocker note, after which the session ends.
+ *
+ * @param sessionId - The process-local session UUID (keys the issues file).
+ * @param emitter - Optional event emitter to fire an issue_reported event.
+ * @param issuesDirOverride - Override the issues directory (for tests).
+ */
+export function makeReportIssueTool(
+  sessionId: string,
+  emitter?: DaemonEventEmitter,
+  issuesDirOverride?: string,
+): AgentTool {
+  const issuesDir = issuesDirOverride ?? path.join(os.homedir(), '.workrail', 'issues');
+
+  return {
+    name: 'report_issue',
+    description:
+      "Record a structured issue, error, or unexpected behavior. Call this AND continue_workflow (unless fatal). " +
+      "Does not stop the session -- it creates a record for the auto-fix coordinator.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          enum: ['tool_failure', 'blocked', 'unexpected_behavior', 'needs_human', 'self_correction'],
+          description: 'Category of issue being reported.',
+        },
+        severity: {
+          type: 'string',
+          enum: ['info', 'warn', 'error', 'fatal'],
+          description: 'Severity level. Fatal means the session cannot continue productively.',
+        },
+        summary: {
+          type: 'string',
+          description: 'One-line summary of the issue. Max 200 chars.',
+          maxLength: 200,
+        },
+        context: {
+          type: 'string',
+          description: 'What you were trying to do when this issue occurred.',
+        },
+        toolName: {
+          type: 'string',
+          description: 'Name of the tool that failed or behaved unexpectedly, if applicable.',
+        },
+        command: {
+          type: 'string',
+          description: 'The shell command or expression that caused the issue, if applicable.',
+        },
+        suggestedFix: {
+          type: 'string',
+          description: 'A suggested fix or recovery action for the auto-fix coordinator.',
+        },
+        continueToken: {
+          type: 'string',
+          description: 'The current continueToken, so the coordinator can resume this session.',
+        },
+      },
+      required: ['kind', 'severity', 'summary'],
+      additionalProperties: false,
+    },
+    label: 'report_issue',
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+      const record: IssueRecord = {
+        sessionId,
+        kind: params.kind as IssueRecord['kind'],
+        severity: params.severity as IssueRecord['severity'],
+        summary: String(params.summary ?? '').slice(0, 200),
+        ...(params.context !== undefined && { context: String(params.context) }),
+        ...(params.toolName !== undefined && { toolName: String(params.toolName) }),
+        ...(params.command !== undefined && { command: String(params.command) }),
+        ...(params.suggestedFix !== undefined && { suggestedFix: String(params.suggestedFix) }),
+        ...(params.continueToken !== undefined && { continueToken: String(params.continueToken) }),
+      };
+
+      // Fire-and-forget: write must never block execute() or propagate errors.
+      // WHY void + catch: observability must not affect correctness.
+      void appendIssueAsync(issuesDir, sessionId, record).catch(() => {
+        // Intentionally empty: write failures are silently swallowed.
+      });
+
+      // Emit structured event for console/SSE stream visibility.
+      emitter?.emit({
+        kind: 'issue_reported',
+        sessionId,
+        issueKind: record.kind,
+        severity: record.severity,
+        summary: record.summary,
+        ...(record.continueToken !== undefined && { continueToken: record.continueToken }),
+      });
+
+      const isFatal = record.severity === 'fatal';
+      const message = isFatal
+        ? `FATAL issue recorded. Call continue_workflow with notes explaining the blocker, then the session will end.`
+        : `Issue recorded (severity=${record.severity}). Continue with your work unless this is fatal.`;
+
+      return {
+        content: [{ type: 'text', text: message }],
+        details: { sessionId, kind: record.kind, severity: record.severity },
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------------------
+
+/**
+ * Static preamble for the daemon agent system prompt.
+ *
+ * WHY a named constant: extracting the preamble makes it readable as a document,
+ * gives it a stable identity for tests, and follows the soul-template.ts precedent
+ * of separating stable content from dynamic assembly. The dynamic parts (session
+ * state, soul, workspace context) are injected by buildSystemPrompt() below.
+ *
+ * WHY these sections: daemon sessions run unattended. The agent has no user to ask.
+ * The preamble replaces that missing human with: an oracle hierarchy, a reasoning
+ * protocol, and explicit contracts for the two failure modes that matter most --
+ * skipping steps and silent failure.
+ */
+const BASE_SYSTEM_PROMPT = `\
+You are WorkRail Auto, an autonomous agent that executes workflows step by step. You are running unattended -- there is no user watching. Your entire job is to faithfully complete the current workflow.
+
+## What you are
+You are highly capable. You handle ambitious, multi-step tasks that require real codebase understanding. You don't hedge, ask for permission, or stop to check in. You work.
+
+## Your oracle (consult in this order when uncertain)
+1. The daemon soul rules (## Agent Rules and Philosophy below)
+2. AGENTS.md / CLAUDE.md in the workspace (injected below under Workspace Context)
+3. The current workflow step's prompt and guidance
+4. Local code patterns in the relevant module (grep the directory, not the whole repo)
+5. Industry best practices -- only when nothing above applies
+
+## Self-directed reasoning
+Ask yourself questions to clarify your approach, then answer them yourself using tools before acting. Never wait for a human to answer -- you are the oracle.
+
+Bad pattern: "I'll analyze both layers." (no justification)
+Good pattern: "Question: Should I check the middleware? Answer: The workflow step says 'trace the full call chain', and the AGENTS.md says the entry point is in the middleware layer. Yes, start there."
+
+## Your tools
+- \`continue_workflow\`: Advance to the next step. Call this after completing each step's work. Always include your notes in notesMarkdown and round-trip the continueToken exactly.
+- \`Bash\`: Run shell commands. Use for building, testing, running scripts.
+- \`Read\`: Read files.
+- \`Write\`: Write files.
+- \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND continue_workflow (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
+
+## Execution contract
+1. Read the step carefully. Do ALL the work the step asks for.
+2. Call \`continue_workflow\` with your notes. Include the continueToken exactly.
+3. Repeat until the workflow reports it is complete.
+4. Do NOT skip steps. Do NOT call \`continue_workflow\` without completing the step's work.
+
+## The workflow is the contract
+Every step must be fully completed before you call continue_workflow. The workflow step prompt is the specification of what 'done' means -- not a suggestion. Don't advance until the work is actually done.
+
+Your cognitive mode changes per step: some steps make you a researcher, others a reviewer, others an implementer. Adopt the mode the step describes. Don't bring your own agenda.
+
+## Silent failure is the worst outcome
+If something goes wrong: call report_issue, then continue unless severity is 'fatal'. Do NOT silently retry forever, work around failures without noting them, or pretend things worked. The issue record is how the system learns and self-heals.
+
+## Tools are your hands, not your voice
+Don't narrate what you're about to do. Use the tool and report what you found. Token efficiency matters -- you have a wall-clock timeout.
+
+## You don't have a user. You have a workflow and a soul.
+If you're unsure, consult the oracle above. If nothing answers the question, make a reasoned decision, call report_issue with kind='self_correction' to document it, and continue.\
+`;
 
 /**
  * Format prior step notes into a concise session state recap string.
@@ -1084,20 +1297,7 @@ export function buildSystemPrompt(
   workspaceContext: string | null,
 ): string {
   const lines = [
-    'You are WorkRail Auto, an autonomous agent that executes workflows step by step.',
-    '',
-    '## Your tools',
-    '- `continue_workflow`: Advance to the next step. Call this after completing each step\'s work.',
-    '  Always include your notes in notesMarkdown and round-trip the continueToken exactly.',
-    '- `Bash`: Run shell commands. Use for building, testing, running scripts.',
-    '- `Read`: Read files.',
-    '- `Write`: Write files.',
-    '',
-    '## Execution contract',
-    '1. Read the step carefully. Do ALL the work the step asks for.',
-    '2. Call `continue_workflow` with your notes. Include the continueToken exactly.',
-    '3. Repeat until the workflow reports it is complete.',
-    '4. Do NOT skip steps. Do NOT call `continue_workflow` without completing the step\'s work.',
+    BASE_SYSTEM_PROMPT,
     '',
     `<workrail_session_state>${sessionState}</workrail_session_state>`,
     '',
@@ -1320,6 +1520,7 @@ export async function runWorkflow(
     makeBashTool(trigger.workspacePath, schemas, sessionId, emitter),
     makeReadTool(schemas, sessionId, emitter),
     makeWriteTool(schemas, sessionId, emitter),
+    makeReportIssueTool(sessionId, emitter),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----

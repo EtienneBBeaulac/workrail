@@ -4029,3 +4029,150 @@ worktrain logs --format json            # machine-readable for scripts
 3. `worktrain logs` CLI commands (reads files, correlates by sessionId)
 4. SSE extension in DaemonConsole for live event streaming
 5. Coordinator script subscription to event streams (replaces polling session store)
+
+---
+
+### Subagent context packaging: the main agent assumes too much (Apr 17, 2026)
+
+**The problem:** When a main agent spawns a subagent, the work package it creates is usually too thin. The main agent has rich context from the full conversation -- why this task matters, what was already tried, what constraints were discovered -- but it packages the subagent task as if that context is shared. The subagent gets a one-liner and has to rediscover everything from scratch.
+
+This is the same problem as a developer handing a junior a vague JIRA ticket instead of a proper brief. The subagent wastes tokens re-deriving what the main agent already knows, or worse, makes wrong assumptions.
+
+**Where this manifests:**
+- Coding task subagents that don't know why a specific approach was chosen
+- MR review subagents that don't know what invariants matter for this codebase
+- Discovery subagents that re-read files the main agent just read
+- Fix subagents that don't know what was already tried and failed
+
+**Three solution directions:**
+
+**Option A: Better instructions to the main agent (prompt engineering)**
+Add explicit guidance to the WorkTrain system prompt: "When spawning a subagent, include: (1) what you already know that the subagent won't, (2) what was already tried, (3) why this specific approach was chosen, (4) what constraints or invariants matter, (5) what 'done' looks like." This is the cheapest fix but depends on the main agent reliably following it.
+
+**Option B: Platform-assisted package creation (structured)**
+The `worktrain spawn` command (or the `spawn_session` tool) takes a structured work package:
+```typescript
+spawnSession({
+  workflowId: 'coding-task-workflow-agentic',
+  goal: '...',
+  context: {
+    whyThisApproach: '...',        // what the main agent knows about the decision
+    alreadyTried: [...],           // what failed
+    knownConstraints: [...],       // invariants the subagent must respect
+    relevantFiles: [...],          // files the main agent already read
+    completionCriteria: '...'      // what done actually looks like
+  }
+})
+```
+The platform validates that the package is complete before spawning -- missing fields emit a warning or block the spawn. The subagent's system prompt is enriched with this context automatically, without the main agent having to think about how to format it.
+
+**Option C: Platform-mediated context transfer (autonomous)**
+The platform automatically packages context from the spawning session into the child session. When the main agent calls `spawn_session`, the platform reads the current session's step notes and recent advances, synthesizes a context bundle, and injects it into the child's system prompt. No explicit packaging required from the main agent.
+
+This is the most powerful but also the most complex -- requires the platform to understand what's relevant, not just what's recent.
+
+**Recommended approach: B + A**
+Option B (structured work package with validation) as the primary mechanism. Option A (better main agent instructions) as a fallback. Option C as a long-term goal once the knowledge graph and session event stream are queryable enough to synthesize context automatically.
+
+**The `context` field in the structured package is the key addition.** Today `worktrain spawn` takes `goal`, `workflowId`, `workspacePath`. Adding a structured `context` object that the platform validates and injects gives subagents the brief they need without depending on the main agent to remember to include it.
+
+**Connection to knowledge graph:** Once the structural knowledge graph is built, `relevantFiles` can be auto-populated from a graph query rather than requiring the main agent to list them. The platform asks "what files are relevant to this goal?" and includes them automatically. This is how the context packaging problem gets solved at scale -- the platform knows what the subagent needs without the main agent having to enumerate it.
+
+**Session knowledge log (extends Option B):**
+As the main agent progresses, it continuously appends to a structured `session-knowledge.jsonl` for the session. Not step notes (those are workflow artifacts) -- this is a running record of things that would matter to any agent picking up this work:
+
+```jsonl
+{"kind":"decision","summary":"Using execFile not exec for all subprocess calls","reason":"Shell injection risk with user-controlled content","ts":1234567890}
+{"kind":"user_pushback","summary":"User rejected the polling approach","detail":"Wants webhook-based solution instead","ts":...}
+{"kind":"relevant_file","path":"src/trigger/trigger-router.ts","why":"Core routing logic, all trigger changes flow through here","ts":...}
+{"kind":"constraint","summary":"Never modify triggers.yml autonomously","source":"daemon-soul.md","ts":...}
+{"kind":"tried_and_failed","summary":"Tried npx approach, got version mismatch","detail":"Local build is different from installed package","ts":...}
+{"kind":"external_ref","url":"https://github.com/...","why":"Design doc for the delivery pattern","ts":...}
+{"kind":"plan","path":"implementation_plan.md","summary":"3-slice plan for the feature","ts":...}
+```
+
+When spawning a subagent, the platform automatically includes the session knowledge log in the work package. The subagent gets the full brief without the main agent having to reconstruct it.
+
+**Blank subagents (intentionally uncontextualized):**
+Sometimes you explicitly DON'T want context from the main session -- fresh eyes are the point. A hypothesis challenge subagent should challenge the leading hypothesis, not be anchored to it. An adversarial reviewer should find problems without knowing the main agent thinks the approach is sound.
+
+The `spawn_session` call should have an explicit `context: 'inherit' | 'blank' | 'custom'` field:
+- `inherit` -- auto-package from session knowledge log (default for most tasks)
+- `blank` -- no session context injected, subagent starts fresh (for adversarial roles)
+- `custom` -- explicit structured package (for precise control)
+
+**Subagent types with specialized system prompts and tools:**
+
+Different tasks need different cognitive profiles. A subagent type bundles: system prompt, available tools, and context mode:
+
+| Type | System prompt focus | Tools | Context |
+|------|---------------------|-------|---------|
+| `researcher` | Thorough, neutral, evidence-first | Read, Bash (read-only), Glob, Grep | inherit |
+| `challenger` | Adversarial, finds holes, challenges assumptions | Read, Bash | blank (intentionally unanchored) |
+| `implementer` | Precise, follows plans, no improvisation | Read, Write, Bash, continue_workflow | inherit |
+| `reviewer` | Finds bugs, security issues, philosophy violations | Read, Bash | blank |
+| `verifier` | Confirms claims with evidence, runs commands | Read, Bash | inherit |
+| `coordinator` | Routes work, reads event streams, dispatches | worktrain_spawn, worktrain_await | inherit |
+
+The type determines the system prompt variant, not just the tools. A `challenger` gets a system prompt that explicitly says "your job is to find problems, not solve them -- do not offer solutions." A `verifier` gets "do not trust claims without running the commands yourself."
+
+This is the WorkTrain equivalent of cognitive specialization -- different agents for different modes of thought, not just different tasks. The workflow step can specify which subagent type to spawn: `spawn_session({ type: 'challenger', goal: '...' })`.
+
+---
+
+### Workflow-scoped system prompts for subagents (Apr 17, 2026)
+
+**The idea:** Workflows (and individual steps within them) can declare a `systemPrompt` field that gets injected into subagent sessions spawned by that workflow step. The workflow author encodes the cognitive mode directly rather than describing it in step prose that the agent has to interpret.
+
+**Why this is the right layer:**
+The workflow already controls: what steps run, what tools are available, what the output contract is, what assessments are required. The cognitive mode -- how the agent should think -- is a natural extension of that. A workflow that says "run as adversarial challenger" should be able to enforce that at the platform level, not just suggest it in a prompt.
+
+**Two levels:**
+
+**1. Workflow-level `systemPrompt`** -- applies to all subagents spawned by this workflow:
+```json
+{
+  "id": "mr-review-workflow.agentic.v2",
+  "systemPrompt": "You are an adversarial code reviewer. Your job is to find problems, not validate the approach. Do not offer solutions -- only surface issues with evidence. Treat every claim as unproven until you verify it yourself.",
+  "steps": [...]
+}
+```
+
+**2. Step-level `systemPrompt`** -- overrides the workflow-level prompt for a specific step:
+```json
+{
+  "id": "phase-hypothesis-challenge",
+  "systemPrompt": "You are a devil's advocate. For every assumption in the hypothesis, find the strongest counterargument. Do not be balanced -- be adversarial.",
+  "prompt": "Challenge the leading hypothesis..."
+}
+```
+
+**How it composes with the base system prompt:**
+The final subagent system prompt is assembled in layers:
+1. WorkTrain base prompt (execution contract, oracle priority, tools)
+2. Workflow-level `systemPrompt` (cognitive mode for this workflow)
+3. Step-level `systemPrompt` (cognitive override for this step)
+4. Soul file (operator behavioral rules)
+5. AGENTS.md / workspace context
+6. Session knowledge log (inherited context, if `context: 'inherit'`)
+7. Step prompt (the actual work instruction)
+
+The workflow author controls layers 2-3. The operator controls layer 4. The platform assembles 1 and 5-7 automatically. Clear separation of concerns.
+
+**This also enables the subagent type system** (from the previous backlog entry) to be workflow-driven rather than call-site-driven. Instead of `spawn_session({ type: 'challenger' })`, the workflow step that spawns a challenger simply declares `systemPrompt: "you are adversarial..."` -- the cognitive mode travels with the workflow definition, not the spawn call.
+
+**Schema addition:**
+```typescript
+interface WorkflowDefinition {
+  systemPrompt?: string;  // workflow-level, injected into all subagent sessions
+  steps: WorkflowStep[];
+}
+
+interface WorkflowStep {
+  systemPrompt?: string;  // step-level, overrides workflow-level for this step
+  prompt: string;
+  // ...existing fields
+}
+```
+
+**Authoring implication:** The `workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
