@@ -32,7 +32,7 @@
     "BASELINE DISCIPLINE: choose both an authoring baseline and an outcome baseline whenever possible. Copy structural patterns, not domain language.",
     "VALIDATION GATE: validate with real validators, not regex approximations. When validator output and authoring assumptions conflict, runtime wins.",
     "DEEP REVIEW: authoring integrity and outcome effectiveness are separate concerns. A workflow is not ready unless both pass.",
-    "THOROUGH MODE: for complex or high-trust workflow work, prefer the deepest review path: state economy audit, execution simulation, adversarial review, and redesign if hard gates fail.",
+    "RIGOR: always run the deepest review path -- state economy audit, execution simulation, adversarial review, and redesign if hard gates fail. There is no reduced-rigor mode.",
     "ARTIFACT STRATEGY: the workflow JSON file is the primary output. Intermediate notes go in output.notesMarkdown. Do not create extra planning artifacts unless the workflow is genuinely complex.",
     "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do not mirror execution state into CONTEXT.md or markdown checkpoint files.",
     "ANTI-PATTERNS TO AVOID IN AUTHORED WORKFLOWS: no pseudo-function metaGuidance, no learning-path branching, no satisfaction-score loops, no heavy clarification batteries, no regex-as-primary-validation, no celebration phases.",
@@ -143,14 +143,14 @@
           "Read the schema, authoring spec, v2 authoring guides, and the strongest relevant example workflows.",
           "Decide `authoringMode`: `create` or `modernize_existing`.",
           "Classify the target workflow archetype: `review_audit`, `coding_execution`, `diagnostic_investigation`, `planning_design`, `linear_operational`, or `content_analysis`.",
-          "Classify `workflowComplexity`: Simple, Medium, or Complex. Classify `rigorMode`: QUICK, STANDARD, or THOROUGH.",
+          "Classify `workflowComplexity`: Simple, Medium, or Complex.",
           "Choose an `authoringBaseline` for engine-native authoring quality and an `outcomeBaseline` for the kind of job the authored workflow should perform. If no good baseline exists for one of them, set it to `none` and explain why.",
           "If `authoringMode = modernize_existing`, build a value inventory BEFORE forming opinions about what to change. Read the original and classify each meaningful mechanism: (1) enforcement mechanisms (forcing functions, hard gates, required outputs), (2) domain knowledge (problem-specific principles the agent would not otherwise know), (3) behavioral rules (persistent constraints on how the agent works). This inventory is the preservation checklist.",
           "If `authoringMode = modernize_existing`, identify what must stay the same about purpose, what feels stale, and what modernization constraints apply."
         ],
         "outputRequired": {
           "notesMarkdown": "Task understanding, baseline choices, patterns to borrow or avoid, and any real open questions.",
-          "context": "Capture authoringMode, workflowArchetype, workflowComplexity, rigorMode, taskDescription, intendedAudience, successCriteria, domainConstraints, targetWorkflowPath, modernizationGoals, authoringBaseline, outcomeBaseline, baselineDecisionRationale, authoringPatternsToBorrow, outcomePatternsToBorrow, patternsToAvoid, openQuestions, and valueInventory (modernize_existing only)."
+          "context": "Capture authoringMode, workflowArchetype, workflowComplexity, taskDescription, intendedAudience, successCriteria, domainConstraints, targetWorkflowPath, modernizationGoals, authoringBaseline, outcomeBaseline, baselineDecisionRationale, authoringPatternsToBorrow, outcomePatternsToBorrow, patternsToAvoid, openQuestions, and valueInventory (modernize_existing only)."
         },
         "verify": [
           "The task is understood well enough to design the workflow without guessing blindly.",
@@ -222,16 +222,8 @@
         }
       ],
       "requireConfirmation": {
-        "or": [
-          {
-            "var": "workflowComplexity",
-            "not_equals": "Simple"
-          },
-          {
-            "var": "rigorMode",
-            "not_equals": "QUICK"
-          }
-        ]
+        "var": "workflowComplexity",
+        "not_equals": "Simple"
       }
     },
     {
@@ -258,16 +250,8 @@
         ]
       },
       "requireConfirmation": {
-        "or": [
-          {
-            "var": "rigorMode",
-            "equals": "THOROUGH"
-          },
-          {
-            "var": "workflowComplexity",
-            "equals": "Complex"
-          }
-        ]
+        "var": "workflowComplexity",
+        "equals": "Complex"
       }
     },
     {
@@ -344,10 +328,6 @@
           "promptFragments": [
             {
               "id": "phase-5a-thorough",
-              "when": {
-                "var": "rigorMode",
-                "equals": "THOROUGH"
-              },
               "text": "After structural validation passes, also check the workflow manually against required-level authoring-spec rules and fix any failures before moving on."
             }
           ],
@@ -464,14 +444,6 @@
           },
           "promptFragments": [
             {
-              "id": "phase-6b-quick",
-              "when": {
-                "var": "rigorMode",
-                "equals": "QUICK"
-              },
-              "text": "For QUICK rigor, keep the simulation compact but still answer where the workflow would likely disappoint the user if it disappointed them at all."
-            },
-            {
               "id": "phase-6b-modernize-check",
               "when": {
                 "var": "authoringMode",
@@ -492,8 +464,8 @@
               "Reviewer-family or validator output is evidence, not authority."
             ],
             "procedure": [
-              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`, `rigorAdaptability` (0 = adapts to complexity/rigor levels, 2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification  -- score 0 for create mode).",
-              "If delegation is available and rigor is THOROUGH, run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
+              "Score these dimensions 0-2 with one sentence of evidence each: `voiceClarity`, `ceremonyLevel`, `loopSoundness`, `delegationBoundedness`, `artifactClarity`, `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, `handoffUtility`2 = single-weight), `enforcementStrength` (0 = behavioral rules have structural teeth; 2 = important rules are prose-only with no enforcement mechanism), and `modernizationDiscipline` (0 = every valueInventory item preserved, equivalently replaced with justification, or dropped with justification; 2 = items missing or replaced with weaker versions without justification  -- score 0 for create mode).",
+              "Run an adversarial review bundle with these lenses: `engine_native_reviewer`, `task_effectiveness_reviewer`, `state_economy_reviewer`, `false_confidence_reviewer`, `domain_fit_reviewer`, and `maintainer_reviewer`.",
               "Synthesize what the review confirmed, what it challenged, and what changed your mind.",
               "When scoring `falseConfidenceResistance`, explicitly check: do the workflow's quality gates protect edge cases and degraded paths, or only the happy path? A workflow that passes its own checks on ideal input but fails silently on minimal or unexpected input scores 2.",
               "Set hard-gate failures whenever any of these are materially weak: `taskEffectiveness`, `falseConfidenceResistance`, `stateMinimality`, `coverageSharpness`, `domainFit`, or `handoffUtility`.",
@@ -509,20 +481,8 @@
           },
           "promptFragments": [
             {
-              "id": "phase-6c-standard",
-              "when": {
-                "var": "rigorMode",
-                "equals": "STANDARD"
-              },
-              "text": "For STANDARD rigor, you may keep the review self-executed unless uncertainty remains material. If you do delegate, prefer a small adversarial bundle."
-            },
-            {
-              "id": "phase-6c-thorough",
-              "when": {
-                "var": "rigorMode",
-                "equals": "THOROUGH"
-              },
-              "text": "For THOROUGH rigor, assume the first review is not enough. Use adversarial reviewer lanes unless a hard limitation makes them impossible."
+              "id": "phase-6c-rigor",
+              "text": "Always use adversarial reviewer lanes. Assume the first review is not enough -- use the full adversarial bundle unless a hard limitation makes it impossible."
             },
             {
               "id": "phase-6c-heritage-review",
@@ -533,7 +493,8 @@
               "text": "For modernize_existing: add a heritage_reviewer to the adversarial bundle. Its job is to check each valueInventory item and find what was lost or weakened  -- it ignores format improvements. It must answer: which enforcement mechanisms are now prose-only? Which domain knowledge items are absent? Which behavioral rules were removed without equivalent replacement? Heritage_reviewer findings drive enforcementStrength and modernizationDiscipline scores."
             }
           ],
-          "requireConfirmation": false
+          "requireConfirmation": false,
+          "validationCriteria": []
         },
         {
           "id": "phase-6d-redesign-and-revalidate",
