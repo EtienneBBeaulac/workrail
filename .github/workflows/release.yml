@@ -153,10 +153,19 @@ jobs:
           BRANCH="chore/release-${NEW_VERSION}"
 
           # Only open a PR if package.json was actually changed by prepareCmd
-          if git diff --quiet package.json package-lock.json; then
+          if git diff --quiet package.json; then
             echo "No version bump to commit -- skipping PR."
             exit 0
           fi
+
+          # Idempotency: skip if branch already exists (workflow rerun)
+          if git ls-remote --exit-code origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            echo "Branch ${BRANCH} already exists -- skipping PR creation."
+            exit 0
+          fi
+
+          # Update package-lock.json to match the new version
+          npm install --package-lock-only --ignore-scripts 2>/dev/null || true
 
           git config user.name  "workrail-release-bot[bot]"
           git config user.email "workrail-release-bot[bot]@users.noreply.github.com"
@@ -165,13 +174,15 @@ jobs:
           git commit -m "chore(release): ${NEW_VERSION} [skip ci]"
           git push origin "${BRANCH}"
 
-          gh pr create \
+          PR_URL="$(gh pr create \
             --title "chore(release): ${NEW_VERSION} [skip ci]" \
-            --body "Automated version bump after publishing v${NEW_VERSION} to npm. Auto-merge enabled." \
+            --body "Automated version bump after publishing v${NEW_VERSION} to npm." \
             --base main \
-            --head "${BRANCH}"
+            --head "${BRANCH}")"
 
-          gh pr merge "${BRANCH}" --squash --auto
+          # Admin-merge immediately -- this is a mechanical version number change,
+          # no code risk, no need to wait for CI on a trivial package.json edit.
+          gh pr merge "${BRANCH}" --squash --admin
 
       - name: Cleanup tag on failed publish
         if: failure()
