@@ -4029,3 +4029,51 @@ worktrain logs --format json            # machine-readable for scripts
 3. `worktrain logs` CLI commands (reads files, correlates by sessionId)
 4. SSE extension in DaemonConsole for live event streaming
 5. Coordinator script subscription to event streams (replaces polling session store)
+
+---
+
+### Subagent context packaging: the main agent assumes too much (Apr 17, 2026)
+
+**The problem:** When a main agent spawns a subagent, the work package it creates is usually too thin. The main agent has rich context from the full conversation -- why this task matters, what was already tried, what constraints were discovered -- but it packages the subagent task as if that context is shared. The subagent gets a one-liner and has to rediscover everything from scratch.
+
+This is the same problem as a developer handing a junior a vague JIRA ticket instead of a proper brief. The subagent wastes tokens re-deriving what the main agent already knows, or worse, makes wrong assumptions.
+
+**Where this manifests:**
+- Coding task subagents that don't know why a specific approach was chosen
+- MR review subagents that don't know what invariants matter for this codebase
+- Discovery subagents that re-read files the main agent just read
+- Fix subagents that don't know what was already tried and failed
+
+**Three solution directions:**
+
+**Option A: Better instructions to the main agent (prompt engineering)**
+Add explicit guidance to the WorkTrain system prompt: "When spawning a subagent, include: (1) what you already know that the subagent won't, (2) what was already tried, (3) why this specific approach was chosen, (4) what constraints or invariants matter, (5) what 'done' looks like." This is the cheapest fix but depends on the main agent reliably following it.
+
+**Option B: Platform-assisted package creation (structured)**
+The `worktrain spawn` command (or the `spawn_session` tool) takes a structured work package:
+```typescript
+spawnSession({
+  workflowId: 'coding-task-workflow-agentic',
+  goal: '...',
+  context: {
+    whyThisApproach: '...',        // what the main agent knows about the decision
+    alreadyTried: [...],           // what failed
+    knownConstraints: [...],       // invariants the subagent must respect
+    relevantFiles: [...],          // files the main agent already read
+    completionCriteria: '...'      // what done actually looks like
+  }
+})
+```
+The platform validates that the package is complete before spawning -- missing fields emit a warning or block the spawn. The subagent's system prompt is enriched with this context automatically, without the main agent having to think about how to format it.
+
+**Option C: Platform-mediated context transfer (autonomous)**
+The platform automatically packages context from the spawning session into the child session. When the main agent calls `spawn_session`, the platform reads the current session's step notes and recent advances, synthesizes a context bundle, and injects it into the child's system prompt. No explicit packaging required from the main agent.
+
+This is the most powerful but also the most complex -- requires the platform to understand what's relevant, not just what's recent.
+
+**Recommended approach: B + A**
+Option B (structured work package with validation) as the primary mechanism. Option A (better main agent instructions) as a fallback. Option C as a long-term goal once the knowledge graph and session event stream are queryable enough to synthesize context automatically.
+
+**The `context` field in the structured package is the key addition.** Today `worktrain spawn` takes `goal`, `workflowId`, `workspacePath`. Adding a structured `context` object that the platform validates and injects gives subagents the brief they need without depending on the main agent to remember to include it.
+
+**Connection to knowledge graph:** Once the structural knowledge graph is built, `relevantFiles` can be auto-populated from a graph query rather than requiring the main agent to list them. The platform asks "what files are relevant to this goal?" and includes them automatically. This is how the context packaging problem gets solved at scale -- the platform knows what the subagent needs without the main agent having to enumerate it.
