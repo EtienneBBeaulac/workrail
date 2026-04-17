@@ -228,6 +228,9 @@ export interface WorkflowRunError {
   readonly workflowId: string;
   readonly message: string;
   readonly stopReason: string;
+  /** Structured stuck marker for coordinator scripts. Contains WORKTRAIN_STUCK JSON
+   * when the session died with an error so scripts can detect and route without LLM. */
+  readonly lastStepNotes?: string;
 }
 
 /**
@@ -1477,11 +1480,22 @@ export async function runWorkflow(
 
   if (stopReason === 'error' || errorMessage) {
     daemonRegistry?.unregister(sessionId, 'failed');
+    const errMsg = errorMessage ?? 'Agent stopped with error reason';
+    // Append a structured stuck marker so coordinator scripts can detect and act on it.
+    // WHY: parseable by worktrain coordinator scripts without LLM involvement --
+    // scripts-over-agent for routing decisions.
+    const stuckMarker = `\n\nWORKTRAIN_STUCK: ${JSON.stringify({
+      reason: 'session_error',
+      error: errMsg.slice(0, 500),
+      workflowId: trigger.workflowId,
+      sessionId,
+    })}`;
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
-      message: errorMessage ?? 'Agent stopped with error reason',
+      message: errMsg,
       stopReason,
+      lastStepNotes: stuckMarker,
     };
   }
 

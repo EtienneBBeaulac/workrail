@@ -439,10 +439,25 @@ export class AgentLoop {
         continue;
       }
 
-      // Execute the tool. Tools throw on failure (pi-agent-core contract).
-      // We do NOT catch here -- errors propagate to prompt()'s caller.
+      // Execute the tool. Catch errors and return them as is_error tool_results
+      // so the LLM can see what went wrong and decide how to proceed.
+      // WHY: killing the session on any tool failure loses all progress and prevents
+      // the agent from recovering. An error tool_result lets the LLM retry,
+      // rephrase, or escalate gracefully -- same rationale as unknown tool names.
       const params = (block.input ?? {}) as Record<string, unknown>;
-      const result = await tool.execute(block.id, params);
+      let result: AgentToolResult<unknown>;
+      try {
+        result = await tool.execute(block.id, params);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        results.push({
+          toolCallId: block.id,
+          toolName: block.name,
+          result: { content: [{ type: 'text', text: `Tool execution failed: ${message}` }], details: null },
+          isError: true,
+        });
+        continue;
+      }
       results.push({
         toolCallId: block.id,
         toolName: block.name,
