@@ -24,6 +24,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "spec",
     "workflows",
     "web"

@@ -70,7 +70,7 @@
       "id": "authoring-guide-v2",
       "title": "Workflow Authoring Guide (v2)",
       "source": "docs/authoring-v2.md",
-      "resolveFrom": "workspace",
+      "resolveFrom": "package",
       "purpose": "Current v2 authoring principles, references guidance, and durable execution patterns.",
       "authoritative": true
     },
@@ -78,7 +78,7 @@
       "id": "workflow-authoring-reference",
       "title": "Workflow Authoring Reference",
       "source": "docs/design/workflow-authoring-v2.md",
-      "resolveFrom": "workspace",
+      "resolveFrom": "package",
       "purpose": "Detailed v2 workflow authoring patterns for loops, conditions, references, and workflow structure.",
       "authoritative": true
     },
@@ -86,7 +86,7 @@
       "id": "routines-guide",
       "title": "Routines Guide",
       "source": "docs/design/routines-guide.md",
-      "resolveFrom": "workspace",
+      "resolveFrom": "package",
       "purpose": "Current guide for deciding when to use delegation, direct execution, or template injection in authored workflows.",
       "authoritative": false
     },
