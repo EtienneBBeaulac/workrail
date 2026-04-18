@@ -29,7 +29,8 @@ export type InternalError =
   | { readonly kind: 'workflow_hash_mismatch' }
   | { readonly kind: 'missing_snapshot' }
   | { readonly kind: 'no_pending_step' }
-  | { readonly kind: 'token_scope_mismatch'; readonly message: string };
+  | { readonly kind: 'token_scope_mismatch'; readonly message: string }
+  | { readonly kind: 'blocked_attempt_limit_exceeded'; readonly message: string };
 
 /** Type guard for InternalError. */
 export function isInternalError(e: unknown): e is InternalError {
@@ -215,6 +216,12 @@ export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
         'PRECONDITION_FAILED',
         e.message,
         { suggestion: 'Set the required context variable in the `context` field of your continue_workflow output. The variable must be a JSON array.' },
+      ) as ToolFailure;
+    case 'blocked_attempt_limit_exceeded':
+      return errNotRetryable(
+        'PRECONDITION_FAILED',
+        e.message,
+        { suggestion: 'Submit a valid wr.assessment artifact with the correct dimensions. Use the format shown in the blocked step prompt.' },
       ) as ToolFailure;
     default:
       const _exhaustive: never = e;

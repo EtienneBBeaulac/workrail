@@ -23,6 +23,48 @@ import { executeAdvanceCore } from '../v2-advance-core.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 
 /**
+ * Maximum number of consecutive blocked_attempt retries allowed on a single step
+ * before the circuit breaker fires.
+ *
+ * When a session has N or more consecutive blocked_attempt nodes on the same step,
+ * the engine refuses to accept another retry and returns a terminal PRECONDITION_FAILED
+ * error with an actionable message including the required artifact format.
+ *
+ * Invariant: counted as the number of blocked_attempt nodes in the current node's
+ * ancestor chain (inclusive of the current node). A chain of length >= MAX fires the breaker.
+ */
+const MAX_BLOCKED_ATTEMPT_RETRIES = 3;
+
+/**
+ * Count consecutive blocked_attempt nodes in the ancestor chain of a given node,
+ * inclusive of the node itself.
+ *
+ * Pure function: reads from the locked index only, no I/O.
+ *
+ * Walk terminates when:
+ * - parentNodeId is null (reached root)
+ * - the parent node has nodeKind !== 'blocked_attempt'
+ * - the parent node is not found in the index (defensive: treats as chain end)
+ *
+ * Returns the depth count (>= 1 when the current node is a blocked_attempt).
+ */
+function countBlockedAttemptChainDepth(nodeId: NodeId, lockedIndex: SessionIndex): number {
+  let depth = 0;
+  let currentId: string | null = String(nodeId);
+
+  while (currentId !== null) {
+    const nodeEvent = lockedIndex.nodeCreatedByNodeId.get(currentId);
+    if (!nodeEvent || nodeEvent.data.nodeKind !== 'blocked_attempt') {
+      break;
+    }
+    depth += 1;
+    currentId = nodeEvent.data.parentNodeId ?? null;
+  }
+
+  return depth;
+}
+
+/**
  * Compute next state, append events, and return success sentinel (first-advance path).
  * Executed under a healthy session lock witness.
  */
@@ -81,6 +123,21 @@ export function advanceAndRecord(args: {
         return neErrorAsync({
           kind: 'token_scope_mismatch' as const,
           message: 'Cannot retry a terminal blocked_attempt node (blocked.kind=terminal_block).',
+        } as InternalError);
+      }
+
+      // Circuit breaker: refuse to accept another retry when the chain has already
+      // hit the maximum consecutive blocked_attempt depth. This prevents daemon sessions
+      // from looping forever on a step they cannot pass.
+      const chainDepth = countBlockedAttemptChainDepth(nodeId, args.lockedIndex);
+      if (chainDepth >= MAX_BLOCKED_ATTEMPT_RETRIES) {
+        return neErrorAsync({
+          kind: 'blocked_attempt_limit_exceeded' as const,
+          message: `Assessment gate failed after ${MAX_BLOCKED_ATTEMPT_RETRIES} attempts. ` +
+            `Submit a valid wr.assessment artifact. Required format:\n` +
+            `\`\`\`json\n` +
+            `{ "artifacts": [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }] }\n` +
+            `\`\`\``,
         } as InternalError);
       }
 

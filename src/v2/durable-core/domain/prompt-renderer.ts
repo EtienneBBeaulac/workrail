@@ -308,6 +308,12 @@ function formatOutputContractRequirements(
   }
 }
 
+export function formatAssessmentRequirementsForTest(
+  assessments: readonly Pick<AssessmentDefinition, 'id' | 'purpose' | 'dimensions'>[]
+): readonly string[] {
+  return formatAssessmentRequirements(assessments as readonly AssessmentDefinition[]);
+}
+
 function formatAssessmentRequirements(
   assessments: readonly AssessmentDefinition[]
 ): readonly string[] {
@@ -326,6 +332,17 @@ function formatAssessmentRequirements(
     for (const dimension of assessment.dimensions) {
       requirements.push(`  ${dimension.id} (${dimension.levels.join(' | ')}): ${dimension.purpose}`);
     }
+    // Canonical format example: use actual assessment id and first dimension to make it
+    // immediately actionable. Follows the wr.loop_control pattern in formatOutputContractRequirements.
+    // Note: dimensions is a Record<string, string | {level, rationale}>, NOT an array.
+    const firstDimension = assessment.dimensions[0];
+    const exampleDimValue = firstDimension ? `"${firstDimension.levels[0] ?? 'high'}"` : '"high"';
+    const exampleDimKey = firstDimension ? `"${firstDimension.id}"` : '"dimensionId"';
+    requirements.push(
+      `Canonical format:\n\`\`\`json\n` +
+      `{ "artifacts": [{ "kind": "wr.assessment", "assessmentId": "${assessment.id}", "dimensions": { ${exampleDimKey}: ${exampleDimValue} } }] }\n` +
+      `\`\`\``
+    );
     requirements.push('Use only canonical dimension levels. If the engine rejects the artifact, correct the submitted levels instead of inventing new ones.');
   }
   return requirements;

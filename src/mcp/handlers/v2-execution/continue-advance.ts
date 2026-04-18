@@ -243,6 +243,15 @@ export function handleAdvanceIntent(args: {
                 suggestion: 'Set the required context variable in the `context` field of your continue_workflow output. The variable must be a JSON array.',
               };
             }
+            // Circuit breaker: too many consecutive blocked_attempt retries on the same step.
+            // Surface as precondition_failed so the agent sees a clear, actionable message.
+            if (cause.kind === 'blocked_attempt_limit_exceeded') {
+              return {
+                kind: 'precondition_failed' as const,
+                message: cause.message,
+                suggestion: 'Submit a valid wr.assessment artifact with the correct dimensions. Use the format shown in the error message.',
+              };
+            }
             return {
               kind: 'invariant_violation' as const,
               message: `Advance failed due to internal error: ${cause.kind}`,
