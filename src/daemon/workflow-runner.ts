@@ -772,6 +772,14 @@ function getSchemas(): Record<string, any> {
           type: 'string',
           description: 'Notes on what you did in this step (10-30 lines, markdown).',
         },
+        artifacts: {
+          type: 'array',
+          items: {},
+          description:
+            'Optional structured artifacts to attach to this step. ' +
+            'Include wr.assessment objects here when the step requires an assessment gate. ' +
+            'Example: [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }]',
+        },
         context: {
           type: 'object',
           additionalProperties: true,
@@ -827,7 +835,8 @@ export function makeContinueWorkflowTool(
     name: 'continue_workflow',
     description:
       'Advance the WorkRail workflow to the next step. Call this after completing all work ' +
-      'required by the current step. Include your notes in notesMarkdown.',
+      'required by the current step. Include your notes in notesMarkdown. ' +
+      'When the step requires an assessment gate, include wr.assessment objects in artifacts.',
     inputSchema: schemas['ContinueWorkflowParams'],
     label: 'Continue Workflow',
 
@@ -841,8 +850,15 @@ export function makeContinueWorkflowTool(
         {
           continueToken: params.continueToken,
           intent: (params.intent ?? 'advance') as 'advance' | 'rehydrate',
-          output: params.notesMarkdown
-            ? { notesMarkdown: params.notesMarkdown }
+          // WHY: output is constructed when either notesMarkdown or artifacts is present.
+          // Agents may need to submit assessment artifacts without notes (e.g. when the
+          // step's only requirement is an assessment gate). Using `?.length` prevents an
+          // empty artifacts array from constructing a spurious output object.
+          output: (params.notesMarkdown || (params.artifacts as unknown[] | undefined)?.length)
+            ? {
+                ...(params.notesMarkdown ? { notesMarkdown: params.notesMarkdown } : {}),
+                ...(params.artifacts ? { artifacts: params.artifacts } : {}),
+              }
             : undefined,
           context: params.context,
         },
