@@ -638,6 +638,10 @@ export function mountConsoleRoutes(
         } else if (result._tag === 'delivery_failed') {
           // delivery_failed not expected here -- this path has no callbackUrl.
           // Handled to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+          // WHY soft handling (log-only, not assertNever): this is a fire-and-forget .then() callback
+          // with no user-visible outcome; there is no parent LLM that acts on the result. Contrast
+          // with makeSpawnAgentTool, which uses assertNever because the outcome is returned to the
+          // parent LLM and silently mapping delivery_failed to success would corrupt the session.
           console.log(`[ConsoleRoutes] Auto dispatch delivery failed: workflowId=${workflowId}`);
         } else {
           // result._tag === 'error'

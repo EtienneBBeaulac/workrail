@@ -37,6 +37,7 @@ import type {
 import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecFn } from './delivery-action.js';
 import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
+import type { NotificationService } from './notification-service.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -408,6 +409,7 @@ export class TriggerRouter {
   private readonly semaphore: Semaphore;
   private readonly _maxConcurrentSessions: number;
   private readonly emitter: DaemonEventEmitter | undefined;
+  private readonly notificationService: NotificationService | undefined;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
@@ -427,9 +429,21 @@ export class TriggerRouter {
      * When absent, no events are emitted (zero overhead).
      */
     emitter?: DaemonEventEmitter,
+    /**
+     * Optional notification service for user-facing notifications.
+     * When provided, fires macOS/webhook notifications after each session completes.
+     * When absent, no notifications are fired (zero overhead).
+     *
+     * WHY optional injection (not a direct config): follows the DaemonEventEmitter
+     * pattern -- the caller constructs the service and injects it. This keeps
+     * TriggerRouter free of notification config knowledge and makes both sides
+     * independently testable.
+     */
+    notificationService?: NotificationService,
   ) {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
+    this.notificationService = notificationService;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -608,6 +622,12 @@ export class TriggerRouter {
             `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
         );
       }
+      // User notifications: fire after logging, before delivery.
+      // Fire-and-forget -- notify() returns void and swallows all errors.
+      // Uses the final `result` (post-delivery_failed reassignment) so the
+      // notification reflects the actual outcome the user cares about.
+      this.notificationService?.notify(result, workflowTrigger.goal);
+
       // Post-workflow delivery: runs after the workflow result is logged.
       // Best-effort -- errors are logged and discarded, never change the workflow result.
       // Use originalResult (not result) so callbackUrl failure does not skip autoCommit.
@@ -659,6 +679,10 @@ export class TriggerRouter {
       } else if (result._tag === 'delivery_failed') {
         // delivery_failed not expected from dispatch() -- WorkflowTrigger has no callbackUrl.
         // Handled here to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        // WHY soft handling (log-only, not assertNever): dispatch() is fire-and-forget and this
+        // result is observed only in logs; there is no parent LLM that acts on it. Contrast with
+        // makeSpawnAgentTool, which uses assertNever because delivery_failed would otherwise
+        // silently corrupt the parent session's outcome if it ever reached that boundary.
         console.log(
           `[TriggerRouter] Dispatch delivery failed: workflowId=${workflowTrigger.workflowId} ` +
             `stopReason=${result.stopReason} deliveryError=${result.deliveryError}`,
@@ -675,6 +699,10 @@ export class TriggerRouter {
             `error=${result.message} stopReason=${result.stopReason}`,
         );
       }
+      // User notifications: fire after logging.
+      // Fire-and-forget -- notify() returns void and swallows all errors.
+      this.notificationService?.notify(result, workflowTrigger.goal);
+
       // NOTE: delivery is not run for console-dispatched workflows because WorkflowTrigger
       // does not carry autoCommit/autoOpenPR flags (those live on TriggerDefinition, keyed
       // by triggerId). The dispatch() path does not have a triggerId to look up the definition.

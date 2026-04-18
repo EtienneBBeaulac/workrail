@@ -41,6 +41,7 @@ import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
+import { assertNever } from '../runtime/assert-never.js';
 
 const execAsync = promisify(exec);
 
@@ -338,6 +339,24 @@ export interface WorkflowDeliveryFailed {
 
 /** Result of a runWorkflow() call. Never throws. */
 export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowDeliveryFailed;
+
+/**
+ * The three result variants that runWorkflow() can actually return.
+ *
+ * WHY this type exists: runWorkflow() never produces WorkflowDeliveryFailed. That variant
+ * is only created by TriggerRouter after an HTTP callbackUrl POST fails -- a trigger-layer
+ * concern that does not apply to the runWorkflow() call itself. Child sessions spawned by
+ * spawn_agent bypass TriggerRouter entirely and have no callbackUrl.
+ *
+ * WorkflowRunResult includes delivery_failed because TriggerRouter reassigns the result
+ * variable after runWorkflow() returns (GAP-3). ChildWorkflowRunResult captures what
+ * runWorkflow() actually produces and makes the architectural invariant explicit at the
+ * type level: delivery_failed is an impossible state at the spawn_agent call site.
+ *
+ * If runWorkflow() ever gains direct callbackUrl support (bypassing TriggerRouter), this
+ * type alias must be updated to include WorkflowDeliveryFailed.
+ */
+export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
 
 /**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
@@ -1541,14 +1560,19 @@ export function makeSpawnAgentTool(
         apiKey,
         undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
         emitter,
-      );
+      ) as ChildWorkflowRunResult;
+      // WHY cast to ChildWorkflowRunResult: runWorkflow() returns WorkflowRunResult (4 variants)
+      // for TriggerRouter compatibility, but structurally only produces success/error/timeout.
+      // delivery_failed is produced by TriggerRouter after a callbackUrl POST fails -- a
+      // trigger-layer concern that does not apply here (child sessions have no callbackUrl).
+      // The cast documents this architectural invariant; assertNever below catches any future
+      // violation at compile time if ChildWorkflowRunResult or runWorkflow() changes.
 
-      // ---- Map WorkflowRunResult to structured output ----
-      // WHY all 4 variants: WorkflowRunResult is a discriminated union with 4 members.
-      // TypeScript requires exhaustive handling. Note: runWorkflow() itself only returns
-      // success/error/timeout -- delivery_failed is produced by TriggerRouter (HTTP callback
-      // failure) and is unreachable via the direct runWorkflowFn call here. The branch is
-      // included for type completeness.
+      // ---- Map ChildWorkflowRunResult to structured output ----
+      // WHY ChildWorkflowRunResult (not WorkflowRunResult): runWorkflow() never produces
+      // delivery_failed -- see ChildWorkflowRunResult type definition and WHY comment above.
+      // Using the narrower type gives compile-time exhaustiveness over the 3 real variants;
+      // assertNever guards against future additions.
       let resultObj: { childSessionId: string | null; outcome: 'success' | 'error' | 'timeout'; notes: string };
 
       if (childResult._tag === 'success') {
@@ -1570,13 +1594,10 @@ export function makeSpawnAgentTool(
           notes: childResult.message,
         };
       } else {
-        // delivery_failed: the workflow ran to completion -- work is done. Only the result
-        // delivery (HTTP callback) failed. Return as success with a note about the delivery failure.
-        resultObj = {
-          childSessionId,
-          outcome: 'success',
-          notes: `Child workflow completed, but result delivery failed: ${childResult.deliveryError}`,
-        };
+        // Compile-time exhaustiveness guard. If ChildWorkflowRunResult gains a new variant
+        // without a corresponding branch above, TypeScript will emit a compile error here.
+        // At runtime this is unreachable -- see ChildWorkflowRunResult and WHY comment above.
+        assertNever(childResult);
       }
 
       console.log(`[WorkflowRunner] spawn_agent completed: sessionId=${sessionId} childSessionId=${childSessionId ?? 'null'} outcome=${resultObj.outcome}`);
