@@ -5183,3 +5183,45 @@ Artifact: design-candidates-stdio-simplification-2026-04-18.md
 ```
 
 **Also useful for:** implementation plans the team wants to track, spec files that belong in the repo permanently, investigation summaries that become part of incident post-mortems.
+
+---
+
+## Current state update (Apr 18, 2026 -- later)
+
+**npm version: v3.35.1** (auto-released after spawn_agent merged)
+
+### What additionally shipped since the milestone (commit 473f4bd0)
+
+- ✅ **`complete_step` tool** (#569) -- daemon manages continueToken internally, LLM never handles it. Notes required (min 50 chars). `continue_workflow` deprecated.
+- ✅ **`spawn_agent` tool** (#573) -- native in-process child session spawning. parentSessionId in session_created event. Depth enforcement. Semaphore bypass. All 4 WorkflowRunResult variants handled.
+- ✅ **`complete_step` description fix** (#575) -- removed token-seeking language from deprecated continue_workflow description that would have triggered the LLM to seek a token.
+- ✅ **Discovery ran before both implementations** -- wr.discovery validated complete_step approach (found 1 merge blocker fixed), designed spawn_agent architecture (found semaphore deadlock risk avoided).
+
+### Updated limitations
+
+**Still open from previous list:**
+1. ~~complete_step just merged, untested~~ → ✅ merged, description fixed, discovery validated
+2. ~~spawn_agent not merged~~ → ✅ merged as #573
+3. **No session identity in console UI** -- parentSessionId is NOW in the event store (schema extended in #573) but console doesn't show the tree yet. Data is there; visualization is not.
+4. **No coordinator scripts** -- spawn_agent exists, coordinator templates don't.
+5. **Subagent loop still LLM-driven** -- workflow-as-orchestrator model spec'd but not built.
+6. **Workflow runtime adapter not built** -- one spec, two runtimes model spec'd but not built.
+7. **Knowledge graph not built** -- context still sweeps files every session.
+8. **Artifacts not first-class** -- agents still dump markdown files in repo. Artifact store spec'd but not built.
+9. **No notifications** -- daemon completes silently.
+10. **MCP simplification PR-B** -- HttpServer still starts with MCP server.
+
+### What's now possible that wasn't before
+
+With `complete_step` + `spawn_agent`:
+- Agents can advance workflows without ever touching a token (removes the #1 session failure cause)
+- Workflows can declare delegation and the daemon spawns proper child sessions (all visible in event log)
+- Multi-phase work has a path to becoming a coherent work unit (parentSessionId in data, UI visualization next)
+
+### Next priorities
+
+1. **Console session tree view** -- parentSessionId data is in the store. Build the UI to show it.
+2. **First coordinator script template** -- `coordinator-mr-review.sh` that spawns: discovery → review → (conditional) fix → re-review. Proves the spawn/await loop works end-to-end.
+3. **Notifications** -- macOS notification + generic webhook. ~30 min implementation.
+4. **Late-bound goals** -- default `goalTemplate: "{{$.goal}}"` when no static goal. 10-line fix in trigger-store.ts.
+5. **Artifacts store foundation** -- `~/.workrail/artifacts/` directory structure. Step 1 of the first-class artifacts vision.
