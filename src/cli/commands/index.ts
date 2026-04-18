@@ -53,3 +53,8 @@ export {
   type SessionResult,
   type AwaitResult,
 } from './worktrain-await.js';
+export {
+  executeWorktrainDaemonCommand,
+  type WorktrainDaemonCommandDeps,
+  type WorktrainDaemonCommandOpts,
+} from './worktrain-daemon.js';
