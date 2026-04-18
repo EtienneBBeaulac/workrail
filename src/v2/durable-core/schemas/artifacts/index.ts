@@ -43,6 +43,15 @@ export {
   type CoordinatorSignalArtifactV1,
 } from './coordinator-signal.js';
 
+export {
+  // Review Verdict
+  REVIEW_VERDICT_CONTRACT_REF,
+  ReviewVerdictArtifactV1Schema,
+  isReviewVerdictArtifact,
+  parseReviewVerdictArtifact,
+  type ReviewVerdictArtifactV1,
+} from './review-verdict.js';
+
 /**
  * Registry of all artifact contract references.
  * Used for validation and documentation.
@@ -51,6 +60,7 @@ export const ARTIFACT_CONTRACT_REFS = [
   'wr.contracts.assessment',
   'wr.contracts.loop_control',
   'wr.contracts.coordinator_signal',
+  'wr.contracts.review_verdict',
 ] as const;
 
 export type ArtifactContractRef = (typeof ARTIFACT_CONTRACT_REFS)[number];

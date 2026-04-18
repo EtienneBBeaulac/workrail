@@ -1298,23 +1298,29 @@ runCommand
         })), allSucceeded: false };
       },
 
-      getAgentResult: async (sessionHandle: string): Promise<string | null> => {
+      getAgentResult: async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
+        // WHY this function returns both recapMarkdown and artifacts:
+        // The coordinator uses recapMarkdown for keyword-scan fallback and artifacts for
+        // typed verdict reading (readVerdictArtifact). Artifacts are aggregated from ALL
+        // session nodes (not just the tip node) so a verdict emitted on any step is captured.
+        // See docs/discovery/artifacts-coordinator-channel.md.
+        const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
         try {
-          // Step 1: get session detail to find preferredTipNodeId
+          // Step 1: get session detail to find preferredTipNodeId and all node IDs
           const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
           const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
           if (!sessionRes.ok) {
             process.stderr.write(
               `[WARN coord:reason=http_error status=${sessionRes.status} handle=${sessionHandle.slice(0, 16)}] getAgentResult: session fetch returned HTTP ${sessionRes.status}\n`,
             );
-            return null;
+            return emptyResult;
           }
           const sessionBody = await sessionRes.json() as Record<string, unknown>;
           if (sessionBody['success'] !== true) {
             process.stderr.write(
               `[WARN coord:reason=api_error handle=${sessionHandle.slice(0, 16)}] getAgentResult: session API returned success=false\n`,
             );
-            return null;
+            return emptyResult;
           }
 
           const data = sessionBody['data'] as Record<string, unknown> | undefined;
@@ -1322,14 +1328,14 @@ runCommand
             process.stderr.write(
               `[WARN coord:reason=no_data handle=${sessionHandle.slice(0, 16)}] getAgentResult: session response missing data field\n`,
             );
-            return null;
+            return emptyResult;
           }
           const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
           if (!Array.isArray(runs) || runs.length === 0) {
             process.stderr.write(
               `[WARN coord:reason=no_runs handle=${sessionHandle.slice(0, 16)}] getAgentResult: session has no runs\n`,
             );
-            return null;
+            return emptyResult;
           }
 
           const firstRun = runs[0] as Record<string, unknown>;
@@ -1340,46 +1346,85 @@ runCommand
             process.stderr.write(
               `[WARN coord:reason=no_tip_node handle=${sessionHandle.slice(0, 16)}] getAgentResult: session run has no preferredTipNodeId\n`,
             );
-            return null;
+            return emptyResult;
           }
 
-          // Step 2: get node detail to retrieve recapMarkdown
-          const nodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/${encodeURIComponent(tipNodeId)}`;
-          const nodeRes = await globalThis.fetch(nodeUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!nodeRes.ok) {
-            process.stderr.write(
-              `[WARN coord:reason=node_http_error status=${nodeRes.status} handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node fetch returned HTTP ${nodeRes.status}\n`,
-            );
-            return null;
-          }
-          const nodeBody = await nodeRes.json() as Record<string, unknown>;
-          if (nodeBody['success'] !== true) {
-            process.stderr.write(
-              `[WARN coord:reason=node_api_error handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node API returned success=false\n`,
-            );
-            return null;
+          // Step 2: collect all node IDs from the session's first run.
+          // WHY all nodes (not just tip): a verdict artifact may be emitted on a non-final step.
+          // The tip node provides recapMarkdown; all nodes contribute to the artifacts aggregate.
+          const allNodes = Array.isArray(firstRun['nodes'])
+            ? (firstRun['nodes'] as Array<Record<string, unknown>>)
+            : [];
+          const allNodeIds = allNodes
+            .map((n) => (typeof n['nodeId'] === 'string' ? n['nodeId'] : null))
+            .filter((id): id is string => id !== null);
+
+          // Ensure the tip node is included even if not in allNodeIds (defensive)
+          const nodeIdsToFetch = allNodeIds.length > 0
+            ? allNodeIds
+            : [tipNodeId];
+
+          // Step 3: fetch each node and aggregate artifacts + recapMarkdown.
+          // WHY per-node try/catch: individual fetch failures must not abort the
+          // entire aggregation. A single failed node's artifacts are skipped (WARN logged),
+          // while other nodes' artifacts and the tip node's recapMarkdown are preserved.
+          const baseNodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/`;
+          let recap: string | null = null;
+          const collectedArtifacts: unknown[] = [];
+
+          for (const nodeId of nodeIdsToFetch) {
+            try {
+              const nodeRes = await globalThis.fetch(
+                baseNodeUrl + encodeURIComponent(nodeId),
+                { signal: AbortSignal.timeout(30_000) },
+              );
+              if (!nodeRes.ok) {
+                process.stderr.write(
+                  `[WARN coord:reason=node_http_error status=${nodeRes.status} handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: node fetch returned HTTP ${nodeRes.status}\n`,
+                );
+                continue;
+              }
+              const nodeBody = await nodeRes.json() as Record<string, unknown>;
+              if (nodeBody['success'] !== true) {
+                process.stderr.write(
+                  `[WARN coord:reason=node_api_error handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: node API returned success=false\n`,
+                );
+                continue;
+              }
+              const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
+              if (!nodeData) continue;
+
+              // Collect recapMarkdown from tip node only
+              if (nodeId === tipNodeId) {
+                recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
+                if (recap === null) {
+                  process.stderr.write(
+                    `[WARN coord:reason=no_recap handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: tip node has no recapMarkdown\n`,
+                  );
+                }
+              }
+
+              // Collect artifacts from all nodes (aggregate across the session)
+              const nodeArtifacts = nodeData['artifacts'];
+              if (Array.isArray(nodeArtifacts) && nodeArtifacts.length > 0) {
+                collectedArtifacts.push(...nodeArtifacts);
+              }
+            } catch (nodeErr) {
+              const msg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+              process.stderr.write(
+                `[WARN coord:reason=node_exception handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: ${msg}\n`,
+              );
+              // Continue to next node -- one failed node does not abort the aggregation
+            }
           }
 
-          const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
-          if (!nodeData) {
-            process.stderr.write(
-              `[WARN coord:reason=no_node_data handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node response missing data field\n`,
-            );
-            return null;
-          }
-          const recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
-          if (recap === null) {
-            process.stderr.write(
-              `[WARN coord:reason=no_recap handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node has no recapMarkdown\n`,
-            );
-          }
-          return recap;
+          return { recapMarkdown: recap, artifacts: collectedArtifacts };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           process.stderr.write(
             `[WARN coord:reason=exception handle=${sessionHandle.slice(0, 16)}] getAgentResult: ${msg}\n`,
           );
-          return null;
+          return emptyResult;
         }
       },
 

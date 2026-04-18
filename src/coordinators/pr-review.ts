@@ -27,6 +27,10 @@
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 import type { AwaitResult, SessionResult } from '../cli/commands/worktrain-await.js';
+import {
+  ReviewVerdictArtifactV1Schema,
+  isReviewVerdictArtifact,
+} from '../v2/durable-core/schemas/artifacts/review-verdict.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOMAIN TYPES
@@ -41,14 +45,21 @@ import type { AwaitResult, SessionResult } from '../cli/commands/worktrain-await
 export type ReviewSeverity = 'clean' | 'minor' | 'blocking' | 'unknown';
 
 /**
- * Parsed findings from a review session's step notes.
+ * Parsed findings from a review session's step notes or typed artifact.
  */
 export interface ReviewFindings {
   readonly severity: ReviewSeverity;
   /** Short summaries of individual findings (for fix-agent goal string). */
   readonly findingSummaries: readonly string[];
-  /** The raw markdown text that was parsed (for report). */
+  /** The raw markdown text or artifact JSON that was parsed (for report). */
   readonly raw: string;
+  /**
+   * The extraction path that produced these findings.
+   * 'artifact': parsed from a wr.review_verdict typed artifact (preferred)
+   * 'keyword_scan': parsed from step notes using keyword heuristics (fallback)
+   * Optional for backward compatibility -- new code always sets this.
+   */
+  readonly source?: 'artifact' | 'keyword_scan';
 }
 
 /**
@@ -136,13 +147,22 @@ export interface CoordinatorDeps {
   ) => Promise<AwaitResult>;
 
   /**
-   * Retrieve the step notes (recapMarkdown) from the final step of a completed session.
-   * Returns null if the session has no notes or the node endpoint fails.
+   * Retrieve the recap notes and artifacts from a completed session.
    *
-   * WHY 2-call HTTP: worktrain await does NOT return session notes.
-   * Call sequence: GET /api/v2/sessions/:id -> preferredTipNodeId -> GET /api/v2/sessions/:id/nodes/:nodeId -> recapMarkdown.
+   * Returns recapMarkdown from the final (tip) node and artifacts aggregated
+   * from ALL session nodes. Returns empty artifacts array on failure.
+   *
+   * WHY both fields: recapMarkdown is used by the keyword-scan fallback;
+   * artifacts are used by readVerdictArtifact() for typed verdict extraction.
+   * WHY all nodes for artifacts: a verdict artifact may be emitted on any step,
+   * not just the final one.
+   *
+   * Call sequence: GET /api/v2/sessions/:id -> runs[0].nodes + preferredTipNodeId
+   * -> GET /api/v2/sessions/:id/nodes/:nodeId (for each node) -> recapMarkdown + artifacts[].
    */
-  readonly getAgentResult: (sessionHandle: string) => Promise<string | null>;
+  readonly getAgentResult: (
+    sessionHandle: string,
+  ) => Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }>;
 
   /**
    * List open PRs in the workspace via gh CLI.
@@ -325,6 +345,56 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
     findingSummaries: [],
     raw: notes,
   });
+}
+
+/**
+ * Read a typed verdict from a session's artifacts array.
+ *
+ * Searches artifacts for a valid `wr.review_verdict` artifact using Zod safeParse.
+ * Returns ReviewFindings on success, null if no valid verdict artifact is found.
+ *
+ * Called before parseFindingsFromNotes() as the preferred extraction path.
+ * Falls through to keyword scan when no artifact is present (backward compat during transition).
+ *
+ * WHY kind check before safeParse: limits WARN logs to cases where the agent tried to emit
+ * a verdict artifact but got the schema wrong. Other artifact types (assessment, loop_control)
+ * are not verdict artifacts and must not emit false warnings.
+ *
+ * @param artifacts - Artifacts aggregated from all session nodes
+ * @param sessionHandle - Session handle for logging context (first 16 chars)
+ */
+export function readVerdictArtifact(
+  artifacts: readonly unknown[],
+  sessionHandle?: string,
+): ReviewFindings | null {
+  const handlePrefix = sessionHandle ? sessionHandle.slice(0, 16) : 'unknown';
+  for (const raw of artifacts) {
+    // Only attempt full validation when kind discriminant matches.
+    // This prevents false WARN logs for non-verdict artifacts.
+    if (!isReviewVerdictArtifact(raw)) continue;
+
+    const result = ReviewVerdictArtifactV1Schema.safeParse(raw);
+    if (!result.success) {
+      const issues = result.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      // RED finding R1: log WARN when agent tried to emit verdict but schema was wrong.
+      // Without this log, malformed artifacts are invisible and the fallback is silent.
+      process.stderr.write(
+        `[WARN coord:reason=artifact_parse_failed handle=${handlePrefix}] readVerdictArtifact: wr.review_verdict schema validation failed: ${issues}\n`,
+      );
+      continue;
+    }
+
+    const v = result.data;
+    return {
+      severity: v.verdict,
+      findingSummaries: v.findings.map((f) => f.summary),
+      raw: JSON.stringify(v),
+      source: 'artifact',
+    };
+  }
+  return null;
 }
 
 /**
@@ -570,14 +640,30 @@ export async function runPrReviewCoordinator(
       const elapsedMs = sessionResult.durationMs;
       const handle = sessionResult.handle;
 
-      // Get notes for this session
+      // Get notes and artifacts for this session
       let notes: string | null = null;
+      let artifacts: readonly unknown[] = [];
       if (sessionResult.outcome === 'success') {
-        notes = await deps.getAgentResult(handle);
+        const agentResult = await deps.getAgentResult(handle);
+        notes = agentResult.recapMarkdown;
+        artifacts = agentResult.artifacts;
       }
 
-      // Parse findings
-      const findingsResult = parseFindingsFromNotes(notes);
+      // Parse findings -- try artifact path first, keyword-scan fallback
+      const verdictFromArtifact = readVerdictArtifact(artifacts, handle);
+      const findingsResult = verdictFromArtifact !== null
+        ? (() => {
+            deps.stderr(`[INFO coord:source=artifact handle=${handle.slice(0, 16)}] readVerdictArtifact succeeded`);
+            return ok(verdictFromArtifact);
+          })()
+        : (() => {
+            const keywordResult = parseFindingsFromNotes(notes);
+            if (keywordResult.kind === 'ok') {
+              const reason = artifacts.length > 0 ? 'no_valid_artifact' : 'no_artifacts';
+              deps.stderr(`[INFO coord:source=keyword_scan reason=${reason} artifactCount=${artifacts.length} handle=${handle.slice(0, 16)}]`);
+            }
+            return keywordResult;
+          })();
       const severity: ReviewSeverity = findingsResult.kind === 'ok'
         ? findingsResult.value.severity
         : 'unknown';
@@ -869,8 +955,18 @@ async function runFixAgentLoop(
       };
     }
 
-    const reNotes = await deps.getAgentResult(reReviewHandle);
-    const reFindingsResult = parseFindingsFromNotes(reNotes);
+    const reAgentResult = await deps.getAgentResult(reReviewHandle);
+    const reVerdictFromArtifact = readVerdictArtifact(reAgentResult.artifacts, reReviewHandle);
+    const reFindingsResult = reVerdictFromArtifact !== null
+      ? (() => {
+          deps.stderr(`[INFO coord:source=artifact handle=${reReviewHandle.slice(0, 16)}] readVerdictArtifact succeeded (re-review pass ${passCount})`);
+          return ok(reVerdictFromArtifact);
+        })()
+      : (() => {
+          const reason = reAgentResult.artifacts.length > 0 ? 'no_valid_artifact' : 'no_artifacts';
+          deps.stderr(`[INFO coord:source=keyword_scan reason=${reason} artifactCount=${reAgentResult.artifacts.length} handle=${reReviewHandle.slice(0, 16)}]`);
+          return parseFindingsFromNotes(reAgentResult.recapMarkdown);
+        })();
     const reSeverity: ReviewSeverity = reFindingsResult.kind === 'ok'
       ? reFindingsResult.value.severity
       : 'unknown';
@@ -913,7 +1009,7 @@ async function runFixAgentLoop(
     // Still minor -- continue loop
     currentFindings = reFindingsResult.kind === 'ok'
       ? reFindingsResult.value
-      : { severity: 'minor', findingSummaries: [], raw: reNotes ?? '' };
+      : { severity: 'minor', findingSummaries: [], raw: reAgentResult.recapMarkdown ?? '' };
   }
 
   // Exhausted max passes
