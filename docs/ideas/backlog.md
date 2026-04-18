@@ -4444,3 +4444,67 @@ The blanket try/catch in AgentLoop._executeTools() converts ALL tool throws to i
 **The bridge complexity was always a band-aid.** It was the right solution when the MCP server also owned the console UI. With the standalone console, the band-aid can come off and the system becomes dramatically simpler and more reliable.
 
 **Build order:** extract `worktrain console` fully (done) → remove HttpServer from MCP startup → remove bridge → remove DashboardLock/primary election → MCP server is pure stdio.
+
+---
+
+### Agent-engine communication: first principles design (Apr 18, 2026)
+
+**The setup for this conversation:**
+
+Three discovery agents investigated whether the daemon should continue using MCP-style tool calls for workflow control (`continue_workflow`). Their findings:
+
+- **Discovery 1**: Tool calls are fine; enrich `continue_workflow` with `artifacts` now, explore structured output hybrid later pending Bedrock verification. ~225 tokens/request saved with hybrid.
+- **Discovery 2**: `complete_step` tool -- daemon owns transitions, continueToken hidden from LLM, notes required at type level. Cleaner DX without paradigm shift.
+- **Discovery 3**: The field has converged on tool calls. OpenAI Agents SDK, LangGraph, Temporal, Vercel AI SDK all use tool calls for workflow control. WorkRail's `continue_workflow` with HMAC tokens is already field-standard or better.
+
+**User's response to "the field has converged on tool calls":**
+
+> "Right, but do we want industry standards? Aren't we trying to build something special? What if there is better?"
+
+This is the right question. "Field convergence" is a description of where everyone ended up starting from the MCP/function-calling paradigm -- not proof that it's optimal. Every system surveyed treats the workflow engine as external infrastructure the agent calls into. WorkRail is different: **the daemon IS the workflow engine**. The agent loop and the step sequencer run in the same process, sharing the same DI container. Tool calls are a network-origin concept -- they exist because there's an LLM over there and an executor over here. WorkRail doesn't have that constraint.
+
+---
+
+#### First-principles alternatives (unexplored territory)
+
+These were not in any of the discovery agents' outputs -- they emerge from the insight that WorkRail owns both sides of the conversation:
+
+**1. Structured response parsing (no tool call for workflow control)**
+The agent outputs a structured response at the end of each turn. The daemon parses it. The LLM never "calls a tool" to advance -- it produces a well-structured output and the daemon acts on it. The continueToken and workflow machinery are completely invisible to the LLM. Example: agent outputs `{"step_complete": true, "notes": "...", "artifacts": [...]}` as its final text, daemon detects this and advances.
+
+**2. Implicit advancement (criteria-based)**
+The daemon watches what the agent produces (file writes, bash outcomes, notes) and decides when to advance -- the agent never explicitly signals "I'm done." The workflow step has completion criteria, and the daemon evaluates them against the agent's cumulative output. More like a CI pipeline (tests pass = done) than an API call. The agent just works; the daemon decides when the step is complete.
+
+**3. Declarative intent + daemon execution**
+The agent outputs what it *wants* to happen: "I want to commit these files with this message and advance to the next step." The daemon executes. Same as the scripts-over-agent principle applied to the agent's own workflow control -- the agent declares intent, scripts execute. No tool call for the mechanical parts.
+
+**4. Streaming judgment**
+The daemon reads the agent's streaming response in real-time, extracts notes and artifacts as they appear, and makes the advance decision before the agent "finishes." No explicit signal from the agent. The daemon monitors and decides.
+
+**5. Separation of concerns: tools for world, declaration for workflow**
+Keep tool calls for external actions (Bash, Read, Write) -- these genuinely need interleaved execution and result reasoning. But workflow control (advance, submit artifacts, set context) uses a different mechanism entirely: structured response, implicit detection, or a single lightweight declaration. The protocol distinction: tools are for I/O, declarations are for state.
+
+---
+
+#### What makes this hard
+
+These alternatives trade off in important ways:
+- **Structured response parsing**: requires reliable structured output from the LLM, which can fail without explicit enforcement
+- **Implicit advancement**: requires the daemon to correctly evaluate completion criteria -- complex for open-ended steps
+- **Declarative intent**: still needs some kind of output format; essentially moves the "tool call" into the response text
+- **Streaming judgment**: hardest to implement correctly; requires the daemon to parse partial responses reliably
+
+The current tool-call approach works precisely because it's explicit: the agent signals intent exactly once, the daemon acts on it. The alternatives are more elegant but less reliable.
+
+---
+
+#### What to actually investigate
+
+Before committing to any alternative, these questions need answers:
+
+1. **Does Bedrock support `response_format + tools` simultaneously?** A 10-line test call resolves this. If yes, hybrid structured output is immediately viable for workflow control.
+2. **What does implicit advancement actually look like for a coding task?** Write out the completion criteria for `coding-task-workflow-agentic` phase-0 (classify). Can a daemon reliably detect "Phase 0 is done" without an explicit signal?
+3. **What is the actual failure mode of structured response parsing?** How often does Claude 4.6 Sonnet fail to produce valid JSON when asked to end its turn with a structured summary? Under what conditions?
+4. **What did nexus-core do?** The backlog notes nexus-core as a more advanced system -- how does it handle agent-step transitions?
+
+These are prototype questions, not design questions. Build the smallest possible test for each before committing to any direction.
