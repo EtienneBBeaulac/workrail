@@ -245,6 +245,56 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CONSOLE COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('console')
+  .description('Start the WorkRail console UI (reads session files directly, no daemon required)')
+  .option('-p, --port <n>', 'Port to bind the console server (default: 3456)', parseInt)
+  .option('-w, --workspace <path>', 'Workspace path (reserved for future scoped view)')
+  .action(async (options: { port?: number; workspace?: string }) => {
+    const { startStandaloneConsole } = await import('./console/standalone-console.js');
+
+    const result = await startStandaloneConsole({
+      port: options.port,
+    });
+
+    if (result.kind === 'port_conflict') {
+      process.stderr.write(
+        `[Console] Port ${result.port} is already in use. ` +
+        `Use --port to choose a different port, or stop the process holding port ${result.port}.\n`,
+      );
+      process.exit(1);
+    }
+
+    if (result.kind === 'io_error') {
+      process.stderr.write(`[Console] Failed to start: ${result.message}\n`);
+      process.exit(1);
+    }
+
+    // Print the banner after the server is confirmed listening.
+    const line = '='.repeat(60);
+    process.stdout.write(`\n${line}\n`);
+    process.stdout.write(`WorkRail Console\n`);
+    process.stdout.write(`${line}\n`);
+    process.stdout.write(`Console:  http://localhost:${result.port}/console\n`);
+    process.stdout.write(`Sessions: ${path.join(os.homedir(), '.workrail', 'data', 'sessions')}\n`);
+    process.stdout.write(`${line}\n\n`);
+    process.stdout.write(`Press Ctrl+C to stop.\n`);
+
+    // Keep the process alive until SIGINT or SIGTERM.
+    const shutdown = async () => {
+      process.stdout.write('\n[Console] Shutting down...\n');
+      await result.stop();
+      process.exit(0);
+    };
+
+    process.on('SIGINT', () => { void shutdown(); });
+    process.on('SIGTERM', () => { void shutdown(); });
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
 // ═══════════════════════════════════════════════════════════════════════════
 
