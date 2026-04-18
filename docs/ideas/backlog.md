@@ -1779,6 +1779,322 @@ No PR merges without passing all required gates for its classification. The coor
 Right now, "has this been reviewed and audited?" is a question that requires reading through PRs and session notes. With proof records, it's a query: `SELECT * FROM proof_records WHERE module='src/trigger/' AND kind='production_audit' AND outcome='pass' AND timestamp > NOW()-30days`. The knowledge graph stores these records. The watchdog checks them on a schedule. The coordinator gates on them before merging. Verification becomes infrastructure, not process.
 ---
 
+### Scripts-first coordinator: avoid the main agent wherever possible (Apr 15, 2026)
+
+**The insight:** In the coordinator workflow we built manually today, the main agent spent most of its time on mechanical work -- reading PR lists, checking CI status, deciding whether findings are blocking, sequencing merges. That's all deterministic logic. An LLM is expensive, slow, and inconsistent for deterministic work.
+
+**The principle extended to coordinators:** the scripts-over-agent rule applies at the coordinator level too. The coordinator's job is to drive a DAG of child sessions. The DAG structure, routing decisions, and termination conditions should be scripts, not LLM reasoning.
+
+**What this means concretely:**
+
+Instead of a coordinator *agent* that reads MR review findings and decides what to do, use a **coordinator script** that:
+1. Calls `gh pr list` → list of PRs (script)
+2. For each PR, calls `spawn_session(mr-review-workflow-agentic)` → session handles (script)
+3. Calls `await_sessions(handles)` → structured findings (script waits)
+4. Parses the findings JSON block from each session's output (script)
+5. Routes: clean → merge queue, minor → spawn fix agent, blocking → escalate (script decision tree)
+6. Calls `spawn_session(coding-task-workflow-agentic, fix: <finding>)` for each fix needed (script)
+7. Awaits fix agents, re-queues for re-review (script loop)
+8. Executes merge sequence when queue is empty (script)
+
+The agent is only invoked for the *leaf work* -- the actual MR review, the actual coding fix. All coordination, routing, sequencing, and decision-making is a script.
+
+**What the coordinator workflow looks like under this model:**
+
+Not a workflow that a single LLM session runs end-to-end. Instead, a **script-driven workflow** where each step is a shell/TypeScript script that calls WorkTrain's API to spawn/await child sessions and route based on their structured outputs. WorkTrain provides:
+- `worktrain spawn --workflow <id> --goal <text>` → prints sessionHandle
+- `worktrain await --sessions <handle1,handle2>` → prints structured results JSON
+- `worktrain merge --pr <number>` → runs the merge sequence
+
+The coordinator "workflow" is then a shell script or TypeScript file that composes these commands. Fully deterministic, fully auditable, no tokens burned on routing decisions.
+
+**Why this is better than a coordinator agent:**
+- Zero LLM cost for coordination -- only leaf sessions burn tokens
+- Fully deterministic routing -- the same PR list always produces the same execution plan
+- Trivially auditable -- `set -x` on the shell script shows every decision
+- Trivially testable -- mock `worktrain spawn` and `worktrain await`, test the routing logic in isolation
+- Reusable across teams -- share the script, not the prompt
+
+**Build order for this model:**
+1. `worktrain spawn` / `worktrain await` CLI commands that wrap the session engine
+2. Structured output format for leaf sessions (the handoff artifact JSON block already exists)
+3. A reference `coordinator-groom-prs.sh` (or `.ts`) as the first coordinator template
+4. Console DAG view updated to show coordinator-script-spawned sessions with parent-child relationships
+
+**The long-term vision:** WorkTrain workflows handle the hard cognitive work. WorkTrain scripts handle orchestration, routing, and sequencing. Together they make the system fully autonomous with full observability and zero wasted tokens.
+
+---
+
+### Full development pipeline: coordinator scripts drive multi-phase autonomous work (Apr 15, 2026)
+
+The coordinator isn't just for review → fix → merge. The full pipeline we run manually covers every phase of software development, with different phases triggered based on task classification.
+
+**Full pipeline DAG:**
+
+```
+trigger: "implement feature X"
+  │
+  ├── [always] classify-task
+  │     outputs: taskComplexity, riskLevel, hasUI, touchesArchitecture
+  │
+  ├── [if taskComplexity != Small] discovery
+  │     workflow: routine-context-gathering (COMPLETENESS + DEPTH in parallel)
+  │     outputs: context bundle, candidate files, invariants
+  │
+  ├── [if hasUI] ux-design
+  │     workflow: ux-design-workflow (mockups, component spec, interaction model)
+  │     outputs: design-spec.md, component-list
+  │
+  ├── [if touchesArchitecture] architecture-design
+  │     workflow: coding-task-workflow-agentic (design phases only)
+  │     outputs: design-candidates.md, selected approach
+  │     └── arch-review (parallel, 2 auditors)
+  │           workflow: routine-hypothesis-challenge + routine-philosophy-alignment
+  │           outputs: findings → revise design if RED/ORANGE
+  │
+  ├── [always] coding-task
+  │     workflow: coding-task-workflow-agentic
+  │     inputs: context bundle + design spec + arch decision
+  │     outputs: implementation + handoff artifact (commitType, prTitle, filesChanged)
+  │
+  ├── [always] mr-review
+  │     workflow: mr-review-workflow-agentic
+  │     outputs: findings with severity
+  │     ├── [if clean] → auto-commit → auto-pr → merge
+  │     ├── [if Minor/Nit] → spawn fix agent → re-review (max 3 passes)
+  │     └── [if Critical/Major] → escalate to human (Slack/GitLab comment)
+  │
+  ├── [if riskLevel == High] prod-risk-audit
+  │     workflow: production-risk-audit-workflow
+  │     outputs: go / no-go + risk register
+  │     └── [if no-go] → escalate, block merge
+  │
+  └── [if merged] notify
+        script: post summary to Slack/GitLab with session DAG link
+```
+
+**The key insight:** the coordinator script reads the `taskComplexity`, `riskLevel`, `hasUI`, and `touchesArchitecture` flags from the classify step's output and uses them to decide which phases to spawn. A one-line bug fix runs: classify → coding-task → mr-review. A new UI feature runs everything. The same coordinator script handles both -- the DAG is dynamic, driven by structured outputs.
+
+**Workflow library needed (not all exist yet):**
+
+| Workflow | Status |
+|----------|--------|
+| `coding-task-workflow-agentic` | ✅ `coding-task-workflow-agentic.lean.v2.json` |
+| `mr-review-workflow-agentic` | ✅ `mr-review-workflow.agentic.v2.json` |
+| `routine-context-gathering` | ✅ `routines/` |
+| `routine-hypothesis-challenge` | ✅ `routines/` |
+| `routine-philosophy-alignment` | ✅ `routines/` |
+| `ux-design-workflow` | ✅ `ui-ux-design-workflow.json` |
+| `production-risk-audit-workflow` | ✅ `production-readiness-audit.json` |
+| `architecture-review-workflow` | ✅ `architecture-scalability-audit.json` |
+| `bug-investigation-workflow` | ✅ `bug-investigation.agentic.v2.json` |
+| `discovery-workflow` | ✅ `wr.discovery.json` |
+| `classify-task-workflow` | ❌ needs authoring -- fast, 1-step, outputs taskComplexity/riskLevel/hasUI/touchesArchitecture |
+
+**The classify step is the gate.** A cheap, fast workflow that takes a task description and returns structured vars. This is where the coordinator decides what to run. It's the single most important missing workflow -- without it, the coordinator has to spawn everything for every task, which is wasteful.
+
+**The coordinator script for this pipeline:**
+```typescript
+// coordinator-implement-feature.ts
+const { taskComplexity, riskLevel, hasUI, touchesArchitecture } =
+  await runWorkflow('classify-task-workflow', { goal: taskDescription });
+
+const contextHandle = taskComplexity !== 'Small'
+  ? spawnSession('routine-context-gathering', { goal: taskDescription })
+  : null;
+
+const uxHandle = hasUI
+  ? spawnSession('ux-design-workflow', { goal: taskDescription })
+  : null;
+
+const [context, uxSpec] = await awaitSessions([contextHandle, uxHandle]);
+
+// ... arch design if needed, then coding, then review, then audit
+```
+
+Zero coordinator LLM calls. Every decision is a script condition on structured output.
+
+**Audit workflows the coordinator can chain:**
+Beyond MR review, the same pattern applies to any quality gate:
+- **Production risk audit** -- scans for: exposed secrets, missing rate limits, no-rollback schema changes, unguarded env vars
+- **Architecture audit** -- scans for: coupling violations, missing abstractions, incorrect layer dependencies
+- **Test coverage audit** -- identifies untested paths on changed files
+- **Performance audit** -- scans for N+1 queries, missing indexes, unbounded loops on hot paths
+- **Security audit** -- OWASP top 10 scan on changed surfaces
+
+Each is a workflow. The coordinator decides which to run based on `riskLevel`, what files changed, and what domain the task touches. All feed findings back to the coordinator script which routes: fix, skip, or escalate.
+
+---
+
+### Additional coordinator pipeline templates (Apr 15, 2026)
+
+Beyond the feature implementation pipeline, three more coordinator templates are high value:
+
+---
+
+#### Backlog grooming coordinator
+
+```
+trigger: "groom backlog" (cron: weekly, or manual dispatch)
+  │
+  ├── [for each open issue] classify-issue
+  │     outputs: issueType (bug/feature/tech-debt/question), priority, complexity, stale?
+  │
+  ├── [for stale issues > 90 days with no activity] auto-close-or-ping
+  │     script: post "Still relevant?" comment, label as stale
+  │
+  ├── [for unclassified issues] label-and-size
+  │     script: apply labels (bug/enhancement/question), size estimate (XS/S/M/L)
+  │
+  ├── [for duplicate issues] detect-duplicates
+  │     workflow: semantic search over existing issues, flag likely dupes
+  │     script: comment "possible duplicate of #X", label as needs-triage
+  │
+  ├── [for high-priority bugs with no assignee] suggest-fix-approach
+  │     workflow: bug-investigation-agentic (surface root cause + candidate fix)
+  │     outputs: investigation summary posted as issue comment
+  │
+  └── produce grooming summary
+        script: post weekly digest to Slack -- issues triaged, dupes found, investigations run
+```
+
+No human needed for any of this. The coordinator classifies, labels, pings stale items, and runs investigations on the important ones. The human reviews the digest and acts on what needs judgment.
+
+---
+
+#### Bug investigation + fix coordinator
+
+```
+trigger: new issue labeled "bug" OR incident alert from monitoring
+  │
+  ├── bug-investigation-agentic
+  │     outputs: root cause hypothesis, affected files, severity, reproduction steps
+  │
+  ├── [if severity == Critical] page-oncall
+  │     script: post to Slack #incidents with investigation summary + session link
+  │
+  ├── [if severity <= High and hypothesis_confidence >= 0.8] attempt-fix
+  │     workflow: coding-task-workflow-agentic (targeted fix)
+  │     inputs: investigation findings, affected files, reproduction steps
+  │     outputs: implementation + handoff artifact
+  │     │
+  │     ├── mr-review
+  │     │     └── [if clean] auto-commit → auto-pr
+  │     │
+  │     └── regression-test
+  │           script: run test suite against affected paths
+  │           outputs: pass/fail
+  │
+  ├── [if severity == Critical OR hypothesis_confidence < 0.8] escalate
+  │     script: post investigation summary to issue + tag team lead
+  │
+  └── close-or-update-issue
+        script: if fix merged → close with "Fixed in PR #X". if escalated → update with findings.
+```
+
+The daemon can go from "bug filed" to "fix merged" with zero human involvement for well-understood bugs with high-confidence hypotheses. Critical bugs and uncertain root causes always escalate to a human -- the investigation is done for them, not by them.
+
+**What makes this work:**
+- `bug-investigation-agentic` already exists and produces structured findings
+- The `hypothesis_confidence` output from the investigation gates the auto-fix attempt
+- The coordinator script decides: high confidence + not critical = try to fix autonomously
+- The circuit breaker (max 3 fix attempts) prevents infinite loops on hard bugs
+- The human always gets the investigation findings, whether the fix succeeded or not
+
+---
+
+#### Incident monitoring coordinator
+
+```
+trigger: monitoring alert (CPU spike, error rate increase, latency P99 > threshold)
+  │
+  ├── triage-alert
+  │     workflow: classify if real incident vs noise (check recent deploys, known issues)
+  │     outputs: isRealIncident, likelyCause, affectedServices
+  │
+  ├── [if isRealIncident] investigate
+  │     workflow: bug-investigation-agentic (logs, traces, recent changes)
+  │     outputs: root cause, blast radius, mitigation options
+  │
+  ├── [if mitigation is config change or rollback] auto-mitigate
+  │     script: execute safe mitigations (feature flag flip, config change)
+  │     -- NEVER auto-rollback code without human approval
+  │
+  ├── page-oncall
+  │     script: post to Slack #incidents with full context + session DAG link
+  │     content: what fired, what was found, what was auto-mitigated, what needs human action
+  │
+  └── follow-up
+        cron: 30 min later → check if resolved, post update
+```
+
+The operator gets paged with a complete picture: what happened, likely why, what was already done automatically, and exactly what decision they need to make. No more waking up to an alert with no context.
+
+---
+
+### Interactive ideation: WorkTrain as a thinking partner with full project context (Apr 15, 2026)
+
+**What this is:** The ability to have a conversation with WorkTrain the way we've been talking today -- bouncing ideas, asking "what if", surfacing tradeoffs, refining designs -- and have WorkTrain respond with full awareness of what's been built, what's in flight, what's in the backlog, and what decisions were made and why.
+
+Today this requires a human (Claude Code + a long conversation) to maintain context across everything. WorkTrain should be able to do this natively because it already has:
+- The session store (every step note from every session ever run)
+- The knowledge graph (structural understanding of the codebase)
+- The backlog (design decisions, research findings, priorities)
+- In-flight agent state (what's running, what's been found)
+
+**The gap:** there's no conversational interface that pulls all of this together. The console shows sessions. The backlog is a markdown file. There's no "talk to WorkTrain about the project" entry point.
+
+**What it needs:**
+
+1. **A "talk" command** -- `worktrain talk` opens an interactive session that starts with a synthesized context bundle: recent session outcomes, open PRs, backlog top items, any findings from in-flight agents. The user types naturally; WorkTrain responds with awareness of all of it.
+
+2. **Project memory** -- WorkTrain maintains a synthesized "project state" that's updated after each coordinator run or major session batch. Answers questions like: "what did we build today?", "why did we choose polling triggers over webhooks?", "what's the biggest gap right now?", "what would happen if we removed pi-mono?" without requiring the user to re-explain context.
+
+3. **Idea capture** -- when the conversation surfaces something new (a gap, an architectural insight, a design decision), WorkTrain should offer to record it to the backlog or open a GitHub issue immediately, right from the conversation.
+
+4. **Context awareness** -- WorkTrain knows which agents are running, what they've found so far, and can report on it during a conversation: "the #400 review just came back with a fetch timeout blocker -- want me to queue a fix agent?"
+
+**What makes this different from just using Claude Code:** Claude Code has no persistent project context -- every conversation starts from scratch. WorkTrain's ideation session starts with everything loaded: session history, knowledge graph results for relevant files, backlog items, open PRs. The conversation is grounded in the actual project state, not just what the user remembers to paste in.
+
+**Architecture:** this is a new `talk` workflow -- a conversational loop workflow with no fixed step count. The agent has access to `query_knowledge_graph`, `read_session_notes`, `read_backlog`, `list_in_flight_agents`, and `append_to_backlog` as tools. It maintains the conversation as a standard message history. The session never "completes" -- it ends when the user exits.
+
+---
+
+### Automatic gap and improvement detection: proactive WorkTrain (Apr 15, 2026)
+
+**What this is:** WorkTrain notices things without being asked. After a batch of work lands, it scans for gaps, inconsistencies, missed connections, and improvement opportunities -- and surfaces them proactively.
+
+**Examples of what it would have caught today without human prompting:**
+- "PR #400 delivery client has no fetch timeout -- delivery could hang indefinitely" (caught by MR review, but WorkTrain could catch this pre-review)
+- "PR #391 picked up GAP-1 crash recovery code it shouldn't have -- scope leak" (caught by the reviewer)
+- "The backlog says knowledge graph should be persistent but the spike uses in-memory DuckDB" (gap between spec and impl)
+- "Three open PRs all modify workflow-runner.ts -- they're going to conflict when merged sequentially"
+- "Issue #393 filed for loadSessionNotes coverage -- this is related to the GAP-2 PR that's open, might as well fix both together"
+- "The classify-task-workflow was just authored but it's not referenced in the coordinator spec yet"
+
+**Two modes:**
+
+**1. Event-triggered scans** -- fires after significant events:
+- After a batch of PRs merge: scan for spec/impl gaps, check if any backlog items are now addressable
+- After a new workflow is authored: check if it should be added to the coordinator pipeline
+- After a bug is filed: check if any recent changes are likely culprits
+- After a coordinator run: check if findings surfaced any architectural concerns not in the backlog
+
+**2. Periodic health checks** -- runs on a schedule (e.g. weekly):
+- Are there backlog items that have all their prerequisites met but haven't been started?
+- Are there open issues that are actually already fixed by merged PRs?
+- Are there PRs that have been approved but not merged for more than N days?
+- Is the knowledge graph stale (files changed since last index)?
+- Are any daemon sessions orphaned (in daemon-sessions/ but older than 24h)?
+
+**Architecture:** a `watchdog` workflow that runs on a cron trigger. It queries the knowledge graph, reads recent session notes, lists open PRs and issues, reads the backlog priorities, and produces a `gap-report.md` with actionable findings. Each finding is either: auto-actionable (spawn a fix agent), conversation-worthy (add to the ideation queue), or escalation-worthy (post to Slack/file a GitHub issue).
+
+**The key difference from the coordinator:** the coordinator executes a known plan. The watchdog discovers things that aren't in any plan yet. It's the system's immune response -- continuously scanning for drift between intention and reality.
+
+**What makes this tractable:** WorkTrain already has all the inputs. The knowledge graph has the structural state. The session store has the history. The backlog has the intentions. The gap detection is the synthesis layer that connects them -- "what was planned" vs "what was built" vs "what's in flight". This is exactly the kind of thing an LLM is good at: cross-referencing multiple sources and identifying inconsistencies.
+
+---
+
 ### Dynamic model selection: right model for the right task (Apr 15, 2026)
 
 **The principle:** not every task needs Sonnet 4.6. Not every task should be locked to Anthropic. The coordinator and the task classifier should be able to select the model dynamically based on what the task actually needs.
