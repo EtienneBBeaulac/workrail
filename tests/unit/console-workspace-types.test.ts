@@ -170,10 +170,10 @@ describe('joinSessionsAndWorktrees', () => {
     expect(items[0]!.allSessions).toHaveLength(2);
   });
 
-  it('correctly separates same branch name across different repos', () => {
-    // Two repos each have a 'feature/x' branch -- sessions appear in both
-    const session1 = makeSession({ sessionId: 'sess_0000000000000000000000001', gitBranch: 'feature/x' });
-    const session2 = makeSession({ sessionId: 'sess_0000000000000000000000002', gitBranch: 'feature/x' });
+  it('places each session under its own repo when repoRoot is set', () => {
+    // Two repos each have a 'feature/x' branch -- each session knows its own repo
+    const session1 = makeSession({ sessionId: 'sess_0000000000000000000000001', gitBranch: 'feature/x', repoRoot: '/repo-a' });
+    const session2 = makeSession({ sessionId: 'sess_0000000000000000000000002', gitBranch: 'feature/x', repoRoot: '/repo-b' });
     const wt1 = makeWorktree({ branch: 'feature/x', path: '/repo-a' });
     const wt2 = makeWorktree({ branch: 'feature/x', path: '/repo-b' });
     const repo1 = makeRepo('/repo-a', [wt1]);
@@ -181,10 +181,27 @@ describe('joinSessionsAndWorktrees', () => {
 
     const items = joinSessionsAndWorktrees([session1, session2], [repo1, repo2]);
 
-    // Sessions appear in both repos since we can't determine which repo they belong to
-    expect(items.length).toBeGreaterThanOrEqual(2);
-    expect(items.map(i => i.repoRoot).sort()).toContain('/repo-a');
-    expect(items.map(i => i.repoRoot).sort()).toContain('/repo-b');
+    // Each session appears under its own repo only -- no cross-repo fan-out
+    expect(items).toHaveLength(2);
+    const repoA = items.find(i => i.repoRoot === '/repo-a');
+    const repoB = items.find(i => i.repoRoot === '/repo-b');
+    expect(repoA?.allSessions.map(s => s.sessionId)).toEqual(['sess_0000000000000000000000001']);
+    expect(repoB?.allSessions.map(s => s.sessionId)).toEqual(['sess_0000000000000000000000002']);
+  });
+
+  it('falls back to all matching repos when session.repoRoot is null (legacy sessions)', () => {
+    // Sessions without repoRoot still fan out to all repos with the same branch name
+    const session = makeSession({ sessionId: 'sess_0000000000000000000000003', gitBranch: 'feature/x', repoRoot: null });
+    const wt1 = makeWorktree({ branch: 'feature/x', path: '/repo-a' });
+    const wt2 = makeWorktree({ branch: 'feature/x', path: '/repo-b' });
+    const repo1 = makeRepo('/repo-a', [wt1]);
+    const repo2 = makeRepo('/repo-b', [wt2]);
+
+    const items = joinSessionsAndWorktrees([session], [repo1, repo2]);
+
+    // Legacy session (no repoRoot) appears under both repos -- graceful degradation
+    expect(items).toHaveLength(2);
+    expect(items.every(i => i.allSessions[0]?.sessionId === 'sess_0000000000000000000000003')).toBe(true);
   });
 
   it('excludes detached HEAD worktrees (null branch) from items', () => {
