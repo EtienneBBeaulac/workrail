@@ -58,3 +58,11 @@ export {
   type WorktrainDaemonCommandDeps,
   type WorktrainDaemonCommandOpts,
 } from './worktrain-daemon.js';
+export {
+  executeWorktrainOverviewCommand,
+  buildConsoleServiceFromDataDir,
+  type WorktrainOverviewCommandDeps,
+  type WorktrainOverviewCommandOpts,
+  type StatusDataPacket,
+  type StatusSession,
+} from './worktrain-overview.js';
