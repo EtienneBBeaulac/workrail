@@ -133,6 +133,8 @@ export interface IssueReportedEvent {
   readonly summary: string;
   /** Current continueToken, if the agent provided it (enables coordinator resumption). */
   readonly continueToken?: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /**

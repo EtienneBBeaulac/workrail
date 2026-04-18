@@ -66,17 +66,17 @@ describe('makeReportIssueTool()', () => {
 
   describe('tool shape', () => {
     it('returns a tool with name report_issue', () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       expect(tool.name).toBe('report_issue');
     });
 
     it('description mentions the auto-fix coordinator', () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       expect(tool.description).toContain('auto-fix coordinator');
     });
 
     it('input schema requires kind, severity, and summary', () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const schema = tool.inputSchema as any;
       expect(schema.required).toContain('kind');
@@ -87,7 +87,7 @@ describe('makeReportIssueTool()', () => {
 
   describe('return values', () => {
     it('returns non-fatal confirmation for info severity', async () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       const result = await tool.execute('call-1', {
         kind: 'tool_failure',
         severity: 'info',
@@ -98,7 +98,7 @@ describe('makeReportIssueTool()', () => {
     });
 
     it('returns non-fatal confirmation for warn severity', async () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       const result = await tool.execute('call-1', {
         kind: 'blocked',
         severity: 'warn',
@@ -108,7 +108,7 @@ describe('makeReportIssueTool()', () => {
     });
 
     it('returns non-fatal confirmation for error severity', async () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       const result = await tool.execute('call-1', {
         kind: 'unexpected_behavior',
         severity: 'error',
@@ -118,7 +118,7 @@ describe('makeReportIssueTool()', () => {
     });
 
     it('returns FATAL message for fatal severity', async () => {
-      const tool = makeReportIssueTool('sess-1', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-1', undefined, undefined, tmpDir);
       const result = await tool.execute('call-1', {
         kind: 'needs_human',
         severity: 'fatal',
@@ -131,7 +131,7 @@ describe('makeReportIssueTool()', () => {
 
   describe('JSONL write', () => {
     it('writes a JSON line to <issuesDirOverride>/<sessionId>.jsonl', async () => {
-      const tool = makeReportIssueTool('sess-abc', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir);
       await tool.execute('call-1', {
         kind: 'tool_failure',
         severity: 'error',
@@ -146,7 +146,7 @@ describe('makeReportIssueTool()', () => {
     });
 
     it('written JSON contains kind, severity, summary, sessionId, and ts', async () => {
-      const tool = makeReportIssueTool('sess-abc', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir);
       await tool.execute('call-1', {
         kind: 'blocked',
         severity: 'warn',
@@ -167,7 +167,7 @@ describe('makeReportIssueTool()', () => {
     });
 
     it('includes optional fields when provided', async () => {
-      const tool = makeReportIssueTool('sess-abc', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir);
       await tool.execute('call-1', {
         kind: 'tool_failure',
         severity: 'error',
@@ -194,7 +194,7 @@ describe('makeReportIssueTool()', () => {
 
     it('creates directory if it does not exist', async () => {
       const nestedDir = path.join(tmpDir, 'issues', 'nested');
-      const tool = makeReportIssueTool('sess-abc', undefined, nestedDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, nestedDir);
       await tool.execute('call-1', {
         kind: 'self_correction',
         severity: 'info',
@@ -212,7 +212,7 @@ describe('makeReportIssueTool()', () => {
       // We simulate failure by pointing to /dev/null as the directory -- mkdir
       // on /dev/null will fail because it is not a directory.
       const badDir = '/dev/null/impossible-path';
-      const tool = makeReportIssueTool('sess-abc', undefined, badDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, badDir);
 
       // Must not throw -- fire-and-forget swallows all write errors.
       await expect(
@@ -226,7 +226,7 @@ describe('makeReportIssueTool()', () => {
 
     it('truncates summary longer than 200 chars to exactly 200 chars', async () => {
       const longSummary = 'a'.repeat(201);
-      const tool = makeReportIssueTool('sess-abc', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir);
       await tool.execute('call-1', {
         kind: 'tool_failure',
         severity: 'error',
@@ -252,7 +252,7 @@ describe('makeReportIssueTool()', () => {
         origEmit(event);
       });
 
-      const tool = makeReportIssueTool('sess-abc', emitter, tmpDir);
+      const tool = makeReportIssueTool('sess-abc', emitter, undefined, tmpDir);
       await tool.execute('call-1', {
         kind: 'unexpected_behavior',
         severity: 'warn',
@@ -270,7 +270,7 @@ describe('makeReportIssueTool()', () => {
 
     it('does not emit an event when no emitter is provided', async () => {
       // If no emitter, no event -- no error should occur.
-      const tool = makeReportIssueTool('sess-abc', undefined, tmpDir);
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir);
       await expect(
         tool.execute('call-1', {
           kind: 'self_correction',

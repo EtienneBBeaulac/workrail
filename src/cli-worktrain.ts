@@ -596,6 +596,10 @@ program
 
     // --follow mode: print existing lines then poll for new ones.
     // Start at offset 0 to show all existing events, then track the byte position.
+    // WHY explicit SIGINT handler: makes Ctrl-C clean exit explicit rather than
+    // relying on Node's default SIGINT behavior inside the polling loop.
+    process.once('SIGINT', () => process.exit(0));
+
     let currentFilePath = filePath;
     let offset = 0;
 

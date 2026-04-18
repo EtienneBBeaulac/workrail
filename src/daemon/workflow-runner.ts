@@ -1097,11 +1097,13 @@ interface IssueRecord {
  *
  * @param sessionId - The process-local session UUID (keys the issues file).
  * @param emitter - Optional event emitter to fire an issue_reported event.
+ * @param workrailSessionId - The WorkRail session ID for event correlation (optional).
  * @param issuesDirOverride - Override the issues directory (for tests).
  */
 export function makeReportIssueTool(
   sessionId: string,
   emitter?: DaemonEventEmitter,
+  workrailSessionId?: string | null,
   issuesDirOverride?: string,
 ): AgentTool {
   const issuesDir = issuesDirOverride ?? path.join(os.homedir(), '.workrail', 'issues');
@@ -1183,6 +1185,7 @@ export function makeReportIssueTool(
         severity: record.severity,
         summary: record.summary,
         ...(record.continueToken !== undefined && { continueToken: record.continueToken }),
+        ...(workrailSessionId != null ? { workrailSessionId } : {}),
       });
 
       const isFatal = record.severity === 'fatal';
@@ -1585,7 +1588,7 @@ export async function runWorkflow(
     makeBashTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
     makeReadTool(schemas, sessionId, emitter, workrailSessionId),
     makeWriteTool(schemas, sessionId, emitter, workrailSessionId),
-    makeReportIssueTool(sessionId, emitter),
+    makeReportIssueTool(sessionId, emitter, workrailSessionId),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----
