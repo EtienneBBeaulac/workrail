@@ -1,11 +1,13 @@
 /**
  * Workflow Source Types
- * 
+ *
  * Discriminated union representing all possible origins for workflows.
  * Exhaustive - compiler enforces all cases are handled in switch statements.
- * 
+ *
  * This is a first-class domain concept, not metadata.
  */
+
+import { assertNever } from '../runtime/assert-never.js';
 
 // =============================================================================
 // SOURCE TYPE DEFINITIONS
@@ -145,14 +147,6 @@ export function createPluginSource(pluginName: string, pluginVersion: string): P
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
-
-/**
- * Type-safe exhaustive check for switch statements.
- * If you see a compile error here, you forgot to handle a source kind.
- */
-export function assertNever(x: never): never {
-  throw new Error(`Unexpected source kind: ${JSON.stringify(x)}`);
-}
 
 /**
  * Get a human-readable display name for a source.
