@@ -5859,31 +5859,35 @@ The same session that found the issues verifies the fixes. No context reconstruc
 - **Spec authoring waiting for stakeholder input:** a spec session writes a draft, flags "needs: human review of acceptance criteria", waits, resumes when the human adds a comment
 - **Integration test waiting for deployment:** a test coordination session waits for a deploy to complete before running integration tests
 
-**The mechanism:**
+**The key insight: the LLM doesn't experience waiting.**
 
-This is a new `wait_for` workflow step type (or tool call):
+LLMs have no concept of time. Between one turn and the next, zero time passes from the agent's perspective. This means "waiting" is not a thing that happens to the agent -- it just doesn't receive its next turn until the coordinator has something to give it.
+
+The session is paused at the engine level (DAG holds at a node, no new turns issued). The agent submitted its output and simply hasn't received a response yet. When the coordinator is ready -- fix agent completed, human reviewed, deployment finished -- it advances the session with a turn that contains the new context. From the agent's perspective: it submitted findings and immediately received "here are the fixes, verify them."
+
+**No `wait_for` primitive needed at the workflow level.** The coordinator is the timing mechanism. This is the coordinator's job: know when each session is ready for its next input, and deliver that input at the right time.
 
 ```
-wait_for:
-  signal: "fixes_ready"           # named signal
-  from: session:<parent-id>       # who can send it
-  timeout: 2h                     # max wait before escalating
-  inject_on_resume:               # what to inject when resumed
-    - "Here is what was fixed: {{fixes.summary}}"
-    - "The diff of changes: {{fixes.diff}}"
+Coordinator logic:
+
+1. Advance review session to "findings complete" node
+2. Read findings from session output
+3. Spawn fix agent with those findings
+4. Wait for fix agent to complete (worktrain await)
+5. Inject fix summary into review session's next turn
+6. Advance review session: "Here are the fixes. Verify them."
+   → LLM receives this as the natural next step, no time gap perceived
 ```
 
-When a session reaches a `wait_for` step, the daemon suspends it (persists state, releases the concurrency semaphore slot). When the signal arrives (from another session completing, a webhook, or a human via `worktrain tell`), the daemon resumes the session and injects the specified context.
+**Why this is more powerful than re-running a fresh session:**
 
-**Why this is more powerful than just re-running a fresh session:**
-
-- **Context continuity:** the reviewer remembers what it found, why it flagged it, what invariants it was checking. A fresh session has to re-discover all of that from the diff.
-- **Relational memory:** "does fix for finding F2 actually address the root cause I identified, or just the symptom?" -- only the original session knows the root cause reasoning.
+- **Context continuity:** the reviewer remembers what it found, why it flagged it, what invariants it was checking. A fresh session has to re-discover all of that.
+- **Relational memory:** "does this fix address the root cause I identified, or just the symptom?" -- only the original session knows the root cause reasoning.
 - **Efficiency:** no redundant context gathering. The resumed session picks up exactly where it left off.
-- **Composable pipelines:** coordinator scripts become optional. A workflow can express the full pipeline declaratively -- review → wait for fixes → re-review -- without an external coordinator.
+- **The agent doesn't know it's coordinating:** from the agent's view, it's a continuous workflow. The coordinator manages the timing externally.
 
 **Implementation path:**
 
-- Phase 1: `wait_for` as a blocking step type in the workflow DAG. The daemon suspends the session and watches for the signal. Signal delivery is via `worktrain tell "signal:<session-id>:fixes_ready {fixes: ...}"` or via daemon event.
-- Phase 2: cross-session signals -- one session can signal another by session ID, passing structured data.
-- Phase 3: declarative coordinator workflows -- a workflow JSON can express the full review-fix-verify pipeline as a single session with `wait_for` steps between phases, replacing the external coordinator script entirely.
+- Phase 1: coordinator scripts withhold `complete_step` advancement until the condition is met. This already works today -- the coordinator just doesn't advance the session until the fix agent is done.
+- Phase 2: the coordinator passes structured context when advancing: `complete_step(session, { injectedContext: fixSummary })`. The session receives it as part of the next step's prompt.
+- Phase 3: declarative pipelines -- workflow JSON declares that step N waits for an external condition before proceeding. The coordinator reads this and manages the timing automatically. No hand-coded coordinator script needed for common patterns.
