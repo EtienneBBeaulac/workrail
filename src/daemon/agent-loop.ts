@@ -439,25 +439,16 @@ export class AgentLoop {
         continue;
       }
 
-      // Execute the tool. Catch errors and return them as is_error tool_results
-      // so the LLM can see what went wrong and decide how to proceed.
-      // WHY: killing the session on any tool failure loses all progress and prevents
-      // the agent from recovering. An error tool_result lets the LLM retry,
-      // rephrase, or escalate gracefully -- same rationale as unknown tool names.
+      // Execute the tool. Let throws propagate -- this is the pi-agent-core contract.
+      // WHY: tool failures are fatal to the current session. runWorkflow() catches at
+      // the outer boundary and records the error. Swallowing tool throws here would
+      // hide bugs and silently corrupt workflow state.
+      //
+      // NOTE: unknown tool names (hallucinated by the LLM) are handled above with an
+      // error tool_result because they are recoverable. A tool that exists but throws
+      // is a programmer-visible failure, not an LLM mistake.
       const params = (block.input ?? {}) as Record<string, unknown>;
-      let result: AgentToolResult<unknown>;
-      try {
-        result = await tool.execute(block.id, params);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        results.push({
-          toolCallId: block.id,
-          toolName: block.name,
-          result: { content: [{ type: 'text', text: `Tool execution failed: ${message}` }], details: null },
-          isError: true,
-        });
-        continue;
-      }
+      const result = await tool.execute(block.id, params);
       results.push({
         toolCallId: block.id,
         toolName: block.name,
