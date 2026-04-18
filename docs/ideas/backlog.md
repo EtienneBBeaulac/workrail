@@ -4861,3 +4861,62 @@ No LLM orchestration. No token-burning context packaging decisions. No "did I re
 6. **Backward compatibility** -- workflows that currently use `mcp__nested-subagent__Task` can be migrated incrementally
 
 **This is a design-first item.** Run a discovery session to explore the design space before any implementation. The current assumptions about subagent loops may be entirely wrong.
+
+---
+
+### Workflow runtime adapter: one spec, two runtimes (Apr 18, 2026)
+
+**The core insight:** as workflows evolve (potentially morphing significantly once the subagent loop is rethought), the workflow JSON becomes the canonical spec for *what work needs to happen*. How that spec gets executed depends on the runtime. A single adapter layer translates the canonical spec to runtime-specific execution plans.
+
+**Two runtimes, one spec:**
+
+```
+workflows/mr-review-workflow-agentic.json  ← canonical spec (unchanged)
+         ↓
+WorkflowAdapter.forRuntime('mcp')          ← MCP runtime interpretation
+WorkflowAdapter.forRuntime('daemon')       ← Daemon runtime interpretation
+```
+
+**What each adapter does:**
+
+MCP adapter (human-in-the-loop):
+- Preserves `requireConfirmation` gates
+- Presents `continue_workflow` tool call interface
+- LLM drives subagent spawning manually via `mcp__nested-subagent__Task`
+- Maintains backward compat with all existing Claude Code usage
+
+Daemon adapter (fully autonomous):
+- Removes or auto-bypasses `requireConfirmation` gates
+- Replaces `continue_workflow` with `complete_step` (daemon manages tokens)
+- Converts workflow-declared parallelism into automatic child session spawning
+- Routes step outputs to child agents per workflow spec
+- Enforces output contracts at step boundaries
+
+**Why this matters as workflows evolve:**
+
+Once the subagent loop is rethought (workflow-as-orchestrator model), workflow steps will likely declare parallelism, context routing, and synthesis patterns explicitly. These declarations make no sense to the MCP runtime (a human is already deciding this in real-time). The adapter translates them:
+
+```yaml
+# Workflow spec (future shape)
+- id: parallel-review
+  type: parallel
+  agents: [correctness, philosophy, hypothesis-challenge]
+  contextFrom: [phase-3-output]
+```
+
+MCP adapter sees this → renders as: "You should spawn 3 reviewer subagents now. Here's a template..."
+Daemon adapter sees this → actually spawns 3 child sessions automatically
+
+The workflow spec describes the intent. The adapter knows how each runtime fulfills it.
+
+**Key guarantee:** workflow improvements automatically benefit both runtimes. Improving `mr-review-workflow-agentic`'s philosophy alignment step shows up whether a human runs it through Claude Code or WorkTrain runs it autonomously. No dual maintenance.
+
+**Also eliminates "autonomous workflow variants":** the backlog had a separate item for autonomous variants of workflows. With the adapter, the canonical workflow spec is the only version -- the daemon adapter handles what "autonomy: full" means in practice. No parallel workflow files.
+
+**Build order:**
+1. Define the canonical workflow spec surface (what can be declared)
+2. MCP adapter (largely a no-op -- existing behavior, but formally defined)
+3. Daemon adapter (the interesting one -- translates declarations to daemon execution)
+4. Converter for upgrading existing workflow JSONs to the new canonical spec if the schema evolves
+
+**Dependencies:** requires the subagent loop rethinking to be resolved first -- the adapter can't be designed until we know what the workflow spec will declare.
