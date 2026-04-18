@@ -4564,3 +4564,53 @@ These are prototype questions, not design questions. Build the smallest possible
 **Why this matters:** The difference between WorkTrain being usable by anyone vs only by engineers who read the source code. A new user should be able to go from `worktrain init` to their first automated workflow in under 5 minutes.
 
 **Also needed:** `worktrain trigger add <template-name>` to add a single trigger to an existing triggers.yml without re-running init.
+
+---
+
+### Coordinator context injection standard: agents start informed, not discovering (Apr 18, 2026)
+
+**The problem:** subagents spawned by a coordinator are completely blind. They know nothing of prior conversations, existing docs, the pipeline, or what's already been tried. The workflows compensate by spending 3-5 turns on "Phase 0: context gathering" every session -- expensive in tokens, time, and LLM turns -- just to get oriented before work starts.
+
+**The root cause:** the coordinator spawns agents with task descriptions but not context. "Fix the Windows CI failures" is a task. "The Windows CI failures are in `workflow-runner-bash-tool.test.ts` because `node -e` isn't in PATH on Windows -- the fix is to use `process.execPath` instead of `node`, which is the established pattern in this codebase" is context. The difference is 0 discovery turns vs 5.
+
+**The standard to establish:**
+
+Every coordinator-spawned agent gets a pre-packaged context bundle. The coordinator assembles it before calling `worktrain spawn`. The bundle includes:
+
+1. **Prior session findings** -- what relevant sessions discovered (from session store query)
+2. **Established patterns** -- the specific invariants and patterns the agent needs (from knowledge graph or AGENTS.md)
+3. **What NOT to discover** -- explicit list of things already known so the agent doesn't waste turns
+4. **Failure history** -- what's been tried and didn't work (prevents re-exploring dead ends)
+
+**Format:** ~2000 tokens max, injected as a `<context>` block before the task description. Structured so the agent can skip Phase 0 context gathering entirely when the bundle is complete.
+
+**Build order:**
+1. Write the standard as a prompt template for coordinator scripts (`worktrain spawn` calls)
+2. The knowledge graph provides the infrastructure for querying relevant context automatically
+3. Eventually: `worktrain spawn` reads the context bundle from the graph + session store automatically, coordinator doesn't have to assemble it manually
+
+**Why this is high priority:** every agent spawned today without proper context is burning tokens on discovery that should have been provided upfront. At 10 concurrent agents, that's 10x the waste. With proper context injection, Phase 0 becomes 1 turn instead of 5, and output quality improves because the agent starts with the right mental model.
+
+---
+
+### Context budget per spawned agent: capped, structured, queryable (Apr 18, 2026)
+
+**The companion spec to context injection:**
+
+Rather than hoping agents discover the right context, the coordinator guarantees a minimum context budget: a pre-packaged bundle of ~2000 tokens that every agent starts with. The knowledge graph is what makes this scalable -- without it, the coordinator has to manually assemble context from files, which is itself expensive.
+
+**Bundle contents (structured):**
+- `<relevant_files>` -- paths + key excerpts from files the agent will likely touch (from KG query)
+- `<prior_sessions>` -- summaries of the last 3 sessions that touched related code (from session store)
+- `<established_patterns>` -- specific patterns the agent must follow (e.g. "use `tmpPath()` not `/tmp/`")
+- `<known_facts>` -- things already proven true (e.g. "semantic-release runs automatically after CI, not before")
+- `<do_not_explore>` -- explicit list of dead ends and already-tried approaches
+
+**How the knowledge graph enables this:**
+- `relevant_files`: KG query "what files are related to the goal?" returns the structural subgraph
+- `prior_sessions`: session store query "what sessions touched these files in the last 7 days?"
+- `established_patterns`: AGENTS.md + KG pattern nodes
+- `known_facts` and `do_not_explore`: built by the coordinator from prior session outputs
+
+**Without the KG (today):** the coordinator manually includes key context in the prompt. Better than nothing, but requires the coordinator to know what's relevant.
+**With the KG (future):** `worktrain spawn --workflow X --goal "..."` automatically queries the KG and assembles the context bundle. Coordinator just provides the goal.
