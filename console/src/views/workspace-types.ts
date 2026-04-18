@@ -240,8 +240,21 @@ export function joinSessionsAndWorktrees(
       continue;
     }
 
-    // When multiple repos share the same branch name, add the session to all of them.
-    for (const entry of entries) {
+    // When session.repoRoot is known, restrict to the repo it belongs to.
+    // This prevents a session from appearing under every repo that happens to
+    // have a worktree on the same branch name (e.g. 'main').
+    // Both session.repoRoot (LocalWorkspaceAnchorV2) and entry.repoRoot
+    // (resolveRepoRoot in worktree-service) are derived from the same
+    // `git rev-parse --git-common-dir` call, so they match for the same repo.
+    // Fall back to all entries when session.repoRoot is null (legacy sessions
+    // predating workspace anchor) or when no entry matches (defensive).
+    let matchedEntries = entries;
+    if (session.repoRoot !== null) {
+      const filtered = entries.filter(e => e.repoRoot === session.repoRoot);
+      if (filtered.length > 0) matchedEntries = filtered;
+    }
+
+    for (const entry of matchedEntries) {
       const key = `${session.gitBranch}\0${entry.repoRoot}`;
       const existing = sessionsByKey.get(key);
       if (existing) {
