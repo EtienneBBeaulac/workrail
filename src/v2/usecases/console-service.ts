@@ -153,8 +153,11 @@ async function readLiveActivity(
       const fd = await fs.open(filePath, 'r');
       const offset = stat.size - DAEMON_EVENT_LOG_READ_LIMIT_BYTES;
       const buf = Buffer.alloc(DAEMON_EVENT_LOG_READ_LIMIT_BYTES);
-      await fd.read(buf, 0, DAEMON_EVENT_LOG_READ_LIMIT_BYTES, offset);
-      await fd.close();
+      try {
+        await fd.read(buf, 0, DAEMON_EVENT_LOG_READ_LIMIT_BYTES, offset);
+      } finally {
+        await fd.close();
+      }
       raw = buf.toString('utf8');
     } else {
       raw = await fs.readFile(filePath, 'utf8');
