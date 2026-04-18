@@ -4309,3 +4309,79 @@ worktrain console --workspace ~/git/myproject  # workspace-scoped view
 **The classify-task-workflow role:** when a task is classified, it can also output a `deduplicationKey` (e.g. `fix:trigger-store:error-kind-consistency`) that is stored with the queue item. Queue items with the same key are considered duplicates.
 
 **What makes this hard:** semantic dedup (two tasks described differently but solving the same problem) requires embedding-based similarity, not exact match. For MVP, exact `sourceId` match + approximate PR title search is sufficient. Semantic dedup is a post-knowledge-graph feature.
+
+---
+
+### Agent actions as first-class events in the session event log (Apr 18, 2026)
+
+**The vision:** the console should be able to reconstruct exactly what an agent did in a session -- every tool call, every argument, every result, every decision -- by reading the event log alone. No log files, no stdout parsing, no separate monitoring infrastructure. The session event store IS the audit trail.
+
+**What's already in the event log:**
+- `session_created`, `run_started`, `run_completed`
+- `node_created`, `edge_created`, `advance_recorded`
+- `node_output_appended` (step notes)
+- `preferences_changed`, `context_set`, `observation_recorded`
+
+**What's missing -- agent-level actions:**
+- `tool_call_started` -- which tool was called, with what arguments, at what timestamp
+- `tool_call_completed` -- result (truncated), duration, success/error
+- `llm_turn_started` -- model, token count estimate, step context
+- `llm_turn_completed` -- stop reason, output tokens, whether steer() was injected
+- `steer_injected` -- what context was injected and why (session recap, workspace context)
+- `report_issue_recorded` -- the structured issue from the `report_issue` tool
+- `worktrain_stuck` -- when WORKTRAIN_STUCK marker is emitted
+
+**Why this matters:**
+Today the `DaemonEventEmitter` writes to `~/.workrail/events/daemon/YYYY-MM-DD.jsonl` separately from the session store. That's two places to look -- and they're not correlated to specific sessions. Putting agent actions into the session event log means:
+- Console can show a session timeline: "Phase 0: called `bash` 3 times (12ms, 8ms, 45ms) → called `read` 2 times → advanced to Phase 1"
+- The proof record (verification chain spec) can link specific tool calls to assessment gate evidence
+- Crash recovery knows exactly where in the agent's execution it died
+- The knowledge graph can be updated from session events without re-reading step notes
+
+**The event schema (additions to the existing event store format):**
+
+```typescript
+// Tool call lifecycle
+{ kind: 'tool_call_started', tool: 'bash', args: { command: 'git status' }, nodeId, ts }
+{ kind: 'tool_call_completed', tool: 'bash', durationMs: 45, exitCode: 0, resultSummary: '...', nodeId, ts }
+{ kind: 'tool_call_failed', tool: 'bash', durationMs: 45, error: 'ENOENT', nodeId, ts }
+
+// LLM turn lifecycle  
+{ kind: 'llm_turn_started', model: 'claude-sonnet-4-6', inputTokens: 12000, nodeId, ts }
+{ kind: 'llm_turn_completed', stopReason: 'tool_use', outputTokens: 450, toolsRequested: ['bash'], nodeId, ts }
+
+// Steer injection
+{ kind: 'steer_injected', reason: 'session_recap', contentLength: 800, nodeId, ts }
+
+// Agent self-reporting
+{ kind: 'report_issue_recorded', severity: 'warning', summary: '...', sessionId, ts }
+```
+
+**Where to emit them:**
+- In `src/daemon/agent-loop.ts` -- before and after each `tool.execute()` call, before and after each LLM call
+- In `src/daemon/workflow-runner.ts` -- for steer injection and report_issue recording
+- Use the existing `V2ToolContext` session store to append events (same mechanism as `continue_workflow` and `start_workflow`)
+
+**Console rendering:**
+Each session detail view gets a "Timeline" tab alongside "Steps" and "Notes":
+```
+Phase 0: Understand & Classify         [2m 14s]
+  ├── llm_turn              450 tokens → 3 tool calls
+  ├── bash: git status                    45ms ✓
+  ├── bash: gh pr list                   180ms ✓  
+  ├── read: AGENTS.md                      8ms ✓
+  └── llm_turn              280 tokens → advance
+Phase 1a: State Hypothesis              [0m 38s]
+  ├── llm_turn              310 tokens → advance
+  ...
+```
+
+**Relationship to DaemonEventEmitter:**
+The existing `DaemonEventEmitter` (written in #498) writes to a separate daily log file. Once agent actions are first-class session events, the daemon event emitter can be simplified or removed -- the session event log is the canonical record. The console reads session events, not daemon event files.
+
+**Build order:**
+1. Add `tool_call_started`/`tool_call_completed` events to `agent-loop.ts` -- smallest change, highest value
+2. Add `llm_turn_started`/`llm_turn_completed` events
+3. Console Timeline tab reads and renders the new event kinds
+4. Wire `report_issue_recorded` and `steer_injected` events
+5. Deprecate `DaemonEventEmitter` once console reads from session events
