@@ -1796,7 +1796,7 @@ Good pattern: "Question: Should I check the middleware? Answer: The workflow ste
 
 ## Your tools
 - \`complete_step\`: Mark the current step complete and advance to the next one. Call this after completing ALL work required by the step. Include your notes (min 50 characters) in the notes field. The daemon manages the session token internally -- you do NOT need a continueToken. This is the preferred advancement tool for daemon sessions.
-- \`continue_workflow\`: [DEPRECATED -- use complete_step instead] Legacy advancement tool. Requires a continueToken that you must round-trip exactly. Only use this if complete_step is unavailable.
+- \`continue_workflow\`: [DEPRECATED -- use complete_step instead. Do NOT pass a continueToken.] Only use this if complete_step is unavailable.
 - \`Bash\`: Run shell commands. Use for building, testing, running scripts.
 - \`Read\`: Read files.
 - \`Write\`: Write files.
