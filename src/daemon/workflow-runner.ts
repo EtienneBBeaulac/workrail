@@ -238,6 +238,12 @@ export interface WorkflowTrigger {
    * WHY a first-class field (not in context map): if parentSessionId were in the generic
    * `context` map, any code that overwrites context could silently lose the parent link.
    * A typed field cannot be accidentally lost and is immediately visible to reviewers.
+   *
+   * NOTE: This field is not read by runWorkflow() directly. The actual parentSessionId
+   * write to session_created.data is performed by makeSpawnAgentTool's executeStartWorkflow()
+   * call (via internalContext). runWorkflow() uses _preAllocatedStartResponse for child
+   * sessions and skips its own executeStartWorkflow() call. This field exists for
+   * documentation purposes and potential future use.
    */
   readonly parentSessionId?: string;
   /**
@@ -1539,8 +1545,10 @@ export function makeSpawnAgentTool(
 
       // ---- Map WorkflowRunResult to structured output ----
       // WHY all 4 variants: WorkflowRunResult is a discriminated union with 4 members.
-      // Exhaustive handling ensures the parent LLM gets a meaningful response for every outcome.
-      // delivery_failed is treated as success (the work is done; only the callback failed).
+      // TypeScript requires exhaustive handling. Note: runWorkflow() itself only returns
+      // success/error/timeout -- delivery_failed is produced by TriggerRouter (HTTP callback
+      // failure) and is unreachable via the direct runWorkflowFn call here. The branch is
+      // included for type completeness.
       let resultObj: { childSessionId: string | null; outcome: 'success' | 'error' | 'timeout'; notes: string };
 
       if (childResult._tag === 'success') {
