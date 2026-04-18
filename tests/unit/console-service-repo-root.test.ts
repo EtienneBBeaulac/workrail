@@ -155,3 +155,98 @@ describe('ConsoleService repoRoot', () => {
     expect(sessions[0]!.repoRoot).toBe(firstPath);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: workspacePath fallback (F1)
+// ---------------------------------------------------------------------------
+
+/** Build a minimal context_set event for testing workspacePath fallback. */
+function makeContextSetWithWorkspacePath(
+  sessionId: string,
+  runId: string,
+  workspacePath: string,
+  source: 'initial' | 'agent_delta',
+  eventIndex: number,
+): DomainEventV1 {
+  return {
+    v: 1,
+    eventId: `evt_ctx_wp_${eventIndex}`,
+    eventIndex,
+    sessionId: sessionId as SessionId,
+    kind: 'context_set',
+    dedupeKey: `context_set:${sessionId}:${runId}:wp-${eventIndex}`,
+    scope: { runId },
+    data: {
+      contextId: `ctx_wp_${eventIndex}`,
+      context: { workspacePath },
+      source,
+    },
+  } as DomainEventV1;
+}
+
+describe('ConsoleService repoRoot workspacePath fallback', () => {
+  it('returns workspacePath from initial context_set when no repo_root observation exists', async () => {
+    const sessionId = 'sess_repo005aaaaaaaaaaaaaaa';
+    const workspacePath = '/foo';
+    const events: DomainEventV1[] = [
+      makeContextSetWithWorkspacePath(sessionId, 'run_wp_01', workspacePath, 'initial', 0),
+    ];
+    const store: SessionEventLogReadonlyStorePortV2 = {
+      load: (_id) => okAsync({ events, manifest: [] }),
+      loadValidatedPrefix: (_id) => okAsync({ kind: 'complete', truth: { events, manifest: [] } }),
+    };
+
+    const service = makeServiceWithStore(sessionId, store);
+    const result = await service.getSessionList();
+    expect(result.isOk()).toBe(true);
+
+    const sessions = result._unsafeUnwrap().sessions;
+    expect(sessions).toHaveLength(1);
+    // workspacePath from initial context_set is used as fallback when no repo_root observation exists
+    expect(sessions[0]!.repoRoot).toBe(workspacePath);
+  });
+
+  it('returns repo_root observation over workspacePath fallback when both present', async () => {
+    const sessionId = 'sess_repo006aaaaaaaaaaaaaaa';
+    const workspacePath = '/foo';
+    const repoRoot = '/bar';
+    const events: DomainEventV1[] = [
+      makeContextSetWithWorkspacePath(sessionId, 'run_wp_02', workspacePath, 'initial', 0),
+      makeObservationEvent(sessionId, 'repo_root', repoRoot, 1),
+    ];
+    const store: SessionEventLogReadonlyStorePortV2 = {
+      load: (_id) => okAsync({ events, manifest: [] }),
+      loadValidatedPrefix: (_id) => okAsync({ kind: 'complete', truth: { events, manifest: [] } }),
+    };
+
+    const service = makeServiceWithStore(sessionId, store);
+    const result = await service.getSessionList();
+    expect(result.isOk()).toBe(true);
+
+    const sessions = result._unsafeUnwrap().sessions;
+    expect(sessions).toHaveLength(1);
+    // observation_recorded repo_root wins over workspacePath fallback
+    expect(sessions[0]!.repoRoot).toBe(repoRoot);
+  });
+
+  it('returns null when context_set source is agent_delta (not initial)', async () => {
+    const sessionId = 'sess_repo007aaaaaaaaaaaaaaa';
+    const workspacePath = '/foo';
+    const events: DomainEventV1[] = [
+      makeContextSetWithWorkspacePath(sessionId, 'run_wp_03', workspacePath, 'agent_delta', 0),
+    ];
+    const store: SessionEventLogReadonlyStorePortV2 = {
+      load: (_id) => okAsync({ events, manifest: [] }),
+      loadValidatedPrefix: (_id) => okAsync({ kind: 'complete', truth: { events, manifest: [] } }),
+    };
+
+    const service = makeServiceWithStore(sessionId, store);
+    const result = await service.getSessionList();
+    expect(result.isOk()).toBe(true);
+
+    const sessions = result._unsafeUnwrap().sessions;
+    expect(sessions).toHaveLength(1);
+    // agent_delta context_set events are excluded from the workspacePath fallback
+    expect(sessions[0]!.repoRoot).toBeNull();
+  });
+});
