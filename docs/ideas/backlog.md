@@ -4606,3 +4606,56 @@ worktrain spawn --trigger mr-review --goal "Review PR #123: fix authentication b
 **Also needed:** the `worktrain spawn` CLI command should accept `--goal` as a first-class flag (already partially implemented) so coordinator scripts can pass goals without knowing the webhook payload format.
 
 **Why this matters for WorkTrain being production-ready:** most real-world triggers (PR review, issue investigation, incident response) have dynamic goals that depend on what just happened. Static goals in triggers.yml only work for scheduled/cron tasks. Late-bound goals make the whole trigger system composable with external events.
+
+---
+
+### Session identity: a unit of work is one session, not many (Apr 18, 2026)
+
+**The problem:** WorkTrain creates a separate WorkRail session for every workflow run. A task that involves discovery + design + implementation + review + re-review appears as 5 unrelated sessions in the console. There's no way to know they belong together without reading the goals. The user sees 50 flat sessions instead of 10 units of work.
+
+**The correct model:** a session is a unit of work, not a workflow run. "Review PR #559" is one session. It might internally run 3 workflow sessions (context gathering, review, re-review) but the user sees one thing with one identity.
+
+**What's needed:**
+
+**1. Parent-child session relationships**
+`session_created` in the session store gets an optional `parentSessionId` field. When a coordinator spawns a child via `worktrain spawn`, the child carries the parent's ID. The session store becomes a tree.
+
+```typescript
+// session_created event
+{
+  kind: 'session_created',
+  sessionId: 'sess_abc123',
+  parentSessionId: 'sess_root456',  // NEW -- absent for root sessions
+  workflowId: 'wr.discovery',
+  goal: '...'
+}
+```
+
+**2. Root session as the identity**
+The root session is what the user sees. It represents the unit of work ("Review PR #559", "Implement GitHub polling adapter"). Child sessions are implementation details -- they may be visible on drill-down but not in the top-level list.
+
+**3. Console session DAG view**
+The console shows root sessions, each expandable to show the tree of child sessions:
+```
+● Review PR #559                    [3 sessions, 22 min]
+  ├── wr.discovery (context)        [completed, 8 min]
+  ├── mr-review-workflow-agentic    [completed, 11 min]  
+  └── coding-task (fix findings)    [running, 3 min...]
+```
+
+**4. Session identity propagated through coordinator**
+`worktrain spawn` accepts `--parent-session <id>` to link child sessions. The coordinator script passes this when spawning each phase of a pipeline. When spawning via the daemon trigger, the trigger's initial session becomes the root.
+
+**Relationship to coordinator sessions spec:**
+The coordinator sessions spec (`spawn_session` + `await_sessions` tools) handles the orchestration. This spec handles the identity and visibility. They're complementary: coordinator scripts drive the work, session identity makes the work visible as a coherent unit.
+
+**Why this matters:**
+- Today: user sees "what are all these sessions?" -- has to read goals to understand grouping
+- With this: user sees "here are my 5 units of work today" -- each one tells a coherent story
+- The console becomes a work log, not a session log
+
+**Build order:**
+1. Add `parentSessionId` to `session_created` event schema (small, additive)
+2. `worktrain spawn --parent-session <id>` flag (wires through TriggerRouter dispatch)
+3. Console aggregates sessions by root and shows tree on expand
+4. Dashboard "work sessions" view replaces flat session list as default
