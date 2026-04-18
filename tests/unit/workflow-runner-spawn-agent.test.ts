@@ -33,6 +33,8 @@ vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { makeSpawnAgentTool } from '../../src/daemon/workflow-runner.js';
 import type {
   ChildWorkflowRunResult,
@@ -67,7 +69,7 @@ const FAKE_SCHEMAS = {
 const FAKE_PARAMS = {
   workflowId: 'test-workflow',
   goal: 'do the thing',
-  workspacePath: '/tmp/test',
+  workspacePath: path.join(os.tmpdir(), 'workrail-spawn-agent-test'),
 };
 
 /**
