@@ -4288,3 +4288,24 @@ worktrain console --workspace ~/git/myproject  # workspace-scoped view
 **Open PRs (only dep bumps remain):**
 - #330, #287, #288 -- vitest 4 + vite 8 (major version, needs testing)
 - #244, #231 -- TypeScript 6.0.2 (now unblocked by #401)
+
+---
+
+### Duplicate task detection: prevent agents from doing the same work twice (Apr 18, 2026)
+
+**The problem:** with multiple agents running concurrently and a persistent work queue, it's easy to accidentally start two agents on the same task -- especially when the queue drains items from external sources (GitHub issues, Jira) that may be added again after a sync. Today, two agents can independently pick up the same issue, do the same investigation, and open duplicate PRs.
+
+**Detection sources:**
+1. **Open PRs**: before starting any coding task, check `gh pr list --state open` -- if a PR already exists that addresses the same issue/goal, skip it
+2. **Active sessions**: the session store knows which workflows are currently running and what their goals are; a new dispatch can check for semantic overlap before starting
+3. **Queue deduplication**: the work queue should deduplicate by external item ID (GitHub issue number, Jira ticket key) so the same item can't be enqueued twice
+4. **Session history**: before starting an investigation, check recent session notes for the same workflowId + goal combination -- if it was completed in the last 24 hours with a successful result, skip or ask the user
+
+**Implementation approach:**
+- Queue-level dedup is the simplest and most reliable: each queue item from an external source carries its `sourceId` (e.g. `github:EtienneBBeaulac/workrail:issues:123`). On enqueue, check if `sourceId` already exists in the queue (pending or active) -- if so, skip with a log.
+- PR-level dedup: before `worktrain spawn` dispatches a coding task, run `gh pr list --search "<issue title keywords>"` and check for matches. If found, add to outbox ("task already in progress as PR #X") and skip.
+- Session-level dedup: the coordinator script checks active session goals before spawning a new one with the same goal text.
+
+**The classify-task-workflow role:** when a task is classified, it can also output a `deduplicationKey` (e.g. `fix:trigger-store:error-kind-consistency`) that is stored with the queue item. Queue items with the same key are considered duplicates.
+
+**What makes this hard:** semantic dedup (two tasks described differently but solving the same problem) requires embedding-based similarity, not exact match. For MVP, exact `sourceId` match + approximate PR title search is sufficient. Semantic dedup is a post-knowledge-graph feature.
