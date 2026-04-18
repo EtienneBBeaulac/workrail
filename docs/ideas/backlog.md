@@ -5777,3 +5777,22 @@ This is the thing that makes WorkTrain feel like a senior engineer taking owners
 **The generic coordinator architecture is already designed** (see `docs/discovery/coordinator-script-design.md`). The `CoordinatorDeps` interface and `AgentResult` bridge type make migration to a generic coordinator trivial -- the PR review script uses these types, so generalizing is additive, not a rewrite.
 
 **Migration path:** once PR review coordinator is proven in production, extract the routing logic (`parseFindings`, `routeByFindings`) and `CoordinatorDeps` interface into `src/coordinators/base.ts`. The PR review coordinator becomes one implementation of the base pattern.
+
+---
+
+### Architecture decisions from Apr 17-18 sessions (to record before files are cleaned up)
+
+**Decision 1: Structured output + tool calls can coexist (Apr 18)**
+Validated empirically via integration test. The beta API (`client.beta.messages.create()`) supports both JSON schema enforcement AND tool calls in the same request. Schema enforcement applies at `end_turn` only. Bedrock is more consistent than direct Anthropic API for system-prompt fallback behavior. This opens a future path for replacing `complete_step` with structured output, but `complete_step` remains the chosen primitive for now.
+
+**Decision 2: `complete_step` is the preferred daemon workflow-control primitive (Apr 18)**
+PR #569 merged. The daemon holds the continueToken in a closure; LLM calls `complete_step(notes)` and never handles the token directly. Structured output (`beta.messages.create` with JSON schema) was evaluated as an alternative and deferred -- it's a viable migration path for a future version but adds API complexity today. Follow-up: track a structured output migration as a future improvement, not a current priority.
+
+**Decision 3: AgentLoop error handling contract -- FatalToolError (Apr 16)**
+`FatalToolError` subclass selected for distinguishing recoverable from non-recoverable tool failures in the AgentLoop. The contract: user-facing tools (Bash, Read, Write) catch failures and return `isError: true` in the tool_result (loop continues, LLM can retry). Coordination tools with unrecoverable failures (session store corruption, token decode failure) throw `FatalToolError` -- `_executeTools` instanceof-checks this and kills the session rather than surfacing a confusing error to the LLM. This contract is part of the AgentLoop architecture and must be followed by any new tool implementations.
+
+**Decision 4: Use `wr.discovery` for discovery-only tasks, not `coding-task-workflow-agentic` (Apr 17)**
+Discovered from a broken session: `coding-task-workflow-agentic` dispatched with "do discovery only, no code" ran 11 step advances then stopped without `run_completed`. The workflow's implementation phases fired even with explicit instructions not to code. Lesson: when a trigger or coordinator wants pure discovery/research, use `wr.discovery` as the workflowId. `coding-task-workflow-agentic` should only be dispatched when implementation is the actual goal.
+
+**Decision 5: Bug -- MCP server EPIPE crash (Apr 18)**
+Root cause confirmed with 15 production crash log entries: `process.stderr` is missing an `'error'` event handler in `registerFatalHandlers()`. When an MCP client disconnects, Node.js emits `EPIPE` on stderr which crashes the process with an unhandled error. `process.stdout` already has equivalent protection via `wireStdoutShutdown()`. Fix: mirror the stdout protection for stderr. One-line fix being implemented in PR `fix/mcp-stderr-epipe-crash`.
