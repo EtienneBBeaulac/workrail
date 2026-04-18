@@ -4176,3 +4176,43 @@ interface WorkflowStep {
 ```
 
 **Authoring implication:** The `workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
+
+---
+
+### Console as a standalone file-reading binary (Apr 18, 2026)
+
+**The insight:** The console doesn't need a live connection to the daemon or MCP server. It reads files. The current architecture where the console is owned by whichever process wins a port election is wrong -- it's a legacy of when the MCP server was the only long-running process.
+
+**Target architecture -- zero coupling:**
+
+```
+Daemon          → writes ~/.workrail/data/sessions/
+                → writes ~/.workrail/events/daemon/
+                → serves :3200 (webhooks only)
+
+MCP server      → reads/writes session store (same files as daemon)
+                → serves :3100 (Claude Code bridge only)
+
+Console         → reads ~/.workrail/data/sessions/ (file watch, not HTTP)
+                → reads ~/.workrail/events/daemon/ (file watch)
+                → reads git for PR/commit context
+                → serves :3456 (browser UI only)
+                → `worktrain console` -- fully standalone binary
+```
+
+**No startup coordination. No lock files. No port election. No coupling.**
+
+The console works whether the daemon is running or not, whether the MCP server is running or not. Start it once, leave it running permanently. It shows whatever is in the files.
+
+**How it gets live updates without HTTP:** FSEvents (macOS) / inotify (Linux) file watching on the session store and daemon event stream. When a new event is appended, the console picks it up within milliseconds and pushes to the browser via SSE -- same latency as today, no polling, no HTTP connection to the daemon required.
+
+**The `worktrain console` command:**
+```bash
+worktrain console              # start on default port 3456
+worktrain console --port 4000  # custom port
+worktrain console --workspace ~/git/myproject  # workspace-scoped view
+```
+
+**Migration:** Remove console startup from both the daemon command and the MCP server startup. The primary election logic (`DashboardLock`, `bindWithPortFallback`) becomes unnecessary. The `DaemonConsole` module in `src/trigger/daemon-console.ts` becomes `src/console/standalone-console.ts` with a simpler interface.
+
+**Why this matters:** Today the console goes down whenever the MCP server crashes. With this architecture, the console is as stable as the filesystem. The daemon crashing doesn't affect the console. The MCP server crashing doesn't affect the console. The only thing that can take down the console is killing the `worktrain console` process itself.
