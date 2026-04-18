@@ -17,8 +17,9 @@
  * - AbortController is used internally so abort() cancels in-flight API calls.
  * - Unknown tool names return an error tool_result (is_error: true) and the loop
  *   continues rather than crashing -- LLMs occasionally hallucinate tool names.
- * - Tools throw on failure (pi-agent-core contract). AgentLoop propagates throws
- *   to prompt()'s caller; runWorkflow() catches at the outer boundary.
+ * - Tool throws are caught inside _executeTools() and returned as isError tool_results
+ *   so the LLM can see what went wrong and decide how to recover. prompt() never throws
+ *   due to a tool error -- only LLM API errors propagate to the caller.
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -62,8 +63,10 @@ export interface AgentToolResult<T> {
  * WHY inputSchema uses Record<string, unknown>: the Anthropic SDK's Tool.input_schema
  * accepts raw JSON Schema as Record<string, unknown> -- no TypeBox needed.
  *
- * WHY execute() throws on failure: pi-agent-core contract. The outer boundary
- * (runWorkflow) catches and returns a discriminated union error result.
+ * WHY execute() throws are caught at the call site: tool failures (e.g. bash exit code 1)
+ * are recoverable -- the LLM must see the error to decide whether to retry, rephrase,
+ * or escalate. AgentLoop._executeTools() catches throws and converts them to isError
+ * tool_results so the session continues rather than dying.
  */
 export interface AgentTool {
   readonly name: string;
@@ -77,7 +80,8 @@ export interface AgentTool {
   readonly label: string;
   /**
    * Execute the tool call.
-   * THROWS on failure (pi-agent-core contract) -- do not encode errors in content.
+   * May throw on failure -- AgentLoop._executeTools() catches throws and converts them
+   * to isError tool_results so the LLM can see and recover from failures.
    */
   execute(toolCallId: string, params: Record<string, unknown>): Promise<AgentToolResult<unknown>>;
 }
@@ -240,13 +244,15 @@ export class AgentLoop {
    * Start the agent loop with the given initial user message.
    *
    * Resolves when the loop exits (end_turn + empty steer queue, error, or abort).
-   * Throws if a tool throws (pi-agent-core contract -- outer boundary catches).
+   * Does NOT throw on tool errors -- tool throws are caught and returned as isError
+   * tool_results so the LLM can recover. Only LLM API errors (client.messages.create
+   * failures) propagate as rejections.
    *
    * Loop algorithm:
    * 1. Append userMsg to messages
    * 2. Call client.messages.create() with AbortSignal
    * 3. Append assistant response to messages
-   * 4. If tool_use: execute tools sequentially; unknown tools get error tool_result
+   * 4. If tool_use: execute tools sequentially; unknown tools and throws get error tool_result
    * 5. Emit turn_end; await all subscribers (subscribers may call steer())
    * 6. If steer queue non-empty: pop, append, go to step 2
    * 7. If end_turn + empty steer queue: emit agent_end, exit
@@ -439,16 +445,26 @@ export class AgentLoop {
         continue;
       }
 
-      // Execute the tool. Let throws propagate -- this is the pi-agent-core contract.
-      // WHY: tool failures are fatal to the current session. runWorkflow() catches at
-      // the outer boundary and records the error. Swallowing tool throws here would
-      // hide bugs and silently corrupt workflow state.
-      //
-      // NOTE: unknown tool names (hallucinated by the LLM) are handled above with an
-      // error tool_result because they are recoverable. A tool that exists but throws
-      // is a programmer-visible failure, not an LLM mistake.
+      // Execute the tool. Catch throws and return them as isError tool_results so the
+      // LLM can see what went wrong and decide how to proceed.
+      // WHY: killing the session on any tool failure loses all progress and prevents
+      // the agent from recovering. A bash command exiting with code 1 is not a fatal
+      // error -- the LLM must see stderr and decide whether to retry, rephrase, or
+      // escalate. Same rationale as unknown tool names above.
       const params = (block.input ?? {}) as Record<string, unknown>;
-      const result = await tool.execute(block.id, params);
+      let result: AgentToolResult<unknown>;
+      try {
+        result = await tool.execute(block.id, params);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        results.push({
+          toolCallId: block.id,
+          toolName: block.name,
+          result: { content: [{ type: 'text', text: `Tool execution failed: ${message}` }], details: null },
+          isError: true,
+        });
+        continue;
+      }
       results.push({
         toolCallId: block.id,
         toolName: block.name,

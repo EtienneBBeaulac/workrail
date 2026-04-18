@@ -441,10 +441,13 @@ describe('AgentLoop', () => {
   });
 
   describe('tool errors (throwing tools)', () => {
-    it('propagates tool throws to the prompt() caller', async () => {
+    it('wraps tool throws as isError tool_result -- prompt() does not throw and loop continues', async () => {
+      // WHY: a tool throw (e.g. bash exit code 1) must not kill the session.
+      // The LLM must receive the error as an isError tool_result so it can recover.
       const throwingTool = makeThrowingTool('bad_tool', 'Tool execution failed');
       const client = new FakeAnthropicClient([
         makeToolUseMessage('bad_tool', 'call_1'),
+        makeEndTurnMessage(), // second LLM call after isError result
       ]);
       const agent = new AgentLoop({
         systemPrompt: 'System prompt.',
@@ -453,8 +456,30 @@ describe('AgentLoop', () => {
         modelId: 'claude-test',
       });
 
-      // Tool throws -> prompt() should throw
-      await expect(agent.prompt(USER_MSG)).rejects.toThrow('Tool execution failed');
+      const capturedResults: Array<{ toolName: string; isError: boolean; content: string }> = [];
+      agent.subscribe(async (event: AgentEvent) => {
+        if (event.type === 'turn_end') {
+          event.toolResults.forEach((r) => {
+            capturedResults.push({
+              toolName: r.toolName,
+              isError: r.isError,
+              content: r.result?.content[0]?.text ?? '',
+            });
+          });
+        }
+      });
+
+      // Tool throws -> prompt() must NOT throw -- loop must continue
+      await expect(agent.prompt(USER_MSG)).resolves.toBeUndefined();
+
+      // Loop continued -- two LLM calls (first with tool_use, second after isError result)
+      expect(client.callCount).toBe(2);
+
+      // isError result was produced with the correct error message
+      expect(capturedResults).toHaveLength(1);
+      expect(capturedResults[0]!.toolName).toBe('bad_tool');
+      expect(capturedResults[0]!.isError).toBe(true);
+      expect(capturedResults[0]!.content).toContain('Tool execution failed');
     });
   });
 
