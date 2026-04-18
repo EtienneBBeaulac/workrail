@@ -10,6 +10,9 @@ import {
   COORDINATOR_SIGNAL_CONTRACT_REF,
   CoordinatorSignalArtifactV1Schema,
   isCoordinatorSignalArtifact,
+  REVIEW_VERDICT_CONTRACT_REF,
+  ReviewVerdictArtifactV1Schema,
+  isReviewVerdictArtifact,
 } from '../schemas/artifacts/index.js';
 
 /**
@@ -67,6 +70,9 @@ export function validateArtifactContract(
 
     case COORDINATOR_SIGNAL_CONTRACT_REF:
       return validateCoordinatorSignalContract(artifacts, contractRef, required);
+
+    case REVIEW_VERDICT_CONTRACT_REF:
+      return validateReviewVerdictContract(artifacts, contractRef, required);
 
     default:
       // Type system should prevent this, but fail-fast just in case
@@ -158,6 +164,54 @@ function validateCoordinatorSignalContract(
   // Validate the first matching artifact
   const artifact = signalArtifacts[0]!;
   const parseResult = CoordinatorSignalArtifactV1Schema.safeParse(artifact);
+
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues.map(
+      (issue) => `${issue.path.join('.')}: ${issue.message}`
+    );
+    return {
+      valid: false,
+      error: {
+        code: 'INVALID_ARTIFACT_SCHEMA',
+        contractRef,
+        message: `Artifact schema validation failed for ${contractRef}`,
+        issues,
+      },
+    };
+  }
+
+  return { valid: true, artifact: parseResult.data };
+}
+
+/**
+ * Validate review verdict artifact contract.
+ */
+function validateReviewVerdictContract(
+  artifacts: readonly unknown[],
+  contractRef: string,
+  required: boolean
+): ArtifactContractValidationResult {
+  // Find review verdict artifacts by kind discriminant
+  const verdictArtifacts = artifacts.filter(isReviewVerdictArtifact);
+
+  if (verdictArtifacts.length === 0) {
+    if (required) {
+      return {
+        valid: false,
+        error: {
+          code: 'MISSING_REQUIRED_ARTIFACT',
+          contractRef,
+          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.review_verdict'.`,
+        },
+      };
+    }
+    // Not required and not present -- valid (no artifact returned)
+    return { valid: true, artifact: null };
+  }
+
+  // Validate the first matching artifact
+  const artifact = verdictArtifacts[0]!;
+  const parseResult = ReviewVerdictArtifactV1Schema.safeParse(artifact);
 
   if (!parseResult.success) {
     const issues = parseResult.error.issues.map(

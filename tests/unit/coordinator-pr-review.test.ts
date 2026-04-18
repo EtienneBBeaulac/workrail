@@ -8,9 +8,10 @@
  * the interface directly and record calls for assertion.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   parseFindingsFromNotes,
+  readVerdictArtifact,
   buildFixGoal,
   formatElapsed,
   runPrReviewCoordinator,
@@ -249,6 +250,142 @@ describe('parseFindingsFromNotes', () => {
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') expect(result.value.severity).toBe('minor');
   });
+
+  // ---- source field: keyword_scan path ----
+
+  it('sets source to keyword_scan when APPROVE text is parsed', () => {
+    const result = parseFindingsFromNotes('APPROVE this change. Looks clean and well-tested.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.severity).toBe('clean');
+      expect(result.value.source).toBe('keyword_scan');
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// readVerdictArtifact -- pure function tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('readVerdictArtifact', () => {
+  // WHY afterEach: the WARN log test uses vi.spyOn(process.stderr, 'write').
+  // Restoring all mocks after each test prevents spy leakage to other tests
+  // in the same process. This is the only acceptable alternative to dep injection
+  // (which would require changing readVerdictArtifact's signature).
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A valid wr.review_verdict artifact for testing. */
+  const validCleanArtifact = {
+    kind: 'wr.review_verdict',
+    verdict: 'clean',
+    confidence: 'high',
+    findings: [],
+    summary: 'No issues found',
+  };
+
+  const validBlockingArtifact = {
+    kind: 'wr.review_verdict',
+    verdict: 'blocking',
+    confidence: 'high',
+    findings: [
+      { severity: 'critical', summary: 'SQL injection in user input handler' },
+      { severity: 'major', summary: 'Missing authentication check' },
+    ],
+    summary: 'Critical security issues found',
+  };
+
+  it('returns ReviewFindings with source=artifact for a valid clean artifact', () => {
+    const result = readVerdictArtifact([validCleanArtifact]);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.severity).toBe('clean');
+      expect(result.findingSummaries).toHaveLength(0);
+      expect(result.source).toBe('artifact');
+    }
+  });
+
+  it('returns ReviewFindings with correct severity for blocking artifact', () => {
+    const result = readVerdictArtifact([validBlockingArtifact]);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.severity).toBe('blocking');
+      expect(result.findingSummaries).toHaveLength(2);
+      expect(result.findingSummaries[0]).toBe('SQL injection in user input handler');
+      expect(result.source).toBe('artifact');
+    }
+  });
+
+  it('returns null for an empty artifacts array', () => {
+    const result = readVerdictArtifact([]);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for an artifact with invalid schema (wrong verdict enum)', () => {
+    const invalidArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'APPROVE', // wrong enum value
+      confidence: 'high',
+      findings: [],
+      summary: 'test',
+    };
+    const result = readVerdictArtifact([invalidArtifact]);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for an artifact with a different kind (no false positives)', () => {
+    const otherArtifact = {
+      kind: 'wr.assessment',
+      assessmentId: 'some-gate',
+      dimensions: { quality: 'high' },
+    };
+    const result = readVerdictArtifact([otherArtifact]);
+    expect(result).toBeNull();
+  });
+
+  it('returns the first valid verdict artifact when multiple artifacts present', () => {
+    const minorArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'minor',
+      confidence: 'medium',
+      findings: [{ severity: 'minor', summary: 'Missing docstring' }],
+      summary: 'Minor issues',
+    };
+    // First artifact is valid minor, second is valid clean -- first wins
+    const result = readVerdictArtifact([minorArtifact, validCleanArtifact]);
+    expect(result).not.toBeNull();
+    if (result !== null) {
+      expect(result.severity).toBe('minor');
+    }
+  });
+
+  it('emits WARN to stderr when wr.review_verdict artifact fails schema validation', () => {
+    // WHY spy: readVerdictArtifact calls process.stderr.write directly (no dep injection).
+    // The spy is restored in afterEach() above.
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const malformedArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'invalid', // wrong enum -- not in ['clean', 'minor', 'blocking']
+      confidence: 'high',
+      findings: [],
+      summary: 'test',
+    };
+
+    const result = readVerdictArtifact([malformedArtifact], 'handle-test-session-123');
+
+    // Should return null (no valid artifact found)
+    expect(result).toBeNull();
+
+    // WARN log must have been emitted -- essential for operator visibility
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[WARN coord:reason=artifact_parse_failed'),
+    );
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('readVerdictArtifact: wr.review_verdict schema validation failed'),
+    );
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -365,7 +502,7 @@ function makeFakeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps
       return { results, allSucceeded: true };
     },
     getAgentResult: async (_handle) => {
-      return 'APPROVE this change. No issues found.';
+      return { recapMarkdown: 'APPROVE this change. No issues found.', artifacts: [] };
     },
     listOpenPRs: async (_workspace) => {
       return [
@@ -410,7 +547,7 @@ describe('runPrReviewCoordinator', () => {
 
   it('merges clean PR', async () => {
     const deps = makeFakeDeps({
-      getAgentResult: async () => 'APPROVE -- clean implementation, no issues.',
+      getAgentResult: async () => ({ recapMarkdown: 'APPROVE -- clean implementation, no issues.', artifacts: [] }),
     });
     const result = await runPrReviewCoordinator(deps, defaultOpts);
     expect(result.reviewed).toBe(1);
@@ -421,7 +558,7 @@ describe('runPrReviewCoordinator', () => {
 
   it('escalates blocking PR without merging', async () => {
     const deps = makeFakeDeps({
-      getAgentResult: async () => 'BLOCKING: critical security vulnerability found.',
+      getAgentResult: async () => ({ recapMarkdown: 'BLOCKING: critical security vulnerability found.', artifacts: [] }),
     });
     const result = await runPrReviewCoordinator(deps, defaultOpts);
     expect(result.reviewed).toBe(1);
@@ -432,7 +569,7 @@ describe('runPrReviewCoordinator', () => {
 
   it('escalates unknown severity without merging', async () => {
     const deps = makeFakeDeps({
-      getAgentResult: async () => null,
+      getAgentResult: async () => ({ recapMarkdown: null, artifacts: [] }),
     });
     const result = await runPrReviewCoordinator(deps, defaultOpts);
     expect(result.reviewed).toBe(1);
@@ -486,10 +623,10 @@ describe('runPrReviewCoordinator', () => {
         // First review: minor; re-review after fix: clean
         if (handle.includes('handle-1')) {
           reviewCallCount++;
-          return 'MINOR: missing test coverage for edge case.';
+          return { recapMarkdown: 'MINOR: missing test coverage for edge case.', artifacts: [] };
         }
         // Re-review after fix
-        return 'APPROVE -- all issues addressed.';
+        return { recapMarkdown: 'APPROVE -- all issues addressed.', artifacts: [] };
       },
     });
     const result = await runPrReviewCoordinator(deps, defaultOpts);
@@ -504,7 +641,7 @@ describe('runPrReviewCoordinator', () => {
     const deps = makeFakeDeps({
       getAgentResult: async () => {
         // Always return minor -- never gets clean
-        return 'MINOR: this issue persists.';
+        return { recapMarkdown: 'MINOR: this issue persists.', artifacts: [] };
       },
     });
     const result = await runPrReviewCoordinator(deps, defaultOpts);
@@ -524,7 +661,7 @@ describe('runPrReviewCoordinator', () => {
 
   it('writes report file to workspace', async () => {
     const deps = makeFakeDeps({
-      getAgentResult: async () => 'APPROVE -- looks good.',
+      getAgentResult: async () => ({ recapMarkdown: 'APPROVE -- looks good.', artifacts: [] }),
     });
     await runPrReviewCoordinator(deps, defaultOpts);
     const reportKey = [...deps.writtenFiles.keys()].find((k) => k.includes('coordinator-pr-review'));
@@ -546,7 +683,7 @@ describe('runPrReviewCoordinator', () => {
 
   it('uses specific PR numbers when --pr flag is provided', async () => {
     const deps = makeFakeDeps({
-      getAgentResult: async () => 'APPROVE',
+      getAgentResult: async () => ({ recapMarkdown: 'APPROVE', artifacts: [] }),
     });
     const result = await runPrReviewCoordinator(deps, { ...defaultOpts, prs: [123, 456] });
     expect(result.reviewed).toBe(2);
@@ -556,7 +693,7 @@ describe('runPrReviewCoordinator', () => {
 
   it('escalates PR when merge fails', async () => {
     const deps = makeFakeDeps({
-      getAgentResult: async () => 'APPROVE -- clean.',
+      getAgentResult: async () => ({ recapMarkdown: 'APPROVE -- clean.', artifacts: [] }),
       mergePR: async () => ({ kind: 'err', error: 'merge conflict' }),
     });
     const result = await runPrReviewCoordinator(deps, defaultOpts);

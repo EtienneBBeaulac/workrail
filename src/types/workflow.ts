@@ -294,5 +294,4 @@ export {
   createPluginSource,
   getSourceDisplayName,
   getSourcePath,
-  assertNever
 } from './workflow-source';

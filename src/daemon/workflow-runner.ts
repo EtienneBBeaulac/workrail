@@ -283,6 +283,19 @@ export interface WorkflowRunSuccess {
    * git commit + gh pr create as scripts. See src/trigger/delivery-action.ts.
    */
   readonly lastStepNotes?: string;
+  /**
+   * Artifacts from the last complete_step or continue_workflow call (the final step's artifacts).
+   * Populated when the agent calls complete_step or continue_workflow with artifacts[] on the
+   * completing step. Undefined if the agent did not provide artifacts on the final step.
+   *
+   * WHY this field exists: surfaces typed artifacts (e.g. wr.review_verdict) through the result
+   * type chain so callers -- including coordinators and spawn_agent parent sessions -- can read
+   * structured data without a separate HTTP round-trip. The pr-review coordinator currently reads
+   * artifacts via HTTP (getAgentResult), but future coordinators or spawn_agent calls can use this.
+   *
+   * Related: docs/discovery/artifacts-coordinator-channel.md, Candidate A.
+   */
+  readonly lastStepArtifacts?: readonly unknown[];
 }
 
 /** Failed workflow run (tool error, agent error, engine error, etc.). */
@@ -932,7 +945,7 @@ export function makeContinueWorkflowTool(
   sessionId: string,
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
-  onComplete: (notes: string | undefined) => void,
+  onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   // Optional injection point for testing -- defaults to the real implementation.
@@ -1041,9 +1054,13 @@ export function makeContinueWorkflowTool(
       }
 
       if (out.isComplete) {
-        // Pass the agent's notes from this final step to onComplete so the trigger
-        // layer can extract the structured handoff artifact for delivery.
-        onComplete(params.notesMarkdown as string | undefined);
+        // Pass the agent's notes and artifacts from this final step to onComplete so the
+        // trigger layer can extract the structured handoff artifact for delivery, and so
+        // coordinators can read typed artifacts via WorkflowRunSuccess.lastStepArtifacts.
+        onComplete(
+          params.notesMarkdown as string | undefined,
+          Array.isArray(params.artifacts) ? (params.artifacts as readonly unknown[]) : undefined,
+        );
         return {
           content: [{ type: 'text', text: 'Workflow complete. All steps have been executed.' }],
           details: out,
@@ -1107,7 +1124,7 @@ export function makeCompleteStepTool(
   ctx: V2ToolContext,
   getCurrentToken: () => string,
   onAdvance: (nextStepText: string, continueToken: string) => void,
-  onComplete: (notes: string | undefined) => void,
+  onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
   onTokenUpdate: (t: string) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
@@ -1246,7 +1263,9 @@ export function makeCompleteStepTool(
       }
 
       if (out.isComplete) {
-        onComplete(notes);
+        // Forward artifacts alongside notes so WorkflowRunSuccess.lastStepArtifacts is
+        // populated for coordinator consumption. See docs/discovery/artifacts-coordinator-channel.md.
+        onComplete(notes, Array.isArray(params.artifacts) ? (params.artifacts as readonly unknown[]) : undefined);
         return {
           content: [{ type: 'text', text: JSON.stringify({ status: 'complete' }) }],
           details: out,
@@ -2052,6 +2071,10 @@ export async function runWorkflow(
   // lastStepNotes is populated by onComplete when the agent's final continue_workflow
   // call includes output.notesMarkdown. Used by the trigger layer for delivery (git commit/PR).
   let lastStepNotes: string | undefined;
+  // lastStepArtifacts is populated by onComplete when the agent's final complete_step or
+  // continue_workflow call includes artifacts[]. Surfaces typed artifacts through the result
+  // type chain for coordinator consumption. See WorkflowRunSuccess.lastStepArtifacts.
+  let lastStepArtifacts: readonly unknown[] | undefined;
 
   // ---- Stuck detection state ----
   // WHY these variables: the turn_end subscriber needs them to check for stuck signals.
@@ -2093,9 +2116,10 @@ export async function runWorkflow(
     emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(workrailSessionId) });
   };
 
-  const onComplete = (notes: string | undefined): void => {
+  const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
     isComplete = true;
     lastStepNotes = notes;
+    lastStepArtifacts = artifacts;
   };
 
   // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
@@ -2623,5 +2647,6 @@ export async function runWorkflow(
     workflowId: trigger.workflowId,
     stopReason,
     ...(lastStepNotes !== undefined ? { lastStepNotes } : {}),
+    ...(lastStepArtifacts !== undefined ? { lastStepArtifacts } : {}),
   };
 }
