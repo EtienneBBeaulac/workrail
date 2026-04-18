@@ -74,14 +74,19 @@ function watchSessionsDir(sessionsDir: string, onChanged: () => void): (() => vo
 /**
  * Resolve the console dist directory.
  * Works both from source (src/) and from compiled output (dist/).
+ *
+ * The Vite build (console/vite.config.ts) outputs to dist/console-ui/ to avoid
+ * clobbering dist/console/standalone-console.js, which TypeScript compiles from
+ * src/console/standalone-console.ts. Both the released path and the source-tree
+ * development path use the console-ui suffix.
  */
 function resolveConsoleDist(): string | null {
-  // Released/compiled server path: dist/v2/usecases -> ../../console
-  const releasedDist = path.join(__dirname, '../../console');
+  // Released/compiled server path: dist/v2/usecases -> ../../console-ui
+  const releasedDist = path.join(__dirname, '../../console-ui');
   if (fs.existsSync(releasedDist)) return releasedDist;
 
-  // Source tree path during local development/testing: src/v2/usecases -> ../../../dist/console
-  const fromSourceBuild = path.join(__dirname, '../../../dist/console');
+  // Source tree path during local development/testing: src/v2/usecases -> ../../../dist/console-ui
+  const fromSourceBuild = path.join(__dirname, '../../../dist/console-ui');
   if (fs.existsSync(fromSourceBuild)) return fromSourceBuild;
 
   // Backward-compatible fallback for older layouts that built in-place

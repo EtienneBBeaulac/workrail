@@ -23,7 +23,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../dist/console',
+    outDir: '../dist/console-ui',
     emptyOutDir: true,
   },
 });
