@@ -659,6 +659,10 @@ export class TriggerRouter {
       } else if (result._tag === 'delivery_failed') {
         // delivery_failed not expected from dispatch() -- WorkflowTrigger has no callbackUrl.
         // Handled here to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        // WHY soft handling (log-only, not assertNever): dispatch() is fire-and-forget and this
+        // result is observed only in logs; there is no parent LLM that acts on it. Contrast with
+        // makeSpawnAgentTool, which uses assertNever because delivery_failed would otherwise
+        // silently corrupt the parent session's outcome if it ever reached that boundary.
         console.log(
           `[TriggerRouter] Dispatch delivery failed: workflowId=${workflowTrigger.workflowId} ` +
             `stopReason=${result.stopReason} deliveryError=${result.deliveryError}`,

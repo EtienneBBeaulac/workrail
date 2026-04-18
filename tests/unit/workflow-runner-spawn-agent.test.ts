@@ -41,7 +41,6 @@ import type {
   WorkflowRunTimeout,
 } from '../../src/daemon/workflow-runner.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
-import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
