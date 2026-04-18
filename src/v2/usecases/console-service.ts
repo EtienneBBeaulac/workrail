@@ -132,8 +132,14 @@ const DAEMON_EVENTS_DIR = path.join(os.homedir(), '.workrail', 'events', 'daemon
  * Determine whether a session is currently live by inspecting today's daemon event log.
  *
  * A session is live if and only if:
- * - A `session_started` event exists for `workrailSessionId` in today's log
+ * - Any event with a matching `workrailSessionId` exists in today's log
  * - AND no `session_completed` event exists for the same `workrailSessionId`
+ *
+ * WHY any event, not session_started: `session_started` is emitted BEFORE
+ * `executeStartWorkflow()` returns, so it never carries `workrailSessionId`.
+ * All subsequent events (tool_called, step_advanced, llm_turn_started, etc.) are
+ * emitted after the session ID is known and always include `workrailSessionId`.
+ * Checking for any correlated event is therefore the correct liveness signal.
  *
  * WHY event log instead of DaemonRegistry: DaemonRegistry is in-memory and resets
  * when the standalone console restarts. The daemon event log is durable on disk --
@@ -166,7 +172,9 @@ async function isSessionLiveFromEventLog(workrailSessionId: string): Promise<boo
       raw = await fs.readFile(filePath, 'utf8');
     }
 
-    let hasStarted = false;
+    // hasSeen: true when ANY event with a matching workrailSessionId has been observed.
+    // All post-start events carry workrailSessionId; session_started does not (see JSDoc above).
+    let hasSeen = false;
     let hasCompleted = false;
 
     for (const line of raw.split('\n')) {
@@ -174,14 +182,14 @@ async function isSessionLiveFromEventLog(workrailSessionId: string): Promise<boo
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
         if (event['workrailSessionId'] !== workrailSessionId) continue;
-        if (event['kind'] === 'session_started') hasStarted = true;
+        hasSeen = true;
         if (event['kind'] === 'session_completed') hasCompleted = true;
       } catch {
         // Malformed line -- skip it
       }
     }
 
-    return hasStarted && !hasCompleted;
+    return hasSeen && !hasCompleted;
   } catch {
     // File not found, permission error, parse error, etc. -- safe default: not live.
     return false;
@@ -364,7 +372,7 @@ export class ConsoleService {
         })();
 
         // Attach liveActivity when the session is currently live.
-        // isLive: derived from the daemon event log (session_started exists, session_completed does not).
+        // isLive: derived from the daemon event log (any correlated event seen, session_completed absent).
         // WHY event log instead of DaemonRegistry: DaemonRegistry is in-memory and resets when the
         // standalone console restarts -- the event log is durable and reflects the true session lifecycle.
         // Best-effort: any error reading the event log returns false (safe default: shows as not live).

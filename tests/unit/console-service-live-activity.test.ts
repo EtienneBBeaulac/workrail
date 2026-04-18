@@ -1,10 +1,13 @@
 /**
  * Tests for liveActivity and isSessionLiveFromEventLog in ConsoleService.getSessionDetail().
  *
- * isLive is now derived from the daemon event log:
- * - session_started event present for workrailSessionId AND session_completed absent => isLive=true
+ * isLive is derived from the daemon event log:
+ * - Any event with matching workrailSessionId present AND session_completed absent => isLive=true
  * - session_completed present => isLive=false
  * - log unreadable (ENOENT, etc.) => isLive=false (safe default)
+ *
+ * NOTE: session_started does NOT carry workrailSessionId (emitted before executeStartWorkflow
+ * returns). It is NOT a valid liveness signal. Use tool_called or step_advanced instead.
  *
  * liveActivity is populated when isLive=true and readLiveActivity returns entries.
  * Returns [] when the log is readable but has no matching tool_called events.
@@ -165,8 +168,12 @@ function todayLogPath(): string {
  * Build a JSONL log with session lifecycle events and optional tool_called entries.
  *
  * @param sessionId - The workrailSessionId to use in events.
- * @param started - Whether to include a session_started event.
+ * @param started - Whether to include a session_started event (NOTE: this event does NOT
+ *   carry workrailSessionId in production -- it is emitted before executeStartWorkflow returns).
+ *   Included here only for completeness tests; it does NOT affect the isLive check.
  * @param completed - Whether to include a session_completed event.
+ * @param stepAdvanced - Whether to include a step_advanced event (carries workrailSessionId;
+ *   serves as the "session is running" signal for isSessionLiveFromEventLog).
  * @param toolNames - Tool names for additional tool_called events.
  */
 function makeEventLogJSONL(
@@ -174,20 +181,32 @@ function makeEventLogJSONL(
   opts: {
     started?: boolean;
     completed?: boolean;
+    stepAdvanced?: boolean;
     toolNames?: string[];
   } = {},
 ): string {
   const lines: string[] = [];
-  const { started = false, completed = false, toolNames = [] } = opts;
+  const { started = false, completed = false, stepAdvanced = false, toolNames = [] } = opts;
 
   if (started) {
+    // NOTE: session_started does NOT include workrailSessionId in production --
+    // it is emitted before executeStartWorkflow returns and the session ID is known.
+    // This event will NOT trigger hasSeen=true in isSessionLiveFromEventLog.
     lines.push(JSON.stringify({
       kind: 'session_started',
-      workrailSessionId: sessionId,
       sessionId: 'internal-daemon-id',
       workflowId: 'test-workflow',
       workspacePath: '/tmp/test',
       ts: 1_700_000_000_000,
+    }));
+  }
+
+  if (stepAdvanced) {
+    lines.push(JSON.stringify({
+      kind: 'step_advanced',
+      workrailSessionId: sessionId,
+      sessionId: 'internal-daemon-id',
+      ts: 1_700_000_000_500,
     }));
   }
 
@@ -236,7 +255,7 @@ describe('ConsoleService isSessionLiveFromEventLog', () => {
     expect(detail.liveActivity).toBeNull();
   });
 
-  it('isLive=false and liveActivity=null when log contains no session_started for this session', async () => {
+  it('isLive=false and liveActivity=null when log contains no correlated events for this session', async () => {
     const sessionId = 'sess_live002aaaaaaaaaaaaaaaa';
     const differentSessionId = 'sess_other00aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);
@@ -292,7 +311,7 @@ describe('ConsoleService isSessionLiveFromEventLog', () => {
     expect(detail.liveActivity).toBeNull();
   });
 
-  it('isLive=true and liveActivity populated when session_started exists without session_completed', async () => {
+  it('isLive=true and liveActivity populated when correlated events exist without session_completed', async () => {
     const sessionId = 'sess_live004aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);
 
@@ -354,8 +373,12 @@ describe('ConsoleService isSessionLiveFromEventLog', () => {
     const sessionId = 'sess_live006aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);
 
-    // session_started but no tool_called events yet.
-    const jsonlContent = makeEventLogJSONL(sessionId, { started: true, toolNames: [] });
+    // step_advanced (with workrailSessionId) but no tool_called events yet.
+    // WHY step_advanced not session_started: session_started is emitted before
+    // executeStartWorkflow returns so it never carries workrailSessionId and
+    // therefore never signals liveness. step_advanced is the correct "session
+    // is running" signal when no tool calls have occurred yet.
+    const jsonlContent = makeEventLogJSONL(sessionId, { stepAdvanced: true, toolNames: [] });
     const logPath = todayLogPath();
 
     mockStat.mockImplementation(async (p: unknown) => {
@@ -372,12 +395,12 @@ describe('ConsoleService isSessionLiveFromEventLog', () => {
 
     expect(result.isOk()).toBe(true);
     const detail = result._unsafeUnwrap();
-    // [] means isLive=true but no tool_called events found yet.
+    // [] means isLive=true (step_advanced seen) but no tool_called events found yet.
     expect(detail.liveActivity).toEqual([]);
   });
 
   it('isLive=true survives console restart (no DaemonRegistry needed)', async () => {
-    // This test verifies the key behavioral fix: a session with session_started but
+    // This test verifies the key behavioral fix: a session with correlated events but
     // no session_completed is correctly identified as live even without DaemonRegistry.
     // Previously, a console restart would clear DaemonRegistry and show isLive=null.
     const sessionId = 'sess_live007aaaaaaaaaaaaaaaa';
