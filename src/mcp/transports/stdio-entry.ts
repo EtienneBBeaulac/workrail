@@ -8,8 +8,6 @@
 import { composeServer } from '../server.js';
 import { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } from './shutdown-hooks.js';
 import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
-import { writeTombstone, clearTombstone } from './primary-tombstone.js';
-import { logBridgeEvent } from './bridge-events.js';
 
 const INITIAL_ROOTS_TIMEOUT_MS = 1000;
 
@@ -34,21 +32,12 @@ export async function startStdioServer(): Promise<void> {
   // cleanly rather than spinning in an infinite loop. See fatal-exit.ts.
   registerFatalHandlers('stdio');
   logStartup('stdio');
-  // Log primary server startup to bridge.log so crash forensics can correlate
-  // primary restarts with bridge reconnect storms in the same log stream.
-  logBridgeEvent({ kind: 'primary_started', transport: 'stdio' });
-
-  // Clear any tombstone left by the previous run. If a previous primary died
-  // cleanly and wrote a tombstone, bridges may be in slow-poll mode waiting
-  // for us. Clearing it is a no-op if no tombstone exists.
-  clearTombstone();
 
   const { server, ctx, rootsManager } = await composeServer();
 
   // Register graceful shutdown so that fatalExit() stops the HTTP server cleanly
   // before calling process.exit(1). The 3s timeout gives the HTTP server a real
   // opportunity to close open connections while guaranteeing the process exits.
-  // Bridge processes do not register — they have their own performShutdown() path.
   registerGracefulShutdown(async () => { await ctx.httpServer?.stop(); });
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -117,14 +106,6 @@ export async function startStdioServer(): Promise<void> {
 
   wireShutdownHooks({
     onBeforeTerminate: async () => {
-      // Write tombstone synchronously BEFORE any async teardown so it is on
-      // disk before bridges start reconnecting. The sync write completes
-      // before the first await in this function. Advisory only -- silently
-      // ignored on any error. Only write when we have a port (MCP HTTP mode).
-      const port = ctx.httpServer?.getPort();
-      if (port != null) {
-        writeTombstone(port, process.pid);
-      }
       await ctx.httpServer?.stop();
     },
   });
