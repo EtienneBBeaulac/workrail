@@ -4564,3 +4564,45 @@ These are prototype questions, not design questions. Build the smallest possible
 **Why this matters:** The difference between WorkTrain being usable by anyone vs only by engineers who read the source code. A new user should be able to go from `worktrain init` to their first automated workflow in under 5 minutes.
 
 **Also needed:** `worktrain trigger add <template-name>` to add a single trigger to an existing triggers.yml without re-running init.
+
+---
+
+### Decouple goal from trigger definition -- late-bound goals for daemon sessions (Apr 18, 2026)
+
+**The problem:** `goal` is currently required at trigger-definition time (in triggers.yml). For triggers like `mr-review`, the goal is inherently dynamic -- it's the PR title and description, known only when the webhook fires, not when the trigger is configured.
+
+The current workaround: `goalTemplate: "{{$.goal}}"` with the caller passing `{"goal": "Review PR #123..."}` in the webhook payload. This works but is awkward -- the caller must know the payload field convention, and it's not obvious from the trigger definition.
+
+**The right model:** separate "which workflow" (trigger definition) from "what to do" (dispatch-time goal).
+
+```yaml
+# Trigger definition -- no goal required
+triggers:
+  - id: mr-review
+    workflowId: mr-review-workflow-agentic
+    workspacePath: ~/git/myproject
+    # No goal here -- goal comes from dispatch context
+```
+
+```bash
+# Dispatch with goal at call time
+curl -X POST http://localhost:3200/webhook/mr-review \
+  -d '{"goal": "Review PR #123: fix authentication bug"}'
+
+# Or via worktrain spawn
+worktrain spawn --trigger mr-review --goal "Review PR #123: fix authentication bug"
+```
+
+**Implementation options:**
+
+1. **goalTemplate with `$.goal` as the default** -- if no `goal` is set in the trigger and no `goalTemplate` is set, default to `goalTemplate: "{{$.goal}}"`. The webhook payload's `goal` field becomes the canonical way to pass a dynamic goal. Zero breaking changes.
+
+2. **Late-bound goal field on WorkflowTrigger** -- `executeStartWorkflow` accepts `goal` as a separate parameter. The trigger provides everything except the goal; the dispatcher (TriggerRouter) resolves the goal from the webhook payload or a default. This makes the separation explicit at the type level.
+
+3. **Prompt injection** -- the workflow's first step can read `context.goal` which is injected from the webhook payload. The trigger has a static placeholder; the real goal comes through as a context variable. This is how it currently half-works but without the clean API.
+
+**Preferred: Option 1 (default goalTemplate)** -- minimal change, backward compatible, works immediately. If `goal` is absent from the trigger and the webhook payload contains `{"goal": "..."}`, use it. Document this as the standard pattern for dynamic-goal triggers.
+
+**Also needed:** the `worktrain spawn` CLI command should accept `--goal` as a first-class flag (already partially implemented) so coordinator scripts can pass goals without knowing the webhook payload format.
+
+**Why this matters for WorkTrain being production-ready:** most real-world triggers (PR review, issue investigation, incident response) have dynamic goals that depend on what just happened. Static goals in triggers.yml only work for scheduled/cron tasks. Late-bound goals make the whole trigger system composable with external events.
