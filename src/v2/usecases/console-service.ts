@@ -701,6 +701,25 @@ function extractGitBranch(events: readonly DomainEventV1[]): string | null {
   return null;
 }
 
+/**
+ * Extract the repo root path from observation events.
+ *
+ * The repo_root observation is written at session start by the workspace anchor
+ * (LocalWorkspaceAnchorV2). It holds the absolute path to the git repo root so
+ * the console workspace view can group sessions by repo even when no matching
+ * worktree entry exists (e.g. in standalone console mode or when the worktrees
+ * API is slow / unavailable).
+ */
+function extractRepoRoot(events: readonly DomainEventV1[]): string | null {
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.OBSERVATION_RECORDED) continue;
+    if (e.data.key === 'repo_root') {
+      return e.data.value.value;
+    }
+  }
+  return null;
+}
+
 
 function truncateTitle(text: string, maxLen = 120): string {
   if (text.length <= maxLen) return text;
@@ -747,6 +766,7 @@ function projectSessionSummary(
 
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
   const gitBranch = extractGitBranch(events);
+  const repoRoot = extractRepoRoot(events);
 
   // Derive isAutonomous from context_set events. Checks all runs; true if any run has
   // is_autonomous: 'true' in its context. Gracefully degrades to false on projection error.
@@ -779,6 +799,7 @@ function projectSessionSummary(
       hasUnresolvedGaps: false,
       recapSnippet: null,
       gitBranch,
+      repoRoot,
       lastModifiedMs,
       isAutonomous,
       isLive,
@@ -833,6 +854,7 @@ function projectSessionSummary(
     hasUnresolvedGaps,
     recapSnippet,
     gitBranch,
+    repoRoot,
     lastModifiedMs,
     isAutonomous,
     isLive,

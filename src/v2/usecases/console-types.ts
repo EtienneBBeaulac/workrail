@@ -36,6 +36,10 @@ export interface ConsoleSessionSummary {
   readonly hasUnresolvedGaps: boolean;
   readonly recapSnippet: string | null;
   readonly gitBranch: string | null;
+  /** Absolute filesystem path to the repo root, derived from the session's repo_root
+   * observation event. Used by the console workspace view to group sessions by repo
+   * when no matching worktree is available (standalone console fallback). */
+  readonly repoRoot: string | null;
   /** Filesystem mtime of the session directory (epoch ms). */
   readonly lastModifiedMs: number;
   /** True when the session was started by the WorkRail autonomous daemon.
