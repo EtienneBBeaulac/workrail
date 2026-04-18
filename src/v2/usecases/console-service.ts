@@ -380,7 +380,7 @@ export class ConsoleService {
 
         return RA.combine([detailRA, isLiveRA] as const).andThen(([detail, isLive]) => {
           if (!isLive) {
-            return okAsync({ ...detail, liveActivity: null });
+            return okAsync({ ...detail, isLive: false, liveActivity: null });
           }
 
           // Session is live -- read tool activity from daemon event log.
@@ -390,7 +390,7 @@ export class ConsoleService {
           );
 
           // Returns [] when no tool_called events found yet (log readable but empty); null means the log file could not be read.
-          return liveActivityRA.map((liveActivity) => ({ ...detail, liveActivity }));
+          return liveActivityRA.map((liveActivity) => ({ ...detail, isLive: true, liveActivity }));
         });
       });
   }

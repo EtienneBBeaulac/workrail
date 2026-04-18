@@ -151,11 +151,16 @@ export interface ConsoleSessionDetail {
   readonly health: ConsoleSessionHealth;
   readonly runs: readonly ConsoleDagRun[];
   /**
+   * Whether the session is currently running.
+   * Derived from the daemon event log: true when any correlated event exists
+   * and no session_completed event has been seen.
+   */
+  readonly isLive?: boolean;
+  /**
    * The last N tool calls recorded in the daemon event log for this session.
-   * Only present when the session is currently live (isLive=true in the session summary)
-   * and the daemon event log contains correlated tool_called events.
-   * null when the session is not live, the daemon is not running in the same process,
-   * or the event log cannot be read.
+   * Only present when the session is currently live (isLive=true).
+   * null when the session is not live or the event log cannot be read.
+   * Returns [] when live but no tool events recorded yet.
    */
   readonly liveActivity?: readonly ConsoleToolActivity[] | null;
 }
