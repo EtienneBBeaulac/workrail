@@ -19,6 +19,7 @@
  * real V2ToolContext.
  */
 
+import os from 'os';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock variables (hoisted alongside vi.mock) ────────────────────────────────
@@ -67,7 +68,7 @@ const FAKE_SCHEMAS = {
 const FAKE_PARAMS = {
   workflowId: 'test-workflow',
   goal: 'do the thing',
-  workspacePath: '/tmp/test',
+  workspacePath: os.tmpdir(),
 };
 
 /**
