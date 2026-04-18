@@ -185,7 +185,7 @@ export class NotificationService {
     if (config.macOs && getPlatform() !== 'darwin') {
       console.warn(
         '[NotificationService] WORKTRAIN_NOTIFY_MACOS=true but platform is not darwin ' +
-        `(platform: ${os.platform()}). macOS notifications are disabled.`,
+        `(platform: ${getPlatform()}). macOS notifications are disabled.`,
       );
       this._macOsEnabled = false;
     } else {
