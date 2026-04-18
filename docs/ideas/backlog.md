@@ -4384,4 +4384,9 @@ The existing `DaemonEventEmitter` (written in #498) writes to a separate daily l
 2. Add `llm_turn_started`/`llm_turn_completed` events
 3. Console Timeline tab reads and renders the new event kinds
 4. Wire `report_issue_recorded` and `steer_injected` events
+
+---
+
+### FatalToolError: distinguish recoverable from non-recoverable tool failures (follow-up from PR #523)
+The blanket try/catch in AgentLoop._executeTools() converts ALL tool throws to isError tool_results. This is correct for Bash/Read/Write (LLM can see and retry), but potentially wrong for continue_workflow failures (LLM retrying with a broken token loops). The discovery agent proposed a FatalToolError subclass: tools throw FatalToolError for non-recoverable errors (session corruption, bad tokens), plain Error for recoverable failures. _executeTools catches plain Error and returns isError; FatalToolError propagates and kills the session. Combined with the DEFAULT_MAX_TURNS cap (PR followup), this provides defense-in-depth.
 5. Deprecate `DaemonEventEmitter` once console reads from session events

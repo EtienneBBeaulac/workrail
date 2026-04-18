@@ -80,6 +80,18 @@ const MAX_SESSION_NOTE_CHARS = 800;
 const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
 
 /**
+ * Default maximum number of LLM turns per agent session.
+ *
+ * This default is used when no agentConfig.maxTurns is configured.
+ * Per-trigger overrides are set via triggers.yml agentConfig.maxTurns.
+ * WHY: prevents infinite retry loops when the LLM keeps calling continue_workflow
+ * with a broken token -- without a cap, each isError tool_result is visible to the
+ * LLM and it will simply retry, looping forever. 50 turns is generous enough for
+ * long coding tasks while still being a hard safety net.
+ */
+const DEFAULT_MAX_TURNS = 50;
+
+/**
  * Directory that holds per-session crash-recovery state files.
  * Each concurrent runWorkflow() call writes to its own <sessionId>.json file,
  * so concurrent sessions never clobber each other.
@@ -1672,7 +1684,7 @@ export async function runWorkflow(
   // (e.g. a fast code-review trigger vs. a slow coding-task trigger).
   const sessionTimeoutMs =
     (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
-  const maxTurns = trigger.agentConfig?.maxTurns ?? 0; // 0 = no limit
+  const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
 
   // ---- Timeout reason flag ----
   // Tracks which limit fired first. Set synchronously before agent.abort() so the

@@ -124,20 +124,34 @@ describe('anchorsToObservations', () => {
     expect(result[1]!.key).toBe('repo_root_hash');
   });
 
-  it('maps repo_root within 80 chars to short_string', () => {
+  it('maps repo_root to path type with high confidence', () => {
     const anchors: readonly WorkspaceAnchor[] = [
       { key: 'repo_root', value: '/Users/user/git/my-project' },
     ];
     const result = anchorsToObservations(anchors);
     expect(result).toHaveLength(1);
     expect(result[0]!.key).toBe('repo_root');
-    expect(result[0]!.value).toEqual({ type: 'short_string', value: '/Users/user/git/my-project' });
+    expect(result[0]!.value).toEqual({ type: 'path', value: '/Users/user/git/my-project' });
     expect(result[0]!.confidence).toBe('high');
   });
 
-  it('skips repo_root exceeding 80 chars (no observation emitted)', () => {
+  it('maps repo_root longer than 80 chars (path type, not silently dropped)', () => {
+    // Regression: short_string type would silently drop paths > 80 chars.
+    // path type supports up to 512 chars so deeply nested repos are not lost.
+    const longPath = '/Users/user/' + 'deeply-nested-directory/'.repeat(3) + 'my-project';
+    expect(longPath.length).toBeGreaterThan(80);
     const anchors: readonly WorkspaceAnchor[] = [
-      { key: 'repo_root', value: '/Users/user/' + 'a'.repeat(80) },
+      { key: 'repo_root', value: longPath },
+    ];
+    const result = anchorsToObservations(anchors);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.key).toBe('repo_root');
+    expect(result[0]!.value).toEqual({ type: 'path', value: longPath });
+  });
+
+  it('skips repo_root exceeding 512 chars (MAX_OBSERVATION_PATH_LENGTH)', () => {
+    const anchors: readonly WorkspaceAnchor[] = [
+      { key: 'repo_root', value: '/Users/user/' + 'a'.repeat(512) },
     ];
     const result = anchorsToObservations(anchors);
     expect(result).toHaveLength(0);

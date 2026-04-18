@@ -1,5 +1,5 @@
 import type { WorkspaceAnchor } from '../../ports/workspace-anchor.port.js';
-import { MAX_OBSERVATION_SHORT_STRING_LENGTH } from '../constants.js';
+import { MAX_OBSERVATION_SHORT_STRING_LENGTH, MAX_OBSERVATION_PATH_LENGTH } from '../constants.js';
 
 /**
  * Observation event data shape (matches DomainEventV1 observation_recorded payload).
@@ -11,7 +11,8 @@ export interface ObservationEventData {
   readonly value:
     | { readonly type: 'short_string'; readonly value: string }
     | { readonly type: 'git_sha1'; readonly value: string }
-    | { readonly type: 'sha256'; readonly value: string };
+    | { readonly type: 'sha256'; readonly value: string }
+    | { readonly type: 'path'; readonly value: string };
   readonly confidence: 'low' | 'med' | 'high';
 }
 
@@ -25,6 +26,7 @@ export interface ObservationEventData {
  * - git_branch     → short_string (bounded to 80 chars)
  * - git_head_sha   → git_sha1 (40 hex chars)
  * - repo_root_hash → sha256 (sha256:<64 hex chars>)
+ * - repo_root      → path (bounded to 512 chars; short_string would silently drop paths > 80 chars)
  *
  * Returns empty array for empty input (graceful: no observations is valid).
  */
@@ -64,11 +66,12 @@ export function anchorsToObservations(anchors: readonly WorkspaceAnchor[]): read
         break;
 
       case 'repo_root':
-        // Lock: short_string max -- paths exceeding the limit are silently skipped (no observation emitted)
-        if (anchor.value.length > MAX_OBSERVATION_SHORT_STRING_LENGTH) break;
+        // Lock: path max 512 chars -- realistic filesystem paths can exceed short_string's 80-char limit.
+        // Using type 'path' prevents silently dropping valid repo roots on deeply nested directories.
+        if (anchor.value.length > MAX_OBSERVATION_PATH_LENGTH) break;
         observations.push({
           key: 'repo_root',
-          value: { type: 'short_string', value: anchor.value },
+          value: { type: 'path', value: anchor.value },
           confidence: 'high',
         });
         break;
