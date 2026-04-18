@@ -55,6 +55,13 @@ export interface SessionStartedEvent {
   readonly sessionId: string;
   readonly workflowId: string;
   readonly workspacePath: string;
+  /**
+   * The WorkRail session ID (e.g. 'sess_abc123') decoded from the continueToken.
+   * Absent on the session_started event (emitted before executeStartWorkflow returns).
+   * Present on subsequent per-session events once the continueToken is decoded.
+   * Used by ConsoleService to correlate daemon event log entries with session store entries.
+   */
+  readonly workrailSessionId?: string;
 }
 
 /** An agent tool was called. */
@@ -64,6 +71,12 @@ export interface ToolCalledEvent {
   readonly toolName: string;
   /** First 80 chars of the primary tool parameter (e.g. bash command, file path). */
   readonly summary?: string;
+  /**
+   * The WorkRail session ID (e.g. 'sess_abc123') for this tool call.
+   * Used by ConsoleService to correlate daemon event log entries with session store entries.
+   * Present when the continueToken was successfully decoded after executeStartWorkflow.
+   */
+  readonly workrailSessionId?: string;
 }
 
 /** A tool returned an error result (isError=true). */
@@ -73,12 +86,16 @@ export interface ToolErrorEvent {
   readonly toolName: string;
   /** First 200 chars of the error message. */
   readonly error: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /** Workflow advanced to the next step. */
 export interface StepAdvancedEvent {
   readonly kind: 'step_advanced';
   readonly sessionId: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /** Workflow run ended (success, error, or timeout). */
@@ -89,6 +106,8 @@ export interface SessionCompletedEvent {
   readonly outcome: 'success' | 'error' | 'timeout';
   /** Human-readable reason (stopReason, error message, or timeout type). */
   readonly detail?: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /** HTTP POST to callbackUrl was attempted. */

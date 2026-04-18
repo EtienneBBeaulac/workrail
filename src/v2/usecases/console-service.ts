@@ -12,6 +12,9 @@
  * loading execution snapshots (stepId) and pinned workflows (step title, workflow name).
  * Graceful degradation: if any label can't be resolved, it falls back to null.
  */
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { type ResultAsync, ResultAsync as RA } from 'neverthrow';
 import { okAsync, errAsync, err } from 'neverthrow';
 import type { DirectoryListingPortV2 } from '../ports/directory-listing.port.js';
@@ -53,6 +56,7 @@ import type {
   ConsoleAdvanceOutcomeKind,
   ConsoleNodeGap,
   ConsoleArtifact,
+  ConsoleToolActivity,
 } from './console-types.js';
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import type { LoadedSessionTruthV2 } from '../ports/session-event-log-store.port.js';
@@ -100,6 +104,93 @@ const DORMANCY_THRESHOLD_MS = (() => {
  * this in a future daemon iteration; for MVP, heartbeats fire at continue_workflow advances.
  */
 const AUTONOMOUS_HEARTBEAT_THRESHOLD_MS = 10 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Live activity (daemon event log)
+// ---------------------------------------------------------------------------
+
+/**
+ * Maximum number of tool activity entries to return in liveActivity.
+ * WHY 5: enough to show recent activity without overwhelming the console UI.
+ */
+const LIVE_ACTIVITY_MAX_ENTRIES = 5;
+
+/**
+ * Maximum bytes to read from the daemon event log file tail.
+ * WHY 100KB: at ~200 bytes/event, this covers ~500 events -- far more than
+ * LIVE_ACTIVITY_MAX_ENTRIES. Matches the tail-read pattern in console-routes.ts.
+ */
+const DAEMON_EVENT_LOG_READ_LIMIT_BYTES = 100 * 1024;
+
+/**
+ * Directory for daemon event log JSONL files.
+ * Format: YYYY-MM-DD.jsonl, one per day, rotated automatically by DaemonEventEmitter.
+ */
+const DAEMON_EVENTS_DIR = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+
+/**
+ * Read the last N tool_called events from today's daemon event log for a given session.
+ *
+ * Best-effort: returns null on any error (file not found, parse error, etc.).
+ * Never throws or propagates errors -- this is observability, not correctness.
+ *
+ * @param workrailSessionId - The WorkRail session ID to filter by.
+ * @param maxEntries - Maximum number of entries to return.
+ */
+async function readLiveActivity(
+  workrailSessionId: string,
+  maxEntries: number,
+): Promise<readonly ConsoleToolActivity[] | null> {
+  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const filePath = path.join(DAEMON_EVENTS_DIR, `${date}.jsonl`);
+
+  try {
+    let raw: string;
+    const stat = await fs.stat(filePath);
+    if (stat.size > DAEMON_EVENT_LOG_READ_LIMIT_BYTES) {
+      // Tail-read: read only the last DAEMON_EVENT_LOG_READ_LIMIT_BYTES.
+      // First line in the slice may be truncated -- JSON.parse catch handles it.
+      const fd = await fs.open(filePath, 'r');
+      const offset = stat.size - DAEMON_EVENT_LOG_READ_LIMIT_BYTES;
+      const buf = Buffer.alloc(DAEMON_EVENT_LOG_READ_LIMIT_BYTES);
+      await fd.read(buf, 0, DAEMON_EVENT_LOG_READ_LIMIT_BYTES, offset);
+      await fd.close();
+      raw = buf.toString('utf8');
+    } else {
+      raw = await fs.readFile(filePath, 'utf8');
+    }
+
+    const activities: ConsoleToolActivity[] = [];
+
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (
+          event['kind'] !== 'tool_called' ||
+          event['workrailSessionId'] !== workrailSessionId ||
+          typeof event['toolName'] !== 'string' ||
+          typeof event['ts'] !== 'number'
+        ) {
+          continue;
+        }
+        activities.push({
+          toolName: event['toolName'],
+          ...(typeof event['summary'] === 'string' ? { summary: event['summary'] } : {}),
+          ts: event['ts'],
+        });
+      } catch {
+        // Malformed line -- skip it
+      }
+    }
+
+    // Return last N entries (most recent activity).
+    return activities.slice(-maxEntries);
+  } catch {
+    // File not found, permission error, etc. -- return null gracefully.
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Run completion map — keyed by runId, true when preferred tip snapshot
@@ -173,6 +264,8 @@ export class ConsoleService {
 
   getSessionDetail(sessionIdStr: string): ResultAsync<ConsoleSessionDetail, ConsoleServiceError> {
     const sessionId = asSessionId(sessionIdStr);
+    const nowMs = Date.now();
+
     return this.ports.sessionStore
       .load(sessionId)
       .mapErr((storeErr): ConsoleServiceError => ({
@@ -181,19 +274,44 @@ export class ConsoleService {
       }))
       .andThen((truth) => {
         const dagRes = projectRunDagV2(truth.events);
-        if (dagRes.isErr()) {
-          return resolveRunCompletion(truth.events, this.ports.snapshotStore)
-            .map((completionMap) => projectSessionDetail(sessionId, truth, completionMap, {}, {}));
-        }
-        const dag = dagRes.value;
 
-        return RA.combine([
-          resolveRunCompletion(truth.events, this.ports.snapshotStore),
-          resolveStepLabels(dag, this.ports.snapshotStore, this.ports.pinnedWorkflowStore),
-          resolveWorkflowNames(dag, this.ports.pinnedWorkflowStore),
-        ] as const).map(([completionMap, stepLabels, workflowNames]) =>
-          projectSessionDetail(sessionId, truth, completionMap, stepLabels, workflowNames)
+        const detailRA = (() => {
+          if (dagRes.isErr()) {
+            return resolveRunCompletion(truth.events, this.ports.snapshotStore)
+              .map((completionMap) => projectSessionDetail(sessionId, truth, completionMap, {}, {}));
+          }
+          const dag = dagRes.value;
+
+          return RA.combine([
+            resolveRunCompletion(truth.events, this.ports.snapshotStore),
+            resolveStepLabels(dag, this.ports.snapshotStore, this.ports.pinnedWorkflowStore),
+            resolveWorkflowNames(dag, this.ports.pinnedWorkflowStore),
+          ] as const).map(([completionMap, stepLabels, workflowNames]) =>
+            projectSessionDetail(sessionId, truth, completionMap, stepLabels, workflowNames)
+          );
+        })();
+
+        // Attach liveActivity when the session is currently live.
+        // isLive: the session appears in DaemonRegistry with a recent heartbeat.
+        // Best-effort: any error reading the event log returns null liveActivity.
+        const registryEntry = this.ports.daemonRegistry?.snapshot().get(sessionId);
+        const isLive = registryEntry !== undefined
+          && (nowMs - registryEntry.lastHeartbeatMs) < AUTONOMOUS_HEARTBEAT_THRESHOLD_MS;
+
+        if (!isLive) {
+          return detailRA.map((detail) => ({ ...detail, liveActivity: null }));
+        }
+
+        // Session is live -- read tool activity from daemon event log.
+        // WHY RA.fromSafePromise: readLiveActivity never throws (returns null on error).
+        const liveActivityRA = RA.fromSafePromise(
+          readLiveActivity(sessionIdStr, LIVE_ACTIVITY_MAX_ENTRIES)
         );
+
+        return RA.combine([detailRA, liveActivityRA] as const).map(([detail, liveActivity]) => ({
+          ...detail,
+          liveActivity,
+        }));
       });
   }
 

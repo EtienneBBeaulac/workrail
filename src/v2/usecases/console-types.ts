@@ -132,11 +132,32 @@ export interface ConsoleDagRun {
   readonly skippedSteps: readonly ConsoleGhostStep[];
 }
 
+/**
+ * A single tool call recorded in the daemon event log.
+ * Shown in the console as live activity for actively-running daemon sessions.
+ */
+export interface ConsoleToolActivity {
+  /** Name of the tool that was called (e.g. 'Bash', 'Read', 'Write', 'continue_workflow'). */
+  readonly toolName: string;
+  /** First 80 chars of the primary tool parameter. Absent for some tool calls. */
+  readonly summary?: string;
+  /** Unix epoch ms when the tool call was recorded. */
+  readonly ts: number;
+}
+
 export interface ConsoleSessionDetail {
   readonly sessionId: string;
   readonly sessionTitle: string | null;
   readonly health: ConsoleSessionHealth;
   readonly runs: readonly ConsoleDagRun[];
+  /**
+   * The last N tool calls recorded in the daemon event log for this session.
+   * Only present when the session is currently live (isLive=true in the session summary)
+   * and the daemon event log contains correlated tool_called events.
+   * null when the session is not live, the daemon is not running in the same process,
+   * or the event log cannot be read.
+   */
+  readonly liveActivity?: readonly ConsoleToolActivity[] | null;
 }
 
 // ---------------------------------------------------------------------------
