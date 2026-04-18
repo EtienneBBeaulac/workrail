@@ -1,16 +1,18 @@
 /**
- * Tests for liveActivity in ConsoleService.getSessionDetail().
+ * Tests for liveActivity and isSessionLiveFromEventLog in ConsoleService.getSessionDetail().
  *
- * liveActivity is populated when:
- * 1. DaemonRegistry has a live entry for the session (recent heartbeat)
- * 2. readLiveActivity successfully reads today's daemon event log file
+ * isLive is now derived from the daemon event log:
+ * - session_started event present for workrailSessionId AND session_completed absent => isLive=true
+ * - session_completed present => isLive=false
+ * - log unreadable (ENOENT, etc.) => isLive=false (safe default)
  *
+ * liveActivity is populated when isLive=true and readLiveActivity returns entries.
  * Returns [] when the log is readable but has no matching tool_called events.
  * Returns null when the log file cannot be read (ENOENT, permission error, etc.).
  *
  * Test strategy:
- * - Inject a DaemonRegistry with a live or absent entry
- * - Mock node:fs/promises stat + readFile to control what readLiveActivity reads
+ * - Mock node:fs/promises stat + readFile to control what isSessionLiveFromEventLog
+ *   and readLiveActivity read
  * - Provide minimal event log (session_created + run_started + node_created)
  *   so getSessionDetail produces a valid ConsoleSessionDetail
  */
@@ -46,7 +48,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 // Import after mock setup -- these will use the mocked fs.
 import { ConsoleService } from '../../src/v2/usecases/console-service.js';
-import { DaemonRegistry } from '../../src/v2/infra/in-memory/daemon-registry/index.js';
 import {
   InMemorySnapshotStore,
   InMemoryPinnedWorkflowStore,
@@ -134,29 +135,10 @@ function makeMinimalEvents(sessionId: string): DomainEventV1[] {
   ];
 }
 
-/** Build a DaemonRegistry stub with a live entry for the given session. */
-function makeLiveRegistry(sessionId: string): DaemonRegistry {
-  return {
-    register: () => {},
-    heartbeat: () => {},
-    unregister: () => {},
-    snapshot: () => new Map([
-      [sessionId, {
-        sessionId,
-        workflowId: 'test-workflow',
-        startedAtMs: Date.now() - 1000,
-        lastHeartbeatMs: Date.now() - 1000, // 1 second ago -- well within 10m threshold
-        status: 'running' as const,
-      }],
-    ]),
-  } as unknown as DaemonRegistry;
-}
-
-/** Build a ConsoleService with injected session store and optional registry. */
+/** Build a ConsoleService with injected session store (no DaemonRegistry). */
 function makeService(
   sessionId: string,
   events: DomainEventV1[],
-  daemonRegistry?: DaemonRegistry,
 ): ConsoleService {
   const sessionStore: SessionEventLogReadonlyStorePortV2 = {
     load: (_id) => okAsync({ events, manifest: [] }),
@@ -169,57 +151,98 @@ function makeService(
     sessionStore,
     snapshotStore: new InMemorySnapshotStore(),
     pinnedWorkflowStore: new InMemoryPinnedWorkflowStore(),
-    daemonRegistry,
+    // daemonRegistry intentionally omitted -- isLive now comes from event log
   });
 }
 
-/** The path that readLiveActivity looks for today's log file. */
+/** The path that isSessionLiveFromEventLog / readLiveActivity look for today's log file. */
 function todayLogPath(): string {
   const date = new Date().toISOString().slice(0, 10);
   return path.join(os.homedir(), '.workrail', 'events', 'daemon', `${date}.jsonl`);
 }
 
-/** Build JSONL content with tool_called events for the given session. */
-function makeToolCalledJSONL(sessionId: string, toolNames: string[]): string {
-  return toolNames
-    .map((toolName, i) =>
-      JSON.stringify({
-        kind: 'tool_called',
-        workrailSessionId: sessionId,
-        toolName,
-        summary: `summary ${i}`,
-        ts: 1_700_000_000_000 + i,
-      })
-    )
-    .join('\n') + '\n';
+/**
+ * Build a JSONL log with session lifecycle events and optional tool_called entries.
+ *
+ * @param sessionId - The workrailSessionId to use in events.
+ * @param started - Whether to include a session_started event.
+ * @param completed - Whether to include a session_completed event.
+ * @param toolNames - Tool names for additional tool_called events.
+ */
+function makeEventLogJSONL(
+  sessionId: string,
+  opts: {
+    started?: boolean;
+    completed?: boolean;
+    toolNames?: string[];
+  } = {},
+): string {
+  const lines: string[] = [];
+  const { started = false, completed = false, toolNames = [] } = opts;
+
+  if (started) {
+    lines.push(JSON.stringify({
+      kind: 'session_started',
+      workrailSessionId: sessionId,
+      sessionId: 'internal-daemon-id',
+      workflowId: 'test-workflow',
+      workspacePath: '/tmp/test',
+      ts: 1_700_000_000_000,
+    }));
+  }
+
+  toolNames.forEach((toolName, i) => {
+    lines.push(JSON.stringify({
+      kind: 'tool_called',
+      workrailSessionId: sessionId,
+      toolName,
+      summary: `summary ${i}`,
+      ts: 1_700_000_001_000 + i,
+    }));
+  });
+
+  if (completed) {
+    lines.push(JSON.stringify({
+      kind: 'session_completed',
+      workrailSessionId: sessionId,
+      sessionId: 'internal-daemon-id',
+      workflowId: 'test-workflow',
+      outcome: 'success',
+      ts: 1_700_000_002_000,
+    }));
+  }
+
+  return lines.join('\n') + '\n';
 }
 
 // ---------------------------------------------------------------------------
-// Tests (F2)
+// Tests: isSessionLiveFromEventLog (via getSessionDetail)
 // ---------------------------------------------------------------------------
 
-describe('ConsoleService liveActivity', () => {
-  it('liveActivity is null when session is not in the registry', async () => {
+describe('ConsoleService isSessionLiveFromEventLog', () => {
+  it('isLive=false and liveActivity=null when log file does not exist (ENOENT)', async () => {
     const sessionId = 'sess_live001aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);
 
-    // Empty registry -- session is not live, readLiveActivity is never called.
-    const service = makeService(sessionId, events, new DaemonRegistry());
+    mockStat.mockImplementation(async () => {
+      throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+    });
 
+    const service = makeService(sessionId, events);
     const result = await service.getSessionDetail(sessionId);
+
     expect(result.isOk()).toBe(true);
     const detail = result._unsafeUnwrap();
     expect(detail.liveActivity).toBeNull();
   });
 
-  it('populates liveActivity with last 5 tool_called events when session is live', async () => {
+  it('isLive=false and liveActivity=null when log contains no session_started for this session', async () => {
     const sessionId = 'sess_live002aaaaaaaaaaaaaaaa';
+    const differentSessionId = 'sess_other00aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);
-    const registry = makeLiveRegistry(sessionId);
 
-    // 7 events in the log -- expect only the last 5 (slice(-5)).
-    const toolNames = ['Bash', 'Read', 'Write', 'Bash', 'Read', 'continue_workflow', 'Bash'];
-    const jsonlContent = makeToolCalledJSONL(sessionId, toolNames);
+    // Log has events for a different session only.
+    const jsonlContent = makeEventLogJSONL(differentSessionId, { started: true, toolNames: ['Bash'] });
     const logPath = todayLogPath();
 
     mockStat.mockImplementation(async (p: unknown) => {
@@ -231,45 +254,108 @@ describe('ConsoleService liveActivity', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
 
-    const service = makeService(sessionId, events, registry);
+    const service = makeService(sessionId, events);
     const result = await service.getSessionDetail(sessionId);
-    expect(result.isOk()).toBe(true);
 
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    expect(detail.liveActivity).toBeNull();
+  });
+
+  it('isLive=false and liveActivity=null when session_completed follows session_started', async () => {
+    const sessionId = 'sess_live003aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    // Both started and completed -- session is not live.
+    const jsonlContent = makeEventLogJSONL(sessionId, {
+      started: true,
+      completed: true,
+      toolNames: ['Bash'],
+    });
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(jsonlContent) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return jsonlContent;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    // session_completed present => isLive=false => liveActivity=null
+    expect(detail.liveActivity).toBeNull();
+  });
+
+  it('isLive=true and liveActivity populated when session_started exists without session_completed', async () => {
+    const sessionId = 'sess_live004aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    const toolNames = ['Bash', 'Read', 'Write'];
+    const jsonlContent = makeEventLogJSONL(sessionId, { started: true, toolNames });
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(jsonlContent) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return jsonlContent;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
     const detail = result._unsafeUnwrap();
     expect(detail.liveActivity).not.toBeNull();
-    // Last 5 of 7: indices 2-6 → ['Write', 'Bash', 'Read', 'continue_workflow', 'Bash']
+    expect(detail.liveActivity).toHaveLength(3);
+    const names = detail.liveActivity!.map((a) => a.toolName);
+    expect(names).toEqual(['Bash', 'Read', 'Write']);
+  });
+
+  it('returns last 5 tool_called events when session is live with more than 5 events', async () => {
+    const sessionId = 'sess_live005aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    // 7 tool events -- expect only the last 5 (slice(-5)).
+    const toolNames = ['Bash', 'Read', 'Write', 'Bash', 'Read', 'continue_workflow', 'Bash'];
+    const jsonlContent = makeEventLogJSONL(sessionId, { started: true, toolNames });
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(jsonlContent) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return jsonlContent;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    expect(detail.liveActivity).not.toBeNull();
+    // Last 5 of 7: indices 2-6 => ['Write', 'Bash', 'Read', 'continue_workflow', 'Bash']
     expect(detail.liveActivity).toHaveLength(5);
     const names = detail.liveActivity!.map((a) => a.toolName);
     expect(names).toEqual(['Write', 'Bash', 'Read', 'continue_workflow', 'Bash']);
   });
 
-  it('returns liveActivity: null when the log file cannot be read (missing file)', async () => {
-    const sessionId = 'sess_live003aaaaaaaaaaaaaaaa';
+  it('returns liveActivity: [] when session is live but no tool_called events in log', async () => {
+    const sessionId = 'sess_live006aaaaaaaaaaaaaaaa';
     const events = makeMinimalEvents(sessionId);
-    const registry = makeLiveRegistry(sessionId);
 
-    // stat throws ENOENT -- log file does not exist.
-    mockStat.mockImplementation(async () => {
-      throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
-    });
-
-    const service = makeService(sessionId, events, registry);
-    const result = await service.getSessionDetail(sessionId);
-    expect(result.isOk()).toBe(true);
-
-    const detail = result._unsafeUnwrap();
-    // null means the log file could not be read.
-    expect(detail.liveActivity).toBeNull();
-  });
-
-  it('returns liveActivity: [] when log is readable but no events match workrailSessionId', async () => {
-    const sessionId = 'sess_live004aaaaaaaaaaaaaaaa';
-    const differentSessionId = 'sess_other00aaaaaaaaaaaaaaaa';
-    const events = makeMinimalEvents(sessionId);
-    const registry = makeLiveRegistry(sessionId);
-
-    // Log contains events for a different session -- none match sessionId.
-    const jsonlContent = makeToolCalledJSONL(differentSessionId, ['Bash', 'Read']);
+    // session_started but no tool_called events yet.
+    const jsonlContent = makeEventLogJSONL(sessionId, { started: true, toolNames: [] });
     const logPath = todayLogPath();
 
     mockStat.mockImplementation(async (p: unknown) => {
@@ -281,12 +367,69 @@ describe('ConsoleService liveActivity', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     });
 
-    const service = makeService(sessionId, events, registry);
+    const service = makeService(sessionId, events);
     const result = await service.getSessionDetail(sessionId);
-    expect(result.isOk()).toBe(true);
 
+    expect(result.isOk()).toBe(true);
     const detail = result._unsafeUnwrap();
-    // [] means log was readable but no tool_called events matched this session.
+    // [] means isLive=true but no tool_called events found yet.
     expect(detail.liveActivity).toEqual([]);
+  });
+
+  it('isLive=true survives console restart (no DaemonRegistry needed)', async () => {
+    // This test verifies the key behavioral fix: a session with session_started but
+    // no session_completed is correctly identified as live even without DaemonRegistry.
+    // Previously, a console restart would clear DaemonRegistry and show isLive=null.
+    const sessionId = 'sess_live007aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    const jsonlContent = makeEventLogJSONL(sessionId, { started: true, toolNames: ['Bash'] });
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(jsonlContent) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return jsonlContent;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    // No DaemonRegistry injected -- simulates standalone console after restart.
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    // Must show liveActivity (isLive=true), not null, even without DaemonRegistry.
+    expect(detail.liveActivity).not.toBeNull();
+    expect(detail.liveActivity).toHaveLength(1);
+    expect(detail.liveActivity![0]!.toolName).toBe('Bash');
+  });
+
+  it('isLive=false when log contains only events for a different session', async () => {
+    const sessionId = 'sess_live008aaaaaaaaaaaaaaaa';
+    const otherSessionId = 'sess_other01aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    // Other session is live, but not ours.
+    const jsonlContent = makeEventLogJSONL(otherSessionId, { started: true, toolNames: ['Bash'] });
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(jsonlContent) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return jsonlContent;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    expect(detail.liveActivity).toBeNull();
   });
 });

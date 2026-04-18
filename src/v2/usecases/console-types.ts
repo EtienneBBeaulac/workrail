@@ -45,9 +45,9 @@ export interface ConsoleSessionSummary {
   /** True when the session was started by the WorkRail autonomous daemon.
    * Durable: derived from context_set event with is_autonomous: 'true'. */
   readonly isAutonomous: boolean;
-  /** True when the session is currently registered in DaemonRegistry with a recent
-   * heartbeat (within AUTONOMOUS_HEARTBEAT_THRESHOLD_MS). Ephemeral: cleared on
-   * process restart. False when no DaemonRegistry is injected into ConsoleService. */
+  /** True when the daemon event log for today contains a session_started event for this
+   * session but no session_completed event. Derived from disk -- survives console restarts.
+   * False on any read error (safe default). */
   readonly isLive: boolean;
 }
 
