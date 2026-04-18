@@ -4444,3 +4444,73 @@ The blanket try/catch in AgentLoop._executeTools() converts ALL tool throws to i
 **The bridge complexity was always a band-aid.** It was the right solution when the MCP server also owned the console UI. With the standalone console, the band-aid can come off and the system becomes dramatically simpler and more reliable.
 
 **Build order:** extract `worktrain console` fully (done) → remove HttpServer from MCP startup → remove bridge → remove DashboardLock/primary election → MCP server is pure stdio.
+
+---
+
+### Daemon agent communication: complete_step tool and structured output (Apr 18, 2026)
+
+**Core question answered by discovery:** Who should own step transitions -- the LLM or the daemon?
+
+Current answer: LLM (calls `continue_workflow`, round-trips the continueToken). Every high-value alternative says: daemon.
+
+---
+
+#### Phase 1: `complete_step` tool (replaces `continue_workflow` in daemon sessions)
+
+The daemon is fully in control of the agent loop. The MCP-style `continue_workflow` tool was inherited from the MCP protocol but is not optimal for autonomous sessions. The better design:
+
+```typescript
+// Agent calls this instead of continue_workflow
+complete_step({
+  notes: string,          // required, min 50 chars -- type-enforced
+  artifacts?: unknown[],  // wr.assessment, handoff artifacts, etc.
+  context?: Record<string, unknown>  // workflow context variable updates
+})
+```
+
+The daemon:
+1. Receives `complete_step` call
+2. Injects continueToken internally (LLM never sees or round-trips it)
+3. Calls `executeContinueWorkflow({ intent: 'advance', continueToken, output: { notesMarkdown: notes, artifacts } })`
+4. Injects next step content via `steer()` 
+5. Returns `{ status: 'advanced', nextStep: '...' }` or `{ status: 'complete' }`
+
+Benefits:
+- LLM never needs to manage or round-trip the continueToken
+- Notes are required at the type level (not just schema-described)
+- Artifacts are first-class, not bolted on
+- No more `TOKEN_BAD_SIGNATURE` errors from LLMs mangling tokens
+- Cleaner tool list: `complete_step`, `Bash`, `Read`, `Write`, `report_issue`
+- Remove `continue_workflow` from the daemon tool registry entirely
+
+**Build order:** ~1 day. Add `complete_step` to `workflow-runner.ts`, update turn_end subscriber, remove `continue_workflow` from daemon tool list, add unit tests.
+
+---
+
+#### Phase 2: Structured output hybrid (after complete_step is proven)
+
+Discovery finding: `response_format` (structured output) and `tools` CAN coexist in the Anthropic API -- they are independent fields on `MessageCreateParamsNonStreaming`. This needs runtime verification on Bedrock (one 10-line test call).
+
+If Bedrock supports it, the optimal hybrid becomes:
+- **Tool calls for world interaction**: Bash, Read, Write (need interleaved execution and reasoning about results)
+- **Structured output for workflow control**: `complete_step` replaced by a JSON schema end_turn response
+
+The LLM ends each turn with structured JSON instead of a tool call:
+```json
+{ "step_complete": true, "notes": "...", "artifacts": [...], "context_updates": {} }
+```
+The daemon reads this and advances. Zero tool_use overhead for workflow control.
+
+**Token savings estimate:** ~225 tokens/request saved by removing `continue_workflow` from the tools list. ~11k tokens/50-turn session. Meaningful at scale.
+
+**Blocker:** Bedrock runtime verification needed. If Bedrock doesn't support `response_format + tools` simultaneously, this approach requires either Anthropic-only or splitting the tool list.
+
+---
+
+#### Build order (from discovery)
+
+1. **Required notes check** (30 min): Add `minLength: 50` validation to current `continue_workflow` -- immediate safety net
+2. **`complete_step` tool** (1 day): Daemon-owned step transition, continueToken hidden
+3. **Verifier hook** (after Phase 2): `onTurnEnd` hook that checks output quality with a cheap Haiku call before advancing
+4. **Bedrock structured output prototype** (2 hours): Verify `response_format + tools` works on Bedrock
+5. **Hybrid structured output** (if Bedrock supports): Replace `complete_step` tool with end_turn JSON schema
