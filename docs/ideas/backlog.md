@@ -4780,3 +4780,36 @@ The daemon executes this synchronously (within the turn) or asynchronously (defe
 - Context injection only works if the daemon controls what children receive
 - Quality metrics only work if all agent work is captured in the event log
 - Coordinator scripts only work if the coordination primitives are owned by WorkTrain
+
+---
+
+### MCP integration strategy: external systems via MCP, WorkTrain internals native-only (Apr 18, 2026)
+
+**The principle:**
+
+- **External systems (Jira, Glean, GitLab, Slack, GitHub, Confluence, etc.)** → MCP is the right interface. These are well-defined external APIs. WorkTrain should NOT recreate what a Jira MCP or Glean MCP already does well. The agent uses the MCP to read tickets, search knowledge, post comments. WorkTrain configures which MCPs are available per workspace.
+
+- **WorkTrain internals (spawning agents, advancing workflows, reading session state, querying the knowledge graph)** → native only, never via external MCP. These must be owned and controlled by WorkTrain. No `mcp__nested-subagent__Task`, no external tool for workflow control.
+
+**Why this distinction matters:**
+- External MCPs can be slow, rate-limited, or unavailable. That's acceptable for optional integrations -- the agent can degrade gracefully.
+- WorkTrain internals must be reliable. If `spawn_agent` is an external MCP call, a flaky MCP connection breaks the entire orchestration layer. If it's native, it's as reliable as the daemon itself.
+
+**First-class vs MCP for common integrations:**
+
+Some integrations are so central to WorkTrain's use case that they should be first-class (built-in triggers, delivery targets) rather than requiring an external MCP:
+- **GitHub/GitLab polling** -- already built-in as polling trigger sources. No MCP needed to trigger on PRs.
+- **Jira/Linear issue polling** -- planned as built-in polling sources. No MCP needed to trigger on new issues.
+- **Slack/Teams notifications** -- planned as built-in delivery targets. No MCP needed to post results.
+
+But for *querying* these systems during a session (e.g. reading the full Jira ticket description, searching Glean for relevant docs, fetching a specific GitLab MR diff) -- MCP is the right answer. WorkTrain shouldn't recreate what `@modelcontextprotocol/server-jira` already does.
+
+**What WorkTrain should provide:**
+1. A way to configure which MCPs are available to daemon sessions (`~/.workrail/config.json` mcp section)
+2. Workspace-scoped MCP config (different workspaces get different MCPs -- a mobile app workspace gets Android-specific MCPs, a web workspace gets web-specific ones)
+3. First-class integrations for the most common automation sources (GitHub, GitLab, Jira, Linear, Slack) so users don't need MCPs for basic automation -- but MCPs available for deeper querying
+
+**Investigation needed:**
+- What do the best MCPs for Jira, Glean, GitLab, Slack actually provide? Are they good enough to just use, or do they have gaps that WorkTrain should fill?
+- Is there a standard way to configure per-workspace MCP availability, or does this need to be custom-built?
+- How do the leading agent platforms (OpenAI Agents SDK, LangGraph) handle external system integrations? Do they all reinvent the wheel or do they use MCP/tool registries?
