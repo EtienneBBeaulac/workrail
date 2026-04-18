@@ -26,6 +26,7 @@ import type { ExecFn } from '../../src/trigger/delivery-action.js';
 import type { TriggerDefinition, WebhookEvent } from '../../src/trigger/types.js';
 import { asTriggerId } from '../../src/trigger/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
+import type { NotificationService } from '../../src/trigger/notification-service.js';
 import { tmpPath } from '../helpers/platform.js';
 
 // ---------------------------------------------------------------------------
@@ -1165,5 +1166,119 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     expect(router.maxConcurrentSessions).toBe(1);
 
     warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter: notify() wiring
+//
+// Verifies that TriggerRouter calls notificationService.notify() after each
+// workflow session completes, and that it passes the FINAL result (post
+// callbackUrl delivery reassignment) to notify().
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter notify() wiring', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('route(): calls notify() with the workflow result when session completes successfully', async () => {
+    // WHY: proves the wiring in route() -- after runWorkflowFn returns a success result,
+    // notificationService.notify() must be called with that result and the goal string.
+    const fakeNotify = { notify: vi.fn() };
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,  // execFn
+      undefined,  // maxConcurrentSessions
+      undefined,  // emitter
+      fakeNotify as unknown as NotificationService,
+    );
+
+    router.route(makeEvent());
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(fakeNotify.notify).toHaveBeenCalledOnce();
+    const [result, goal] = fakeNotify.notify.mock.calls[0] as [{ _tag: string }, string];
+    expect(result._tag).toBe('success');
+    expect(goal).toBe(trigger.goal);
+  });
+
+  it('dispatch(): calls notify() with the workflow result when session fails', async () => {
+    // WHY: proves the wiring in dispatch() -- when runWorkflowFn returns an error result,
+    // notificationService.notify() must be called with that error result.
+    const fakeNotify = { notify: vi.fn() };
+    const trigger = makeTrigger();
+
+    // Custom runWorkflowFn that returns an error result
+    const errorFn: RunWorkflowFn = async (t) => ({
+      _tag: 'error' as const,
+      workflowId: t.workflowId,
+      message: 'simulated agent error',
+      stopReason: 'stop',
+    });
+
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      errorFn,
+      undefined,  // execFn
+      undefined,  // maxConcurrentSessions
+      undefined,  // emitter
+      fakeNotify as unknown as NotificationService,
+    );
+
+    const workflowTrigger = {
+      workflowId: trigger.workflowId,
+      goal: trigger.goal,
+      workspacePath: trigger.workspacePath,
+      context: {},
+    };
+    router.dispatch(workflowTrigger);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(fakeNotify.notify).toHaveBeenCalledOnce();
+    const [result] = fakeNotify.notify.mock.calls[0] as [{ _tag: string }, string];
+    expect(result._tag).toBe('error');
+  });
+
+  it('route(): notify() receives delivery_failed (not success) when callbackUrl POST fails', async () => {
+    // WHY: proves the ordering invariant -- route() reassigns result to delivery_failed
+    // BEFORE calling notify(). If this fails, notify() would receive 'success' and the
+    // user notification would not reflect the actual outcome.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => 'Service Unavailable',
+    }));
+
+    const fakeNotify = { notify: vi.fn() };
+    const trigger = makeTrigger({ callbackUrl: 'https://example.com/callback' });
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,  // execFn
+      undefined,  // maxConcurrentSessions
+      undefined,  // emitter
+      fakeNotify as unknown as NotificationService,
+    );
+
+    router.route(makeEvent());
+    await new Promise((r) => setTimeout(r, 50));
+
+    // notify() must have been called with the post-reassignment result
+    expect(fakeNotify.notify).toHaveBeenCalledOnce();
+    const [result] = fakeNotify.notify.mock.calls[0] as [{ _tag: string }, string];
+    // Critical: must be 'delivery_failed', not 'success' -- proves result was reassigned
+    // before notify() was called (trigger-router.ts lines 578-629).
+    expect(result._tag).toBe('delivery_failed');
   });
 });

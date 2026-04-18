@@ -5697,3 +5697,132 @@ Tested empirically today. This is what actually works, not what's specced.
 - Need enough volume to be statistically meaningful
 
 **Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `mr-review-workflow-agentic` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
+
+---
+
+### Autonomous feature development: scope → breakdown → parallel execution → merge (Apr 18, 2026)
+
+**The vision:** give WorkTrain a feature scope -- from a vague idea to a fully groomed ticket -- and it figures out the rest. Discovery if needed, design if needed, breakdown into parallel slices, execution across worktrees, context management across agents, bringing it all back together.
+
+**The four pillars the user cares about:**
+1. **Autonomy** -- WorkTrain takes a scope and figures out the work breakdown without hand-holding
+2. **Quality** -- comes FROM autonomy + workflow enforcement + coordination. Each slice goes through the right phases.
+3. **Throughput** -- parallel slices across worktrees simultaneously. N agents working while you focus elsewhere.
+4. **Visibility** -- one coherent work unit you can track at a glance, not N unrelated sessions in a flat list.
+
+**The pipeline for a scope:**
+
+```
+Input: "add GitHub polling support" (any level of definition -- idea to full spec)
+  │
+  ├── [if vague] ideation + spec authoring → output: BRD / acceptance criteria
+  ├── classify-task → taskComplexity, hasUI, touchesArchitecture, taskMaturity
+  ├── [if Medium/Large] discovery → context bundle, invariants, candidate files
+  ├── [if touchesArchitecture] design → candidates, review, selected approach
+  ├── breakdown → parallel slices with dependency graph
+  │     ├── Slice 1: types + schema         (worktree A)
+  │     ├── Slice 2: polling adapter        (worktree B, depends: 1)
+  │     ├── Slice 3: scheduler integration  (worktree C, depends: 2)
+  │     └── Slice 4: tests                 (worktree D, depends: 1-3)
+  ├── [parallel execution] each slice: implement → review → (fix if needed) → approved
+  ├── [serial integration] merge slices in dependency order, verify after each
+  └── [final] integration test → PR created → notification to user
+```
+
+**Context management across agents:**
+- Coordinator maintains a "work unit manifest": current phase, slice status, shared invariants, decisions made in design phase
+- Each spawned agent receives a context bundle: relevant portion of the manifest + files it needs + decisions from upstream phases
+- Agents don't rediscover what the coordinator already knows
+- After each agent completes, its findings update the manifest (new invariants found, scope changes, follow-up tickets)
+
+**Worktree coordination:**
+- Each slice gets its own worktree (already done via `--isolation worktree`)
+- Coordinator tracks which files each slice touches -- detects conflicts before they happen
+- Independent slices run in parallel; dependent slices queue automatically
+- Merge order follows the dependency graph, not wall-clock completion time
+
+**Knowing when to spawn a new main agent:**
+- When a slice is too large or discovers unexpected scope, it requests a breakdown from the coordinator
+- When a review finds a Critical finding, the coordinator spawns a dedicated fix agent with the finding + relevant context
+- When integration reveals a regression, coordinator spawns an investigation agent before retrying the merge
+
+**The coordinator's job (what stays in scripts, not LLM):**
+- Maintain the manifest (JSON file, append-only)
+- Compute the dependency graph
+- Decide parallelism vs serialization
+- Route: clean → merge, minor findings → fix agent, critical → escalate
+- Track worktrees, detect conflicts
+- Sequence the merge order
+
+**What requires LLM cognition:**
+- Discovery (what are the invariants, which files matter)
+- Design (which approach, what tradeoffs)
+- Implementation (write the code)
+- Review (is this correct and complete)
+- Breakdown (what are the right slice boundaries)
+
+**The minimum viable version:**
+A coordinator that handles a Medium/Small scoped task (already classified, no need for ideation or design). Takes 2-4 parallel slices, runs them, reviews each, merges when clean. No escalation handling in v1 -- if anything fails, notify the user.
+
+This is the thing that makes WorkTrain feel like a senior engineer taking ownership of a task, not a tool you have to supervise step by step.
+
+---
+
+### Coordinator design decision: MVP-first, generalize after (Apr 18, 2026)
+
+**Decision:** Build the first coordinator as a PR review-specific script. Generalize to a reusable coordinator framework after proving it works end-to-end.
+
+**Rationale:** Three discovery runs all converged on the architecture (TypeScript script, `CoordinatorDeps` interface, 2-call HTTP for notes). The risk is over-engineering for hypothetical pipelines before validating the real one. PR review is the highest-value first use case with a clear success criterion.
+
+**The generic coordinator architecture is already designed** (see `docs/discovery/coordinator-script-design.md`). The `CoordinatorDeps` interface and `AgentResult` bridge type make migration to a generic coordinator trivial -- the PR review script uses these types, so generalizing is additive, not a rewrite.
+
+**Migration path:** once PR review coordinator is proven in production, extract the routing logic (`parseFindings`, `routeByFindings`) and `CoordinatorDeps` interface into `src/coordinators/base.ts`. The PR review coordinator becomes one implementation of the base pattern.
+
+---
+
+### Architecture decisions from Apr 17-18 sessions (to record before files are cleaned up)
+
+**Decision 1: Structured output + tool calls can coexist (Apr 18)**
+Validated empirically via integration test. The beta API (`client.beta.messages.create()`) supports both JSON schema enforcement AND tool calls in the same request. Schema enforcement applies at `end_turn` only. Bedrock is more consistent than direct Anthropic API for system-prompt fallback behavior. This opens a future path for replacing `complete_step` with structured output, but `complete_step` remains the chosen primitive for now.
+
+**Decision 2: `complete_step` is the preferred daemon workflow-control primitive (Apr 18)**
+PR #569 merged. The daemon holds the continueToken in a closure; LLM calls `complete_step(notes)` and never handles the token directly. Structured output (`beta.messages.create` with JSON schema) was evaluated as an alternative and deferred -- it's a viable migration path for a future version but adds API complexity today. Follow-up: track a structured output migration as a future improvement, not a current priority.
+
+**Decision 3: AgentLoop error handling contract -- FatalToolError (Apr 16)**
+`FatalToolError` subclass selected for distinguishing recoverable from non-recoverable tool failures in the AgentLoop. The contract: user-facing tools (Bash, Read, Write) catch failures and return `isError: true` in the tool_result (loop continues, LLM can retry). Coordination tools with unrecoverable failures (session store corruption, token decode failure) throw `FatalToolError` -- `_executeTools` instanceof-checks this and kills the session rather than surfacing a confusing error to the LLM. This contract is part of the AgentLoop architecture and must be followed by any new tool implementations.
+
+**Decision 4: Use `wr.discovery` for discovery-only tasks, not `coding-task-workflow-agentic` (Apr 17)**
+Discovered from a broken session: `coding-task-workflow-agentic` dispatched with "do discovery only, no code" ran 11 step advances then stopped without `run_completed`. The workflow's implementation phases fired even with explicit instructions not to code. Lesson: when a trigger or coordinator wants pure discovery/research, use `wr.discovery` as the workflowId. `coding-task-workflow-agentic` should only be dispatched when implementation is the actual goal.
+
+**Decision 5: Bug -- MCP server EPIPE crash (Apr 18)**
+Root cause confirmed with 15 production crash log entries: `process.stderr` is missing an `'error'` event handler in `registerFatalHandlers()`. When an MCP client disconnects, Node.js emits `EPIPE` on stderr which crashes the process with an unhandled error. `process.stdout` already has equivalent protection via `wireStdoutShutdown()`. Fix: mirror the stdout protection for stderr. One-line fix being implemented in PR `fix/mcp-stderr-epipe-crash`.
+
+---
+
+### worktrain status → console integration (Apr 18, 2026)
+
+The `worktrain status` CLI command is Phase 1. Phase 2: the same data and rendering lives inside the console as the default landing view when you open it -- not the sessions list, the overview. Same `StatusDataPacket` type, two surfaces. The console overview replaces the need to run a CLI command; it auto-refreshes and stays live.
+
+---
+
+### WorkTrain as a native macOS app (Apr 18, 2026)
+
+Long-term vision: WorkTrain becomes a full native Mac app -- not just a CLI + web console, but a proper macOS application with a menubar icon, system notifications, windows, and native UX.
+
+**What this unlocks:**
+- Always-on menubar presence showing daemon status at a glance
+- Native macOS notifications (already built via osascript -- the app version uses UserNotifications framework directly)
+- The `worktrain status` overview as a native window, not a browser tab
+- Message queue and inbox as a native interface (type a message from anywhere on your Mac, not just the terminal)
+- Background daemon management -- start/stop/restart from the menubar without terminal
+- Deep system integration: file system events, calendar, Contacts, native share sheet
+
+**Tech stack options:**
+- Swift/SwiftUI: full native, best macOS integration, steeper learning curve from TypeScript
+- Electron + existing console UI: fastest path, same TypeScript codebase, but heavy
+- Tauri: Rust core + existing web frontend, lighter than Electron, good macOS support
+- React Native macOS: reuses React knowledge, not quite native feel
+
+**Recommended path:** Tauri wrapping the existing console UI. The console is already a React/Vite app. Tauri gives native menubar, notifications, and system APIs without rewriting the frontend. The WorkTrain daemon stays as a separate process managed by the app.
+
+**This is a post-v1 platform decision** -- not a near-term priority, but worth designing toward. Don't make architectural decisions that would make the Tauri wrapper hard later.
