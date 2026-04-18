@@ -4656,3 +4656,33 @@ worktrain spawn --trigger mr-review --goal "Review PR #123: fix authentication b
 **Also needed:** the `worktrain spawn` CLI command should accept `--goal` as a first-class flag (already partially implemented) so coordinator scripts can pass goals without knowing the webhook payload format.
 
 **Why this matters for WorkTrain being production-ready:** most real-world triggers (PR review, issue investigation, incident response) have dynamic goals that depend on what just happened. Static goals in triggers.yml only work for scheduled/cron tasks. Late-bound goals make the whole trigger system composable with external events.
+
+---
+
+### Discovery needed: optimal context injection strategy for subagents (Apr 18, 2026)
+
+**The question:** what is the optimal way to give spawned subagents the context they need to do high-quality work without burning tokens on discovery?
+
+**Candidate approaches to evaluate:**
+
+1. **Step notes as context** -- use `buildSessionRecap()` (already in workflow-runner.ts) to extract and inject prior session notes into subagent prompts. Cheap, already built, no infrastructure needed. Quality depends entirely on note quality.
+
+2. **Knowledge graph queries** -- structured context extracted from the KG: relevant files, symbols, prior session findings. High quality, but requires KG to be built first.
+
+3. **Hybrid** -- notes for "what was done and found," KG for "what code exists and how it connects." Each source contributes what it's best at.
+
+4. **Structured handoff artifacts** -- the main agent explicitly writes a context bundle (structured JSON with key facts, patterns, known issues) as an artifact at session end, specifically intended for subagent consumption. Higher quality than freeform notes but requires workflow changes.
+
+**Note quality is the bottleneck for option 1:**
+- Some sessions produce excellent notes: "Root cause: X. Fix: Y. Files changed: A, B, C."
+- Others produce verbose notes that bury signal in process description
+- There's no systematic measurement of note quality yet
+
+**What the discovery should investigate:**
+1. Take 10 real daemon sessions from the event log. Read their step notes. Would those notes give a subagent enough context to continue the work or review it intelligently?
+2. What would "high quality" notes look like for each workflow type (coding task, MR review, discovery)?
+3. Is there a note quality rubric that the workflow-effectiveness-assessment could use to flag poor notes?
+4. What's the minimum context a subagent needs to start working without Phase 0 discovery?
+5. How do the leading autonomous agent systems solve this? (OpenAI Agents SDK, LangGraph -- how do they handle context hand-off between agents?)
+
+**The outcome:** a concrete recommendation on which approach to build, with quality requirements for the note-based approach if that's the chosen path.
