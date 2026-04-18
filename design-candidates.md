@@ -1,85 +1,94 @@
-# Design Candidates: PR #417 Fixes (maxConcurrentSessions semaphore)
+# Design Candidates: Regression Test for delivery_failed->success Bug (PR #580)
 
-**Date:** 2026-04-15
+**Date:** 2026-04-18
 **Status:** Ready for main-agent review
 
 ---
 
 ## Problem Understanding
 
-### Core Tensions
+**Tensions:**
+- `delivery_failed` is part of `WorkflowRunResult` for TriggerRouter compatibility but is architecturally unreachable from `runWorkflow()` directly. Testing the assertNever guard requires bypassing the type system via `as any` cast - intentional and documented.
+- Testing an "impossible" runtime state means deliberately constructing a value the type system forbids. The `as any` cast is the correct signal.
 
-1. **Silent falsy coercion vs. explicit validation**: `parseInt('0') || undefined` looks
-   idiomatic but treats `0` (a valid user intent) the same as `NaN` or absent.
+**Likely seam:** The end of the `describe('makeSpawnAgentTool() result mapping')` block in `tests/unit/workflow-runner-spawn-agent.test.ts`, before the closing `});`.
 
-2. **TypeScript type safety vs. runtime NaN**: TypeScript types `NaN` as `number`, so the
-   type system cannot prevent `NaN` from reaching `new Semaphore(NaN)`. The runtime guard
-   in the constructor is the only defense against a silent deadlock.
-
-3. **Boundary responsibility**: Config values should be validated where they cross from
-   string to typed number (listener), but the constructor should also enforce its own
-   invariant (class boundary). Both are correct; neither replaces the other.
-
-### Likely Seam
-
-- **F1**: `trigger-listener.ts`, the expression `parseInt(maxConcurrencyRaw, 10) || undefined`
-- **F2**: `trigger-router.ts` constructor, after the `??` fallback, before the `< 1` clamp
-- **F5**: `trigger-router.ts` constructor, after `this.semaphore = new Semaphore(...)`
-
-### What Makes This Hard
-
-- `|| undefined` idiom looks correct at a glance; falsy case for `0` is easy to miss.
-- `??` guards against `null | undefined` but not `NaN`.
-- A deadlock in `Semaphore(NaN)` is silent: `acquire()` enqueues a waiter that never resolves.
+**What makes it hard:** Nothing technically hard. Key insight: `delivery_failed` cannot be passed to `makeRunWorkflowStub` (typed to `ChildWorkflowRunResult`) - must use inline stub with `as any`.
 
 ---
 
 ## Philosophy Constraints
 
-- **Make illegal states unrepresentable**: NaN as a semaphore cap is an illegal state.
-- **Validate at boundaries, trust inside**: Listener = config-string boundary; constructor = class invariant boundary.
-- **Determinism over cleverness**: Replace `||` with `!isNaN()`.
-- **Document 'why', not 'what'**: The NaN guard needs a `// WHY:` comment.
-- **Errors are data**: Invalid config -> `console.warn` + safe fallback (not throw).
+- `exhaustiveness everywhere` - assertNever is the correct compile-time guard
+- `prefer fakes over mocks` - inline async stub, not vi.fn() mock
+- `document why not what` - test description explains the regression intent
+- `type safety as first line of defense` - the `as any` cast is explicitly bypassing type safety to test the runtime guard (justified)
 
-No philosophy conflicts.
+No philosophy conflicts between CLAUDE.md and repo patterns.
 
 ---
 
 ## Impact Surface
 
-- `src/trigger/trigger-listener.ts`: one expression change
-- `src/trigger/trigger-router.ts`: two-line guard insertion + one `console.log`
-- No test changes required
+- Test file only: `tests/unit/workflow-runner-spawn-agent.test.ts`
+- No production code changes
+- No new imports required (all helpers and types already imported)
+- No nearby consumers affected
 
 ---
 
 ## Candidates
 
-All candidates converge. Noted honestly.
+### Candidate 1: Append provided test verbatim (recommended)
 
-### Candidate 1 (Selected): Surgical three-expression fixes
+**Summary:** Add the user-provided test case inside the existing describe block, just before the closing `});`.
 
-Fix `|| undefined` to `!isNaN()` in listener, add NaN guard before `< 1` clamp in constructor
-with `// WHY:` comment, add startup log line.
+**Tensions resolved:** Correctly tests the assertNever guard using `as any` to simulate the impossible delivery_failed state.
 
-- **Tensions resolved**: All three.
-- **Failure mode**: Variable name divergence during editing (`requested` vs `cap`).
-- **Repo pattern**: Follows exactly. Same `console.warn` + clamp style.
-- **Scope**: Best-fit.
+**Tensions accepted:** Deliberately bypasses ChildWorkflowRunResult type safety (the `as any` is intentional and documented with eslint-disable comment).
 
-### Candidate 2 (Rejected): Parse and validate in constructor only
+**Boundary:** Test file only. No production changes.
 
-Accept `string | number | undefined` in constructor. Rejected: wrong boundary, architectural
-regression violating 'validate at boundaries'.
+**Why this boundary is best-fit:** The regression is in result mapping logic inside makeSpawnAgentTool. The test exercises exactly that path.
+
+**Failure mode:** If makeSpawnAgentTool returns before calling runWorkflowFn when continueToken is undefined. Disproved by existing error/timeout tests with same setup.
+
+**Repo-pattern relationship:** Follows exactly - inline stub pattern, eslint-disable comment before as-any, beforeEach provides mockExecuteStartWorkflow.
+
+**Gains:** Documents the regression; verifies assertNever fires; prevents future regressions.
+
+**Losses:** None.
+
+**Scope judgment:** Best-fit.
+
+**Philosophy fit:** Honors exhaustiveness everywhere, prefer fakes over mocks, document why not what.
+
+### Candidate 2: Use makeRunWorkflowStub helper
+
+**Summary:** Use `makeRunWorkflowStub(deliveryFailedResult)` like the other tests.
+
+**Why this fails:** `makeRunWorkflowStub` has return type `ChildWorkflowRunResult` which excludes `delivery_failed`. TypeScript compile error. Not a real candidate.
 
 ---
 
-## Recommendation
+## Comparison and Recommendation
 
-Candidate 1. Surgical, correct, consistent with repo patterns and philosophy.
+All candidates converge on Candidate 1. There is no architectural choice to make - the provided snippet is the only valid approach.
 
-**Self-critique**: F2 NaN guard is redundant given F1 fix. Counter: defense-in-depth when
-failure is a silent deadlock costs two lines. Worth it.
+**Recommendation:** Append the provided test verbatim. Switch to branch `fix/spawn-agent-result-handling`, edit the test file, run vitest, push, merge.
 
-**Open questions**: None.
+---
+
+## Self-Critique
+
+**Strongest counter-argument:** None meaningful.
+
+**Pivot condition:** None identified.
+
+**Assumption that would invalidate design:** makeSpawnAgentTool returns early before runWorkflowFn when continueToken is undefined. Disproved by existing passing tests with identical setup.
+
+---
+
+## Open Questions for the Main Agent
+
+None. Proceed directly to implementation.

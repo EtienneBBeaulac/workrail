@@ -269,4 +269,19 @@ describe('makeSpawnAgentTool() result mapping', () => {
     expect(parsed.notes).toContain('Failed to start child workflow');
     expect(runWorkflowStub).not.toHaveBeenCalled();
   });
+
+  it('throws via assertNever when runWorkflow returns delivery_failed -- regression: old code silently mapped this to success', async () => {
+    const deliveryFailedResult = {
+      _tag: 'delivery_failed' as const,
+      workflowId: 'test-workflow',
+      stopReason: 'completed',
+      deliveryError: 'HTTP POST to callbackUrl failed with 503',
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stub = async () => deliveryFailedResult as any;
+    const tool = makeSpawnAgentTool(
+      'sess-1', FAKE_CTX, FAKE_API_KEY, 'parent-session-id', 0, 3, stub, FAKE_SCHEMAS,
+    );
+    await expect(tool.execute('call-1', FAKE_PARAMS)).rejects.toThrow('Unexpected value');
+  });
 });
