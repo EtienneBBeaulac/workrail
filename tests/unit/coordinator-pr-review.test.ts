@@ -8,7 +8,7 @@
  * the interface directly and record calls for assertion.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   parseFindingsFromNotes,
   readVerdictArtifact,
@@ -250,6 +250,17 @@ describe('parseFindingsFromNotes', () => {
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') expect(result.value.severity).toBe('minor');
   });
+
+  // ---- source field: keyword_scan path ----
+
+  it('sets source to keyword_scan when APPROVE text is parsed', () => {
+    const result = parseFindingsFromNotes('APPROVE this change. Looks clean and well-tested.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.severity).toBe('clean');
+      expect(result.value.source).toBe('keyword_scan');
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -257,6 +268,14 @@ describe('parseFindingsFromNotes', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('readVerdictArtifact', () => {
+  // WHY afterEach: the WARN log test uses vi.spyOn(process.stderr, 'write').
+  // Restoring all mocks after each test prevents spy leakage to other tests
+  // in the same process. This is the only acceptable alternative to dep injection
+  // (which would require changing readVerdictArtifact's signature).
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   /** A valid wr.review_verdict artifact for testing. */
   const validCleanArtifact = {
     kind: 'wr.review_verdict',
@@ -339,6 +358,33 @@ describe('readVerdictArtifact', () => {
     if (result !== null) {
       expect(result.severity).toBe('minor');
     }
+  });
+
+  it('emits WARN to stderr when wr.review_verdict artifact fails schema validation', () => {
+    // WHY spy: readVerdictArtifact calls process.stderr.write directly (no dep injection).
+    // The spy is restored in afterEach() above.
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const malformedArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'invalid', // wrong enum -- not in ['clean', 'minor', 'blocking']
+      confidence: 'high',
+      findings: [],
+      summary: 'test',
+    };
+
+    const result = readVerdictArtifact([malformedArtifact], 'handle-test-session-123');
+
+    // Should return null (no valid artifact found)
+    expect(result).toBeNull();
+
+    // WARN log must have been emitted -- essential for operator visibility
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[WARN coord:reason=artifact_parse_failed'),
+    );
+    expect(stderrSpy).toHaveBeenCalledWith(
+      expect.stringContaining('readVerdictArtifact: wr.review_verdict schema validation failed'),
+    );
   });
 });
 

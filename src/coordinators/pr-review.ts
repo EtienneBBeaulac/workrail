@@ -300,6 +300,7 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
       severity: 'blocking',
       findingSummaries: extractFindingSummaries(notes),
       raw: notes,
+      source: 'keyword_scan',
     });
   }
 
@@ -326,6 +327,7 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
       severity: 'clean',
       findingSummaries: [],
       raw: notes,
+      source: 'keyword_scan',
     });
   }
 
@@ -335,6 +337,7 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
       severity: 'minor',
       findingSummaries: extractFindingSummaries(notes),
       raw: notes,
+      source: 'keyword_scan',
     });
   }
 
@@ -344,6 +347,7 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
     severity: 'unknown',
     findingSummaries: [],
     raw: notes,
+    source: 'keyword_scan',
   });
 }
 

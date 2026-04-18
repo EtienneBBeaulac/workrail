@@ -466,4 +466,39 @@ describe('makeCompleteStepTool()', () => {
       ).rejects.toThrow(/complete_step failed/);
     });
   });
+
+  describe('TC12: onComplete receives artifacts alongside notes', () => {
+    it('forwards artifacts array to onComplete when workflow is complete', async () => {
+      const sessionId = makeSessionId();
+      let completedNotes: string | undefined;
+      let completedArtifacts: readonly unknown[] | undefined;
+
+      const { fake } = makeFakeCapturingExec(() => makeOkResponse({ isComplete: true }));
+
+      const tool = makeCompleteStepTool(
+        sessionId,
+        NULL_CTX,
+        () => 'ct_current12345678901234567890',
+        () => {},
+        (notes, artifacts) => {
+          completedNotes = notes;
+          completedArtifacts = artifacts;
+        },
+        () => {},
+        STUB_SCHEMAS,
+        fake,
+      );
+
+      const result = await tool.execute('call-1', {
+        notes: VALID_NOTES,
+        artifacts: [SAMPLE_ASSESSMENT],
+      });
+
+      expect(result.content[0].text).toBe(JSON.stringify({ status: 'complete' }));
+      // Both notes and artifacts must be forwarded to onComplete for coordinator consumption.
+      // See docs/discovery/artifacts-coordinator-channel.md for why both fields are needed.
+      expect(completedNotes).toBe(VALID_NOTES);
+      expect(completedArtifacts).toEqual([SAMPLE_ASSESSMENT]);
+    });
+  });
 });
