@@ -5697,3 +5697,71 @@ Tested empirically today. This is what actually works, not what's specced.
 - Need enough volume to be statistically meaningful
 
 **Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `mr-review-workflow-agentic` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
+
+---
+
+### Autonomous feature development: scope → breakdown → parallel execution → merge (Apr 18, 2026)
+
+**The vision:** give WorkTrain a feature scope -- from a vague idea to a fully groomed ticket -- and it figures out the rest. Discovery if needed, design if needed, breakdown into parallel slices, execution across worktrees, context management across agents, bringing it all back together.
+
+**The four pillars the user cares about:**
+1. **Autonomy** -- WorkTrain takes a scope and figures out the work breakdown without hand-holding
+2. **Quality** -- comes FROM autonomy + workflow enforcement + coordination. Each slice goes through the right phases.
+3. **Throughput** -- parallel slices across worktrees simultaneously. N agents working while you focus elsewhere.
+4. **Visibility** -- one coherent work unit you can track at a glance, not N unrelated sessions in a flat list.
+
+**The pipeline for a scope:**
+
+```
+Input: "add GitHub polling support" (any level of definition -- idea to full spec)
+  │
+  ├── [if vague] ideation + spec authoring → output: BRD / acceptance criteria
+  ├── classify-task → taskComplexity, hasUI, touchesArchitecture, taskMaturity
+  ├── [if Medium/Large] discovery → context bundle, invariants, candidate files
+  ├── [if touchesArchitecture] design → candidates, review, selected approach
+  ├── breakdown → parallel slices with dependency graph
+  │     ├── Slice 1: types + schema         (worktree A)
+  │     ├── Slice 2: polling adapter        (worktree B, depends: 1)
+  │     ├── Slice 3: scheduler integration  (worktree C, depends: 2)
+  │     └── Slice 4: tests                 (worktree D, depends: 1-3)
+  ├── [parallel execution] each slice: implement → review → (fix if needed) → approved
+  ├── [serial integration] merge slices in dependency order, verify after each
+  └── [final] integration test → PR created → notification to user
+```
+
+**Context management across agents:**
+- Coordinator maintains a "work unit manifest": current phase, slice status, shared invariants, decisions made in design phase
+- Each spawned agent receives a context bundle: relevant portion of the manifest + files it needs + decisions from upstream phases
+- Agents don't rediscover what the coordinator already knows
+- After each agent completes, its findings update the manifest (new invariants found, scope changes, follow-up tickets)
+
+**Worktree coordination:**
+- Each slice gets its own worktree (already done via `--isolation worktree`)
+- Coordinator tracks which files each slice touches -- detects conflicts before they happen
+- Independent slices run in parallel; dependent slices queue automatically
+- Merge order follows the dependency graph, not wall-clock completion time
+
+**Knowing when to spawn a new main agent:**
+- When a slice is too large or discovers unexpected scope, it requests a breakdown from the coordinator
+- When a review finds a Critical finding, the coordinator spawns a dedicated fix agent with the finding + relevant context
+- When integration reveals a regression, coordinator spawns an investigation agent before retrying the merge
+
+**The coordinator's job (what stays in scripts, not LLM):**
+- Maintain the manifest (JSON file, append-only)
+- Compute the dependency graph
+- Decide parallelism vs serialization
+- Route: clean → merge, minor findings → fix agent, critical → escalate
+- Track worktrees, detect conflicts
+- Sequence the merge order
+
+**What requires LLM cognition:**
+- Discovery (what are the invariants, which files matter)
+- Design (which approach, what tradeoffs)
+- Implementation (write the code)
+- Review (is this correct and complete)
+- Breakdown (what are the right slice boundaries)
+
+**The minimum viable version:**
+A coordinator that handles a Medium/Small scoped task (already classified, no need for ideation or design). Takes 2-4 parallel slices, runs them, reviews each, merges when clean. No escalation handling in v1 -- if anything fails, notify the user.
+
+This is the thing that makes WorkTrain feel like a senior engineer taking ownership of a task, not a tool you have to supervise step by step.
