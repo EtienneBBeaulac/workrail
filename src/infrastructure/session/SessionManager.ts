@@ -58,6 +58,11 @@ export class SessionManager extends EventEmitter {
     @inject(DI.Config.ProjectPath) projectPath: string
   ) {
     super();
+    // Raise the EventEmitter listener limit for 'session:updated'. Multiple callers
+    // can subscribe to this event concurrently (e.g. one per active MCP session).
+    // The default Node.js limit of 10 produces a MaxListenersExceededWarning at
+    // moderate concurrency; 50 is a safe upper bound for the expected session count.
+    this.setMaxListeners(50);
     this.sessionsRoot = path.join(os.homedir(), '.workrail', 'sessions');
     
     // Resolve to Git repository root if in a Git repo
@@ -87,9 +92,23 @@ export class SessionManager extends EventEmitter {
     const gitRoot = this.findGitRepoRoot(startPath);
     
     if (gitRoot) {
-      console.error(`[SessionManager] Git repository detected: ${gitRoot}`);
+      // EPIPE guard: these console.error calls run during MCP server startup, before the
+      // stdio pipe is fully established. If the client disconnects during this window,
+      // Node.js delivers an async EPIPE event on process.stderr. The architectural guard
+      // in fatal-exit.ts (process.stderr.on('error', ...)) absorbs it, but a belt-and-
+      // suspenders catch here prevents any residual risk if registration order changes.
+      // Non-EPIPE errors are re-thrown so real problems are never silently swallowed.
+      try {
+        console.error(`[SessionManager] Git repository detected: ${gitRoot}`);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EPIPE') throw e;
+      }
       if (gitRoot !== path.resolve(startPath)) {
-        console.error(`[SessionManager] Resolved worktree ${startPath} to main repo ${gitRoot}`);
+        try {
+          console.error(`[SessionManager] Resolved worktree ${startPath} to main repo ${gitRoot}`);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== 'EPIPE') throw e;
+        }
       }
       return gitRoot;
     }
@@ -751,12 +770,12 @@ export class SessionManager extends EventEmitter {
       // Also log to console for visibility
       if (validation.errors.length > 0) {
         console.warn(
-          `[SessionManager] ⚠️  Validation errors in ${workflowId}/${sessionId}:`,
+          `[SessionManager] Validation errors in ${workflowId}/${sessionId}:`,
           validation.errors.map(e => e.message).join(', ')
         );
       } else if (validation.warnings.some(w => w.severity === 'warning')) {
         console.info(
-          `[SessionManager] ℹ️  Validation warnings in ${workflowId}/${sessionId}:`,
+          `[SessionManager] Validation warnings in ${workflowId}/${sessionId}:`,
           validation.warnings
             .filter(w => w.severity === 'warning')
             .map(w => w.message)
