@@ -214,11 +214,17 @@ export class PolledEventStore {
       }
       await fs.rename(tmpPath, filePath);
       // fsync the directory so the rename (directory entry update) is durable.
-      const dirFh = await fs.open(dir, 'r');
-      try {
-        await dirFh.sync();
-      } finally {
-        await dirFh.close();
+      // WHY: Windows does not support opening directory handles for fsync -- fs.open(dir, 'r')
+      // throws EPERM on win32. The durable-write guarantee still holds: fsync(file) + rename
+      // is already crash-safe, and NTFS makes rename atomic. Skip directory fsync on win32
+      // to match the pattern in src/v2/infra/local/fs/index.ts fsyncDir().
+      if (process.platform !== 'win32') {
+        const dirFh = await fs.open(dir, 'r');
+        try {
+          await dirFh.sync();
+        } finally {
+          await dirFh.close();
+        }
       }
       return ok(undefined);
     } catch (e) {

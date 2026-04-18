@@ -19,6 +19,7 @@ import {
   type AgentToolResult,
   type AgentEvent,
 } from '../../src/daemon/agent-loop.js';
+import { tmpPath } from '../helpers/platform.js';
 
 // ---------------------------------------------------------------------------
 // FakeAnthropicClient
@@ -686,7 +687,7 @@ describe('AgentLoop callbacks', () => {
   it('onToolCallCompleted fires after successful execute with durationMs and resultSummary', async () => {
     const tool = makeTool('Read', 'file contents here');
     const client = new FakeAnthropicClient([
-      makeToolUseMessage('Read', 'call-1', { filePath: '/tmp/test.txt' }),
+      makeToolUseMessage('Read', 'call-1', { filePath: tmpPath('test.txt') }),
       makeEndTurnMessage(),
     ]);
     const completedCalls: Array<{ toolName: string; durationMs: number; resultSummary: string }> = [];

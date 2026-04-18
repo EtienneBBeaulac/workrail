@@ -4720,3 +4720,63 @@ worktrain await --sessions <handle>
 **Dependency:** requires `parentSessionId` in session_created events (session identity spec) so child sessions appear under the parent in the console.
 
 **Why this is high priority:** without this, the session identity work is incomplete. You'd have a tree of sessions but the most important delegation steps -- the parallel reviewer families in mr-review, the context-gathering subagents in discovery -- would still be invisible black boxes.
+
+---
+
+### Native agent spawning in the daemon: no external MCP tools (Apr 18, 2026)
+
+**Core principle: WorkTrain owns everything.** The daemon must NOT use `mcp__nested-subagent__Task` or any external MCP tool for spawning agents. Every agent, subagent, and nested delegation must happen through WorkTrain's own primitives, running in-process, fully controlled and observable.
+
+**What this means architecturally:**
+
+The daemon's `AgentLoop` (or a new `AgentSpawner` built on top of it) gets a native `spawnChildAgent()` capability:
+
+```typescript
+// Called from inside a running AgentLoop (e.g. from a tool execute())
+const childResult = await spawner.spawnChildAgent({
+  goal: "Review these files for correctness",
+  workflowId: "routine-hypothesis-challenge",
+  parentSessionId: currentSessionId,  // links child to parent in console
+  depth: currentDepth + 1,            // enforced against maxSubagentDepth
+  budgetTokens: remainingBudget / 2,  // child gets a share of parent's budget
+});
+// childResult.notes contains the child's step notes
+// childResult.sessionId links to the full child session in the store
+```
+
+**Why native and not via MCP:**
+- **Observability**: native spawning creates a WorkRail session for every child. `mcp__nested-subagent__Task` creates an invisible black box.
+- **Control**: the daemon enforces depth limits, budget limits, and can abort child agents. External MCP tools are fire-and-forget.
+- **Context**: native children inherit the parent's context bundle (workspace, soul, knowledge graph) automatically. External tools get nothing.
+- **Security**: the daemon controls what tools children have access to. External tools bypass this entirely.
+- **Consistency**: all agents use the same AgentLoop, tool definitions, and event stream. No behavioral divergence between "main agent" and "subagent."
+
+**The tool interface for workflows:**
+Workflow steps use a `spawn_agent` tool (daemon-provided, not MCP-external) instead of `mcp__nested-subagent__Task`:
+
+```
+spawn_agent({
+  goal: "Review these candidates for architectural soundness",
+  workflow: "routine-hypothesis-challenge",
+  context: { files: [...], priorNotes: "..." }  // explicit context injection
+}) → { sessionId, notes, outcome }
+```
+
+The daemon executes this synchronously (within the turn) or asynchronously (deferred to next turn via steer()) depending on the workflow's needs.
+
+**Depth enforcement (from nested subagent depth spec):**
+- Each spawned agent increments a depth counter
+- Agents at `maxSubagentDepth` cannot spawn further children
+- The `maxTotalAgentsPerTask` budget prevents exponential explosion
+
+**Migration path:**
+1. Implement native `spawn_agent` tool in `workflow-runner.ts` backed by a child `AgentLoop`
+2. Implement the tool in the daemon tool registry (alongside Bash, Read, Write, complete_step)
+3. Update workflows to use `spawn_agent` instead of `mcp__nested-subagent__Task`
+4. Remove `mcp__nested-subagent__Task` from the daemon's permitted tools list
+
+**This is the foundation for everything else:**
+- Session identity (parentSessionId) only works if children are native WorkRail sessions
+- Context injection only works if the daemon controls what children receive
+- Quality metrics only work if all agent work is captured in the event log
+- Coordinator scripts only work if the coordination primitives are owned by WorkTrain
