@@ -1,5 +1,48 @@
 # WorkRail -- Agent Instructions
 
+## CRITICAL: Three separate systems -- do not conflate them
+
+WorkRail/WorkTrain is **three distinct systems** that share a common engine and session store. Understanding this separation is essential before working on any part of this codebase. Confusing them leads to wrong fixes, wrong architecture decisions, and real production problems.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Shared: WorkRail engine (src/v2/durable-core/) + session store │
+│          ~/.workrail/data/sessions/  + workflow registry        │
+└──────────────┬──────────────────┬───────────────────────────────┘
+               │                  │                    │
+   ┌───────────▼───────┐  ┌───────▼────────┐  ┌───────▼──────────┐
+   │  WorkRail MCP     │  │ WorkTrain       │  │ WorkTrain        │
+   │  Server           │  │ Daemon          │  │ Console          │
+   │  workrail start   │  │ worktrain daemon │  │ worktrain console│
+   │  (stdio → Claude) │  │ (autonomous     │  │ (read-only HTTP  │
+   │                   │  │  agent loop)    │  │  session viewer) │
+   └───────────────────┘  └─────────────────┘  └──────────────────┘
+```
+
+**WorkRail MCP Server** (`workrail start`)
+- A standalone stdio MCP server that Claude Code (and other MCP clients) connect to
+- Provides `start_workflow`, `complete_step`, `continue_workflow`, `list_workflows` etc. as MCP tools
+- Must be bulletproof -- crashes here kill all in-flight Claude Code sessions that depend on it
+- Has NOTHING to do with the daemon's internal machinery
+- Source: `src/mcp/`
+
+**WorkTrain Daemon** (`worktrain daemon`)
+- An autonomous agent runner that drives workflow sessions without human involvement
+- Listens for triggers (webhooks, polling), spawns LLM agent loops, uses `complete_step` in-process
+- Completely separate process from the MCP server
+- Does NOT depend on the MCP server being alive -- it calls the WorkRail engine directly in-process
+- Source: `src/daemon/`, `src/trigger/`
+
+**WorkRail Console** (`worktrain console`)
+- A unified read-only HTTP server that shows sessions from BOTH the MCP server AND the daemon
+- Reads `~/.workrail/data/sessions/` directly -- sessions from both entry points land in the same store
+- Does not require either the MCP server or the daemon to be running
+- Source: `src/console/`, `src/infrastructure/standalone-console.ts`
+
+**Do not mix their concerns.** The MCP server should never call daemon-internal functions. The daemon should never depend on the MCP server being alive. The console is independent of both -- it just reads the shared session store.
+
+---
+
 ## What is WorkRail
 
 WorkRail is a step-by-step workflow enforcement engine for AI agents, delivered as an MCP server. It compiles workflow definitions (JSON) into a durable execution graph, then guides agents through it one step at a time via `start_workflow` and `continue_workflow` tool calls. The agent never sees the full workflow -- it receives one step's prompt at a time, submits its output, and WorkRail decides what comes next.
