@@ -215,6 +215,18 @@ export function fatalExit(label: string, reason: unknown): void {
  */
 export function registerFatalHandlers(transport: TransportKind): void {
   registeredTransport = transport;
+
+  // Absorb async EPIPE events on stderr -- without this listener, a broken pipe
+  // (e.g. Claude Code reconnecting) escalates to uncaughtException and kills the server.
+  process.stderr.on('error', () => { /* intentionally empty */ });
+
+  // Absorb async EPIPE events on stdout -- same rationale as stderr above.
+  // Bridge entry points override this with a handler that calls performShutdown();
+  // for stdio/http transports a silent absorb is the correct behaviour.
+  if (process.stdout.listenerCount('error') === 0) {
+    process.stdout.on('error', () => { /* intentionally empty */ });
+  }
+
   process.on('uncaughtException', (err) => fatalExit('Uncaught exception', err));
   process.on('unhandledRejection', (reason) => fatalExit('Unhandled promise rejection', reason));
 }
