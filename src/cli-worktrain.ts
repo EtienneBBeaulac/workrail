@@ -33,6 +33,8 @@ import {
   executeWorktrainSpawnCommand,
   executeWorktrainAwaitCommand,
   executeWorktrainDaemonCommand,
+  executeWorktrainOverviewCommand,
+  buildConsoleServiceFromDataDir,
   type Priority,
 } from './cli/commands/index.js';
 
@@ -661,15 +663,15 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STATUS COMMAND
+// HEALTH COMMAND (renamed from `status <sessionId>`)
 // ═══════════════════════════════════════════════════════════════════════════
 
 program
-  .command('status <sessionId>')
+  .command('health <sessionId>')
   .description('Print a health summary for a daemon session. Accepts sessionId (UUID prefix) or workrailSessionId (sess_xxx).')
-  .action(async (sessionId: string) => {
-    // WHY warn on short IDs: the startsWith() filter below would aggregate events
-    // from ALL sessions sharing the same prefix, silently producing a wrong summary.
+  .action((sessionId: string) => {
+    // WHY warn on short IDs: the startsWith() filter in runHealthSummary aggregates
+    // events from ALL sessions sharing the same prefix, silently producing a wrong summary.
     // Full sess_ IDs are ~31 chars; 20 chars is a safe threshold that warns on
     // short prefixes without triggering on any valid full session ID.
     if (sessionId.length < 20) {
@@ -691,130 +693,206 @@ program
       return;
     }
 
-    // Aggregate stats across all event kinds for this session.
-    let workflowId: string | null = null;
-    let firstTs: number | null = null;
-    let lastTs: number | null = null;
-    let llmTurns = 0;
-    let stepAdvances = 0;
-    let totalToolCalls = 0;
-    let failedToolCalls = 0;
-    let fatalIssues = 0;
-    let errorIssues = 0;
-    let warnIssues = 0;
-    let sessionOutcome: string | null = null;
-    let lastToolName: string | null = null;
-    let lastToolArgs: string | null = null;
-    let stuckCount = 0;
-    let isLive = true;
+    runHealthSummary(sessionId, raw);
+  });
 
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      let obj: Record<string, unknown>;
+// ═══════════════════════════════════════════════════════════════════════════
+// STATUS COMMAND (overview, no args)
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('status [sessionId]')
+  .description(
+    'Print an overview of active and recently completed sessions (no args), ' +
+    'or a session health summary when a sessionId is provided (deprecated: use `worktrain health <id>`).',
+  )
+  .option('--json', 'Output machine-readable JSON packet')
+  .option('-w, --workspace <path>', 'Filter sessions by workspace (reserved for future use)')
+  .action(async (sessionId: string | undefined, options: { json?: boolean; workspace?: string }) => {
+    // Backward-compat shim: if a sessionId argument is provided, route to the
+    // health command logic with a deprecation notice.
+    if (sessionId !== undefined) {
+      process.stderr.write(
+        `Deprecation notice: \`worktrain status <sessionId>\` has been renamed to \`worktrain health <sessionId>\`.\n` +
+        `Please update your scripts to use \`worktrain health ${sessionId}\`.\n\n`,
+      );
+
+      // WHY warn on short IDs: same rationale as the health command below.
+      if (sessionId.length < 20) {
+        process.stderr.write(
+          `Warning: session ID "${sessionId}" is shorter than 20 characters -- ` +
+          `provide more characters to avoid matching multiple sessions.\n`,
+        );
+      }
+
+      const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+      const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const filePath = path.join(eventsDir, `${date}.jsonl`);
+
+      let raw: string;
       try {
-        obj = JSON.parse(line) as Record<string, unknown>;
+        raw = fs.readFileSync(filePath, 'utf8');
       } catch {
-        continue;
+        process.stdout.write(`No events today. Is the daemon running? (Expected: ${filePath})\n`);
+        return;
       }
 
-      // Match by process-local sessionId (UUID) or workrailSessionId (sess_xxx).
-      const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
-      const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
-      const matches = sid.startsWith(sessionId) || sid === sessionId ||
-        wrid.startsWith(sessionId) || wrid === sessionId;
-      if (!matches) continue;
+      // Delegate to the same inline logic as the health command.
+      // WHY duplicate instead of extract: the health command body is intentionally
+      // inline in this composition root. Extracting for one shim would be premature.
+      // The shim is expected to be removed once all callers migrate to `health`.
+      process.stdout.write(`\nNote: This is the old \`worktrain status <id>\` output. Use \`worktrain health <id>\` instead.\n\n`);
 
-      const ts = typeof obj['ts'] === 'number' ? obj['ts'] : null;
-      if (ts !== null) {
-        if (firstTs === null || ts < firstTs) firstTs = ts;
-        if (lastTs === null || ts > lastTs) lastTs = ts;
-      }
-
-      const kind = typeof obj['kind'] === 'string' ? obj['kind'] : '';
-      switch (kind) {
-        case 'session_started':
-          workflowId = typeof obj['workflowId'] === 'string' ? obj['workflowId'] : null;
-          break;
-        case 'llm_turn_completed':
-          llmTurns++;
-          break;
-        case 'step_advanced':
-          stepAdvances++;
-          break;
-        case 'tool_call_started':
-          totalToolCalls++;
-          lastToolName = typeof obj['toolName'] === 'string' ? obj['toolName'] : null;
-          lastToolArgs = typeof obj['argsSummary'] === 'string' ? String(obj['argsSummary']).slice(0, 60) : null;
-          break;
-        case 'tool_call_failed':
-          failedToolCalls++;
-          break;
-        case 'issue_reported': {
-          const severity = obj['severity'];
-          if (severity === 'fatal') fatalIssues++;
-          else if (severity === 'error') errorIssues++;
-          else if (severity === 'warn') warnIssues++;
-          break;
-        }
-        case 'agent_stuck':
-          stuckCount++;
-          break;
-        case 'session_completed':
-          sessionOutcome = typeof obj['outcome'] === 'string' ? obj['outcome'] : null;
-          isLive = false;
-          break;
-      }
-    }
-
-    if (firstTs === null) {
-      process.stdout.write(`No events found for session: ${sessionId}\n`);
+      // Re-run the health summary logic (same code as the health command below).
+      runHealthSummary(sessionId, raw);
       return;
     }
 
-    // Format duration as human-readable string.
-    const durationMs = (lastTs ?? firstTs) - firstTs;
-    const durationSec = Math.floor(durationMs / 1000);
-    const durationMin = Math.floor(durationSec / 60);
-    const durationRemSec = durationSec % 60;
-    const durationStr = durationMin > 0
-      ? `${durationMin}m ${durationRemSec}s`
-      : `${durationSec}s`;
-
-    const avgTurnSec = llmTurns > 0 ? (durationMs / llmTurns / 1000).toFixed(1) : '?';
-    const failRate = totalToolCalls > 0 ? ((failedToolCalls / totalToolCalls) * 100).toFixed(1) : '0';
-    const sessionStatus = sessionOutcome !== null
-      ? sessionOutcome.toUpperCase()
-      : (isLive ? 'RUNNING' : 'UNKNOWN');
-
-    const issueStr = (fatalIssues + errorIssues + warnIssues) > 0
-      ? `${fatalIssues + errorIssues + warnIssues} (${fatalIssues} fatal, ${errorIssues} error, ${warnIssues} warn)`
-      : '0';
-
-    const lastActivityStr = lastTs !== null
-      ? `${lastToolName ?? 'unknown'} ${lastToolArgs ? `"${lastToolArgs}"` : ''} ${Math.round((Date.now() - lastTs) / 1000)}s ago`
-      : 'unknown';
-
-    process.stdout.write(`\nSession: ${sessionId}    [${sessionStatus}]\n`);
-    if (workflowId) process.stdout.write(`Workflow: ${workflowId}\n`);
-    process.stdout.write(`Duration: ${durationStr}\n`);
-    process.stdout.write(`LLM turns: ${llmTurns}${llmTurns > 0 ? ` (avg ${avgTurnSec}s each)` : ''}\n`);
-    process.stdout.write(`Step advances: ${stepAdvances}\n`);
-    process.stdout.write(`Tool calls: ${totalToolCalls} (${failedToolCalls} failed, ${failRate}% failure rate)\n`);
-    process.stdout.write(`Issues reported: ${issueStr}\n`);
-    process.stdout.write(`Last activity: ${lastActivityStr}\n`);
-
-    if (stuckCount > 0) {
-      process.stdout.write(`*** WARNING: ${stuckCount} stuck signal(s) detected\n`);
-    }
-    if (fatalIssues > 0) {
-      process.stdout.write(`*** WARNING: ${fatalIssues} FATAL issue(s) reported\n`);
-    }
-    if (llmTurns >= 10 && stepAdvances === 0) {
-      process.stdout.write(`*** WARNING: ${llmTurns} turns with 0 step advances (possible stuck)\n`);
-    }
-
-    process.stdout.write('\n');
+    // No sessionId: new overview mode.
+    await executeWorktrainOverviewCommand(
+      {
+        now: () => Date.now(),
+        buildConsoleService: buildConsoleServiceFromDataDir,
+        homedir: os.homedir,
+        joinPath: path.join,
+        print: (line: string) => process.stdout.write(line + '\n'),
+        getDataDirEnv: () => process.env['WORKRAIL_DATA_DIR'],
+      },
+      {
+        json: options.json,
+        workspace: options.workspace,
+      },
+    );
   });
+
+/**
+ * Print a health summary for a single session from its raw JSONL event log.
+ *
+ * WHY extracted as a function: shared between the `health` command and the
+ * backward-compat shim in `status [sessionId]`. Keeps the logic in one place.
+ */
+function runHealthSummary(sessionId: string, raw: string): void {
+  let workflowId: string | null = null;
+  let firstTs: number | null = null;
+  let lastTs: number | null = null;
+  let llmTurns = 0;
+  let stepAdvances = 0;
+  let totalToolCalls = 0;
+  let failedToolCalls = 0;
+  let fatalIssues = 0;
+  let errorIssues = 0;
+  let warnIssues = 0;
+  let sessionOutcome: string | null = null;
+  let lastToolName: string | null = null;
+  let lastToolArgs: string | null = null;
+  let stuckCount = 0;
+  let isLive = true;
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
+    const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
+    const matches = sid.startsWith(sessionId) || sid === sessionId ||
+      wrid.startsWith(sessionId) || wrid === sessionId;
+    if (!matches) continue;
+
+    const ts = typeof obj['ts'] === 'number' ? obj['ts'] : null;
+    if (ts !== null) {
+      if (firstTs === null || ts < firstTs) firstTs = ts;
+      if (lastTs === null || ts > lastTs) lastTs = ts;
+    }
+
+    const kind = typeof obj['kind'] === 'string' ? obj['kind'] : '';
+    switch (kind) {
+      case 'session_started':
+        workflowId = typeof obj['workflowId'] === 'string' ? obj['workflowId'] : null;
+        break;
+      case 'llm_turn_completed':
+        llmTurns++;
+        break;
+      case 'step_advanced':
+        stepAdvances++;
+        break;
+      case 'tool_call_started':
+        totalToolCalls++;
+        lastToolName = typeof obj['toolName'] === 'string' ? obj['toolName'] : null;
+        lastToolArgs = typeof obj['argsSummary'] === 'string' ? String(obj['argsSummary']).slice(0, 60) : null;
+        break;
+      case 'tool_call_failed':
+        failedToolCalls++;
+        break;
+      case 'issue_reported': {
+        const severity = obj['severity'];
+        if (severity === 'fatal') fatalIssues++;
+        else if (severity === 'error') errorIssues++;
+        else if (severity === 'warn') warnIssues++;
+        break;
+      }
+      case 'agent_stuck':
+        stuckCount++;
+        break;
+      case 'session_completed':
+        sessionOutcome = typeof obj['outcome'] === 'string' ? obj['outcome'] : null;
+        isLive = false;
+        break;
+    }
+  }
+
+  if (firstTs === null) {
+    process.stdout.write(`No events found for session: ${sessionId}\n`);
+    return;
+  }
+
+  const durationMs = (lastTs ?? firstTs) - firstTs;
+  const durationSec = Math.floor(durationMs / 1000);
+  const durationMin = Math.floor(durationSec / 60);
+  const durationRemSec = durationSec % 60;
+  const durationStr = durationMin > 0
+    ? `${durationMin}m ${durationRemSec}s`
+    : `${durationSec}s`;
+
+  const avgTurnSec = llmTurns > 0 ? (durationMs / llmTurns / 1000).toFixed(1) : '?';
+  const failRate = totalToolCalls > 0 ? ((failedToolCalls / totalToolCalls) * 100).toFixed(1) : '0';
+  const sessionStatus = sessionOutcome !== null
+    ? sessionOutcome.toUpperCase()
+    : (isLive ? 'RUNNING' : 'UNKNOWN');
+
+  const issueStr = (fatalIssues + errorIssues + warnIssues) > 0
+    ? `${fatalIssues + errorIssues + warnIssues} (${fatalIssues} fatal, ${errorIssues} error, ${warnIssues} warn)`
+    : '0';
+
+  const lastActivityStr = lastTs !== null
+    ? `${lastToolName ?? 'unknown'} ${lastToolArgs ? `"${lastToolArgs}"` : ''} ${Math.round((Date.now() - lastTs) / 1000)}s ago`
+    : 'unknown';
+
+  process.stdout.write(`\nSession: ${sessionId}    [${sessionStatus}]\n`);
+  if (workflowId) process.stdout.write(`Workflow: ${workflowId}\n`);
+  process.stdout.write(`Duration: ${durationStr}\n`);
+  process.stdout.write(`LLM turns: ${llmTurns}${llmTurns > 0 ? ` (avg ${avgTurnSec}s each)` : ''}\n`);
+  process.stdout.write(`Step advances: ${stepAdvances}\n`);
+  process.stdout.write(`Tool calls: ${totalToolCalls} (${failedToolCalls} failed, ${failRate}% failure rate)\n`);
+  process.stdout.write(`Issues reported: ${issueStr}\n`);
+  process.stdout.write(`Last activity: ${lastActivityStr}\n`);
+
+  if (stuckCount > 0) {
+    process.stdout.write(`*** WARNING: ${stuckCount} stuck signal(s) detected\n`);
+  }
+  if (fatalIssues > 0) {
+    process.stdout.write(`*** WARNING: ${fatalIssues} FATAL issue(s) reported\n`);
+  }
+  if (llmTurns >= 10 && stepAdvances === 0) {
+    process.stdout.write(`*** WARNING: ${llmTurns} turns with 0 step advances (possible stuck)\n`);
+  }
+
+  process.stdout.write('\n');
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
