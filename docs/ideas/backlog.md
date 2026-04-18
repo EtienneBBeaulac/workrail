@@ -5765,3 +5765,15 @@ Input: "add GitHub polling support" (any level of definition -- idea to full spe
 A coordinator that handles a Medium/Small scoped task (already classified, no need for ideation or design). Takes 2-4 parallel slices, runs them, reviews each, merges when clean. No escalation handling in v1 -- if anything fails, notify the user.
 
 This is the thing that makes WorkTrain feel like a senior engineer taking ownership of a task, not a tool you have to supervise step by step.
+
+---
+
+### Coordinator design decision: MVP-first, generalize after (Apr 18, 2026)
+
+**Decision:** Build the first coordinator as a PR review-specific script. Generalize to a reusable coordinator framework after proving it works end-to-end.
+
+**Rationale:** Three discovery runs all converged on the architecture (TypeScript script, `CoordinatorDeps` interface, 2-call HTTP for notes). The risk is over-engineering for hypothetical pipelines before validating the real one. PR review is the highest-value first use case with a clear success criterion.
+
+**The generic coordinator architecture is already designed** (see `docs/discovery/coordinator-script-design.md`). The `CoordinatorDeps` interface and `AgentResult` bridge type make migration to a generic coordinator trivial -- the PR review script uses these types, so generalizing is additive, not a rewrite.
+
+**Migration path:** once PR review coordinator is proven in production, extract the routing logic (`parseFindings`, `routeByFindings`) and `CoordinatorDeps` interface into `src/coordinators/base.ts`. The PR review coordinator becomes one implementation of the base pattern.
