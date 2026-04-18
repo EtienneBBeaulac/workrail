@@ -15,7 +15,10 @@
  */
 
 import * as crypto from 'node:crypto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
@@ -490,6 +493,212 @@ describe('startTriggerListener feature flag', () => {
       return;
     }
     expect(result.port).toBeGreaterThan(0);
+    await result.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// startTriggerListener: workflowId validation
+//
+// Verifies that triggers with unknown workflowIds are warned and skipped at
+// startup, and that triggers with valid workflowIds are kept in the index.
+// ---------------------------------------------------------------------------
+
+describe('startTriggerListener workflowId validation', () => {
+  let tempDir: string;
+
+  beforeAll(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workrail-wfid-validation-'));
+  });
+
+  afterAll(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  /** Write a triggers.yml with one or more triggers to tempDir. */
+  async function writeTriggers(yaml: string): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(tempDir, 'ws-'));
+    await fs.writeFile(path.join(dir, 'triggers.yml'), yaml, 'utf8');
+    return dir;
+  }
+
+  function makeTriggerYaml(id: string, workflowId: string): string {
+    return [
+      'triggers:',
+      `  - id: ${id}`,
+      `    provider: generic`,
+      `    workflowId: ${workflowId}`,
+      `    workspacePath: /workspace`,
+      `    goal: "Test goal"`,
+    ].join('\n') + '\n';
+  }
+
+  it('skips trigger with unknown workflowId and logs a warning', async () => {
+    const wsDir = await writeTriggers(makeTriggerYaml('bad-trigger', 'nonexistent-workflow'));
+    const { fn: runWorkflowFn } = makeFakeRunWorkflow();
+
+    // Resolver: no workflows known
+    const getWorkflowByIdFn = vi.fn().mockResolvedValue(false);
+
+    const result = await startTriggerListener(FAKE_CTX, {
+      workspacePath: wsDir,
+      apiKey: 'test-key',
+      env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
+      runWorkflowFn,
+      workspaces: {},
+      port: 0,
+      getWorkflowByIdFn,
+    });
+
+    expect(result).not.toBeNull();
+    if (result === null || '_kind' in result) {
+      expect.fail('Expected a successful listener handle');
+      return;
+    }
+
+    // The bad trigger was validated
+    expect(getWorkflowByIdFn).toHaveBeenCalledWith('nonexistent-workflow');
+
+    // The router has no triggers (bad trigger was removed)
+    const triggers = result.router.listTriggers();
+    expect(triggers).toHaveLength(0);
+
+    await result.stop();
+  });
+
+  it('keeps trigger with valid workflowId', async () => {
+    const wsDir = await writeTriggers(makeTriggerYaml('good-trigger', 'coding-task-workflow-agentic'));
+    const { fn: runWorkflowFn } = makeFakeRunWorkflow();
+
+    // Resolver: this workflow is known
+    const getWorkflowByIdFn = vi.fn().mockResolvedValue(true);
+
+    const result = await startTriggerListener(FAKE_CTX, {
+      workspacePath: wsDir,
+      apiKey: 'test-key',
+      env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
+      runWorkflowFn,
+      workspaces: {},
+      port: 0,
+      getWorkflowByIdFn,
+    });
+
+    expect(result).not.toBeNull();
+    if (result === null || '_kind' in result) {
+      expect.fail('Expected a successful listener handle');
+      return;
+    }
+
+    expect(getWorkflowByIdFn).toHaveBeenCalledWith('coding-task-workflow-agentic');
+
+    const triggers = result.router.listTriggers();
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]?.workflowId).toBe('coding-task-workflow-agentic');
+
+    await result.stop();
+  });
+
+  it('skips bad triggers and keeps good ones in a mixed config', async () => {
+    const yaml = [
+      'triggers:',
+      '  - id: good-trigger',
+      '    provider: generic',
+      '    workflowId: coding-task-workflow-agentic',
+      '    workspacePath: /workspace',
+      '    goal: "Good trigger"',
+      '  - id: bad-trigger',
+      '    provider: generic',
+      '    workflowId: nonexistent-workflow.v2',
+      '    workspacePath: /workspace',
+      '    goal: "Bad trigger"',
+    ].join('\n') + '\n';
+    const wsDir = await writeTriggers(yaml);
+    const { fn: runWorkflowFn } = makeFakeRunWorkflow();
+
+    const getWorkflowByIdFn = vi.fn().mockImplementation(async (id: string) =>
+      id === 'coding-task-workflow-agentic',
+    );
+
+    const result = await startTriggerListener(FAKE_CTX, {
+      workspacePath: wsDir,
+      apiKey: 'test-key',
+      env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
+      runWorkflowFn,
+      workspaces: {},
+      port: 0,
+      getWorkflowByIdFn,
+    });
+
+    expect(result).not.toBeNull();
+    if (result === null || '_kind' in result) {
+      expect.fail('Expected a successful listener handle');
+      return;
+    }
+
+    const triggers = result.router.listTriggers();
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]?.id).toBe('good-trigger');
+
+    await result.stop();
+  });
+
+  it('skips validation entirely and keeps all triggers when getWorkflowByIdFn is not provided', async () => {
+    const wsDir = await writeTriggers(makeTriggerYaml('any-trigger', 'nonexistent-workflow'));
+    const { fn: runWorkflowFn } = makeFakeRunWorkflow();
+
+    // No getWorkflowByIdFn -- validation should be skipped
+    const result = await startTriggerListener(FAKE_CTX, {
+      workspacePath: wsDir,
+      apiKey: 'test-key',
+      env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
+      runWorkflowFn,
+      workspaces: {},
+      port: 0,
+      // no getWorkflowByIdFn
+    });
+
+    expect(result).not.toBeNull();
+    if (result === null || '_kind' in result) {
+      expect.fail('Expected a successful listener handle');
+      return;
+    }
+
+    // Trigger is present because validation was skipped
+    const triggers = result.router.listTriggers();
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]?.id).toBe('any-trigger');
+
+    await result.stop();
+  });
+
+  it('skips trigger when getWorkflowByIdFn rejects (does not crash the daemon)', async () => {
+    const wsDir = await writeTriggers(makeTriggerYaml('error-trigger', 'some-workflow'));
+    const { fn: runWorkflowFn } = makeFakeRunWorkflow();
+
+    // Resolver throws an error
+    const getWorkflowByIdFn = vi.fn().mockRejectedValue(new Error('Storage I/O error'));
+
+    const result = await startTriggerListener(FAKE_CTX, {
+      workspacePath: wsDir,
+      apiKey: 'test-key',
+      env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
+      runWorkflowFn,
+      workspaces: {},
+      port: 0,
+      getWorkflowByIdFn,
+    });
+
+    // Daemon should still start (no crash)
+    expect(result).not.toBeNull();
+    if (result === null || '_kind' in result) {
+      expect.fail('Expected a successful listener handle (resolver errors do not crash the daemon)');
+      return;
+    }
+
+    // Trigger is skipped because resolver rejected
+    const triggers = result.router.listTriggers();
+    expect(triggers).toHaveLength(0);
+
     await result.stop();
   });
 });

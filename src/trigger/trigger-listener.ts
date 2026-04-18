@@ -91,6 +91,23 @@ export interface StartTriggerListenerOptions {
    * When absent, globalThis.fetch is used.
    */
   readonly fetchFn?: FetchFn;
+  /**
+   * Optional resolver to validate that trigger workflowIds exist before starting.
+   *
+   * WHY: a trigger with a typo'd workflowId (e.g. "my-workflow.v2" instead of "my-workflow")
+   * would silently fail at every dispatch with workflow_not_found. Validating at startup
+   * catches the misconfiguration immediately and removes the broken trigger from the index.
+   *
+   * Policy: warn+skip (consistent with loadTriggerConfig's treatment of invalid triggers).
+   * Not hard-fail: a bad workflowId should not block other valid triggers from running.
+   *
+   * When absent, workflowId validation is skipped entirely (backward compat for test callers
+   * that do not inject a resolver). In production, ctx.workflowService is used as the default.
+   *
+   * Note: only the primary trigger.workflowId is validated here. onComplete.workflowId
+   * (secondary completion hook) is out of scope for this validation pass.
+   */
+  readonly getWorkflowByIdFn?: (id: string) => Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +256,68 @@ export async function startTriggerListener(
     triggerIndex = indexResult.value;
     console.log(
       `[TriggerListener] Loaded ${configResult.value.triggers.length} trigger(s) from triggers.yml`,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Validate workflowId values against the live workflow store.
+  //
+  // WHY: a trigger with a typo'd workflowId (e.g. "my-workflow.v2" instead of
+  // "my-workflow") silently fails at every webhook dispatch with workflow_not_found.
+  // The error only surfaces in logs during an actual event -- never at startup.
+  // Validating here catches the misconfiguration immediately so the operator
+  // sees a clear warning before traffic starts.
+  //
+  // Policy: warn+skip, consistent with loadTriggerConfig's treatment of invalid
+  // triggers. One broken trigger should not block all valid triggers from running.
+  //
+  // When getWorkflowByIdFn is not provided (e.g. existing tests that do not inject
+  // a resolver), validation is skipped entirely for backward compatibility.
+  // In production, ctx.workflowService provides the default resolver.
+  // ---------------------------------------------------------------------------
+  const getWorkflowByIdFn = options.getWorkflowByIdFn
+    ?? (ctx.workflowService
+      ? async (id: string): Promise<boolean> => (await ctx.workflowService.getWorkflowById(id)) !== null
+      : undefined);
+
+  if (getWorkflowByIdFn) {
+    // First pass: collect trigger IDs with unknown workflowIds.
+    // WHY two passes: do not mutate the Map while iterating it.
+    const unknownTriggerIds: string[] = [];
+    for (const [triggerId, trigger] of triggerIndex) {
+      let found: boolean;
+      try {
+        found = await getWorkflowByIdFn(trigger.workflowId);
+      } catch (e) {
+        // Treat resolver errors as "not found" so the daemon can still start.
+        // The operator can fix the workflow and restart.
+        found = false;
+        console.warn(
+          `[TriggerListener] Error validating workflowId '${trigger.workflowId}' for trigger '${triggerId}': ` +
+          (e instanceof Error ? e.message : String(e)),
+        );
+      }
+      if (!found) {
+        unknownTriggerIds.push(triggerId);
+        console.warn(
+          `[TriggerListener] Skipping trigger '${triggerId}': workflowId '${trigger.workflowId}' was not found. ` +
+          `Fix the workflowId in triggers.yml and restart the daemon.`,
+        );
+      }
+    }
+    // Second pass: remove skipped triggers from the index.
+    for (const id of unknownTriggerIds) {
+      triggerIndex.delete(id);
+    }
+    if (unknownTriggerIds.length > 0) {
+      console.warn(
+        `[TriggerListener] Skipped ${unknownTriggerIds.length} trigger(s) with unknown workflowId(s). ` +
+        `${triggerIndex.size} trigger(s) will be active.`,
+      );
+    }
+  } else {
+    console.log(
+      `[TriggerListener] workflowId validation skipped (no resolver provided).`,
     );
   }
 
