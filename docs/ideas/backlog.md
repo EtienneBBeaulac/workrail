@@ -4686,3 +4686,37 @@ worktrain spawn --trigger mr-review --goal "Review PR #123: fix authentication b
 5. How do the leading autonomous agent systems solve this? (OpenAI Agents SDK, LangGraph -- how do they handle context hand-off between agents?)
 
 **The outcome:** a concrete recommendation on which approach to build, with quality requirements for the note-based approach if that's the chosen path.
+
+---
+
+### Replace mcp__nested-subagent__Task with worktrain spawn in workflows (Apr 18, 2026)
+
+**The problem:** workflow steps that use `mcp__nested-subagent__Task` for delegation create invisible work. The subagent runs outside WorkRail -- no session, no step notes, no event log. The main agent gets back a summary but everything the subagent reasoned through, read, and found is gone. Notes are fragmented: the main session has a lossy compression of what the subagent did.
+
+**This is the root cause of fragmented session notes.** Even if session identity (parentSessionId) is implemented, subagents spawned via `mcp__nested-subagent__Task` will never appear in the tree -- they're not WorkRail sessions at all.
+
+**The fix:** update workflows that use `mcp__nested-subagent__Task` to use `worktrain spawn` + `worktrain await` instead. Every delegated task becomes a proper child WorkRail session with full step notes, event log, and visibility.
+
+**What changes:**
+- `mcp__nested-subagent__Task`: raw Claude Code subagent, no WorkRail, invisible
+- `worktrain spawn`: WorkRail session, full notes, visible in console, participates in session identity tree
+
+**Workflows to audit and update:**
+- `coding-task-workflow-agentic` (lean.v2) -- uses `templateCall` routines (already WorkRail sessions ✓) but some steps may use nested-subagent for one-off tasks
+- `mr-review-workflow-agentic` -- uses reviewer families via nested-subagent; each reviewer should be a child WorkRail session
+- `wr.discovery` -- delegates context gathering via nested-subagent
+- Any workflow that says "spawn parallel reviewers" or "delegate to subagent"
+
+**The right pattern:**
+```
+# Instead of:
+mcp__nested-subagent__Task({ prompt: "Review this code for correctness..." })
+
+# Use:
+worktrain spawn --workflow routine-hypothesis-challenge --goal "Review..." --parent-session <current>
+worktrain await --sessions <handle>
+```
+
+**Dependency:** requires `parentSessionId` in session_created events (session identity spec) so child sessions appear under the parent in the console.
+
+**Why this is high priority:** without this, the session identity work is incomplete. You'd have a tree of sessions but the most important delegation steps -- the parallel reviewer families in mr-review, the context-gathering subagents in discovery -- would still be invisible black boxes.
