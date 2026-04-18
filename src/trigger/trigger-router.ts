@@ -26,6 +26,7 @@ import * as crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
+import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
 import { post as deliveryPost } from './delivery-client.js';
@@ -615,12 +616,16 @@ export class TriggerRouter {
           `[TriggerRouter] Workflow timed out: triggerId=${trigger.id} ` +
           `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
         );
-      } else {
-        // result._tag === 'error'
+      } else if (result._tag === 'error') {
         console.log(
           `[TriggerRouter] Workflow failed: triggerId=${trigger.id} ` +
             `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
         );
+      } else {
+        // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
+        // this will fail to compile, forcing the developer to handle the new case.
+        // At runtime this is unreachable -- all current variants are handled above.
+        assertNever(result);
       }
       // User notifications: fire after logging, before delivery.
       // Fire-and-forget -- notify() returns void and swallows all errors.
@@ -692,12 +697,16 @@ export class TriggerRouter {
           `[TriggerRouter] Dispatch timed out: workflowId=${workflowTrigger.workflowId} ` +
           `reason=${result.reason} message=${result.message}`,
         );
-      } else {
-        // result._tag === 'error'
+      } else if (result._tag === 'error') {
         console.log(
           `[TriggerRouter] Dispatch failed: workflowId=${workflowTrigger.workflowId} ` +
             `error=${result.message} stopReason=${result.stopReason}`,
         );
+      } else {
+        // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
+        // this will fail to compile, forcing the developer to handle the new case.
+        // At runtime this is unreachable -- all current variants are handled above.
+        assertNever(result);
       }
       // User notifications: fire after logging.
       // Fire-and-forget -- notify() returns void and swallows all errors.
