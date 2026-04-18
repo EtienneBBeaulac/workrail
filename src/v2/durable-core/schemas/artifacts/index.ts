@@ -32,6 +32,17 @@ export {
   type LoopControlArtifactV1,
 } from './loop-control.js';
 
+export {
+  // Coordinator Signal
+  COORDINATOR_SIGNAL_CONTRACT_REF,
+  CoordinatorSignalKindSchema,
+  CoordinatorSignalArtifactV1Schema,
+  isCoordinatorSignalArtifact,
+  parseCoordinatorSignalArtifact,
+  type CoordinatorSignalKind,
+  type CoordinatorSignalArtifactV1,
+} from './coordinator-signal.js';
+
 /**
  * Registry of all artifact contract references.
  * Used for validation and documentation.
@@ -39,6 +50,7 @@ export {
 export const ARTIFACT_CONTRACT_REFS = [
   'wr.contracts.assessment',
   'wr.contracts.loop_control',
+  'wr.contracts.coordinator_signal',
 ] as const;
 
 export type ArtifactContractRef = (typeof ARTIFACT_CONTRACT_REFS)[number];

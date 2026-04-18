@@ -7,6 +7,9 @@ import {
   isLoopControlArtifact,
   isValidContractRef,
   type LoopControlArtifactV1,
+  COORDINATOR_SIGNAL_CONTRACT_REF,
+  CoordinatorSignalArtifactV1Schema,
+  isCoordinatorSignalArtifact,
 } from '../schemas/artifacts/index.js';
 
 /**
@@ -61,7 +64,10 @@ export function validateArtifactContract(
   switch (contractRef) {
     case LOOP_CONTROL_CONTRACT_REF:
       return validateLoopControlContract(artifacts, contractRef, required);
-    
+
+    case COORDINATOR_SIGNAL_CONTRACT_REF:
+      return validateCoordinatorSignalContract(artifacts, contractRef, required);
+
     default:
       // Type system should prevent this, but fail-fast just in case
       return {
@@ -124,8 +130,56 @@ function validateLoopControlContract(
 }
 
 /**
+ * Validate coordinator signal artifact contract.
+ */
+function validateCoordinatorSignalContract(
+  artifacts: readonly unknown[],
+  contractRef: string,
+  required: boolean
+): ArtifactContractValidationResult {
+  // Find coordinator signal artifacts by kind discriminant
+  const signalArtifacts = artifacts.filter(isCoordinatorSignalArtifact);
+
+  if (signalArtifacts.length === 0) {
+    if (required) {
+      return {
+        valid: false,
+        error: {
+          code: 'MISSING_REQUIRED_ARTIFACT',
+          contractRef,
+          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.coordinator_signal'.`,
+        },
+      };
+    }
+    // Not required and not present -- valid (no artifact returned)
+    return { valid: true, artifact: null };
+  }
+
+  // Validate the first matching artifact
+  const artifact = signalArtifacts[0]!;
+  const parseResult = CoordinatorSignalArtifactV1Schema.safeParse(artifact);
+
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues.map(
+      (issue) => `${issue.path.join('.')}: ${issue.message}`
+    );
+    return {
+      valid: false,
+      error: {
+        code: 'INVALID_ARTIFACT_SCHEMA',
+        contractRef,
+        message: `Artifact schema validation failed for ${contractRef}`,
+        issues,
+      },
+    };
+  }
+
+  return { valid: true, artifact: parseResult.data };
+}
+
+/**
  * Check if step has an output contract that requires validation.
- * 
+ *
  * @param outputContract - The step's output contract (optional)
  * @returns True if validation is required
  */
