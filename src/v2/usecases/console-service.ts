@@ -702,22 +702,45 @@ function extractGitBranch(events: readonly DomainEventV1[]): string | null {
 }
 
 /**
- * Extract the repo root path from observation events.
+ * Extract the repo root path from session events.
  *
- * The repo_root observation is written at session start by the workspace anchor
- * (LocalWorkspaceAnchorV2). It holds the absolute path to the git repo root so
- * the console workspace view can group sessions by repo even when no matching
- * worktree entry exists (e.g. in standalone console mode or when the worktrees
- * API is slow / unavailable).
+ * Priority:
+ * 1. repo_root observation event -- written by the workspace anchor (LocalWorkspaceAnchorV2)
+ *    at session start. Holds the actual git repo root, which may differ from workspacePath
+ *    when the session was started from a subdirectory.
+ * 2. workspacePath from an initial context_set event -- written by the daemon and dispatch
+ *    handler as a fallback for sessions where workspace anchor resolution produced no anchors
+ *    (e.g. non-git directories, git binary unavailable, or daemon using an older engine context
+ *    without workspaceResolver). Close enough for workspace grouping in the console.
+ *
+ * Returns null only when neither source is available.
  */
 function extractRepoRoot(events: readonly DomainEventV1[]): string | null {
+  let workspacePathFallback: string | null = null;
+
   for (const e of events) {
-    if (e.kind !== EVENT_KIND.OBSERVATION_RECORDED) continue;
-    if (e.data.key === 'repo_root') {
+    if (e.kind === EVENT_KIND.OBSERVATION_RECORDED && e.data.key === 'repo_root') {
       return e.data.value.value;
     }
+    // Capture workspacePath from the initial context_set as a fallback.
+    // Only 'initial' source context is used -- agent_delta context_set events may not
+    // include workspacePath and would overwrite it with a different key set.
+    if (
+      e.kind === EVENT_KIND.CONTEXT_SET &&
+      e.data.source === 'initial' &&
+      workspacePathFallback === null
+    ) {
+      const ctx = e.data.context;
+      if (ctx && typeof ctx === 'object' && !Array.isArray(ctx)) {
+        const wp = (ctx as Record<string, unknown>)['workspacePath'];
+        if (typeof wp === 'string' && wp.length > 0) {
+          workspacePathFallback = wp;
+        }
+      }
+    }
   }
-  return null;
+
+  return workspacePathFallback;
 }
 
 

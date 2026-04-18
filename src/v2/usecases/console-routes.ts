@@ -574,7 +574,9 @@ export function mountConsoleRoutes(
       { workflowId, workspacePath, goal },
       v2ToolContext,
       // Mark as autonomous so isAutonomous is derivable from the event log.
-      { is_autonomous: 'true' },
+      // workspacePath is written into the context_set event so the console can group sessions
+      // by workspace even when workspace anchor resolution produces empty observations.
+      { is_autonomous: 'true', workspacePath },
     );
 
     if (startResult.isErr()) {

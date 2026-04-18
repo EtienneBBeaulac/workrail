@@ -1477,7 +1477,9 @@ export async function runWorkflow(
       { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
       ctx,
       // Mark this session as autonomous so isAutonomous is derivable from the event log.
-      { is_autonomous: 'true' },
+      // workspacePath is written into the context_set event so the console can group daemon
+      // sessions by workspace even when workspace anchor resolution produces empty observations.
+      { is_autonomous: 'true', workspacePath: trigger.workspacePath },
     );
 
     if (startResult.isErr()) {
