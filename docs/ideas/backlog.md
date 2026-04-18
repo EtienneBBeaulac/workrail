@@ -4920,3 +4920,51 @@ The workflow spec describes the intent. The adapter knows how each runtime fulfi
 4. Converter for upgrading existing workflow JSONs to the new canonical spec if the schema evolves
 
 **Dependencies:** requires the subagent loop rethinking to be resolved first -- the adapter can't be designed until we know what the workflow spec will declare.
+
+---
+
+### User notifications when daemon starts and finishes work (Apr 18, 2026)
+
+**The problem:** the daemon silently starts and finishes sessions. Unless you're watching the console or tailing the log, you have no idea work happened or completed. For autonomous sessions that run over minutes or hours, this is a significant UX gap.
+
+**What users need to know:**
+- Session started: "WorkTrain started reviewing PR #566" (with a link)
+- Session completed: "WorkTrain finished reviewing PR #566 -- APPROVED, no findings" (with session link)
+- Session failed/stuck: "WorkTrain got stuck on PR #566 after 15 turns -- needs attention" (with details)
+
+**Notification channels (multiple, user-configurable):**
+
+1. **macOS notification** -- `osascript -e 'display notification "..." with title "WorkTrain"'`. Zero config, works immediately on Mac.
+2. **Outbox.jsonl** -- already spec'd in the message queue backlog. `worktrain inbox` reads it, mobile client polls it.
+3. **Slack webhook** -- POST to a configured webhook URL. Simple delivery target using the existing callbackUrl pattern.
+4. **Email** -- SMTP delivery for completion/failure. Low-friction for async awareness.
+5. **Desktop badge** -- update the `worktrain console` window title or icon badge with active session count.
+
+**Implementation (start simple):**
+The `DaemonEventEmitter` already emits `session_started` and `session_completed` events. The simplest implementation: a `NotificationEmitter` that subscribes to these events and fires macOS notifications for `session_completed` with `outcome: success/error/timeout`.
+
+```typescript
+// In startTriggerListener, after daemon starts:
+if (process.platform === 'darwin') {
+  emitter.on('session_completed', (event) => {
+    const icon = event.outcome === 'success' ? '✅' : '❌';
+    execFile('osascript', ['-e', 
+      `display notification "${icon} ${event.workflowId}: ${event.outcome}" with title "WorkTrain"`
+    ]);
+  });
+}
+```
+
+**Config:**
+```yaml
+# ~/.workrail/config.json
+notifications:
+  onSessionStart: false          # usually too noisy
+  onSessionComplete: true        # the useful one
+  onSessionFailed: true          # urgent
+  onStuck: true                  # urgent
+  channels: [macos, slack]
+  slackWebhookUrl: $SLACK_WEBHOOK_URL
+```
+
+**Build order:** macOS notification on session_completed (30 min) → outbox.jsonl integration (already partially built) → Slack webhook → configurable per-channel.
