@@ -205,6 +205,10 @@ describe('registerFatalHandlers', () => {
     // or other test files running in the same vitest worker thread (pool:threads).
     process.removeAllListeners('uncaughtException');
     process.removeAllListeners('unhandledRejection');
+    // Remove the stderr 'error' listener registered by registerFatalHandlers() so it
+    // does not accumulate across tests. process.stderr is a process-level singleton --
+    // vi.resetModules() resets module state but does NOT reset process.stderr listeners.
+    process.stderr.removeAllListeners('error');
     // Clean up the temp dir created for this test.
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
@@ -228,6 +232,25 @@ describe('registerFatalHandlers', () => {
     expect(() =>
       process.emit('unhandledRejection', new Error('test'), handledRejection),
     ).toThrow('exit');
+  });
+
+  it('registers an error listener on process.stderr to absorb async EPIPE events', async () => {
+    const { registerFatalHandlers } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    registerFatalHandlers('stdio');
+    // Without this listener, a broken stderr pipe (e.g. Claude Code reconnecting) delivers
+    // an async 'error' event that Node.js promotes to uncaughtException -- crashing the server.
+    // The listener must be unconditional (no listenerCount guard), unlike the stdout listener.
+    expect(process.stderr.listenerCount('error')).toBe(1);
+  });
+
+  it('does not crash when error is emitted on process.stderr after registration', async () => {
+    const { registerFatalHandlers } = await import('../../../../src/mcp/transports/fatal-exit.js');
+    registerFatalHandlers('stdio');
+    // WHY process.stderr.emit('error') is safe to call here:
+    // A registered 'error' listener on an EventEmitter fully absorbs the event -- it does NOT
+    // propagate to the process-level uncaughtException handler. This is a core Node.js invariant.
+    // This test confirms the no-op handler is in place and the async EPIPE crash is prevented.
+    expect(() => process.stderr.emit('error', new Error('EPIPE'))).not.toThrow();
   });
 });
 
