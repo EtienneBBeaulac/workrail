@@ -5700,136 +5700,190 @@ Tested empirically today. This is what actually works, not what's specced.
 
 ---
 
-### Self-healing daemon: detect internal failures, kill, diagnose, fix, reboot, resume (Apr 18, 2026)
+### Autonomous feature development: scope → breakdown → parallel execution → merge (Apr 18, 2026)
 
-**The problem:** today if WorkRail's MCP connection drops or the daemon's internal tooling fails, agents continue running without enforcement -- producing unverified output that looks correct but bypassed all workflow gates. The user has no way to know this happened until they manually inspect session completion events.
+**The vision:** give WorkTrain a feature scope -- from a vague idea to a fully groomed ticket -- and it figures out the rest. Discovery if needed, design if needed, breakdown into parallel slices, execution across worktrees, context management across agents, bringing it all back together.
 
-**What happened today:** WorkRail MCP went down mid-session across ~10 concurrent agents. All sessions show INCOMPLETE (no `run_completed` event). Agents produced PRs, reviews, and merges -- two PRs landed on main -- without any confirmed workflow completion. Required manual audit after the fact.
+**The four pillars the user cares about:**
+1. **Autonomy** -- WorkTrain takes a scope and figures out the work breakdown without hand-holding
+2. **Quality** -- comes FROM autonomy + workflow enforcement + coordination. Each slice goes through the right phases.
+3. **Throughput** -- parallel slices across worktrees simultaneously. N agents working while you focus elsewhere.
+4. **Visibility** -- one coherent work unit you can track at a glance, not N unrelated sessions in a flat list.
 
-**What WorkTrain needs:**
+**The pipeline for a scope:**
 
-**1. Detect its own tooling failures**
-- Monitor whether `complete_step` / `continue_workflow` tool calls are succeeding or timing out
-- Detect when the WorkRail session store becomes unreachable
-- Detect when the MCP connection (for agents that use MCP-mode) is lost
-- Distinguish: "agent is thinking" vs "agent is stuck" vs "agent's tools are broken"
+```
+Input: "add GitHub polling support" (any level of definition -- idea to full spec)
+  │
+  ├── [if vague] ideation + spec authoring → output: BRD / acceptance criteria
+  ├── classify-task → taskComplexity, hasUI, touchesArchitecture, taskMaturity
+  ├── [if Medium/Large] discovery → context bundle, invariants, candidate files
+  ├── [if touchesArchitecture] design → candidates, review, selected approach
+  ├── breakdown → parallel slices with dependency graph
+  │     ├── Slice 1: types + schema         (worktree A)
+  │     ├── Slice 2: polling adapter        (worktree B, depends: 1)
+  │     ├── Slice 3: scheduler integration  (worktree C, depends: 2)
+  │     └── Slice 4: tests                 (worktree D, depends: 1-3)
+  ├── [parallel execution] each slice: implement → review → (fix if needed) → approved
+  ├── [serial integration] merge slices in dependency order, verify after each
+  └── [final] integration test → PR created → notification to user
+```
 
-**2. Kill the agent cleanly on detected failure**
-- When internal tooling is detected broken, stop the agent immediately -- do NOT let it continue without enforcement
-- Retain the full conversation history and step notes up to the point of failure
-- Mark the session as `interrupted_tooling_failure` (distinct from `error` or `timeout`)
-- Write the failure event to the daemon event log with the exact cause
+**Context management across agents:**
+- Coordinator maintains a "work unit manifest": current phase, slice status, shared invariants, decisions made in design phase
+- Each spawned agent receives a context bundle: relevant portion of the manifest + files it needs + decisions from upstream phases
+- Agents don't rediscover what the coordinator already knows
+- After each agent completes, its findings update the manifest (new invariants found, scope changes, follow-up tickets)
 
-**3. Self-diagnose**
-- Run a lightweight health check: can we reach the session store? Can we decode the continueToken? Is the WorkRail engine responding?
-- Identify the root cause: MCP disconnect? Session store corruption? Token decode failure? Port conflict?
-- Distinguish recoverable (restart and resume) from non-recoverable (session data corrupted, must restart from scratch)
+**Worktree coordination:**
+- Each slice gets its own worktree (already done via `--isolation worktree`)
+- Coordinator tracks which files each slice touches -- detects conflicts before they happen
+- Independent slices run in parallel; dependent slices queue automatically
+- Merge order follows the dependency graph, not wall-clock completion time
 
-**4. Fix and reboot**
-- For recoverable failures: restart the WorkRail engine in-process, re-register tools, verify health before resuming
-- For MCP-mode failures: reconnect without killing the parent session
-- For port conflicts: clear the lock and rebind
-- All of this happens automatically, without user intervention
+**Knowing when to spawn a new main agent:**
+- When a slice is too large or discovers unexpected scope, it requests a breakdown from the coordinator
+- When a review finds a Critical finding, the coordinator spawns a dedicated fix agent with the finding + relevant context
+- When integration reveals a regression, coordinator spawns an investigation agent before retrying the merge
 
-**5. Resume with context**
-- Resume the session from the last confirmed `complete_step` / `advance_recorded` event
-- Inject a `<context>` block into the resumed session: "Your previous session was interrupted due to [reason]. Here is what you completed before the interruption: [last 3 step notes]. Resume from where you left off."
-- The agent never knows the interruption happened -- it just continues
-- If resume fails (token expired, session corrupted), escalate to the user with full context on what was completed and what wasn't
+**The coordinator's job (what stays in scripts, not LLM):**
+- Maintain the manifest (JSON file, append-only)
+- Compute the dependency graph
+- Decide parallelism vs serialization
+- Route: clean → merge, minor findings → fix agent, critical → escalate
+- Track worktrees, detect conflicts
+- Sequence the merge order
 
-**6. Audit trail**
-- Every self-heal event is recorded in `~/.workrail/events/daemon/YYYY-MM-DD.jsonl` as `tooling_failure_detected`, `self_heal_started`, `self_heal_succeeded` / `self_heal_failed`
-- The console shows a `⚠️ self-healed` badge on sessions that were interrupted and resumed
-- The user can query: "which sessions were interrupted today?" and get the full list with causes
+**What requires LLM cognition:**
+- Discovery (what are the invariants, which files matter)
+- Design (which approach, what tradeoffs)
+- Implementation (write the code)
+- Review (is this correct and complete)
+- Breakdown (what are the right slice boundaries)
+
+**The minimum viable version:**
+A coordinator that handles a Medium/Small scoped task (already classified, no need for ideation or design). Takes 2-4 parallel slices, runs them, reviews each, merges when clean. No escalation handling in v1 -- if anything fails, notify the user.
+
+This is the thing that makes WorkTrain feel like a senior engineer taking ownership of a task, not a tool you have to supervise step by step.
+
+---
+
+### Coordinator design decision: MVP-first, generalize after (Apr 18, 2026)
+
+**Decision:** Build the first coordinator as a PR review-specific script. Generalize to a reusable coordinator framework after proving it works end-to-end.
+
+**Rationale:** Three discovery runs all converged on the architecture (TypeScript script, `CoordinatorDeps` interface, 2-call HTTP for notes). The risk is over-engineering for hypothetical pipelines before validating the real one. PR review is the highest-value first use case with a clear success criterion.
+
+**The generic coordinator architecture is already designed** (see `docs/discovery/coordinator-script-design.md`). The `CoordinatorDeps` interface and `AgentResult` bridge type make migration to a generic coordinator trivial -- the PR review script uses these types, so generalizing is additive, not a rewrite.
+
+**Migration path:** once PR review coordinator is proven in production, extract the routing logic (`parseFindings`, `routeByFindings`) and `CoordinatorDeps` interface into `src/coordinators/base.ts`. The PR review coordinator becomes one implementation of the base pattern.
+
+---
+
+### Architecture decisions from Apr 17-18 sessions (to record before files are cleaned up)
+
+**Decision 1: Structured output + tool calls can coexist (Apr 18)**
+Validated empirically via integration test. The beta API (`client.beta.messages.create()`) supports both JSON schema enforcement AND tool calls in the same request. Schema enforcement applies at `end_turn` only. Bedrock is more consistent than direct Anthropic API for system-prompt fallback behavior. This opens a future path for replacing `complete_step` with structured output, but `complete_step` remains the chosen primitive for now.
+
+**Decision 2: `complete_step` is the preferred daemon workflow-control primitive (Apr 18)**
+PR #569 merged. The daemon holds the continueToken in a closure; LLM calls `complete_step(notes)` and never handles the token directly. Structured output (`beta.messages.create` with JSON schema) was evaluated as an alternative and deferred -- it's a viable migration path for a future version but adds API complexity today. Follow-up: track a structured output migration as a future improvement, not a current priority.
+
+**Decision 3: AgentLoop error handling contract -- FatalToolError (Apr 16)**
+`FatalToolError` subclass selected for distinguishing recoverable from non-recoverable tool failures in the AgentLoop. The contract: user-facing tools (Bash, Read, Write) catch failures and return `isError: true` in the tool_result (loop continues, LLM can retry). Coordination tools with unrecoverable failures (session store corruption, token decode failure) throw `FatalToolError` -- `_executeTools` instanceof-checks this and kills the session rather than surfacing a confusing error to the LLM. This contract is part of the AgentLoop architecture and must be followed by any new tool implementations.
+
+**Decision 4: Use `wr.discovery` for discovery-only tasks, not `coding-task-workflow-agentic` (Apr 17)**
+Discovered from a broken session: `coding-task-workflow-agentic` dispatched with "do discovery only, no code" ran 11 step advances then stopped without `run_completed`. The workflow's implementation phases fired even with explicit instructions not to code. Lesson: when a trigger or coordinator wants pure discovery/research, use `wr.discovery` as the workflowId. `coding-task-workflow-agentic` should only be dispatched when implementation is the actual goal.
+
+**Decision 5: Bug -- MCP server EPIPE crash (Apr 18)**
+Root cause confirmed with 15 production crash log entries: `process.stderr` is missing an `'error'` event handler in `registerFatalHandlers()`. When an MCP client disconnects, Node.js emits `EPIPE` on stderr which crashes the process with an unhandled error. `process.stdout` already has equivalent protection via `wireStdoutShutdown()`. Fix: mirror the stdout protection for stderr. One-line fix being implemented in PR `fix/mcp-stderr-epipe-crash`.
+
+---
+
+### worktrain status → console integration (Apr 18, 2026)
+
+The `worktrain status` CLI command is Phase 1. Phase 2: the same data and rendering lives inside the console as the default landing view when you open it -- not the sessions list, the overview. Same `StatusDataPacket` type, two surfaces. The console overview replaces the need to run a CLI command; it auto-refreshes and stays live.
+
+---
+
+### WorkTrain as a native macOS app (Apr 18, 2026)
+
+Long-term vision: WorkTrain becomes a full native Mac app -- not just a CLI + web console, but a proper macOS application with a menubar icon, system notifications, windows, and native UX.
+
+**What this unlocks:**
+- Always-on menubar presence showing daemon status at a glance
+- Native macOS notifications (already built via osascript -- the app version uses UserNotifications framework directly)
+- The `worktrain status` overview as a native window, not a browser tab
+- Message queue and inbox as a native interface (type a message from anywhere on your Mac, not just the terminal)
+- Background daemon management -- start/stop/restart from the menubar without terminal
+- Deep system integration: file system events, calendar, Contacts, native share sheet
+
+**Tech stack options:**
+- Swift/SwiftUI: full native, best macOS integration, steeper learning curve from TypeScript
+- Electron + existing console UI: fastest path, same TypeScript codebase, but heavy
+- Tauri: Rust core + existing web frontend, lighter than Electron, good macOS support
+- React Native macOS: reuses React knowledge, not quite native feel
+
+**Recommended path:** Tauri wrapping the existing console UI. The console is already a React/Vite app. Tauri gives native menubar, notifications, and system APIs without rewriting the frontend. The WorkTrain daemon stays as a separate process managed by the app.
+
+**This is a post-v1 platform decision** -- not a near-term priority, but worth designing toward. Don't make architectural decisions that would make the Tauri wrapper hard later.
+
+---
+
+### Long-running sessions: stay open across agent handoffs (Apr 18, 2026)
+
+**The problem:** today when an MR review session completes, it writes its findings and exits. If the findings require fixes, a new fix agent starts from scratch with no shared context. When the fix is done, a new re-review agent also starts from scratch. Three sessions that are logically one unit of work are isolated from each other.
+
+**The vision:** a session can stay open and wait -- dormant but alive -- while another agent does work. When that work completes, the waiting session resumes with full context continuity.
+
+**The MR review example:**
+
+```
+[MR review session]  finds: 2 critical, 3 minor
+  → stays open, waiting for fixes
+  
+  [Fix agent session]  addresses all 5 findings
+    → completes, signals "fixes ready"
+  
+[MR review session resumes]  re-reads the diff, re-evaluates
+  → all 5 verified fixed, 0 new findings
+  → completes with APPROVE verdict
+```
+
+The same session that found the issues verifies the fixes. No context reconstruction. No risk of re-review missing something the original reviewer knew.
+
+**Other use cases for waiting sessions:**
+
+- **Architecture review waiting for approval:** architect session identifies a design gap, waits for the human to decide on direction, resumes when the decision is recorded
+- **Discovery session waiting for data:** a research session identifies that it needs a specific file or API response, signals "blocked on: fetch X", waits for a retrieval agent to deliver it, resumes with the data injected
+- **Coordinator waiting on child completion:** instead of a coordinator script polling `worktrain await`, the coordinator session can yield and be resumed by the daemon when child sessions complete -- same session, same context, no polling overhead
+- **Spec authoring waiting for stakeholder input:** a spec session writes a draft, flags "needs: human review of acceptance criteria", waits, resumes when the human adds a comment
+- **Integration test waiting for deployment:** a test coordination session waits for a deploy to complete before running integration tests
+
+**The mechanism:**
+
+This is a new `wait_for` workflow step type (or tool call):
+
+```
+wait_for:
+  signal: "fixes_ready"           # named signal
+  from: session:<parent-id>       # who can send it
+  timeout: 2h                     # max wait before escalating
+  inject_on_resume:               # what to inject when resumed
+    - "Here is what was fixed: {{fixes.summary}}"
+    - "The diff of changes: {{fixes.diff}}"
+```
+
+When a session reaches a `wait_for` step, the daemon suspends it (persists state, releases the concurrency semaphore slot). When the signal arrives (from another session completing, a webhook, or a human via `worktrain tell`), the daemon resumes the session and injects the specified context.
+
+**Why this is more powerful than just re-running a fresh session:**
+
+- **Context continuity:** the reviewer remembers what it found, why it flagged it, what invariants it was checking. A fresh session has to re-discover all of that from the diff.
+- **Relational memory:** "does fix for finding F2 actually address the root cause I identified, or just the symptom?" -- only the original session knows the root cause reasoning.
+- **Efficiency:** no redundant context gathering. The resumed session picks up exactly where it left off.
+- **Composable pipelines:** coordinator scripts become optional. A workflow can express the full pipeline declaratively -- review → wait for fixes → re-review -- without an external coordinator.
 
 **Implementation path:**
-- Phase 1: detection only -- log `tooling_failure_detected` when a session produces output without `run_completed`. Surface in console and status command.
-- Phase 2: kill on detection -- stop agents immediately when tooling failure detected. No more unverified output reaching main.
-- Phase 3: auto-resume -- restart and resume for recoverable failures.
-- Phase 4: full self-heal loop -- diagnose, fix, reboot, resume automatically.
 
-**The invariant that must hold:** no output from a WorkTrain agent should be acted on (committed, merged, posted) unless its session has a confirmed `run_completed` event. This is the enforcement guarantee. Self-healing is what makes that guarantee survivable.
-
----
-
-### CRITICAL architectural clarity: three systems, one shared engine (permanent reference)
-
-This is the most important architectural fact about this codebase. Every agent and contributor must understand this before touching anything.
-
-**WorkRail/WorkTrain is three separate systems sharing one engine:**
-
-```
-                    Shared core
-          ┌─────────────────────────────┐
-          │  WorkRail engine            │
-          │  src/v2/durable-core/       │
-          │  ~/.workrail/data/sessions/ │
-          │  workflow registry          │
-          └────────┬──────────┬─────────┘
-                   │          │          │
-    ┌──────────────▼─┐  ┌─────▼──────┐  ┌▼─────────────┐
-    │ WorkRail MCP   │  │ WorkTrain  │  │ WorkRail     │
-    │ Server         │  │ Daemon     │  │ Console      │
-    │ workrail start │  │ worktrain  │  │ worktrain    │
-    │ src/mcp/       │  │ daemon     │  │ console      │
-    │                │  │ src/daemon/│  │ src/console/ │
-    │ Claude Code    │  │ src/trigger│  │              │
-    │ connects here  │  │            │  │ Shows BOTH   │
-    │ via stdio      │  │ autonomous │  │ MCP + daemon │
-    │                │  │ agent loop │  │ sessions     │
-    └────────────────┘  └────────────┘  └──────────────┘
-```
-
-**WorkRail MCP Server:** `workrail start` → stdio MCP server. Claude Code connects here. Provides `start_workflow`, `complete_step`, `list_workflows` etc. as MCP tools. Source: `src/mcp/`. Must be bulletproof -- a crash kills all Claude Code workflow tools.
-
-**WorkTrain Daemon:** `worktrain daemon` → autonomous agent runner. Drives sessions without human involvement. Calls the WorkRail engine **directly in-process** -- does NOT go through the MCP server. Source: `src/daemon/`, `src/trigger/`.
-
-**WorkRail Console:** `worktrain console` → unified read-only session viewer. Shows sessions from **both** the MCP server and the daemon (they share the same session store). Requires neither the MCP server nor the daemon to be running.
-
-**Rules that follow from this:**
-- MCP server code must never import from `src/daemon/` or `src/trigger/`
-- Daemon code must never depend on the MCP server being alive
-- Console code reads the session store directly -- no IPC with MCP or daemon needed
-- These are separate processes. A crash in one does not affect the others.
-
----
-
-### CRITICAL architectural clarity: three systems, one shared engine (permanent reference)
-
-This is the most important architectural fact about this codebase. Every agent and contributor must understand this before touching anything.
-
-**WorkRail/WorkTrain is three separate systems sharing one engine:**
-
-```
-                    Shared core
-          ┌─────────────────────────────┐
-          │  WorkRail engine            │
-          │  src/v2/durable-core/       │
-          │  ~/.workrail/data/sessions/ │
-          │  workflow registry          │
-          └────────┬──────────┬─────────┘
-                   │          │          │
-    ┌──────────────▼─┐  ┌─────▼──────┐  ┌▼─────────────┐
-    │ WorkRail MCP   │  │ WorkTrain  │  │ WorkRail     │
-    │ Server         │  │ Daemon     │  │ Console      │
-    │ workrail start │  │ worktrain  │  │ worktrain    │
-    │ src/mcp/       │  │ daemon     │  │ console      │
-    │                │  │ src/daemon/│  │ src/console/ │
-    │ Claude Code    │  │ src/trigger│  │              │
-    │ connects here  │  │            │  │ Shows BOTH   │
-    │ via stdio      │  │ autonomous │  │ MCP + daemon │
-    │                │  │ agent loop │  │ sessions     │
-    └────────────────┘  └────────────┘  └──────────────┘
-```
-
-**WorkRail MCP Server:** `workrail start` → stdio MCP server. Claude Code connects here. Provides `start_workflow`, `complete_step`, `list_workflows` etc. as MCP tools. Source: `src/mcp/`. Must be bulletproof.
-
-**WorkTrain Daemon:** `worktrain daemon` → autonomous agent runner. Drives sessions without human involvement. Calls the WorkRail engine **directly in-process**. Does NOT go through the MCP server. Source: `src/daemon/`, `src/trigger/`.
-
-**WorkRail Console:** `worktrain console` → unified read-only session viewer. Shows sessions from **both** the MCP server and the daemon (shared session store). Requires neither to be running.
-
-**Rules:**
-- MCP server code must never import from `src/daemon/` or `src/trigger/`
-- Daemon code must never depend on the MCP server being alive
-- Console reads the session store directly -- no IPC with either needed
-- These are separate processes. A crash in one does not affect the others.
+- Phase 1: `wait_for` as a blocking step type in the workflow DAG. The daemon suspends the session and watches for the signal. Signal delivery is via `worktrain tell "signal:<session-id>:fixes_ready {fixes: ...}"` or via daemon event.
+- Phase 2: cross-session signals -- one session can signal another by session ID, passing structured data.
+- Phase 3: declarative coordinator workflows -- a workflow JSON can express the full review-fix-verify pipeline as a single session with `wait_for` steps between phases, replacing the external coordinator script entirely.
