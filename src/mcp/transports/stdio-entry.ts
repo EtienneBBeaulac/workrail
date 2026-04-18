@@ -63,9 +63,9 @@ export async function startStdioServer(): Promise<void> {
     try {
       const result = await server.listRoots();
       rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
-      console.error(`[Roots] Updated workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}`);
+      try { process.stderr.write(`[Roots] Updated workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}\n`); } catch { /* ignore */ }
     } catch {
-      console.error('[Roots] Failed to fetch updated roots after change notification');
+      try { process.stderr.write('[Roots] Failed to fetch updated roots after change notification\n'); } catch { /* ignore */ }
     }
   });
 
@@ -86,7 +86,7 @@ export async function startStdioServer(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('[Transport] WorkRail MCP Server running on stdio');
+  try { process.stderr.write('[Transport] WorkRail MCP Server running on stdio\n'); } catch { /* ignore */ }
 
   // -------------------------------------------------------------------------
   // stdio-specific: Fetch initial workspace roots from the IDE client
@@ -94,15 +94,15 @@ export async function startStdioServer(): Promise<void> {
   void fetchInitialRootsWithTimeout(server)
     .then((result) => {
       if (result == null) {
-        console.error('[Roots] Initial roots probe timed out; workspace context will use server CWD fallback');
+        try { process.stderr.write('[Roots] Initial roots probe timed out; workspace context will use server CWD fallback\n'); } catch { /* ignore */ }
         return;
       }
 
       rootsManager.updateRootUris(result.roots.map((r: { uri: string }) => r.uri));
-      console.error(`[Roots] Initial workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}`);
+      try { process.stderr.write(`[Roots] Initial workspace roots: ${result.roots.map((r: { uri: string }) => r.uri).join(', ') || '(none)'}\n`); } catch { /* ignore */ }
     })
     .catch(() => {
-      console.error('[Roots] Client does not support roots/list; workspace context will use server CWD fallback');
+      try { process.stderr.write('[Roots] Client does not support roots/list; workspace context will use server CWD fallback\n'); } catch { /* ignore */ }
     });
 
   // -------------------------------------------------------------------------

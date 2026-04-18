@@ -158,7 +158,7 @@ export class HttpServer {
       const start = Date.now();
       res.on('finish', () => {
         const duration = Date.now() - start;
-        console.error(`[HTTP] ${req.method} ${req.path} ${res.statusCode} (${duration}ms)`);
+        try { process.stderr.write(`[HTTP] ${req.method} ${req.path} ${res.statusCode} (${duration}ms)\n`); } catch { /* ignore */ }
       });
       next();
     });
@@ -337,11 +337,11 @@ export class HttpServer {
         try {
           res.write(`data: ${JSON.stringify({ type: 'update', session: event.session })}\n\n`);
         } catch (error) {
-          console.error(`[SSE] Write error for ${workflow}/${id}:`, error);
+          try { process.stderr.write(`[SSE] Write error for ${workflow}/${id}: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
           cleanup();
         }
       };
-      
+
       // Safe write helper
       const safeWrite = (data: string): boolean => {
         if (isCleanedUp || res.writableEnded) {
@@ -352,21 +352,21 @@ export class HttpServer {
           res.write(data);
           return true;
         } catch (error) {
-          console.error(`[SSE] Write error for ${workflow}/${id}:`, error);
+          try { process.stderr.write(`[SSE] Write error for ${workflow}/${id}: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
           cleanup();
           return false;
         }
       };
-      
+
       // Set SSE headers
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
-      
+
       // Set max connection time (30 minutes) to prevent indefinite resource hold
       maxConnectionTimeout = setTimeout(() => {
-        console.error(`[SSE] Max connection time reached for ${workflow}/${id}, closing`);
+        try { process.stderr.write(`[SSE] Max connection time reached for ${workflow}/${id}, closing\n`); } catch { /* ignore */ }
         cleanup();
       }, 30 * 60 * 1000);
       
@@ -401,11 +401,11 @@ export class HttpServer {
       // Attach cleanup handlers for all disconnect scenarios
       req.on('close', cleanup);
       req.on('error', (error) => {
-        console.error(`[SSE] Request error for ${workflow}/${id}:`, error);
+        try { process.stderr.write(`[SSE] Request error for ${workflow}/${id}: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
         cleanup();
       });
       res.on('error', (error) => {
-        console.error(`[SSE] Response error for ${workflow}/${id}:`, error);
+        try { process.stderr.write(`[SSE] Response error for ${workflow}/${id}: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
         cleanup();
       });
       res.on('finish', cleanup);
@@ -429,35 +429,35 @@ export class HttpServer {
           message: `Session ${workflow}/${id} deleted successfully`
         });
       } catch (error: any) {
-        console.error('[HttpServer] Delete session error:', error);
+        try { process.stderr.write(`[HttpServer] Delete session error: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
         res.status(500).json({
           success: false,
           error: error.message || 'Failed to delete session'
         });
       }
     });
-    
+
     // Bulk delete sessions
     this.app.post('/api/sessions/bulk-delete', async (req: Request, res: Response) => {
       try {
         const { sessions } = req.body;
-        
+
         if (!Array.isArray(sessions)) {
           return res.status(400).json({
             success: false,
             error: 'Body must contain "sessions" array'
           });
         }
-        
+
         await this.sessionManager.deleteSessions(sessions);
-        
+
         res.json({
           success: true,
           message: `Deleted ${sessions.length} session(s)`,
           count: sessions.length
         });
       } catch (error: any) {
-        console.error('[HttpServer] Bulk delete error:', error);
+        try { process.stderr.write(`[HttpServer] Bulk delete error: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
         res.status(500).json({
           success: false,
           error: error.message || 'Failed to delete sessions'
@@ -495,10 +495,10 @@ export class HttpServer {
     // Check dashboard mode (DI-provided, not env check)
     const mode = this.config.dashboardMode ?? this.dashboardMode;
     if (mode.kind === 'legacy') {
-      console.error('[Dashboard] Unified dashboard disabled, using legacy mode');
+      try { process.stderr.write('[Dashboard] Unified dashboard disabled, using legacy mode\n'); } catch { /* ignore */ }
       return await this.startLegacyMode();
     }
-    
+
     // Try to become primary
     if (await this.tryBecomePrimary()) {
       try {
@@ -511,10 +511,10 @@ export class HttpServer {
           // new instance reclaimed the lock but can't bind yet). Fall back to
           // legacy mode so both instances can run concurrently. The old instance
           // will release the port when its IDE tab closes (stdin EOF).
-          console.error(
+          try { process.stderr.write(
             `[Dashboard] Port ${this.port} still held by previous instance -- ` +
-            `running on next available port. Restart the old instance to move to ${this.port}.`
-          );
+            `running on next available port. Restart the old instance to move to ${this.port}.\n`
+          ); } catch { /* ignore */ }
           await fs.unlink(this.lockFile).catch(() => {});
           return await this.startLegacyMode();
         }
@@ -522,7 +522,7 @@ export class HttpServer {
       }
     } else {
       // Secondary mode - dashboard already running
-      console.error(`[Dashboard] ✅ Unified dashboard at http://localhost:${this.port}`);
+      try { process.stderr.write(`[Dashboard] Unified dashboard at http://localhost:${this.port}\n`); } catch { /* ignore */ }
       return null;
     }
   }
@@ -549,19 +549,19 @@ export class HttpServer {
       await fs.writeFile(this.lockFile, JSON.stringify(lockData, null, 2), { flag: 'wx' });
       
       // Success! We are primary
-      console.error('[Dashboard] Primary elected');
+      try { process.stderr.write('[Dashboard] Primary elected\n'); } catch { /* ignore */ }
       this.isPrimary = true;
       this.setupPrimaryCleanup();
       this.heartbeat.start();
       return true;
-      
+
     } catch (error: any) {
       if (error.code === 'EEXIST') {
         // Lock exists, check if it's stale
         return await this.reclaimStaleLock();
       } else if (error.code === 'EACCES' || error.code === 'EPERM') {
         // Permission denied
-        console.error('[Dashboard] Cannot write lock file (permission denied)');
+        try { process.stderr.write('[Dashboard] Cannot write lock file (permission denied)\n'); } catch { /* ignore */ }
         return false;
       }
       throw error;
@@ -893,7 +893,7 @@ export class HttpServer {
         });
         
         this.baseUrl = `http://localhost:${this.port}`;
-        console.error(`[Dashboard] Started in legacy mode on port ${this.port}`);
+        try { process.stderr.write(`[Dashboard] Started in legacy mode on port ${this.port}\n`); } catch { /* ignore */ }
         this.printBanner();
         return this.baseUrl;
         
@@ -955,9 +955,9 @@ export class HttpServer {
     if (behavior.kind === 'auto_open') {
       try {
         await open(url);
-        console.error(`🌐 Opened dashboard: ${url}`);
+        try { process.stderr.write(`Opened dashboard: ${url}\n`); } catch { /* ignore */ }
       } catch (error) {
-        console.error(`🌐 Dashboard URL: ${url} (auto-open failed, please open manually)`);
+        try { process.stderr.write(`Dashboard URL: ${url} (auto-open failed, please open manually)\n`); } catch { /* ignore */ }
       }
     }
     
@@ -1001,13 +1001,13 @@ export class HttpServer {
 
       // Timeout to prevent hanging if server.close() never completes
       const closeTimeout = setTimeout(() => {
-        console.error('[Dashboard] Server close timeout after 5s, forcing shutdown');
+        try { process.stderr.write('[Dashboard] Server close timeout after 5s, forcing shutdown\n'); } catch { /* ignore */ }
         resolve();
       }, 5000);
 
       this.server.close(() => {
         clearTimeout(closeTimeout);
-        console.error('HTTP server stopped');
+        try { process.stderr.write('HTTP server stopped\n'); } catch { /* ignore */ }
         resolve();
       });
     });
@@ -1088,59 +1088,59 @@ export class HttpServer {
   async fullCleanup(): Promise<number> {
     try {
       const busyPorts = await this.getWorkrailPorts();
-      
+
       if (busyPorts.length === 0) {
-        console.error('[Cleanup] No workrail processes found');
+        try { process.stderr.write('[Cleanup] No workrail processes found\n'); } catch { /* ignore */ }
         return 0;
       }
-      
-      console.error(`[Cleanup] Found ${busyPorts.length} workrail process(es), removing all...`);
-      
+
+      try { process.stderr.write(`[Cleanup] Found ${busyPorts.length} workrail process(es), removing all...\n`); } catch { /* ignore */ }
+
       let cleanedCount = 0;
-      
+
       for (const { port, pid } of busyPorts) {
         // Don't kill ourselves
         if (pid === process.pid) {
-          console.error(`[Cleanup] Skipping current process ${pid}`);
+          try { process.stderr.write(`[Cleanup] Skipping current process ${pid}\n`); } catch { /* ignore */ }
           continue;
         }
-        
-        console.error(`[Cleanup] Killing process ${pid} on port ${port}`);
+
+        try { process.stderr.write(`[Cleanup] Killing process ${pid} on port ${port}\n`); } catch { /* ignore */ }
         try {
           // Try graceful shutdown first
           process.kill(pid, 'SIGTERM');
           await new Promise(r => setTimeout(r, 1000));
-          
+
           // Check if still alive
           try {
             process.kill(pid, 0);
             // Still alive, force kill
             process.kill(pid, 'SIGKILL');
-            console.error(`[Cleanup] Force killed process ${pid}`);
+            try { process.stderr.write(`[Cleanup] Force killed process ${pid}\n`); } catch { /* ignore */ }
           } catch {
             // Already dead
-            console.error(`[Cleanup] Process ${pid} terminated gracefully`);
+            try { process.stderr.write(`[Cleanup] Process ${pid} terminated gracefully\n`); } catch { /* ignore */ }
           }
-          
+
           cleanedCount++;
         } catch (error) {
-          console.error(`[Cleanup] Failed to kill process ${pid}:`, error);
+          try { process.stderr.write(`[Cleanup] Failed to kill process ${pid}: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
         }
       }
-      
-      console.error(`[Cleanup] Cleaned up ${cleanedCount} process(es)`);
-      
+
+      try { process.stderr.write(`[Cleanup] Cleaned up ${cleanedCount} process(es)\n`); } catch { /* ignore */ }
+
       // Also remove lock file
       try {
         await fs.unlink(this.lockFile);
-        console.error('[Cleanup] Removed lock file');
+        try { process.stderr.write('[Cleanup] Removed lock file\n'); } catch { /* ignore */ }
       } catch {
         // Lock file might not exist
       }
-      
+
       return cleanedCount;
     } catch (error) {
-      console.error('[Cleanup] Full cleanup failed:', error);
+      try { process.stderr.write(`[Cleanup] Full cleanup failed: ${(error as Error)?.message ?? String(error)}\n`); } catch { /* ignore */ }
       throw error;
     }
   }
