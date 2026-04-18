@@ -5796,3 +5796,33 @@ Discovered from a broken session: `coding-task-workflow-agentic` dispatched with
 
 **Decision 5: Bug -- MCP server EPIPE crash (Apr 18)**
 Root cause confirmed with 15 production crash log entries: `process.stderr` is missing an `'error'` event handler in `registerFatalHandlers()`. When an MCP client disconnects, Node.js emits `EPIPE` on stderr which crashes the process with an unhandled error. `process.stdout` already has equivalent protection via `wireStdoutShutdown()`. Fix: mirror the stdout protection for stderr. One-line fix being implemented in PR `fix/mcp-stderr-epipe-crash`.
+
+---
+
+### worktrain status → console integration (Apr 18, 2026)
+
+The `worktrain status` CLI command is Phase 1. Phase 2: the same data and rendering lives inside the console as the default landing view when you open it -- not the sessions list, the overview. Same `StatusDataPacket` type, two surfaces. The console overview replaces the need to run a CLI command; it auto-refreshes and stays live.
+
+---
+
+### WorkTrain as a native macOS app (Apr 18, 2026)
+
+Long-term vision: WorkTrain becomes a full native Mac app -- not just a CLI + web console, but a proper macOS application with a menubar icon, system notifications, windows, and native UX.
+
+**What this unlocks:**
+- Always-on menubar presence showing daemon status at a glance
+- Native macOS notifications (already built via osascript -- the app version uses UserNotifications framework directly)
+- The `worktrain status` overview as a native window, not a browser tab
+- Message queue and inbox as a native interface (type a message from anywhere on your Mac, not just the terminal)
+- Background daemon management -- start/stop/restart from the menubar without terminal
+- Deep system integration: file system events, calendar, Contacts, native share sheet
+
+**Tech stack options:**
+- Swift/SwiftUI: full native, best macOS integration, steeper learning curve from TypeScript
+- Electron + existing console UI: fastest path, same TypeScript codebase, but heavy
+- Tauri: Rust core + existing web frontend, lighter than Electron, good macOS support
+- React Native macOS: reuses React knowledge, not quite native feel
+
+**Recommended path:** Tauri wrapping the existing console UI. The console is already a React/Vite app. Tauri gives native menubar, notifications, and system APIs without rewriting the frontend. The WorkTrain daemon stays as a separate process managed by the app.
+
+**This is a post-v1 platform decision** -- not a near-term priority, but worth designing toward. Don't make architectural decisions that would make the Tauri wrapper hard later.
