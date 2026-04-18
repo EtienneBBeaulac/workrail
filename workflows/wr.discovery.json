@@ -1,9 +1,10 @@
 {
   "id": "wr.discovery",
   "name": "Discovery Workflow",
-  "version": "3.1.0",
+  "version": "3.2.0",
+  "validatedAgainstSpecVersion": 3,
   "description": "Use this to explore and think through a problem end-to-end. Moves between landscape exploration, problem framing, candidate generation, adversarial challenge, and uncertainty resolution.",
-  "about": "## Discovery Workflow\n\nThis workflow is for structured thinking through an ambiguous problem, opportunity, or decision  -- the kind where you are not sure of the right answer yet and jumping straight to solutions would be premature.\n\n**What it does:**\nThe workflow selects one of three emphasis paths based on your actual need: `landscape_first` for understanding the current state and comparing options, `full_spectrum` for important or ambiguous problems where both landscape grounding and reframing are needed, and `design_first` when the dominant risk is solving the wrong problem. It then moves through landscape research, stakeholder and problem framing, candidate direction generation, adversarial challenge, and an uncertainty-resolution stage that can close with a recommendation, a targeted research follow-up, or a prototype/test plan. A design document is maintained throughout as the human-facing artifact.\n\n**When to use it:**\n- You face a decision, architectural question, or design problem with no obvious right answer\n- You want to explore an opportunity space before committing to a direction\n- You suspect the stated problem might not be the real problem\n- You need a structured recommendation with explicit tradeoffs and alternatives rather than the first plausible answer\n\n**What it produces:**\nA design document covering: the selected path and framing, landscape takeaways, chosen direction and why it won, the strongest alternative and why it lost, confidence band, residual risks, and next actions.\n\n**How to get good results:**\nDescribe the problem, opportunity, or decision you want help thinking through. State what outcome you want (a recommendation, a comparison, a research plan, a prototype direction). The more context you provide upfront about constraints and anti-goals, the sharper the framing will be.",
+  "about": "## Discovery Workflow\n\nThis workflow is for structured thinking through an ambiguous problem, opportunity, or decision -- the kind where you are not sure of the right answer yet and jumping straight to solutions would be premature.\n\n**What it does:**\nBefore starting any research, the workflow challenges the stated goal: it determines whether you handed it a problem or a solution, surfaces hidden assumptions, and defines what success looks like in concrete observable terms. It then selects one of three emphasis paths based on your actual need: `landscape_first` for understanding the current state and comparing options, `full_spectrum` for important or ambiguous problems where both landscape grounding and reframing are needed, and `design_first` when the dominant risk is solving the wrong problem. The workflow moves through landscape research, stakeholder and problem framing, candidate direction generation, adversarial challenge, and an uncertainty-resolution stage that can close with a recommendation, a targeted research follow-up, or a prototype/test plan. A design document is maintained throughout as the human-facing artifact.\n\n**When to use it:**\n- You face a decision, architectural question, or design problem with no obvious right answer\n- You want to explore an opportunity space before committing to a direction\n- You suspect the stated problem might not be the real problem\n- You need a structured recommendation with explicit tradeoffs and alternatives rather than the first plausible answer\n- You want to make sure you are solving the right problem, not just the one you described\n\n**What it produces:**\nA design document covering: the reframed problem (if the original was solution-framed), the selected path and framing, landscape takeaways, chosen direction and why it won, the strongest alternative and why it lost, confidence band, residual risks, and next actions.\n\n**How to get good results:**\nDescribe the problem, opportunity, or decision you want help thinking through -- or describe the solution you are considering, and let the workflow figure out the underlying problem. State what outcome you want (a recommendation, a comparison, a research plan, a prototype direction). The more context you provide upfront about constraints and anti-goals, the sharper the framing will be.",
   "examples": [
     "Decide whether to build a custom notification system or adopt a third-party service",
     "Explore what the right architecture is for moving our monolith to services",
@@ -54,6 +55,40 @@
   ],
   "steps": [
     {
+      "id": "phase-0-reframe",
+      "title": "Phase 0a: Reframe the Goal Before Jumping to Solutions",
+      "promptBlocks": {
+        "goal": "Challenge the stated goal before we start researching it. Figure out whether I handed you a problem or a solution, surface the assumptions baked into the framing, and define what success actually looks like.",
+        "constraints": [
+          [
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
+          ],
+          "Do not begin landscape research or candidate generation in this step.",
+          "If the goal is stated as a solution, find the problem behind it -- do not just accept the solution as given.",
+          "Challenge assumptions with specificity: name each assumption, state why it might be wrong, and say what evidence would confirm or refute it.",
+          "Define success in terms of outcomes and observable signals, not just delivery of the stated goal."
+        ],
+        "procedure": [
+          "Classify the stated goal as a `solution_statement` (names a specific solution or approach) or a `problem_statement` (describes an outcome, pain, or gap without prescribing the fix). Record this as `goalType`.",
+          "If `goalType = solution_statement`: identify the underlying problem this solution is trying to solve, name at least one materially different way to solve that problem, and state explicitly whether the stated solution is the best match for the problem or just the most familiar one.",
+          "Challenge exactly 3 key assumptions embedded in the stated goal. For each assumption: state the assumption clearly, explain why it might be wrong, and identify what evidence would confirm or refute it. Record these as `challengedAssumptions`.",
+          "Define what success looks like before any candidates are generated. Success criteria must be concrete and observable -- not 'the problem is solved' but 'we can measure X, users do Y, the system behaves Z'. Record these as `successCriteria`.",
+          "Record a one-sentence `reframedProblem` that captures the real underlying problem, stripped of any solution bias from the original goal.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `goalType`, `reframedProblem`, `challengedAssumptions`, `successCriteria`, `goalWasSolutionStatement`."
+        ],
+        "verify": [
+          "Each of the 3 challenged assumptions is specific enough that someone could disagree with the challenge.",
+          "The success criteria would let a skeptic determine whether the work actually succeeded.",
+          "If the goal was a solution-statement, the underlying problem is stated independently of the proposed solution.",
+          "The reframed problem is meaningfully different from the original goal wording, or you have explicitly noted why the original framing was already problem-shaped."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
       "id": "phase-0-select-path",
       "title": "Phase 0: Understand, Classify, and Recommend a Path",
       "promptBlocks": {
@@ -71,13 +106,15 @@
         ],
         "procedure": [
           "Capture: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
-          "Choose `landscape_first` when my dominant need is understanding the current landscape or comparing options. Choose `full_spectrum` when both landscape grounding and reframing are needed. Choose `design_first` when the dominant risk is solving the wrong problem or shaping the wrong concept.",
+          "If `goalWasSolutionStatement = true`, set `problemStatement` from `reframedProblem` rather than from the stated goal. Record the original stated goal as `statedGoal` in the design doc so the distinction is visible.",
+          "Choose `landscape_first` when my dominant need is understanding the current landscape or comparing options. Choose `full_spectrum` when both landscape grounding and reframing are needed. Choose `design_first` when the dominant risk is solving the wrong problem or shaping the wrong concept. If `goalWasSolutionStatement = true`, bias toward `design_first` unless the stated solution is clearly the correct framing.",
           "Create or update `designDocPath` with sections for Context / Ask, Path Recommendation, Constraints / Anti-goals, Landscape Packet, Problem Frame Packet, Candidate Directions, Challenge Notes, Resolution Notes, Decision Log, and Final Summary.",
           "Set these keys in the next `continue_workflow` call's `context` object: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
           "Also set `goal` in the context object: one sentence describing what you are trying to accomplish. This populates the session title in the Workspace console immediately."
         ],
         "verify": [
           "The chosen path is justified against the other two, not just named.",
+          "If `goalWasSolutionStatement = true`, the `problemStatement` reflects the reframed problem, not the stated solution.",
           "The design doc exists and the path recommendation is recorded there."
         ]
       },
@@ -284,10 +321,11 @@
           "Capture users or stakeholders, jobs or outcomes, pains or tensions, constraints that matter in lived use, success criteria, assumptions, and at least 2 reframes or HMW questions.",
           "If `delegationAvailable = true`, decide whether parallel stakeholder lenses would actually sharpen the result. If yes, run them in parallel. If not, keep going yourself. In either case, you must synthesize the result yourself.",
           "Update `designDocPath` using `problemFrameTemplate`.",
+          "Before finishing, name ONE specific concrete condition that would make the current framing wrong -- not a generic caveat, but a specific thing that if discovered to be true would change the path or direction. Record this as `primaryFramingRisk` in the design doc.",
           "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`."
         ],
         "verify": [
-          "The framing names what could still be wrong.",
+          "The framing names what could still be wrong -- specifically, not generically.",
           "The frame is strong enough to influence candidate generation and later selection."
         ]
       },
@@ -319,10 +357,11 @@
           "Capture users or stakeholders, jobs or outcomes, pains or tensions, constraints that matter in lived use, success criteria, assumptions, and at least 2 reframes or HMW questions.",
           "If `delegationAvailable = true`, decide whether parallel stakeholder lenses would actually sharpen the result. If yes, run them in parallel. If not, keep going yourself. In either case, you must synthesize the result yourself.",
           "Update `designDocPath` using `problemFrameTemplate`.",
+          "Before finishing, name ONE specific concrete condition that would make the current framing wrong -- not a generic caveat, but a specific thing that if discovered to be true would change the path or direction. Record this as `primaryFramingRisk` in the design doc.",
           "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`."
         ],
         "verify": [
-          "The framing names what could still be wrong.",
+          "The framing names what could still be wrong -- specifically, not generically.",
           "The framing depth is strong enough to justify a design-first path."
         ]
       },
@@ -335,8 +374,20 @@
       "id": "phase-1g-retriage",
       "title": "Phase 1g: Re-Triage After Early Context",
       "runCondition": {
-        "var": "retriageNeeded",
-        "equals": true
+        "or": [
+          {
+            "var": "retriageNeeded",
+            "equals": true
+          },
+          {
+            "var": "pathRecommendation",
+            "equals": "design_first"
+          },
+          {
+            "var": "pathRecommendation",
+            "equals": "full_spectrum"
+          }
+        ]
       },
       "promptBlocks": {
         "goal": "Reassess the path now that you have real landscape and framing context instead of just my initial wording.",
