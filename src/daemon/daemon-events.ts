@@ -147,6 +147,10 @@ export interface LlmTurnStartedEvent {
   readonly sessionId: string;
   /** Number of messages in the conversation at the time of the call. */
   readonly messageCount: number;
+  /** The model ID used for this LLM turn (e.g. 'claude-sonnet-4-5'). */
+  readonly modelId?: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /**
@@ -166,6 +170,8 @@ export interface LlmTurnCompletedEvent {
   readonly inputTokens: number;
   /** Names of tools the LLM requested in this turn (empty if end_turn). */
   readonly toolNamesRequested: readonly string[];
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /**
@@ -180,6 +186,8 @@ export interface ToolCallStartedEvent {
   readonly toolName: string;
   /** JSON-serialized params, truncated to 200 chars. */
   readonly argsSummary: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /**
@@ -193,6 +201,8 @@ export interface ToolCallCompletedEvent {
   readonly durationMs: number;
   /** First 200 chars of the tool result text content. */
   readonly resultSummary: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /**
@@ -210,6 +220,8 @@ export interface ToolCallFailedEvent {
   readonly durationMs: number;
   /** First 200 chars of the error message. */
   readonly errorMessage: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
 }
 
 /**

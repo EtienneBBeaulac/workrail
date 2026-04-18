@@ -1639,7 +1639,13 @@ export async function runWorkflow(
   // The try/catch guards inside AgentLoop ensure callbacks never crash the loop.
   const agentCallbacks: AgentLoopCallbacks = {
     onLlmTurnStarted: ({ messageCount }) => {
-      emitter?.emit({ kind: 'llm_turn_started', sessionId, messageCount });
+      emitter?.emit({
+        kind: 'llm_turn_started',
+        sessionId,
+        messageCount,
+        modelId,
+        ...(workrailSessionId != null ? { workrailSessionId } : {}),
+      });
     },
     onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
       emitter?.emit({
@@ -1649,16 +1655,17 @@ export async function runWorkflow(
         outputTokens,
         inputTokens,
         toolNamesRequested,
+        ...(workrailSessionId != null ? { workrailSessionId } : {}),
       });
     },
     onToolCallStarted: ({ toolName, argsSummary }) => {
-      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary });
+      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
     },
     onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
-      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary });
+      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
     },
     onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
-      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage });
+      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
     },
   };
 

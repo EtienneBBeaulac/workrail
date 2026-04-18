@@ -512,7 +512,7 @@ program
   .command('logs')
   .description('Read and display the WorkRail daemon event log. Use --follow to stream new events in real time.')
   .option('--follow', 'Continuously poll the log file for new events (like tail -f)')
-  .option('--session <id>', 'Filter events by sessionId prefix (first 8 chars or full UUID)')
+  .option('--session <id>', 'Filter events by sessionId (UUID prefix) or workrailSessionId (sess_xxx prefix)')
   .action(async (options: { follow?: boolean; session?: string }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
@@ -561,13 +561,14 @@ program
       for (const line of lines) {
         // Apply session filter if --session was provided.
         if (options.session) {
-          // Filter by sessionId prefix or exact match.
+          // Filter by sessionId (UUID) prefix/exact OR workrailSessionId (sess_xxx) prefix/exact.
           try {
             const obj = JSON.parse(line) as Record<string, unknown>;
             const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
-            if (!sid.startsWith(options.session) && sid !== options.session) {
-              continue;
-            }
+            const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
+            const matchesSession = sid.startsWith(options.session) || sid === options.session ||
+              wrid.startsWith(options.session) || wrid === options.session;
+            if (!matchesSession) continue;
           } catch {
             continue; // Skip malformed lines when filtering.
           }
