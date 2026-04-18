@@ -108,7 +108,11 @@ export function buildRecommendationWarningEvents(args: {
         data: {
           gapId,
           severity: 'warning',
-          reason: w.kind,
+          // WHY unexpected/evaluation_error: recommendation warning exceedances are advisory
+          // (non-blocking). The closest GapReasonV1 category is 'unexpected' with 'evaluation_error'
+          // as this is an edge case where preferences exceeded recommendations. The w.kind string
+          // is captured in summary for human-readable context.
+          reason: { category: 'unexpected', detail: 'evaluation_error' } as const,
           summary: w.summary,
           resolution: { kind: 'unresolved' as const },
         },
@@ -243,7 +247,11 @@ export function buildDecisionTraceEvent(args: {
       kind: EVENT_KIND.DECISION_TRACE_APPENDED,
       dedupeKey: `decision_trace_appended:${sessionId}:${traceId}`,
       scope: { runId: String(runId), nodeId: String(nodeId) },
-      data: traceDataRes.value,
+      // WHY cast: buildDecisionTraceEventData returns readonly entries[], but the Zod schema
+      // infers mutable entries[]. The cast is safe -- entries are never mutated after construction,
+      // and the schema validates the shape at parse time regardless of mutability.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data: traceDataRes.value as any,
     })
   );
 }

@@ -200,14 +200,21 @@ export interface WorkflowTrigger {
      * Default: no limit.
      */
     readonly maxTurns?: number;
+    /**
+     * Maximum spawn depth for nested spawn_agent calls.
+     * Root sessions have depth 0. Each child adds 1. When a session's depth reaches
+     * this limit, spawn_agent returns a typed error without spawning.
+     * Default: 3. Configurable per-trigger for workflows that intentionally delegate deeply.
+     */
+    readonly maxSubagentDepth?: number;
   };
   /**
    * Pre-allocated session start result from a caller that already called executeStartWorkflow().
    *
-   * WHY: The `worktrain spawn` CLI command calls executeStartWorkflow() synchronously
-   * in the HTTP handler so it can return a session ID to the caller before the agent
-   * loop starts. It passes the resulting response here so runWorkflow() skips its own
-   * executeStartWorkflow() call and starts the agent loop from this pre-created session.
+   * WHY: The dispatch HTTP handler and the spawn_agent tool both call executeStartWorkflow()
+   * synchronously so they can obtain a session ID before the agent loop starts. They pass
+   * the resulting response here so runWorkflow() skips its own executeStartWorkflow() call
+   * and starts the agent loop from the pre-created session.
    *
    * INVARIANT: When set, runWorkflow() MUST NOT call executeStartWorkflow() again.
    * The session is already created -- calling it again would create a duplicate session.
@@ -218,9 +225,33 @@ export interface WorkflowTrigger {
    *
    * WHY underscore prefix: signals this is an internal implementation detail, not
    * a user-facing field. Script authors do not set this -- it is set only by the
-   * dispatch HTTP handler.
+   * dispatch HTTP handler or the spawn_agent tool.
    */
   readonly _preAllocatedStartResponse?: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  /**
+   * WorkRail session ID of the parent session that spawned this one.
+   *
+   * WHY: Written to the `session_created` event in the session store so the parent-child
+   * relationship is durable and survives crashes. Enables the console DAG view to render
+   * the session tree. Set only by makeSpawnAgentTool() -- root sessions have no parent.
+   *
+   * WHY a first-class field (not in context map): if parentSessionId were in the generic
+   * `context` map, any code that overwrites context could silently lose the parent link.
+   * A typed field cannot be accidentally lost and is immediately visible to reviewers.
+   */
+  readonly parentSessionId?: string;
+  /**
+   * Spawn depth of this session in the session tree.
+   *
+   * Root sessions have depth 0. Each spawn_agent call increments the depth by 1.
+   * The spawn_agent tool reads this from its closure (set at factory construction
+   * time by runWorkflow()) to enforce the maxSubagentDepth limit.
+   *
+   * WHY a first-class field (not in context map): if spawnDepth were in the generic
+   * `context` map, any code that overwrites context could silently break depth enforcement.
+   * A typed field cannot be accidentally lost, silently overwritten, or misused.
+   */
+  readonly spawnDepth?: number;
   /**
    * Optional resolved soul file path. Sourced from TriggerDefinition.soulFile
    * (already cascade-resolved by trigger-store.ts: trigger soulFile -> workspace soulFile).
@@ -840,6 +871,30 @@ function getSchemas(): Record<string, any> {
       },
       required: ['filePath', 'content'],
     },
+    SpawnAgentParams: {
+      type: 'object',
+      properties: {
+        workflowId: {
+          type: 'string',
+          description: 'ID of the workflow to run in the child session (e.g. "wr.discovery").',
+        },
+        goal: {
+          type: 'string',
+          description: 'One-sentence description of what the child session should accomplish.',
+        },
+        workspacePath: {
+          type: 'string',
+          description: 'Absolute path to the workspace directory for the child session.',
+        },
+        context: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Optional initial context variables to pass to the child workflow.',
+        },
+      },
+      required: ['workflowId', 'goal', 'workspacePath'],
+      additionalProperties: false,
+    },
   };
   return _schemas;
 }
@@ -1311,6 +1366,223 @@ function makeWriteTool(schemas: Record<string, any>, sessionId?: string, emitter
 }
 
 // ---------------------------------------------------------------------------
+// spawn_agent tool
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the spawn_agent tool for daemon sessions.
+ *
+ * Spawns a child WorkRail session in-process, blocking the parent until the child completes.
+ * Returns `{ childSessionId, outcome, notes }` as a JSON string so the parent LLM can reason
+ * about the child's result and decide how to proceed.
+ *
+ * WHY in-process (not via TriggerRouter.dispatch): dispatch() uses a global Semaphore and is
+ * fire-and-forget. Calling it from inside a running session would deadlock (parent holds a slot
+ * waiting for child to acquire one). Direct runWorkflow() call is naturally blocking via await.
+ *
+ * WHY pre-create session (Candidate 2): calls executeStartWorkflow() first so childSessionId is
+ * deterministic and the child is observable in the session store from the moment execute() is called.
+ * Crash-before-start is observable (zombie session with parentSessionId). Adapts the proven
+ * _preAllocatedStartResponse pattern from console-routes.ts.
+ *
+ * WHY errors as data (not throw): a child failure should not abort the parent session. The parent
+ * LLM receives { outcome: 'error', notes: errorMessage } and decides how to proceed. This is
+ * different from other tools (complete_step, Bash) which throw on failure because those failures
+ * ARE errors in the parent session's own execution.
+ *
+ * WHY currentDepth is a constructor parameter (not read from store): depth is set at factory
+ * construction time by runWorkflow(), which reads trigger.spawnDepth. For checkpoint-resumed
+ * sessions, the daemon restarts the AgentLoop from scratch and re-reads trigger.spawnDepth --
+ * the constructor parameter is always correct. Store reads would add async I/O and error paths
+ * for a theoretical edge case that does not exist in practice.
+ *
+ * @param sessionId - Process-local UUID (for logging correlation).
+ * @param ctx - V2ToolContext from the shared DI container.
+ * @param apiKey - Anthropic API key for the child session's Claude model.
+ * @param thisWorkrailSessionId - WorkRail session ID of the parent (becomes parentSessionId in child).
+ * @param currentDepth - Spawn depth of the parent session (0 for root sessions).
+ * @param maxDepth - Maximum allowed spawn depth. Blocks spawn when currentDepth >= maxDepth.
+ * @param runWorkflowFn - Injected runWorkflow function (allows testing without real LLM calls).
+ * @param schemas - Plain JSON Schema map from getSchemas().
+ * @param emitter - Optional event emitter for structured lifecycle events.
+ */
+export function makeSpawnAgentTool(
+  sessionId: string,
+  ctx: V2ToolContext,
+  apiKey: string,
+  thisWorkrailSessionId: string,
+  currentDepth: number,
+  maxDepth: number,
+  runWorkflowFn: typeof runWorkflow,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schemas: Record<string, any>,
+  emitter?: DaemonEventEmitter,
+): AgentTool {
+  return {
+    name: 'spawn_agent',
+    description:
+      'Spawn a child WorkRail session to handle a delegated sub-task. ' +
+      'Blocks until the child session completes, then returns the child\'s outcome and notes. ' +
+      'Use this when a step requires delegating a well-defined sub-task to a separate workflow. ' +
+      'IMPORTANT: The parent session\'s time limit (maxSessionMinutes) keeps ticking while the child runs. ' +
+      'Configure the parent with enough time to cover both its own work and the child\'s work. ' +
+      'Returns: { childSessionId, outcome: "success"|"error"|"timeout", notes: string }. ' +
+      'Check outcome before using notes -- on error/timeout, notes contains the error message.',
+    inputSchema: schemas['SpawnAgentParams'],
+    label: 'Spawn Agent',
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+      console.log(`[WorkflowRunner] Tool: spawn_agent sessionId=${sessionId} workflowId=${String(params.workflowId)} depth=${currentDepth}/${maxDepth}`);
+      emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent', summary: `${String(params.workflowId)} depth=${currentDepth}`, ...withWorkrailSession(thisWorkrailSessionId) });
+
+      // ---- Depth limit enforcement (synchronous, before any async work) ----
+      // WHY check before executeStartWorkflow: fail fast at the boundary. A depth error
+      // is a configuration issue, not a transient failure. No child session should be
+      // created at all when the depth limit is exceeded.
+      if (currentDepth >= maxDepth) {
+        const limitResult = {
+          childSessionId: null,
+          outcome: 'error' as const,
+          notes: `Max spawn depth exceeded (currentDepth=${currentDepth}, maxDepth=${maxDepth}). ` +
+            `Cannot spawn a child session from this depth. ` +
+            `Increase agentConfig.maxSubagentDepth if deeper delegation is intentional.`,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(limitResult) }],
+          details: limitResult,
+        };
+      }
+
+      // ---- Pre-create child session (Candidate 2: _preAllocatedStartResponse pattern) ----
+      // WHY call executeStartWorkflow first: childSessionId is deterministic and the child
+      // is observable in the store from the moment execute() is called. If the process crashes
+      // after executeStartWorkflow but before runWorkflow, the zombie session is traceable
+      // via parentSessionId. Adapts the proven pattern from console-routes.ts.
+      const startInput = {
+        workflowId: String(params.workflowId),
+        workspacePath: String(params.workspacePath),
+        goal: String(params.goal),
+      };
+
+      const startResult = await executeStartWorkflow(
+        startInput,
+        ctx,
+        // WHY parentSessionId via internalContext: the public V2StartWorkflowInput schema
+        // stays unchanged. parentSessionId is extracted in buildInitialEvents() to populate
+        // session_created.data (typed, durable, DAG-queryable).
+        // is_autonomous: 'true' marks the child as a daemon-owned session.
+        { is_autonomous: 'true', workspacePath: String(params.workspacePath), parentSessionId: thisWorkrailSessionId },
+      );
+
+      if (startResult.isErr()) {
+        const errResult = {
+          childSessionId: null,
+          outcome: 'error' as const,
+          notes: `Failed to start child workflow: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(errResult) }],
+          details: errResult,
+        };
+      }
+
+      // ---- Decode childSessionId from continueToken ----
+      // WHY token decode (not return from executeStartWorkflow): adding sessionId to
+      // V2StartWorkflowOutputSchema would be a public API change (GAP-7 territory).
+      // Token decode via the alias store is the correct in-process path.
+      // On decode failure: proceed with childSessionId = null (observable in logs).
+      let childSessionId: string | null = null;
+      const childContinueToken = startResult.value.response.continueToken ?? '';
+      if (childContinueToken) {
+        const decoded = await parseContinueTokenOrFail(
+          childContinueToken,
+          ctx.v2.tokenCodecPorts,
+          ctx.v2.tokenAliasStore,
+        );
+        if (decoded.isOk()) {
+          childSessionId = decoded.value.sessionId;
+        } else {
+          console.warn(
+            `[WorkflowRunner] spawn_agent: could not decode childSessionId from continueToken -- ` +
+            `childSessionId will be null in result. Reason: ${decoded.error.message}`,
+          );
+        }
+      }
+
+      // ---- Run child workflow (blocking until complete) ----
+      // WHY direct runWorkflow() call (not dispatch()): dispatch() is fire-and-forget and uses
+      // a global Semaphore. Calling it from inside a running session would deadlock.
+      // Direct await runWorkflow() is naturally blocking -- the parent's AgentLoop is paused
+      // inside execute() until the child completes (AgentLoop.execute() is sequential).
+      const childResult = await runWorkflowFn(
+        {
+          workflowId: String(params.workflowId),
+          goal: String(params.goal),
+          workspacePath: String(params.workspacePath),
+          context: params.context as Readonly<Record<string, unknown>> | undefined,
+          // WHY spawnDepth: child session constructs its own spawn_agent tool at depth+1.
+          // This is the mechanism by which depth limits propagate through the tree.
+          spawnDepth: currentDepth + 1,
+          // WHY parentSessionId: threads the parent link through runWorkflow -> executeStartWorkflow
+          // for context_set injection (alongside the session_created.data written above).
+          parentSessionId: thisWorkrailSessionId,
+          // WHY _preAllocatedStartResponse: the session is already created above.
+          // runWorkflow() MUST NOT call executeStartWorkflow() again (invariant).
+          _preAllocatedStartResponse: startResult.value.response,
+        },
+        ctx,
+        apiKey,
+        undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
+        emitter,
+      );
+
+      // ---- Map WorkflowRunResult to structured output ----
+      // WHY all 4 variants: WorkflowRunResult is a discriminated union with 4 members.
+      // Exhaustive handling ensures the parent LLM gets a meaningful response for every outcome.
+      // delivery_failed is treated as success (the work is done; only the callback failed).
+      let resultObj: { childSessionId: string | null; outcome: 'success' | 'error' | 'timeout'; notes: string };
+
+      if (childResult._tag === 'success') {
+        resultObj = {
+          childSessionId,
+          outcome: 'success',
+          notes: childResult.lastStepNotes ?? '(no notes from child session)',
+        };
+      } else if (childResult._tag === 'error') {
+        resultObj = {
+          childSessionId,
+          outcome: 'error',
+          notes: childResult.message,
+        };
+      } else if (childResult._tag === 'timeout') {
+        resultObj = {
+          childSessionId,
+          outcome: 'timeout',
+          notes: childResult.message,
+        };
+      } else {
+        // delivery_failed: the workflow ran to completion -- work is done. Only the result
+        // delivery (HTTP callback) failed. Return as success with a note about the delivery failure.
+        resultObj = {
+          childSessionId,
+          outcome: 'success',
+          notes: `Child workflow completed, but result delivery failed: ${childResult.deliveryError}`,
+        };
+      }
+
+      console.log(`[WorkflowRunner] spawn_agent completed: sessionId=${sessionId} childSessionId=${childSessionId ?? 'null'} outcome=${resultObj.outcome}`);
+      emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent_complete', summary: `outcome=${resultObj.outcome} child=${childSessionId ?? 'null'}`, ...withWorkrailSession(thisWorkrailSessionId) });
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(resultObj) }],
+        details: resultObj,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // report_issue tool
 // ---------------------------------------------------------------------------
 
@@ -1521,6 +1793,7 @@ Good pattern: "Question: Should I check the middleware? Answer: The workflow ste
 - \`Read\`: Read files.
 - \`Write\`: Write files.
 - \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND complete_step (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
+- \`spawn_agent\`: Delegate a sub-task to a child WorkRail session. BLOCKS until the child completes. Returns \`{ childSessionId, outcome: "success"|"error"|"timeout", notes: string }\`. Always check \`outcome\` before using \`notes\`. IMPORTANT: your session's time limit (maxSessionMinutes) keeps running while the child executes -- ensure your parent session has enough time for both your work AND the child's work. Maximum spawn depth is 3 by default (configurable). Use only when a step explicitly asks for delegation or when a clearly separable sub-task would benefit from its own WorkRail audit trail.
 
 ## Execution contract
 1. Read the step carefully. Do ALL the work the step asks for.
@@ -1911,6 +2184,20 @@ export async function runWorkflow(
   // and eliminates TOKEN_BAD_SIGNATURE errors from token mangling. continue_workflow
   // is kept for backward compatibility but is marked deprecated in its description.
   // The LLM should prefer complete_step as directed by the system prompt.
+  //
+  // WHY spawn_agent is listed after report_issue: it is a rarely-used orchestration
+  // tool. Placing it after the common tools (complete_step, Bash, Read, Write) reduces
+  // the chance the LLM reaches for it prematurely.
+
+  // ---- spawn_agent depth parameters ----
+  // WHY read at construction time: trigger.spawnDepth is set by the parent session's
+  // makeSpawnAgentTool when it calls runWorkflow() for the child. Root sessions have
+  // spawnDepth = undefined (defaults to 0). The maxSubagentDepth comes from trigger.agentConfig
+  // or falls back to 3. These values are captured once here; the factory uses them for all
+  // spawn_agent calls in this session's lifetime.
+  const spawnCurrentDepth = trigger.spawnDepth ?? 0;
+  const spawnMaxDepth = trigger.agentConfig?.maxSubagentDepth ?? 3;
+
   const tools: AgentTool[] = [
     makeCompleteStepTool(
       sessionId,
@@ -1939,6 +2226,25 @@ export async function runWorkflow(
         issueSummaries.push(summary);
       }
     }),
+    // WHY spawn_agent: enables native WorkRail child session delegation from workflow steps.
+    // The tool is always available in the tool list; the depth check inside execute() is the
+    // enforcement boundary. workrailSessionId is the parent -- it becomes parentSessionId in
+    // the child session's event log.
+    // WHY fallback to empty string when workrailSessionId is null: a null workrailSessionId means
+    // the token decode failed earlier (unusual internal error). The child will still be created,
+    // but parentSessionId in the event log will be ''. This is acceptable -- the session runs
+    // correctly; only the parent-child link in the DAG view will be missing.
+    makeSpawnAgentTool(
+      sessionId,
+      ctx,
+      apiKey,
+      workrailSessionId ?? '',
+      spawnCurrentDepth,
+      spawnMaxDepth,
+      runWorkflow,
+      schemas,
+      emitter,
+    ),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----

@@ -147,7 +147,10 @@ const PreferencesChangedDataV1Schema = z
  * to be closed so projections and storage don't drift under "stringly kinds".
  */
 export const DomainEventV1Schema = z.discriminatedUnion('kind', [
-  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('session_created'), data: z.object({}) }),
+  // parentSessionId is optional -- root sessions (no parent) produce data: {}.
+  // Extension is backward-compatible: z.object() uses strip mode (not strict),
+  // so existing parsers that expect data: {} silently ignore the new field.
+  DomainEventEnvelopeV1Schema.extend({ kind: z.literal('session_created'), data: z.object({ parentSessionId: z.string().optional() }) }),
   DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('observation_recorded'),
     scope: z.undefined(),

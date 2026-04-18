@@ -199,6 +199,11 @@ export function buildInitialEvents(args: {
    * Used by the autonomous daemon to set is_autonomous: 'true' without changing
    * the public V2StartWorkflowInput schema. */
   readonly extraContext?: Readonly<Record<string, string>>;
+  /** Optional WorkRail session ID of the parent session that spawned this one.
+   * When set, written into the session_created event's data field so the parent-child
+   * relationship is durable and survives crashes. Root sessions omit this field.
+   * Set only by makeSpawnAgentTool() via internalContext['parentSessionId']. */
+  readonly parentSessionId?: string;
 }): readonly DomainEventV1[] {
   const {
     sessionId,
@@ -213,6 +218,7 @@ export function buildInitialEvents(args: {
     idFactory,
     goal,
     extraContext,
+    parentSessionId,
   } = args;
 
   const evtSessionCreated = idFactory.mintEventId();
@@ -229,7 +235,10 @@ export function buildInitialEvents(args: {
       sessionId,
       kind: EVENT_KIND.SESSION_CREATED,
       dedupeKey: `session_created:${sessionId}`,
-      data: {},
+      // WHY spread parentSessionId conditionally: root sessions produce data: {} (unchanged).
+      // Child sessions produced by spawn_agent include parentSessionId so the session tree
+      // is durable in the event log and queryable for the console DAG view.
+      data: parentSessionId !== undefined ? { parentSessionId } : {},
     },
     {
       v: 1,
@@ -482,6 +491,11 @@ export function executeStartWorkflow(
               idFactory,
               goal: input.goal,
               extraContext: internalContext,
+              // WHY extract from internalContext: parentSessionId is injected by makeSpawnAgentTool()
+              // via internalContext so the public V2StartWorkflowInput schema stays unchanged.
+              // It is extracted here to populate session_created.data (typed, durable, DAG-queryable)
+              // rather than only living in a context_set event (which internalContext alone would produce).
+              parentSessionId: internalContext?.['parentSessionId'],
             });
 
             // New session: truth is known to be empty at this point (session just created).

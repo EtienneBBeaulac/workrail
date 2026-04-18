@@ -11,7 +11,9 @@ export const UserOnlyDependencyReasonSchema = z.enum([
 
 export const GapReasonSchema = z.discriminatedUnion('category', [
   z.object({ category: z.literal('user_only_dependency'), detail: UserOnlyDependencyReasonSchema }),
-  z.object({ category: z.literal('contract_violation'), detail: z.enum(['missing_required_output', 'invalid_required_output', 'missing_required_notes']) }),
+  // WHY assessment_followup_required: matches GapReasonV1 in reason-model.ts which already includes this detail.
+  // The schema was previously out of sync with the domain type -- this corrects the mismatch.
+  z.object({ category: z.literal('contract_violation'), detail: z.enum(['missing_required_output', 'invalid_required_output', 'missing_required_notes', 'assessment_followup_required']) }),
   z.object({
     category: z.literal('capability_missing'),
     detail: z.enum(['required_capability_unavailable', 'required_capability_unknown']),
