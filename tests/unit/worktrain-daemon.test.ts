@@ -45,7 +45,7 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
     execCalls.push({ command, args });
     if (command === 'launchctl' && args[0] === 'list') {
       return {
-        stdout: JSON.stringify({ PID: 42, Status: 0, Label: 'com.worktrain.daemon' }),
+        stdout: JSON.stringify({ PID: 42, Status: 0, Label: 'io.worktrain.daemon' }),
         stderr: '',
         exitCode: 0,
       };
@@ -97,7 +97,7 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
   return deps;
 }
 
-const PLIST_PATH = '/Users/test/Library/LaunchAgents/com.worktrain.daemon.plist';
+const PLIST_PATH = '/Users/test/Library/LaunchAgents/io.worktrain.daemon.plist';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // --install
@@ -320,7 +320,7 @@ describe('worktrain daemon --status', () => {
       exec: async (command, args) => {
         if (command === 'launchctl' && args[0] === 'list') {
           return {
-            stdout: JSON.stringify({ Status: 0, Label: 'com.worktrain.daemon' }),
+            stdout: JSON.stringify({ Status: 0, Label: 'io.worktrain.daemon' }),
             stderr: '',
             exitCode: 0,
           };

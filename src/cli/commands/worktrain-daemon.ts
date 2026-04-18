@@ -30,8 +30,13 @@ import { success, failure, misuse } from '../types/cli-result.js';
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** The launchd service label. Must match the Label key in the plist. */
-const LAUNCHD_LABEL = 'com.worktrain.daemon';
+/**
+ * The launchd service label. Must match the Label key in the plist.
+ * WHY io.worktrain.daemon (reverse domain): follows Apple's convention for
+ * user-installed services. Apple reserves the com.apple.* namespace; third-party
+ * services should use io.*, com.company.* etc.
+ */
+const LAUNCHD_LABEL = 'io.worktrain.daemon';
 
 /** Plist filename under ~/Library/LaunchAgents/. */
 const PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
@@ -186,6 +191,15 @@ ${envEntries}
 
   <key>KeepAlive</key>
   <true/>
+
+  <!--
+    ThrottleInterval: minimum seconds between launchd restarts.
+    WHY 30s: prevents launchd from spinning in a tight restart loop if the daemon
+    exits immediately (e.g., missing credentials or invalid workspace path).
+    Without this, a misconfigured service consumes CPU and spams logs.
+  -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
 </dict>
 </plist>
 `;
