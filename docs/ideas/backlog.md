@@ -5225,3 +5225,106 @@ With `complete_step` + `spawn_agent`:
 3. **Notifications** -- macOS notification + generic webhook. ~30 min implementation.
 4. **Late-bound goals** -- default `goalTemplate: "{{$.goal}}"` when no static goal. 10-line fix in trigger-store.ts.
 5. **Artifacts store foundation** -- `~/.workrail/artifacts/` directory structure. Step 1 of the first-class artifacts vision.
+
+---
+
+## What WorkTrain is currently capable of (as of v3.36.0, Apr 18, 2026)
+
+Tested empirically today. This is what actually works, not what's specced.
+
+---
+
+### Autonomous workflow execution
+
+**Confirmed working:**
+- Accepts webhook triggers and dispatches workflow sessions autonomously
+- `mr-review-workflow-agentic` v2.6 runs end-to-end: context gathering, parallel reviewer phases, synthesis loop, validation, structured handoff. **Confirmed today** (sess_3bmj..., APPROVE verdict).
+- `coding-task-workflow-agentic` (lean v2) runs end-to-end for Small tasks. **Confirmed today** (evidenceFrom field implementation, completed successfully).
+- `wr.discovery` v3.2.0 runs with goal reframing. **Confirmed today** (spawn_agent architecture discovery).
+- Sessions advance through 8+ workflow steps autonomously (36 step advances today across 6 sessions).
+- 402 LLM turns + 660 tool calls executed autonomously today.
+
+**Known reliability issues:**
+- `wr.discovery` hit timeout once today -- multi-step discovery workflows can run long and hit the 60-min limit
+- One coding task failed (error) -- assessment gate or tool issue, still being investigated
+- One MR review timed out -- complex PRs need more time than the configured limit
+
+---
+
+### Trigger system
+
+**Confirmed working:**
+- Generic webhook trigger (fire-and-forget via `POST /webhook/<id>`)
+- GitHub Issues polling (no webhook registration needed)
+- GitLab MR polling (no webhook registration needed)
+- Multiple triggers in one triggers.yml
+- WorkflowId validation at startup (wrong IDs caught before traffic arrives)
+- `goalTemplate` interpolation from webhook payload
+
+**Not yet working:**
+- Native cron trigger (requires OS crontab workaround)
+- Late-bound goals (static goal required in triggers.yml, dynamic goal via payload requires `goalTemplate`)
+
+---
+
+### Agent capabilities inside sessions
+
+**Confirmed working:**
+- Bash (read files, run commands, git, gh CLI)
+- Read (read files)
+- Write (write files -- used by coding tasks)
+- `complete_step` (daemon-managed token, LLM never handles continueToken)
+- `continue_workflow` (deprecated but functional for backward compat)
+- `report_issue` (agents call this when stuck, logged to `~/.workrail/issues/`)
+- `spawn_agent` (spawns child WorkRail sessions in-process, v3.35.1+)
+- Assessment artifact submission (`artifacts` field in complete_step)
+
+**Not yet working in production:**
+- `spawn_agent` just shipped (v3.35.1) -- untested in real workflows yet
+- `complete_step` just shipped (v3.34.1) -- daemon now using it but not yet validated end-to-end through full assessment-gate workflow
+
+---
+
+### Observability
+
+**Confirmed working:**
+- Daemon event log (`~/.workrail/events/daemon/YYYY-MM-DD.jsonl`) -- every LLM turn, tool call, session lifecycle event
+- `worktrain logs --follow` -- real-time event stream
+- `worktrain status <sessionId>` -- session health summary with stuck detection
+- Console (`http://localhost:3456/console`) -- live sessions, step notes, repoRoot grouping, `isLive` from event log
+- Stuck detection -- `agent_stuck` events emitted for repeated tool calls, no-progress, timeout imminent
+- `issue_reported` events when agents hit walls
+
+**Known gaps:**
+- Console shows flat session list, not work-unit tree (parentSessionId data exists, visualization not built)
+- `isLive` only covers today's event log (cross-midnight limitation)
+- No push notifications when daemon completes work
+
+---
+
+### Infrastructure
+
+**Confirmed working:**
+- MCP server stable (v3.36.0, bridge removed, EPIPE fixed)
+- `worktrain daemon --install` creates launchd service (daemon survives MCP reconnects)
+- `worktrain console` standalone (independent of daemon and MCP server)
+- `worktrain init` guided onboarding
+- `worktrain tell` / `worktrain inbox` message queue
+- `worktrain spawn` / `worktrain await` CLI (primitives exist, no coordinator templates yet)
+- Crash recovery (orphaned sessions detected and cleared on startup)
+- Workspace context injection (CLAUDE.md, AGENTS.md, daemon-soul.md)
+- maxConcurrentSessions semaphore (default 3)
+- Per-trigger timeout + max-turn limits
+
+---
+
+### What WorkTrain cannot do yet (key gaps for autonomous production use)
+
+1. **Multi-phase work is invisible** -- sessions are flat in console. A 5-session MR review pipeline looks like 5 unrelated sessions.
+2. **No coordinator scripts** -- spawn_agent and spawn/await exist but there's no coordinator template to run a full pipeline.
+3. **No auto-commit** -- agents write code but don't commit or open PRs autonomously (merge workflow exists in spec, not in production use).
+4. **No notifications** -- daemon completes work silently.
+5. **Assessment gates unreliable** -- complete_step fixes the token issue but full assessment-gate workflows not yet validated end-to-end.
+6. **Subagent delegation invisible** -- spawn_agent creates proper child sessions, but workflows still use mcp__nested-subagent__Task for most delegation (invisible black box).
+7. **No artifact store** -- agents dump markdown in the repo as a workaround.
+8. **Context poverty** -- each session starts from scratch, no persistent knowledge graph.
