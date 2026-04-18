@@ -4218,3 +4218,73 @@ worktrain console --workspace ~/git/myproject  # workspace-scoped view
 **Migration:** Remove console startup from both the daemon command and the MCP server startup. The primary election logic (`DashboardLock`, `bindWithPortFallback`) becomes unnecessary. The `DaemonConsole` module in `src/trigger/daemon-console.ts` becomes `src/console/standalone-console.ts` with a simpler interface.
 
 **Why this matters:** Today the console goes down whenever the MCP server crashes. With this architecture, the console is as stable as the filesystem. The daemon crashing doesn't affect the console. The MCP server crashing doesn't affect the console. The only thing that can take down the console is killing the `worktrain console` process itself.
+
+---
+
+## WorkTrain sprint: Apr 17-18, 2026 -- shipped and current state
+
+### What shipped (Apr 17-18)
+
+**Daemon stabilization:**
+- ✅ `report_issue` tool -- agents call this instead of dying silently; structured JSON written to `~/.workrail/issues/<sessionId>.jsonl`, event emitted to daemon stream, WORKTRAIN_STUCK marker in `WorkflowRunResult`
+- ✅ Richer `BASE_SYSTEM_PROMPT` -- baked-in behavioral principles (oracle hierarchy, self-directed reasoning, workflow-as-contract, silent failure policy) rather than relying on soul file alone
+- ✅ `/bin/bash` for Bash tool -- process substitution `<(...)` and other bash-specific syntax now works
+- ✅ `DaemonEventEmitter` -- structured event stream at `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`
+- ✅ Self-configuration -- `triggers.yml`, upgraded `daemon-soul.md` (WorkRail-specific rules + coding philosophy), `AGENTS.md` WorkTrain section
+
+**Workflow library:**
+- ✅ mr-review v2.6 -- `philosophy_alignment` reviewer family; scoped philosophy extraction in fact packet; 7th coverage domain; "is this the right design?" framing
+- ✅ wfw v2.5 -- phases 2 and 3 split into dedicated prep-step design steps (2a/2b, 3a/3b); principle: assessments need dedicated prep steps, not on-the-fly evidence gathering
+- ✅ Clean workflow display names across library (removed `v2 •`, `Lean •`, etc.)
+- ✅ `philosophy.mdc` created at `~/.firebender/commands/philosophy.mdc` -- MR review subagents now evaluate findings against coding philosophy
+
+**Integrations and infrastructure:**
+- ✅ GitLab polling triggers fully merged (#404) -- zero-webhook MR polling
+- ✅ TS6 forward-compat tsconfig fixes (#401) -- unblocks TypeScript 6 dep bumps
+- ✅ Standalone console spec -- `worktrain console` as independent file-reading binary, zero coupling to daemon or MCP server
+
+---
+
+### Current state (Apr 18, 2026)
+
+**What works:**
+- Daemon runs autonomously on webhook triggers
+- Sessions advance through full workflow steps
+- Console at `:3456` when daemon starts before MCP server
+- Daemon event stream logging every tool call
+- GitLab + GitHub polling (no webhooks needed)
+- Philosophy-aligned MR reviews
+- `report_issue` tool available to agents
+
+**Known issues / active bugs:**
+
+1. **Daemon killed by MCP server reconnects** (CRITICAL) -- the daemon and MCP server share process infrastructure via the bridge mechanism. When Claude Code reconnects and a new MCP server process starts, it displaces the running daemon. The daemon must be run from a separate terminal or as a `launchd` service to survive MCP reconnects. Root fix: decouple daemon from the MCP server process tree entirely.
+
+2. **Console unstable** -- the console port (3456) is contested between daemon and MCP server. Whoever starts first wins. When the MCP server reconnects, it takes the port and the daemon console goes down. Root fix: standalone `worktrain console` binary (spec in backlog).
+
+3. **`workflow_not_found` on first test** -- trigger used `coding-task-workflow-agentic.lean.v2` (filename) instead of `coding-task-workflow-agentic` (workflow ID). Fixed in triggers.yml. Symptom of workflow ID vs filename confusion -- worth a validator that catches this at `worktrain daemon` startup.
+
+4. **Session advances 0 when daemon crashes** -- if daemon dies mid-Phase-0 (before any `continue_workflow` call), the session is orphaned at `observation_recorded(8)` with 0 advances and no output. No automatic recovery. Crash recovery reads the daemon-session token file but can't resume a session that never advanced. No fix yet.
+
+---
+
+### Next priorities (groomed Apr 18)
+
+**Tier 1 -- Must fix for reliable autonomous operation:**
+1. **Daemon as a launchd service** -- run daemon outside Claude Code's process tree so MCP reconnects can't kill it. `worktrain daemon --install` creates a launchd plist and starts it.
+2. **Standalone `worktrain console`** -- file-watching binary independent of daemon/MCP. Zero coupling. Spec in backlog.
+3. **Workflow ID validation at startup** -- `workrail daemon` should validate that all `workflowId` values in triggers.yml resolve to real workflows before starting, not fail silently at dispatch time.
+
+**Tier 2 -- Workflow quality:**
+4. **mr-review prep steps** -- the audit identified missing dedicated prep steps for philosophy extraction, pattern baseline, and design decision reconstruction. These are described in the backlog but not yet in the workflow JSON. wfw v2.5 guides new workflows to add them; the mr-review workflow itself still needs a v2.7 pass to implement them.
+5. **Autonomous workflow variants** -- audit `requireConfirmation` gates across all workflows; confirm daemon's `autonomy: full` setting correctly bypasses the right ones.
+
+**Tier 3 -- Features:**
+6. **`worktrain spawn` / `worktrain await`** -- already merged, needs real-world test
+7. **Auto-commit from handoff artifact** -- merged but untested end-to-end
+8. **Session knowledge log** -- continuous context accumulation for subagent packaging
+9. **TypeScript 6 dep bump** -- tsconfig fixes are in (#401), unblocks #244 and #231
+
+**Open PRs (only dep bumps remain):**
+- #330, #287, #288 -- vitest 4 + vite 8 (major version, needs testing)
+- #244, #231 -- TypeScript 6.0.2 (now unblocked by #401)

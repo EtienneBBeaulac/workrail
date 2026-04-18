@@ -3,29 +3,8 @@ triggers:
     provider: generic
     workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
-    goal: "What is 2+2? Answer and stop."
+    goal: "Add the evidenceFrom field to the AssessmentDimension type in src/mcp/output-schemas.ts -- this is the backlog item that makes assessment gates declare their evidence sources. The field should be optional (string[]), with a JSDoc comment explaining it links an assessment dimension to the context keys a prep step must produce before the gate fires."
     concurrencyMode: parallel
-    autoCommit: false  # daemon cannot commit without explicit config
+    autoCommit: false
     agentConfig:
-      maxSessionMinutes: 60  # coding tasks need more than 30 min
-
-# FUTURE: GitHub PR review (activate when github_poll is configured)
-# - id: pr-review
-#   provider: github_poll  # not yet implemented, use webhook for now
-#   workflowId: mr-review-workflow.agentic.v2
-#   workspacePath: /Users/etienneb/git/personal/workrail
-#   concurrencyMode: parallel
-#   autoCommit: false  # daemon cannot commit without explicit config
-#   agentConfig:
-#     maxSessionMinutes: 60
-
-# FUTURE: Weekly code health scan
-# - id: weekly-health
-#   provider: cron  # not yet implemented, use OS crontab
-#   schedule: "0 8 * * 1"
-#   workflowId: architecture-scalability-audit
-#   workspacePath: /Users/etienneb/git/personal/workrail
-#   concurrencyMode: serial
-#   autoCommit: false  # daemon cannot commit without explicit config
-#   agentConfig:
-#     maxSessionMinutes: 120
+      maxSessionMinutes: 60
