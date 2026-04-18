@@ -5121,7 +5121,9 @@ Workflow steps declare their artifact output type:
 }
 ```
 
-The daemon automatically stores the step's notes as a typed artifact. Other steps and other sessions can query it by type rather than by file path.
+**Both the daemon AND the MCP server** store step artifacts automatically. The artifact store is a WorkRail data layer feature, not daemon-specific. A human using Claude Code with the MCP produces the same artifacts in the same store as an autonomous daemon session. The console shows them for both. Other sessions (human-driven or autonomous) can query them either way.
+
+In MCP mode, the human can explicitly commit an artifact to the repo if desired (e.g. a final spec becomes `docs/specs/feature-x.md`). But the default is the artifact store -- repo is opt-in. The `NEVER COMMIT MARKDOWN FILES` rule in workflow metaGuidance exists because the artifact store doesn't exist yet. Once it does, that rule becomes unnecessary for all runtimes.
 
 ---
 
