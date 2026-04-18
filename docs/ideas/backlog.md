@@ -4975,3 +4975,55 @@ Long-term (when mobile exists):
 ```
 
 **Build order:** outbox.jsonl integration (foundation, works everywhere) → generic webhook (covers Slack/Discord/Teams/anything) → platform notifications (macOS/Linux/Windows) → mobile app push (when mobile exists).
+
+---
+
+## 🎉 WorkTrain first confirmed end-to-end autonomous session (Apr 18, 2026)
+
+**Timestamp:** 2026-04-18T15:09:49Z  
+**Commit:** `473f4bd0` (main)  
+**npm version:** v3.34.1 (published, installable by anyone)  
+**What happened:** A real MR review workflow (`mr-review-workflow-agentic`) ran completely autonomously via webhook trigger, advanced through all phases (context gathering, review, synthesis, validation, handoff), self-validated, and produced a structured finding set. 8 step advances, `outcome: success`.
+
+**Trigger:** `POST /webhook/mr-review {"goal": "Review PR #566: fix two minor bugs..."}`  
+**Session:** `sess_3bmjuzf7l2vrqynjtleg5iskm4`  
+**Result:** APPROVE with High confidence. 3 Minor findings, 1 Informational. Correctly decided not to delegate since no Critical/Major issues.
+
+---
+
+### What works at this commit
+
+- ✅ Daemon accepts webhooks, starts sessions, runs workflows end-to-end
+- ✅ Sessions advance through all workflow phases autonomously
+- ✅ `mr-review-workflow-agentic` v2.6 runs fully -- context gathering, review phases, synthesis loop, validation, handoff
+- ✅ `wr.discovery` v3.2.0 runs fully -- with new phase-0-reframe (goal reframing before research)
+- ✅ Console shows live sessions via event log (no daemon connection required)
+- ✅ MCP server is stable (bridge removed, EPIPE fixed, v3.34.1 published)
+- ✅ GitHub + GitLab polling triggers (no webhooks needed)
+- ✅ `worktrain init`, `tell`, `inbox`, `spawn`, `await` CLI commands
+- ✅ Stuck detection + visibility (`worktrain status`, `worktrain logs --follow`)
+- ✅ `complete_step` tool -- daemon manages continueToken, LLM never handles it
+- ✅ Assessment gate circuit breaker (stops at 3 blocked attempts, shows artifact format)
+- ✅ `worktrain daemon --install` creates launchd service (daemon survives MCP reconnects)
+- ✅ Self-configuration (`triggers.yml`, `daemon-soul.md`, `AGENTS.md` for workrail repo)
+
+### Current limitations at this commit
+
+**Blocking reliable complex workflows:**
+1. **`complete_step` not yet tested in production** -- just merged, daemon still using `continue_workflow` in running sessions. Needs daemon restart to take effect.
+2. **Assessment gates still unreliable** -- `complete_step` fixes the token issue; the `artifacts` field (#557) fixes the submission issue. But `coding-task-workflow-agentic` phases with quality gates haven't been tested end-to-end yet.
+3. **Native `spawn_agent` not yet merged** -- implementation in progress. Until it lands, all subagent delegation is via `mcp__nested-subagent__Task` (invisible black box).
+4. **No session identity (parentSessionId)** -- multi-phase work appears as unrelated flat sessions in the console.
+
+**Architecture not yet realized:**
+5. **Coordinator scripts don't exist** -- `worktrain spawn/await` is there but no templates.
+6. **Subagent loop not rethought** -- LLM still decides when to delegate; workflow-as-orchestrator model is spec'd but not built.
+7. **Workflow runtime adapter not built** -- workflows run in daemon mode as-is; no MCP vs daemon adaptation layer.
+8. **Knowledge graph not built** -- context gathering still sweeps files on every session.
+9. **MCP simplification PR-B not done** -- HttpServer still starts with MCP server.
+
+**Missing for production autonomy:**
+10. **No notifications** -- daemon completes work silently. Users have no awareness unless watching console/logs.
+11. **No auto-commit from handoff artifact** -- merged but untested end-to-end.
+12. **Late-bound goals not implemented** -- triggers require static goals; dynamic goals (like PR reviews) need `goalTemplate: "{{$.goal}}"` as default.
+13. **No coordinator script template** -- the multi-phase autonomous pipeline exists as primitives but not as a usable script.
