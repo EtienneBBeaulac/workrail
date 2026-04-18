@@ -4390,3 +4390,29 @@ The existing `DaemonEventEmitter` (written in #498) writes to a separate daily l
 ### FatalToolError: distinguish recoverable from non-recoverable tool failures (follow-up from PR #523)
 The blanket try/catch in AgentLoop._executeTools() converts ALL tool throws to isError tool_results. This is correct for Bash/Read/Write (LLM can see and retry), but potentially wrong for continue_workflow failures (LLM retrying with a broken token loops). The discovery agent proposed a FatalToolError subclass: tools throw FatalToolError for non-recoverable errors (session corruption, bad tokens), plain Error for recoverable failures. _executeTools catches plain Error and returns isError; FatalToolError propagates and kills the session. Combined with the DEFAULT_MAX_TURNS cap (PR followup), this provides defense-in-depth.
 5. Deprecate `DaemonEventEmitter` once console reads from session events
+
+---
+
+### Worktree lifecycle management: automatic cleanup and inventory (Apr 18, 2026)
+
+**The problem:** every WorkTrain agent that uses `--isolation worktree` leaves a worktree on disk after completion. With 10 concurrent agents running all day, this accumulated to 69 worktrees in `.claude/worktrees/`, triggering hundreds of simultaneous `git status` processes that saturated the CPU.
+
+**What's needed:**
+
+1. **Automatic cleanup on session end** -- when a WorkTrain session completes (success or failure), the daemon automatically runs `git worktree remove <path> --force` for the session's worktree. If the branch is already merged to main, also delete the local branch ref.
+
+2. **Startup pruning** -- `workrail daemon` startup runs `git worktree prune` in each configured workspace before starting the trigger listener.
+
+3. **`worktrain worktree list`** -- shows all WorkTrain-managed worktrees: path, branch, session ID, age, whether the branch is merged.
+
+4. **`worktrain worktree clean`** -- removes all worktrees whose branches are merged to main, or older than N days. Dry-run mode by default.
+
+5. **`worktrain worktree status`** -- summary: how many worktrees, total disk usage, any stale ones.
+
+6. **Never use main as a worktree** (already in backlog) -- enforced at worktree creation time, not just as a rule.
+
+**Root cause of the CPU spike:** 69 worktrees × repeated `git status --short` from tools/IDE plugins = hundreds of concurrent git processes. Each `git status` on a large repo with many untracked files is CPU-intensive.
+
+**Mitigation already in place:** `--isolation worktree` creates branches named `worktree-agent-<id>` -- these are identifiable and bulk-deletable. The daemon's `runStartupRecovery()` could also prune them.
+
+**Build order:** startup pruning (trivial, high value) → automatic cleanup on session end → `worktrain worktree` CLI commands.
