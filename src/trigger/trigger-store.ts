@@ -38,7 +38,7 @@ import {
   type TriggerDefinition,
   type ContextMapping,
   type ContextMappingEntry,
-  type GitLabPollingSource,
+  type PollingSource,
   type WorkspaceConfig,
   type WorkspaceName,
   asTriggerId,
@@ -64,7 +64,7 @@ export type TriggerStoreError =
 // Supported providers (extensible: add post-MVP providers here)
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_PROVIDERS = new Set(['generic', 'gitlab_poll']);
+const SUPPORTED_PROVIDERS = new Set(['generic', 'gitlab_poll', 'github_issues_poll', 'github_prs_poll']);
 
 // ---------------------------------------------------------------------------
 // Narrow YAML parser
@@ -108,13 +108,22 @@ interface ParsedTriggerRaw {
   // Workspace namespacing (Phase 1).
   workspaceName?: string;  // raw string; validated + branded in validateAndResolveTrigger
   soulFile?: string;       // raw path; cascade-resolved in validateAndResolveTrigger
-  // Polling trigger source (present only when provider === 'gitlab_poll').
+  // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
+  // Fields from all providers are unioned here -- the assembler validates which
+  // fields are required per provider and rejects invalid combinations.
   source?: {
+    // GitLab fields
     baseUrl?: string;
     projectId?: string;
-    token?: string;          // may be a $SECRET_REF, resolved at assembly time
-    events?: string;         // space-separated scalar in YAML; split at assemble time
+    // GitHub fields
+    repo?: string;            // "owner/repo" format
+    excludeAuthors?: string;  // space-separated logins; split at assemble time
+    notLabels?: string;       // space-separated label names; split at assemble time
+    labelFilter?: string;     // space-separated label names; passed to GitHub API
+    // Shared fields
+    token?: string;           // may be a $SECRET_REF, resolved at assembly time
+    events?: string;          // space-separated scalar in YAML; split at assemble time
     pollIntervalSeconds?: string; // numeric string; parsed to number at assembly time
   };
 }
@@ -409,6 +418,10 @@ function parseTriggersYaml(
             switch (srcKey) {
               case 'baseUrl':              source.baseUrl = srcValueResult.value; break;
               case 'projectId':            source.projectId = srcValueResult.value; break;
+              case 'repo':                 source.repo = srcValueResult.value; break;
+              case 'excludeAuthors':       source.excludeAuthors = srcValueResult.value; break;
+              case 'notLabels':            source.notLabels = srcValueResult.value; break;
+              case 'labelFilter':          source.labelFilter = srcValueResult.value; break;
               case 'token':                source.token = srcValueResult.value; break;
               case 'events':               source.events = srcValueResult.value; break;
               case 'pollIntervalSeconds':  source.pollIntervalSeconds = srcValueResult.value; break;
@@ -781,80 +794,174 @@ function validateAndResolveTrigger(
   }
 
   // ---------------------------------------------------------------------------
-  // pollingSource assembly (gitlab_poll only)
+  // pollingSource assembly (gitlab_poll, github_issues_poll, github_prs_poll)
   //
   // Invariants enforced here:
-  // - provider === 'gitlab_poll' requires source: block (missing_field error if absent)
-  // - provider !== 'gitlab_poll' with source: block logs a warning (block is ignored)
+  // - polling providers require source: block (missing_field error if absent)
+  // - provider === 'generic' with source: block logs a warning (block is ignored)
   // - token is resolved from env if it is a $SECRET_REF
   // - events is split from space-separated scalar to string[]
   // - pollIntervalSeconds is parsed to a positive integer (default 60)
+  // - GitLab requires baseUrl + projectId; GitHub requires repo
+  // - The assembled pollingSource is tagged with provider for discriminated union narrowing
   // ---------------------------------------------------------------------------
 
-  let pollingSource: GitLabPollingSource | undefined;
+  /**
+   * Parse pollIntervalSeconds from the raw source block.
+   * Returns 60 if absent, or a TriggerStoreError if invalid.
+   *
+   * WHY Number.isInteger instead of parseInt: parseInt('60.7', 10) silently returns 60,
+   * so an operator writing pollIntervalSeconds: 60.7 would get 60 with no warning.
+   * Number.isInteger(Number(raw)) catches both non-numeric strings (NaN -> false) and
+   * decimal values (60.7 -> false) in one check. Same pattern as maxSessionMinutes above.
+   */
+  function parsePollIntervalSeconds(
+    raw2: NonNullable<ParsedTriggerRaw['source']>,
+    triggerId2: string,
+  ): Result<number, TriggerStoreError> {
+    const intervalRaw = raw2.pollIntervalSeconds?.trim();
+    if (!intervalRaw) return ok(60);
+    const asNumber = Number(intervalRaw);
+    if (!Number.isInteger(asNumber) || asNumber <= 0) {
+      return err({
+        kind: 'invalid_field_value',
+        field: `source.pollIntervalSeconds (must be a positive integer, got: ${intervalRaw})`,
+        triggerId: triggerId2,
+      });
+    }
+    return ok(asNumber);
+  }
 
-  if (provider === 'gitlab_poll') {
+  let pollingSource: PollingSource | undefined;
+
+  const isPollingProvider = provider === 'gitlab_poll' ||
+    provider === 'github_issues_poll' ||
+    provider === 'github_prs_poll';
+
+  if (isPollingProvider) {
     if (!raw.source) {
       return err({ kind: 'missing_field', field: 'source', triggerId: rawId });
     }
 
     const src = raw.source;
 
-    // Validate required source sub-fields
-    const requiredSourceFields: Array<'baseUrl' | 'projectId' | 'token' | 'events'> = [
-      'baseUrl', 'projectId', 'token', 'events',
-    ];
-    for (const field of requiredSourceFields) {
-      if (!src[field]?.trim()) {
-        return err({ kind: 'missing_field', field: `source.${field}`, triggerId: rawId });
-      }
+    // Validate shared required field: token
+    if (!src.token?.trim()) {
+      return err({ kind: 'missing_field', field: 'source.token', triggerId: rawId });
     }
-
-    // Resolve token from env if it is a $SECRET_REF
-    const tokenRaw = src.token!.trim();
-    const tokenResult = resolveSecret(tokenRaw, rawId, env);
+    const tokenResult = resolveSecret(src.token.trim(), rawId, env);
     if (tokenResult.kind === 'err') return tokenResult;
 
-    // Parse events: space-separated scalar -> string array
-    const eventsRaw = src.events!.trim();
-    const events = eventsRaw.split(/\s+/).filter(Boolean);
+    // Parse events (required for all polling providers)
+    if (!src.events?.trim()) {
+      return err({ kind: 'missing_field', field: 'source.events', triggerId: rawId });
+    }
+    const events = src.events.trim().split(/\s+/).filter(Boolean);
     if (events.length === 0) {
       return err({ kind: 'missing_field', field: 'source.events (empty)', triggerId: rawId });
     }
 
-    // Parse pollIntervalSeconds: optional, must be a positive integer, defaults to 60
-    // WHY Number.isInteger instead of parseInt: parseInt('60.7', 10) silently returns 60,
-    // so an operator writing pollIntervalSeconds: 60.7 would get 60 with no warning.
-    // Number.isInteger(Number(raw)) catches both non-numeric strings (NaN -> false) and
-    // decimal values (60.7 -> false) in one check. Same pattern as maxSessionMinutes above.
-    const intervalRaw = src.pollIntervalSeconds?.trim();
-    let pollIntervalSeconds = 60;
-    if (intervalRaw) {
-      const asNumber = Number(intervalRaw);
-      if (!Number.isInteger(asNumber) || asNumber <= 0) {
-        return err({
-          kind: 'invalid_field_value',
-          field: `source.pollIntervalSeconds (must be a positive integer, got: ${intervalRaw})`,
-          triggerId: rawId,
-        });
-      }
-      pollIntervalSeconds = asNumber;
-    }
+    // Parse pollIntervalSeconds (shared, optional)
+    const intervalResult = parsePollIntervalSeconds(src, rawId);
+    if (intervalResult.kind === 'err') return intervalResult;
+    const pollIntervalSeconds = intervalResult.value;
 
-    pollingSource = {
-      baseUrl: src.baseUrl!.trim(),
-      projectId: src.projectId!.trim(),
-      token: tokenResult.value,
-      events,
-      pollIntervalSeconds,
-    };
+    if (provider === 'gitlab_poll') {
+      // GitLab-specific required fields
+      if (!src.baseUrl?.trim()) {
+        return err({ kind: 'missing_field', field: 'source.baseUrl', triggerId: rawId });
+      }
+      if (!src.projectId?.trim()) {
+        return err({ kind: 'missing_field', field: 'source.projectId', triggerId: rawId });
+      }
+
+      // Warn on unknown or unreachable event types
+      const KNOWN_MR_EVENT_TYPES = new Set([
+        'merge_request.opened',
+        'merge_request.updated',
+        'merge_request.merged',
+        'merge_request.closed',
+      ]);
+      for (const event of events) {
+        if (!KNOWN_MR_EVENT_TYPES.has(event)) {
+          console.warn(
+            `[TriggerStore] Unknown polling event type '${event}' for trigger '${rawId}' -- ` +
+            `will match all open MRs as fallback`,
+          );
+        } else if (event === 'merge_request.merged' || event === 'merge_request.closed') {
+          console.warn(
+            `[TriggerStore] Event type '${event}' for trigger '${rawId}' cannot be observed ` +
+            `with state=opened polling (GitLab only returns open MRs). ` +
+            `Use a webhook trigger for merge/close events.`,
+          );
+        }
+      }
+
+      pollingSource = {
+        provider: 'gitlab_poll',
+        baseUrl: src.baseUrl.trim(),
+        projectId: src.projectId.trim(),
+        token: tokenResult.value,
+        events,
+        pollIntervalSeconds,
+      };
+    } else {
+      // GitHub-specific required field: repo
+      if (!src.repo?.trim()) {
+        return err({ kind: 'missing_field', field: 'source.repo', triggerId: rawId });
+      }
+
+      // Warn on unknown GitHub event types
+      const KNOWN_GITHUB_ISSUE_EVENTS = new Set(['issues.opened', 'issues.updated']);
+      const KNOWN_GITHUB_PR_EVENTS = new Set(['pull_request.opened', 'pull_request.updated']);
+      const knownEvents = provider === 'github_issues_poll' ? KNOWN_GITHUB_ISSUE_EVENTS : KNOWN_GITHUB_PR_EVENTS;
+      for (const event of events) {
+        if (!knownEvents.has(event)) {
+          console.warn(
+            `[TriggerStore] Unknown GitHub polling event type '${event}' for trigger '${rawId}' -- ` +
+            `will match all items as fallback`,
+          );
+        }
+      }
+
+      // Parse optional space-separated list fields
+      const excludeAuthors = src.excludeAuthors?.trim()
+        ? src.excludeAuthors.trim().split(/\s+/).filter(Boolean)
+        : [];
+      const notLabels = src.notLabels?.trim()
+        ? src.notLabels.trim().split(/\s+/).filter(Boolean)
+        : [];
+      const labelFilter = src.labelFilter?.trim()
+        ? src.labelFilter.trim().split(/\s+/).filter(Boolean)
+        : [];
+
+      if (excludeAuthors.length === 0) {
+        console.warn(
+          `[TriggerStore] WARNING: trigger '${rawId}' has provider='${provider}' but ` +
+          `excludeAuthors is not set. If WorkTrain creates issues/PRs under a bot account, ` +
+          `omitting excludeAuthors will cause infinite self-review loops. ` +
+          `Set excludeAuthors to your WorkTrain bot account login (e.g. "worktrain-bot").`,
+        );
+      }
+
+      pollingSource = {
+        provider: provider as 'github_issues_poll' | 'github_prs_poll',
+        repo: src.repo.trim(),
+        token: tokenResult.value,
+        events,
+        pollIntervalSeconds,
+        excludeAuthors,
+        notLabels,
+        labelFilter,
+      };
+    }
   } else if (raw.source) {
-    // provider !== 'gitlab_poll' but source: is present -- warn, do not error.
-    // The source: block is only meaningful for provider='gitlab_poll'.
+    // provider === 'generic' but source: is present -- warn, do not error.
+    // The source: block is only meaningful for polling providers.
     console.warn(
       `[TriggerStore] WARNING: trigger '${rawId}' has provider='${provider}' but also ` +
-      `defines a source: block. The source: block is only used for provider='gitlab_poll'. ` +
-      `It will be ignored for this trigger.`,
+      `defines a source: block. The source: block is only used for polling providers ` +
+      `(gitlab_poll, github_issues_poll, github_prs_poll). It will be ignored for this trigger.`,
     );
   }
 
