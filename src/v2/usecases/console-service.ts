@@ -141,6 +141,7 @@ async function readLiveActivity(
   workrailSessionId: string,
   maxEntries: number,
 ): Promise<readonly ConsoleToolActivity[] | null> {
+  // WHY today-only: a session active just before UTC midnight will have events in yesterday's file; after midnight liveActivity returns null for up to 10 minutes until a new heartbeat. Known limitation.
   const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   const filePath = path.join(DAEMON_EVENTS_DIR, `${date}.jsonl`);
 
@@ -311,6 +312,7 @@ export class ConsoleService {
           readLiveActivity(sessionIdStr, LIVE_ACTIVITY_MAX_ENTRIES)
         );
 
+        // Returns [] when no tool_called events found yet (log readable but empty); null means the log file could not be read.
         return RA.combine([detailRA, liveActivityRA] as const).map(([detail, liveActivity]) => ({
           ...detail,
           liveActivity,
