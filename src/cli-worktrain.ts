@@ -456,6 +456,181 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// LOGS COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Format a single DaemonEvent JSONL line for human-readable output.
+ *
+ * WHY inline: the logs command is the only consumer of this formatting.
+ * Keeping it here avoids creating a module for a single 30-line function.
+ */
+function formatDaemonEventLine(raw: string): string | null {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null; // Skip malformed lines silently.
+  }
+
+  const ts = typeof obj['ts'] === 'number'
+    ? new Date(obj['ts']).toISOString().replace('T', ' ').slice(0, 23)
+    : '?';
+  const kind = typeof obj['kind'] === 'string' ? obj['kind'] : 'unknown';
+  const sessionId = typeof obj['sessionId'] === 'string' ? obj['sessionId'].slice(0, 8) : null;
+  const prefix = sessionId ? `[${ts}] [${sessionId}] ${kind}` : `[${ts}] ${kind}`;
+
+  switch (kind) {
+    case 'llm_turn_started':
+      return `${prefix}  msgs=${obj['messageCount'] ?? '?'}`;
+    case 'llm_turn_completed':
+      return `${prefix}  stop=${obj['stopReason'] ?? '?'} in=${obj['inputTokens'] ?? '?'} out=${obj['outputTokens'] ?? '?'} tools=[${Array.isArray(obj['toolNamesRequested']) ? (obj['toolNamesRequested'] as string[]).join(',') : ''}]`;
+    case 'tool_call_started':
+      return `${prefix}  tool=${obj['toolName'] ?? '?'} args=${String(obj['argsSummary'] ?? '').slice(0, 80)}`;
+    case 'tool_call_completed':
+      return `${prefix}  tool=${obj['toolName'] ?? '?'} ${obj['durationMs'] ?? '?'}ms result=${String(obj['resultSummary'] ?? '').slice(0, 60)}`;
+    case 'tool_call_failed':
+      return `${prefix}  tool=${obj['toolName'] ?? '?'} ${obj['durationMs'] ?? '?'}ms err=${String(obj['errorMessage'] ?? '').slice(0, 80)}`;
+    case 'tool_called':
+      return `${prefix}  tool=${obj['toolName'] ?? '?'} ${obj['summary'] ? String(obj['summary']).slice(0, 80) : ''}`;
+    case 'tool_error':
+      return `${prefix}  tool=${obj['toolName'] ?? '?'} err=${String(obj['error'] ?? '').slice(0, 80)}`;
+    case 'session_started':
+      return `${prefix}  workflow=${obj['workflowId'] ?? '?'} workspace=${obj['workspacePath'] ?? '?'}`;
+    case 'session_completed':
+      return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${obj['outcome'] ?? '?'}${obj['detail'] ? ` (${obj['detail']})` : ''}`;
+    case 'step_advanced':
+      return `${prefix}`;
+    case 'issue_reported':
+      return `${prefix}  severity=${obj['severity'] ?? '?'} ${String(obj['summary'] ?? '').slice(0, 80)}`;
+    default:
+      return `${prefix}  ${JSON.stringify(obj).slice(0, 120)}`;
+  }
+}
+
+program
+  .command('logs')
+  .description('Read and display the WorkRail daemon event log. Use --follow to stream new events in real time.')
+  .option('--follow', 'Continuously poll the log file for new events (like tail -f)')
+  .option('--session <id>', 'Filter events by sessionId prefix (first 8 chars or full UUID)')
+  .action(async (options: { follow?: boolean; session?: string }) => {
+    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+
+    /**
+     * Compute today's log file path.
+     * Recomputed on each poll iteration so --follow handles midnight rotation.
+     */
+    function todayFilePath(): string {
+      const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      return path.join(eventsDir, `${date}.jsonl`);
+    }
+
+    /**
+     * Read lines from a file starting at byte offset, return lines and new offset.
+     * Returns null if the file does not exist.
+     */
+    function readNewLines(filePath: string, fromOffset: number): { lines: string[]; newOffset: number } | null {
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(filePath);
+      } catch {
+        return null; // File doesn't exist yet.
+      }
+
+      if (stat.size <= fromOffset) {
+        return { lines: [], newOffset: fromOffset }; // No new bytes.
+      }
+
+      const fd = fs.openSync(filePath, 'r');
+      try {
+        const len = stat.size - fromOffset;
+        const buf = Buffer.alloc(len);
+        fs.readSync(fd, buf, 0, len, fromOffset);
+        const text = buf.toString('utf8');
+        const lines = text.split('\n').filter((l) => l.trim().length > 0);
+        return { lines, newOffset: stat.size };
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+
+    /**
+     * Print a set of raw JSONL lines, applying the session filter if set.
+     */
+    function printLines(lines: string[]): void {
+      for (const line of lines) {
+        // Apply session filter if --session was provided.
+        if (options.session) {
+          // Filter by sessionId prefix or exact match.
+          try {
+            const obj = JSON.parse(line) as Record<string, unknown>;
+            const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
+            if (!sid.startsWith(options.session) && sid !== options.session) {
+              continue;
+            }
+          } catch {
+            continue; // Skip malformed lines when filtering.
+          }
+        }
+
+        const formatted = formatDaemonEventLine(line);
+        if (formatted !== null) {
+          process.stdout.write(formatted + '\n');
+        }
+      }
+    }
+
+    const filePath = todayFilePath();
+
+    if (!options.follow) {
+      // One-shot: read the file and exit.
+      const result = readNewLines(filePath, 0);
+      if (result === null) {
+        process.stdout.write(`No events yet. Is the daemon running? (Expected: ${filePath})\n`);
+        return;
+      }
+      printLines(result.lines);
+      return;
+    }
+
+    // --follow mode: print existing lines then poll for new ones.
+    // Start at offset 0 to show all existing events, then track the byte position.
+    let currentFilePath = filePath;
+    let offset = 0;
+
+    // Print all existing lines first.
+    const initial = readNewLines(currentFilePath, 0);
+    if (initial !== null) {
+      printLines(initial.lines);
+      offset = initial.newOffset;
+    } else {
+      process.stdout.write(`Waiting for events... (${currentFilePath})\n`);
+    }
+
+    // Poll every 500ms for new lines.
+    // Handles midnight rotation: recompute file path on each iteration.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
+      const newFilePath = todayFilePath();
+      if (newFilePath !== currentFilePath) {
+        // Day rolled over -- switch to the new file from the beginning.
+        currentFilePath = newFilePath;
+        offset = 0;
+      }
+
+      const result = readNewLines(currentFilePath, offset);
+      if (result !== null && result.lines.length > 0) {
+        printLines(result.lines);
+        offset = result.newOffset;
+      } else if (result !== null) {
+        offset = result.newOffset; // Update offset even if no new lines.
+      }
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
 // ═══════════════════════════════════════════════════════════════════════════
 

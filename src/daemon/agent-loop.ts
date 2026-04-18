@@ -134,6 +134,58 @@ export interface AgentInternalToolResultMessage {
   readonly content: ReadonlyArray<Anthropic.ToolResultBlockParam>;
 }
 
+/**
+ * Observability callbacks for AgentLoop.
+ *
+ * All callbacks are optional and fire synchronously at specific lifecycle points.
+ * Each is wrapped in try/catch inside AgentLoop to preserve the fire-and-forget
+ * invariant: a throwing callback must never crash the agent loop.
+ *
+ * WHY callbacks instead of event emitter: AgentLoop is decoupled from
+ * DaemonEventEmitter. Callbacks are the DI boundary that keeps AgentLoop
+ * reusable outside the daemon without pulling in observability infrastructure.
+ */
+export interface AgentLoopCallbacks {
+  /**
+   * Called immediately before client.messages.create().
+   * @param info.messageCount - Number of messages in the conversation at this point.
+   */
+  readonly onLlmTurnStarted?: (info: { readonly messageCount: number }) => void;
+  /**
+   * Called immediately after client.messages.create() resolves successfully.
+   * @param info.stopReason - The stop_reason from the API response.
+   * @param info.outputTokens - Actual output token count from the API response.
+   * @param info.inputTokens - Actual input token count from the API response.
+   * @param info.toolNamesRequested - Names of tools the LLM requested (empty for end_turn).
+   */
+  readonly onLlmTurnCompleted?: (info: {
+    readonly stopReason: string;
+    readonly outputTokens: number;
+    readonly inputTokens: number;
+    readonly toolNamesRequested: readonly string[];
+  }) => void;
+  /**
+   * Called immediately before tool.execute().
+   * @param info.toolName - The tool's name.
+   * @param info.argsSummary - JSON-serialized params, truncated to 200 chars.
+   */
+  readonly onToolCallStarted?: (info: { readonly toolName: string; readonly argsSummary: string }) => void;
+  /**
+   * Called immediately after a successful tool.execute().
+   * @param info.toolName - The tool's name.
+   * @param info.durationMs - Wall-clock duration of the tool execution in milliseconds.
+   * @param info.resultSummary - First 200 chars of the tool result text content.
+   */
+  readonly onToolCallCompleted?: (info: { readonly toolName: string; readonly durationMs: number; readonly resultSummary: string }) => void;
+  /**
+   * Called when tool.execute() throws.
+   * @param info.toolName - The tool's name.
+   * @param info.durationMs - Wall-clock duration up to the point of failure.
+   * @param info.errorMessage - First 200 chars of the error message.
+   */
+  readonly onToolCallFailed?: (info: { readonly toolName: string; readonly durationMs: number; readonly errorMessage: string }) => void;
+}
+
 /** Options for constructing an AgentLoop. */
 export interface AgentLoopOptions {
   /** System prompt sent with every LLM request. */
@@ -154,6 +206,18 @@ export interface AgentLoopOptions {
    * Only 'sequential' is needed for WorkRail (tools have ordering requirements).
    */
   readonly toolExecution?: 'sequential';
+  /**
+   * Optional observability callbacks for structured event emission.
+   *
+   * Each callback fires at a specific lifecycle point (before/after LLM call,
+   * before/after tool execute). All are wrapped in try/catch -- a throwing callback
+   * never crashes the agent loop. Callers that do not provide callbacks pay zero cost.
+   *
+   * WHY optional on the options object: keeps AgentLoopOptions self-contained and
+   * follows the existing strategy-param pattern (toolExecution is already a strategy
+   * field on options).
+   */
+  readonly callbacks?: AgentLoopCallbacks;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +348,7 @@ export class AgentLoop {
   // ---------------------------------------------------------------------------
 
   private async _runLoop(): Promise<void> {
-    const { client, modelId, systemPrompt, tools, maxTokens = 8192 } = this._options;
+    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks } = this._options;
 
     while (true) {
       // Check abort before each LLM call.
@@ -307,6 +371,11 @@ export class AgentLoop {
         input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
       }));
 
+      // Emit llm_turn_started before the API call.
+      // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
+      // must never crash the agent loop.
+      try { callbacks?.onLlmTurnStarted?.({ messageCount: apiMessages.length }); } catch { /* swallow */ }
+
       let response: Anthropic.Message;
       try {
         response = await client.messages.create(
@@ -328,6 +397,23 @@ export class AgentLoop {
         this._appendErrorMessage(isAbort ? 'aborted' : message);
         await this._emitEvent({ type: 'agent_end' });
         return;
+      }
+
+      // Emit llm_turn_completed after the API response.
+      // WHY try/catch: preserves fire-and-forget invariant.
+      // WHY inline block: scopes toolNamesRequested to avoid polluting the outer loop.
+      {
+        const toolNamesRequested = response.content
+          .filter((block): block is Anthropic.ToolUseBlock => block.type === 'tool_use')
+          .map((block) => block.name);
+        try {
+          callbacks?.onLlmTurnCompleted?.({
+            stopReason: response.stop_reason ?? 'unknown',
+            outputTokens: response.usage.output_tokens,
+            inputTokens: response.usage.input_tokens,
+            toolNamesRequested,
+          });
+        } catch { /* swallow */ }
       }
 
       // Append the assistant response to messages.
@@ -415,6 +501,7 @@ export class AgentLoop {
   private async _executeTools(
     toolUseBlocks: readonly Anthropic.ToolUseBlock[],
   ): Promise<AgentToolCallResult[]> {
+    const { callbacks } = this._options;
     const results: AgentToolCallResult[] = [];
 
     for (const block of toolUseBlocks) {
@@ -452,11 +539,22 @@ export class AgentLoop {
       // error -- the LLM must see stderr and decide whether to retry, rephrase, or
       // escalate. Same rationale as unknown tool names above.
       const params = (block.input ?? {}) as Record<string, unknown>;
+
+      // Emit tool_call_started before execute().
+      // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
+      // must never crash the agent loop.
+      const argsSummary = JSON.stringify(params).slice(0, 200);
+      try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
+
+      const toolStartMs = Date.now();
       let result: AgentToolResult<unknown>;
       try {
         result = await tool.execute(block.id, params);
       } catch (err: unknown) {
+        const durationMs = Date.now() - toolStartMs;
         const message = err instanceof Error ? err.message : String(err);
+        // Emit tool_call_failed for the throwing path.
+        try { callbacks?.onToolCallFailed?.({ toolName: block.name, durationMs, errorMessage: message.slice(0, 200) }); } catch { /* swallow */ }
         results.push({
           toolCallId: block.id,
           toolName: block.name,
@@ -465,6 +563,14 @@ export class AgentLoop {
         });
         continue;
       }
+
+      // Emit tool_call_completed for the success path.
+      {
+        const durationMs = Date.now() - toolStartMs;
+        const resultSummary = (result.content[0]?.text ?? '(no output)').slice(0, 200);
+        try { callbacks?.onToolCallCompleted?.({ toolName: block.name, durationMs, resultSummary }); } catch { /* swallow */ }
+      }
+
       results.push({
         toolCallId: block.id,
         toolName: block.name,

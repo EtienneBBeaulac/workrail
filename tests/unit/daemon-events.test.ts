@@ -180,6 +180,12 @@ describe('DaemonEventEmitter', () => {
       { kind: 'session_completed', sessionId: 's1', workflowId: 'w1', outcome: 'success' },
       { kind: 'delivery_attempted', callbackUrl: 'https://example.com', outcome: 'success' },
       { kind: 'issue_reported', sessionId: 's1', issueKind: 'tool_failure', severity: 'warn', summary: 'test' },
+      // New conversation logging events (Slice 1).
+      { kind: 'llm_turn_started', sessionId: 's1', messageCount: 3 },
+      { kind: 'llm_turn_completed', sessionId: 's1', stopReason: 'tool_use', outputTokens: 150, inputTokens: 1200, toolNamesRequested: ['Bash'] },
+      { kind: 'tool_call_started', sessionId: 's1', toolName: 'Bash', argsSummary: '{"command":"git status"}' },
+      { kind: 'tool_call_completed', sessionId: 's1', toolName: 'Bash', durationMs: 45, resultSummary: 'On branch main' },
+      { kind: 'tool_call_failed', sessionId: 's1', toolName: 'Bash', durationMs: 12, errorMessage: 'Command failed' },
     ];
 
     for (const event of events) {

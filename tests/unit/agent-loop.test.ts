@@ -564,3 +564,208 @@ describe('AgentLoop', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// AgentLoopCallbacks tests
+// ---------------------------------------------------------------------------
+
+describe('AgentLoop callbacks', () => {
+  it('onLlmTurnStarted fires before the API call with correct messageCount', async () => {
+    const client = new FakeAnthropicClient([makeEndTurnMessage()]);
+    const startedCalls: Array<{ messageCount: number }> = [];
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        onLlmTurnStarted: (info) => { startedCalls.push(info); },
+      },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    // One LLM call was made. onLlmTurnStarted should have fired once.
+    expect(startedCalls).toHaveLength(1);
+    // The initial user message is 1 message in the conversation.
+    expect(startedCalls[0]!.messageCount).toBe(1);
+  });
+
+  it('onLlmTurnCompleted fires after the API call with token counts and stop reason', async () => {
+    const client = new FakeAnthropicClient([makeEndTurnMessage()]);
+    const completedCalls: Array<{ stopReason: string; outputTokens: number; inputTokens: number; toolNamesRequested: readonly string[] }> = [];
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        onLlmTurnCompleted: (info) => { completedCalls.push(info); },
+      },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    expect(completedCalls).toHaveLength(1);
+    // makeEndTurnMessage returns usage: { input_tokens: 10, output_tokens: 5 }.
+    expect(completedCalls[0]!.inputTokens).toBe(10);
+    expect(completedCalls[0]!.outputTokens).toBe(5);
+    expect(completedCalls[0]!.stopReason).toBe('end_turn');
+    expect(completedCalls[0]!.toolNamesRequested).toEqual([]);
+  });
+
+  it('onLlmTurnCompleted reports tool names when LLM requests tool calls', async () => {
+    const tool = makeTool('Bash', '(bash output)');
+    const client = new FakeAnthropicClient([
+      makeToolUseMessage('Bash', 'call-1', { command: 'echo hi' }),
+      makeEndTurnMessage(),
+    ]);
+    const completedCalls: Array<{ toolNamesRequested: readonly string[] }> = [];
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [tool],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        onLlmTurnCompleted: (info) => { completedCalls.push(info); },
+      },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    // First turn: tool_use. Second turn: end_turn.
+    expect(completedCalls).toHaveLength(2);
+    expect(completedCalls[0]!.toolNamesRequested).toEqual(['Bash']);
+    expect(completedCalls[1]!.toolNamesRequested).toEqual([]);
+  });
+
+  it('onToolCallStarted fires before tool execute with truncated argsSummary', async () => {
+    const tool = makeTool('Bash', '(output)');
+    const client = new FakeAnthropicClient([
+      makeToolUseMessage('Bash', 'call-1', { command: 'git status' }),
+      makeEndTurnMessage(),
+    ]);
+    const startedCalls: Array<{ toolName: string; argsSummary: string }> = [];
+    const executionOrder: string[] = [];
+
+    // Intercept execute() to record ordering.
+    const wrappedTool = {
+      ...tool,
+      async execute(toolCallId: string, params: Record<string, unknown>) {
+        executionOrder.push('execute');
+        return tool.execute(toolCallId, params);
+      },
+    };
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [wrappedTool],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        onToolCallStarted: (info) => {
+          executionOrder.push('onToolCallStarted');
+          startedCalls.push(info);
+        },
+      },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    expect(startedCalls).toHaveLength(1);
+    expect(startedCalls[0]!.toolName).toBe('Bash');
+    expect(startedCalls[0]!.argsSummary).toContain('git status');
+    // onToolCallStarted must fire BEFORE execute().
+    expect(executionOrder[0]).toBe('onToolCallStarted');
+    expect(executionOrder[1]).toBe('execute');
+  });
+
+  it('onToolCallCompleted fires after successful execute with durationMs and resultSummary', async () => {
+    const tool = makeTool('Read', 'file contents here');
+    const client = new FakeAnthropicClient([
+      makeToolUseMessage('Read', 'call-1', { filePath: '/tmp/test.txt' }),
+      makeEndTurnMessage(),
+    ]);
+    const completedCalls: Array<{ toolName: string; durationMs: number; resultSummary: string }> = [];
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [tool],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        onToolCallCompleted: (info) => { completedCalls.push(info); },
+      },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    expect(completedCalls).toHaveLength(1);
+    expect(completedCalls[0]!.toolName).toBe('Read');
+    expect(typeof completedCalls[0]!.durationMs).toBe('number');
+    expect(completedCalls[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(completedCalls[0]!.resultSummary).toBe('file contents here');
+  });
+
+  it('onToolCallFailed fires when tool.execute() throws, loop continues', async () => {
+    // A tool that always throws.
+    const throwingTool: AgentTool = {
+      name: 'BadTool',
+      description: 'always throws',
+      inputSchema: { type: 'object', properties: {} },
+      label: 'BadTool',
+      async execute(): Promise<AgentToolResult<unknown>> {
+        throw new Error('intentional failure');
+      },
+    };
+
+    const client = new FakeAnthropicClient([
+      makeToolUseMessage('BadTool', 'call-1'),
+      makeEndTurnMessage(), // Loop continues after the tool failure.
+    ]);
+    const failedCalls: Array<{ toolName: string; durationMs: number; errorMessage: string }> = [];
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [throwingTool],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        onToolCallFailed: (info) => { failedCalls.push(info); },
+      },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    expect(failedCalls).toHaveLength(1);
+    expect(failedCalls[0]!.toolName).toBe('BadTool');
+    expect(failedCalls[0]!.errorMessage).toContain('intentional failure');
+    expect(typeof failedCalls[0]!.durationMs).toBe('number');
+  });
+
+  it('a throwing callback does not crash the agent loop', async () => {
+    const client = new FakeAnthropicClient([makeEndTurnMessage()]);
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [],
+      client,
+      modelId: 'test-model',
+      callbacks: {
+        // All callbacks throw -- the loop must still complete normally.
+        onLlmTurnStarted: () => { throw new Error('callback error'); },
+        onLlmTurnCompleted: () => { throw new Error('callback error'); },
+      },
+    });
+
+    // Must not throw. Loop completes normally despite throwing callbacks.
+    await expect(agent.prompt(USER_MSG)).resolves.toBeUndefined();
+
+    const messages = agent.state.messages;
+    const lastMsg = messages[messages.length - 1];
+    expect(lastMsg?.role).toBe('assistant');
+  });
+});

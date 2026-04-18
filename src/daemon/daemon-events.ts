@@ -117,6 +117,83 @@ export interface IssueReportedEvent {
 }
 
 /**
+ * LLM turn starting: the agent is about to call the LLM API.
+ *
+ * Emitted in agent-loop.ts immediately before client.messages.create().
+ * WHY messageCount: the number of messages in the conversation is a proxy for
+ * input token usage. Actual input tokens are not available until the API responds.
+ */
+export interface LlmTurnStartedEvent {
+  readonly kind: 'llm_turn_started';
+  readonly sessionId: string;
+  /** Number of messages in the conversation at the time of the call. */
+  readonly messageCount: number;
+}
+
+/**
+ * LLM turn completed: the LLM API returned a response.
+ *
+ * Emitted in agent-loop.ts immediately after client.messages.create() resolves.
+ * WHY actual tokens: response.usage contains the exact counts from the API.
+ */
+export interface LlmTurnCompletedEvent {
+  readonly kind: 'llm_turn_completed';
+  readonly sessionId: string;
+  /** The stop_reason from the API response ('tool_use', 'end_turn', etc.). */
+  readonly stopReason: string;
+  /** Actual output token count from the API response. */
+  readonly outputTokens: number;
+  /** Actual input token count from the API response. */
+  readonly inputTokens: number;
+  /** Names of tools the LLM requested in this turn (empty if end_turn). */
+  readonly toolNamesRequested: readonly string[];
+}
+
+/**
+ * A tool call is starting. Emitted in agent-loop.ts before tool.execute().
+ *
+ * WHY argsSummary: raw params may be large (e.g. file contents in Write tool).
+ * Truncating to 200 chars gives observability without bloating the event log.
+ */
+export interface ToolCallStartedEvent {
+  readonly kind: 'tool_call_started';
+  readonly sessionId: string;
+  readonly toolName: string;
+  /** JSON-serialized params, truncated to 200 chars. */
+  readonly argsSummary: string;
+}
+
+/**
+ * A tool call completed successfully. Emitted in agent-loop.ts after tool.execute().
+ */
+export interface ToolCallCompletedEvent {
+  readonly kind: 'tool_call_completed';
+  readonly sessionId: string;
+  readonly toolName: string;
+  /** Wall-clock duration of the tool execution in milliseconds. */
+  readonly durationMs: number;
+  /** First 200 chars of the tool result text content. */
+  readonly resultSummary: string;
+}
+
+/**
+ * A tool call failed (tool.execute() threw). Emitted in agent-loop.ts in the catch block.
+ *
+ * WHY separate from tool_error: tool_error is emitted by the turn_end subscriber in
+ * workflow-runner.ts for isError tool_results. tool_call_failed is emitted by the
+ * agent-loop.ts catch block when execute() throws -- finer-grained timing.
+ */
+export interface ToolCallFailedEvent {
+  readonly kind: 'tool_call_failed';
+  readonly sessionId: string;
+  readonly toolName: string;
+  /** Wall-clock duration up to the point of failure in milliseconds. */
+  readonly durationMs: number;
+  /** First 200 chars of the error message. */
+  readonly errorMessage: string;
+}
+
+/**
  * Union of all daemon lifecycle events.
  *
  * Each member has a `kind` discriminant so switch exhaustiveness is enforced
@@ -132,7 +209,12 @@ export type DaemonEvent =
   | StepAdvancedEvent
   | SessionCompletedEvent
   | DeliveryAttemptedEvent
-  | IssueReportedEvent;
+  | IssueReportedEvent
+  | LlmTurnStartedEvent
+  | LlmTurnCompletedEvent
+  | ToolCallStartedEvent
+  | ToolCallCompletedEvent
+  | ToolCallFailedEvent;
 
 // ---------------------------------------------------------------------------
 // DaemonEventEmitter

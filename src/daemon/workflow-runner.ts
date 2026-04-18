@@ -31,7 +31,7 @@ import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import { AgentLoop } from "./agent-loop.js";
-import type { AgentTool, AgentToolResult, AgentEvent } from "./agent-loop.js";
+import type { AgentTool, AgentToolResult, AgentEvent, AgentLoopCallbacks } from "./agent-loop.js";
 import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
@@ -1570,6 +1570,36 @@ export async function runWorkflow(
     contextJson +
     '\n\nComplete all step work, then call continue_workflow with your notes to begin.';
 
+  // ---- Observability callbacks for AgentLoop ----
+  // Wire structured event emission for LLM turns and tool calls.
+  // WHY callbacks not direct emitter: AgentLoop is decoupled from DaemonEventEmitter.
+  // Each callback calls emitter?.emit() which is fire-and-forget (void, errors swallowed).
+  // The try/catch guards inside AgentLoop ensure callbacks never crash the loop.
+  const agentCallbacks: AgentLoopCallbacks = {
+    onLlmTurnStarted: ({ messageCount }) => {
+      emitter?.emit({ kind: 'llm_turn_started', sessionId, messageCount });
+    },
+    onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
+      emitter?.emit({
+        kind: 'llm_turn_completed',
+        sessionId,
+        stopReason,
+        outputTokens,
+        inputTokens,
+        toolNamesRequested,
+      });
+    },
+    onToolCallStarted: ({ toolName, argsSummary }) => {
+      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary });
+    },
+    onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
+      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary });
+    },
+    onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
+      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage });
+    },
+  };
+
   // ---- AgentLoop (one per runWorkflow() call, not reused) ----
   // WHY AgentLoop instead of pi-agent-core's Agent: AgentLoop is the first-party
   // replacement that uses @anthropic-ai/sdk directly, eliminating the private npm
@@ -1583,6 +1613,7 @@ export async function runWorkflow(
     // Sequential execution: continue_workflow must complete before Bash begins
     // on the next step. Workflow tools have ordering requirements.
     toolExecution: 'sequential',
+    callbacks: agentCallbacks,
   });
 
   // ---- Session limits (wall-clock timeout + max-turn limit) ----
