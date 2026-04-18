@@ -4751,3 +4751,113 @@ The daemon assembles a pre-packaged context bundle from these sources before the
 - How do you handle a trigger that spans multiple systems (e.g. a Jira ticket about a GitHub PR)?
 
 **This is a design-first item** -- the ideas are promising but the right shape isn't obvious. Needs a discovery pass before any implementation.
+
+---
+
+### Rethinking the subagent loop from first principles (Apr 18, 2026)
+
+**Step back from all assumptions.** The current design assumes subagent spawning works like Claude Code's `mcp__nested-subagent__Task` -- the LLM decides when to spawn, what to give it, and handles the result. That's not the only model, and it might not be the best one for WorkTrain.
+
+---
+
+#### The current assumption (inherited from Claude Code)
+
+```
+Agent decides → calls spawn_agent tool → subagent runs → agent gets result → agent continues
+```
+
+The LLM is the orchestrator. It decides when parallelism is needed, what context to pass, how to handle results.
+
+**Problems with this:**
+- LLMs are bad at orchestration decisions -- they sometimes delegate when they shouldn't, sometimes don't when they should
+- Context passing is lossy -- the LLM decides what to include, which is usually insufficient
+- Subagent output competes with everything else in the parent's context window
+- The LLM has to reason about the subagent's output before continuing -- burns context and turns
+- No enforcement -- the LLM can skip delegation entirely and just do the work itself (often wrong)
+
+---
+
+#### Alternative model: workflow-declared parallelism, daemon-enforced
+
+**The workflow spec is the orchestration. The daemon is the orchestrator. The LLM is the executor.**
+
+```yaml
+# Workflow step definition
+- id: parallel-review
+  type: parallel
+  agents:
+    - workflow: routine-correctness-review
+      contextFrom: [phase-3-output, candidateFiles]
+    - workflow: routine-philosophy-alignment  
+      contextFrom: [phase-0-output, philosophySources]
+    - workflow: routine-hypothesis-challenge
+      contextFrom: [phase-2-output, selectedApproach]
+  synthesisStep: synthesize-parallel-review
+```
+
+The daemon sees this step definition and:
+1. Automatically spawns 3 child sessions with specified workflows
+2. Injects the declared context bundles (from prior step outputs) into each child
+3. Waits for all 3 to complete
+4. Passes all 3 results to a synthesis step
+5. Injects the synthesis into the parent agent's next turn
+
+**The parent LLM never decides to spawn anything.** It just does its part. The workflow declares the orchestration pattern. The daemon enforces it.
+
+---
+
+#### What this changes about the agent's job
+
+Today: "Do this work, and decide when to delegate parts of it to subagents."
+
+New model: "Do this bounded cognitive task. The daemon handles everything else."
+
+The agent's job becomes strictly about the cognitive work -- reasoning, writing, deciding within a defined scope. Orchestration, parallelism, context packaging, result synthesis -- all daemon responsibilities defined by the workflow spec.
+
+---
+
+#### The agent gives context to the daemon, not to subagents directly
+
+Instead of the LLM calling `spawn_agent({ goal: "...", context: {...} })`, the workflow step has:
+
+```yaml
+- id: context-gathering
+  output:
+    contextFor:
+      - step: parallel-review
+        keys: [candidateFiles, invariants, philosophySources]
+```
+
+The agent writes outputs as structured artifacts. The daemon routes those artifacts to the right child agents at the right time. The LLM never packages context for a subagent -- it just produces outputs, and the workflow spec declares where those outputs go.
+
+**This is the shift:** from "agent as orchestrator" to "workflow as orchestrator, daemon as executor, agent as cognitive unit."
+
+---
+
+#### What the subagent loop might look like
+
+```
+Parent workflow step completes
+  ↓ Daemon reads step output artifacts
+  ↓ Daemon checks workflow spec for parallel/sequential children
+  ↓ Daemon spawns child sessions with structured context bundles
+  ↓ Children run their bounded tasks
+  ↓ Daemon collects child outputs
+  ↓ Daemon passes synthesized context to parent's next step
+  ↓ Parent continues with full context
+```
+
+No LLM orchestration. No token-burning context packaging decisions. No "did I remember to delegate this?" uncertainty.
+
+---
+
+#### What needs to be designed (don't implement yet)
+
+1. **Workflow step schema for parallelism** -- how does the workflow spec declare parallel agents, sequential chains, fan-out/fan-in patterns?
+2. **Context routing spec** -- how does a step's output get routed to specific child agents? What's the schema for `contextFor`?
+3. **Synthesis patterns** -- how do multiple child outputs get combined? (concatenate? LLM synthesis step? structured merge?)
+4. **Failure handling** -- if one child fails, what happens? (fail-fast? continue with partial results? retry?)
+5. **Depth limits** -- same constraints as native agent spawning, but enforced at the workflow level not tool level
+6. **Backward compatibility** -- workflows that currently use `mcp__nested-subagent__Task` can be migrated incrementally
+
+**This is a design-first item.** Run a discovery session to explore the design space before any implementation. The current assumptions about subagent loops may be entirely wrong.
