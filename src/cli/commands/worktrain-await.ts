@@ -104,8 +104,13 @@ export interface AwaitResult {
 /** Default console HTTP server port. */
 const DEFAULT_CONSOLE_PORT = 3456;
 
-/** Lock file name under ~/.workrail/. */
-const LOCK_FILE_NAME = 'dashboard.lock';
+/**
+ * Lock file names under ~/.workrail/, checked in priority order.
+ *
+ * daemon-console.lock: written by `worktrain console` (standalone console, preferred)
+ * dashboard.lock:      written by the MCP server's HttpServer (legacy fallback)
+ */
+const LOCK_FILE_NAMES = ['daemon-console.lock', 'dashboard.lock'] as const;
 
 /**
  * Default timeout: 30 minutes.
@@ -164,15 +169,17 @@ async function discoverConsolePort(
     return portOverride;
   }
 
-  const lockPath = deps.joinPath(deps.homedir(), '.workrail', LOCK_FILE_NAME);
-  try {
-    const raw = await deps.readFile(lockPath);
-    const parsed = JSON.parse(raw) as { port?: unknown };
-    if (typeof parsed.port === 'number' && parsed.port > 0) {
-      return parsed.port;
+  for (const lockFileName of LOCK_FILE_NAMES) {
+    const lockPath = deps.joinPath(deps.homedir(), '.workrail', lockFileName);
+    try {
+      const raw = await deps.readFile(lockPath);
+      const parsed = JSON.parse(raw) as { port?: unknown };
+      if (typeof parsed.port === 'number' && parsed.port > 0) {
+        return parsed.port;
+      }
+    } catch {
+      // ENOENT or parse error -- try next lock file
     }
-  } catch {
-    // ENOENT or parse error -- fall through to default
   }
 
   return DEFAULT_CONSOLE_PORT;

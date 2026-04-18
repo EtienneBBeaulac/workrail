@@ -11,7 +11,8 @@
  * - All I/O is injected via WorktrainSpawnCommandDeps. Zero direct fs/fetch imports.
  * - Only the session handle is written to stdout. All other output goes to stderr.
  * - All failures are returned as CliResult failure variants -- never thrown.
- * - Port discovery reads ~/.workrail/dashboard.lock first; falls back to --port or 3456.
+ * - Port discovery checks ~/.workrail/daemon-console.lock (standalone console) then
+ *   ~/.workrail/dashboard.lock (MCP server), then --port, then 3456.
  */
 
 import type { CliResult } from '../types/cli-result.js';
@@ -64,8 +65,17 @@ export interface WorktrainSpawnCommandOpts {
 /** Default console HTTP server port (matches HttpServer.ts default). */
 const DEFAULT_CONSOLE_PORT = 3456;
 
-/** Lock file name under ~/.workrail/. Contains running server port. */
-const LOCK_FILE_NAME = 'dashboard.lock';
+/**
+ * Lock file names under ~/.workrail/, checked in priority order.
+ *
+ * daemon-console.lock: written by `worktrain console` (standalone console, preferred)
+ * dashboard.lock:      written by the MCP server's HttpServer (legacy fallback)
+ *
+ * The standalone console is the canonical owner of the console port. The MCP
+ * server's dashboard.lock is checked as a fallback for setups where
+ * `worktrain console` is not running separately.
+ */
+const LOCK_FILE_NAMES = ['daemon-console.lock', 'dashboard.lock'] as const;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PORT DISCOVERY
@@ -76,11 +86,12 @@ const LOCK_FILE_NAME = 'dashboard.lock';
  *
  * Priority:
  * 1. Explicit --port flag (caller-provided override)
- * 2. Port from ~/.workrail/dashboard.lock (running server)
- * 3. Default: 3456
+ * 2. Port from ~/.workrail/daemon-console.lock (standalone `worktrain console`)
+ * 3. Port from ~/.workrail/dashboard.lock (MCP server HttpServer, legacy)
+ * 4. Default: 3456
  *
- * The lock file is JSON: { pid, port, startedAt, ... }. If absent or
- * unparseable, falls back silently to the default port.
+ * Lock files are JSON: { pid, port, ... }. Absent or unparseable files are
+ * skipped silently; the next candidate is tried.
  */
 async function discoverConsolePort(
   deps: Pick<WorktrainSpawnCommandDeps, 'readFile' | 'homedir' | 'joinPath'>,
@@ -90,15 +101,17 @@ async function discoverConsolePort(
     return portOverride;
   }
 
-  const lockPath = deps.joinPath(deps.homedir(), '.workrail', LOCK_FILE_NAME);
-  try {
-    const raw = await deps.readFile(lockPath);
-    const parsed = JSON.parse(raw) as { port?: unknown };
-    if (typeof parsed.port === 'number' && parsed.port > 0) {
-      return parsed.port;
+  for (const lockFileName of LOCK_FILE_NAMES) {
+    const lockPath = deps.joinPath(deps.homedir(), '.workrail', lockFileName);
+    try {
+      const raw = await deps.readFile(lockPath);
+      const parsed = JSON.parse(raw) as { port?: unknown };
+      if (typeof parsed.port === 'number' && parsed.port > 0) {
+        return parsed.port;
+      }
+    } catch {
+      // ENOENT or parse error -- try next lock file
     }
-  } catch {
-    // ENOENT or parse error -- fall through to default
   }
 
   return DEFAULT_CONSOLE_PORT;

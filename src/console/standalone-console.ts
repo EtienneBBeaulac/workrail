@@ -22,7 +22,6 @@
  *   the daemon console. Reusing them ensures identical behavior with no drift.
  */
 
-import 'reflect-metadata';
 import express from 'express';
 import cors from 'cors';
 import * as http from 'node:http';
@@ -56,8 +55,8 @@ export type StandaloneConsoleError =
 
 export type StandaloneConsoleResult =
   | ({ readonly kind: 'ok' } & StandaloneConsoleHandle)
-  | ({ readonly kind: 'port_conflict' } & StandaloneConsoleError & { readonly kind: 'port_conflict' })
-  | ({ readonly kind: 'io_error' } & StandaloneConsoleError & { readonly kind: 'io_error' });
+  | ({ readonly kind: 'port_conflict' } & { readonly port: number })
+  | ({ readonly kind: 'io_error' } & { readonly message: string });
 
 export interface StartStandaloneConsoleOptions {
   /** Port to bind. Default: 3456. */
@@ -231,17 +230,19 @@ export async function startStandaloneConsole(
           // 1. Stop the sessions directory watcher.
           try { stopWatcher(); } catch { /* ignore */ }
 
+          // Safety timeout: if server.close() hangs (open keep-alive connections),
+          // force-resolve after 5 s so the process can still exit cleanly.
+          const safetyTimer = setTimeout(() => res(), 5_000);
+
           // 2. Close the HTTP server (waits for open connections to drain).
           server.close(() => {
+            // Cancel the safety timer -- server closed in time.
+            clearTimeout(safetyTimer);
             // 3. Delete the lock file (best-effort; ignore errors).
             void fs.unlink(lockFilePath)
               .catch(() => { /* already gone or never written -- ok */ })
               .finally(() => res());
           });
-
-          // Safety timeout: if server.close() hangs (open keep-alive connections),
-          // force-resolve after 5 s so the process can still exit cleanly.
-          setTimeout(() => res(), 5_000);
         });
       };
 

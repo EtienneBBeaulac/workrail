@@ -88,10 +88,35 @@ describe('executeWorktrainSpawnCommand', () => {
     expect(stdoutLines).toEqual(['sess_abc123']);
   });
 
-  it('uses port from dashboard.lock when no --port given', async () => {
+  it('uses port from daemon-console.lock (standalone console) with priority over dashboard.lock', async () => {
     const fetchCalls: string[] = [];
     const { deps } = makeBaseDeps({
       readFile: async (p) => {
+        if (p.includes('daemon-console.lock')) return JSON.stringify({ port: 8888, pid: 11111 });
+        if (p.includes('dashboard.lock')) return JSON.stringify({ port: 9999, pid: 12345 });
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      fetch: async (url, opts) => {
+        fetchCalls.push(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true, data: { sessionHandle: 'h1' } }),
+        };
+      },
+    });
+
+    await executeWorktrainSpawnCommand(deps, VALID_OPTS);
+
+    // daemon-console.lock (port 8888) takes priority over dashboard.lock (port 9999)
+    expect(fetchCalls[0]).toContain(':8888/');
+  });
+
+  it('falls back to dashboard.lock when daemon-console.lock is absent', async () => {
+    const fetchCalls: string[] = [];
+    const { deps } = makeBaseDeps({
+      readFile: async (p) => {
+        if (p.includes('daemon-console.lock')) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
         if (p.includes('dashboard.lock')) return JSON.stringify({ port: 9999, pid: 12345 });
         throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       },
