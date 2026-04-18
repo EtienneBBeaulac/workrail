@@ -404,6 +404,7 @@ function buildGitLabWorkflowTrigger(
     context,
     ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
     ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
+    ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
   };
 }
 
@@ -448,6 +449,7 @@ function buildGitHubWorkflowTrigger(
     context,
     ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
     ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
+    ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
   };
 }
 

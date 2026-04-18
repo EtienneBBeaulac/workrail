@@ -41,6 +41,7 @@ function makePollingTrigger(overrides: Partial<TriggerDefinition> = {}): Trigger
     workflowId: 'mr-review-workflow',
     workspacePath: '/workspace',
     goal: 'Review MR',
+    concurrencyMode: 'serial',
     pollingSource: {
       provider: 'gitlab_poll',
       baseUrl: 'https://gitlab.example.com',
@@ -60,6 +61,7 @@ function makeWebhookTrigger(): TriggerDefinition {
     workflowId: 'some-workflow',
     workspacePath: '/workspace',
     goal: 'Some goal',
+    concurrencyMode: 'serial',
   };
 }
 
