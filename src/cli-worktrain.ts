@@ -895,6 +895,218 @@ function runHealthSummary(sessionId: string, raw: string): void {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// RUN COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * worktrain run pr-review
+ *
+ * Autonomous PR review coordinator. Dispatches mr-review-workflow-agentic sessions
+ * for open PRs, waits for results, and routes by severity: clean -> merge,
+ * minor -> fix-agent loop, blocking/unknown -> escalate.
+ *
+ * Requires the WorkTrain daemon to be running: worktrain daemon
+ */
+const runCommand = program
+  .command('run')
+  .description('Run a coordinator script');
+
+runCommand
+  .command('pr-review')
+  .description('Review open PRs autonomously: dispatch review sessions, route by findings, merge or escalate')
+  .requiredOption('-W, --workspace <path>', 'Absolute path to the git workspace')
+  .option('-r, --pr <number>', 'Review a specific PR number (repeatable)', (val, prev: number[]) => [...prev, parseInt(val, 10)], [] as number[])
+  .option('--dry-run', 'Print actions without dispatching sessions or merging')
+  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
+  .action(async (options: { workspace: string; pr: number[]; dryRun?: boolean; port?: number }) => {
+    const {
+      runPrReviewCoordinator,
+      discoverConsolePort,
+    } = await import('./coordinators/pr-review.js');
+    const { execFile: execFileRaw } = await import('child_process');
+    const execFilePromise = promisify(execFileRaw);
+
+    // Validate workspace at the CLI boundary
+    if (!path.isAbsolute(options.workspace)) {
+      process.stderr.write(`Error: --workspace must be an absolute path, got: ${options.workspace}\n`);
+      process.exit(1);
+    }
+    try {
+      const stat = await fs.promises.stat(options.workspace);
+      if (!stat.isDirectory()) {
+        process.stderr.write(`Error: --workspace must be an existing directory: ${options.workspace}\n`);
+        process.exit(1);
+      }
+    } catch {
+      process.stderr.write(`Error: --workspace does not exist: ${options.workspace}\n`);
+      process.exit(1);
+    }
+
+    // Discover console port
+    const port = await discoverConsolePort(
+      {
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        homedir: os.homedir,
+        joinPath: path.join,
+      },
+      options.port,
+    );
+
+    // Build real CoordinatorDeps
+    const deps = {
+      spawnSession: async (workflowId: string, goal: string, workspace: string) => {
+        const url = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
+        try {
+          const response = await globalThis.fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflowId, goal, workspacePath: workspace }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          const body = await response.json() as Record<string, unknown>;
+          if (!response.ok) {
+            const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
+            if (response.status === 503) {
+              return { kind: 'err' as const, error: `WorkTrain daemon is not ready: ${errMsg}` };
+            }
+            return { kind: 'err' as const, error: `Dispatch failed: ${errMsg}` };
+          }
+          if (body['success'] !== true || typeof body['data'] !== 'object') {
+            return { kind: 'err' as const, error: 'Unexpected response from dispatch endpoint' };
+          }
+          const data = body['data'] as Record<string, unknown>;
+          const handle = typeof data['sessionHandle'] === 'string' ? data['sessionHandle'] : '';
+          if (!handle) {
+            return { kind: 'err' as const, error: 'Dispatch succeeded but no session handle returned' };
+          }
+          return { kind: 'ok' as const, value: handle };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          const isConnRefused = msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
+          if (isConnRefused) {
+            return { kind: 'err' as const, error: `Could not connect to WorkTrain daemon on port ${port}. Ensure the daemon is running with: worktrain daemon` };
+          }
+          if (e instanceof Error && e.name === 'TimeoutError') {
+            return { kind: 'err' as const, error: `Daemon request timed out after 30s` };
+          }
+          return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
+        }
+      },
+
+      awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
+        const { executeWorktrainAwaitCommand } = await import('./cli/commands/worktrain-await.js');
+        let resolvedResult: import('./cli/commands/worktrain-await.js').AwaitResult | null = null;
+
+        await executeWorktrainAwaitCommand(
+          {
+            fetch: (url: string) => globalThis.fetch(url),
+            readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+            stdout: (line: string) => {
+              try { resolvedResult = JSON.parse(line) as import('./cli/commands/worktrain-await.js').AwaitResult; } catch { /* ignore */ }
+            },
+            stderr: (line: string) => process.stderr.write(line + '\n'),
+            homedir: os.homedir,
+            joinPath: path.join,
+            sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+          },
+          {
+            sessions: [...handles].join(','),
+            mode: 'all',
+            timeout: `${Math.round(timeoutMs / 1000)}s`,
+            port,
+          },
+        );
+
+        return resolvedResult ?? { results: [...handles].map((h) => ({
+          handle: h,
+          outcome: 'failed' as const,
+          status: null,
+          durationMs: 0,
+        })), allSucceeded: false };
+      },
+
+      getAgentResult: async (sessionHandle: string): Promise<string | null> => {
+        try {
+          // Step 1: get session detail to find preferredTipNodeId
+          const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
+          const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
+          if (!sessionRes.ok) return null;
+          const sessionBody = await sessionRes.json() as Record<string, unknown>;
+          if (sessionBody['success'] !== true) return null;
+
+          const data = sessionBody['data'] as Record<string, unknown> | undefined;
+          if (!data) return null;
+          const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
+          if (!Array.isArray(runs) || runs.length === 0) return null;
+
+          const firstRun = runs[0] as Record<string, unknown>;
+          const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string'
+            ? firstRun['preferredTipNodeId']
+            : null;
+          if (!tipNodeId) return null;
+
+          // Step 2: get node detail to retrieve recapMarkdown
+          const nodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/${encodeURIComponent(tipNodeId)}`;
+          const nodeRes = await globalThis.fetch(nodeUrl, { signal: AbortSignal.timeout(30_000) });
+          if (!nodeRes.ok) return null;
+          const nodeBody = await nodeRes.json() as Record<string, unknown>;
+          if (nodeBody['success'] !== true) return null;
+
+          const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
+          if (!nodeData) return null;
+          return typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
+        } catch {
+          return null;
+        }
+      },
+
+      listOpenPRs: async (workspace: string) => {
+        try {
+          const { stdout } = await execFilePromise('gh', ['pr', 'list', '--json', 'number,title,headRefName'], {
+            cwd: workspace,
+            timeout: 30_000,
+          });
+          const parsed = JSON.parse(stdout) as Array<{ number: number; title: string; headRefName: string }>;
+          return parsed.map((p) => ({ number: p.number, title: p.title, headRef: p.headRefName }));
+        } catch {
+          return [];
+        }
+      },
+
+      mergePR: async (prNumber: number, workspace: string) => {
+        try {
+          await execFilePromise('gh', ['pr', 'merge', String(prNumber), '--squash', '--auto'], {
+            cwd: workspace,
+            timeout: 60_000,
+          });
+          return { kind: 'ok' as const, value: undefined };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { kind: 'err' as const, error: msg };
+        }
+      },
+
+      writeFile: async (filePath: string, content: string) => {
+        await fs.promises.writeFile(filePath, content, 'utf-8');
+      },
+
+      stderr: (line: string) => process.stderr.write(line + '\n'),
+      now: () => Date.now(),
+      port,
+    };
+
+    const result = await runPrReviewCoordinator(deps, {
+      workspace: options.workspace,
+      prs: options.pr.length > 0 ? options.pr : undefined,
+      dryRun: options.dryRun ?? false,
+      port: options.port,
+    });
+
+    process.exit(result.hasErrors ? 1 : 0);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
 // ═══════════════════════════════════════════════════════════════════════════
 
