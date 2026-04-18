@@ -243,18 +243,35 @@ async function readLiveActivity(
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
-        // Accept both coarse stream (tool_called) and fine-grained stream (tool_call_started).
+        // Accept both coarse stream (tool_called) and fine-grained stream (tool_call_started),
+        // plus agent_stuck events which are surfaced prominently in the live activity panel.
         // See dual-stream model docs in ToolCallStartedEvent in daemon-events.ts.
         const isToolEvent =
-          event['kind'] === 'tool_called' || event['kind'] === 'tool_call_started';
+          event['kind'] === 'tool_called' ||
+          event['kind'] === 'tool_call_started' ||
+          event['kind'] === 'agent_stuck';
         if (
           !isToolEvent ||
           event['workrailSessionId'] !== workrailSessionId ||
-          typeof event['toolName'] !== 'string' ||
           typeof event['ts'] !== 'number'
         ) {
           continue;
         }
+
+        if (event['kind'] === 'agent_stuck') {
+          // WHY toolName='agent_stuck': ConsoleToolActivity expects a toolName field.
+          // Using a sentinel value makes agent_stuck events identifiable by the console UI
+          // without requiring a schema change to ConsoleToolActivity.
+          activities.push({
+            toolName: 'agent_stuck',
+            summary: `STUCK: ${String(event['reason'] ?? '?')} -- ${String(event['detail'] ?? '').slice(0, 80)}`,
+            ts: event['ts'],
+          });
+          continue;
+        }
+
+        if (typeof event['toolName'] !== 'string') continue;
+
         activities.push({
           toolName: event['toolName'],
           ...(typeof event['summary'] === 'string' ? { summary: event['summary'] } : {}),

@@ -245,6 +245,41 @@ export interface ToolCallFailedEvent {
 }
 
 /**
+ * Emitted when the stuck-detection heuristics in workflow-runner.ts identify that
+ * the agent is likely stuck and not making forward progress.
+ *
+ * WHY a separate event kind: stuck is categorically different from a tool failure.
+ * It is a higher-level signal that the agent has entered a loop or is blocked
+ * on a gate it cannot pass. Callers (console, coordinator scripts, worktrain logs)
+ * need to distinguish "this tool call failed once" from "the agent is not progressing".
+ *
+ * WHY reason is a closed union: illegal states must be unrepresentable. A freeform
+ * string for reason would require string parsing at every consumer.
+ *
+ * WHY advisory only: this event does NOT abort the session. It is purely observational.
+ * The fire-and-forget emitter contract means stuck detection never affects correctness.
+ */
+export interface AgentStuckEvent {
+  readonly kind: 'agent_stuck';
+  readonly sessionId: string;
+  /**
+   * Which heuristic triggered:
+   * - repeated_tool_call: same tool + same args called 3+ times in a row
+   * - no_progress: 80%+ of turns used with 0 step advances
+   * - timeout_imminent: wall-clock timeout fired (session already aborting)
+   */
+  readonly reason: 'repeated_tool_call' | 'no_progress' | 'timeout_imminent';
+  /** Human-readable description of why stuck was detected. */
+  readonly detail: string;
+  /** The tool name that was called repeatedly (present for repeated_tool_call). */
+  readonly toolName?: string;
+  /** The argsSummary of the repeated call (present for repeated_tool_call). */
+  readonly argsSummary?: string;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
+}
+
+/**
  * Union of all daemon lifecycle events.
  *
  * Each member has a `kind` discriminant so switch exhaustiveness is enforced
@@ -265,7 +300,8 @@ export type DaemonEvent =
   | LlmTurnCompletedEvent
   | ToolCallStartedEvent
   | ToolCallCompletedEvent
-  | ToolCallFailedEvent;
+  | ToolCallFailedEvent
+  | AgentStuckEvent;
 
 // ---------------------------------------------------------------------------
 // DaemonEventEmitter

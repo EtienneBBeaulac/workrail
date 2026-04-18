@@ -32,6 +32,8 @@ function formatDaemonEventLine(raw: string): string | null {
   const prefix = sessionId ? `[${ts}] [${sessionId}] ${kind}` : `[${ts}] ${kind}`;
 
   switch (kind) {
+    case 'agent_stuck':
+      return `${prefix}  *** STUCK: ${obj['reason'] ?? '?'} -- ${String(obj['detail'] ?? '').slice(0, 100)}`;
     case 'llm_turn_started':
       return `${prefix}  msgs=${obj['messageCount'] ?? '?'}`;
     case 'llm_turn_completed':
@@ -48,12 +50,30 @@ function formatDaemonEventLine(raw: string): string | null {
       return `${prefix}  tool=${obj['toolName'] ?? '?'} err=${String(obj['error'] ?? '').slice(0, 80)}`;
     case 'session_started':
       return `${prefix}  workflow=${obj['workflowId'] ?? '?'} workspace=${obj['workspacePath'] ?? '?'}`;
-    case 'session_completed':
-      return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${obj['outcome'] ?? '?'}${obj['detail'] ? ` (${obj['detail']})` : ''}`;
+    case 'session_completed': {
+      const outcome = obj['outcome'];
+      const detail = obj['detail'] ? ` (${obj['detail']})` : '';
+      if (outcome === 'success') {
+        return `${prefix}  workflow=${obj['workflowId'] ?? '?'} -- session complete${detail}`;
+      } else if (outcome === 'error') {
+        return `${prefix}  workflow=${obj['workflowId'] ?? '?'} -- session FAILED${detail}`;
+      } else if (outcome === 'timeout') {
+        return `${prefix}  workflow=${obj['workflowId'] ?? '?'} -- session TIMEOUT${detail}`;
+      }
+      return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${outcome ?? '?'}${detail}`;
+    }
     case 'step_advanced':
-      return `${prefix}`;
-    case 'issue_reported':
-      return `${prefix}  severity=${obj['severity'] ?? '?'} ${String(obj['summary'] ?? '').slice(0, 80)}`;
+      return `${prefix}  -> step advanced`;
+    case 'issue_reported': {
+      const severity = obj['severity'];
+      const summary = String(obj['summary'] ?? '').slice(0, 100);
+      if (severity === 'fatal') {
+        return `${prefix}  FATAL: ${summary}`;
+      } else if (severity === 'error') {
+        return `${prefix}  ERROR: ${summary}`;
+      }
+      return `${prefix}  severity=${severity ?? '?'} ${summary}`;
+    }
     default:
       return `${prefix}  ${JSON.stringify(obj).slice(0, 120)}`;
   }
@@ -246,7 +266,7 @@ describe('formatDaemonEventLine', () => {
     expect(result).toContain('workspace=/home/user/project');
   });
 
-  it('formats session_completed with outcome and optional detail', () => {
+  it('formats session_completed outcome=error with FAILED label and detail', () => {
     const line = makeEvent({
       kind: 'session_completed',
       sessionId: 'aabbccdd-1234',
@@ -256,11 +276,12 @@ describe('formatDaemonEventLine', () => {
     });
     const result = formatDaemonEventLine(line);
     expect(result).not.toBeNull();
-    expect(result).toContain('outcome=error');
+    expect(result).toContain('session FAILED');
     expect(result).toContain('(unhandled exception)');
+    expect(result).not.toContain('outcome=error');
   });
 
-  it('omits detail parenthetical when detail is absent', () => {
+  it('formats session_completed outcome=success with complete label', () => {
     const line = makeEvent({
       kind: 'session_completed',
       sessionId: 'aabbccdd-1234',
@@ -269,16 +290,85 @@ describe('formatDaemonEventLine', () => {
     });
     const result = formatDaemonEventLine(line);
     expect(result).not.toBeNull();
-    expect(result).not.toContain('(');
+    expect(result).toContain('session complete');
+    expect(result).not.toContain('outcome=');
   });
 
-  it('formats step_advanced as bare prefix (no extra fields)', () => {
+  it('formats session_completed outcome=timeout with TIMEOUT label', () => {
+    const line = makeEvent({
+      kind: 'session_completed',
+      sessionId: 'aabbccdd-1234',
+      workflowId: 'wf-123',
+      outcome: 'timeout',
+      detail: 'max_turns',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('session TIMEOUT');
+    expect(result).toContain('(max_turns)');
+  });
+
+  it('formats step_advanced with arrow label', () => {
     const line = makeEvent({ kind: 'step_advanced', sessionId: 'aabbccdd-1234' });
     const result = formatDaemonEventLine(line);
     expect(result).not.toBeNull();
     expect(result).toContain('step_advanced');
-    // Should not have trailing spaces or extra content
-    expect(result!.endsWith('step_advanced')).toBe(true);
+    expect(result).toContain('-> step advanced');
+  });
+
+  it('formats agent_stuck with STUCK label and reason/detail', () => {
+    const line = makeEvent({
+      kind: 'agent_stuck',
+      sessionId: 'aabbccdd-1234',
+      reason: 'repeated_tool_call',
+      detail: 'Same tool+args called 3 times: Bash',
+      toolName: 'Bash',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('*** STUCK:');
+    expect(result).toContain('repeated_tool_call');
+    expect(result).toContain('Same tool+args called 3 times: Bash');
+  });
+
+  it('formats issue_reported severity=fatal with FATAL label', () => {
+    const line = makeEvent({
+      kind: 'issue_reported',
+      sessionId: 'aabbccdd-1234',
+      severity: 'fatal',
+      summary: 'Cannot proceed: assessment gate rejected all attempts',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('FATAL:');
+    expect(result).toContain('Cannot proceed');
+    expect(result).not.toContain('severity=fatal');
+  });
+
+  it('formats issue_reported severity=error with ERROR label', () => {
+    const line = makeEvent({
+      kind: 'issue_reported',
+      sessionId: 'aabbccdd-1234',
+      severity: 'error',
+      summary: 'Build failed with exit code 1',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('ERROR:');
+    expect(result).toContain('Build failed');
+  });
+
+  it('formats issue_reported severity=warn with severity label', () => {
+    const line = makeEvent({
+      kind: 'issue_reported',
+      sessionId: 'aabbccdd-1234',
+      severity: 'warn',
+      summary: 'Retrying after transient failure',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('severity=warn');
+    expect(result).toContain('Retrying after transient failure');
   });
 
   it('uses ? for unknown ts when ts field is missing', () => {

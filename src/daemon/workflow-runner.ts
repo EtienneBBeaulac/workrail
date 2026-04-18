@@ -1127,12 +1127,18 @@ interface IssueRecord {
  * @param emitter - Optional event emitter to fire an issue_reported event.
  * @param workrailSessionId - The WorkRail session ID for event correlation (optional).
  * @param issuesDirOverride - Override the issues directory (for tests).
+ * @param onIssueSummary - Optional callback called synchronously with the issue summary
+ *   string after each successful report_issue call. Used by runWorkflow() to accumulate
+ *   issue summaries for the WORKTRAIN_STUCK marker without async file I/O.
+ *   WHY optional callback: avoids circular dependency and keeps execute() synchronous
+ *   from the caller's perspective. Fire-and-forget writes happen separately.
  */
 export function makeReportIssueTool(
   sessionId: string,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: string | null,
   issuesDirOverride?: string,
+  onIssueSummary?: (summary: string) => void,
 ): AgentTool {
   const issuesDir = issuesDirOverride ?? path.join(os.homedir(), '.workrail', 'issues');
 
@@ -1215,6 +1221,12 @@ export function makeReportIssueTool(
         ...(record.continueToken !== undefined && { continueToken: record.continueToken }),
         ...(workrailSessionId != null ? { workrailSessionId } : {}),
       });
+
+      // Notify the accumulator so runWorkflow() can include issue summaries in
+      // the WORKTRAIN_STUCK marker without async file I/O.
+      // WHY synchronous callback: execute() already runs synchronously from the
+      // agent loop's perspective; the callback push is O(1) and never throws.
+      onIssueSummary?.(record.summary);
 
       const isFatal = record.severity === 'fatal';
       const message = isFatal
@@ -1498,8 +1510,31 @@ export async function runWorkflow(
   // call includes output.notesMarkdown. Used by the trigger layer for delivery (git commit/PR).
   let lastStepNotes: string | undefined;
 
+  // ---- Stuck detection state ----
+  // WHY these variables: the turn_end subscriber needs them to check for stuck signals.
+  // All are closure-scoped to this runWorkflow() call -- no cross-session contamination.
+  //
+  // stepAdvanceCount: incremented in onAdvance() every time continue_workflow advances.
+  // Used by signal 2 (no_progress: N turns with 0 advances).
+  let stepAdvanceCount = 0;
+  //
+  // lastNToolCalls: ring buffer of the last 3 tool_call_started events.
+  // Populated in the onToolCallStarted callback before each tool execution.
+  // Used by signal 1 (repeated_tool_call: same tool+args 3 times).
+  // WHY max 3: conservative threshold avoids false positives on legitimate retries.
+  // WHY argsSummary: same tool with different args is not stuck (e.g. grep on different files).
+  const lastNToolCalls: Array<{ toolName: string; argsSummary: string }> = [];
+  const STUCK_REPEAT_THRESHOLD = 3;
+  //
+  // issueSummaries: push-only array populated by the onIssueSummary callback on report_issue.
+  // Included in the WORKTRAIN_STUCK marker so coordinator scripts can categorize failures.
+  // WHY cap at 10: bounds memory on pathological sessions with many issue_reported calls.
+  const issueSummaries: string[] = [];
+  const MAX_ISSUE_SUMMARIES = 10;
+
   const onAdvance = (stepText: string, _continueToken: string): void => {
     pendingSteerText = stepText;
+    stepAdvanceCount++;
     // Heartbeat on each step advance -- the session is alive and making progress.
     // WHY workrailSessionId: DaemonRegistry is keyed by WorkRail session ID (not process UUID).
     // workrailSessionId is populated after executeStartWorkflow + continueToken decode.
@@ -1616,7 +1651,13 @@ export async function runWorkflow(
     makeBashTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
     makeReadTool(schemas, sessionId, emitter, workrailSessionId),
     makeWriteTool(schemas, sessionId, emitter, workrailSessionId),
-    makeReportIssueTool(sessionId, emitter, workrailSessionId),
+    makeReportIssueTool(sessionId, emitter, workrailSessionId, undefined, (summary: string) => {
+      // Accumulate issue summaries for WORKTRAIN_STUCK marker.
+      // WHY cap: bounds memory on pathological sessions.
+      if (issueSummaries.length < MAX_ISSUE_SUMMARIES) {
+        issueSummaries.push(summary);
+      }
+    }),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----
@@ -1691,6 +1732,14 @@ export async function runWorkflow(
     },
     onToolCallStarted: ({ toolName, argsSummary }) => {
       emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(workrailSessionId) });
+      // Update the stuck-detection ring buffer.
+      // WHY here: this callback fires synchronously before tool.execute() so the
+      // ring buffer always reflects the most recent tool calls at turn_end check time.
+      // WHY bounded by STUCK_REPEAT_THRESHOLD: O(1) space, no history accumulation.
+      lastNToolCalls.push({ toolName, argsSummary });
+      if (lastNToolCalls.length > STUCK_REPEAT_THRESHOLD) {
+        lastNToolCalls.shift();
+      }
     },
     onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
       emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(workrailSessionId) });
@@ -1758,6 +1807,65 @@ export async function runWorkflow(
       timeoutReason = 'max_turns';
       agent.abort();
       return; // Do not inject the next step -- we are aborting.
+    }
+
+    // ---- Stuck detection heuristics ----
+    // WHY here: the turn_end subscriber is the canonical post-turn hook. All state
+    // variables (turnCount, stepAdvanceCount, lastNToolCalls, timeoutReason) are
+    // available here. Detection is advisory-only: emitter?.emit() is fire-and-forget
+    // and never aborts the session.
+    //
+    // Signal 1: same tool + same args called STUCK_REPEAT_THRESHOLD times in a row.
+    // WHY argsSummary comparison: same tool with different args is not stuck
+    // (e.g. grep on different files). argsSummary is JSON-serialized params truncated
+    // to 200 chars -- the truncation boundary is an accepted near-zero false positive.
+    if (
+      lastNToolCalls.length === STUCK_REPEAT_THRESHOLD &&
+      lastNToolCalls.every(
+        (c) => c.toolName === lastNToolCalls[0]?.toolName && c.argsSummary === lastNToolCalls[0]?.argsSummary,
+      )
+    ) {
+      emitter?.emit({
+        kind: 'agent_stuck',
+        sessionId,
+        reason: 'repeated_tool_call',
+        detail: `Same tool+args called ${STUCK_REPEAT_THRESHOLD} times: ${lastNToolCalls[0]?.toolName ?? 'unknown'}`,
+        toolName: lastNToolCalls[0]?.toolName,
+        argsSummary: lastNToolCalls[0]?.argsSummary,
+        ...withWorkrailSession(workrailSessionId),
+      });
+    }
+
+    // Signal 2: 80%+ of turns used with 0 step advances.
+    // WHY 0.8 threshold: conservative -- 80% of turns gone with nothing to show is
+    // a strong stuck signal. The agent may legitimately spend many turns researching
+    // before advancing; the threshold must be high enough to avoid false positives.
+    if (
+      maxTurns > 0 &&
+      turnCount >= Math.floor(maxTurns * 0.8) &&
+      stepAdvanceCount === 0
+    ) {
+      emitter?.emit({
+        kind: 'agent_stuck',
+        sessionId,
+        reason: 'no_progress',
+        detail: `${turnCount} turns used, 0 step advances (${maxTurns} turn limit)`,
+        ...withWorkrailSession(workrailSessionId),
+      });
+    }
+
+    // Signal 3: wall-clock timeout is already firing (session is aborting).
+    // WHY emit here: the abort fires in the timeout Promise rejection path, which
+    // runs after the catch block and does not go through turn_end. Emitting here
+    // gives a clear last-chance signal before the abort propagates.
+    if (timeoutReason !== null) {
+      emitter?.emit({
+        kind: 'agent_stuck',
+        sessionId,
+        reason: 'timeout_imminent',
+        detail: `${timeoutReason === 'wall_clock' ? 'Wall-clock timeout' : 'Max-turn limit'} reached`,
+        ...withWorkrailSession(workrailSessionId),
+      });
     }
 
     // If a step was advanced and workflow is not yet complete, inject the next step.
@@ -1850,11 +1958,18 @@ export async function runWorkflow(
     // Append a structured stuck marker so coordinator scripts can detect and act on it.
     // WHY: parseable by worktrain coordinator scripts without LLM involvement --
     // scripts-over-agent for routing decisions.
+    // WHY these fields: coordinator scripts need enough context to categorize the
+    // failure without reading the full daemon event log.
+    const lastToolCalled = lastNToolCalls.length > 0 ? lastNToolCalls[lastNToolCalls.length - 1] : null;
     const stuckMarker = `\n\nWORKTRAIN_STUCK: ${JSON.stringify({
       reason: 'session_error',
       error: errMsg.slice(0, 500),
       workflowId: trigger.workflowId,
       sessionId,
+      turnCount,
+      stepAdvanceCount,
+      ...(lastToolCalled !== null && { lastToolCalled }),
+      ...(issueSummaries.length > 0 && { issueSummaries }),
     })}`;
     return {
       _tag: 'error',

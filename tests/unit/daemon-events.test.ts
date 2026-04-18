@@ -186,6 +186,8 @@ describe('DaemonEventEmitter', () => {
       { kind: 'tool_call_started', sessionId: 's1', toolName: 'Bash', argsSummary: '{"command":"git status"}' },
       { kind: 'tool_call_completed', sessionId: 's1', toolName: 'Bash', durationMs: 45, resultSummary: 'On branch main' },
       { kind: 'tool_call_failed', sessionId: 's1', toolName: 'Bash', durationMs: 12, errorMessage: 'Command failed' },
+      // Stuck detection event.
+      { kind: 'agent_stuck', sessionId: 's1', reason: 'repeated_tool_call', detail: 'Same tool+args 3 times', toolName: 'Bash', argsSummary: '{"command":"npm test"}' },
     ];
 
     for (const event of events) {

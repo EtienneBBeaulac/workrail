@@ -481,6 +481,10 @@ function formatDaemonEventLine(raw: string): string | null {
   const prefix = sessionId ? `[${ts}] [${sessionId}] ${kind}` : `[${ts}] ${kind}`;
 
   switch (kind) {
+    case 'agent_stuck':
+      // WHY prominent label: stuck sessions need to be immediately visible in the log.
+      // The STUCK prefix and reason/detail make it scannable at a glance.
+      return `${prefix}  *** STUCK: ${obj['reason'] ?? '?'} -- ${String(obj['detail'] ?? '').slice(0, 100)}`;
     case 'llm_turn_started':
       return `${prefix}  msgs=${obj['messageCount'] ?? '?'}`;
     case 'llm_turn_completed':
@@ -497,12 +501,33 @@ function formatDaemonEventLine(raw: string): string | null {
       return `${prefix}  tool=${obj['toolName'] ?? '?'} err=${String(obj['error'] ?? '').slice(0, 80)}`;
     case 'session_started':
       return `${prefix}  workflow=${obj['workflowId'] ?? '?'} workspace=${obj['workspacePath'] ?? '?'}`;
-    case 'session_completed':
-      return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${obj['outcome'] ?? '?'}${obj['detail'] ? ` (${obj['detail']})` : ''}`;
+    case 'session_completed': {
+      // WHY distinct labels per outcome: success/error/timeout are actionable states.
+      // A human scanning logs can see at a glance what happened.
+      const outcome = obj['outcome'];
+      const detail = obj['detail'] ? ` (${obj['detail']})` : '';
+      if (outcome === 'success') {
+        return `${prefix}  workflow=${obj['workflowId'] ?? '?'} -- session complete${detail}`;
+      } else if (outcome === 'error') {
+        return `${prefix}  workflow=${obj['workflowId'] ?? '?'} -- session FAILED${detail}`;
+      } else if (outcome === 'timeout') {
+        return `${prefix}  workflow=${obj['workflowId'] ?? '?'} -- session TIMEOUT${detail}`;
+      }
+      return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${outcome ?? '?'}${detail}`;
+    }
     case 'step_advanced':
-      return `${prefix}`;
-    case 'issue_reported':
-      return `${prefix}  severity=${obj['severity'] ?? '?'} ${String(obj['summary'] ?? '').slice(0, 80)}`;
+      return `${prefix}  -> step advanced`;
+    case 'issue_reported': {
+      // WHY severity-differentiated labels: fatal and error issues need to stand out.
+      const severity = obj['severity'];
+      const summary = String(obj['summary'] ?? '').slice(0, 100);
+      if (severity === 'fatal') {
+        return `${prefix}  FATAL: ${summary}`;
+      } else if (severity === 'error') {
+        return `${prefix}  ERROR: ${summary}`;
+      }
+      return `${prefix}  severity=${severity ?? '?'} ${summary}`;
+    }
     default:
       return `${prefix}  ${JSON.stringify(obj).slice(0, 120)}`;
   }
@@ -633,6 +658,151 @@ program
         offset = result.newOffset; // Update offset even if no new lines.
       }
     }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATUS COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('status <sessionId>')
+  .description('Print a health summary for a daemon session. Accepts sessionId (UUID prefix) or workrailSessionId (sess_xxx).')
+  .action(async (sessionId: string) => {
+    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filePath = path.join(eventsDir, `${date}.jsonl`);
+
+    let raw: string;
+    try {
+      raw = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      process.stdout.write(`No events today. Is the daemon running? (Expected: ${filePath})\n`);
+      return;
+    }
+
+    // Aggregate stats across all event kinds for this session.
+    let workflowId: string | null = null;
+    let firstTs: number | null = null;
+    let lastTs: number | null = null;
+    let llmTurns = 0;
+    let stepAdvances = 0;
+    let totalToolCalls = 0;
+    let failedToolCalls = 0;
+    let fatalIssues = 0;
+    let errorIssues = 0;
+    let warnIssues = 0;
+    let sessionOutcome: string | null = null;
+    let lastToolName: string | null = null;
+    let lastToolArgs: string | null = null;
+    let stuckCount = 0;
+    let isLive = true;
+
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      // Match by process-local sessionId (UUID) or workrailSessionId (sess_xxx).
+      const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
+      const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
+      const matches = sid.startsWith(sessionId) || sid === sessionId ||
+        wrid.startsWith(sessionId) || wrid === sessionId;
+      if (!matches) continue;
+
+      const ts = typeof obj['ts'] === 'number' ? obj['ts'] : null;
+      if (ts !== null) {
+        if (firstTs === null || ts < firstTs) firstTs = ts;
+        if (lastTs === null || ts > lastTs) lastTs = ts;
+      }
+
+      const kind = typeof obj['kind'] === 'string' ? obj['kind'] : '';
+      switch (kind) {
+        case 'session_started':
+          workflowId = typeof obj['workflowId'] === 'string' ? obj['workflowId'] : null;
+          break;
+        case 'llm_turn_completed':
+          llmTurns++;
+          break;
+        case 'step_advanced':
+          stepAdvances++;
+          break;
+        case 'tool_call_started':
+          totalToolCalls++;
+          lastToolName = typeof obj['toolName'] === 'string' ? obj['toolName'] : null;
+          lastToolArgs = typeof obj['argsSummary'] === 'string' ? String(obj['argsSummary']).slice(0, 60) : null;
+          break;
+        case 'tool_call_failed':
+          failedToolCalls++;
+          break;
+        case 'issue_reported': {
+          const severity = obj['severity'];
+          if (severity === 'fatal') fatalIssues++;
+          else if (severity === 'error') errorIssues++;
+          else if (severity === 'warn') warnIssues++;
+          break;
+        }
+        case 'agent_stuck':
+          stuckCount++;
+          break;
+        case 'session_completed':
+          sessionOutcome = typeof obj['outcome'] === 'string' ? obj['outcome'] : null;
+          isLive = false;
+          break;
+      }
+    }
+
+    if (firstTs === null) {
+      process.stdout.write(`No events found for session: ${sessionId}\n`);
+      return;
+    }
+
+    // Format duration as human-readable string.
+    const durationMs = (lastTs ?? firstTs) - firstTs;
+    const durationSec = Math.floor(durationMs / 1000);
+    const durationMin = Math.floor(durationSec / 60);
+    const durationRemSec = durationSec % 60;
+    const durationStr = durationMin > 0
+      ? `${durationMin}m ${durationRemSec}s`
+      : `${durationSec}s`;
+
+    const avgTurnSec = llmTurns > 0 ? (durationMs / llmTurns / 1000).toFixed(1) : '?';
+    const failRate = totalToolCalls > 0 ? ((failedToolCalls / totalToolCalls) * 100).toFixed(1) : '0';
+    const sessionStatus = sessionOutcome !== null
+      ? sessionOutcome.toUpperCase()
+      : (isLive ? 'RUNNING' : 'UNKNOWN');
+
+    const issueStr = (fatalIssues + errorIssues + warnIssues) > 0
+      ? `${fatalIssues + errorIssues + warnIssues} (${fatalIssues} fatal, ${errorIssues} error, ${warnIssues} warn)`
+      : '0';
+
+    const lastActivityStr = lastTs !== null
+      ? `${lastToolName ?? 'unknown'} ${lastToolArgs ? `"${lastToolArgs}"` : ''} ${Math.round((Date.now() - lastTs) / 1000)}s ago`
+      : 'unknown';
+
+    process.stdout.write(`\nSession: ${sessionId}    [${sessionStatus}]\n`);
+    if (workflowId) process.stdout.write(`Workflow: ${workflowId}\n`);
+    process.stdout.write(`Duration: ${durationStr}\n`);
+    process.stdout.write(`LLM turns: ${llmTurns}${llmTurns > 0 ? ` (avg ${avgTurnSec}s each)` : ''}\n`);
+    process.stdout.write(`Step advances: ${stepAdvances}\n`);
+    process.stdout.write(`Tool calls: ${totalToolCalls} (${failedToolCalls} failed, ${failRate}% failure rate)\n`);
+    process.stdout.write(`Issues reported: ${issueStr}\n`);
+    process.stdout.write(`Last activity: ${lastActivityStr}\n`);
+
+    if (stuckCount > 0) {
+      process.stdout.write(`*** WARNING: ${stuckCount} stuck signal(s) detected\n`);
+    }
+    if (fatalIssues > 0) {
+      process.stdout.write(`*** WARNING: ${fatalIssues} FATAL issue(s) reported\n`);
+    }
+    if (llmTurns >= 10 && stepAdvances === 0) {
+      process.stdout.write(`*** WARNING: ${llmTurns} turns with 0 step advances (possible stuck)\n`);
+    }
+
+    process.stdout.write('\n');
   });
 
 // ═══════════════════════════════════════════════════════════════════════════

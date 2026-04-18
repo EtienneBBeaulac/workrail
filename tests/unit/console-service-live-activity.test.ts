@@ -430,6 +430,46 @@ describe('ConsoleService isSessionLiveFromEventLog', () => {
     expect(detail.liveActivity![0]!.toolName).toBe('Bash');
   });
 
+  it('liveActivity includes agent_stuck events when session is live', async () => {
+    const sessionId = 'sess_live009aaaaaaaaaaaaaaaa';
+    const events = makeMinimalEvents(sessionId);
+
+    // Build a log with a tool_called event AND an agent_stuck event.
+    const stuckEvent = JSON.stringify({
+      kind: 'agent_stuck',
+      workrailSessionId: sessionId,
+      sessionId: 'internal-daemon-id',
+      reason: 'repeated_tool_call',
+      detail: 'Same tool+args called 3 times: Bash',
+      toolName: 'Bash',
+      ts: 1_700_000_001_500,
+    });
+    const jsonlContent = makeEventLogJSONL(sessionId, { started: true, toolNames: ['Bash'] }) +
+      stuckEvent + '\n';
+    const logPath = todayLogPath();
+
+    mockStat.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return { size: Buffer.byteLength(jsonlContent) };
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockReadFile.mockImplementation(async (p: unknown) => {
+      if (p === logPath) return jsonlContent;
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const service = makeService(sessionId, events);
+    const result = await service.getSessionDetail(sessionId);
+
+    expect(result.isOk()).toBe(true);
+    const detail = result._unsafeUnwrap();
+    expect(detail.isLive).toBe(true);
+    expect(detail.liveActivity).not.toBeNull();
+    // agent_stuck event should appear in liveActivity with toolName='agent_stuck'.
+    const stuckEntries = detail.liveActivity!.filter((a) => a.toolName === 'agent_stuck');
+    expect(stuckEntries.length).toBeGreaterThan(0);
+    expect(stuckEntries[0]!.summary).toContain('STUCK:');
+  });
+
   it('isLive=false when log contains only events for a different session', async () => {
     const sessionId = 'sess_live008aaaaaaaaaaaaaaaa';
     const otherSessionId = 'sess_other01aaaaaaaaaaaaaaaa';
