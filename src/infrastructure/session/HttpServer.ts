@@ -792,38 +792,46 @@ export class HttpServer {
     
     // SYNC cleanup for 'exit' event - cannot be async per Node.js docs
     // "The 'exit' event listener functions must only perform synchronous operations"
+    //
+    // WHY process.stderr.write with try/catch instead of console.error:
+    // This runs at process exit, when the MCP client pipe may already be broken.
+    // console.error() on a broken pipe throws EPIPE with no handler, which crashes
+    // the process via uncaughtException *during* cleanup. See printBanner() and
+    // reclaimStaleLock() for the same pattern. See fatal-exit.ts for full rationale.
     const cleanupSync = () => {
       if (isCleaningUp || !this.isPrimary) return;
       isCleaningUp = true;
-      
-      console.error('[Dashboard] Primary shutting down (sync cleanup)');
-      
+
+      try { process.stderr.write('[Dashboard] Primary shutting down (sync cleanup)\n'); } catch { /* ignore */ }
+
       // Stop heartbeat
       this.heartbeat.stop();
-      
+
       // SYNC file delete only - async won't complete before process exits
       try {
         releaseLockFileSync(this.lockFile);
-        console.error('[Dashboard] Lock file released');
+        try { process.stderr.write('[Dashboard] Lock file released\n'); } catch { /* ignore */ }
       } catch (error: any) {
         // Ignore ENOENT (file already deleted) but log others
         if (error.code !== 'ENOENT') {
-          console.error('[Dashboard] Failed to release lock file:', error.message);
+          try { process.stderr.write(`[Dashboard] Failed to release lock file: ${(error as Error).message}\n`); } catch { /* ignore */ }
         }
       }
-      
+
       this.isPrimary = false;
     };
-    
+
     // Signal handler: stop the server and emit a typed shutdown request.
     // IMPORTANT: HttpServer does NOT terminate the process. The composition root decides.
+    //
+    // WHY process.stderr.write: see cleanupSync above for full rationale.
     const signalHandler = (signal: ProcessSignal) => {
       if (isCleaningUp) return;
       isCleaningUp = true;
 
-      console.error(`[Dashboard] Received ${signal}`);
+      try { process.stderr.write(`[Dashboard] Received ${signal}\n`); } catch { /* ignore */ }
       this.stop()
-        .catch(err => console.error('[Dashboard] Cleanup error:', err))
+        .catch(err => { try { process.stderr.write(`[Dashboard] Cleanup error: ${(err as Error).message}\n`); } catch { /* ignore */ } })
         .finally(() => {
           if (signal !== 'exit') {
             this.shutdownEvents.emit({ kind: 'shutdown_requested', signal });

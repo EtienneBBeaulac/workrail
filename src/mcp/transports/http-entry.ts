@@ -16,6 +16,7 @@ import { bindWithPortFallback } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
 import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
 import { clearTombstone, writeTombstone } from './primary-tombstone.js';
+import { logBridgeEvent } from './bridge-events.js';
 import * as crypto from 'crypto';
 import express from 'express';
 
@@ -26,6 +27,9 @@ export async function startHttpServer(port: number): Promise<void> {
   // Register early — before composeServer() — so startup failures exit cleanly.
   registerFatalHandlers('http');
   logStartup('http', { port });
+  // Log primary server startup to bridge.log so crash forensics can correlate
+  // primary restarts with bridge reconnect storms in the same log stream.
+  logBridgeEvent({ kind: 'primary_started', transport: 'http', port });
 
   // Clear any tombstone from the previous primary run. This signals to
   // slow-polling bridges that a new primary is available.

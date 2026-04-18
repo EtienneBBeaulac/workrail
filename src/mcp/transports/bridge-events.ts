@@ -1,10 +1,15 @@
 /**
- * Bridge connection event log — append-only JSONL at ~/.workrail/bridge.log.
+ * WorkRail process lifecycle log — append-only JSONL at ~/.workrail/bridge.log.
  *
- * Records the lifecycle of each bridge process so that post-mortem diagnosis
- * can reconstruct exactly what happened: when it connected, when it lost
- * connection, how many reconnect attempts it made, whether it spawned a
- * primary, and why it ultimately shut down.
+ * Records lifecycle events for ALL WorkRail processes: both bridge processes
+ * and primary (stdio/http) servers. Named 'bridge-events' for historical
+ * reasons; the log itself covers the full WorkRail process graph.
+ *
+ * Bridge events: when it connected, when it lost connection, how many
+ * reconnect attempts it made, whether it spawned a primary, why it shut down.
+ *
+ * Primary events: when the primary server started (with transport and PID),
+ * enabling correlation with bridge reconnect storms in the same log stream.
  *
  * Without this log, diagnosing orphaned high-CPU bridge processes requires
  * reading stale CPU stats and guessing at the state machine. With it, the
@@ -26,6 +31,17 @@ const BRIDGE_LOG_MAX_BYTES = 512 * 1024; // 512 KB
 // ---------------------------------------------------------------------------
 
 export type BridgeEvent =
+  | {
+      /** Fired when a primary (stdio or http) server starts up. */
+      readonly kind: 'primary_started';
+      readonly transport: 'stdio' | 'http';
+      /**
+       * The MCP HTTP port, when known at startup time.
+       * Present for http transport (port is a parameter).
+       * Absent for stdio transport (HTTP server binds later).
+       */
+      readonly port?: number;
+    }
   | { readonly kind: 'started'; readonly primaryPort: number; readonly ppid: number }
   | { readonly kind: 'connected'; readonly primaryPort: number }
   | { readonly kind: 'disconnected' }
