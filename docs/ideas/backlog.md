@@ -5148,3 +5148,38 @@ Everything else -- design docs, review findings, investigation notes, implementa
 6. **Knowledge graph integration** -- artifacts become nodes, sessions link to their artifacts
 
 **The `NEVER COMMIT MARKDOWN FILES` rule in metaGuidance is a symptom of this missing feature.** The rule exists because agents keep dumping files in the wrong place. With a proper artifact store, the rule becomes unnecessary -- artifacts have nowhere to go except the artifact store.
+
+---
+
+### "Add to repo" button in console for artifacts (Apr 18, 2026)
+
+Instead of workflow steps declaring upfront whether an artifact goes to the repo, the human makes that decision after seeing the content -- via a button in the console.
+
+**The flow:**
+1. Agent produces artifact → stored automatically in `~/.workrail/artifacts/`
+2. Human opens it in the console Artifacts tab
+3. Sees action buttons: **📁 Add to repo** | **📋 Copy** | **🔗 Share link**
+4. Clicks "Add to repo" → console prompts: "Save as: `docs/design/design-candidates-<name>.md`" (editable path with sensible default)
+5. Console commits the artifact as markdown to the repo at that path, with a commit message like `docs: add design candidates for <workflow-goal>`
+
+**Why this is better than workflow-level declaration:**
+- Agent doesn't need to know at step time whether output will be repo-worthy
+- Human decides after seeing actual content quality
+- Ephemeral working artifacts stay ephemeral; only promoted ones go to the repo
+- No "NEVER COMMIT MARKDOWN FILES" rule needed -- agents just produce artifacts, humans decide what's repo-worthy
+
+**Button options:**
+- **📁 Add to repo** -- renders artifact as markdown, commits to repo at specified path
+- **📋 Copy** -- copies rendered markdown to clipboard
+- **🔗 Share link** -- generates a URL that opens the artifact in the console (useful for teams)
+- **📤 Export** -- save to arbitrary filesystem path outside the repo
+
+**The commit WorkTrain creates:**
+```
+docs(design): add design candidates for MCP simplification
+
+Source: WorkTrain session sess_3bmj... (mr-review-workflow-agentic)
+Artifact: design-candidates-stdio-simplification-2026-04-18.md
+```
+
+**Also useful for:** implementation plans the team wants to track, spec files that belong in the repo permanently, investigation summaries that become part of incident post-mortems.
