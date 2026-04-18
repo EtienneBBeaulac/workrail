@@ -4508,3 +4508,59 @@ Before committing to any alternative, these questions need answers:
 4. **What did nexus-core do?** The backlog notes nexus-core as a more advanced system -- how does it handle agent-step transitions?
 
 These are prototype questions, not design questions. Build the smallest possible test for each before committing to any direction.
+
+---
+
+### Bundled trigger templates: zero-config workflow automation via worktrain init (Apr 18, 2026)
+
+**Problem:** Every user has to write their own triggers.yml manually. Wrong workflow IDs, missing required fields, wrong workspace paths -- all common mistakes (we hit all three today). There's no "just works" path to workflow automation.
+
+**Solution:** Ship common trigger templates bundled with WorkTrain. `worktrain init` presents a menu and generates a pre-filled triggers.yml.
+
+**Bundled templates to ship:**
+
+```yaml
+# Template: mr-review
+- id: mr-review
+  workflowId: mr-review-workflow-agentic
+  goal: "Review the PR specified in the webhook payload goal field"
+  concurrencyMode: parallel
+  autoCommit: false
+  agentConfig: { maxSessionMinutes: 30 }
+
+# Template: coding-task  
+- id: coding-task
+  workflowId: coding-task-workflow-agentic
+  concurrencyMode: parallel
+  autoCommit: false
+  agentConfig: { maxSessionMinutes: 60 }
+
+# Template: discovery-task
+- id: discovery-task
+  workflowId: wr.discovery
+  concurrencyMode: parallel
+  autoCommit: false
+  agentConfig: { maxSessionMinutes: 60 }
+
+# Template: bug-investigation
+- id: bug-investigation
+  workflowId: bug-investigation.agentic.v2
+  agentConfig: { maxSessionMinutes: 45 }
+
+# Template: weekly-health-scan (cron, when native cron trigger ships)
+# - id: weekly-health-scan
+#   type: cron
+#   schedule: "0 9 * * 0"
+#   workflowId: architecture-scalability-audit
+```
+
+**`worktrain init` flow:**
+1. "Which workflows do you want to run automatically?" (checkbox menu)
+2. For each selected: set `workspacePath` to current directory (overridable)
+3. Generate `triggers.yml` in the workspace root
+4. Validate workflow IDs exist before writing (use the startup validator)
+5. Tell the user how to fire each trigger: `curl -X POST http://localhost:3200/webhook/<id> ...`
+
+**Why this matters:** The difference between WorkTrain being usable by anyone vs only by engineers who read the source code. A new user should be able to go from `worktrain init` to their first automated workflow in under 5 minutes.
+
+**Also needed:** `worktrain trigger add <template-name>` to add a single trigger to an existing triggers.yml without re-running init.

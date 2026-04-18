@@ -8,3 +8,16 @@ triggers:
     autoCommit: false
     agentConfig:
       maxSessionMinutes: 60
+
+  # MR review: pass a PR number in the goal to get a full review
+  # Dispatch via: POST /webhook/mr-review {"goal": "Review PR #123: <title>"}
+  # Or use goalTemplate with GitHub polling (when github_poll is configured)
+  - id: mr-review
+    goal: "Review the PR specified in the webhook payload goal field"
+    provider: generic
+    workflowId: mr-review-workflow-agentic
+    workspacePath: /Users/etienneb/git/personal/workrail
+    concurrencyMode: parallel
+    autoCommit: false
+    agentConfig:
+      maxSessionMinutes: 30
