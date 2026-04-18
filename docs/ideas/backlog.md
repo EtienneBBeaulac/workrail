@@ -4416,3 +4416,31 @@ The blanket try/catch in AgentLoop._executeTools() converts ALL tool throws to i
 **Mitigation already in place:** `--isolation worktree` creates branches named `worktree-agent-<id>` -- these are identifiable and bulk-deletable. The daemon's `runStartupRecovery()` could also prune them.
 
 **Build order:** startup pruning (trivial, high value) → automatic cleanup on session end → `worktrain worktree` CLI commands.
+
+---
+
+### Simplify MCP server: remove primary election, bridge, and HTTP serving (architectural cleanup)
+
+**The core insight:** the bridge/primary-election system exists solely to solve "only one process should serve the console UI on port 3456." Now that `worktrain console` is a standalone file-watching binary (PR #512), that problem is already solved. The entire bridge/election system can be removed.
+
+**What "allow multiple MCP processes" means in practice:**
+- Each Claude Code window gets its own MCP server -- no port contention, no primary election, no bridge reconnect cycles
+- MCP server becomes pure stdio: starts, handles tools, exits. Nothing async needs to write after the pipe closes -- EPIPE is irrelevant.
+- Session store is append-only JSONL per-session -- multiple processes writing different sessions cannot corrupt each other
+- `worktrain console` aggregates all sessions from the file store regardless of how many MCP servers ran
+
+**What to remove:**
+- `DashboardLock` / `tryBecomePrimary()` / `bindWithPortFallback()` -- the entire primary election system
+- `bridge-entry.ts` -- the bridge, spawn storm, and reconnect drama are gone
+- `HttpServer` starting as part of the MCP server -- console owns HTTP, not MCP
+
+**What remains for the MCP server:** pure stdio MCP protocol + session engine. No HTTP, no port binding, no lock files. Starts instantly, exits cleanly.
+
+**Why this is safe:**
+- Tokens are session-scoped UUIDs -- two servers cannot share a session
+- Append-only JSONL has no exclusive file locks
+- ~50MB per process × 3 Claude Code windows = 150MB -- acceptable
+
+**The bridge complexity was always a band-aid.** It was the right solution when the MCP server also owned the console UI. With the standalone console, the band-aid can come off and the system becomes dramatically simpler and more reliable.
+
+**Build order:** extract `worktrain console` fully (done) → remove HttpServer from MCP startup → remove bridge → remove DashboardLock/primary election → MCP server is pure stdio.

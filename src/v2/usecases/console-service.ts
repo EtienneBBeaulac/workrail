@@ -129,10 +129,15 @@ const DAEMON_EVENT_LOG_READ_LIMIT_BYTES = 100 * 1024;
 const DAEMON_EVENTS_DIR = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
 /**
- * Read the last N tool_called events from today's daemon event log for a given session.
+ * Read the last N tool activity events from today's daemon event log for a given session.
+ *
+ * Reads from BOTH the coarse stream (tool_called) and fine-grained stream (tool_call_started)
+ * to show all tool activity regardless of which stream emitted it. See ToolCallStartedEvent
+ * in daemon-events.ts for documentation of the dual-stream model.
  *
  * Best-effort: returns null on any error (file not found, parse error, etc.).
  * Never throws or propagates errors -- this is observability, not correctness.
+ * Returns [] when no matching events found (log readable but empty for this session).
  *
  * @param workrailSessionId - The WorkRail session ID to filter by.
  * @param maxEntries - Maximum number of entries to return.
@@ -170,8 +175,12 @@ async function readLiveActivity(
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
+        // Accept both coarse stream (tool_called) and fine-grained stream (tool_call_started).
+        // See dual-stream model docs in ToolCallStartedEvent in daemon-events.ts.
+        const isToolEvent =
+          event['kind'] === 'tool_called' || event['kind'] === 'tool_call_started';
         if (
-          event['kind'] !== 'tool_called' ||
+          !isToolEvent ||
           event['workrailSessionId'] !== workrailSessionId ||
           typeof event['toolName'] !== 'string' ||
           typeof event['ts'] !== 'number'

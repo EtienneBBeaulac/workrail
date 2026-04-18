@@ -177,6 +177,24 @@ export interface LlmTurnCompletedEvent {
 /**
  * A tool call is starting. Emitted in agent-loop.ts before tool.execute().
  *
+ * NOTE -- dual-stream model:
+ * Two parallel tool event streams exist in the daemon JSONL log:
+ *
+ * 1. COARSE stream (legacy): `tool_called` events emitted from inside each
+ *    tool's execute() body in workflow-runner.ts. Includes a tool-specific
+ *    `summary` field (truncated command/path). Consumed by `readLiveActivity()`
+ *    in console-service.ts for the live session panel.
+ *
+ * 2. FINE-GRAINED stream (new): `tool_call_started`, `tool_call_completed`,
+ *    `tool_call_failed` events emitted via AgentLoopCallbacks in agent-loop.ts.
+ *    Includes `durationMs` and `resultSummary`. Intended for timing analysis,
+ *    `worktrain logs --follow`, and future analytics features.
+ *
+ * WHY two streams: `tool_called` predates AgentLoopCallbacks and is emitted
+ * from inside each tool -- it has tool-specific context (the Bash command, the
+ * file path) that AgentLoop cannot see. The fine-grained stream adds timing
+ * and lifecycle without replacing the coarse stream.
+ *
  * WHY argsSummary: raw params may be large (e.g. file contents in Write tool).
  * Truncating to 200 chars gives observability without bloating the event log.
  */

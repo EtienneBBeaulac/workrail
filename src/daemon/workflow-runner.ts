@@ -92,6 +92,18 @@ const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
 const DEFAULT_MAX_TURNS = 50;
 
 /**
+ * Conditionally spreads workrailSessionId into a daemon event object.
+ *
+ * WHY: workrailSessionId (the WorkRail sess_xxx ID) is unavailable at session_started
+ * time -- it can only be decoded from the continueToken after executeStartWorkflow()
+ * returns. All subsequent events include it when available, via this helper.
+ * Returns an empty object when sid is null so callers can spread unconditionally.
+ */
+function withWorkrailSession(sid: string | null | undefined): { workrailSessionId?: string } {
+  return sid != null ? { workrailSessionId: sid } : {};
+}
+
+/**
  * Directory that holds per-session crash-recovery state files.
  * Each concurrent runWorkflow() call writes to its own <sessionId>.json file,
  * so concurrent sessions never clobber each other.
@@ -824,7 +836,7 @@ export function makeContinueWorkflowTool(
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: continue_workflow sessionId=${sessionId}`);
-      emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'continue_workflow', summary: (params.intent as string | undefined) ?? 'advance', ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'continue_workflow', summary: (params.intent as string | undefined) ?? 'advance', ...withWorkrailSession(workrailSessionId) });
       const result = await _executeContinueWorkflowFn(
         {
           continueToken: params.continueToken,
@@ -944,7 +956,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 80), ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
       const cwd = params.cwd ?? workspacePath;
       try {
         const { stdout, stderr } = await execAsync(params.command, {
@@ -1012,7 +1024,7 @@ function makeReadTool(schemas: Record<string, any>, sessionId?: string, emitter?
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: String(params.filePath).slice(0, 80), ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: String(params.filePath).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
       const content = await fs.readFile(params.filePath, 'utf8');
       return {
         content: [{ type: 'text', text: content }],
@@ -1034,7 +1046,7 @@ function makeWriteTool(schemas: Record<string, any>, sessionId?: string, emitter
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: String(params.filePath).slice(0, 80), ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: String(params.filePath).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
       await fs.mkdir(path.dirname(params.filePath), { recursive: true });
       await fs.writeFile(params.filePath, params.content, 'utf8');
       return {
@@ -1475,7 +1487,7 @@ export async function runWorkflow(
     // The closure captures it by reference -- correct value is available when onAdvance fires.
     if (workrailSessionId !== null) daemonRegistry?.heartbeat(workrailSessionId);
     // Emit step_advanced event with workrailSessionId for liveActivity correlation.
-    emitter?.emit({ kind: 'step_advanced', sessionId, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(workrailSessionId) });
   };
 
   const onComplete = (notes: string | undefined): void => {
@@ -1569,7 +1581,7 @@ export async function runWorkflow(
   // no pending continuation). Return success without creating an Agent.
   if (firstStep.isComplete) {
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
     return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
   }
@@ -1644,7 +1656,7 @@ export async function runWorkflow(
         sessionId,
         messageCount,
         modelId,
-        ...(workrailSessionId != null ? { workrailSessionId } : {}),
+        ...withWorkrailSession(workrailSessionId),
       });
     },
     onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
@@ -1655,17 +1667,17 @@ export async function runWorkflow(
         outputTokens,
         inputTokens,
         toolNamesRequested,
-        ...(workrailSessionId != null ? { workrailSessionId } : {}),
+        ...withWorkrailSession(workrailSessionId),
       });
     },
     onToolCallStarted: ({ toolName, argsSummary }) => {
-      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(workrailSessionId) });
     },
     onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
-      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(workrailSessionId) });
     },
     onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
-      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(workrailSessionId) });
     },
   };
 
@@ -1714,7 +1726,7 @@ export async function runWorkflow(
     for (const toolResult of event.toolResults) {
       if (toolResult.isError) {
         const errorText = toolResult.result?.content[0]?.text ?? 'tool error';
-        emitter?.emit({ kind: 'tool_error', sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200), ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+        emitter?.emit({ kind: 'tool_error', sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       }
     }
 
@@ -1798,11 +1810,11 @@ export async function runWorkflow(
   // timeoutReason is set before agent.abort() in both abort paths; by the time we
   // reach here the catch has completed and it is safe to read synchronously.
   if (timeoutReason !== null) {
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'timeout', detail: timeoutReason, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'timeout', detail: timeoutReason, ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
     const limitDescription = timeoutReason === 'wall_clock'
       ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
-      : `${trigger.agentConfig?.maxTurns} turns`;
+      : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
     return {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
@@ -1814,7 +1826,7 @@ export async function runWorkflow(
 
   if (stopReason === 'error' || errorMessage) {
     const errMsg = errorMessage ?? 'Agent stopped with error reason';
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
     // Append a structured stuck marker so coordinator scripts can detect and act on it.
     // WHY: parseable by worktrain coordinator scripts without LLM involvement --
@@ -1841,7 +1853,7 @@ export async function runWorkflow(
     // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
   });
 
-  emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...(workrailSessionId != null ? { workrailSessionId } : {}) });
+  emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...withWorkrailSession(workrailSessionId) });
   if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
 
   return {
