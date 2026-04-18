@@ -254,11 +254,12 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
   // Suppressed by negation context within ~30 chars before the keyword.
   const NEGATION_BLOCKING_RE = /\b(?:not|no|without)\b.{0,30}\bblocking\b/i;
   const NEGATION_CRITICAL_RE = /\b(?:not|no|without)\b.{0,30}\bcritical\b/i;
+  const NEGATION_REQUEST_CHANGES_RE = /\b(?:not|no|without)\b.{0,30}\brequest[\s_]changes\b/i;
 
   const hasBlockingKeyword =
     (upperNotes.includes('BLOCKING') && !NEGATION_BLOCKING_RE.test(notes)) ||
     (upperNotes.includes('CRITICAL') && !NEGATION_CRITICAL_RE.test(notes)) ||
-    upperNotes.includes('REQUEST CHANGES');
+    (upperNotes.includes('REQUEST CHANGES') && !NEGATION_REQUEST_CHANGES_RE.test(notes));
 
   if (hasBlockingKeyword) {
     return ok({
@@ -268,11 +269,11 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
     });
   }
 
-  // Check for clean keywords (APPROVE, LGTM, CLEAN are strong positive signals).
+  // Check for clean keywords (APPROVE, LGTM are strong positive signals).
+  // WHY no CLEAN: "CLEAN" matches too broadly ("clean architecture", "clean implementation").
   const hasCleanKeyword =
     upperNotes.includes('APPROVE') ||
     upperNotes.includes('LGTM') ||
-    upperNotes.includes('CLEAN') ||
     upperNotes.includes('NO FINDINGS') ||
     upperNotes.includes('NO ISSUES');
 
@@ -292,18 +293,10 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
   }
 
   if (hasMinorKeyword) {
+    // Handles both minor-only AND clean+minor: conservative -- minor findings exist.
     return ok({
       severity: 'minor',
       findingSummaries: extractFindingSummaries(notes),
-      raw: notes,
-    });
-  }
-
-  if (hasCleanKeyword) {
-    // Clean keyword present alongside minor keywords -- lean clean but conservative
-    return ok({
-      severity: 'clean',
-      findingSummaries: [],
       raw: notes,
     });
   }
@@ -449,7 +442,7 @@ export async function runPrReviewCoordinator(
   opts: PrReviewOpts,
 ): Promise<CoordinatorResult> {
   const coordinatorStartMs = deps.now();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(deps.now()).toISOString().slice(0, 10);
   const reportPath = opts.workspace + `/coordinator-pr-review-${today}.md`;
   const reportLines: string[] = [];
 
@@ -677,7 +670,7 @@ export async function runPrReviewCoordinator(
   }
 
   const result: CoordinatorResult = {
-    reviewed: prs.length,
+    reviewed: outcomes.size - spawnErrors.size,
     approved: mergedPrs.length,
     escalated: escalated.length,
     mergedPrs,
@@ -914,7 +907,7 @@ async function writeReport(
   logLines: string[],
   result: CoordinatorResult,
 ): Promise<void> {
-  const today = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const today = new Date(deps.now()).toISOString().slice(0, 19).replace('T', ' ');
   const content = [
     `# PR Review Coordinator Report`,
     ``,

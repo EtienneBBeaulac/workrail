@@ -168,6 +168,28 @@ describe('parseFindingsFromNotes', () => {
     if (result.kind === 'ok') expect(result.value.severity).toBe('blocking');
   });
 
+  it('does NOT classify as blocking when "no request changes" appears', () => {
+    const result = parseFindingsFromNotes('There are no request changes needed. Good implementation.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.severity).not.toBe('blocking');
+    }
+  });
+
+  it('does NOT classify as blocking when "not request changes" appears', () => {
+    const result = parseFindingsFromNotes('This is not request changes territory -- looks good to me.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.severity).not.toBe('blocking');
+    }
+  });
+
+  it('DOES classify as blocking when "REQUEST CHANGES" appears without negation', () => {
+    const result = parseFindingsFromNotes('Final recommendation: REQUEST CHANGES -- fix the security issue first.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).toBe('blocking');
+  });
+
   // ---- Priority: blocking wins over clean ----
 
   it('blocking keywords win over clean keywords when both present', () => {
