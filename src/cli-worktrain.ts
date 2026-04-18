@@ -32,6 +32,7 @@ import {
   executeWorktrainInboxCommand,
   executeWorktrainSpawnCommand,
   executeWorktrainAwaitCommand,
+  executeWorktrainDaemonCommand,
   type Priority,
 } from './cli/commands/index.js';
 
@@ -292,6 +293,166 @@ program
 
     process.on('SIGINT', () => { void shutdown(); });
     process.on('SIGTERM', () => { void shutdown(); });
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DAEMON COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('daemon')
+  .description('Start the WorkTrain daemon, or manage it as a macOS launchd service')
+  .option('--install', 'Create the launchd plist and start the daemon service')
+  .option('--uninstall', 'Stop the daemon service and remove the launchd plist')
+  .option('--status', 'Show the current status of the daemon service')
+  .action(async (options: { install?: boolean; uninstall?: boolean; status?: boolean }) => {
+    const { execFile: execFileRaw } = await import('child_process');
+    const execFilePromise = promisify(execFileRaw);
+
+    const result = await executeWorktrainDaemonCommand(
+      {
+        env,
+        platform: process.platform,
+        // Use the resolved path of the current worktrain binary so the plist
+        // always points to the installed binary, not a symlink or npx wrapper.
+        worktrainBinPath: process.argv[1],
+        nodeBinPath: process.execPath,
+        homedir: os.homedir,
+        joinPath: path.join,
+        mkdir: (p: string, opts: { recursive: boolean }) => fs.promises.mkdir(p, opts),
+        writeFile: (p: string, content: string) => fs.promises.writeFile(p, content, 'utf-8'),
+        chmod: (p: string, mode: number) => fs.promises.chmod(p, mode),
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        removeFile: (p: string) => fs.promises.unlink(p),
+        exists: async (p: string) => {
+          try {
+            await fs.promises.access(p);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        exec: async (command: string, args: string[]) => {
+          try {
+            const { stdout, stderr } = await execFilePromise(command, args, { encoding: 'utf-8' });
+            return { stdout: stdout ?? '', stderr: stderr ?? '', exitCode: 0 };
+          } catch (err: unknown) {
+            const e = err as { stdout?: string; stderr?: string; code?: number };
+            return {
+              stdout: e.stdout ?? '',
+              stderr: e.stderr ?? '',
+              exitCode: typeof e.code === 'number' ? e.code : 1,
+            };
+          }
+        },
+        print: (line: string) => console.log(line),
+        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+        startDaemon: async () => {
+          // This is the launchd entry point: `worktrain daemon` with no flags.
+          // Run the same startup logic as `workrail daemon`.
+          const { startTriggerListener } = await import('./trigger/trigger-listener.js');
+          const { startDaemonConsole } = await import('./trigger/daemon-console.js');
+          const { DaemonEventEmitter } = await import('./daemon/daemon-events.js');
+          const { initializeContainer, container } = await import('./di/container.js');
+          const { DI } = await import('./di/tokens.js');
+
+          await initializeContainer({ runtimeMode: { kind: 'cli' } });
+          const { createToolContext } = await import('./mcp/server.js');
+          const { requireV2Context } = await import('./mcp/types.js');
+          const rawCtx = await createToolContext();
+          const v2Guard = requireV2Context(rawCtx);
+          if (!v2Guard.ok) {
+            console.error('v2 engine not available -- ensure WorkRail is fully initialized');
+            process.exit(1);
+          }
+          const ctx = v2Guard.ctx;
+
+          const { loadWorkrailConfigFile } = await import('./config/config-file.js');
+
+          // Resolve workspace: WORKRAIL_DEFAULT_WORKSPACE in config > cwd (home
+          // dir when launched by launchd, since WorkingDirectory is set to homedir).
+          const configResult = loadWorkrailConfigFile();
+          const configWorkspace =
+            configResult.kind === 'ok' ? configResult.value['WORKRAIL_DEFAULT_WORKSPACE'] : undefined;
+          const workspacePath = configWorkspace?.trim() || process.cwd();
+
+          const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+          const apiKey = process.env['ANTHROPIC_API_KEY'];
+          if (!usesBedrock && !apiKey) {
+            console.error('No LLM credentials found. Set AWS_PROFILE (Bedrock) or ANTHROPIC_API_KEY.');
+            process.exit(1);
+          }
+
+          const emitter = new DaemonEventEmitter();
+
+          const handle = await startTriggerListener(ctx, {
+            workspacePath,
+            apiKey: apiKey,
+            env: process.env,
+            emitter,
+          });
+
+          if (handle === null) {
+            console.error('Daemon is disabled. Set WORKRAIL_TRIGGERS_ENABLED=true to enable.');
+            process.exit(1);
+          }
+          if ('_kind' in handle) {
+            console.error('Failed to start daemon:', handle.error);
+            process.exit(1);
+          }
+
+          console.log(`WorkRail daemon running on port ${handle.port}`);
+          console.log(`Workspace: ${workspacePath}`);
+          console.log('Waiting for webhook triggers...');
+
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const pkg = require('../package.json') as { version: string };
+
+          // Resolve workflowService from the DI container.
+          type WorkflowService = import('./application/services/workflow-service.js').WorkflowService;
+          const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
+
+          const consoleResult = await startDaemonConsole(ctx, {
+            triggerRouter: handle.router,
+            serverVersion: pkg.version,
+            workflowService,
+          });
+
+          let consoleHandle: import('./trigger/daemon-console.js').DaemonConsoleHandle | null = null;
+          if (consoleResult.kind === 'ok') {
+            consoleHandle = consoleResult.value;
+          } else if (consoleResult.error.kind === 'port_conflict') {
+            console.warn(
+              `[DaemonConsole] Port ${consoleResult.error.port} is already held. ` +
+              `The daemon is running but the console is unavailable.`,
+            );
+          } else {
+            console.warn(`[DaemonConsole] Could not start console: ${consoleResult.error.message}`);
+          }
+
+          // Keep alive until SIGINT/SIGTERM.
+          await new Promise<void>((resolve) => {
+            const shutdown = async () => {
+              console.log('\nShutting down daemon...');
+              if (consoleHandle) {
+                await consoleHandle.stop();
+              }
+              await handle.stop();
+              resolve();
+            };
+            process.once('SIGINT', () => void shutdown());
+            process.once('SIGTERM', () => void shutdown());
+          });
+        },
+      },
+      {
+        install: options.install,
+        uninstall: options.uninstall,
+        status: options.status,
+      },
+    );
+
+    interpretCliResultWithoutDI(result);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
