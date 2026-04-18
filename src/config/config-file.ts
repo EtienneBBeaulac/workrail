@@ -77,6 +77,12 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
   // in trigger-listener.ts and passed to TriggerRouter as a number).
   // Example in config.json: "maxConcurrentSessions": "3"
   'maxConcurrentSessions',
+
+  // daemon notification channels
+  // "WORKTRAIN_NOTIFY_MACOS": "true"  -- enable macOS native notifications (darwin only)
+  // "WORKTRAIN_NOTIFY_WEBHOOK": "https://hooks.example.com/worktrain"  -- generic webhook POST
+  'WORKTRAIN_NOTIFY_MACOS',
+  'WORKTRAIN_NOTIFY_WEBHOOK',
 ]);
 
 // =============================================================================

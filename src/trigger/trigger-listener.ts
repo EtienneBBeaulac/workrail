@@ -27,6 +27,7 @@ import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
 import { loadWorkrailConfigFile, loadWorkspacesFromConfigFile } from '../config/config-file.js';
+import { NotificationService } from './notification-service.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
 import type { WebhookEvent, WorkspaceConfig } from './types.js';
 import { asTriggerId } from './types.js';
@@ -332,9 +333,19 @@ export async function startTriggerListener(
   const parsed = parseInt(maxConcurrencyRaw ?? '', 10);
   const maxConcurrentSessions = !isNaN(parsed) ? parsed : undefined;
 
+  // Construct NotificationService if either notification channel is configured.
+  // WHY constructed here (not in TriggerRouter): trigger-listener.ts owns config loading.
+  // TriggerRouter receives the service as an optional injection -- it does not know about
+  // config.json keys. This keeps TriggerRouter free of config knowledge.
+  const notifyMacOs = (workrailConfig.kind === 'ok' && workrailConfig.value['WORKTRAIN_NOTIFY_MACOS'] === 'true');
+  const notifyWebhook = workrailConfig.kind === 'ok' ? workrailConfig.value['WORKTRAIN_NOTIFY_WEBHOOK'] : undefined;
+  const notificationService = (notifyMacOs || (notifyWebhook !== undefined && notifyWebhook !== ''))
+    ? new NotificationService({ macOs: notifyMacOs, webhookUrl: notifyWebhook })
+    : undefined;
+
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService);
   const app = createTriggerApp(router);
 
   // Create and start the polling scheduler.
