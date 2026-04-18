@@ -1,15 +1,14 @@
 /**
- * Tests for worktrain daemon --install / --uninstall / --status
+ * Tests for worktrain daemon (bare start, --install, --uninstall, --status)
  *
  * All I/O is exercised via injected fakes. No real filesystem, no real
  * launchctl. This makes the tests fast, deterministic, and macOS-agnostic.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   executeWorktrainDaemonCommand,
   type WorktrainDaemonCommandDeps,
-  type WorktrainDaemonCommandOpts,
 } from '../../src/cli/commands/worktrain-daemon.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -31,10 +30,12 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
   files: Map<string, FakeFile>;
   execCalls: Array<{ command: string; args: string[] }>;
   printed: string[];
+  chmodCalls: Array<{ path: string; mode: number }>;
 } {
   const files = new Map<string, FakeFile>();
   const execCalls: Array<{ command: string; args: string[] }> = [];
   const printed: string[] = [];
+  const chmodCalls: Array<{ path: string; mode: number }> = [];
 
   // Default exec: returns success for all commands, returning a valid
   // launchctl list JSON for the LAUNCHD_LABEL.
@@ -57,10 +58,12 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
     files: Map<string, FakeFile>;
     execCalls: Array<{ command: string; args: string[] }>;
     printed: string[];
+    chmodCalls: Array<{ path: string; mode: number }>;
   } = {
     files,
     execCalls,
     printed,
+    chmodCalls,
 
     env: {
       AWS_PROFILE: 'test-profile',
@@ -76,6 +79,9 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
     mkdir: async () => undefined,
     writeFile: async (p, content) => {
       files.set(p, { content });
+    },
+    chmod: async (p, mode) => {
+      chmodCalls.push({ path: p, mode });
     },
     readFile: async (p) => {
       const f = files.get(p);
@@ -98,6 +104,47 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
 }
 
 const PLIST_PATH = '/Users/test/Library/LaunchAgents/io.worktrain.daemon.plist';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// bare invocation (no flags) -- daemon start
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('worktrain daemon (no flags)', () => {
+  it('calls startDaemon when provided and no flags are given', async () => {
+    let started = false;
+    const deps = buildFakeDeps({
+      startDaemon: async () => { started = true; },
+    });
+    const result = await executeWorktrainDaemonCommand(deps, {});
+
+    expect(started).toBe(true);
+    expect(result.kind).toBe('success');
+  });
+
+  it('returns misuse when no flags and startDaemon is absent', async () => {
+    const deps = buildFakeDeps();
+    // No startDaemon in overrides -- falls through to usage error.
+    const result = await executeWorktrainDaemonCommand(deps, {});
+
+    expect(result.kind).toBe('failure');
+    if (result.kind === 'failure') {
+      expect(result.output.message).toContain('--install');
+    }
+  });
+
+  it('platform guard does not apply to bare daemon start', async () => {
+    // Even on linux, startDaemon should be called (the daemon itself is not macOS-only).
+    let started = false;
+    const deps = buildFakeDeps({
+      platform: 'linux',
+      startDaemon: async () => { started = true; },
+    });
+    const result = await executeWorktrainDaemonCommand(deps, {});
+
+    expect(started).toBe(true);
+    expect(result.kind).toBe('success');
+  });
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // --install
@@ -134,6 +181,15 @@ describe('worktrain daemon --install', () => {
     expect(deps.files.has(PLIST_PATH)).toBe(true);
   });
 
+  it('sets plist permissions to 0o600 after writing', async () => {
+    const deps = buildFakeDeps();
+    await executeWorktrainDaemonCommand(deps, { install: true });
+
+    const chmodCall = deps.chmodCalls.find((c) => c.path === PLIST_PATH);
+    expect(chmodCall).toBeDefined();
+    expect(chmodCall?.mode).toBe(0o600);
+  });
+
   it('plist contains the worktrain binary path', async () => {
     const deps = buildFakeDeps();
     await executeWorktrainDaemonCommand(deps, { install: true });
@@ -148,6 +204,15 @@ describe('worktrain daemon --install', () => {
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('/usr/local/bin/node');
+  });
+
+  it('plist contains WorkingDirectory set to homedir', async () => {
+    const deps = buildFakeDeps();
+    await executeWorktrainDaemonCommand(deps, { install: true });
+
+    const plist = deps.files.get(PLIST_PATH)?.content ?? '';
+    expect(plist).toContain('<key>WorkingDirectory</key>');
+    expect(plist).toContain('<string>/Users/test</string>');
   });
 
   it('plist contains WORKRAIL_TRIGGERS_ENABLED', async () => {
@@ -233,6 +298,34 @@ describe('worktrain daemon --install', () => {
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('WORKRAIL_TRIGGERS_ENABLED');
     expect(plist).toContain('<string>true</string>');
+  });
+
+  it('overrides WORKRAIL_TRIGGERS_ENABLED to true when set to false and emits warning', async () => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (msg: string) => warnings.push(msg);
+
+    try {
+      const deps = buildFakeDeps({
+        env: {
+          AWS_PROFILE: 'test-profile',
+          WORKRAIL_TRIGGERS_ENABLED: 'false',
+          HOME: '/Users/test',
+          PATH: '/usr/bin',
+        },
+      });
+      await executeWorktrainDaemonCommand(deps, { install: true });
+
+      const plist = deps.files.get(PLIST_PATH)?.content ?? '';
+      // The plist must have the flag set to true regardless of the env value.
+      expect(plist).toContain('WORKRAIL_TRIGGERS_ENABLED');
+      expect(plist).toContain('<string>true</string>');
+      // A warning must have been emitted.
+      expect(warnings.some((w) => w.includes('WORKRAIL_TRIGGERS_ENABLED'))).toBe(true);
+      expect(warnings.some((w) => w.includes("'false'"))).toBe(true);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });
 
@@ -344,7 +437,7 @@ describe('worktrain daemon --status', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('worktrain daemon -- flag validation', () => {
-  it('returns misuse when no flag is provided', async () => {
+  it('returns misuse when no flag is provided and startDaemon is absent', async () => {
     const deps = buildFakeDeps();
     const result = await executeWorktrainDaemonCommand(deps, {});
 

@@ -2,7 +2,7 @@
 
 ## Task Summary
 
-Implement `worktrain daemon --install` (and `--uninstall`, `--status`) subcommands that create a launchd plist at `~/Library/LaunchAgents/com.worktrain.daemon.plist`, load it via `launchctl`, and verify the daemon is running outside the MCP process tree so MCP reconnects cannot kill it. This is Tier 1 priority from the Apr 18 sprint -- it eliminates the critical bug where the daemon dies whenever Claude Code reconnects the MCP server.
+Implement `worktrain daemon --install` (and `--uninstall`, `--status`) subcommands that create a launchd plist at `~/Library/LaunchAgents/io.worktrain.daemon.plist`, load it via `launchctl`, and verify the daemon is running outside the MCP process tree so MCP reconnects cannot kill it. This is Tier 1 priority from the Apr 18 sprint -- it eliminates the critical bug where the daemon dies whenever Claude Code reconnects the MCP server.
 
 ## Conversation Preferences
 
@@ -70,7 +70,7 @@ Implement `worktrain daemon --install` (and `--uninstall`, `--status`) subcomman
 
 ### Decision 4: Plist location
 
-- Decision: `~/Library/LaunchAgents/com.worktrain.daemon.plist`
+- Decision: `~/Library/LaunchAgents/io.worktrain.daemon.plist`
 - Why: Standard macOS location for user-level launch agents. Survives reboots, runs as the current user, no sudo required.
 - Impacted files: worktrain-daemon.ts
 
@@ -108,7 +108,7 @@ A launchd plist is a standard macOS XML property list. For a user-level agent:
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.worktrain.daemon</string>
+  <string>io.worktrain.daemon</string>
 
   <key>ProgramArguments</key>
   <array>
@@ -147,7 +147,7 @@ A launchd plist is a standard macOS XML property list. For a user-level agent:
 </plist>
 ```
 
-Location: `~/Library/LaunchAgents/com.worktrain.daemon.plist`
+Location: `~/Library/LaunchAgents/io.worktrain.daemon.plist`
 
 Key notes:
 - `RunAtLoad: true` -- starts immediately when loaded with launchctl
@@ -192,19 +192,19 @@ worktrain daemon --status      # Check if launchd service is running (launchctl 
 2. Resolve absolute path to `workrail daemon` or the node + worktrain path
 3. Capture required env vars from current process.env
 4. Generate plist XML content
-5. Write plist to `~/Library/LaunchAgents/com.worktrain.daemon.plist`
+5. Write plist to `~/Library/LaunchAgents/io.worktrain.daemon.plist`
 6. Create log directory `~/.workrail/logs/`
-7. Run `launchctl load ~/Library/LaunchAgents/com.worktrain.daemon.plist`
-8. Wait ~1s, then verify: `launchctl list com.worktrain.daemon`
+7. Run `launchctl load ~/Library/LaunchAgents/io.worktrain.daemon.plist`
+8. Wait ~1s, then verify: `launchctl list io.worktrain.daemon`
 9. Print status
 
 **--uninstall flow:**
-1. Run `launchctl unload ~/Library/LaunchAgents/com.worktrain.daemon.plist`
+1. Run `launchctl unload ~/Library/LaunchAgents/io.worktrain.daemon.plist`
 2. Remove the plist file
 3. Print status
 
 **--status flow:**
-1. Run `launchctl list com.worktrain.daemon`
+1. Run `launchctl list io.worktrain.daemon`
 2. Parse output and report whether it's running + PID
 3. Check if plist file exists
 
@@ -227,19 +227,19 @@ The --install command creates `~/.workrail/logs/` before loading the plist.
 
 ```bash
 # Load (install + start)
-launchctl load ~/Library/LaunchAgents/com.worktrain.daemon.plist
+launchctl load ~/Library/LaunchAgents/io.worktrain.daemon.plist
 
 # Verify running
-launchctl list com.worktrain.daemon
-# Output: {"PID": 12345, "Status": 0, "Label": "com.worktrain.daemon"}
-# If not running: {"Status": 0, "Label": "com.worktrain.daemon"} (no PID key)
+launchctl list io.worktrain.daemon
+# Output: {"PID": 12345, "Status": 0, "Label": "io.worktrain.daemon"}
+# If not running: {"Status": 0, "Label": "io.worktrain.daemon"} (no PID key)
 
 # Unload (stop + remove from launchd)
-launchctl unload ~/Library/LaunchAgents/com.worktrain.daemon.plist
+launchctl unload ~/Library/LaunchAgents/io.worktrain.daemon.plist
 
 # Force reload after plist change
-launchctl unload ~/Library/LaunchAgents/com.worktrain.daemon.plist
-launchctl load ~/Library/LaunchAgents/com.worktrain.daemon.plist
+launchctl unload ~/Library/LaunchAgents/io.worktrain.daemon.plist
+launchctl load ~/Library/LaunchAgents/io.worktrain.daemon.plist
 ```
 
 Note: On macOS 10.10+ there is also `launchctl bootstrap`/`launchctl kickstart` but `load`/`unload` works for user agents on all relevant macOS versions.

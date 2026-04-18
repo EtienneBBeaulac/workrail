@@ -1,18 +1,25 @@
 /**
- * WorkTrain Daemon Install Command
+ * WorkTrain Daemon Command
  *
  * Manages the WorkRail daemon as a macOS launchd service so it runs outside
  * Claude Code's process tree and survives MCP server reconnects.
  *
- * Subcommands (mutually exclusive flags):
- *   worktrain daemon --install    Create plist + load service + verify running
- *   worktrain daemon --uninstall  Unload service + remove plist
- *   worktrain daemon --status     Check whether the launchd service is running
+ * Invocation modes:
+ *   worktrain daemon             Start the trigger listener (launchd entry point)
+ *   worktrain daemon --install   Create plist + load service + verify running
+ *   worktrain daemon --uninstall Unload service + remove plist
+ *   worktrain daemon --status    Check whether the launchd service is running
  *
  * WHY launchd: When the daemon runs as a child of the MCP server process, any
  * Claude Code reconnect spawns a new MCP server and displaces the running daemon.
  * A launchd service runs as a sibling process of all Claude Code sessions, not
  * as a child of any of them. It also restarts automatically after crashes.
+ *
+ * WHY bare invocation starts the daemon: the plist ProgramArguments is
+ * [node, worktrainBinPath, 'daemon'] with no extra flags. launchd calls
+ * `worktrain daemon` directly, so the no-flags path must be the actual
+ * daemon startup -- not a usage error. Without this, KeepAlive causes a
+ * crash loop (launchd restarts every 10 s after the non-zero exit).
  *
  * Design invariants:
  * - All I/O is injected via WorktrainDaemonCommandDeps. No direct fs/child_process.
@@ -20,7 +27,7 @@
  * - The plist is only written when --install is requested (not on every run).
  * - Only recognized env vars are captured -- avoids leaking unrelated secrets.
  * - Idempotent: --install on an already-installed service unloads and reloads.
- * - macOS only: returns an explicit error on non-darwin platforms.
+ * - macOS only: --install/--uninstall/--status return an explicit error on non-darwin.
  */
 
 import type { CliResult } from '../types/cli-result.js';
@@ -103,6 +110,8 @@ export interface WorktrainDaemonCommandDeps {
   readonly mkdir: (path: string, opts: { recursive: boolean }) => Promise<unknown>;
   /** Write UTF-8 content to a file. */
   readonly writeFile: (path: string, content: string) => Promise<void>;
+  /** Set file permissions (octal mode). */
+  readonly chmod: (path: string, mode: number) => Promise<void>;
   /** Read file contents as UTF-8. Throws on ENOENT. */
   readonly readFile: (path: string) => Promise<string>;
   /** Delete a file. Throws on ENOENT unless swallowMissing is set. */
@@ -121,6 +130,19 @@ export interface WorktrainDaemonCommandDeps {
   readonly print: (line: string) => void;
   /** Sleep for the given number of milliseconds. */
   readonly sleep: (ms: number) => Promise<void>;
+  /**
+   * Start the trigger listener daemon process. Called when `worktrain daemon`
+   * is invoked with no flags -- the launchd entry point.
+   *
+   * WHY a callback here: the startup logic requires the DI container and
+   * several heavy imports (trigger-listener, daemon-console, etc.). Injecting
+   * it as a callback keeps this module free of those dependencies and lets
+   * tests stub out the entire startup with a simple function.
+   *
+   * If absent, the no-flags path falls back to a usage error (useful in
+   * contexts where daemon start is not supported).
+   */
+  readonly startDaemon?: () => Promise<void>;
 }
 
 export interface WorktrainDaemonCommandOpts {
@@ -143,6 +165,11 @@ export interface WorktrainDaemonCommandOpts {
  * launchctl loads the plist. KeepAlive restarts it automatically if it exits
  * unexpectedly, providing crash recovery without manual intervention.
  *
+ * WHY WorkingDirectory is set to homedir: without it launchd sets cwd to '/'.
+ * The daemon falls back to process.cwd() when WORKRAIL_DEFAULT_WORKSPACE is
+ * unset, so it would silently treat '/' as the workspace. The user's home
+ * directory is a safe default; they can override via WORKRAIL_DEFAULT_WORKSPACE.
+ *
  * WHY stdout/stderr to ~/.workrail/logs: the daemon writes structured log lines
  * to its stdout/stderr. Redirecting through launchd means logs persist across
  * restarts and are always available without running a separate log forwarder.
@@ -152,6 +179,7 @@ function buildPlist(
   worktrainBinPath: string,
   envVars: Record<string, string>,
   logDir: string,
+  homeDir: string,
 ): string {
   const envEntries = Object.entries(envVars)
     .map(([k, v]) => `    <key>${escapeXml(k)}</key>\n    <string>${escapeXml(v)}</string>`)
@@ -174,6 +202,9 @@ function buildPlist(
     <string>${escapeXml(worktrainBinPath)}</string>
     <string>daemon</string>
   </array>
+
+  <key>WorkingDirectory</key>
+  <string>${escapeXml(homeDir)}</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -222,12 +253,17 @@ function escapeXml(s: string): string {
 /**
  * Collect the env vars to embed in the plist from the current process env.
  *
- * WHY we always include WORKRAIL_TRIGGERS_ENABLED=true: the daemon refuses to
+ * WHY we always ensure WORKRAIL_TRIGGERS_ENABLED=true: the daemon refuses to
  * start without this flag. If the user has it set in their shell env, we capture
  * the actual value. If not, we inject it so the service starts correctly.
+ *
+ * WHY we warn on override: if the user has explicitly set WORKRAIL_TRIGGERS_ENABLED
+ * to something other than 'true', forcing it to 'true' in the plist may be
+ * surprising. We warn so they know the override happened.
  */
 function captureEnvVars(
   env: Readonly<Record<string, string | undefined>>,
+  warn: (message: string) => void,
 ): Record<string, string> {
   const captured: Record<string, string> = {};
 
@@ -239,7 +275,17 @@ function captureEnvVars(
   }
 
   // Always ensure the daemon can start -- inject the trigger flag if missing.
-  if (!captured['WORKRAIL_TRIGGERS_ENABLED']) {
+  const existing = captured['WORKRAIL_TRIGGERS_ENABLED'];
+  if (!existing) {
+    captured['WORKRAIL_TRIGGERS_ENABLED'] = 'true';
+  } else if (existing !== 'true') {
+    // The user explicitly set this to something other than 'true'. Override
+    // it so the plist-launched daemon can start, but warn so they notice.
+    warn(
+      `[worktrain daemon --install] WORKRAIL_TRIGGERS_ENABLED is set to '${existing}' in your environment. ` +
+      `The plist will override this with 'true' so the daemon can start. ` +
+      `Remove WORKRAIL_TRIGGERS_ENABLED from your shell environment if you do not want this warning.`,
+    );
     captured['WORKRAIL_TRIGGERS_ENABLED'] = 'true';
   }
 
@@ -315,9 +361,12 @@ async function runInstall(
   }
 
   // Step 3: Build and write plist.
-  const capturedEnv = captureEnvVars(env);
-  const plist = buildPlist(deps.nodeBinPath, deps.worktrainBinPath, capturedEnv, logDir);
+  const capturedEnv = captureEnvVars(env, (msg) => console.warn(msg));
+  const plist = buildPlist(deps.nodeBinPath, deps.worktrainBinPath, capturedEnv, logDir, home);
   await deps.writeFile(plistPath, plist);
+
+  // F4: Restrict plist to owner-only (0o600) -- it may contain API keys.
+  await deps.chmod(plistPath, 0o600);
   deps.print(`  Plist written: ${plistPath}`);
 
   // Step 4: Load the service.
@@ -461,14 +510,43 @@ async function runStatus(
 /**
  * Execute the `worktrain daemon` command.
  *
- * Exactly one of --install, --uninstall, or --status must be provided.
- * On non-macOS platforms, returns a clear error (launchd is macOS-only).
+ * When called with no flags, starts the trigger listener via deps.startDaemon().
+ * This is the launchd entry point: the plist ProgramArguments is
+ * [node, worktrainBinPath, 'daemon'] with no flags, so this path runs every
+ * time launchd starts or restarts the service.
+ *
+ * When called with --install, --uninstall, or --status, manages the launchd
+ * service. These paths require macOS (launchd is macOS-only).
  */
 export async function executeWorktrainDaemonCommand(
   deps: WorktrainDaemonCommandDeps,
   opts: WorktrainDaemonCommandOpts,
 ): Promise<CliResult> {
-  // Platform guard: launchd is macOS-only.
+  const flagCount = [opts.install, opts.uninstall, opts.status].filter(Boolean).length;
+
+  // No flags: this is the launchd entry point. Start the daemon process.
+  if (flagCount === 0) {
+    if (deps.startDaemon) {
+      await deps.startDaemon();
+      // startDaemon() keeps the process alive (event loop stays open).
+      // It returns only when the daemon shuts down cleanly.
+      return success({ message: 'WorkTrain daemon stopped.' });
+    }
+    return misuse(
+      'Specify one of: --install, --uninstall, or --status',
+      [
+        'worktrain daemon --install    Install and start as a launchd service',
+        'worktrain daemon --uninstall  Stop and remove the launchd service',
+        'worktrain daemon --status     Show service status',
+      ],
+    );
+  }
+
+  if (flagCount > 1) {
+    return misuse('--install, --uninstall, and --status are mutually exclusive. Specify only one.');
+  }
+
+  // Platform guard: launchd management is macOS-only.
   if (deps.platform !== 'darwin') {
     return failure(
       `worktrain daemon --install requires macOS (launchd). ` +
@@ -480,21 +558,6 @@ export async function executeWorktrainDaemonCommand(
         ],
       },
     );
-  }
-
-  const flagCount = [opts.install, opts.uninstall, opts.status].filter(Boolean).length;
-  if (flagCount === 0) {
-    return misuse(
-      'Specify one of: --install, --uninstall, or --status',
-      [
-        'worktrain daemon --install    Install and start as a launchd service',
-        'worktrain daemon --uninstall  Stop and remove the launchd service',
-        'worktrain daemon --status     Show service status',
-      ],
-    );
-  }
-  if (flagCount > 1) {
-    return misuse('--install, --uninstall, and --status are mutually exclusive. Specify only one.');
   }
 
   if (opts.install) return runInstall(deps);
