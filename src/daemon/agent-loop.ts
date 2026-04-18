@@ -150,7 +150,7 @@ export interface AgentLoopCallbacks {
    * Called immediately before client.messages.create().
    * @param info.messageCount - Number of messages in the conversation at this point.
    */
-  readonly onLlmTurnStarted?: (info: { readonly messageCount: number }) => void;
+  readonly onLlmTurnStarted?: (info: { readonly messageCount: number; readonly modelId: string }) => void;
   /**
    * Called immediately after client.messages.create() resolves successfully.
    * @param info.stopReason - The stop_reason from the API response.
@@ -374,7 +374,7 @@ export class AgentLoop {
       // Emit llm_turn_started before the API call.
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
       // must never crash the agent loop.
-      try { callbacks?.onLlmTurnStarted?.({ messageCount: apiMessages.length }); } catch { /* swallow */ }
+      try { callbacks?.onLlmTurnStarted?.({ messageCount: apiMessages.length, modelId }); } catch { /* swallow */ }
 
       let response: Anthropic.Message;
       try {
