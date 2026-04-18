@@ -129,6 +129,66 @@ const DAEMON_EVENT_LOG_READ_LIMIT_BYTES = 100 * 1024;
 const DAEMON_EVENTS_DIR = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
 /**
+ * Determine whether a session is currently live by inspecting today's daemon event log.
+ *
+ * A session is live if and only if:
+ * - A `session_started` event exists for `workrailSessionId` in today's log
+ * - AND no `session_completed` event exists for the same `workrailSessionId`
+ *
+ * WHY event log instead of DaemonRegistry: DaemonRegistry is in-memory and resets
+ * when the standalone console restarts. The daemon event log is durable on disk --
+ * it reflects the true session lifecycle regardless of whether the console process
+ * was restarted since the session began.
+ *
+ * Best-effort: returns false on any error (file not found, parse error, etc.).
+ * Never throws or propagates errors -- correctness must never depend on this check.
+ *
+ * @param workrailSessionId - The WorkRail session ID (sess_xxx) to check.
+ */
+async function isSessionLiveFromEventLog(workrailSessionId: string): Promise<boolean> {
+  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const filePath = path.join(DAEMON_EVENTS_DIR, `${date}.jsonl`);
+
+  try {
+    let raw: string;
+    const stat = await fs.stat(filePath);
+    if (stat.size > DAEMON_EVENT_LOG_READ_LIMIT_BYTES) {
+      const fd = await fs.open(filePath, 'r');
+      const offset = stat.size - DAEMON_EVENT_LOG_READ_LIMIT_BYTES;
+      const buf = Buffer.alloc(DAEMON_EVENT_LOG_READ_LIMIT_BYTES);
+      try {
+        await fd.read(buf, 0, DAEMON_EVENT_LOG_READ_LIMIT_BYTES, offset);
+      } finally {
+        await fd.close();
+      }
+      raw = buf.toString('utf8');
+    } else {
+      raw = await fs.readFile(filePath, 'utf8');
+    }
+
+    let hasStarted = false;
+    let hasCompleted = false;
+
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (event['workrailSessionId'] !== workrailSessionId) continue;
+        if (event['kind'] === 'session_started') hasStarted = true;
+        if (event['kind'] === 'session_completed') hasCompleted = true;
+      } catch {
+        // Malformed line -- skip it
+      }
+    }
+
+    return hasStarted && !hasCompleted;
+  } catch {
+    // File not found, permission error, parse error, etc. -- safe default: not live.
+    return false;
+  }
+}
+
+/**
  * Read the last N tool activity events from today's daemon event log for a given session.
  *
  * Reads from BOTH the coarse stream (tool_called) and fine-grained stream (tool_call_started)
@@ -277,7 +337,6 @@ export class ConsoleService {
 
   getSessionDetail(sessionIdStr: string): ResultAsync<ConsoleSessionDetail, ConsoleServiceError> {
     const sessionId = asSessionId(sessionIdStr);
-    const nowMs = Date.now();
 
     return this.ports.sessionStore
       .load(sessionId)
@@ -305,27 +364,26 @@ export class ConsoleService {
         })();
 
         // Attach liveActivity when the session is currently live.
-        // isLive: the session appears in DaemonRegistry with a recent heartbeat.
-        // Best-effort: any error reading the event log returns null liveActivity.
-        const registryEntry = this.ports.daemonRegistry?.snapshot().get(sessionId);
-        const isLive = registryEntry !== undefined
-          && (nowMs - registryEntry.lastHeartbeatMs) < AUTONOMOUS_HEARTBEAT_THRESHOLD_MS;
+        // isLive: derived from the daemon event log (session_started exists, session_completed does not).
+        // WHY event log instead of DaemonRegistry: DaemonRegistry is in-memory and resets when the
+        // standalone console restarts -- the event log is durable and reflects the true session lifecycle.
+        // Best-effort: any error reading the event log returns false (safe default: shows as not live).
+        const isLiveRA = RA.fromSafePromise(isSessionLiveFromEventLog(sessionIdStr));
 
-        if (!isLive) {
-          return detailRA.map((detail) => ({ ...detail, liveActivity: null }));
-        }
+        return RA.combine([detailRA, isLiveRA] as const).andThen(([detail, isLive]) => {
+          if (!isLive) {
+            return okAsync({ ...detail, liveActivity: null });
+          }
 
-        // Session is live -- read tool activity from daemon event log.
-        // WHY RA.fromSafePromise: readLiveActivity never throws (returns null on error).
-        const liveActivityRA = RA.fromSafePromise(
-          readLiveActivity(sessionIdStr, LIVE_ACTIVITY_MAX_ENTRIES)
-        );
+          // Session is live -- read tool activity from daemon event log.
+          // WHY RA.fromSafePromise: readLiveActivity never throws (returns null on error).
+          const liveActivityRA = RA.fromSafePromise(
+            readLiveActivity(sessionIdStr, LIVE_ACTIVITY_MAX_ENTRIES)
+          );
 
-        // Returns [] when no tool_called events found yet (log readable but empty); null means the log file could not be read.
-        return RA.combine([detailRA, liveActivityRA] as const).map(([detail, liveActivity]) => ({
-          ...detail,
-          liveActivity,
-        }));
+          // Returns [] when no tool_called events found yet (log readable but empty); null means the log file could not be read.
+          return liveActivityRA.map((liveActivity) => ({ ...detail, liveActivity }));
+        });
       });
   }
 
