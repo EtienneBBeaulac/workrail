@@ -5171,7 +5171,7 @@ Instead of workflow steps declaring upfront whether an artifact goes to the repo
 **Button options:**
 - **📁 Add to repo** -- renders artifact as markdown, commits to repo at specified path
 - **📋 Copy** -- copies rendered markdown to clipboard
-- **🔗 Share link** -- generates a URL that opens the artifact in the console (useful for teams)
+- **🔗 Share link** -- generates a URL that opens the artifact in the console. ⚠️ Local-only: only works on the same machine or with shared filesystem access. Requires cloud hosting for true team sharing (see cloud hosting spec in backlog)
 - **📤 Export** -- save to arbitrary filesystem path outside the repo
 
 **The commit WorkTrain creates:**
