@@ -5697,3 +5697,55 @@ Tested empirically today. This is what actually works, not what's specced.
 - Need enough volume to be statistically meaningful
 
 **Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `mr-review-workflow-agentic` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
+
+---
+
+### Self-healing daemon: detect internal failures, kill, diagnose, fix, reboot, resume (Apr 18, 2026)
+
+**The problem:** today if WorkRail's MCP connection drops or the daemon's internal tooling fails, agents continue running without enforcement -- producing unverified output that looks correct but bypassed all workflow gates. The user has no way to know this happened until they manually inspect session completion events.
+
+**What happened today:** WorkRail MCP went down mid-session across ~10 concurrent agents. All sessions show INCOMPLETE (no `run_completed` event). Agents produced PRs, reviews, and merges -- two PRs landed on main -- without any confirmed workflow completion. Required manual audit after the fact.
+
+**What WorkTrain needs:**
+
+**1. Detect its own tooling failures**
+- Monitor whether `complete_step` / `continue_workflow` tool calls are succeeding or timing out
+- Detect when the WorkRail session store becomes unreachable
+- Detect when the MCP connection (for agents that use MCP-mode) is lost
+- Distinguish: "agent is thinking" vs "agent is stuck" vs "agent's tools are broken"
+
+**2. Kill the agent cleanly on detected failure**
+- When internal tooling is detected broken, stop the agent immediately -- do NOT let it continue without enforcement
+- Retain the full conversation history and step notes up to the point of failure
+- Mark the session as `interrupted_tooling_failure` (distinct from `error` or `timeout`)
+- Write the failure event to the daemon event log with the exact cause
+
+**3. Self-diagnose**
+- Run a lightweight health check: can we reach the session store? Can we decode the continueToken? Is the WorkRail engine responding?
+- Identify the root cause: MCP disconnect? Session store corruption? Token decode failure? Port conflict?
+- Distinguish recoverable (restart and resume) from non-recoverable (session data corrupted, must restart from scratch)
+
+**4. Fix and reboot**
+- For recoverable failures: restart the WorkRail engine in-process, re-register tools, verify health before resuming
+- For MCP-mode failures: reconnect without killing the parent session
+- For port conflicts: clear the lock and rebind
+- All of this happens automatically, without user intervention
+
+**5. Resume with context**
+- Resume the session from the last confirmed `complete_step` / `advance_recorded` event
+- Inject a `<context>` block into the resumed session: "Your previous session was interrupted due to [reason]. Here is what you completed before the interruption: [last 3 step notes]. Resume from where you left off."
+- The agent never knows the interruption happened -- it just continues
+- If resume fails (token expired, session corrupted), escalate to the user with full context on what was completed and what wasn't
+
+**6. Audit trail**
+- Every self-heal event is recorded in `~/.workrail/events/daemon/YYYY-MM-DD.jsonl` as `tooling_failure_detected`, `self_heal_started`, `self_heal_succeeded` / `self_heal_failed`
+- The console shows a `⚠️ self-healed` badge on sessions that were interrupted and resumed
+- The user can query: "which sessions were interrupted today?" and get the full list with causes
+
+**Implementation path:**
+- Phase 1: detection only -- log `tooling_failure_detected` when a session produces output without `run_completed`. Surface in console and status command.
+- Phase 2: kill on detection -- stop agents immediately when tooling failure detected. No more unverified output reaching main.
+- Phase 3: auto-resume -- restart and resume for recoverable failures.
+- Phase 4: full self-heal loop -- diagnose, fix, reboot, resume automatically.
+
+**The invariant that must hold:** no output from a WorkTrain agent should be acted on (committed, merged, posted) unless its session has a confirmed `run_completed` event. This is the enforcement guarantee. Self-healing is what makes that guarantee survivable.
