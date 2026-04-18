@@ -156,7 +156,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
       const width = isActiveLineage ? ACTIVE_NODE_WIDTH : SIDE_NODE_WIDTH;
       const borderColor = getNodeBorderColor(node, isActiveLineage, isCurrent, isSelected);
       const background = getNodeBackgroundColor(node, isActiveLineage);
-      const displayLabel = getDisplayLabel(node, positionedNode.branchKind, positionedNode.branchIndex);
+      const displayLabel = getDisplayLabel(node, positionedNode.branchKind, positionedNode.branchIndex, run.status);
 
       // Cause items for this node (undefined = trace not available)
       const causeItems = blockedCauseMap?.get(node.nodeId);
@@ -432,7 +432,7 @@ export function RunLineageDag({ run, selectedNodeId = null, onNodeClick }: Props
             <JumpButton onClick={() => focusNodeInViewport(model.latestBranchNodeId)}>Latest branch</JumpButton>
           </div>
         </div>
-        <OverviewRail model={model} selectedNodeId={selectedNodeId} onNavigateToNode={focusNodeInViewport} />
+        <OverviewRail model={model} selectedNodeId={selectedNodeId} runStatus={run.status} onNavigateToNode={focusNodeInViewport} />
         {run.executionTraceSummary !== null && run.executionTraceSummary.contextFacts.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-3">
             {run.executionTraceSummary.contextFacts.map((fact) => (
@@ -698,10 +698,12 @@ function NodeLabel({
 function OverviewRail({
   model,
   selectedNodeId,
+  runStatus,
   onNavigateToNode,
 }: {
   model: ReturnType<typeof buildLineageDagModel>;
   selectedNodeId: string | null;
+  runStatus: ConsoleDagRun['status'];
   onNavigateToNode: (nodeId: string | null) => void;
 }) {
   const activeNodes = model.nodes.filter((node) => node.isActiveLineage);
@@ -727,7 +729,7 @@ function OverviewRail({
             {sideNodes.map((node) => (
               <RailDot
                 key={node.node.nodeId}
-                label={getDisplayLabel(node.node, node.branchKind, node.branchIndex)}
+                label={getDisplayLabel(node.node, node.branchKind, node.branchIndex, runStatus)}
                 isCurrent={false}
                 isSelected={node.node.nodeId === selectedNodeId}
                 tone={node.branchKind === 'blocked' ? 'blocked' : 'side'}
@@ -923,10 +925,16 @@ function getDisplayLabel(
   node: ConsoleDagNode,
   branchKind: 'active' | 'blocked' | 'alternate',
   branchIndex: number | null,
+  runStatus?: ConsoleDagRun['status'],
 ): string {
   if (node.stepLabel) return node.stepLabel;
   if (branchKind === 'blocked') return branchIndex ? `Blocked attempt ${branchIndex}` : 'Blocked attempt';
   if (branchKind === 'alternate') return branchIndex ? `Alternate path ${branchIndex}` : 'Alternate path';
+  // The preferred tip of a completed run has no step label because the engine's
+  // complete state has no pending step -- show "Complete" instead of the raw node ID.
+  if (node.isPreferredTip && (runStatus === 'complete' || runStatus === 'complete_with_gaps')) {
+    return 'Complete';
+  }
   return shortNodeId(node.nodeId);
 }
 

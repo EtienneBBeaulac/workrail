@@ -215,7 +215,9 @@ export function buildLineageDagModel(run: ConsoleDagRun): LineageDagModel {
     .sort((left, right) => right.createdAtEventIndex - left.createdAtEventIndex)[0] ?? null;
 
   const summary: LineageSummary = {
-    currentNodeLabel: currentNode?.stepLabel ?? (currentNode ? shortNodeId(currentNode.nodeId) : 'No active node'),
+    currentNodeLabel: currentNode?.stepLabel
+      ?? (currentNode?.isPreferredTip && (run.status === 'complete' || run.status === 'complete_with_gaps') ? 'Complete' : null)
+      ?? (currentNode ? shortNodeId(currentNode.nodeId) : 'No active node'),
     lineageNodeCount: activeLineageIds.size,
     sideNodeCount: run.nodes.length - activeLineageIds.size,
     alternateBranchCount: alternateBranchRootIds.size,
