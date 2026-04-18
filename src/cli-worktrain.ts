@@ -668,6 +668,17 @@ program
   .command('status <sessionId>')
   .description('Print a health summary for a daemon session. Accepts sessionId (UUID prefix) or workrailSessionId (sess_xxx).')
   .action(async (sessionId: string) => {
+    // WHY warn on short IDs: the startsWith() filter below would aggregate events
+    // from ALL sessions sharing the same prefix, silently producing a wrong summary.
+    // Full sess_ IDs are ~31 chars; 20 chars is a safe threshold that warns on
+    // short prefixes without triggering on any valid full session ID.
+    if (sessionId.length < 20) {
+      process.stderr.write(
+        `Warning: session ID "${sessionId}" is shorter than 20 characters -- ` +
+        `provide more characters to avoid matching multiple sessions.\n`,
+      );
+    }
+
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
     const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const filePath = path.join(eventsDir, `${date}.jsonl`);

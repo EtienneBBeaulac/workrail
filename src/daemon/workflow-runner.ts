@@ -1805,6 +1805,18 @@ export async function runWorkflow(
     // Guard: skip if wall-clock timeout already fired.
     if (maxTurns > 0 && turnCount >= maxTurns && timeoutReason === null) {
       timeoutReason = 'max_turns';
+      // WHY emit here rather than relying on Signal 3 below: the `return` at the end
+      // of this block exits this subscriber invocation before Signal 3 can run.
+      // For wall_clock, timeoutReason is set in a setTimeout callback and Signal 3
+      // fires on the NEXT turn_end invocation; for max_turns, the abort happens on
+      // THIS turn -- there is no next turn.
+      emitter?.emit({
+        kind: 'agent_stuck',
+        sessionId,
+        reason: 'timeout_imminent',
+        detail: 'Max-turn limit reached',
+        ...withWorkrailSession(workrailSessionId),
+      });
       agent.abort();
       return; // Do not inject the next step -- we are aborting.
     }
@@ -1855,9 +1867,11 @@ export async function runWorkflow(
     }
 
     // Signal 3: wall-clock timeout is already firing (session is aborting).
-    // WHY emit here: the abort fires in the timeout Promise rejection path, which
-    // runs after the catch block and does not go through turn_end. Emitting here
-    // gives a clear last-chance signal before the abort propagates.
+    // WHY emit here: the wall-clock abort fires in the timeout Promise rejection path,
+    // which does not go through turn_end. Emitting here gives a clear last-chance
+    // signal before the abort propagates.
+    // NOTE: the max_turns path emits timeout_imminent inline above (before its
+    // early return) and does not reach this check.
     if (timeoutReason !== null) {
       emitter?.emit({
         kind: 'agent_stuck',
