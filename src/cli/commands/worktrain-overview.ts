@@ -37,6 +37,8 @@ export interface StatusSession {
   readonly sessionId: string;
   readonly title: string;
   readonly status: 'active' | 'recent';
+  /** The raw session status from the underlying session record (e.g. 'in_progress', 'blocked', 'dormant', 'complete'). */
+  readonly rawStatus: string;
   /** Workflow step label, or step ID as fallback, or null if unavailable. */
   readonly stepLabel: string | null;
   /** Filesystem mtime of the session directory (epoch ms). */
@@ -231,6 +233,7 @@ export async function executeWorktrainOverviewCommand(
         sessionId: String(s.sessionId),
         title: buildSessionTitle(s),
         status: 'active',
+        rawStatus: s.status,
         stepLabel: extractStepLabel(s),
         lastModifiedMs: lastMod,
         isComplete: false,
@@ -240,6 +243,7 @@ export async function executeWorktrainOverviewCommand(
         sessionId: String(s.sessionId),
         title: buildSessionTitle(s),
         status: 'recent',
+        rawStatus: s.status,
         stepLabel: extractStepLabel(s),
         lastModifiedMs: lastMod,
         isComplete: true,
@@ -290,7 +294,7 @@ export async function executeWorktrainOverviewCommand(
     deps.print(`ACTIVE (${activeSessions.length} session${activeSessions.length !== 1 ? 's' : ''})`);
     for (const s of activeSessions) {
       const runningStr = formatRunningTime(nowMs - s.lastModifiedMs);
-      deps.print(`  in_progress  ${s.title}`);
+      deps.print(`  ${s.rawStatus}  ${s.title}`);
       if (s.stepLabel) {
         deps.print(`               Step -- ${s.stepLabel}  --  ${runningStr}`);
       } else {

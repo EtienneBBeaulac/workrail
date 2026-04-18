@@ -209,6 +209,7 @@ describe('executeWorktrainOverviewCommand -- active sessions', () => {
 
     expect(lines.some((l) => l.includes('Blocked on approval'))).toBe(true);
     expect(lines.some((l) => l.includes('ACTIVE'))).toBe(true);
+    expect(lines.some((l) => l.includes('blocked'))).toBe(true);
   });
 
   it('shows dormant session within threshold as active', async () => {
@@ -224,6 +225,7 @@ describe('executeWorktrainOverviewCommand -- active sessions', () => {
     await executeWorktrainOverviewCommand(deps);
 
     expect(lines.some((l) => l.includes('Dormant task'))).toBe(true);
+    expect(lines.some((l) => l.includes('dormant'))).toBe(true);
   });
 
   it('shows count in ACTIVE header', async () => {

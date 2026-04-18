@@ -737,11 +737,11 @@ program
         return;
       }
 
-      // Delegate to the same inline logic as the health command.
-      // WHY duplicate instead of extract: the health command body is intentionally
-      // inline in this composition root. Extracting for one shim would be premature.
-      // The shim is expected to be removed once all callers migrate to `health`.
-      process.stdout.write(`\nNote: This is the old \`worktrain status <id>\` output. Use \`worktrain health <id>\` instead.\n\n`);
+      // WHY this shim block is inline: it is a temporary backward-compat bridge
+      // that routes legacy `worktrain status <id>` calls to runHealthSummary.
+      // It is kept inline because it is expected to be removed once all callers
+      // migrate to `worktrain health <id>` -- extracting it would be premature.
+      process.stderr.write(`\nNote: This is the old \`worktrain status <id>\` output. Use \`worktrain health <id>\` instead.\n\n`);
 
       // Re-run the health summary logic (same code as the health command below).
       runHealthSummary(sessionId, raw);
