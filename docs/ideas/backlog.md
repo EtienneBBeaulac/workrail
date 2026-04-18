@@ -5891,3 +5891,23 @@ Coordinator logic:
 - Phase 1: coordinator scripts withhold `complete_step` advancement until the condition is met. This already works today -- the coordinator just doesn't advance the session until the fix agent is done.
 - Phase 2: the coordinator passes structured context when advancing: `complete_step(session, { injectedContext: fixSummary })`. The session receives it as part of the next step's prompt.
 - Phase 3: declarative pipelines -- workflow JSON declares that step N waits for an external condition before proceeding. The coordinator reads this and manages the timing automatically. No hand-coded coordinator script needed for common patterns.
+
+---
+
+### Design decisions: mid-session coordinator signaling protocol (Apr 18, 2026)
+
+**Decision 1: `signal_coordinator` coexists with `report_issue` -- different semantics**
+- `report_issue`: unstructured, human-facing, "I'm stuck, a person should look at this"
+- `signal_coordinator`: typed, machine-readable, structured data flowing to a coordinator
+- They serve different audiences. Do not merge them.
+
+**Decision 2: Approval gates -- convention first, engine enforcement later**
+- v1: workflow instructs agent to call `signal_coordinator('approval_needed', {...})` and check for a steer response before acting. Convention-based, nothing enforced.
+- Future: `waitForApproval` flag on a workflow step. Engine holds the session until an explicit coordinator response arrives. **This is the desired end state** -- mark for future implementation once the convention pattern is proven in production.
+- WHY defer: engine enforcement requires new infrastructure. Prove the pattern works with convention first.
+
+**Decision 3: Steer injection is daemon-only, probably forever**
+- `POST /sessions/:id/steer` only works for sessions the daemon spawned. Coordinators own what they spawn.
+- MCP-driven sessions (Claude Code) cannot receive coordinator steer injections in v1.
+- **Strong preference: probably never extend steer to MCP sessions.** A coordinator injecting arbitrary content into a session you're driving manually is confusing and potentially dangerous. The MCP session belongs to the user, not the coordinator.
+- If cross-mode injection is ever needed, it requires explicit user consent and a different mechanism -- not the same steer endpoint.
