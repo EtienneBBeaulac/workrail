@@ -37,7 +37,7 @@ WorkRail/WorkTrain is **three distinct systems** that share a common engine and 
 - A unified read-only HTTP server that shows sessions from BOTH the MCP server AND the daemon
 - Reads `~/.workrail/data/sessions/` directly -- sessions from both entry points land in the same store
 - Does not require either the MCP server or the daemon to be running
-- Source: `src/console/`, `src/infrastructure/standalone-console.ts`
+- Source: `src/console/standalone-console.ts`
 
 **Do not mix their concerns.** The MCP server should never call daemon-internal functions. The daemon should never depend on the MCP server being alive. The console is independent of both -- it just reads the shared session store.
 
