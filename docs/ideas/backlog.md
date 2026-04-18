@@ -5027,3 +5027,122 @@ Long-term (when mobile exists):
 11. **No auto-commit from handoff artifact** -- merged but untested end-to-end.
 12. **Late-bound goals not implemented** -- triggers require static goals; dynamic goals (like PR reviews) need `goalTemplate: "{{$.goal}}"` as default.
 13. **No coordinator script template** -- the multi-phase autonomous pipeline exists as primitives but not as a usable script.
+
+---
+
+### Artifacts as first-class citizens: explorable, accessible, out of the repo (Apr 18, 2026)
+
+**The current mess:** every autonomous session dumps `design-candidates.md`, `implementation_plan.md`, `design-review-findings.md`, `mr-review.md` etc. as files in the repo root or worktrees. They are:
+- Not indexed or searchable
+- Not visible in the console
+- Not accessible to other sessions (agent B can't read agent A's handoff without knowing the exact file path)
+- Polluting the repo with ephemeral working documents
+- Lost when worktrees are cleaned up
+- Scattered across the filesystem with no structure
+
+**The right model:** artifacts are WorkTrain data, not filesystem files.
+
+---
+
+#### What an artifact is
+
+Any structured output from a session that has value beyond the session itself:
+- **Handoff docs** -- what one session produces for the next to consume
+- **Design candidates** -- research output with tradeoffs and recommendation
+- **Implementation plans** -- what to build, how, in what order
+- **Review findings** -- MR review output with findings, severity, recommendation
+- **Spec files** -- behavioral specs, acceptance criteria, API contracts
+- **Investigation summaries** -- bug investigation root cause and reproduction
+- **Context bundles** -- pre-packaged knowledge for subagent consumption
+
+**NOT artifacts:** step notes (stay in WorkRail session store), event logs (stay in daemon events), source code (stays in repo).
+
+---
+
+#### Where artifacts live
+
+`~/.workrail/artifacts/<sessionId>/<artifact-type>-<timestamp>.json`
+
+Structured JSON, not markdown. The display layer (console, `worktrain artifacts`) renders them as human-readable. Other agents query them as structured data.
+
+**Why JSON not markdown:**
+- Queryable by other agents (what are the findings with severity=critical?)
+- Renderable by the console with proper formatting, filtering, search
+- Versionable and diffable in the artifact store
+- Accessible via the knowledge graph (artifacts become nodes with typed edges)
+
+---
+
+#### Console integration
+
+The console session detail view gets an "Artifacts" tab alongside "Steps" and "Notes":
+
+```
+Session: sess_3bmj...  [MR Review: PR #566]
+├── Steps (8)
+├── Notes
+└── Artifacts (3)
+    ├── 📋 review-findings.json    "APPROVE -- 3 Minor, 1 Info"
+    ├── 📄 context-bundle.json     "12 files read, 4 patterns identified"  
+    └── 🔍 investigation-notes.json "Signal 3 dead code in max_turns path"
+```
+
+Click an artifact → full rendered view in the console.
+
+---
+
+#### Accessibility to other agents
+
+Agents can query artifacts from prior sessions via a new tool:
+
+```
+read_artifact({ sessionId: 'sess_3bmj...', type: 'review-findings' })
+→ { verdict: 'APPROVE', findings: [...], recommendation: '...' }
+
+search_artifacts({ type: 'implementation-plan', workflowId: 'coding-task-workflow-agentic', since: '7d' })
+→ [{ sessionId, summary, createdAt }, ...]
+```
+
+This replaces the current pattern where agents `cat design-candidates.md` from a known path -- fragile, path-dependent, breaks across worktrees.
+
+---
+
+#### Workflow integration
+
+Workflow steps declare their artifact output type:
+
+```json
+{
+  "id": "phase-1c-challenge-and-select",
+  "output": {
+    "artifact": "design-candidates",
+    "schema": "wr.artifacts.design-candidates.v1"
+  }
+}
+```
+
+The daemon automatically stores the step's notes as a typed artifact. Other steps and other sessions can query it by type rather than by file path.
+
+---
+
+#### What stays in the repo
+
+Almost nothing from WorkTrain sessions. The only things that belong in the repo:
+- Source code changes (committed via auto-commit or human review)
+- Long-lived spec files that are part of the product (e.g. `docs/ideas/backlog.md`)
+- Workflow definitions (`workflows/*.json`)
+
+Everything else -- design docs, review findings, investigation notes, implementation plans -- lives in `~/.workrail/artifacts/`. If you want a design doc in the repo, you explicitly commit it. The default is: it lives in WorkTrain's data layer.
+
+---
+
+#### Build order
+
+1. **Artifact store** -- `~/.workrail/artifacts/<sessionId>/` directory structure, JSON schema for common types
+2. **Daemon writes artifacts** -- workflow steps with `output.artifact` declaration write to the artifact store automatically
+3. **`worktrain artifacts` CLI** -- list, read, search artifacts by session, type, date
+4. **Console artifacts tab** -- render artifacts in session detail view
+5. **`read_artifact` / `search_artifacts` tools** -- agents can query the artifact store
+6. **Knowledge graph integration** -- artifacts become nodes, sessions link to their artifacts
+
+**The `NEVER COMMIT MARKDOWN FILES` rule in metaGuidance is a symptom of this missing feature.** The rule exists because agents keep dumping files in the wrong place. With a proper artifact store, the rule becomes unnecessary -- artifacts have nowhere to go except the artifact store.
