@@ -788,6 +788,35 @@ function getSchemas(): Record<string, any> {
       },
       required: ['continueToken'],
     },
+    CompleteStepParams: {
+      type: 'object',
+      properties: {
+        notes: {
+          type: 'string',
+          minLength: 50,
+          description:
+            'What you did in this step (required, at least 50 characters). Write for a human reader. ' +
+            'Include: what you did and key decisions, what you produced (files, tests, numbers), ' +
+            'anything notable (risks, open questions, things you chose NOT to do and why). ' +
+            'Use markdown: headings, bullets, bold. 10-30 lines is ideal.',
+        },
+        artifacts: {
+          type: 'array',
+          items: {},
+          description:
+            'Optional structured artifacts to attach to this step. ' +
+            'Include wr.assessment objects here when the step requires an assessment gate. ' +
+            'Example: [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }]',
+        },
+        context: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Updated context variables (only changed values). Omit entirely if no facts changed.',
+        },
+      },
+      required: ['notes'],
+      additionalProperties: false,
+    },
     BashParams: {
       type: 'object',
       properties: {
@@ -834,6 +863,7 @@ export function makeContinueWorkflowTool(
   return {
     name: 'continue_workflow',
     description:
+      '[DEPRECATED in daemon sessions -- use complete_step instead] ' +
       'Advance the WorkRail workflow to the next step. Call this after completing all work ' +
       'required by the current step. Include your notes in notesMarkdown. ' +
       'When the step requires an assessment gate, include wr.assessment objects in artifacts.',
@@ -946,6 +976,213 @@ export function makeContinueWorkflowTool(
         : `Step advanced. continueToken: ${continueToken}`;
 
       onAdvance(stepText, continueToken);
+
+      return {
+        content: [{ type: 'text', text: stepText }],
+        details: out,
+      };
+    },
+  };
+}
+
+/**
+ * Build the complete_step tool for daemon sessions.
+ *
+ * WHY this tool exists: continue_workflow requires the LLM to round-trip a
+ * continueToken (an HMAC-signed opaque token). The LLM frequently mangles
+ * this token, causing TOKEN_BAD_SIGNATURE errors that kill sessions. complete_step
+ * eliminates this failure mode by having the daemon inject the continueToken
+ * internally -- the LLM only provides notes, artifacts, and context.
+ *
+ * WHY two token-update paths: the continueToken must be updated on both
+ * (a) successful advance: getCurrentToken() returns the new next-step token
+ *     from the response, which onAdvance will have stored before the next call.
+ * (b) blocked retry: the engine returns a retryContinueToken that must be used
+ *     on the retry call; onTokenUpdate updates the closure variable so the next
+ *     complete_step call injects the correct retry token.
+ * Both paths are mutually exclusive (kind: 'ok' vs kind: 'blocked') and cannot
+ * race because AgentLoop runs tools sequentially (toolExecution: 'sequential').
+ *
+ * WHY getCurrentToken is a getter (not a value): the closure variable
+ * currentContinueToken in runWorkflow() is updated after each step advance.
+ * The getter captures the variable by reference so each complete_step call
+ * reads the current token at call time, not at construction time.
+ *
+ * @param sessionId - Process-local UUID for crash-recovery token persistence.
+ * @param ctx - V2ToolContext from the shared DI container.
+ * @param getCurrentToken - Getter that returns the current continueToken from the
+ *   runWorkflow() closure. Called at tool execution time, not construction time.
+ * @param onAdvance - Called after a successful step advance with the next step text
+ *   and the new continueToken. Sets pendingSteerText and updates currentContinueToken.
+ * @param onComplete - Called when the workflow is complete.
+ * @param onTokenUpdate - Called when the continueToken changes without an advance
+ *   (i.e., on a blocked retry). Updates currentContinueToken in the runWorkflow() closure.
+ * @param schemas - Plain JSON Schema map from getSchemas().
+ * @param _executeContinueWorkflowFn - Optional injection point for testing.
+ * @param emitter - Optional event emitter for structured lifecycle events.
+ * @param workrailSessionId - WorkRail session ID for event correlation.
+ */
+export function makeCompleteStepTool(
+  sessionId: string,
+  ctx: V2ToolContext,
+  getCurrentToken: () => string,
+  onAdvance: (nextStepText: string, continueToken: string) => void,
+  onComplete: (notes: string | undefined) => void,
+  onTokenUpdate: (t: string) => void,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schemas: Record<string, any>,
+  // Optional injection point for testing -- defaults to the real implementation.
+  _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
+  emitter?: DaemonEventEmitter,
+  workrailSessionId?: string | null,
+): AgentTool {
+  return {
+    name: 'complete_step',
+    description:
+      'Mark the current WorkRail workflow step as complete and advance to the next one. ' +
+      'Call this after completing all work required by the current step. ' +
+      'Include your substantive notes (min 50 characters) describing what you did. ' +
+      'The daemon manages the session token internally -- you do not need a continueToken. ' +
+      'When the step requires an assessment gate, include wr.assessment objects in artifacts.',
+    inputSchema: schemas['CompleteStepParams'],
+    label: 'Complete Step',
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    execute: async (
+      _toolCallId: string,
+      params: any,
+    ): Promise<AgentToolResult<unknown>> => {
+      console.log(`[WorkflowRunner] Tool: complete_step sessionId=${sessionId}`);
+      emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'complete_step', summary: 'advance', ...withWorkrailSession(workrailSessionId) });
+
+      // WHY runtime validation: JSON Schema minLength is informational to the LLM
+      // but NOT enforced by AgentLoop. We must validate here so the LLM gets a
+      // clear error immediately, rather than a downstream blocked response from
+      // the engine. Fail fast at the boundary.
+      const notes = params.notes as string | undefined;
+      if (!notes || notes.length < 50) {
+        throw new Error(
+          `complete_step: notes is required and must be at least 50 characters. ` +
+          `Provide substantive notes describing what you did, what you produced, and any notable decisions. ` +
+          `Current length: ${notes?.length ?? 0} characters.`,
+        );
+      }
+
+      // WHY inject getCurrentToken(): the daemon holds the continueToken in a
+      // closure variable (currentContinueToken in runWorkflow()). The LLM never
+      // sees this token -- we inject it here so the engine can authenticate the
+      // advance call. This is the core value of complete_step over continue_workflow.
+      const continueToken = getCurrentToken();
+
+      const result = await _executeContinueWorkflowFn(
+        {
+          continueToken,
+          intent: 'advance',
+          // WHY: output is constructed when notes is present (always true after validation)
+          // or when artifacts is a non-empty array (e.g. assessment-only steps without notes,
+          // though complete_step always requires notes). An empty artifacts array must not
+          // spread {} or {} with artifacts: [] -- use ?.length to guard against this.
+          output: (notes || (params.artifacts as unknown[] | undefined)?.length)
+            ? {
+                notesMarkdown: notes,
+                ...((params.artifacts as unknown[] | undefined)?.length ? { artifacts: params.artifacts } : {}),
+              }
+            : undefined,
+          context: params.context,
+        },
+        ctx,
+      );
+
+      if (result.isErr()) {
+        throw new Error(`complete_step failed: ${result.error.kind} -- ${JSON.stringify(result.error)}`);
+      }
+
+      const out = result.value.response;
+
+      // Persist tokens atomically before returning -- crash safety invariant.
+      // WHY this must happen before onAdvance/onTokenUpdate: a crash between
+      // executeContinueWorkflow returning and the token being persisted would
+      // leave no recoverable state. Persisting first ensures crash recovery works.
+      const newContinueToken = out.continueToken ?? '';
+      const checkpointToken = out.checkpointToken ?? null;
+      // WHY blocked uses retry token: on a blocked response, the engine returns a
+      // retryContinueToken (via nextCall.params.continueToken). The session token
+      // advances to this retry token -- the original session token is consumed.
+      const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? newContinueToken;
+      if (persistToken) {
+        await persistTokens(sessionId, persistToken, checkpointToken);
+      }
+
+      // WHY onTokenUpdate on blocked: the next complete_step call must inject the
+      // retry token (not the original session token). We update the closure variable
+      // so getCurrentToken() returns the correct retry token on the next call.
+      // This is a separate path from onAdvance because a blocked response does NOT
+      // advance the step -- it only changes which token is valid for retry.
+      if (out.kind === 'blocked') {
+        const retryToken = out.nextCall?.params.continueToken ?? newContinueToken;
+        // Update the closure token to the retry token for the next complete_step call.
+        onTokenUpdate(retryToken);
+
+        const lines: string[] = ['## Step blocked -- action required\n'];
+
+        for (const blocker of out.blockers.blockers) {
+          lines.push(blocker.message);
+          if (blocker.suggestedFix) {
+            lines.push(`\nWhat to do: ${blocker.suggestedFix}`);
+          }
+          lines.push('');
+        }
+
+        if (out.validation) {
+          if (out.validation.issues.length > 0) {
+            lines.push('**Issues:**');
+            for (const issue of out.validation.issues) lines.push(`- ${issue}`);
+            lines.push('');
+          }
+          if (out.validation.suggestions.length > 0) {
+            lines.push('**Suggestions:**');
+            for (const s of out.validation.suggestions) lines.push(`- ${s}`);
+            lines.push('');
+          }
+        }
+
+        if (out.assessmentFollowup) {
+          lines.push(`**Follow-up required:** ${out.assessmentFollowup.title}`);
+          lines.push(out.assessmentFollowup.guidance);
+          lines.push('');
+        }
+
+        if (out.retryable) {
+          lines.push(`Retry the same step: call complete_step again with corrected notes.`);
+        } else {
+          lines.push(`You cannot proceed without resolving this. Inform the user and wait for their response, then call complete_step.`);
+        }
+
+        const feedback = lines.join('\n');
+        return {
+          content: [{ type: 'text', text: feedback }],
+          details: out,
+        };
+      }
+
+      if (out.isComplete) {
+        onComplete(notes);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'complete' }) }],
+          details: out,
+        };
+      }
+
+      const pending = out.pending;
+      // WHY no continueToken in the response text: the LLM does not need the token.
+      // Including it would invite the LLM to store it and pass it to continue_workflow,
+      // defeating the purpose of complete_step.
+      const nextStepTitle = pending?.title ?? 'Next step';
+      const stepText = pending
+        ? `${JSON.stringify({ status: 'advanced', nextStep: pending.title })}\n\n## ${pending.title}\n\n${pending.prompt}`
+        : JSON.stringify({ status: 'advanced', nextStep: nextStepTitle });
+
+      onAdvance(stepText, newContinueToken);
 
       return {
         content: [{ type: 'text', text: stepText }],
@@ -1278,20 +1515,21 @@ Bad pattern: "I'll analyze both layers." (no justification)
 Good pattern: "Question: Should I check the middleware? Answer: The workflow step says 'trace the full call chain', and the AGENTS.md says the entry point is in the middleware layer. Yes, start there."
 
 ## Your tools
-- \`continue_workflow\`: Advance to the next step. Call this after completing each step's work. Always include your notes in notesMarkdown and round-trip the continueToken exactly.
+- \`complete_step\`: Mark the current step complete and advance to the next one. Call this after completing ALL work required by the step. Include your notes (min 50 characters) in the notes field. The daemon manages the session token internally -- you do NOT need a continueToken. This is the preferred advancement tool for daemon sessions.
+- \`continue_workflow\`: [DEPRECATED -- use complete_step instead] Legacy advancement tool. Requires a continueToken that you must round-trip exactly. Only use this if complete_step is unavailable.
 - \`Bash\`: Run shell commands. Use for building, testing, running scripts.
 - \`Read\`: Read files.
 - \`Write\`: Write files.
-- \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND continue_workflow (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
+- \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND complete_step (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
 
 ## Execution contract
 1. Read the step carefully. Do ALL the work the step asks for.
-2. Call \`continue_workflow\` with your notes. Include the continueToken exactly.
+2. Call \`complete_step\` with your notes. No continueToken needed -- the daemon manages it.
 3. Repeat until the workflow reports it is complete.
-4. Do NOT skip steps. Do NOT call \`continue_workflow\` without completing the step's work.
+4. Do NOT skip steps. Do NOT call \`complete_step\` without completing the step's work.
 
 ## The workflow is the contract
-Every step must be fully completed before you call continue_workflow. The workflow step prompt is the specification of what 'done' means -- not a suggestion. Don't advance until the work is actually done.
+Every step must be fully completed before you call complete_step. The workflow step prompt is the specification of what 'done' means -- not a suggestion. Don't advance until the work is actually done.
 
 Your cognitive mode changes per step: some steps make you a researcher, others a reviewer, others an implementer. Adopt the mode the step describes. Don't bring your own agenda.
 
@@ -1302,7 +1540,10 @@ If something goes wrong: call report_issue, then continue unless severity is 'fa
 Don't narrate what you're about to do. Use the tool and report what you found. Token efficiency matters -- you have a wall-clock timeout.
 
 ## You don't have a user. You have a workflow and a soul.
-If you're unsure, consult the oracle above. If nothing answers the question, make a reasoned decision, call report_issue with kind='self_correction' to document it, and continue.\
+If you're unsure, consult the oracle above. If nothing answers the question, make a reasoned decision, call report_issue with kind='self_correction' to document it, and continue.
+
+## IMPORTANT: Never use continue_workflow in daemon sessions
+complete_step is your advancement tool. It does not require a continueToken. Do NOT call continue_workflow with a token you found in a previous message -- use complete_step instead.\
 `;
 
 /**
@@ -1532,9 +1773,15 @@ export async function runWorkflow(
   const issueSummaries: string[] = [];
   const MAX_ISSUE_SUMMARIES = 10;
 
-  const onAdvance = (stepText: string, _continueToken: string): void => {
+  const onAdvance = (stepText: string, continueToken: string): void => {
     pendingSteerText = stepText;
     stepAdvanceCount++;
+    // WHY update currentContinueToken here: complete_step injects the token from
+    // this closure variable. After each successful advance, the engine returns a new
+    // continueToken for the next step. Updating here ensures the next complete_step
+    // call injects the correct token. The second parameter was previously unused
+    // (continue_workflow relied on the LLM round-tripping the token instead).
+    currentContinueToken = continueToken;
     // Heartbeat on each step advance -- the session is alive and making progress.
     // WHY workrailSessionId: DaemonRegistry is keyed by WorkRail session ID (not process UUID).
     // workrailSessionId is populated after executeStartWorkflow + continueToken decode.
@@ -1587,6 +1834,18 @@ export async function runWorkflow(
 
   const startContinueToken = firstStep.continueToken ?? '';
   const startCheckpointToken = firstStep.checkpointToken ?? null;
+
+  // ---- Current continue token (for complete_step daemon tool) ----
+  // WHY a mutable variable: complete_step injects the continueToken internally so
+  // the LLM never needs to round-trip it. This variable starts with the initial
+  // session token and is updated by onAdvance after each step advance.
+  // WHY let (not const): the value changes on every successful step advance and on
+  // blocked-retry responses. Mutation is confined to onAdvance and the onTokenUpdate
+  // callback passed to makeCompleteStepTool.
+  // INVARIANT: this variable is always updated AFTER persistTokens() is called,
+  // so a crash between advance and the next complete_step call can still recover
+  // the correct token from the persisted state file.
+  let currentContinueToken = startContinueToken;
 
   // ---- Decode WorkRail session ID from the continueToken ----
   // WHY: daemonRegistry.register() and daemon event emitter both need the WorkRail
@@ -1646,7 +1905,29 @@ export async function runWorkflow(
   // ---- Tools ----
   // start_workflow is NOT in this list: the daemon calls executeStartWorkflow()
   // directly above so the LLM cannot call it again.
+  //
+  // WHY complete_step is listed before continue_workflow: the preferred tool for
+  // daemon sessions is complete_step -- it hides the continueToken from the LLM
+  // and eliminates TOKEN_BAD_SIGNATURE errors from token mangling. continue_workflow
+  // is kept for backward compatibility but is marked deprecated in its description.
+  // The LLM should prefer complete_step as directed by the system prompt.
   const tools: AgentTool[] = [
+    makeCompleteStepTool(
+      sessionId,
+      ctx,
+      () => currentContinueToken,
+      onAdvance,
+      onComplete,
+      // WHY onTokenUpdate: on a blocked response, the engine returns a retryContinueToken.
+      // This callback updates currentContinueToken so the next complete_step call
+      // injects the correct retry token. This is the second (and only other) write
+      // path for currentContinueToken alongside onAdvance above.
+      (t: string) => { currentContinueToken = t; },
+      schemas,
+      executeContinueWorkflow,
+      emitter,
+      workrailSessionId,
+    ),
     makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSessionId),
     makeBashTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
     makeReadTool(schemas, sessionId, emitter, workrailSessionId),
@@ -1685,24 +1966,22 @@ export async function runWorkflow(
   // ---- Initial prompt: first step content from start_workflow ----
   // The daemon has already called executeStartWorkflow() and has the first step.
   // Pass the step content directly -- the LLM starts working on step 1 immediately.
-  // Appending the continueToken so the LLM can pass it to continue_workflow.
-  // WHY closing directive: an explicit imperative at the end of the initial prompt directs
-  // the agent to complete the step work before calling continue_workflow. Without this,
-  // the agent may produce a "thinking aloud" turn before the first tool call, which
-  // wastes tokens and delays step execution.
+  // WHY no continueToken in the initial prompt: the daemon uses complete_step which
+  // manages the token internally. Including the token would invite the LLM to store
+  // it and call continue_workflow (deprecated) instead of complete_step, defeating
+  // the purpose of the new tool.
+  // WHY closing directive: an explicit imperative at the end of the initial prompt
+  // directs the agent to complete the step work before calling complete_step. Without
+  // this, the agent may produce a "thinking aloud" turn before the first tool call,
+  // which wastes tokens and delays step execution.
   const contextJson = trigger.context
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
 
-  // WHY: an explicit imperative at the end of the initial prompt directs the agent
-  // to complete the step work before calling continue_workflow. Without this,
-  // the agent may produce a "thinking aloud" turn before the first tool call, which
-  // wastes tokens and delays step execution.
   const initialPrompt =
     (firstStep.pending?.prompt ?? 'No step content available') +
-    `\n\ncontinueToken: ${startContinueToken}` +
     contextJson +
-    '\n\nComplete all step work, then call continue_workflow with your notes to begin.';
+    '\n\nComplete all step work, then call complete_step with your notes to advance.';
 
   // ---- Observability callbacks for AgentLoop ----
   // Wire structured event emission for LLM turns and tool calls.
