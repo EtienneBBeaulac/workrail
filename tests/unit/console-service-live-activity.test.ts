@@ -24,6 +24,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import { okAsync } from 'neverthrow';
+import { tmpPath } from '../helpers/platform.js';
 
 // ---------------------------------------------------------------------------
 // Mock node:fs/promises before any module imports that use it.
@@ -196,7 +197,7 @@ function makeEventLogJSONL(
       kind: 'session_started',
       sessionId: 'internal-daemon-id',
       workflowId: 'test-workflow',
-      workspacePath: '/tmp/test',
+      workspacePath: tmpPath('test'),
       ts: 1_700_000_000_000,
     }));
   }

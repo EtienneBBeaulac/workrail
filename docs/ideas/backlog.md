@@ -4709,3 +4709,45 @@ The coordinator sessions spec (`spawn_session` + `await_sessions` tools) handles
 2. `worktrain spawn --parent-session <id>` flag (wires through TriggerRouter dispatch)
 3. Console aggregates sessions by root and shows tree on expand
 4. Dashboard "work sessions" view replaces flat session list as default
+
+---
+
+### Trigger-derived tool availability and knowledge configuration (Apr 18, 2026, to investigate)
+
+**Observation:** the trigger already declares what external system matters. A `gitlab_poll` trigger means the agent will be working on GitLab content. A `jira_poll` trigger means Jira. WorkTrain should use this declaration to automatically configure what tools and knowledge sources the agent gets -- no manual per-trigger MCP configuration.
+
+**Idea 1: Implicit tool availability from trigger source**
+If `provider: gitlab_poll` → agent automatically gets GitLab MCP tools.
+If `provider: github_poll` → agent gets GitHub tools.
+If `provider: jira_poll` → agent gets Jira tools.
+The trigger source is a declaration of intent -- WorkTrain infers the tool environment from it. No extra config needed for the common case.
+
+**Idea 2: Trigger as knowledge configuration**
+The trigger could declare where the agent gets different kinds of knowledge:
+
+```yaml
+- id: jira-bug-fix
+  provider: jira_poll
+  knowledge:
+    general:   [glean, confluence]         # background org knowledge
+    codebase:  [github, local-kg]           # structural code knowledge  
+    task:      [jira-ticket, related-prs]   # what this specific task is about
+    style:     [team-conventions, agents-md] # how to do the work
+```
+
+The daemon assembles a pre-packaged context bundle from these sources before the agent starts. The agent skips Phase 0 discovery entirely for the declared knowledge domains.
+
+**Why this is interesting:**
+- Closes the loop between "what triggers the work" and "what context the agent needs"
+- The trigger author knows better than anyone what knowledge sources are relevant
+- Eliminates redundant context gathering across sessions for the same trigger type
+- Natural fit with workspace-scoped MCP config and the knowledge graph
+
+**What needs investigating:**
+- Is the trigger → tool mapping always 1:1 (gitlab_poll → gitlab MCP) or does it need explicit override?
+- What are the right "knowledge categories"? (general, codebase, task, style seem like a reasonable starting set)
+- How does this interact with the knowledge graph? (local-kg is already planned as a knowledge source)
+- Can this be inferred automatically or does it always need explicit declaration?
+- How do you handle a trigger that spans multiple systems (e.g. a Jira ticket about a GitHub PR)?
+
+**This is a design-first item** -- the ideas are promising but the right shape isn't obvious. Needs a discovery pass before any implementation.
