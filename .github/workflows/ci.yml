@@ -154,6 +154,11 @@ jobs:
       - name: Build dist/
         run: npm run build
 
+      # Validates the publishable tarball would build correctly -- catches broken prepack,
+      # missing dist/ files, and package.json files field errors. No npm credentials needed.
+      - name: Verify release would succeed
+        run: npm pack --dry-run
+
       - name: Verify dist artifacts
         run: |
           test -f dist/mcp-server.js || (echo "Missing dist/mcp-server.js" && exit 1)
