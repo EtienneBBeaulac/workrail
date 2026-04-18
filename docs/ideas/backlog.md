@@ -5644,3 +5644,56 @@ Tested empirically today. This is what actually works, not what's specced.
 6. **Subagent delegation invisible** -- spawn_agent creates proper child sessions, but workflows still use mcp__nested-subagent__Task for most delegation (invisible black box).
 7. **No artifact store** -- agents dump markdown in the repo as a workaround.
 8. **Context poverty** -- each session starts from scratch, no persistent knowledge graph.
+
+---
+
+### WorkTrain benchmarking: prove it's better, publish the results (Apr 18, 2026)
+
+**The opportunity:** if WorkTrain can demonstrably outperform one-shot LLM calls and human-in-the-loop for specific task types, with reproducible benchmarks published in GitHub and visible in the console, that's the killer adoption argument. Not "trust us, it's better" -- actual numbers.
+
+**What to benchmark:**
+
+| Dimension | WorkTrain | One-shot | Human-in-loop |
+|-----------|-----------|----------|---------------|
+| MR review finding rate (Critical/Major caught) | ? | ? | ? |
+| False positive rate (findings that were wrong) | ? | ? | ? |
+| Coding task correctness (builds + tests pass) | ? | ? | ? |
+| Coding task completeness (wiring, exports, tests) | ? | ? | ? |
+| Bug investigation accuracy (correct root cause) | ? | ? | ? |
+| Time to complete | ? | ? | ? |
+| Token cost per task | ? | ? | ? |
+
+**Model comparison within WorkTrain:**
+- Haiku (fast, cheap) vs Sonnet (balanced) vs Opus (best) for each task type
+- Other providers: GPT-4o, Gemini 1.5 Pro, Llama 3 (via Ollama) -- can WorkTrain run on any model?
+- Does the workflow structure make Haiku competitive with Sonnet one-shot? (hypothesis: yes, for structured tasks)
+
+**The benchmark suite:**
+
+1. **MR review benchmark** -- 50 PRs with known ground truth (bugs that were later filed, correct implementations that had no bugs). Score: recall (caught real issues) + precision (didn't flag non-issues).
+2. **Coding task benchmark** -- 50 tasks with objective completion criteria (build passes, tests pass, correct wiring). Score: % completing correctly on first autonomous run.
+3. **Bug investigation benchmark** -- 30 real bugs with known root causes. Score: % identifying correct root cause.
+4. **Discovery quality benchmark** -- 20 design questions with expert-evaluated answers. Score: coverage of key tradeoffs, identification of non-obvious alternatives.
+
+**How to publish:**
+
+- `docs/benchmarks/` directory in the repo -- YAML results files, one per benchmark run
+- GitHub Actions CI job that runs the benchmark suite on each release and commits results
+- Console "Benchmarks" tab showing historical performance by model and workflow version
+- Public benchmark page (once cloud hosting exists) showing WorkTrain vs alternatives
+- Badge in README: "MR review recall: 87% (Sonnet 4.6, v3.36.0)"
+
+**Why this matters for adoption:**
+- Developers are skeptical of autonomous agents -- "it probably makes stuff up"
+- Hard numbers cut through skepticism instantly
+- Showing WorkTrain with Haiku beating one-shot Opus on structured tasks is a compelling cost argument
+- Showing improvement over workflow versions gives teams confidence the system is getting better
+- The benchmark suite is also a regression test -- if a workflow change degrades performance, CI catches it
+
+**What makes this hard:**
+- Ground truth is expensive to establish (need expert-labeled evaluation sets)
+- Some tasks are inherently subjective (discovery quality)
+- Benchmarks can be gamed (optimize for the benchmark, not real performance)
+- Need enough volume to be statistically meaningful
+
+**Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `mr-review-workflow-agentic` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
