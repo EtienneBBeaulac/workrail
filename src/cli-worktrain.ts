@@ -1018,6 +1018,11 @@ runCommand
           },
         );
 
+        if (resolvedResult === null) {
+          process.stderr.write(
+            `[WARN coord:reason=await_failed] awaitSessions: could not get session results -- daemon may be unreachable or timed out. Returning all ${handles.length} session(s) as failed.\n`,
+          );
+        }
         return resolvedResult ?? { results: [...handles].map((h) => ({
           handle: h,
           outcome: 'failed' as const,
@@ -1031,32 +1036,82 @@ runCommand
           // Step 1: get session detail to find preferredTipNodeId
           const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
           const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!sessionRes.ok) return null;
+          if (!sessionRes.ok) {
+            process.stderr.write(
+              `[WARN coord:reason=http_error status=${sessionRes.status} handle=${sessionHandle.slice(0, 16)}] getAgentResult: session fetch returned HTTP ${sessionRes.status}\n`,
+            );
+            return null;
+          }
           const sessionBody = await sessionRes.json() as Record<string, unknown>;
-          if (sessionBody['success'] !== true) return null;
+          if (sessionBody['success'] !== true) {
+            process.stderr.write(
+              `[WARN coord:reason=api_error handle=${sessionHandle.slice(0, 16)}] getAgentResult: session API returned success=false\n`,
+            );
+            return null;
+          }
 
           const data = sessionBody['data'] as Record<string, unknown> | undefined;
-          if (!data) return null;
+          if (!data) {
+            process.stderr.write(
+              `[WARN coord:reason=no_data handle=${sessionHandle.slice(0, 16)}] getAgentResult: session response missing data field\n`,
+            );
+            return null;
+          }
           const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
-          if (!Array.isArray(runs) || runs.length === 0) return null;
+          if (!Array.isArray(runs) || runs.length === 0) {
+            process.stderr.write(
+              `[WARN coord:reason=no_runs handle=${sessionHandle.slice(0, 16)}] getAgentResult: session has no runs\n`,
+            );
+            return null;
+          }
 
           const firstRun = runs[0] as Record<string, unknown>;
           const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string'
             ? firstRun['preferredTipNodeId']
             : null;
-          if (!tipNodeId) return null;
+          if (!tipNodeId) {
+            process.stderr.write(
+              `[WARN coord:reason=no_tip_node handle=${sessionHandle.slice(0, 16)}] getAgentResult: session run has no preferredTipNodeId\n`,
+            );
+            return null;
+          }
 
           // Step 2: get node detail to retrieve recapMarkdown
           const nodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/${encodeURIComponent(tipNodeId)}`;
           const nodeRes = await globalThis.fetch(nodeUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!nodeRes.ok) return null;
+          if (!nodeRes.ok) {
+            process.stderr.write(
+              `[WARN coord:reason=node_http_error status=${nodeRes.status} handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node fetch returned HTTP ${nodeRes.status}\n`,
+            );
+            return null;
+          }
           const nodeBody = await nodeRes.json() as Record<string, unknown>;
-          if (nodeBody['success'] !== true) return null;
+          if (nodeBody['success'] !== true) {
+            process.stderr.write(
+              `[WARN coord:reason=node_api_error handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node API returned success=false\n`,
+            );
+            return null;
+          }
 
           const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
-          if (!nodeData) return null;
-          return typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
-        } catch {
+          if (!nodeData) {
+            process.stderr.write(
+              `[WARN coord:reason=no_node_data handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node response missing data field\n`,
+            );
+            return null;
+          }
+          const recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
+          if (recap === null) {
+            process.stderr.write(
+              `[WARN coord:reason=no_recap handle=${sessionHandle.slice(0, 16)} node=${tipNodeId.slice(0, 16)}] getAgentResult: node has no recapMarkdown\n`,
+            );
+          }
+          return recap;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          process.stderr.write(
+            `[WARN coord:reason=exception handle=${sessionHandle.slice(0, 16)}] getAgentResult: ${msg}\n`,
+          );
           return null;
         }
       },

@@ -17,6 +17,8 @@
  * 2. spawnSession returning empty/null handle -> treat as error (zombie detection).
  * 3. Coordinator wall-clock check: refuse new spawns if elapsed > 70 minutes.
  * 4. Two-tier notes parsing: JSON block first (## COORDINATOR_OUTPUT), keyword scan fallback.
+ *    NOTE: the JSON block parser is aspirational -- no live workflow emits ## COORDINATOR_OUTPUT.
+ *    The keyword scan is the ONLY active parser path. See comment in parseFindingsFromNotes().
  *    Unknown severity defaults to 'blocking' (conservative). Blocking wins over clean keywords.
  *    Negation context suppresses blocking: /\b(?:not|no|without)\b.{0,30}\bblocking\b/i
  * 5. Traceability: write { childSessionId, outcome, elapsedMs, severity } JSON block before acting.
@@ -221,7 +223,19 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
   }
 
   // Strategy 1: JSON fenced block after ## COORDINATOR_OUTPUT marker.
-  // Try all JSON blocks in the notes before falling through to keyword scan.
+  //
+  // IMPORTANT: This parser is NOT currently active for any live workflow.
+  // The mr-review-workflow.agentic.v2 workflow (and all other versions) produce
+  // free-form markdown -- NOT a structured ## COORDINATOR_OUTPUT JSON block.
+  // The keyword scan (Strategy 2) is the ONLY live parser path today.
+  //
+  // This block is intentionally kept because it is the right long-term contract:
+  // when a future workflow version emits structured output, this parser will
+  // activate automatically without code changes. Do NOT rely on it today.
+  //
+  // WHY we still try all JSON blocks: if a workflow ever happens to include a
+  // JSON block with the right shape, we prefer the explicit machine-readable
+  // signal over keyword heuristics.
   const jsonBlockRe = /```json\s*\n([\s\S]*?)\n```/g;
   for (const blockMatch of notes.matchAll(jsonBlockRe)) {
     const blockContent = blockMatch[1];
@@ -270,12 +284,15 @@ export function parseFindingsFromNotes(notes: string | null): Result<ReviewFindi
   }
 
   // Check for clean keywords (APPROVE, LGTM are strong positive signals).
-  // WHY no CLEAN: "CLEAN" matches too broadly ("clean architecture", "clean implementation").
+  // WHY word boundary for CLEAN: bare includes('CLEAN') matches "CLEANED", "CLEANER",
+  // "CLEANING", "UNCLEAN", etc. -- all false positives for auto-merge decisions.
+  // /\bCLEAN\b/ matches exactly the standalone word and nothing else.
   const hasCleanKeyword =
     upperNotes.includes('APPROVE') ||
     upperNotes.includes('LGTM') ||
     upperNotes.includes('NO FINDINGS') ||
-    upperNotes.includes('NO ISSUES');
+    upperNotes.includes('NO ISSUES') ||
+    /\bCLEAN\b/.test(upperNotes);
 
   // Check for minor-only keywords.
   const hasMinorKeyword =
@@ -790,6 +807,20 @@ async function runFixAgentLoop(
     }
 
     log(`      PR #${pr.number}  ->  fix done (pass ${passCount}), re-reviewing...`);
+
+    // OP-4: Wall-clock cutoff check before re-review spawn.
+    // Same guard as the fix-agent spawn above -- prevents running past 90 minutes
+    // even if the fix agent itself ran close to the cutoff.
+    if (!opts.dryRun && deps.now() - coordinatorStartMs > COORDINATOR_SPAWN_CUTOFF_MS) {
+      log(`      PR #${pr.number}  ->  coordinator elapsed > 70 minutes, skipping re-review spawn`);
+      return {
+        ...initialOutcome,
+        passCount,
+        sessionHandles,
+        escalated: true,
+        escalationReason: 'coordinator elapsed > 70 minutes (re-review cutoff)',
+      };
+    }
 
     // Re-review after fix
     const reReviewGoal = `Re-review PR #${pr.number} after fixes (pass ${passCount})`;

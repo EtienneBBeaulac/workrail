@@ -198,6 +198,57 @@ describe('parseFindingsFromNotes', () => {
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') expect(result.value.severity).toBe('blocking');
   });
+
+  // ---- F1: CLEAN word boundary ----
+
+  it('classifies standalone CLEAN as clean', () => {
+    const result = parseFindingsFromNotes('Code review complete. CLEAN -- no issues found.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).toBe('clean');
+  });
+
+  it('does NOT classify CLEANED as clean (word boundary guard)', () => {
+    // "CLEANED" is a past-tense verb, not a severity signal
+    const result = parseFindingsFromNotes('The developer CLEANED up the code after feedback.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).not.toBe('clean');
+  });
+
+  it('does NOT classify CLEANER as clean (word boundary guard)', () => {
+    const result = parseFindingsFromNotes('This approach is CLEANER than the previous implementation.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).not.toBe('clean');
+  });
+
+  it('does NOT classify CLEANING as clean (word boundary guard)', () => {
+    const result = parseFindingsFromNotes('The PR focuses on CLEANING up dead code in the module.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).not.toBe('clean');
+  });
+
+  // ---- F2: clean+minor combination must return minor ----
+
+  it('returns minor when both clean and minor keywords are present (minor beats clean)', () => {
+    // A reviewer might write a mostly positive review but note a minor issue
+    const result = parseFindingsFromNotes('APPROVE the overall approach. MINOR: missing docstring on helper.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // minor findings exist -- should go through fix-agent loop, NOT auto-merge
+      expect(result.value.severity).toBe('minor');
+    }
+  });
+
+  it('returns minor when LGTM and NIT both appear', () => {
+    const result = parseFindingsFromNotes('LGTM overall. NIT: variable name could be more descriptive.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).toBe('minor');
+  });
+
+  it('returns minor when CLEAN and SUGGESTION both appear', () => {
+    const result = parseFindingsFromNotes('CLEAN implementation. SUGGESTION: consider extracting this into a helper.');
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.value.severity).toBe('minor');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
