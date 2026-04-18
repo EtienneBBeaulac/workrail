@@ -4179,9 +4179,11 @@ interface WorkflowStep {
 
 ---
 
-### Console as a standalone file-reading binary (Apr 18, 2026)
+### Console as the unified WorkRail dashboard -- standalone, file-reading, zero coupling (Apr 18, 2026)
 
-**The insight:** The console doesn't need a live connection to the daemon or MCP server. It reads files. The current architecture where the console is owned by whichever process wins a port election is wrong -- it's a legacy of when the MCP server was the only long-running process.
+**The insight:** The console is the unified view of all WorkRail activity -- whether sessions were started by the autonomous daemon or by a human working interactively through the MCP server. It doesn't care how a session was created. It reads the same session store either way.
+
+The console doesn't need a live connection to either the daemon or the MCP server. It reads files. The current architecture where the console is owned by whichever process wins a port election is wrong -- it's a legacy of when the MCP server was the only long-running process.
 
 **Target architecture -- zero coupling:**
 
