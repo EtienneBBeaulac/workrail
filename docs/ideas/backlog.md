@@ -4932,39 +4932,46 @@ The workflow spec describes the intent. The adapter knows how each runtime fulfi
 - Session completed: "WorkTrain finished reviewing PR #566 -- APPROVED, no findings" (with session link)
 - Session failed/stuck: "WorkTrain got stuck on PR #566 after 15 turns -- needs attention" (with details)
 
-**Notification channels (multiple, user-configurable):**
+**Notification channels -- anything the user wants:**
 
-1. **macOS notification** -- `osascript -e 'display notification "..." with title "WorkTrain"'`. Zero config, works immediately on Mac.
-2. **Outbox.jsonl** -- already spec'd in the message queue backlog. `worktrain inbox` reads it, mobile client polls it.
-3. **Slack webhook** -- POST to a configured webhook URL. Simple delivery target using the existing callbackUrl pattern.
-4. **Email** -- SMTP delivery for completion/failure. Low-friction for async awareness.
-5. **Desktop badge** -- update the `worktrain console` window title or icon badge with active session count.
+The notification system should be open-ended. Any channel that accepts a webhook or has an API should be configurable. The architecture is: `DaemonEventEmitter` → `NotificationRouter` → one or more configured channels.
 
-**Implementation (start simple):**
-The `DaemonEventEmitter` already emits `session_started` and `session_completed` events. The simplest implementation: a `NotificationEmitter` that subscribes to these events and fires macOS notifications for `session_completed` with `outcome: success/error/timeout`.
+Short-term (easiest to ship):
+- **Outbox.jsonl** -- already spec'd. `worktrain inbox` reads it, mobile client polls it. Works everywhere, zero config.
+- **Generic webhook** -- HTTP POST to any URL. Covers Slack, Discord, Teams, PagerDuty, Zapier, IFTTT, and anything else that accepts webhooks. One implementation, infinite integrations.
+- **macOS notification** -- `osascript` on Mac. Useful for local dev awareness.
+- **Linux/Windows notification** -- `notify-send` on Linux, Windows Toast via PowerShell.
 
-```typescript
-// In startTriggerListener, after daemon starts:
-if (process.platform === 'darwin') {
-  emitter.on('session_completed', (event) => {
-    const icon = event.outcome === 'success' ? '✅' : '❌';
-    execFile('osascript', ['-e', 
-      `display notification "${icon} ${event.workflowId}: ${event.outcome}" with title "WorkTrain"`
-    ]);
-  });
+Medium-term (first-class integrations):
+- **Slack** (direct API, not just webhook -- enables threading, reactions, rich formatting)
+- **Discord** (webhook, then bot for richer interactions)
+- **Microsoft Teams** (Adaptive Cards)
+- **Telegram** (popular for personal automation)
+- **Email** (SMTP for async, digest mode)
+
+Long-term (when mobile exists):
+- **Mobile push notifications** -- the mobile app (spec'd in backlog) receives push notifications directly. When the app exists, this becomes the primary channel -- native push is better than any polling-based alternative.
+- **Desktop app** -- if WorkTrain ever has a desktop app, native notifications from there.
+
+**The outbox is the universal foundation.** Every notification goes through `~/.workrail/outbox.jsonl` first. Channel-specific delivery (webhook, Slack, push) is a fan-out from the outbox. This means: a mobile app polling the outbox gets ALL notifications regardless of which other channels are configured.
+
+**Config:**
+```json
+// ~/.workrail/config.json
+{
+  "notifications": {
+    "onSessionComplete": true,
+    "onSessionFailed": true,
+    "onStuck": true,
+    "onSessionStart": false,
+    "channels": [
+      { "type": "webhook", "url": "$SLACK_WEBHOOK_URL" },
+      { "type": "webhook", "url": "$DISCORD_WEBHOOK_URL" },
+      { "type": "macos" },
+      { "type": "outbox" }
+    ]
+  }
 }
 ```
 
-**Config:**
-```yaml
-# ~/.workrail/config.json
-notifications:
-  onSessionStart: false          # usually too noisy
-  onSessionComplete: true        # the useful one
-  onSessionFailed: true          # urgent
-  onStuck: true                  # urgent
-  channels: [macos, slack]
-  slackWebhookUrl: $SLACK_WEBHOOK_URL
-```
-
-**Build order:** macOS notification on session_completed (30 min) → outbox.jsonl integration (already partially built) → Slack webhook → configurable per-channel.
+**Build order:** outbox.jsonl integration (foundation, works everywhere) → generic webhook (covers Slack/Discord/Teams/anything) → platform notifications (macOS/Linux/Windows) → mobile app push (when mobile exists).
