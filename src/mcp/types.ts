@@ -10,7 +10,6 @@
 import type { WorkflowService } from '../application/services/workflow-service.js';
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
-import type { HttpServer } from '../infrastructure/session/HttpServer.js';
 import type { SessionHealthV2 } from '../v2/durable-core/schemas/session/session-health.js';
 import type { ExecutionSessionGateV2 } from '../v2/usecases/execution-session-gate.js';
 import type { 
@@ -265,7 +264,6 @@ export interface ToolContext {
   readonly featureFlags: IFeatureFlagProvider;
   // Session-related dependencies are null when session tools are disabled
   readonly sessionManager: SessionManager | null;
-  readonly httpServer: HttpServer | null;
   // v2 dependencies are null when v2Tools flag is disabled
   readonly v2: V2Dependencies | null;
 }

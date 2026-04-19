@@ -5,6 +5,9 @@
  * Each handler receives typed input and context, returns ToolResult<T>.
  */
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
 import type {
@@ -13,6 +16,7 @@ import type {
   ReadSessionInput,
   OpenDashboardInput,
 } from '../tools.js';
+import { DEFAULT_CONSOLE_PORT } from '../../infrastructure/console-defaults.js';
 
 // -----------------------------------------------------------------------------
 // Output Types
@@ -50,6 +54,7 @@ export interface ReadSessionSchemaOutput {
 
 export interface OpenDashboardOutput {
   url: string;
+  guidance?: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -97,9 +102,12 @@ const SESSION_SCHEMA_OVERVIEW: SchemaOverview = {
 /**
  * Guard that checks if session tools are available.
  * Returns an error result if they're not.
+ *
+ * Only checks for sessionManager -- HttpServer is no longer part of the MCP
+ * server. The dashboard is served by `worktrain console` independently.
  */
 function requireSessionTools(ctx: ToolContext): ToolResult<never> | null {
-  if (!ctx.sessionManager || !ctx.httpServer) {
+  if (!ctx.sessionManager) {
     return errNotRetryable(
       'PRECONDITION_FAILED',
       'Session tools are not enabled',
@@ -121,7 +129,6 @@ export async function handleCreateSession(
   if (guardError) return guardError;
 
   const sessionManager = ctx.sessionManager!;
-  const httpServer = ctx.httpServer!;
 
   const res = await sessionManager.createSession(
     input.workflowId,
@@ -134,8 +141,10 @@ export async function handleCreateSession(
   }
 
   const session = res.value;
-  const baseUrl = httpServer.getBaseUrl();
-  const dashboardUrl = baseUrl ? `${baseUrl}?session=${input.sessionId}` : null;
+  // Static URL hint -- the actual port is served by `worktrain console`.
+  // Use DEFAULT_CONSOLE_PORT as the documented default; users running
+  // `worktrain console --port N` should use open_dashboard to get the live URL.
+  const dashboardUrl = `http://localhost:${DEFAULT_CONSOLE_PORT}?session=${input.sessionId}`;
 
   const payload: CreateSessionOutput = {
     sessionId: session.id,
@@ -215,6 +224,29 @@ export async function handleReadSession(
   return success(payload);
 }
 
+/**
+ * Read the console port from the daemon-console.lock file.
+ * Returns the port number if the lock file exists and is valid JSON,
+ * otherwise returns DEFAULT_CONSOLE_PORT as a fallback.
+ *
+ * The lock file is written by `worktrain console` at startup:
+ *   { "pid": number, "port": number }
+ */
+async function readConsoleLockPort(): Promise<number> {
+  const lockPath = path.join(os.homedir(), '.workrail', 'daemon-console.lock');
+  try {
+    const raw = await fs.readFile(lockPath, 'utf-8');
+    const data = JSON.parse(raw) as unknown;
+    if (data !== null && typeof data === 'object' && 'port' in data && typeof (data as Record<string, unknown>).port === 'number') {
+      return (data as { port: number }).port;
+    }
+    return DEFAULT_CONSOLE_PORT;
+  } catch {
+    // Lock file absent (worktrain console not running) or parse error -- use default
+    return DEFAULT_CONSOLE_PORT;
+  }
+}
+
 export async function handleOpenDashboard(
   input: OpenDashboardInput,
   ctx: ToolContext
@@ -222,16 +254,13 @@ export async function handleOpenDashboard(
   const guardError = requireSessionTools(ctx);
   if (guardError) return guardError;
 
-  const httpServer = ctx.httpServer!;
+  const port = await readConsoleLockPort();
+  const sessionQuery = input.sessionId ? `?session=${input.sessionId}` : '';
+  const url = `http://localhost:${port}${sessionQuery}`;
 
-  try {
-    const url = await httpServer.openDashboard(input.sessionId);
-    const payload: OpenDashboardOutput = { url };
-    return success(payload);
-  } catch (err) {
-    return errNotRetryable(
-      'INTERNAL_ERROR',
-      err instanceof Error ? err.message : 'Failed to open dashboard'
-    );
-  }
+  const payload: OpenDashboardOutput = {
+    url,
+    guidance: "Run 'worktrain console' to start the dashboard UI if it's not already running.",
+  };
+  return success(payload);
 }
