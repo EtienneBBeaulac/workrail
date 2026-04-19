@@ -285,10 +285,17 @@ export function mountConsoleRoutes(
     const { sessionId } = req.params;
 
     // Validate session exists before opening SSE stream.
+    // NOTE: the session store returns ok() for unknown IDs (empty manifest, not an error).
+    // We detect non-existent sessions by checking for an empty runs array.
     const sessionResult = await consoleService.getSessionDetail(sessionId);
     if (sessionResult.isErr()) {
       const status = sessionResult.error.code === 'SESSION_LOAD_FAILED' ? 404 : 500;
       res.status(status).json({ success: false, error: sessionResult.error.message });
+      return;
+    }
+    const sessionDetail = sessionResult.value;
+    if (!sessionDetail || !sessionDetail.runs || sessionDetail.runs.length === 0) {
+      res.status(404).json({ success: false, error: `Session not found: ${sessionId}` });
       return;
     }
 
@@ -303,11 +310,12 @@ export function mountConsoleRoutes(
     res.write(`data: ${JSON.stringify({ kind: 'connected', sessionId })}\n\n`);
 
     // Track current file position so we only read newly-appended bytes.
-    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const logFilePath = path.join(daemonEventsDir, `${date}.jsonl`);
+    // currentLogDate and currentLogPath are updated on every poll to handle UTC midnight rollover.
+    let currentLogDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    let currentLogPath = path.join(daemonEventsDir, `${currentLogDate}.jsonl`);
     let fileOffset = 0;
     try {
-      const stat = await fs.promises.stat(logFilePath);
+      const stat = await fs.promises.stat(currentLogPath);
       fileOffset = stat.size; // start from end of existing content
     } catch {
       // File not yet created -- start from 0
@@ -328,7 +336,16 @@ export function mountConsoleRoutes(
     const processNewEvents = async () => {
       if (isClosed || isProcessing) return;
       isProcessing = true;
-      const newEvents = await tailDaemonEvents(logFilePath, fileOffset);
+
+      // Handle UTC midnight rollover: if the date changed, switch to the new log file.
+      const todayDate = new Date().toISOString().slice(0, 10);
+      if (todayDate !== currentLogDate) {
+        currentLogDate = todayDate;
+        currentLogPath = path.join(daemonEventsDir, `${currentLogDate}.jsonl`);
+        fileOffset = 0;
+      }
+
+      const newEvents = await tailDaemonEvents(currentLogPath, fileOffset);
 
       for (const event of newEvents) {
         if (isClosed) break;
@@ -359,7 +376,7 @@ export function mountConsoleRoutes(
 
       // Update fileOffset to current file size (covers all lines just consumed).
       try {
-        const stat = await fs.promises.stat(logFilePath);
+        const stat = await fs.promises.stat(currentLogPath);
         fileOffset = stat.size;
       } catch {
         // File was deleted or renamed mid-read -- reset to 0 for next poll.
@@ -370,9 +387,9 @@ export function mountConsoleRoutes(
 
     // Watch the daemon events directory. The log file for today may not exist yet;
     // fs.watch on the directory fires on any file change within it, including file creation.
-    // WHY directory not file: if the session spans midnight, the date flips and a new file
-    // is created. Watching the directory catches that case (within-day limitation is acceptable
-    // for the current use case -- same as readLiveActivity in console-service.ts).
+    // WHY directory not file: midnight rollover creates a new YYYY-MM-DD.jsonl file;
+    // watching the directory fires when that file is created. processNewEvents() handles
+    // the rollover by recomputing currentLogPath when the date changes.
     try {
       fs.mkdirSync(daemonEventsDir, { recursive: true });
     } catch { /* ignore */ }
