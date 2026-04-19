@@ -2,12 +2,12 @@
   "id": "wr.shaping",
   "name": "Shaping Workflow",
   "version": "1.0.0",
-  "description": "Converts a messy problem statement or discovery output into a bounded, implementation-ready spec (shape.json) consumable by coding-task-workflow-agentic. Sits between wr.discovery (divergent) and coding-task (convergent). Universal -- not specific to Shape Up or any particular methodology.",
-  "about": "## Shaping Workflow\n\nThis workflow takes a fuzzy problem -- a vague idea, raw user request, or discovery output -- and produces a concrete, bounded spec that a coding agent can execute without mid-implementation product questions or rabbit-hole spirals.\n\n### What shaping means\n\n- **Rough but solved:** the main elements and their connections are worked out, but implementation details are deliberately left to the builder\n- **Bounded:** explicit no-gos state what will NOT be built\n- **Appetite-first:** time/token budget is set before the solution, not after\n\n### What it produces\n\n- `shape.json` -- machine-readable spec with problem, appetite, breadboard, elements, context pack, acceptance criteria, rabbit holes, no-gos, assumptions log, decomposition, and build-readiness score\n- `pitch.md` -- human-readable companion\n\n### Two mandatory human gates\n\n1. **Frame gate (Step 2):** you confirm the problem statement and appetite before any design work begins. A wrong frame wastes everything downstream.\n2. **Approval gate (Step 10):** you review the complete shaped pitch before it becomes the implementation spec.\n\n### When to use this\n\n- After wr.discovery when you have findings to shape into a concrete plan\n- Before coding-task when a task is 'rough' or 'specced' (not fully groomed)\n- Any time you have a fuzzy problem and need to make it implementable",
+  "description": "Faithful Shape Up product shaping. Converts a fuzzy problem into a bounded, implementation-ready pitch (pitch.md). Tech-agnostic -- works for any language, platform, framework, or non-software work. Produces a product-level pitch, not an engineering spec.",
+  "about": "## Shaping Workflow\n\nTakes a fuzzy problem and produces a shaped pitch: a specific problem story, a fixed appetite, a fat-marker solution sketch, rabbit holes patched at the product level, and explicit no-gos.\n\n### What this is\n\nFaithful Shape Up shaping. The output is a **product-level pitch** -- it describes what the feature does and what it explicitly does not do, at a level a human engineering team or an AI pipeline can execute against.\n\nThis is not an engineering spec. It does not contain file paths, function signatures, test commands, or implementation plans. Those belong in the engineering phase that follows.\n\n### Tech-agnostic\n\nThis workflow works for any context: web, mobile, backend, data, embedded, or non-software product work. There are no references to specific tools, languages, frameworks, or platforms.\n\n### What it produces\n\n- `pitch.md` at `.workrail/current-pitch.md` -- the shaped pitch\n\n### Two mandatory human gates\n\n1. **Frame gate (Step 2):** confirm the problem statement and appetite before design work begins -- a wrong frame wastes everything downstream\n2. **Approval gate (Step 7):** review the complete pitch before implementation starts\n\nBoth gates self-resolve with low-confidence defaults when running autonomously.\n\n### When to use this\n\n- After `wr.discovery` when you have a direction and need to translate it into a bounded task\n- Before `coding-task-workflow-agentic` when a task is fuzzy, could sprawl, or needs appetite-setting\n- When multiple people need to agree on what is being built before engineering starts\n- Any time you want the Shape Up circuit breaker: fixed time, variable scope, kill if it doesn't fit\n\n### When to skip this\n\n- The task is small, concrete, and clearly scoped -- go straight to Coding\n- Discovery already produced a bounded, implementable direction\n- You have a pre-written ticket or spec",
   "examples": [
-    "Shape the coordinator review mode feature -- self-healing vs comment-and-wait",
-    "Shape a new trigger type for deadline-aware queue prioritization",
-    "Shape the worktrain status command based on the discovery findings"
+    "Shape the notification center feature -- users miss things posted while they're offline",
+    "Shape the coordinator review mode -- how should automated review behave on team projects",
+    "Shape a new trigger type for deadline-aware work queue prioritization"
   ],
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
@@ -16,178 +16,124 @@
   "assessments": [
     {
       "id": "frame-soundness",
-      "purpose": "The problem statement is a specific story with a named user in a named situation -- not abstract, not solution-framed.",
+      "purpose": "The problem statement is a specific story -- not abstract, not solution-framed.",
       "dimensions": [
         {
           "id": "frame_soundness",
-          "purpose": "Problem is a specific story (who, situation, what fails) not an abstract description or solution statement.",
-          "levels": [
-            "low",
-            "high"
-          ]
+          "purpose": "Problem names a specific person/role, describes a specific situation, states what they need, and states what fails today.",
+          "levels": ["low", "high"]
         }
       ]
     },
     {
-      "id": "spec-precision",
-      "purpose": "All elements classify as Interface, Invariant, or Exclusion -- no implementation details, no vague modifiers.",
+      "id": "solution-roughness",
+      "purpose": "The solution is rough but solved -- describes what the feature does without specifying how to build it.",
       "dimensions": [
         {
-          "id": "spec_precision",
-          "purpose": "Elements name interfaces (surfaces, data objects, integration points) and invariants (declarative constraints), not function bodies, SQL, or specific library choices.",
-          "levels": [
-            "low",
-            "high"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "context-integrity",
-      "purpose": "All context_pack utilities are verified to exist in the codebase -- no hallucinated entries.",
-      "dimensions": [
-        {
-          "id": "context_integrity",
-          "purpose": "Every utility in context_pack.reuse_utilities was verified via codebase tools before being listed. do_not_touch_globs is populated.",
-          "levels": [
-            "low",
-            "high"
-          ]
+          "id": "solution_roughness",
+          "purpose": "Elements describe user-visible surfaces, flows, and behavioral constraints -- not function signatures, data models, or implementation patterns.",
+          "levels": ["low", "high"]
         }
       ]
     }
   ],
   "preconditions": [
     "A problem statement, raw idea, or discovery output is available as input.",
-    "The user has rough sense of how much effort this is worth (even just 'small' or 'large' is enough)."
+    "The user has a rough sense of how much effort this is worth (even 'small' or 'large' is enough to start)."
   ],
   "metaGuidance": [
-    "ABSTRACTION LEVEL: name interfaces and invariants, not function bodies. 'getInbox(userId) -> Item[]' is correct. 'SELECT * FROM items WHERE user_id = $1' is over-specified.",
-    "CLASSIFICATION: elements must be Interface (surface/API/data object), Invariant (declarative constraint), or Exclusion (not included). Flag Implementation-detail or Vague entries and rewrite before advancing.",
-    "GENERATOR != EVALUATOR: wherever you are asked to critique or review your own work, use a structurally different framing. Approach your earlier output as if you are a skeptical external reviewer who was not involved in writing it.",
-    "CONTEXT PACK INTEGRITY: never list a utility in context_pack.reuse_utilities unless you have verified it exists via Bash grep or Read tools. An empty context pack is better than a hallucinated one.",
-    "ASSUMPTIONS LOG: record every autonomous decision you make (frame interpretation, shape selection, element classification, utility identification) in assumptionsLog with confidence 0-1 and rationale. The user reviews this at the approval gate.",
-    "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user at the two mandatory gates (frame-gate and approval-gate) and when genuinely blocked.",
-    "NO IMPLEMENTATION DETAILS: do not produce wireframes, SQL, function signatures, specific library choices, or detailed component architectures. Breadboards use words and arrows only."
+    "PRODUCT LEVEL ONLY: this workflow produces a product pitch, not an engineering spec. Do not include file paths, function signatures, data schemas, test commands, or implementation plans. Those belong in the engineering phase that follows.",
+    "TECH-AGNOSTIC: never reference specific tools, languages, frameworks, platforms, or ecosystems. A pitch for a Kotlin app and a pitch for a Python service should look structurally identical.",
+    "ROUGH BUT SOLVED: rough enough that the builder retains creative latitude, solved enough they won't hit hidden rabbit holes. The main elements and how they connect must be worked out -- without specifying implementation.",
+    "APPETITE-FIRST: the appetite is a fixed time budget, not an estimate. Set it before designing the solution -- the solution must fit the appetite, not the other way around.",
+    "GENERATOR != EVALUATOR: wherever you critique your earlier work, approach it as a skeptical external reviewer who was not involved in writing it.",
+    "DEFAULT BEHAVIOR: self-execute. Only pause at the two mandatory human gates (frame-gate and approval-gate) or when genuinely blocked.",
+    "NO IMPLEMENTATION DETAILS: breadboards use words and arrows only -- places, affordances, connections. No code, no APIs, no system internals."
   ],
   "steps": [
     {
       "id": "ingest-and-extract",
       "title": "Step 1: Ingest and Extract",
-      "prompt": "Read and extract structure from the raw problem input. The goal is not to solve anything yet -- it is to surface the underlying problem clearly.\n\nFrom the provided input (goal text, discovery notes, tickets, user stories -- whatever was given), extract:\n\n**1. Candidate problem framings (1-3)**\nEach framing should be a specific story format: \"When [person] [situation], they need to [job], but today [what fails].\" Avoid solution language. If the input is already solution-framed ('add notifications'), extract the underlying need.\n\n**2. Forces analysis**\nFour buckets of signals:\n- Push: what's pushing them away from the current situation?\n- Pull: what's pulling them toward a new solution?\n- Anxiety: what might hold them back from a new solution?\n- Habit: what current behavior would the new solution displace?\n\n**3. Appetite signals**\nAny urgency, timeline, or scope signals in the input. Don't set the appetite yet -- just note the signals.\n\n**4. Open questions**\nWhat is the input silent or contradictory about that must be resolved before shaping can proceed?\n\nRun two independent extraction passes with different framings -- frame 1: 'what is the user's job-to-be-done?', frame 2: 'what system behavior is broken?'. If the two passes produce materially different problem framings, surface all of them rather than picking one.\n\nCapture:\n- `candidateProblems` (array of problem story strings)\n- `forces` (object with push/pull/anxiety/habit arrays)\n- `appetiteSignals` (string)\n- `openQuestions` (array of strings)\n- `extractionConflicts` (any material disagreements between the two passes)\n\n**Task complexity classification:**\nBefore advancing, set `taskComplexity` to one of: `trivial` | `small` | `medium` | `large`.\n- `trivial`: single-file fix, single known change, no design decision required (e.g. 'fix typo in X', 'add field Z to type T')\n- `small` to `large`: anything with scope, tradeoffs, or ambiguity\n\nIf `trivial`, set it and advance -- Steps 2-10 will be automatically skipped. Step 11 will write a minimal shape.json. Record why in `divergenceMarker: 'efficiency_skip'`.\n\nQuality floor: if you classify as trivial, you must state the specific reason it has no design decisions.\n\n**Divergence markers:** use these structured values when explaining why you deviated:\n- `efficiency_skip`: task is trivially small, full shaping not warranted\n- `capability_unavailable`: codebase tools not available for context pack\n- `safety_stop`: problem is unshapeable in this appetite, shape abandoned\nRecord as `divergenceMarker: '<value>'` in the context before advancing.",
+      "prompt": "Read and extract structure from the raw problem input. Do not solve anything yet -- surface the underlying problem clearly.\n\nFrom whatever was provided (goal text, discovery notes, tickets, user stories), extract:\n\n**1. Candidate problem framings (1-3)**\nEach as a specific story: \"When [person] [situation], they need to [job], but today [what fails].\"\nAvoid solution language. If the input is solution-framed ('add notifications'), extract the underlying need.\n\n**2. Forces analysis**\n- Push: what's driving people away from the current situation?\n- Pull: what's pulling them toward something new?\n- Anxiety: what might hold them back?\n- Habit: what current behavior would this displace?\n\n**3. Appetite signals**\nAny urgency, timeline, or scope signals in the input. Don't set the appetite yet.\n\n**4. Open questions**\nWhat is the input silent or contradictory about that must be resolved before shaping can proceed?\n\n**Task complexity check:**\nIf the problem is a single, obvious, bounded change with no design decisions required (e.g. 'fix typo in X', 'rename field Y'), set `taskComplexity: 'trivial'` and record a `divergenceMarker: 'efficiency_skip'` with the reason. Steps 2-6 will be skipped.\n\nCapture:\n- `candidateProblems` (array of problem story strings)\n- `forces` (object: push/pull/anxiety/habit)\n- `appetiteSignals` (string)\n- `openQuestions` (array)\n- `taskComplexity` ('trivial' | 'small' | 'medium' | 'large')",
       "requireConfirmation": false
     },
     {
       "id": "frame-gate",
-      "title": "Step 2: Frame Gate (Human Gate)",
-      "prompt": "Present the extracted problem framings to the user and confirm the frame before proceeding. This is the most important gate in the workflow -- a wrong frame wastes everything downstream.\n\nShow:\n1. The candidate problem framings (from Step 1)\n2. A suggested appetite with reasoning, using these calibration anchors:\n  - xs: ~20k tokens, ~10 turns, ~2 files | few hours\n  - s:  ~60k tokens, ~30 turns, ~5 files | 1-2 days\n  - m:  ~150k tokens, ~60 turns, ~10 files | 3-7 days\n  - l:  ~400k tokens, ~120 turns, ~20 files | 1-2 weeks\n  - xl: ~800k tokens, ~200 turns, ~40 files | 3-4 weeks\n  (These are initial anchors -- tune from actual coding-task run data)\n3. The open questions that need resolution\n4. Any extraction conflicts\n\nAsk the user to:\n- Select or rewrite the problem statement (must be a specific story, not abstract)\n- Confirm the appetite\n- Answer critical open questions\n\nDo NOT proceed until the user has confirmed a specific-story problem statement. 'Better notifications' is not acceptable. 'When Mia finishes her shift she needs to know if teammates posted something requiring action, but today she misses items' is acceptable.\n\nAfter user confirms, set:\n- `problemStatement` (confirmed specific story)\n- `appetite` (object: {sizingBucket: xs|s|m|l|xl, calendarDays: number, tokenBudgetEst: number, agentTurnsEst: number, filesTouchedEst: number})\n- `resolvedQuestions` (answers to open questions)\n\n**Structural validation for frame_soundness:**\nThe problem statement passes frame_soundness=high ONLY if it matches this pattern: it names a specific person or role, describes a specific situation, states what they need, AND states what fails today. Abstract statements ('users want better X', 'improve Y') are always frame_soundness=low. Check this explicitly before submitting the assessment.\n\n**If running autonomously with no user available:**\nDo not block waiting for input. Make the most defensible default decision from the candidate framings above -- pick the most specific story framing, set appetite to 's' as a safe default, record it in assumptionsLog with `confidence: 0.4` and rationale, and advance immediately. Flag the session for human review by appending to the outbox: `worktrain tell \"wr.shaping gate decision requires human review -- [brief summary]\"`",
-      "assessmentRefs": [
-        "frame-soundness"
-      ],
-      "assessmentConsequences": [
-        {
-          "when": {
-            "anyEqualsLevel": "low"
-          },
-          "effect": {
-            "kind": "require_followup",
-            "guidance": "The problem statement is still abstract or solution-framed. Ask the user for a specific story: 'When [person] [situation], they need to [job], but today [what fails].' Do not advance until the statement names a specific situation and failure."
-          }
-        }
-      ],
-      "requireConfirmation": true,
-      "runCondition": {
-        "var": "taskComplexity",
-        "not_equals": "trivial"
-      }
-    },
-    {
-      "id": "current-state-investigation",
-      "title": "Step 2.5: Current State Investigation",
+      "title": "Step 2: Frame Gate",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "trivial"
       },
-      "prompt": "Before diverging into solution shapes, investigate the current state of the code. This step produces `currentState` -- the factual grounding that Step 3 divergence, Step 6 rabbit holes, and Step 7 context pack all depend on.\n\nUse Bash, Read, and Grep to answer these five questions with specific citations:\n\n**1. Current implementation surface**\nWhat does the existing code that will be changed look like right now? Read the relevant files and summarize the code surface in \u226410 lines. Cite exact file paths and function/class names.\n\n**2. Analogous patterns**\nWhat existing patterns in this codebase are structurally similar to the change? Cite 1-3 specific files or symbols with brief notes on why they're analogous.\n\n**3. Applicable conventions**\nWhat does CLAUDE.md, AGENTS.md, or any coding-standards file say that applies here? Cite the specific rules. A shape that violates a convention is a dead-on-arrival shape.\n\n**4. Prior art**\nIs there prior work on this problem? Check:\n- Open and recently-closed PRs (gh pr list + gh pr search)\n- Git log for analogous changes (git log --oneline --grep='<keyword>')\n- Design docs in docs/ for related decisions\nCite 1-3 with brief relevance notes. If nothing exists, say so explicitly.\n\n**5. Blast radius**\nWhich files and modules would a naive implementation touch? Which of those are protected (AGENTS.md no-touch zones)? What callers or downstream systems would be affected?\n\n**Quality floor (named requirements):**\n- Q1 (current implementation) and Q3 (conventions) are **required** -- if you cannot answer either with specific citations, do not advance to diverge; investigate further.\n- Q5 (blast radius) is required for any non-trivial task.\n- Q2 (analogous patterns) and Q4 (prior art) are expected but a defensible 'none found after searching X, Y, Z' is acceptable.\n'3 of 5' is not the bar -- Q1, Q3, and Q5 must always be answered.\n\nCapture `currentState` with this exact schema:\n```\ncurrentState: {\n  implementation: {summary: string, filesRead: string[], symbols: string[]},\n  analogousPatterns: [{path: string, symbol: string, relevance: string}],\n  conventions: [{source: string, rule: string}],\n  priorArt: [{ref: string, type: 'pr'|'commit'|'doc', relevance: string}]\n            | {searched: string[], found: 'none'},\n  blastRadius: {filesLikelyTouched: string[], protectedZonesInPath: string[], downstreamCallers: string[]}\n}\n```\nDownstream steps reference specific fields (e.g. `currentState.blastRadius.protectedZonesInPath`). Use this exact shape so references are unambiguous.\n\nAlso capture: note to `assumptionsLog` for any required field you could not answer with citations.",
-      "requireConfirmation": false
+      "prompt": "Present the extracted problem framings and confirm the frame before any design work begins.\n\nShow:\n1. The candidate problem framings from Step 1\n2. Suggested appetite: xs (hours), s (1-2 days), m (3-7 days), l (1-2 weeks), xl (3-4 weeks)\n3. Open questions that need resolution\n\nAsk the user to:\n- Select or rewrite the problem statement as a specific story\n- Confirm the appetite\n- Answer critical open questions\n\n**Structural validation for frame_soundness=high:** the problem statement must name a specific person or role, describe a specific situation, state what they need, AND state what fails today. Abstract statements ('users want better X') are always frame_soundness=low.\n\nDo NOT proceed until the user confirms a specific-story problem statement.\n\n**If running autonomously with no user available:** pick the most specific candidate framing, set appetite to 's' as a safe default, record both in assumptionsLog with confidence 0.4, and advance. Flag for human review.\n\nCapture:\n- `problemStatement` (confirmed specific story)\n- `appetite` (object: {sizingBucket: xs|s|m|l|xl, calendarDays: number})\n- `resolvedQuestions`",
+      "assessmentRefs": ["frame-soundness"],
+      "assessmentConsequences": [
+        {
+          "when": {"anyEqualsLevel": "low"},
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "The problem statement is still abstract or solution-framed. It must name a specific person/role in a specific situation with a specific failure. Do not advance until confirmed."
+          }
+        }
+      ],
+      "requireConfirmation": true
     },
     {
       "id": "diverge-shapes",
-      "title": "Step 3: Diverge -- Generate 4 Solution Shapes",
-      "prompt": "Generate solution shapes using Verbalized Sampling to resist mode collapse.\n\n**Start by reading `currentState` from Step 2.5.** Your shapes must be grounded in the actual current implementation, not assumed patterns. At least 2 of your 6 sketches must explicitly deviate from the current pattern (cite how). At least 2 must stay close to it (cite which existing patterns they follow).\n\n**Do this:** sketch 6 plausible solution directions grounded in `currentState`. For each, note:\n- Whether it **stays close** to the current implementation pattern (cite specific evidence from `currentState`)\n- Or **deviates** from it (cite what it changes and why)\n\nYou MUST include at least 2 shapes that deviate meaningfully from `currentState.implementation`. These are your unconventional options -- they are the ones most likely to be missed without the investigation step.\n\nSelect the 4 most diverse shapes from your 6. Do NOT pick the 4 that feel most natural -- actively include the interesting deviations.\n\nFor each of the 4 selected shapes, sketch ONE fat-marker-level solution direction:\n- 3-6 core elements with one-sentence descriptions\n- How the elements connect\n- Naturalness score\n- What makes this shape different from the others\n\nStay rough. Name interfaces and invariants, not implementations. No wireframes, no code, no specific libraries. Use breadboard notation: components, affordances, connections -- all in words.\n\nFor each shape, note:\n- The 1-2 elements that are most uncertain (rabbit hole candidates)\n- What it explicitly does NOT do\n\nAfter generating all 4, note any shared blind spots -- things ALL shapes ignored (shared blind spots reveal the limits of your solution search).\n\nCapture:\n- `candidateShapes` (array of 4 shape objects: {framing, deviatesFromCurrent: boolean, currentStateEvidence: string, elements[], uncertainElements[], notDoing, description})\n- `sharedBlindSpots` (what ALL 4 shapes ignored)",
-      "requireConfirmation": false,
+      "title": "Step 3: Diverge -- Generate Solution Shapes",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "trivial"
-      }
+      },
+      "prompt": "Generate 6 fat-marker solution sketches with genuine diversity.\n\nFor each sketch:\n- 3-5 elements described in one sentence each\n- How the elements connect\n- What it explicitly does NOT do\n- Whether it stays close to the obvious solution or deviates (be honest -- at least 2 sketches must deviate meaningfully from the most obvious approach)\n\nStay at the product level. Elements describe what the feature does -- screens, flows, policies, affordances -- not how it is built. No file paths, no function names, no system internals.\n\nUse breadboard notation for connection: **Place A → Place B when [user action]**. All words, no visual layout.\n\nAfter generating 6, select the 4 most diverse. Explicitly include the unconventional ones -- they are what makes the divergence valuable.\n\nNote any shared blind spots: things all 6 sketches ignored.\n\nCapture:\n- `candidateShapes` (array of 4: {framing, elements[], notDoing, deviatesFromObvious: boolean, description})\n- `sharedBlindSpots`",
+      "requireConfirmation": false
     },
     {
       "id": "converge-pick",
       "title": "Step 4: Converge -- Select Best Shape",
-      "prompt": "You are now reviewing the 4 candidate shapes as a skeptical evaluator. Approach them as if you are a different person from whoever sketched them -- with no prior attachment to any particular direction.\n\nEvaluate each shape on 4 dimensions:\n1. **Fit to problem** -- does it solve the specific story from the frame gate, or a different problem?\n2. **Buildable in appetite** -- is the complexity honest about the time/token budget?\n3. **Avoids grab-bag** -- does it have a clear definition of done, or is it a feature wishlist?\n4. **Rough but solved** -- are the main elements and connections worked out, without over-specifying implementation?\n\nScoring: 1-3 per dimension. Pick the shape with the highest total. For the chosen shape, identify the specific element from each non-chosen shape worth merging in.\n\nAlso surface: the shared blind spots from Step 3 -- which of these does the chosen shape most need to address?\n\nCapture:\n- `selectedShape` (description of chosen direction)\n- `selectionRationale` (why it won, what it avoids)\n- `elementsToMergeIn` (from non-chosen shapes)\n- `blindSpotsToAddress` (from shared blind spots)",
-      "requireConfirmation": false,
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "trivial"
-      }
+      },
+      "prompt": "You are a skeptical reviewer reading these 4 shapes for the first time. You have no attachment to any of them.\n\nEvaluate each on 4 dimensions:\n1. **Solves the specific problem** -- does it address the exact story from the frame gate, not a related but different problem?\n2. **Fits the appetite** -- is the complexity honest about the time budget?\n3. **Bounded** -- clear definition of done, not a feature wishlist?\n4. **Rough but solved** -- main elements and connections worked out, without micromanaging implementation?\n\nScore 1-3 per dimension. Pick the highest total.\n\nFor the chosen shape: name the one element from each non-chosen shape worth merging in.\n\nNote which shared blind spots the chosen shape most needs to address.\n\nCapture:\n- `selectedShape` (description)\n- `selectionRationale`\n- `elementsToMerge`\n- `blindSpotsToAddress`",
+      "requireConfirmation": false
     },
     {
       "id": "breadboard-and-elements",
       "title": "Step 5: Breadboard and Elements",
-      "prompt": "Expand the chosen shape into a concrete breadboard and element list.\n\n**Breadboard (words only):**\nDraw the key interactions using Shape Up breadboard notation:\n- **Places** (screens, dialogs, endpoints -- write them with an underline in prose)\n- **Affordances** (buttons, fields, API calls -- listed under their place)\n- **Connections** (arrows between places -- describe as 'Place A \u2192 Place B when [action]')\n\nNo visual layout. No wireframes. Words and arrows only.\n\n**Element list:**\nFor each element in the breadboard, write a one-sentence description that classifies it as exactly one of:\n- **Interface** -- a user-visible surface, data object, API endpoint, or integration point\n- **Invariant** -- a declarative constraint (idempotency, consistency, rate limit, latency budget, auth model)\n- **Exclusion** -- functionality explicitly NOT included\n\nReject any element that is:\n- **Implementation-detail** -- function signatures, SQL, specific library choices, control flow (demote to a note or cut)\n- **Vague** -- contains 'improve', 'better', 'scalable', 'efficient' without a concrete noun (replace with a specific interface or invariant)\n\nSelf-review: after writing the elements, scan every sentence. Flag any Implementation-detail or Vague classifications and rewrite them before advancing.\n\nCapture:\n- `breadboardMd` (full breadboard in markdown)\n- `elements` (array of {name, description, classification: 'interface'|'invariant'|'exclusion'})\n- `elementsRewritten` (any elements that were flagged and rewritten, for the record)\n\n**Structural validation for spec_precision:**\nspec_precision=high requires: EVERY element in the `elements` array has `classification` set to exactly 'interface', 'invariant', or 'exclusion'. Scan the list mechanically -- if any element is missing the classification field, or has a classification outside those three values, spec_precision=low regardless of prose quality.",
-      "assessmentRefs": [
-        "spec-precision"
-      ],
-      "assessmentConsequences": [
-        {
-          "when": {
-            "anyEqualsLevel": "low"
-          },
-          "effect": {
-            "kind": "require_followup",
-            "guidance": "One or more elements are still implementation-details or vague. Apply the classification rule: every element must be Interface (surface/API/data object), Invariant (declarative constraint), or Exclusion (explicitly not included). Remove function signatures, SQL, specific library choices. Replace vague modifiers with concrete nouns."
-          }
-        }
-      ],
-      "requireConfirmation": false,
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "trivial"
-      }
+      },
+      "prompt": "Expand the chosen shape into a breadboard and element list. Stay at the product level throughout.\n\n**Breadboard (words only):**\n- **Places** -- screens, dialogs, states, endpoints (from the user's perspective)\n- **Affordances** -- buttons, fields, actions -- listed under their place\n- **Connections** -- 'Place A → Place B when [user action]'\n\nNo visual layout. No code. No system internals. Words and arrows only.\n\n**Element list:**\nFor each element, one sentence classified as:\n- **Interface** -- something the user sees or interacts with (a surface, a flow, a visible state)\n- **Invariant** -- a behavioral constraint (a policy, a rule, what must always be true)\n- **Exclusion** -- functionality explicitly NOT included\n\nReject any element that:\n- Describes HOW to build something (implementation detail)\n- Uses vague modifiers without a concrete noun ('improve', 'better', 'scalable')\n\n**Structural validation for solution_roughness=high:** every element must be Interface, Invariant, or Exclusion describing product behavior -- not code structure, not technical implementation.\n\nCapture:\n- `breadboardMd` (breadboard in markdown)\n- `elements` (array: {name, description, classification: 'interface'|'invariant'|'exclusion'})",
+      "assessmentRefs": ["solution-roughness"],
+      "assessmentConsequences": [
+        {
+          "when": {"anyEqualsLevel": "low"},
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "One or more elements describe implementation details or contain vague modifiers. Rewrite: every element must describe what the feature does (Interface, Invariant, or Exclusion), not how it is built."
+          }
+        }
+      ],
+      "requireConfirmation": false
     },
     {
       "id": "rabbit-holes-and-nogos",
       "title": "Step 6: Rabbit Holes and No-Gos",
-      "prompt": "You are a skeptical senior engineer reviewing this shaped solution before it goes to a builder. You have read `currentState` from Step 2.5 and know the actual current structure. Your job is to find the risks that would blow this past its appetite.\n\n**Rabbit holes** -- specific risks with mitigations:\nFor each risk:\n- Name it concretely ('DST transitions when events recur weekly', not 'timezone handling')\n- Rate severity: low | medium | critical\n- Propose a mitigation patch (a decision that resolves the risk during shaping, not during building)\n- Mark `patchApplied: true` if the mitigation changes the solution shape\n\n**No-gos** -- explicit exclusions:\nName at least 3 things this solution deliberately does NOT do. Be specific enough that a builder reading this knows when they're about to go out of scope ('no push notifications', not 'keep it simple').\n\n**Assumptions:**\nFor every decision you made autonomously (frame interpretation, shape selection, element classification), add an entry to assumptionsLog:\n```\n{step, assumption, confidence: 0-1, rationale}\n```\nEntries with confidence < 0.6 should be flagged.\n\n**Second-pass adversarial question:**\nWhat risks did you NOT put in the rabbit holes that you should have? Name them explicitly even if you decide they don't need mitigation.\n\nCapture:\n- `rabbitHoles` (array of {risk, severity, mitigation, patchApplied})\n- `noGos` (array of specific exclusion strings)\n- `assumptionsLog` (append new entries for this step)\n- `unconsidered` (risks explicitly noted as not included, for the record)\n\n**Use currentState for grounded rabbit holes:**\nGeneric risks ('handle edge cases', 'timezone handling') are not rabbit holes -- they are laziness. Every rabbit hole must reference a specific thing you found in currentState: a specific existing pattern that would be disrupted, a specific caller that would break, a specific convention that creates a constraint.",
-      "requireConfirmation": false,
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "trivial"
-      }
-    },
-    {
-      "id": "context-pack-build",
-      "title": "Step 7: Context Pack",
-      "prompt": "The context pack packages what Step 2.5 investigated into the final deliverable. Derive the fields below from `currentState` rather than re-investigating from scratch:\n\n- `contextPack.touch_globs` \u2190 extend from `currentState.blastRadius.filesLikelyTouched`\n- `contextPack.do_not_touch_globs` \u2190 extend from `currentState.blastRadius.protectedZonesInPath`\n- `contextPack.reuse_utilities` \u2190 investigate deeper from `currentState.analogousPatterns` (analogous patterns are structural; reuse utilities need exact signatures -- verify with Read)\n- `contextPack.conventions_md` \u2190 derive from `currentState.conventions`\n- `contextPack.related_prior_art` \u2190 derive from `currentState.priorArt`\n\n`contextPack` is authoritative for the final pitch; `currentState` is the investigation artifact. Step 7 extends and verifies -- it does not re-investigate.\n\nBuild the context pack that will guide the coding agent away from reinventing existing utilities and into the right parts of the codebase.\n\nThis is the highest-leverage AI-specific addition to the pitch. An implementer (human or AI) cannot know what utilities already exist without this information. A coding agent that doesn't have this will confidently reinvent them.\n\n**Use tools to verify everything.** Search the codebase with Bash and Read before listing anything. If you cannot verify a utility exists, do NOT include it. An empty context pack is better than a hallucinated one. However: if the task touches \u22653 files and you return an empty context pack, you MUST record `divergenceMarker: 'capability_unavailable'` with an explicit explanation of which tools were unavailable. A silent empty pack on a multi-file task is a quality failure.\n\nFor each section:\n\n**touch_globs** -- file paths or globs likely to be modified (verified to exist)\n**do_not_touch_globs** -- file paths or globs explicitly off-limits (migrations, auth, core engine, etc.)\n**reuse_utilities** -- existing utilities that must be reused, not reinvented:\n  - path (verified to exist)\n  - symbol name\n  - signature (exact, from the file)\n  - reason_to_reuse (what problem it solves that's relevant here)\n**conventions_md** -- project conventions that apply to this work (from CLAUDE.md, AGENTS.md, src/coding-standards if they exist)\n**related_prior_art** -- 1-3 prior PRs, commits, or files structurally analogous to this work\n\nAfter building the context pack, note: what would the coding agent most likely reinvent without this information?\n\nCapture:\n- `contextPack` (object with all fields above)\n- `contextPackConfidence` (0-1: how confident are you that touch_globs and reuse_utilities are correct?)\n- Note to assumptionsLog if confidence < 0.8\n\n**Confidence gate:**\nAfter building the context pack, score your confidence 0-1. If `contextPackConfidence < 0.7`, do NOT silently proceed -- surface a mini-gate: list which utilities you could not verify, and ask the user: 'I couldn't verify [utilities]. Should I continue with an incomplete context pack, or investigate further?' An acknowledged gap is safer than silent incompleteness.",
-      "requireConfirmation": false,
-      "runCondition": {
-        "var": "taskComplexity",
-        "not_equals": "trivial"
-      }
-    },
-    {
-      "id": "example-map-and-gherkin",
-      "title": "Step 8: Acceptance Criteria",
-      "prompt": "Define the acceptance criteria that will let the coding agent self-verify its implementation.\n\n**Example map** (one per key element):\nFor each key interface or invariant from Step 5:\n- Business rules (what must always be true)\n- Concrete examples (specific inputs and expected outputs)\n- Open questions (what you're still unsure about)\n\nStop at 3-5 examples per element. Do not enumerate every possible case.\n\n**Gherkin scenarios:**\nLift the most important examples into Given/When/Then scenarios:\n```gherkin\nFeature: [feature name]\n  Scenario: [specific behavior]\n    Given [precondition]\n    When [action]\n    Then [expected outcome]\n```\n\nWrite only key scenarios -- the ones that would catch the most common implementation mistakes. 3-7 total.\n\n**Verification commands:**\nFor each scenario, specify the exact command a coding agent can run to verify it:\n- `npx vitest run tests/foo.test.ts`\n- `tsc --noEmit`\n- `curl -X POST http://localhost:3200/webhook/test -d '...'`\n\nThese must be runnable without modification. If you cannot write a runnable command, write 'MANUAL: [description of what to check]' -- this flags a gap in testability.\n\nCapture:\n- `gherkinScenarios` (full Gherkin text)\n- `verificationCommands` (array of runnable strings or MANUAL: descriptions)\n- `exampleMap` (object with rules/examples/openQuestions per element)",
-      "requireConfirmation": false,
-      "runCondition": {
-        "var": "taskComplexity",
-        "not_equals": "trivial"
-      }
+      },
+      "prompt": "Find the scope and UX risks that would blow this past its appetite.\n\n**Rabbit holes -- product-level risks with mitigations:**\nEach risk must be concrete and product-level:\n- Scope creep ('once users see this, they'll expect Y too') -- not 'handle edge cases'\n- UX ambiguity ('what happens if the user is in state X when this fires?') -- not 'timezone handling'\n- Policy conflicts ('this behavior contradicts how we handle Z elsewhere') -- specific, not generic\n\nFor each: rate severity (low/medium/critical), propose a shaping-time mitigation that resolves it before building begins.\n\n**No-gos -- explicit product exclusions:**\nAt least 3. Specific enough that a builder knows when they're about to go out of scope. 'No push notifications' not 'keep it simple'.\n\n**Second pass:** what risks did you NOT put in the rabbit holes that you should have? Name them even if you decide they don't need mitigation.\n\n**Assumptions log:** for every autonomous decision made during shaping, add an entry: {step, assumption, confidence: 0-1, rationale}. Entries with confidence < 0.6 should be flagged.\n\nCapture:\n- `rabbitHoles` (array: {risk, severity, mitigation, patchApplied})\n- `noGos` (array of specific exclusion strings)\n- `assumptionsLog` (append entries)\n- `unconsidered` (risks explicitly noted but not included)",
+      "requireConfirmation": false
     },
     {
       "id": "draft-pitch-loop",
-      "title": "Step 9: Draft and Refine Pitch",
+      "title": "Step 7: Draft and Refine Pitch",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "trivial"
+      },
       "type": "loop",
       "loop": {
         "type": "while",
@@ -201,65 +147,36 @@
       "body": [
         {
           "id": "draft-pitch",
-          "title": "Draft Full Pitch",
-          "prompt": "Synthesize everything from Steps 1-8 into the full shaped pitch.\n\nThe pitch has 8 sections in order:\n\n**Problem** -- the specific story from the frame gate. One paragraph. Named user, named situation, specific failure.\n\n**Appetite** -- multi-dimensional: `sizingBucket`, `calendarDays`, `tokenBudgetEst`, `agentTurnsEst`, `filesTouchedEst`. One sentence each.\n\n**Solution** -- the breadboard + element list from Step 5. Use the exact breadboard text. Then the elements as a list with their classification (Interface/Invariant/Exclusion).\n\n**Rabbit Holes** -- the rabbit holes from Step 6 with mitigations. Specific, not generic.\n\n**No-Gos** -- the exclusions from Step 6. Specific, not vague.\n\n**Context Pack** -- the context pack from Step 7. touch_globs, do_not_touch_globs, reuse_utilities with signatures.\n\n**Acceptance Criteria** -- Gherkin scenarios + verification commands from Step 8.\n\n**Decomposition** -- break the work into atomic subtasks, each sized to fit in a single context window:\n- A walking skeleton subtask (thin end-to-end slice, implements first) \n- 3-8 additional subtasks with dependencies\n- Each subtask lists which acceptance scenarios it satisfies\n\nAlso output the full pitch as a JSON object that matches the shape.json schema (see docs/design/shaping-workflow-external-research.md for the full schema).\n\nCapture:\n- `pitchMd` (full pitch in markdown)\n- `pitchJson` (pitch as JSON object matching schema)\n- `decomposition` (walking skeleton + atomic subtasks)",
+          "title": "Draft Pitch",
+          "prompt": "Write the shaped pitch. Five sections only:\n\n**Problem** -- the specific story from Step 2. One paragraph. Named person/role, situation, what fails.\n\n**Appetite** -- sizing bucket and calendar days. One sentence.\n\n**Solution** -- the breadboard from Step 5, then the element list with classifications. Exact breadboard text. Nothing else.\n\n**Rabbit Holes** -- from Step 6. Specific, not generic.\n\n**No-Gos** -- from Step 6. Specific, not vague.\n\nCapture:\n- `pitchMd` (full pitch in markdown)",
           "requireConfirmation": false
         },
         {
           "id": "critique-pitch",
-          "title": "Critique Pitch (External Reviewer Framing)",
-          "prompt": "**Authorship stripping (do this first):**\nBefore evaluating, rewrite the pitch sections (Problem, Solution, Rabbit Holes) into a neutral, third-person voice: 'The proposal addresses...', 'The solution defines...'. This removes stylistic fingerprints that trigger self-preference bias. Evaluate the rewritten version, not the original.\n\nYou are a skeptical external reviewer reading this pitch for the first time. The author of this pitch is not present. You have no prior attachment to any of the decisions made.\n\nYou are evaluating whether this pitch is ready for a coding agent to implement.\n\nEvaluate against 5 criteria:\n\n1. **Problem specificity** -- is the problem statement a specific story with a named user and named failure? Or is it still abstract?\n\n2. **Appetite honesty** -- does the named complexity match the time/token budget? Would you bet on this shipping in that appetite?\n\n3. **Solution roughness** -- is the solution rough but solved? Or does it over-specify (implementation details) or under-specify (key elements missing)?\n\n4. **Rabbit hole completeness** -- are the named risks specific enough to be mitigated? Or are they generic catch-alls?\n\n5. **Context pack reliability** -- is every utility in reuse_utilities something you'd trust a coding agent to find and use? Any that look fabricated?\n\nFor each criterion, score: pass | warn | block.\nBlock = the coding agent would produce wrong output without this being fixed.\n\nList specific blocking issues. If no blocking issues, the pitch is ready.\n\nCapture:\n- `critiqueFindings` (array of {criterion, score, finding})\n- `blockingIssues` (array of strings -- empty if pitch is ready)\n\nThen emit a loop control artifact:\n```json\n{\"artifacts\": [{\"kind\": \"wr.loop_control\", \"decision\": \"continue\"}]}\n```\nor:\n```json\n{\"artifacts\": [{\"kind\": \"wr.loop_control\", \"decision\": \"stop\"}]}\n```\nContinue only if there are blocking issues AND iterations remain. Stop if no blocking issues or max iterations reached.",
+          "title": "Critique Pitch",
+          "prompt": "**Authorship stripping first:** rewrite the Problem, Solution, and Rabbit Holes sections into neutral third-person voice before evaluating. 'The proposal addresses...', 'The solution defines...'. Evaluate the rewritten version.\n\nYou are a skeptical external reviewer. The author is not present.\n\nEvaluate against 5 criteria:\n1. **Problem specificity** -- specific story or still abstract?\n2. **Appetite honesty** -- does the complexity match the time budget?\n3. **Solution roughness** -- rough but solved, or over/under-specified?\n4. **Rabbit hole quality** -- specific product risks, or generic catch-alls?\n5. **No-go clarity** -- could a builder tell when they're going out of scope?\n\nScore each: pass | warn | block. Block = a builder would make wrong decisions without fixing this.\n\nEmit loop control:\n```json\n{\"artifacts\": [{\"kind\": \"wr.loop_control\", \"decision\": \"continue\"}]}\n```\nor stop if no blocking issues or max iterations reached.\n\nCapture:\n- `critiqueFindings` (array: {criterion, score, finding})\n- `blockingIssues`",
           "requireConfirmation": false,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
           }
         }
-      ],
-      "runCondition": {
-        "var": "taskComplexity",
-        "not_equals": "trivial"
-      }
+      ]
     },
     {
       "id": "approval-gate",
-      "title": "Step 10: Approval Gate (Human Gate)",
-      "prompt": "Present the complete shaped pitch to the user for final approval.\n\nShow:\n1. The full pitch (problem, appetite, solution, rabbit holes, no-gos, context pack, acceptance criteria, decomposition)\n2. The assumptions log -- every autonomous decision made during shaping with confidence scores. Flag any entry with confidence < 0.6.\n3. The build readiness score:\n   - rubric_pass_count: how many of the 5 critique criteria passed\n   - critical_blockers: number of blocking issues remaining\n\nAsk the user to choose:\n- **Approve** -- proceed to finalization\n- **Edit** -- provide specific edits, incorporate them, re-run critique, return to this gate\n- **Restart from framing** -- the shape is wrong at a fundamental level; restart from Step 2\n- **Abandon** -- this problem cannot be shaped in this appetite; stop and record `divergenceMarker: 'safety_stop'` with the reason\n\nDo NOT auto-approve. The assumptions log must be reviewed by the user before the shape becomes the implementation spec.\n\n**If running autonomously with no user available:**\nDo not block waiting for input. Make the most defensible default decision from the options above -- auto-approve if critical_blockers == 0 AND no assumptionsLog entries with confidence < 0.5, otherwise choose 'Restart from framing', record it in assumptionsLog with `confidence: 0.4` and rationale, and advance immediately. Flag the session for human review by appending to the outbox: `worktrain tell \"wr.shaping gate decision requires human review -- [brief summary]\"`",
-      "assessmentRefs": [
-        "context-integrity"
-      ],
-      "assessmentConsequences": [
-        {
-          "when": {
-            "anyEqualsLevel": "low"
-          },
-          "effect": {
-            "kind": "require_followup",
-            "guidance": "The context pack contains unverified utilities or is empty when codebase tools were available. Re-run Step 7 with Bash and Read tools to verify every utility before approving. An unverified context pack causes the coding agent to confidently reinvent existing utilities."
-          }
-        }
-      ],
-      "requireConfirmation": true,
+      "title": "Step 8: Approval Gate",
       "runCondition": {
         "var": "taskComplexity",
         "not_equals": "trivial"
-      }
+      },
+      "prompt": "Present the complete shaped pitch for final approval.\n\nShow:\n1. The full pitch (Problem, Appetite, Solution, Rabbit Holes, No-Gos)\n2. The assumptions log -- every autonomous decision with confidence scores. Flag entries with confidence < 0.6.\n\nAsk the user to choose:\n- **Approve** -- proceed to writing pitch.md\n- **Edit** -- provide edits, re-run critique, return here\n- **Restart from framing** -- the shape is fundamentally wrong, restart from Step 2\n- **Abandon** -- this problem cannot be shaped in this appetite; record `divergenceMarker: 'safety_stop'` with reason\n\n**If running autonomously:** auto-approve if critique found 0 blocking issues AND no assumptionsLog entries with confidence < 0.5. Otherwise restart from Step 2. Record the decision in assumptionsLog with confidence 0.4 and flag for human review.\n\nDo NOT auto-approve if there are blocking critique issues.",
+      "requireConfirmation": true
     },
     {
-      "id": "finalize-and-handoff",
-      "title": "Step 11: Finalize and Write Artifact",
-      "prompt": "The pitch is approved. Write the canonical shape artifacts.\n\n1. **Validate the pitch JSON** against the shape schema at `spec/shape.schema.json`.\nRun: `Bash('npx ajv validate -s spec/shape.schema.json -d .workrail/current-shape.json 2>&1 || echo VALIDATION_FAILED')`\nIf validation fails, fix the JSON before proceeding. A shape that doesn't validate is not a shape.\n\n2. **Compute build_readiness_score with confidence caps:**\n   - rubric_pass_count: count of critique criteria that passed (0-5)\n   - critical_blockers: count of remaining blocking issues (should be 0 if approved)\n   - Apply caps: if `contextPackConfidence < 0.7` OR count of `assumptionsLog` entries with `confidence < 0.6` is \u2265 3, cap `rubric_pass_count` at `min(rubric_pass_count, 3)` and add a `capReason` field explaining why. A run with high uncertainty signals cannot report maximum build readiness.\n\n2a. **Ensure the output directory exists:**\nRun `Bash('mkdir -p .workrail/shapes')` before writing any files.\n\n3. **Write two files using the Write tool:**\n\n   a. `.workrail/current-shape.json` -- always overwritten with the current shape\n   b. `.workrail/shapes/[YYYY-MM-DD]-[slugified-problem].json` -- dated archive copy\n\n   Also write:\n   c. `.workrail/current-pitch.md` -- the human-readable pitch markdown\n\n4. **Summary for handoff:**\n   Print a brief summary:\n   - Problem: [one sentence]\n   - Appetite: [sizingBucket, calendarDays days]\n   - Key elements: [list element names]\n   - Rabbit holes: [count] identified, [count] patched\n   - Build readiness: [rubric_pass_count]/5 criteria, [critical_blockers] blockers\n   - Files written: [paths]\n   - Next step: run coding-task-workflow-agentic with goal from this shape\n\nCapture:\n- `shapeJsonPath` (path written)\n- `pitchMdPath` (path written)\n- `buildReadinessScore` (final score object)",
+      "id": "finalize",
+      "title": "Step 9: Write pitch.md",
+      "prompt": "Write the shaped pitch to disk.\n\n1. **If trivial task:** write a minimal pitch.md with just the problem statement and 'Appetite: xs. Single bounded change, no design decisions required.' Record `divergenceMarker: 'efficiency_skip'`.\n\n2. **Otherwise:** write `.workrail/current-pitch.md` with the full pitch from Step 7. Also archive to `.workrail/pitches/YYYY-MM-DD-[slugified-problem].md`.\n\nFirst ensure the directory exists:\n```\nmkdir -p .workrail/pitches\n```\n\nSummary to print:\n- Problem: [one sentence]\n- Appetite: [sizingBucket, calendarDays days]\n- Solution: [element names]\n- Rabbit holes: [count] identified\n- Assumptions flagged for review: [count of confidence < 0.6 entries]\n- Files written: [paths]\n- Next: hand pitch.md to a human engineering team, or run coding-task-workflow-agentic",
       "requireConfirmation": false
-    }
-  ],
-  "validatedAgainstSpecVersion": 3,
-  "references": [
-    {
-      "id": "shape-schema",
-      "title": "Shape JSON Schema",
-      "source": "./spec/shape.schema.json",
-      "purpose": "Canonical schema for the shape.json output artifact. Step 11 validates against this. Migration target: wr.contracts.shape_pitch (when WorkRail contract pack support is added).",
-      "authoritative": true,
-      "resolveFrom": "package"
     }
   ]
 }
