@@ -1,8 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://workrail.dev/spec/shape.schema.json",
+  "$comment": "Future target: when wr.shaping produces structured output, this schema defines its shape. For now the workflow writes pitch.md only.",
   "title": "WorkRail Shape",
-  "description": "The output artifact of wr.shaping -- a bounded, implementation-ready spec consumable by coding-task-workflow-agentic.",
+  "description": "Aspirational output schema for wr.shaping -- not yet produced by the workflow. Current output is pitch.md.",
   "type": "object",
   "required": ["shaping_run_id", "frame", "solution", "context_pack", "acceptance_criteria", "rabbit_holes", "no_gos", "assumptions_log", "decomposition", "pitch_md", "build_readiness_score"],
   "additionalProperties": false,

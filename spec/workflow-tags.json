@@ -46,11 +46,13 @@
       "when": [
         "designing a UI or UX feature from scratch",
         "exploring and thinking through a problem or decision",
-        "generating and comparing design candidates"
+        "generating and comparing design candidates",
+        "shaping a fuzzy problem into a bounded, implementation-ready pitch before coding begins"
       ],
       "examples": [
         "ui-ux-design-workflow",
-        "wr.discovery"
+        "wr.discovery",
+        "wr.shaping"
       ]
     },
     {
