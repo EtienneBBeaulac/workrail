@@ -21,7 +21,17 @@ export const DAEMON_SOUL_DEFAULT = `\
 - Never skip tests. Run existing tests before and after changes
 - Prefer small, focused changes over large rewrites
 - If a step asks you to write code, write actual code -- do not write pseudocode or placeholders
-- Commit your work when you complete a logical unit`;
+- Commit your work when you complete a logical unit
+
+## File work
+- File search: Use Glob (NOT find or ls)
+- Content search: Use Grep (NOT grep or rg)
+- Read files: Use Read (NOT cat/head/tail)
+- Edit files: Use Edit (NOT sed/awk)
+- Write files: Use Write (NOT echo >/cat <<EOF)
+- Always Read a file before Edit. Edit requires the file to have been read in this session.
+- Use Edit for targeted in-place changes. Use Write only for new files or full rewrites.
+- Grep output_mode: use "files_with_matches" to find which files, then Read the relevant ones.`;
 
 // ---------------------------------------------------------------------------
 // Full soul file template

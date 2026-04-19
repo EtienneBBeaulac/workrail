@@ -25,8 +25,9 @@ import 'reflect-metadata';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { exec } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { glob as tinyGlob } from 'tinyglobby';
 import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
@@ -44,6 +45,7 @@ import type { DaemonEventEmitter } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -158,6 +160,21 @@ const WORKSPACE_CONTEXT_CANDIDATE_PATHS = [
 // for backward compatibility with callers that already import this module.
 import { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
 export { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
+
+// ---------------------------------------------------------------------------
+// File tool state type
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-file read state stored inside the session-scoped readFileState Map.
+ *
+ * WHY: Read, Edit, and Write tools share this Map (passed by DI into each factory)
+ * to enforce read-before-write and detect file modification between read and write.
+ * isPartialView is stored so future tooling can warn when an Edit targets a file
+ * that was only partially read.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type ReadFileState = { content: string; timestamp: number; isPartialView: boolean };
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -921,7 +938,9 @@ function getSchemas(): Record<string, any> {
     ReadParams: {
       type: 'object',
       properties: {
-        filePath: { type: 'string', description: 'Absolute path to the file to read' },
+        filePath: { type: 'string', description: 'Absolute path to the file to read. Content is returned in cat -n format: each line prefixed with its 1-indexed line number and a tab character.' },
+        offset: { type: 'number', description: '0-indexed line number to start reading from (inclusive). Omit to read from the beginning.' },
+        limit: { type: 'number', description: 'Maximum number of lines to return. Omit to read to end of file.' },
       },
       required: ['filePath'],
     },
@@ -932,6 +951,39 @@ function getSchemas(): Record<string, any> {
         content: { type: 'string', description: 'Content to write to the file' },
       },
       required: ['filePath', 'content'],
+    },
+    GlobParams: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Glob pattern to match (e.g. "**/*.ts"). Supports standard glob syntax.' },
+        path: { type: 'string', description: 'Absolute path to search root. Defaults to the workspace root.' },
+      },
+      required: ['pattern'],
+    },
+    GrepParams: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'Regular expression pattern to search for in file contents.' },
+        path: { type: 'string', description: 'Absolute path to search in. Defaults to the workspace root.' },
+        glob: { type: 'string', description: 'Glob pattern to restrict which files are searched (e.g. "*.ts").' },
+        type: { type: 'string', description: 'File type filter for ripgrep (e.g. "ts", "js", "py").' },
+        output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'], description: 'Output mode. "files_with_matches": only file paths (default). "content": matching lines with context. "count": match counts per file.' },
+        head_limit: { type: 'number', description: 'Maximum number of output lines to return. Default: 250.' },
+        context: { type: 'number', description: 'Number of lines of context to show before and after each match (output_mode=content only).' },
+        '-i': { type: 'boolean', description: 'Case-insensitive search.' },
+      },
+      required: ['pattern'],
+    },
+    EditParams: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Absolute path to the file to edit. The file must have been read in this session via the Read tool.' },
+        old_string: { type: 'string', description: 'Exact string to find and replace. Must appear exactly once in the file (or use replace_all=true for multiple occurrences). Do NOT include line-number prefixes from Read output.' },
+        new_string: { type: 'string', description: 'Replacement string. Must differ from old_string.' },
+        replace_all: { type: 'boolean', description: 'Replace all occurrences of old_string. Default: false (fails if more than one match).' },
+      },
+      required: ['file_path', 'old_string', 'new_string'],
+      additionalProperties: false,
     },
     SpawnAgentParams: {
       type: 'object',
@@ -1388,46 +1440,383 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
   };
 }
 
+// ---------------------------------------------------------------------------
+// File navigation and editing tools
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalizes LLM-generated typographic quotes to their ASCII equivalents.
+ *
+ * WHY: LLMs trained on typographic text often generate curly single quotes (\u2018, \u2019)
+ * and curly double quotes (\u201C, \u201D) where the user intended straight ASCII quotes.
+ * When these appear in an `old_string` for Edit, the exact match fails. This function
+ * tries the normalized form as a fallback, recovering from the most common LLM quote variants.
+ *
+ * Handles ~95% of LLM quote variants. Full Unicode normalization is YAGNI (YELLOW-2).
+ */
+function findActualString(fileContent: string, oldString: string): string | null {
+  if (fileContent.includes(oldString)) return oldString;
+  // Handle LLM-generated typographic quotes
+  const normalized = oldString
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\u2013/g, '-')
+    .replace(/\u2014/g, '--');
+  if (fileContent.includes(normalized)) return normalized;
+  return null;
+}
+
+/** Max file size Read will return without offset/limit (256 KiB). */
+const READ_SIZE_CAP_BYTES = 256 * 1024;
+
+/** Glob paths always excluded from makeGlobTool results. */
+const GLOB_ALWAYS_EXCLUDE = ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**'];
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeReadTool(schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
   return {
     name: 'Read',
-    description: 'Read the contents of a file at the given absolute path.',
+    description:
+      'Read the contents of a file at the given absolute path. ' +
+      'Content is returned in cat -n format: each line is prefixed with its 1-indexed line number and a tab character (e.g. "1\\tline one\\n2\\tline two"). ' +
+      'Use offset (0-indexed start line) and limit (max lines) to read a slice of a large file.',
     inputSchema: schemas['ReadParams'],
     label: 'Read',
 
     execute: async (
       _toolCallId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: String(params.filePath).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
-      const content = await fs.readFile(params.filePath, 'utf8');
+      const filePath: string = params.filePath;
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+
+      // Block device paths to prevent reads from infinite streams
+      const devPaths = ['/dev/stdin', '/dev/tty', '/dev/zero', '/dev/random', '/dev/full', '/dev/urandom'];
+      if (devPaths.some(d => filePath === d)) {
+        throw new Error(`Refusing to read device path: ${filePath}`);
+      }
+
+      const stat = await fs.stat(filePath);
+      if (stat.size > READ_SIZE_CAP_BYTES) {
+        throw new Error(
+          `File is too large to read at once (${stat.size} bytes, cap is ${READ_SIZE_CAP_BYTES} bytes). ` +
+          `Use offset and limit parameters to read a specific range of lines.`,
+        );
+      }
+
+      const rawContent = await fs.readFile(filePath, 'utf8');
+      const allLines = rawContent.split('\n');
+
+      const offset: number = params.offset ?? 0;
+      const limit: number | undefined = params.limit;
+      const isPartialView = offset !== 0 || limit != null;
+
+      const slicedLines = limit != null ? allLines.slice(offset, offset + limit) : allLines.slice(offset);
+      const startLine = offset; // 0-indexed offset -> 1-indexed line numbers start at offset+1
+      const formatted = slicedLines.map((l, i) => `${startLine + i + 1}\t${l}`).join('\n');
+
+      // Store in readFileState so Edit and Write can enforce staleness checks
+      readFileState.set(filePath, { content: rawContent, timestamp: stat.mtimeMs, isPartialView });
+
       return {
-        content: [{ type: 'text', text: content }],
-        details: { filePath: params.filePath, length: content.length },
+        content: [{ type: 'text', text: formatted }],
+        details: { filePath, totalLines: allLines.length, returnedLines: slicedLines.length, offset, isPartialView },
       };
     },
   };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeWriteTool(schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeWriteTool(readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
   return {
     name: 'Write',
-    description: 'Write content to a file at the given absolute path. Creates parent directories if needed.',
+    description:
+      'Write content to a file at the given absolute path. Creates parent directories if needed. ' +
+      'For existing files: the file must have been read in this session and must not have changed on disk since then. ' +
+      'For new files (path does not exist): no prior read is required.',
     inputSchema: schemas['WriteParams'],
     label: 'Write',
 
     execute: async (
       _toolCallId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: String(params.filePath).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
-      await fs.mkdir(path.dirname(params.filePath), { recursive: true });
-      await fs.writeFile(params.filePath, params.content, 'utf8');
+      const filePath: string = params.filePath;
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+
+      // Staleness guard: only for existing files. New files bypass the check entirely.
+      // WHY: a new file has never been read, so there is nothing stale to guard against.
+      let existsOnDisk = false;
+      try {
+        await fs.access(filePath);
+        existsOnDisk = true;
+      } catch {
+        // File does not exist -- new file, no guard needed
+      }
+
+      if (existsOnDisk) {
+        const state = readFileState.get(filePath);
+        if (!state) {
+          throw new Error(
+            `File has not been read in this session. Call Read first before writing to it: ${filePath}`,
+          );
+        }
+        const stat = await fs.stat(filePath);
+        if (stat.mtimeMs !== state.timestamp) {
+          throw new Error(
+            `File has been modified since it was read. Re-read before writing: ${filePath}`,
+          );
+        }
+      }
+
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, params.content, 'utf8');
+
+      // Update readFileState so a subsequent Edit/Write sees the new mtime
+      const newStat = await fs.stat(filePath);
+      readFileState.set(filePath, { content: params.content, timestamp: newStat.mtimeMs, isPartialView: false });
+
       return {
-        content: [{ type: 'text', text: `Written ${params.content.length} bytes to ${params.filePath}` }],
-        details: { filePath: params.filePath, length: params.content.length },
+        content: [{ type: 'text', text: `Written ${params.content.length} bytes to ${filePath}` }],
+        details: { filePath, length: params.content.length },
+      };
+    },
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function makeGlobTool(workspacePath: string, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+  return {
+    name: 'Glob',
+    description:
+      'Find files matching a glob pattern. Returns newline-separated relative file paths, sorted by modification time descending. ' +
+      'node_modules, .git, dist, and build directories are always excluded. ' +
+      'Results are capped at 100 files.',
+    inputSchema: schemas['GlobParams'],
+    label: 'Glob',
+
+    execute: async (
+      _toolCallId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      params: any,
+    ): Promise<AgentToolResult<unknown>> => {
+      const pattern: string = params.pattern;
+      const searchRoot: string = params.path ?? workspacePath;
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Glob', summary: pattern.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+
+      const GLOB_LIMIT = 100;
+
+      let paths: string[];
+      try {
+        paths = await tinyGlob(pattern, {
+          cwd: searchRoot,
+          ignore: GLOB_ALWAYS_EXCLUDE,
+          absolute: false,
+        });
+      } catch {
+        // Non-existent search root or invalid pattern returns empty
+        paths = [];
+      }
+
+      // Sort by mtime descending (most recently modified first)
+      const withMtimes = await Promise.all(
+        paths.map(async (p) => {
+          try {
+            const stat = await fs.stat(path.join(searchRoot, p));
+            return { p, mtime: stat.mtimeMs };
+          } catch {
+            return { p, mtime: 0 };
+          }
+        }),
+      );
+      withMtimes.sort((a, b) => b.mtime - a.mtime);
+
+      const sorted = withMtimes.map(x => x.p);
+      const truncated = sorted.length > GLOB_LIMIT;
+      const result = sorted.slice(0, GLOB_LIMIT);
+
+      let text = result.join('\n');
+      if (truncated) {
+        text += '\n[Results truncated at 100 files]';
+      }
+
+      return {
+        content: [{ type: 'text', text: text || '(no matches)' }],
+        details: { pattern, searchRoot, matchCount: sorted.length, truncated },
+      };
+    },
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function makeGrepTool(workspacePath: string, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+  return {
+    name: 'Grep',
+    description:
+      'Search file contents using ripgrep (rg). Fast regex search with optional context lines, file-type filtering, and case-insensitive mode. ' +
+      'output_mode: "files_with_matches" (default) returns only file paths; "content" returns matching lines; "count" returns match counts per file. ' +
+      'node_modules and .git are always excluded.',
+    inputSchema: schemas['GrepParams'],
+    label: 'Grep',
+
+    execute: async (
+      _toolCallId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      params: any,
+    ): Promise<AgentToolResult<unknown>> => {
+      const pattern: string = params.pattern;
+      const searchPath: string = params.path ?? workspacePath;
+      const outputMode: string = params.output_mode ?? 'files_with_matches';
+      const headLimit: number = params.head_limit ?? 250;
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Grep', summary: pattern.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+
+      const args: string[] = [
+        '--hidden',
+        '--glob', '!node_modules',
+        '--glob', '!.git',
+        '--max-columns', '500',
+      ];
+
+      if (params['-i']) args.push('-i');
+      if (params.glob) { args.push('--glob', params.glob); }
+      if (params.type) { args.push('--type', params.type); }
+
+      switch (outputMode) {
+        case 'files_with_matches':
+          args.push('--files-with-matches');
+          break;
+        case 'count':
+          args.push('--count');
+          break;
+        case 'content':
+          args.push('--vimgrep');
+          if (params.context != null) { args.push('-C', String(params.context)); }
+          break;
+      }
+
+      args.push('--', pattern, searchPath);
+
+      let stdout: string;
+      try {
+        const result = await execFileAsync('rg', args, { cwd: workspacePath, maxBuffer: 10 * 1024 * 1024 });
+        stdout = result.stdout;
+      } catch (err: unknown) {
+        const nodeErr = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string; code?: number | string };
+        // ENOENT: rg binary not found
+        if (nodeErr.code === 'ENOENT') {
+          throw new Error(
+            'ripgrep (rg) is not installed. Install it with: brew install ripgrep (macOS) or apt install ripgrep (Ubuntu/Debian).',
+          );
+        }
+        // exit code 1 from rg means "no matches found" -- not an error
+        if (typeof nodeErr.code === 'number' && nodeErr.code === 1) {
+          return {
+            content: [{ type: 'text', text: '(no matches)' }],
+            details: { pattern, searchPath, outputMode },
+          };
+        }
+        throw new Error(`rg failed: ${nodeErr.message ?? String(err)}`);
+      }
+
+      // Apply head_limit
+      const lines = stdout.split('\n').filter(l => l.length > 0);
+      const truncated = lines.length > headLimit;
+      const result = lines.slice(0, headLimit).join('\n');
+
+      return {
+        content: [{ type: 'text', text: result || '(no matches)' }],
+        details: { pattern, searchPath, outputMode, lineCount: lines.length, truncated },
+      };
+    },
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function makeEditTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+  return {
+    name: 'Edit',
+    description:
+      'Perform an exact string replacement in a file. ' +
+      'The file must have been read in this session via the Read tool. ' +
+      'By default, old_string must appear exactly once; use replace_all=true to replace all occurrences. ' +
+      'Do NOT include line-number prefixes (e.g. "1\\t") from Read output in old_string or new_string.',
+    inputSchema: schemas['EditParams'],
+    label: 'Edit',
+
+    execute: async (
+      _toolCallId: string,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      params: any,
+    ): Promise<AgentToolResult<unknown>> => {
+      const filePath: string = params.file_path;
+      const oldString: string = params.old_string;
+      const newString: string = params.new_string;
+      const replaceAll: boolean = params.replace_all ?? false;
+
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Edit', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+
+      // Validate that old_string and new_string differ
+      if (oldString === newString) {
+        throw new Error('old_string and new_string are identical. No edit needed.');
+      }
+
+      // Read-before-write enforcement
+      const state = readFileState.get(filePath);
+      if (!state) {
+        throw new Error(
+          `File has not been read in this session. Call Read first before editing: ${filePath}`,
+        );
+      }
+
+      // Staleness check
+      let stat: Awaited<ReturnType<typeof fs.stat>>;
+      try {
+        stat = await fs.stat(filePath);
+      } catch {
+        throw new Error(`File not found: ${filePath}. It may have been deleted after it was read.`);
+      }
+      if (stat.mtimeMs !== state.timestamp) {
+        throw new Error(
+          `File has been modified since it was read. Re-read before editing: ${filePath}`,
+        );
+      }
+
+      const currentContent = await fs.readFile(filePath, 'utf8');
+
+      // Find the actual string to replace (with optional curly-quote normalization)
+      const actualString = findActualString(currentContent, oldString);
+      if (actualString === null) {
+        throw new Error(
+          `String to replace not found in file. Make sure old_string exactly matches the file content ` +
+          `(do not include line-number prefixes from Read output): ${filePath}`,
+        );
+      }
+
+      // Count occurrences
+      const occurrences = currentContent.split(actualString).length - 1;
+      if (!replaceAll && occurrences > 1) {
+        throw new Error(
+          `old_string appears ${occurrences} times in the file. ` +
+          `Provide a more specific string that matches exactly once, or set replace_all=true to replace all occurrences.`,
+        );
+      }
+
+      // Apply the replacement
+      const updatedContent = replaceAll
+        ? currentContent.split(actualString).join(newString)
+        : currentContent.replace(actualString, newString);
+
+      await fs.writeFile(filePath, updatedContent, 'utf8');
+
+      // Update readFileState with new content and new mtime
+      const newStat = await fs.stat(filePath);
+      readFileState.set(filePath, { content: updatedContent, timestamp: newStat.mtimeMs, isPartialView: false });
+
+      return {
+        content: [{ type: 'text', text: `The file ${filePath} has been updated successfully.` }],
+        details: { filePath, occurrencesReplaced: occurrences },
       };
     },
   };
@@ -2456,6 +2845,12 @@ export async function runWorkflow(
   const spawnCurrentDepth = trigger.spawnDepth ?? 0;
   const spawnMaxDepth = trigger.agentConfig?.maxSubagentDepth ?? 3;
 
+  // Session-scoped file read state. Passed by DI into Read, Write, and Edit tools to
+  // enforce the read-before-write invariant and detect file modification between read and write.
+  // WHY here (not module-level): each runWorkflow() call gets its own Map -- no cross-session
+  // contamination. The Map is disposed when runWorkflow() returns.
+  const readFileState = new Map<string, ReadFileState>();
+
   const tools: AgentTool[] = [
     makeCompleteStepTool(
       sessionId,
@@ -2475,8 +2870,11 @@ export async function runWorkflow(
     ),
     makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSessionId),
     makeBashTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
-    makeReadTool(schemas, sessionId, emitter, workrailSessionId),
-    makeWriteTool(schemas, sessionId, emitter, workrailSessionId),
+    makeReadTool(readFileState, schemas, sessionId, emitter, workrailSessionId),
+    makeWriteTool(readFileState, schemas, sessionId, emitter, workrailSessionId),
+    makeGlobTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
+    makeGrepTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
+    makeEditTool(trigger.workspacePath, readFileState, schemas, sessionId, emitter, workrailSessionId),
     makeReportIssueTool(sessionId, emitter, workrailSessionId, undefined, (summary: string) => {
       // Accumulate issue summaries for WORKTRAIN_STUCK marker.
       // WHY cap: bounds memory on pathological sessions.
