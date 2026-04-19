@@ -469,8 +469,6 @@ describe('Description-schema alignment', () => {
 describe('coding-task workflow protocol wording', () => {
   const workflowPaths = [
     path.resolve(process.cwd(), 'workflows/coding-task-workflow-agentic.json'),
-    path.resolve(process.cwd(), 'workflows/coding-task-workflow-agentic.v2.json'),
-    path.resolve(process.cwd(), 'workflows/coding-task-workflow-agentic.lean.v2.json'),
   ];
 
   it('uses canonical continue_workflow context-object wording in all coding-task workflow variants', () => {

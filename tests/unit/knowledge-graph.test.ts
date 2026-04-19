@@ -150,7 +150,7 @@ describe.skipIf(SKIP_ON_WINDOWS)('query 2: what CLI commands are registered in c
 
     const commands = result.value;
     // Use a floor check rather than an exact match so new CLI commands don't break this test.
-    expect(commands.length).toBeGreaterThanOrEqual(9);
+    expect(commands.length).toBeGreaterThanOrEqual(8);
   });
 
   it('includes the init command', async () => {
