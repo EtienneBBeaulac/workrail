@@ -143,7 +143,7 @@ export function SessionList({ viewModel }: Props) {
 
       {isTreeMode && (<p className="text-[var(--text-muted)] text-xs font-mono">Tree view -- filters disabled</p>)}
       {/* Status filter pills */}
-      <div className="flex flex-wrap gap-1.5">
+      <div className={`flex flex-wrap gap-1.5 ${isTreeMode ? 'opacity-40 pointer-events-none select-none' : ''}`}>
         {statusFilterOptions.map((opt) => {
           const count = statusCounts[opt.value] ?? 0;
           if (opt.value !== 'all' && count === 0) return null;
@@ -469,15 +469,23 @@ function SessionTreeView({
   readonly onSelectSession: (id: string) => void;
 }) {
   const { roots } = sessionTree;
-  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => {
-    const initial = new Set<string>();
-    for (const node of roots) {
-      if (node.children.length > 0 && node.session.status === 'in_progress') {
-        initial.add(node.session.sessionId);
-      }
-    }
-    return initial;
-  });
+  // Start empty -- sessions arrive asynchronously after mount, so the lazy
+  // initializer would always capture an empty roots array.
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
+
+  // Additive only: seed auto-expansion for in-progress coordinators whenever
+  // roots changes (e.g. on each poll cycle). Existing IDs are never removed so
+  // user-toggled collapsed state is preserved across data refreshes.
+  useEffect(() => {
+    const toAdd = roots
+      .filter((n) => n.children.length > 0 && n.session.status === 'in_progress')
+      .map((n) => n.session.sessionId);
+    if (toAdd.length === 0) return;
+    setExpandedIds((prev) => {
+      if (toAdd.every((id) => prev.has(id))) return prev;
+      return new Set([...prev, ...toAdd]);
+    });
+  }, [roots]);
 
   const toggleExpand = (sessionId: string) => {
     setExpandedIds((prev) => {
