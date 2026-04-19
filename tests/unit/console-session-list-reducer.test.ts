@@ -36,6 +36,7 @@ describe('sessionListReducer', () => {
         groupBy: 'none',
         statusFilter: 'all',
         page: 0,
+        viewMode: 'flat',
       });
     });
 
@@ -191,6 +192,7 @@ describe('sessionListReducer', () => {
         groupBy: 'workflow',
         statusFilter: 'in_progress',
         page: 0,
+        viewMode: 'flat',
       };
       const next = reduce(state, { type: 'page_changed', page: 5 });
       expect(next.rawSearch).toBe('foo');
