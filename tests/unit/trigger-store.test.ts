@@ -1273,3 +1273,70 @@ triggers:
     warnSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Late-bound goals: default goalTemplate injection
+// ---------------------------------------------------------------------------
+
+describe('late-bound goals', () => {
+  it('loads successfully when neither goal nor goalTemplate is configured, injecting defaults', () => {
+    const yaml = `
+triggers:
+  - id: late-bound
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+`;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      const trigger = result.value.triggers[0];
+      expect(trigger?.goal).toBe('Autonomous task');
+      expect(trigger?.goalTemplate).toBe('{{$.goal}}');
+    }
+    // Should log an informational message about the late-bound injection
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('defaulting to goalTemplate'));
+    logSpy.mockRestore();
+  });
+
+  it('uses sentinel goal when goalTemplate is configured but goal is absent', () => {
+    const yaml = `
+triggers:
+  - id: template-only
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+    goalTemplate: "Review PR: {{$.pull_request.title}}"
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      const trigger = result.value.triggers[0];
+      // Static fallback sentinel is injected; goalTemplate comes from YAML
+      expect(trigger?.goal).toBe('Autonomous task');
+      expect(trigger?.goalTemplate).toBe('Review PR: {{$.pull_request.title}}');
+    }
+  });
+
+  it('leaves existing triggers with a static goal unchanged (regression)', () => {
+    const yaml = `
+triggers:
+  - id: static-goal
+    provider: generic
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /workspace
+    goal: Review this MR
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      const trigger = result.value.triggers[0];
+      expect(trigger?.goal).toBe('Review this MR');
+      expect(trigger?.goalTemplate).toBeUndefined();
+    }
+  });
+});

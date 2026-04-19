@@ -1282,3 +1282,58 @@ describe('TriggerRouter notify() wiring', () => {
     expect(result._tag).toBe('delivery_failed');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Late-bound goals: {{$.goal}} dispatches correctly via TriggerRouter.route()
+// ---------------------------------------------------------------------------
+
+describe('late-bound goals integration', () => {
+  it('dispatches with payload goal when trigger has goalTemplate={{$.goal}}', async () => {
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger({
+      goal: 'Autonomous task',
+      goalTemplate: '{{$.goal}}',
+    });
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const payload = { goal: 'review PR #42' };
+    const rawBody = Buffer.from(JSON.stringify(payload));
+    router.route({
+      triggerId: asTriggerId('test-trigger'),
+      rawBody,
+      payload,
+    });
+
+    // Wait for the async queue to drain
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.goal).toBe('review PR #42');
+  });
+
+  it('falls back to sentinel when payload has no goal field', async () => {
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger({
+      goal: 'Autonomous task',
+      goalTemplate: '{{$.goal}}',
+    });
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const payload = { pull_request: { title: 'My PR' } }; // no $.goal field
+    const rawBody = Buffer.from(JSON.stringify(payload));
+    router.route({
+      triggerId: asTriggerId('test-trigger'),
+      rawBody,
+      payload,
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.goal).toBe('Autonomous task');
+    // interpolateGoalTemplate should have warned about the missing token
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("goalTemplate variable '$.goal' not found"));
+    warnSpy.mockRestore();
+  });
+});
