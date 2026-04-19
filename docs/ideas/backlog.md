@@ -6133,3 +6133,53 @@ Also consolidated from three workflow variants to one canonical file.
 **Key insight for AI implementers:** LLMs need MORE explicit specs than humans on interfaces/invariants/file boundaries (no tacit knowledge, no scope-shame), but LESS explicit than junior humans on standard patterns. The dominant failure mode is confident architectural divergence -- working code that reinvents an existing utility. Context Pack (Step 7) directly prevents this.
 
 **Next action:** author `wr.shaping` as a WorkRail workflow JSON using workflow-for-workflows, then update `coding-task-workflow-agentic` Phase 0 to detect and consume `shape.json` when present.
+
+---
+
+## Coordinator architecture: separation of concerns (Apr 19, 2026)
+
+**Decision: defer knowledge graph implementation until the context assembly layer is designed.**
+
+### The god class problem
+
+`src/coordinators/pr-review.ts` is already ~500 LOC doing: session dispatch, result aggregation, finding classification, merge routing, message queue drain, and outbox writes. Adding knowledge graph queries, context bundle assembly, upstream doc fetching, and prior session lookups would make it a god class.
+
+"Coordinator" is not a class or a script -- it is a **layer** that orchestrates across multiple concerns. Those concerns need to be separated before we add more to them.
+
+### The right layering
+
+```
+Trigger layer         src/trigger/          receives events, validates, enqueues
+Dispatch layer        (TBD)                 decides which workflow + what goal
+Context assembly      (TBD)                 gathers and packages context before spawning
+Orchestration layer   src/coordinators/     spawns, awaits, routes, retries, escalates
+Delivery layer        src/trigger/delivery  posts results back to origin systems
+```
+
+**Context assembly** is the missing layer. Before dispatching a coding session, something needs to:
+- Run `buildIndex()` and query "what imports the file being changed"
+- Find the upstream pitch/PRD/BRD for the task
+- Pull relevant prior session notes
+- Package everything as a structured context bundle
+
+This is NOT the orchestration script's job. The orchestration script should call `assembleContext(task, workspace)` and receive a bundle -- it should not know how that bundle was gathered.
+
+### Why the knowledge graph belongs in context assembly, not in the daemon
+
+Two options were considered:
+- **Daemon tool** (`makeQueryKnowledgeGraphTool` in `workflow-runner.ts`) -- agent queries mid-session on demand
+- **Coordinator pre-fetch** -- coordinator runs queries before spawning, injects answers as context
+
+The coordinator pre-fetch is better for known patterns (e.g. "what imports the file being changed" before a coding task). The agent doesn't need to know the graph exists -- it just gets the relevant facts as context. This also avoids adding `ts-morph` + DuckDB to the production build.
+
+The daemon tool approach is only better for ad-hoc mid-session queries the agent discovers dynamically. That's a secondary use case for v1.
+
+### What to build before the knowledge graph
+
+1. **Design the `ContextAssembler` abstraction** -- takes task description + workspace + trigger metadata, returns a structured context bundle. The knowledge graph is one of several sources (alongside upstream docs, prior session notes, repo state).
+2. **Refactor `pr-review.ts`** to use a `ContextAssembler` for the bits that fit there.
+3. **Then** implement knowledge graph as a `ContextAssembler` plugin -- not as a coordinator script addition and not as a daemon tool.
+
+### Anti-pattern to avoid
+
+Adding knowledge graph calls directly into `pr-review.ts` or any other coordinator script. That immediately creates the god class we're trying to avoid and couples the orchestration layer to a specific context source.
