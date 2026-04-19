@@ -321,7 +321,7 @@
             },
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Current modern example."
             }
           ],
@@ -421,7 +421,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "See the sharpened user-voiced prompts in the current lean coding workflow."
             }
           ]
@@ -443,7 +443,7 @@
           "sourceRefs": [
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses explicit capture footers and shape-preserving loop outputs."
             }
           ],
@@ -457,7 +457,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses compact Capture footers and explicit loop-control wording."
             }
           ]
@@ -491,7 +491,7 @@
             },
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses prompt fragments to slim mode-specific prompt branches."
             }
           ],
@@ -506,7 +506,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses prompt fragments and context templates to keep prompts slimmer at render time."
             }
           ]
@@ -867,7 +867,7 @@
             },
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Current loop decision prompts show shape-only output examples."
             }
           ],
@@ -881,7 +881,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Current loop decision steps show shape-only output examples."
             }
           ]
@@ -934,7 +934,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag."
             }
           ]
@@ -962,7 +962,7 @@
           "sourceRefs": [
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses confirmation for real review barriers like MultiPR checkpoints."
             }
           ],
@@ -1084,7 +1084,7 @@
           "sourceRefs": [
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Delegation checkpoints keep the main agent as the synthesizer and decision-maker."
             }
           ],
@@ -1120,7 +1120,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses explicit challenge, audit, and verification barriers."
             }
           ]
@@ -1170,7 +1170,7 @@
           "sourceRefs": [
             {
               "kind": "example",
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Major synthesis checkpoints use Confirmed / Plausible / Rejected for adopted claims."
             }
           ],
@@ -1185,7 +1185,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Major synthesis checkpoints use Confirmed / Plausible / Rejected for decision-driving findings."
             }
           ]
@@ -1288,7 +1288,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Current example of modern prompt composition, delegation barriers, and loop semantics."
             }
           ]
@@ -1389,7 +1389,7 @@
           ],
           "exampleRefs": [
             {
-              "path": "workflows/coding-task-workflow-agentic.lean.v2.json",
+              "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses explicit spec vs implementation-plan ownership."
             }
           ]
