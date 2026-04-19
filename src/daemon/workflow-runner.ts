@@ -1494,7 +1494,8 @@ export function makeSpawnAgentTool(
       'Use this when a step requires delegating a well-defined sub-task to a separate workflow. ' +
       'IMPORTANT: The parent session\'s time limit (maxSessionMinutes) keeps ticking while the child runs. ' +
       'Configure the parent with enough time to cover both its own work and the child\'s work. ' +
-      'Returns: { childSessionId, outcome: "success"|"error"|"timeout", notes: string }. ' +
+      'Returns: { childSessionId, outcome: "success"|"error"|"timeout", notes: string, artifacts?: readonly unknown[] }. ' +
+      'On success, artifacts contains the child session\'s final step artifacts if any were produced. ' +
       'Check outcome before using notes -- on error/timeout, notes contains the error message.',
     inputSchema: schemas['SpawnAgentParams'],
     label: 'Spawn Agent',
@@ -1616,13 +1617,16 @@ export function makeSpawnAgentTool(
       // delivery_failed -- see ChildWorkflowRunResult type definition and WHY comment above.
       // Using the narrower type gives compile-time exhaustiveness over the 3 real variants;
       // assertNever guards against future additions.
-      let resultObj: { childSessionId: string | null; outcome: 'success' | 'error' | 'timeout'; notes: string };
+      let resultObj: { childSessionId: string | null; outcome: 'success' | 'error' | 'timeout'; notes: string; artifacts?: readonly unknown[] };
 
       if (childResult._tag === 'success') {
         resultObj = {
           childSessionId,
           outcome: 'success',
           notes: childResult.lastStepNotes ?? '(no notes from child session)',
+          // WHY spread conditional: artifacts must be absent (not null/undefined) when the child
+          // produced none. Mirrors the WorkflowRunSuccess construction pattern at lines 2868-2869.
+          ...(childResult.lastStepArtifacts !== undefined ? { artifacts: childResult.lastStepArtifacts } : {}),
         };
       } else if (childResult._tag === 'error') {
         resultObj = {
