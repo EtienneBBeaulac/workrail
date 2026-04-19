@@ -1,11 +1,10 @@
 const allowMajorRelease = process.env.WORKRAIL_ALLOW_MAJOR_RELEASE === "true";
 const breakingReleaseType = allowMajorRelease ? "major" : "minor";
 
-// RELEASE_CHANNEL is set by the workflow:
-//   'beta'   -- every merge to main (automatic)
-//   'latest' -- manual "Run workflow" button in GitHub Actions
-const channel = process.env.WORKRAIL_RELEASE_CHANNEL || "beta";
-const isLatest = channel === "latest";
+// Every merge to main publishes to @beta (e.g. 3.41.0-beta.1).
+// To promote to @latest, use the "Promote to latest" workflow in GitHub Actions --
+// it runs `npm dist-tag add @exaudeus/workrail@<beta-version> latest` without
+// creating a new version. The tested beta artifact becomes the stable release.
 
 module.exports = {
   branches: [
@@ -60,10 +59,7 @@ module.exports = {
       "@semantic-release/exec",
       {
         prepareCmd: "npm pkg set version=${nextRelease.version}",
-        // @beta: publish as pre-release tag. @latest: promote to latest.
-        publishCmd: isLatest
-          ? "npm publish --access public --tag latest"
-          : "npm publish --access public --tag beta"
+        publishCmd: "npm publish --access public --tag beta"
       }
     ],
     "@semantic-release/github"

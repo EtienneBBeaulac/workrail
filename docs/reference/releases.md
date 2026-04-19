@@ -2,9 +2,32 @@
 
 This is the canonical reference for WorkRail release behavior.
 
+## Two-channel release model
+
+WorkRail publishes to two npm channels:
+
+| Channel | How | Who installs it |
+|---------|-----|-----------------|
+| `@beta` | Every merge to `main` | Developers tracking latest changes |
+| `@latest` | Manual promotion via GitHub Actions | End users, MCP config defaults |
+
+**To install beta:** `npm install -g @exaudeus/workrail@beta`  
+**To install stable:** `npm install -g @exaudeus/workrail` (default)
+
+## Promoting @beta to @latest
+
+When beta is stable and ready to ship to users:
+
+1. Go to **Actions** → **Promote to latest** → **Run workflow**
+2. That's it.
+
+The workflow runs `npm dist-tag add @exaudeus/workrail@<current-beta-version> latest`. No new version is created. The artifact users have been running on `@beta` becomes the stable release.
+
 ## Release authority
 
-Releases are produced by **semantic-release** in GitHub Actions.
+Auto-releases to `@beta` are produced by **semantic-release** in GitHub Actions.
+
+Promotions to `@latest` are manual (see above).
 
 Do not:
 

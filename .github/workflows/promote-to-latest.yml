@@ -1,0 +1,49 @@
+name: Promote to latest
+
+# One-click promotion of the current @beta to @latest.
+# Run from: Actions tab -> Promote to latest -> Run workflow
+#
+# This does NOT create a new version. It takes whatever is currently
+# published as @beta and re-tags it as @latest in npm.
+# The tested beta artifact becomes the stable release.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  promote:
+    name: Promote @beta to @latest
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write  # npm trusted publishing (OIDC)
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm (Trusted Publishing)
+        run: npm install -g npm@11.6.2
+
+      - name: Find current @beta version
+        id: beta
+        run: |
+          VERSION=$(npm view @exaudeus/workrail@beta version)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Promoting @exaudeus/workrail@$VERSION to @latest"
+
+      - name: Promote to @latest
+        run: npm dist-tag add @exaudeus/workrail@${{ steps.beta.outputs.version }} latest
+
+      - name: Summary
+        run: |
+          echo "## Promoted to @latest" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** ${{ steps.beta.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`bash" >> "$GITHUB_STEP_SUMMARY"
+          echo "npm install -g @exaudeus/workrail  # now installs ${{ steps.beta.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"

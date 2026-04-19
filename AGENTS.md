@@ -309,9 +309,10 @@ A "new engine feature" means any of:
 
 ## Release policy
 
-- Releases are automated via semantic-release on merge to main
+- Every merge to main auto-publishes to `@beta` (e.g. `3.41.0-beta.1`) via semantic-release
 - `fix:` -> patch, `feat:` -> minor, `docs:`/`chore:`/`test:` -> no release
 - **Never create a major release unless explicitly authorized by the project owner.** Breaking changes default to minor. Major requires setting `WORKRAIL_ALLOW_MAJOR_RELEASE=true` on the repo variable. See `docs/reference/releases.md`.
+- To promote `@beta` to `@latest`: Actions -> "Promote to latest" -> Run workflow. No new version -- the tested beta artifact is re-tagged as stable.
 
 ## Branch and commit conventions
 

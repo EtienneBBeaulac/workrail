@@ -5,17 +5,6 @@ on:
     workflows: [ "CI" ]
     types: [ completed ]
     branches: [ main ]
-  # Manual trigger: promotes the latest @beta to @latest.
-  # Run from: Actions tab -> Release -> Run workflow
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: 'Release channel'
-        required: false
-        default: 'latest'
-        type: choice
-        options:
-          - latest
 
 # Prevent concurrent releases
 concurrency:
@@ -27,7 +16,7 @@ jobs:
     name: Notify CI failure on main
     runs-on: ubuntu-latest
     # Fires when CI fails on a push to main -- release will be skipped, open an issue.
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
     permissions:
       issues: write
     steps:
@@ -59,9 +48,7 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
     
     permissions:
       contents: write
@@ -78,14 +65,6 @@ jobs:
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: workrail
-
-      - name: Set release channel
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "RELEASE_CHANNEL=latest" >> "$GITHUB_ENV"
-          else
-            echo "RELEASE_CHANNEL=beta" >> "$GITHUB_ENV"
-          fi
 
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -113,18 +92,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Download build artifact (dist/) -- auto trigger
-        if: github.event_name == 'workflow_run'
+      - name: Download build artifact (dist/)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
           name: dist
           path: dist
-
-      - name: Build dist/ -- manual trigger
-        if: github.event_name == 'workflow_dispatch'
-        run: npm run build
 
       - name: Verify dist manifest
         run: node scripts/dist-manifest.js --dist dist --verify dist/manifest.json
@@ -151,12 +125,8 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           WORKRAIL_ALLOW_MAJOR_RELEASE: ${{ vars.WORKRAIL_ALLOW_MAJOR_RELEASE }}
-          # RELEASE_CHANNEL is set earlier: 'beta' for auto releases, 'latest' for manual
-          WORKRAIL_RELEASE_CHANNEL: ${{ env.RELEASE_CHANNEL }}
         run: |
           set -euo pipefail
-
-          echo "Releasing to channel: ${WORKRAIL_RELEASE_CHANNEL}"
 
           # Configure git remote to use the app token for push authentication.
           # @semantic-release/git pushes using the remote URL; setting it here ensures
