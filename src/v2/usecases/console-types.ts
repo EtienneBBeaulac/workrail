@@ -49,6 +49,7 @@ export interface ConsoleSessionSummary {
    * session but no session_completed event. Derived from disk -- survives console restarts.
    * False on any read error (safe default). */
   readonly isLive: boolean;
+  readonly parentSessionId: string | null;
 }
 
 export interface ConsoleSessionListResponse {

@@ -28,6 +28,8 @@ export interface SessionListInteractionState {
   readonly groupBy: GroupBy;
   readonly statusFilter: StatusFilter;
   readonly page: number;
+  /** 'flat' = sorted/grouped list; 'tree' = coordinator tree. */
+  readonly viewMode: 'flat' | 'tree';
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +51,7 @@ export function createInitialSessionListState(
     groupBy: 'none',
     statusFilter: 'all',
     page: 0,
+    viewMode: 'flat',
   };
 }
 
@@ -61,7 +64,8 @@ export type SessionListEvent =
   | { readonly type: 'sort_changed'; readonly sort: SortField }
   | { readonly type: 'group_changed'; readonly groupBy: GroupBy }
   | { readonly type: 'status_changed'; readonly statusFilter: StatusFilter }
-  | { readonly type: 'page_changed'; readonly page: number };
+  | { readonly type: 'page_changed'; readonly page: number }
+  | { readonly type: 'view_mode_changed'; readonly viewMode: 'flat' | 'tree' };
 
 // ---------------------------------------------------------------------------
 // Reducer
@@ -98,6 +102,12 @@ export function sessionListReducer(
     case 'page_changed':
       // page_changed is the only event that does NOT reset page to 0.
       return { ...state, page: event.page };
+
+    case 'view_mode_changed':
+      if (event.viewMode === 'tree') {
+        return { ...state, viewMode: 'tree', rawSearch: '', statusFilter: 'all', page: 0 };
+      }
+      return { ...state, viewMode: 'flat', page: 0 };
 
     default:
       return assertNever(event);

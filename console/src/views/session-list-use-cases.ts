@@ -196,3 +196,48 @@ export function computeStatusCounts(
   }
   return counts as Record<StatusFilter, number>;
 }
+
+// ---------------------------------------------------------------------------
+// Session tree
+// ---------------------------------------------------------------------------
+
+export const TREE_MAX_DEPTH = 2;
+
+export interface SessionTreeNode {
+  readonly session: ConsoleSessionSummary;
+  readonly children: readonly ConsoleSessionSummary[];
+}
+
+export interface SessionTree {
+  readonly roots: readonly SessionTreeNode[];
+  readonly orphanChildIds: ReadonlySet<string>;
+}
+
+export function buildSessionTree(sessions: readonly ConsoleSessionSummary[]): SessionTree {
+  const sessionIdSet = new Set(sessions.map((s) => s.sessionId));
+  const childrenByParent = new Map<string, ConsoleSessionSummary[]>();
+  const orphanChildIds = new Set<string>();
+  const childSessionIds = new Set<string>();
+
+  for (const session of sessions) {
+    const parentId = session.parentSessionId;
+    if (!parentId) continue;
+    if (parentId === session.sessionId) continue;
+    if (!sessionIdSet.has(parentId)) {
+      orphanChildIds.add(session.sessionId);
+      continue;
+    }
+    childSessionIds.add(session.sessionId);
+    const siblings = childrenByParent.get(parentId) ?? [];
+    siblings.push(session);
+    childrenByParent.set(parentId, siblings);
+  }
+
+  const roots: SessionTreeNode[] = [];
+  for (const session of sessions) {
+    if (childSessionIds.has(session.sessionId)) continue;
+    roots.push({ session, children: childrenByParent.get(session.sessionId) ?? [] });
+  }
+
+  return { roots, orphanChildIds };
+}

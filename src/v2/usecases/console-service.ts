@@ -959,6 +959,17 @@ function extractRepoRoot(events: readonly DomainEventV1[]): string | null {
 }
 
 
+function extractParentSessionId(events: readonly DomainEventV1[]): string | null {
+  for (const e of events) {
+    if (e.kind === EVENT_KIND.SESSION_CREATED) {
+      const parentId = e.data.parentSessionId;
+      if (typeof parentId === 'string' && parentId.length > 0) return parentId;
+      return null;
+    }
+  }
+  return null;
+}
+
 function truncateTitle(text: string, maxLen = 120): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1) + '…';
@@ -1005,6 +1016,7 @@ function projectSessionSummary(
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
   const gitBranch = extractGitBranch(events);
   const repoRoot = extractRepoRoot(events);
+  const parentSessionId = extractParentSessionId(events);
 
   // Derive isAutonomous from context_set events. Checks all runs; true if any run has
   // is_autonomous: 'true' in its context. Gracefully degrades to false on projection error.
@@ -1041,6 +1053,7 @@ function projectSessionSummary(
       lastModifiedMs,
       isAutonomous,
       isLive,
+      parentSessionId,
     };
   }
 
@@ -1096,6 +1109,7 @@ function projectSessionSummary(
     lastModifiedMs,
     isAutonomous,
     isLive,
+    parentSessionId,
   };
 }
 

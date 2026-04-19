@@ -6100,3 +6100,36 @@ Also consolidated from three workflow variants to one canonical file.
 6. **`spawn_agent` artifacts gap** -- add `artifacts?: readonly unknown[]` to the return value. `lastStepArtifacts` is already on `WorkflowRunSuccess`; wiring it through is ~30 LOC.
 7. **Knowledge graph wiring** -- move `ts-morph` and `@duckdb/node-api` to dependencies, add `query_knowledge_graph` MCP tool.
 8. **Artifact store foundation** -- `~/.workrail/artifacts/` directory, write path in `complete_step`.
+
+---
+
+### wr.shaping workflow: shape messy problems into implementation-ready specs (needs authoring, Apr 18, 2026)
+
+**Status:** Design complete. Ready to author as a WorkRail workflow JSON.
+
+**Design docs:**
+- `docs/design/shaping-workflow-discovery.md` -- WorkRail-internal discovery findings
+- `docs/design/shaping-workflow-external-research.md` -- External research synthesis (Shape Up, LLM failure modes, artifact schema)
+
+**The gap this fills:** WorkRail has `wr.discovery` (divergent) and `coding-task-workflow-agentic` (convergent). Shaping is the missing middle -- converting messy discovery output into a bounded, implementation-ready spec without mid-implementation rabbit holes.
+
+**The 11-step skeleton (see design doc for full detail):**
+1. ingest_and_extract -- extract problem frames, forces, open questions
+2. **frame_gate** -- MANDATORY HUMAN GATE: confirm problem + appetite
+3. diverge_solution_shapes -- 4 parallel rough shapes with varied framings
+4. converge_pick -- SEPARATE JUDGE (different model/prompt): pick best shape
+5. breadboard_and_elements -- fat-marker breadboard + Interface/Invariant/Exclusion classification
+6. rabbit_holes_nogos -- adversarial: risks, mitigations, no-gos, assumptions
+7. context_pack_build -- file globs, reuse_utilities, conventions, do-not-touch boundaries
+8. example_map_and_gherkin -- Given/When/Then acceptance criteria + verification commands
+9. draft_pitch -- self-refine ×2, SEPARATE CRITIC (obfuscated authorship)
+10. **approval_gate** -- MANDATORY HUMAN GATE: approve, edit, or restart
+11. finalize_and_handoff -- schema validation, emit shape.json + pitch.md
+
+**The single most important design decision:** generator and critic run on structurally different prompts (ideally different model families). CoT and self-reflection alone do NOT mitigate anchoring or self-preference bias (Lou & Sun 2025; Panickssery et al. 2024).
+
+**Output artifact:** `shape.json` -- contains problem story, appetite (multi-dimensional: calendar + tokens + turns + files), breadboard, elements, context_pack (file boundaries + reuse_utilities), Gherkin acceptance criteria, rabbit holes, no-gos, decomposition with walking skeleton, assumptions_log, build_readiness_score.
+
+**Key insight for AI implementers:** LLMs need MORE explicit specs than humans on interfaces/invariants/file boundaries (no tacit knowledge, no scope-shame), but LESS explicit than junior humans on standard patterns. The dominant failure mode is confident architectural divergence -- working code that reinvents an existing utility. Context Pack (Step 7) directly prevents this.
+
+**Next action:** author `wr.shaping` as a WorkRail workflow JSON using workflow-for-workflows, then update `coding-task-workflow-agentic` Phase 0 to detect and consume `shape.json` when present.

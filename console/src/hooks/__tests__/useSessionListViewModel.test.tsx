@@ -33,6 +33,7 @@ function makeSession(overrides: Partial<ConsoleSessionSummary> = {}): ConsoleSes
     lastModifiedMs: Date.now(),
     isAutonomous: false,
     isLive: false,
+    parentSessionId: null,
     ...overrides,
   };
 }

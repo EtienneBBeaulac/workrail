@@ -48,10 +48,12 @@ import {
   sortSessions,
   groupSessions,
   computeStatusCounts,
+  buildSessionTree,
   PAGE_SIZE,
   type SortField,
   type GroupBy,
   type StatusFilter,
+  type SessionTree,
   SORT_AXES,
   GROUP_AXES,
   STATUS_FILTER_OPTIONS,
@@ -113,6 +115,8 @@ export type SessionListViewState =
       readonly groupAxes: typeof GROUP_AXES;
       /** Available status filter options. */
       readonly statusFilterOptions: typeof STATUS_FILTER_OPTIONS;
+      readonly viewMode: 'flat' | 'tree';
+      readonly sessionTree: SessionTree;
     };
 
 // ---------------------------------------------------------------------------
@@ -193,6 +197,12 @@ export function useSessionListViewModel({
     return { groups, total: sessions.length, filtered: filtered.length };
   }, [sessions, debouncedSearch, interactionState.statusFilter, interactionState.sort, interactionState.groupBy]);
 
+  // Tree built from full unfiltered session list.
+  const sessionTree = useMemo(() => {
+    if (!sessions) return buildSessionTree([]);
+    return buildSessionTree(sessions);
+  }, [sessions]);
+
   const isGrouped = interactionState.groupBy !== 'none';
   const totalPages = processed ? Math.ceil(processed.filtered / PAGE_SIZE) : 0;
   const pageStart = interactionState.page * PAGE_SIZE;
@@ -238,6 +248,8 @@ export function useSessionListViewModel({
       sortAxes: SORT_AXES,
       groupAxes: GROUP_AXES,
       statusFilterOptions: STATUS_FILTER_OPTIONS,
+      viewMode: interactionState.viewMode,
+      sessionTree,
     };
   }, [
     isLoading,
@@ -250,6 +262,7 @@ export function useSessionListViewModel({
     flatPageSessions,
     getSessionNavProps,
     sessionContainerProps,
+    sessionTree,
   ]);
 
   return { state, dispatch, onSelectSession };

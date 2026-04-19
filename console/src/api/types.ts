@@ -100,6 +100,8 @@ export interface ConsoleSessionSummary {
   /** True when the session is currently registered in DaemonRegistry with a recent heartbeat.
    * Ephemeral: always false when daemon is not running. */
   readonly isLive: boolean;
+  /** Session ID of the parent coordinator session. null for root sessions. */
+  readonly parentSessionId: string | null;
 }
 
 export interface ConsoleSessionListResponse {

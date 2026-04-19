@@ -4,10 +4,12 @@ import { HealthBadge } from '../components/HealthBadge';
 import { BracketBadge } from '../components/BracketBadge';
 import { MetaChip } from '../components/MetaChip';
 import { ConsoleCard } from '../components/ConsoleCard';
+import { TreeLine } from '../components/TreeLine';
 import type { ConsoleSessionSummary } from '../api/types';
 import { formatRelativeTime } from '../utils/time';
 import type { UseGridKeyNavResult } from '../hooks/useGridKeyNav';
 import type { UseSessionListViewModelResult } from '../hooks/useSessionListViewModel';
+import type { SessionTree, SessionTreeNode } from './session-list-use-cases';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -57,7 +59,11 @@ export function SessionList({ viewModel }: Props) {
     sortAxes,
     groupAxes,
     statusFilterOptions,
+    viewMode,
+    sessionTree,
   } = state;
+
+  const isTreeMode = viewMode === 'tree';
 
   if (processed.total === 0) {
     return (
@@ -77,20 +83,33 @@ export function SessionList({ viewModel }: Props) {
         <h2 className="text-lg font-medium text-[var(--text-primary)]">
           Sessions
           <span className="text-[var(--text-muted)] font-normal ml-2 text-sm">
-            {processed.filtered === processed.total
-              ? processed.total
-              : `${processed.filtered} / ${processed.total}`}
+            {isTreeMode ? processed.total : processed.filtered === processed.total ? processed.total : `${processed.filtered} / ${processed.total}`}
           </span>
         </h2>
+        <div className="flex items-center gap-0 border border-[var(--border)] rounded-md overflow-hidden">
+          {(['flat', 'tree'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => dispatch({ type: 'view_mode_changed', viewMode: mode })}
+              className={`px-3 py-1.5 text-xs font-mono uppercase tracking-wider transition-colors cursor-pointer ${viewMode === mode ? 'bg-[var(--accent)] text-[#0f131f] font-bold' : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+              aria-pressed={viewMode === mode}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className={`flex flex-wrap items-center gap-3 ${isTreeMode ? 'opacity-40 pointer-events-none select-none' : ''}`}>
         {/* Search */}
         <div className="relative flex-1 min-w-[200px] max-w-[360px]">
           <input
             type="text"
             value={rawSearch}
+            disabled={isTreeMode}
+            aria-disabled={isTreeMode}
             onChange={(e) => dispatch({ type: 'search_changed', value: e.target.value })}
             placeholder="Search sessions..."
             className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded-md px-3 py-1.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
@@ -122,6 +141,7 @@ export function SessionList({ viewModel }: Props) {
         />
       </div>
 
+      {isTreeMode && (<p className="text-[var(--text-muted)] text-xs font-mono">Tree view -- filters disabled</p>)}
       {/* Status filter pills */}
       <div className="flex flex-wrap gap-1.5">
         {statusFilterOptions.map((opt) => {
@@ -146,7 +166,9 @@ export function SessionList({ viewModel }: Props) {
       </div>
 
       {/* Session list */}
-      {processed.filtered === 0 ? (
+      {isTreeMode ? (
+        <SessionTreeView sessionTree={sessionTree} onSelectSession={onSelectSession} />
+      ) : processed.filtered === 0 ? (
         <div className="text-center py-12 text-[var(--text-muted)] text-sm">
           No sessions match the current filters
         </div>
@@ -431,5 +453,203 @@ function Chip({ children, icon }: { children: React.ReactNode; icon?: keyof type
       {icon && CHIP_ICONS[icon]}
       {children}
     </MetaChip>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Session tree view
+// ---------------------------------------------------------------------------
+
+function SessionTreeView({
+  sessionTree,
+  onSelectSession,
+}: {
+  readonly sessionTree: SessionTree;
+  readonly onSelectSession: (id: string) => void;
+}) {
+  const { roots } = sessionTree;
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => {
+    const initial = new Set<string>();
+    for (const node of roots) {
+      if (node.children.length > 0 && node.session.status === 'in_progress') {
+        initial.add(node.session.sessionId);
+      }
+    }
+    return initial;
+  });
+
+  const toggleExpand = (sessionId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) { next.delete(sessionId); } else { next.add(sessionId); }
+      return next;
+    });
+  };
+
+  if (roots.length === 0) {
+    return <div className="text-center py-12 text-[var(--text-muted)] text-sm">No sessions found</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {roots.map((node) => (
+        <SessionTreeRow
+          key={node.session.sessionId}
+          node={node}
+          isExpanded={expandedIds.has(node.session.sessionId)}
+          onToggle={() => toggleExpand(node.session.sessionId)}
+          onSelectSession={onSelectSession}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SessionTreeRow({
+  node,
+  isExpanded,
+  onToggle,
+  onSelectSession,
+}: {
+  readonly node: SessionTreeNode;
+  readonly isExpanded: boolean;
+  readonly onToggle: () => void;
+  readonly onSelectSession: (id: string) => void;
+}) {
+  const hasChildren = node.children.length > 0;
+
+  return (
+    <div>
+      <div className="flex items-start gap-1">
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} children of ${node.session.sessionTitle ?? node.session.sessionId}`}
+            className="flex items-center justify-center w-11 h-11 shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:outline-none"
+          >
+            <span
+              className="text-xs transition-transform duration-150"
+              style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            >
+              &#x25b6;
+            </span>
+          </button>
+        ) : (
+          <div className="w-11 shrink-0" />
+        )}
+        <div className="flex-1 min-w-0">
+          <CoordinatorCard
+            session={node.session}
+            hasChildren={hasChildren}
+            isExpanded={isExpanded}
+            childCount={node.children.length}
+            onClick={() => onSelectSession(node.session.sessionId)}
+          />
+        </div>
+      </div>
+      {hasChildren && isExpanded && (
+        <div className="ml-11">
+          <TreeLine>
+            <div className="space-y-2 pt-1">
+              {node.children.map((child) => (
+                <ChildSessionCard
+                  key={child.sessionId}
+                  session={child}
+                  onClick={() => onSelectSession(child.sessionId)}
+                />
+              ))}
+            </div>
+          </TreeLine>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoordinatorCard({
+  session,
+  hasChildren,
+  isExpanded,
+  childCount,
+  onClick,
+}: {
+  readonly session: ConsoleSessionSummary;
+  readonly hasChildren: boolean;
+  readonly isExpanded: boolean;
+  readonly childCount: number;
+  readonly onClick: () => void;
+}) {
+  const title = session.sessionTitle;
+  const workflowLabel = session.workflowName ?? session.workflowId;
+  const timeAgo = formatRelativeTime(session.lastModifiedMs);
+
+  return (
+    <ConsoleCard
+      variant="list"
+      onClick={onClick}
+      className="rounded-lg px-4 py-3"
+      style={{ borderLeft: '3px solid var(--accent)' }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-[var(--text-primary)] line-clamp-1 group-hover:text-[var(--accent)] transition-colors">
+            {title ?? workflowLabel ?? 'Unnamed session'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[10px] text-[var(--text-muted)] tabular-nums">{timeAgo}</span>
+          {session.isAutonomous && session.isLive && (
+            <BracketBadge label="LIVE" pulse={true} color="#f4c430" />
+          )}
+          <BracketBadge label="COORD" color="var(--accent)" />
+          <StatusBadge status={session.status} />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+        {title && workflowLabel && (
+          <MetaChip className="rounded text-[var(--text-muted)] max-w-[200px] truncate">{workflowLabel}</MetaChip>
+        )}
+        {hasChildren && !isExpanded && (
+          <MetaChip className="rounded text-[var(--accent)]">{childCount} {childCount === 1 ? 'child' : 'children'}</MetaChip>
+        )}
+      </div>
+      <div className="mt-1.5 font-mono text-[10px] text-[var(--text-muted)] opacity-60 group-hover:opacity-100 transition-opacity truncate">
+        {session.sessionId}
+      </div>
+    </ConsoleCard>
+  );
+}
+
+function ChildSessionCard({
+  session,
+  onClick,
+}: {
+  readonly session: ConsoleSessionSummary;
+  readonly onClick: () => void;
+}) {
+  const title = session.sessionTitle;
+  const workflowLabel = session.workflowName ?? session.workflowId;
+  const timeAgo = formatRelativeTime(session.lastModifiedMs);
+
+  return (
+    <ConsoleCard variant="list" onClick={onClick} className="rounded-lg px-4 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-[var(--text-primary)] line-clamp-1 group-hover:text-[var(--accent)] transition-colors">
+            {title ?? workflowLabel ?? 'Unnamed session'}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[10px] text-[var(--text-muted)] tabular-nums">{timeAgo}</span>
+          <StatusBadge status={session.status} />
+        </div>
+      </div>
+      <div className="mt-1 font-mono text-[10px] text-[var(--text-muted)] opacity-60 truncate">
+        {session.sessionId}
+      </div>
+    </ConsoleCard>
   );
 }

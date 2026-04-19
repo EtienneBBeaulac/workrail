@@ -58,6 +58,7 @@ const FAKE_REPO_READY = {
       lastModifiedMs: Date.now() - 1000,
       isAutonomous: false,
       isLive: false,
+      parentSessionId: null,
     },
   ],
   worktreeRepos: [
