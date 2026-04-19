@@ -372,6 +372,13 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Workflow
 export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
 
 /**
+ * Registry mapping WorkRail session IDs to steer callbacks.
+ * Used by POST /api/v2/sessions/:sessionId/steer. Daemon-only.
+ * TODO(v2): Extend to MCP-mode sessions if mid-step injection proves necessary.
+ */
+export type SteerRegistry = Map<string, (text: string) => void>;
+
+/**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
  *
  * Each active runWorkflow() call writes a per-session file to DAEMON_SESSIONS_DIR.
@@ -1110,7 +1117,7 @@ export function makeContinueWorkflowTool(
  * @param getCurrentToken - Getter that returns the current continueToken from the
  *   runWorkflow() closure. Called at tool execution time, not construction time.
  * @param onAdvance - Called after a successful step advance with the next step text
- *   and the new continueToken. Sets pendingSteerText and updates currentContinueToken.
+ *   and the new continueToken. Appends step text to pendingSteerParts and updates currentContinueToken.
  * @param onComplete - Called when the workflow is complete.
  * @param onTokenUpdate - Called when the continueToken changes without an advance
  *   (i.e., on a blocked retry). Updates currentContinueToken in the runWorkflow() closure.
@@ -2147,6 +2154,7 @@ export async function runWorkflow(
   apiKey: string,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
+  steerRegistry?: SteerRegistry,
 ): Promise<WorkflowRunResult> {
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
@@ -2369,6 +2377,12 @@ export async function runWorkflow(
   // paths above (model validation failure, start_workflow failure) happen before this point.
   if (workrailSessionId !== null) {
     daemonRegistry?.register(workrailSessionId, trigger.workflowId);
+  }
+
+  // Register steer callback so POST /sessions/:id/steer can inject coordinator text.
+  // Registration gap: ~50ms after session creation. Coordinators retry once on 404.
+  if (workrailSessionId !== null) {
+    steerRegistry?.set(workrailSessionId, (text: string) => { pendingSteerParts.push(text); });
   }
 
   // Crash safety: persist tokens before starting the agent loop. A crash between
@@ -2755,6 +2769,8 @@ export async function runWorkflow(
     // and mutate the closed-over timeoutReason variable. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    // Deregister so HTTP endpoint returns 404 for completed sessions.
+    if (workrailSessionId !== null) { steerRegistry?.delete(workrailSessionId); }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
   }
 

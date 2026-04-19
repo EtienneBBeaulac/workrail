@@ -25,7 +25,7 @@
 import * as crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SteerRegistry } from '../daemon/workflow-runner.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
@@ -72,6 +72,7 @@ export type RunWorkflowFn = (
   apiKey: string,
   daemonRegistry?: import('../v2/infra/in-memory/daemon-registry/index.js').DaemonRegistry,
   emitter?: DaemonEventEmitter,
+  steerRegistry?: SteerRegistry,
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------
@@ -411,6 +412,7 @@ export class TriggerRouter {
   private readonly _maxConcurrentSessions: number;
   private readonly emitter: DaemonEventEmitter | undefined;
   private readonly notificationService: NotificationService | undefined;
+  private readonly steerRegistry: SteerRegistry | undefined;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
@@ -441,10 +443,13 @@ export class TriggerRouter {
      * independently testable.
      */
     notificationService?: NotificationService,
+    /** Optional steer registry for POST /sessions/:id/steer coordinator injection. */
+    steerRegistry?: SteerRegistry,
   ) {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
     this.notificationService = notificationService;
+    this.steerRegistry = steerRegistry;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -559,7 +564,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry);
       } finally {
         this.semaphore.release();
       }
@@ -672,7 +677,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry);
       } finally {
         this.semaphore.release();
       }

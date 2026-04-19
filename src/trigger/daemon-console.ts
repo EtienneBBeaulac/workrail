@@ -27,6 +27,7 @@ import * as os from 'node:os';
 import type { V2ToolContext } from '../mcp/types.js';
 import type { TriggerRouter } from './trigger-router.js';
 import type { WorkflowService } from '../application/services/workflow-service.js';
+import type { SteerRegistry } from '../daemon/workflow-runner.js';
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 
@@ -60,6 +61,8 @@ export interface StartDaemonConsoleOptions {
   readonly workflowService?: WorkflowService;
   /** Override the lock file path (for testing). */
   readonly lockFilePath?: string;
+  /** Steer registry for POST /sessions/:id/steer. Must match TriggerRouter instance. */
+  readonly steerRegistry?: SteerRegistry;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +129,7 @@ export async function startDaemonConsole(
     options.serverVersion,
     ctx,
     options.triggerRouter,
+    options.steerRegistry,
   );
 
   // 404 catch-all (must be installed after all routes)

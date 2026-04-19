@@ -22,6 +22,7 @@ import { isDevMode } from '../../mcp/dev-mode.js';
 import type { TriggerRouter } from '../../trigger/trigger-router.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import { runWorkflow } from '../../daemon/workflow-runner.js';
+import type { SteerRegistry } from '../../daemon/workflow-runner.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
 
@@ -134,6 +135,7 @@ export function mountConsoleRoutes(
   serverVersion?: string,
   v2ToolContext?: V2ToolContext,
   triggerRouter?: TriggerRouter,
+  steerRegistry?: SteerRegistry,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -864,6 +866,7 @@ export function mountConsoleRoutes(
         trigger,
         v2ToolContext,
         apiKey ?? '',
+        undefined, undefined, steerRegistry,
       ).then((result) => {
         if (result._tag === 'success') {
           console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
@@ -911,6 +914,22 @@ export function mountConsoleRoutes(
     }));
 
     res.json({ success: true, data: { triggers } });
+  });
+
+  // POST /api/v2/sessions/:sessionId/steer
+  // Injects text into a running daemon session's next agent turn via steer().
+  // Daemon-only (steerRegistry present), localhost-only auth.
+  // TODO(v2): Add token auth before multi-user/remote deployment.
+  app.post('/api/v2/sessions/:sessionId/steer', express.json(), (req: Request, res: Response) => {
+    if (!steerRegistry) { res.status(503).json({ success: false, error: 'Steer not available (not a daemon context).' }); return; }
+    const { sessionId } = req.params;
+    const body = req.body as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) { res.status(400).json({ success: false, error: 'text is required and must be a non-empty string.' }); return; }
+    const callback = steerRegistry.get(sessionId);
+    if (!callback) { res.status(404).json({ success: false, error: 'Session not found or not a daemon session.' }); return; }
+    callback(text);
+    res.json({ success: true });
   });
 
   // --- Static file serving for Console UI ---
