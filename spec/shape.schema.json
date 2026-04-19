@@ -1,0 +1,178 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://workrail.dev/spec/shape.schema.json",
+  "$comment": "Future target: when wr.shaping produces structured output, this schema defines its shape. For now the workflow writes pitch.md only.",
+  "title": "WorkRail Shape",
+  "description": "Aspirational output schema for wr.shaping -- not yet produced by the workflow. Current output is pitch.md.",
+  "type": "object",
+  "required": ["shaping_run_id", "frame", "solution", "context_pack", "acceptance_criteria", "rabbit_holes", "no_gos", "assumptions_log", "decomposition", "pitch_md", "build_readiness_score"],
+  "additionalProperties": false,
+  "properties": {
+    "shaping_run_id": { "type": "string", "description": "UUID for this shaping run" },
+    "workflow_version": { "type": "string" },
+    "frame": {
+      "type": "object",
+      "required": ["problem_story_md", "appetite"],
+      "properties": {
+        "problem_story_md": { "type": "string", "minLength": 20, "description": "Specific story: When [person] [situation], they need [job], but today [what fails]" },
+        "appetite": {
+          "type": "object",
+          "required": ["sizing_bucket"],
+          "properties": {
+            "sizing_bucket": { "type": "string", "enum": ["xs", "s", "m", "l", "xl"] },
+            "calendar_days": { "type": "number" },
+            "token_budget_est": { "type": "number" },
+            "agent_turns_est": { "type": "number" },
+            "files_touched_est": { "type": "number" }
+          }
+        },
+        "forces": {
+          "type": "object",
+          "properties": {
+            "push": { "type": "array", "items": { "type": "string" } },
+            "pull": { "type": "array", "items": { "type": "string" } },
+            "anxiety": { "type": "array", "items": { "type": "string" } },
+            "habit": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "solution": {
+      "type": "object",
+      "required": ["breadboard_md", "elements"],
+      "properties": {
+        "breadboard_md": { "type": "string" },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "classification"],
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "classification": { "type": "string", "enum": ["interface", "invariant", "exclusion"] }
+            }
+          }
+        },
+        "rationale_md": { "type": "string" },
+        "alternatives_considered": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sketch": { "type": "string" },
+              "rejected_because": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "context_pack": {
+      "type": "object",
+      "required": ["touch_globs", "do_not_touch_globs"],
+      "properties": {
+        "touch_globs": { "type": "array", "items": { "type": "string" } },
+        "do_not_touch_globs": { "type": "array", "items": { "type": "string" } },
+        "reuse_utilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "symbol", "reason_to_reuse"],
+            "properties": {
+              "path": { "type": "string" },
+              "symbol": { "type": "string" },
+              "signature": { "type": "string" },
+              "reason_to_reuse": { "type": "string" }
+            }
+          }
+        },
+        "conventions_md": { "type": "string" },
+        "related_prior_art": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path_or_pr": { "type": "string" },
+              "relevance": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "acceptance_criteria": {
+      "type": "object",
+      "required": ["gherkin", "verification_commands"],
+      "properties": {
+        "gherkin": { "type": "string" },
+        "verification_commands": { "type": "array", "items": { "type": "string" } },
+        "example_map": { "type": "object" }
+      }
+    },
+    "rabbit_holes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["risk", "severity", "mitigation"],
+        "properties": {
+          "risk": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "critical"] },
+          "mitigation": { "type": "string" },
+          "patch_applied": { "type": "boolean" }
+        }
+      }
+    },
+    "no_gos": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "assumptions_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "assumption", "confidence"],
+        "properties": {
+          "step": { "type": "string" },
+          "assumption": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "rationale": { "type": "string" }
+        }
+      }
+    },
+    "decomposition": {
+      "type": "object",
+      "required": ["walking_skeleton", "atomic_subtasks"],
+      "properties": {
+        "walking_skeleton": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string" },
+            "files": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "atomic_subtasks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": ["id", "title"],
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "depends_on": { "type": "array", "items": { "type": "string" } },
+              "est_context_window": { "type": "string" },
+              "acceptance_scenario_refs": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "pitch_md": { "type": "string", "minLength": 100 },
+    "pitch_structured": { "type": "object" },
+    "build_readiness_score": {
+      "type": "object",
+      "required": ["rubric_pass_count", "critical_blockers"],
+      "properties": {
+        "rubric_pass_count": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "critical_blockers": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

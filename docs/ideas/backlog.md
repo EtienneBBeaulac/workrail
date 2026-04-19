@@ -5925,3 +5925,178 @@ Today the coordinator is external to the workflow -- it orchestrates sessions fr
 - `signal_coordinator` tool -- the session might signal the coordinator instead of blocking
 - `waitForCoordinator` step flag (already in this backlog) -- same underlying need, different framing
 - "Coordinator review mode: self-healing vs comment-and-wait" -- confirmation points are where that routing decision gets expressed
+
+---
+
+## Architecture Decision: Three-Workflow Pipeline (Apr 18, 2026)
+
+### Decision
+
+The canonical WorkRail workflow pipeline for new features is:
+
+```
+wr.discovery (optional) → wr.shaping (optional) → coding-task-workflow-agentic
+```
+
+Each workflow is independently useful. The pipeline is an optional chain, not a required sequence.
+
+### Rationale
+
+**wr.discovery** produces a direction -- what problem is worth solving. Output: structured discovery notes at `.workrail/discovery/`.
+
+**wr.shaping** produces a bounded pitch -- what specifically to build and explicitly NOT build, at a product level. Output: `.workrail/current-pitch.md`. Faithful Shape Up methodology. Tech-agnostic. No code-level content.
+
+**coding-task-workflow-agentic** produces running code -- engineering approach, sliced implementation, verification. When pitch.md exists (Phase 0.5), it skips design ideation and translates the pitch directly into an engineering approach. The pitch's no-gos and appetite are binding constraints.
+
+### No TechSpec workflow needed
+
+The coding workflow already does everything a TechSpec workflow would do: Phase 1b generates design candidates, Phase 1c selects and challenges the approach, Phase 3 writes the spec and implementation plan. Adding a separate TechSpec workflow would duplicate this and create a question of which is canonical. The coding workflow is the engineering planning layer.
+
+**The split that matters is product vs engineering:**
+- Product decisions (what to build, for whom, within what time) → wr.shaping
+- Engineering decisions (how to build it, which interfaces, which tests) → coding workflow
+
+### When to skip shaping
+
+- Task is small, concrete, and clearly scoped → go straight to coding workflow
+- Discovery already produced a bounded, implementable direction
+- You have a pre-written ticket or spec that already defines what to build
+
+### Faithful Shape Up constraint
+
+wr.shaping is tech-agnostic. A pitch for a Kotlin Android app and a pitch for a Python API service look structurally identical. No file paths, no function signatures, no implementation details. This makes pitches usable by human engineering teams at companies using Shape Up, not just WorkRail's coding workflow.
+
+### Phase 0.5 mechanics
+
+When `coding-task-workflow-agentic` finds `.workrail/current-pitch.md`:
+1. Reads all five pitch sections (Problem, Appetite, Solution/Elements, Rabbit Holes, No-Gos)
+2. Sets `shapedInputDetected=true`
+3. Skips phases 1a-1c (hypothesis, design generation, challenge-and-select)
+4. Phase 1d translates pitch elements/invariants/no-gos into an engineering approach
+5. Plan audit (Phase 4) checks for drift against the pitch
+6. Appetite is a hard ceiling -- oversized engineering work becomes follow-up tickets
+
+
+---
+
+## Idea: `context-gather` Step Type (Apr 19, 2026)
+
+### Problem
+
+Phase 0.5 in the coding workflow currently looks for a shaped pitch by checking a local path. This doesn't handle: coordinator-injected context, manually written docs (GDoc, Confluence, Notion), Glean-indexed artifacts, or URLs embedded in the task description. The search logic is duplicated if other workflows need the same document.
+
+### Proposed primitive
+
+A new engine-level step type `context-gather` that resolves a named context artifact from ordered sources:
+
+```json
+{
+  "type": "context-gather",
+  "id": "gather-pitch",
+  "contextType": "shaped-pitch",
+  "outputVar": "shapedInput",
+  "optional": true,
+  "sources": ["coordinator-injected", "local-paths", "task-url", "glean"]
+}
+```
+
+**Source resolution order (stops at first hit):**
+1. `coordinator-injected` -- coordinator already attached context of this type to the session (most common in autonomous mode)
+2. `local-paths` -- check `.workrail/current-pitch.md`, `pitch.md`, `PRD.md`, `.workrail/pitches/` (most recent)
+3. `task-url` -- extract any URL from the task description and fetch via WebFetch or matching MCP (GDoc, Confluence, Notion)
+4. `glean` -- search Glean for recent docs matching the task keywords and `contextType`; opt-in only (risk of false positives silently constraining wrong scope)
+
+If `optional: true` and no source resolves: `outputVar = null`, workflow continues normally.
+
+### Why engine-level, not a routine
+
+- Coordinator intercept requires the engine to check "has this type already been provided?" before running any search -- a routine can't express that
+- `contextType` is a declared intent multiple workflows can share (`wr.shaping`, `coding-task-workflow`, `wr.discovery`) without duplicating resolver logic
+- New sources (Linear, Jira, Notion) get added to the engine once, immediately available to all workflows
+
+### Relationship to existing work
+
+- Replaces/supersedes Phase 0.5's current local-path check in `coding-task-workflow-agentic`
+- Coordinator PR-review flow would inject `shaped-pitch` context before spawning the coding session
+- Any workflow that needs "find the spec/pitch/PRD for this task" uses the same step type
+
+### Open questions
+
+- How does the coordinator inject context into a session? Via a session variable set before `start_workflow`, or a new `inject_context` call?
+- How does `task-url` distinguish a GDoc URL from a Confluence URL from a Notion URL? MCP routing by domain?
+- What is the `contextType` vocabulary? Start with `shaped-pitch` -- what else? (`discovery-notes`, `design-spec`, `api-contract`?)
+- Glean false-positive risk: wrong document fed as shaped input silently constrains wrong scope. Needs confidence threshold or explicit user confirmation when Glean is the only hit.
+
+
+---
+
+## Completed (Apr 19, 2026)
+
+### wr.shaping -- Faithful Shape Up shaping workflow
+
+Created `workflows/wr.shaping.json`. Faithful Shape Up methodology, tech-agnostic, produces `.workrail/current-pitch.md` only. Nine steps: ingest → frame gate → diverge (6 shapes, Verbalized Sampling) → converge → breadboard + elements → rabbit holes + no-gos → draft/critique loop → approval gate → write pitch.md. Two human gates with autonomous fallback. Appetite is calendar-time only (xs/s/m/l/xl). No code-level content -- a pitch for a Kotlin app and a pitch for a Python service look structurally identical.
+
+### coding-task-workflow-agentic -- Upstream context Phase 0.5
+
+Added Phase 0.5 "Locate Upstream Context" to `coding-task-workflow-agentic.json`. Format-agnostic: the agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, etc.) to find any upstream document -- pitch, PRD, BRD, RFC, design doc, user story, Jira epic, etc. Sets `upstreamSpecDetected` + `solutionFixed` flags. When `solutionFixed=true`, design ideation phases (1a-1c) are skipped and Phase 1d translates upstream constraints directly into an engineering approach. Plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.
+
+Also consolidated from three workflow variants to one canonical file.
+
+
+---
+
+## Current state update (Apr 19, 2026)
+
+**npm version: v3.40.0**
+
+### What shipped since v3.36.0 (Apr 18 -- Apr 19)
+
+- ✅ **`wr.shaping`** -- faithful Shape Up shaping workflow (9 steps, two human gates with autonomous fallback)
+- ✅ **`coding-task-workflow-agentic` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
+- ✅ **Coding workflow consolidated** -- from three variants (lean, full, lean.v2) to one canonical file.
+- ✅ **HttpServer removed from MCP server** (#601) -- pure stdio. MCP server can no longer accidentally start an HTTP server.
+- ✅ **Late-bound goals** (#604) -- `goalTemplate: "{{$.goal}}"` defaults for webhook-driven sessions. Goals can come from the payload, not just the static trigger definition.
+- ✅ **Coordinator message queue drain** (#606) -- `pr-review` coordinator reads `~/.workrail/message-queue.jsonl` before each spawn cycle. `worktrain tell stop`, `skip-pr <n>`, `add-pr <n>` work.
+- ✅ **Notifications shipped** -- `NotificationService` implemented, wired into `TriggerRouter` via `trigger-listener.ts`. `WORKTRAIN_NOTIFY_MACOS=true` and `WORKTRAIN_NOTIFY_WEBHOOK=<url>` in `~/.workrail/config.json`.
+- ✅ **`worktrain run pr-review`** -- fully wired coordinator command. `spawnSession` → `awaitSessions` → `getAgentResult` (session-wide artifact aggregation) → `parseFindingsFromNotes` → route by severity.
+- ✅ **`wr.review_verdict` artifact path** -- end-to-end wired: `mr-review-workflow.agentic.v2.json` phase-6 emits it, `artifact-contract-validator.ts` validates it at `continue_workflow` time, coordinator reads it with keyword-scan fallback.
+- ✅ **`worktrain logs` / `worktrain health`** -- structured daemon log tailing and per-session health summary. `worktrain status <id>` deprecated in favor of `worktrain health <id>`.
+- ✅ **`signal_coordinator` tool** -- agent can emit structured mid-session signals (`progress`, `finding`, `data_needed`, `approval_needed`, `blocked`) without advancing the step.
+- ✅ **`ChildWorkflowRunResult` + `assertNever`** -- spawn_agent delivery_failed bug fixed. `delivery_failed` impossible state is compile-time excluded.
+- ✅ **`lastStepArtifacts` on `WorkflowRunSuccess`** -- `onComplete` callback forwards artifacts alongside notes. Coordinator can read typed artifacts from result without a separate HTTP call.
+- ✅ **`steerRegistry` + POST `/sessions/:id/steer`** -- coordinator injection endpoint wired in daemon console. Running sessions register a steer callback; coordinators can inject mid-session messages via HTTP.
+- ✅ **GitHub polling adapters** -- `github_issues_poll` and `github_prs_poll` providers fully implemented alongside existing `gitlab_poll`.
+- ✅ **Knowledge graph spike** -- `src/knowledge-graph/` module: DuckDB in-memory + ts-morph indexer + two validation queries. NOT yet wired to an MCP tool (ts-morph in devDependencies).
+- ✅ **`worktrain daemon --install`** -- launchd plist creation, load, verify. Daemon survives MCP server reconnects.
+- ✅ **Performance sweep** -- April 2026 sweep identified 10 highest-leverage fixes, filed as issues #248-257. Not yet merged.
+
+### Accurate limitations (as of v3.40.0)
+
+1. **Console session tree UI not built** -- `parentSessionId` is stored in the `session_created` event and in `WorkflowRunSuccess`. Console `RunLineageDag` shows the per-session step DAG only. Cross-session parent-child tree is data-only. PRs #607 (tree view) and #608 (steer endpoint) are OPEN.
+2. **Daemon tool set is minimal** -- agent has: `complete_step`, `continue_workflow` (deprecated), `Bash`, `Read`, `Write`, `report_issue`, `spawn_agent`, `signal_coordinator`. No `Glob`, `Grep`, or `Edit`. Read/Write are thin wrappers.
+3. **`worktrain tell` messages only drained by coordinator** -- `drainMessageQueue` is called by `runPrReviewCoordinator`, not by the daemon loop. A running autonomous session cannot receive mid-run injections from `worktrain tell`. The `steerRegistry` HTTP endpoint is the mid-session channel.
+4. **Knowledge graph not wired** -- module exists, ts-morph must move to dependencies before an MCP tool can be built.
+5. **`spawn_agent` return missing `artifacts`** -- returns `{ childSessionId, outcome, notes }` only. Typed artifacts from child session are not surfaced to the parent agent. `lastStepArtifacts` on `WorkflowRunSuccess` exists but spawn_agent doesn't return it.
+6. **`worktrain inbox --watch` stub** -- `--watch` flag prints "not yet implemented" and exits.
+7. **Artifact store not built** -- agents still dump markdown/files directly into the repo. `~/.workrail/artifacts/` directory structure not created.
+8. **Performance issues not fixed** -- issues #248-257 filed from April sweep. `continue_workflow` triggers 6+ event log scans, full session rebuild per `/api/v2/sessions` request, N+1 workflow fetches, no caching.
+9. **No auto-commit** -- agents can write code but do not commit, push, or open PRs autonomously.
+10. **Assessment gates not battle-tested** -- end-to-end flow with `outputContract: required: true` not validated in production use.
+
+### Open PRs to merge
+
+- **#607** `feat(console): add session tree view for coordinator sessions` -- cross-session parent-child hierarchy in console. Blocked on: `parentSessionId` data is in store but console routes need to surface it.
+- **#608** `feat(console): add POST /api/v2/sessions/:sessionId/steer for coordinator injection` -- NOTE: this endpoint is already implemented in `daemon-console.ts` via `steerRegistry`. PR #608 may be adding this to the MCP server console separately. Check before merging.
+- **#610** `feat(workflows): add wr.shaping` -- the shaping workflow. Ready to merge.
+- **#587** `fix(mcp): add assertNever exhaustiveness guard to TriggerRouter` -- likely already applied in codebase (ChildWorkflowRunResult assertNever is live). May be a duplicate or different scope. Check.
+
+### Next priorities (groomed Apr 19)
+
+1. **Merge #610 (wr.shaping)** -- ready. Workflow is implemented and in the branch.
+2. **Merge #587 (TriggerRouter assertNever)** -- quick fix, check if still relevant.
+3. **Review and merge #607 + #608** -- console tree view and steer endpoint. Verify #608 doesn't duplicate what's already live in daemon-console.ts.
+4. **Performance fixes** -- issues #248-257. Pick highest-leverage first: SessionIndex (#248) and console projection cache (#249) eliminate most of the repeated scans.
+5. **Daemon tool set: add Glob + Grep** -- agents routinely need to search files. `Read` + `Bash` grep is slow and lossy. Native `Glob` and `Grep` tools would make coding sessions more reliable.
+6. **`spawn_agent` artifacts gap** -- add `artifacts?: readonly unknown[]` to the return value. `lastStepArtifacts` is already on `WorkflowRunSuccess`; wiring it through is ~30 LOC.
+7. **Knowledge graph wiring** -- move `ts-morph` and `@duckdb/node-api` to dependencies, add `query_knowledge_graph` MCP tool.
+8. **Artifact store foundation** -- `~/.workrail/artifacts/` directory, write path in `complete_step`.
