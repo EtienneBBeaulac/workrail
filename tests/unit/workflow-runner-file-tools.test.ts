@@ -110,6 +110,25 @@ describe('makeReadTool()', () => {
     await expect(tool.execute('test-id', { filePath })).rejects.toThrow(/too large/i);
   });
 
+  it('succeeds reading a paginated slice of a file larger than 256KB', async () => {
+    const filePath = path.join(testDir, 'large-paginated.txt');
+    // Write a file just over 256KB (260 lines of 1024 bytes each)
+    const chunk = 'x'.repeat(1024);
+    const lines = Array.from({ length: 260 }, (_, i) => `line-${i}-${chunk}`).join('\n');
+    await fs.writeFile(filePath, lines, 'utf8');
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeReadTool(readFileState, stubSchemas);
+    // offset and limit are provided -- size cap must be skipped
+    const result = await tool.execute('test-id', { filePath, offset: 0, limit: 5 });
+
+    const text = (result.content[0] as { type: string; text: string }).text;
+    const returnedLines = text.split('\n').filter(l => l.length > 0);
+    expect(returnedLines).toHaveLength(5);
+    expect(text).toContain('1\tline-0-');
+    expect(text).toContain('5\tline-4-');
+  });
+
   it('stores file state in readFileState after reading', async () => {
     const filePath = path.join(testDir, 'test.txt');
     await fs.writeFile(filePath, 'hello\nworld', 'utf8');

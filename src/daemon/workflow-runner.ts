@@ -1498,7 +1498,10 @@ export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas:
       }
 
       const stat = await fs.stat(filePath);
-      if (stat.size > READ_SIZE_CAP_BYTES) {
+      const offset: number = params.offset ?? 0;
+      const limit: number | undefined = params.limit;
+      const isPaginated = params.offset !== undefined || params.limit !== undefined;
+      if (!isPaginated && stat.size > READ_SIZE_CAP_BYTES) {
         throw new Error(
           `File is too large to read at once (${stat.size} bytes, cap is ${READ_SIZE_CAP_BYTES} bytes). ` +
           `Use offset and limit parameters to read a specific range of lines.`,
@@ -1507,9 +1510,6 @@ export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas:
 
       const rawContent = await fs.readFile(filePath, 'utf8');
       const allLines = rawContent.split('\n');
-
-      const offset: number = params.offset ?? 0;
-      const limit: number | undefined = params.limit;
       const isPartialView = offset !== 0 || limit != null;
 
       const slicedLines = limit != null ? allLines.slice(offset, offset + limit) : allLines.slice(offset);
@@ -1723,7 +1723,10 @@ export function makeGrepTool(workspacePath: string, schemas: Record<string, any>
       // Apply head_limit
       const lines = stdout.split('\n').filter(l => l.length > 0);
       const truncated = lines.length > headLimit;
-      const result = lines.slice(0, headLimit).join('\n');
+      let result = lines.slice(0, headLimit).join('\n');
+      if (truncated) {
+        result += `\n[Results truncated at ${headLimit} lines. Use a more specific pattern or increase head_limit.]`;
+      }
 
       return {
         content: [{ type: 'text', text: result || '(no matches)' }],
@@ -1750,7 +1753,15 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
-      const filePath: string = params.file_path;
+      const rawFilePath: string = params.file_path;
+      const absoluteFilePath = path.isAbsolute(rawFilePath)
+        ? rawFilePath
+        : path.join(workspacePath, rawFilePath);
+      // Enforce workspace boundary: prevent edits outside the workspace
+      if (!absoluteFilePath.startsWith(workspacePath)) {
+        throw new Error(`Edit target is outside the workspace: ${rawFilePath}`);
+      }
+      const filePath: string = absoluteFilePath;
       const oldString: string = params.old_string;
       const newString: string = params.new_string;
       const replaceAll: boolean = params.replace_all ?? false;
