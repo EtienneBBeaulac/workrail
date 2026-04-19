@@ -126,7 +126,7 @@ describe('End-to-end routine injection through the compiler', () => {
 
 describe('Lean workflow — Phase 1 orchestration with injected routine', () => {
   it('compiles with the three-part Phase 1 structure (hypothesis, design, select)', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
@@ -152,7 +152,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
   });
 
   it('hypothesis step references initialHypothesis context variable', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -162,7 +162,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
   });
 
   it('QUICK design step has rigorMode=QUICK runCondition', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -172,12 +172,13 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
       and: [
         { var: 'taskComplexity', not_equals: 'Small' },
         { var: 'rigorMode', equals: 'QUICK' },
+        { var: 'solutionFixed', not_equals: true },
       ],
     });
   });
 
   it('deep design routine steps inherit compound runCondition (not Small AND not QUICK)', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
     const routine = loadRoutineJson('tension-driven-design.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
@@ -187,6 +188,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
       and: [
         { var: 'taskComplexity', not_equals: 'Small' },
         { var: 'rigorMode', not_equals: 'QUICK' },
+        { var: 'solutionFixed', not_equals: true },
       ],
     };
 
@@ -199,7 +201,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
   });
 
   it('both design paths produce design-candidates.md as unified output contract', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -218,7 +220,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
   });
 
   it('challenge-and-select step captures selectedApproach and references comparison', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -230,7 +232,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
   });
 
   it('preserves all other phases after restructured Phase 1', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -246,7 +248,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
   });
 
   it('arg substitution works in the deep design path (deliverableName)', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -263,7 +265,7 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
 
 describe('Lean workflow — injected review routines inside loops', () => {
   it('expands the design review routine inside Phase 2 while keeping workflow-owned wrapper steps', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
     const routine = loadRoutineJson('design-review.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
@@ -289,7 +291,7 @@ describe('Lean workflow — injected review routines inside loops', () => {
   });
 
   it('expands the final verification routine inside Phase 7 while keeping fix-and-loop-control in workflow', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
     const routine = loadRoutineJson('final-verification.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
@@ -314,7 +316,7 @@ describe('Lean workflow — injected review routines inside loops', () => {
   });
 
   it('review routines inherit their parent loop-step run conditions when expanded', () => {
-    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.lean.v2.json');
+    const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     expect(result.isOk()).toBe(true);
