@@ -8,7 +8,12 @@ const breakingReleaseType = allowMajorRelease ? "major" : "minor";
 
 module.exports = {
   branches: [
-    // Auto-releases on every merge: published as @beta (e.g. 3.41.0-beta.1)
+    // Stable channel: the 'release' branch publishes clean versions (e.g. 3.41.0) to @latest.
+    // This branch is currently unused -- promotion is done via `npm dist-tag add` in
+    // the "Promote to latest" GitHub Actions workflow instead.
+    // Defined here because semantic-release requires at least one non-prerelease branch.
+    "release",
+    // Auto-releases on every merge to main: published as @beta (e.g. 3.41.0-beta.1)
     { name: "main", channel: "beta", prerelease: "beta" },
   ],
   tagFormat: "v${version}",
