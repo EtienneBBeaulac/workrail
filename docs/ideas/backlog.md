@@ -6027,3 +6027,18 @@ If `optional: true` and no source resolves: `outputVar = null`, workflow continu
 - What is the `contextType` vocabulary? Start with `shaped-pitch` -- what else? (`discovery-notes`, `design-spec`, `api-contract`?)
 - Glean false-positive risk: wrong document fed as shaped input silently constrains wrong scope. Needs confidence threshold or explicit user confirmation when Glean is the only hit.
 
+
+---
+
+## Completed (Apr 19, 2026)
+
+### wr.shaping -- Faithful Shape Up shaping workflow
+
+Created `workflows/wr.shaping.json`. Faithful Shape Up methodology, tech-agnostic, produces `.workrail/current-pitch.md` only. Nine steps: ingest → frame gate → diverge (6 shapes, Verbalized Sampling) → converge → breadboard + elements → rabbit holes + no-gos → draft/critique loop → approval gate → write pitch.md. Two human gates with autonomous fallback. Appetite is calendar-time only (xs/s/m/l/xl). No code-level content -- a pitch for a Kotlin app and a pitch for a Python service look structurally identical.
+
+### coding-task-workflow-agentic -- Upstream context Phase 0.5
+
+Added Phase 0.5 "Locate Upstream Context" to `coding-task-workflow-agentic.json`. Format-agnostic: the agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, etc.) to find any upstream document -- pitch, PRD, BRD, RFC, design doc, user story, Jira epic, etc. Sets `upstreamSpecDetected` + `solutionFixed` flags. When `solutionFixed=true`, design ideation phases (1a-1c) are skipped and Phase 1d translates upstream constraints directly into an engineering approach. Plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.
+
+Also consolidated from three workflow variants to one canonical file.
+
