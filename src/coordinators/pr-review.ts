@@ -193,6 +193,49 @@ export interface CoordinatorDeps {
 
   /** Resolved console HTTP server port (after lock file discovery). */
   readonly port: number;
+
+  /**
+   * Read file contents as UTF-8 string.
+   * Used by drainMessageQueue to read message-queue.jsonl and cursor files.
+   * Throws on ENOENT (caller handles the error as "no messages").
+   */
+  readonly readFile: (path: string) => Promise<string>;
+
+  /**
+   * Append content to a file, creating it if it does not exist.
+   * Used by drainMessageQueue to write outbox.jsonl notifications.
+   */
+  readonly appendFile: (path: string, content: string) => Promise<void>;
+
+  /**
+   * Create a directory (recursive: true = mkdir -p).
+   * Used by drainMessageQueue to ensure ~/.workrail/ exists before writing the cursor.
+   */
+  readonly mkdir: (path: string, options: { recursive: boolean }) => Promise<string | undefined>;
+
+  /**
+   * Return the user's home directory.
+   * Used by drainMessageQueue to build ~/.workrail paths.
+   */
+  readonly homedir: () => string;
+
+  /**
+   * Join path segments (same semantics as node:path join).
+   * Used by drainMessageQueue for cross-platform path construction.
+   */
+  readonly joinPath: (...paths: string[]) => string;
+
+  /**
+   * Return the current timestamp as ISO 8601 string.
+   * Used by drainMessageQueue to timestamp outbox notifications.
+   */
+  readonly nowIso: () => string;
+
+  /**
+   * Generate a UUIDv4.
+   * Used by drainMessageQueue to assign IDs to outbox notifications.
+   */
+  readonly generateId: () => string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -512,6 +555,257 @@ export interface CoordinatorPortDiscoveryDeps {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// MESSAGE QUEUE DRAIN TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Result of draining the message queue.
+ *
+ * INVARIANT: When `stop` is true, all other fields are informational only.
+ * The coordinator MUST honor `stop` before inspecting `skipPrNumbers` or
+ * `addPrNumbers`. Any messages processed alongside a stop are captured for
+ * diagnostic purposes but must not be acted on.
+ */
+export interface DrainResult {
+  /** True if any queued message requests the coordinator to stop. */
+  readonly stop: boolean;
+  /** The full text of the message that triggered the stop (for outbox/logging). */
+  readonly stopReason: string | null;
+  /** PR numbers to remove from the review list (from skip-pr messages). */
+  readonly skipPrNumbers: readonly number[];
+  /** PR numbers to add to the review list (from add-pr messages). */
+  readonly addPrNumbers: readonly number[];
+  /** Total number of valid messages processed in this drain. */
+  readonly messagesProcessed: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MESSAGE QUEUE DRAIN
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Drain the WorkTrain message queue for the current coordinator cycle.
+ *
+ * Reads new lines from ~/.workrail/message-queue.jsonl since the last run
+ * (tracked by ~/.workrail/message-queue-cursor.json) and acts on actionable
+ * messages. Appends outbox.jsonl notifications for each actionable message and
+ * advances the cursor so messages are not re-processed on the next invocation.
+ *
+ * Recognized command patterns (matched against QueuedMessage.message text):
+ * - /^\s*stop\b/i           -> coordinator must halt before any spawn
+ * - /\bskip[- ]pr\s#?(\d+)/i -> remove that PR from the review list
+ * - /\badd[- ]pr\s#?(\d+)/i  -> add that PR to the review list
+ * All other messages are treated as informational notes and skipped silently.
+ *
+ * WHY text parsing: QueuedMessage has no structured `kind` field today.
+ * Text matching follows the same pattern as parseFindingsFromNotes() in this
+ * file. A follow-up task should add a `kind` field to QueuedMessage to make
+ * routing type-safe and eliminate the text-parsing fragility.
+ *
+ * WHY cursor (not timestamp filter): the cursor pattern is strictly more
+ * correct than timestamp-based dedup. It is the same approach used by
+ * worktrain-inbox.ts (InboxCursor / inbox-cursor.json).
+ *
+ * INVARIANT: message-queue.jsonl is never modified -- only the cursor file
+ * is written. The queue is append-only per worktrain-tell.ts design.
+ */
+export async function drainMessageQueue(
+  deps: Pick<
+    CoordinatorDeps,
+    | 'readFile'
+    | 'appendFile'
+    | 'writeFile'
+    | 'mkdir'
+    | 'homedir'
+    | 'joinPath'
+    | 'nowIso'
+    | 'generateId'
+    | 'stderr'
+  >,
+): Promise<DrainResult> {
+  const workrailDir = deps.joinPath(deps.homedir(), '.workrail');
+  const queuePath = deps.joinPath(workrailDir, 'message-queue.jsonl');
+  const cursorPath = deps.joinPath(workrailDir, 'message-queue-cursor.json');
+  const outboxPath = deps.joinPath(workrailDir, 'outbox.jsonl');
+
+  // ── Read queue ───────────────────────────────────────────────────────────
+
+  let queueContent: string;
+  try {
+    queueContent = await deps.readFile(queuePath);
+  } catch (err) {
+    if (isEnoentError(err)) {
+      // Queue file doesn't exist yet -- no messages, proceed normally.
+      return { stop: false, stopReason: null, skipPrNumbers: [], addPrNumbers: [], messagesProcessed: 0 };
+    }
+    // Unexpected I/O error -- log and proceed as if empty.
+    deps.stderr(
+      `[WARN coord:drain reason=read_failed] drainMessageQueue: could not read message queue: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { stop: false, stopReason: null, skipPrNumbers: [], addPrNumbers: [], messagesProcessed: 0 };
+  }
+
+  const allLines = queueContent.split('\n').filter((line) => line.trim() !== '');
+  const parsedMessages: import('../cli/commands/worktrain-tell.js').QueuedMessage[] = [];
+
+  for (const line of allLines) {
+    try {
+      const msg = JSON.parse(line) as import('../cli/commands/worktrain-tell.js').QueuedMessage;
+      parsedMessages.push(msg);
+    } catch {
+      deps.stderr(`[WARN coord:drain reason=malformed_line] drainMessageQueue: skipped malformed JSONL line`);
+    }
+  }
+
+  const totalLines = parsedMessages.length;
+
+  // ── Read cursor ──────────────────────────────────────────────────────────
+
+  let lastReadCount = 0;
+  try {
+    const cursorContent = await deps.readFile(cursorPath);
+    const cursor = JSON.parse(cursorContent) as { lastReadCount?: unknown };
+    if (typeof cursor.lastReadCount === 'number' && cursor.lastReadCount >= 0) {
+      lastReadCount = cursor.lastReadCount;
+    }
+  } catch {
+    // Missing cursor or corrupt JSON -- default to 0 (process all messages).
+    lastReadCount = 0;
+  }
+
+  // Cursor desync guard: if queue was truncated/wiped, cursor may point past
+  // the end. Reset to 0 so all current messages are processed.
+  // (cursor === totalLines is the normal "all read" state -- no reset needed.)
+  if (lastReadCount > totalLines) {
+    lastReadCount = 0;
+  }
+
+  // ── Process new messages ─────────────────────────────────────────────────
+
+  const newMessages = parsedMessages.slice(lastReadCount);
+
+  let stop = false;
+  let stopReason: string | null = null;
+  const skipSet = new Set<number>();
+  const addSet = new Set<number>();
+  const outboxEntries: string[] = [];
+
+  const STOP_RE = /^\s*stop\b/i;
+  const SKIP_PR_RE = /\bskip[- ]pr[\s#]+([0-9]+)/i;
+  const ADD_PR_RE = /\badd[- ]pr[\s#]+([0-9]+)/i;
+
+  for (const msg of newMessages) {
+    const text = msg.message;
+
+    if (STOP_RE.test(text)) {
+      stop = true;
+      stopReason = text;
+      deps.stderr(
+        `[INFO coord:drain kind=stop ts=${msg.timestamp}] drainMessageQueue: stop signal received -- message: "${text}"`,
+      );
+      // Outbox notification includes full triggering text for diagnostics (FM1 mitigation).
+      outboxEntries.push(
+        JSON.stringify({
+          id: deps.generateId(),
+          message: `WorkTrain coordinator stopped by queued message: "${text}" (queued at ${msg.timestamp})`,
+          timestamp: deps.nowIso(),
+        }) + '\n',
+      );
+      continue;
+    }
+
+    const skipMatch = SKIP_PR_RE.exec(text);
+    if (skipMatch !== null) {
+      const prNum = parseInt(skipMatch[1]!, 10);
+      skipSet.add(prNum);
+      deps.stderr(
+        `[INFO coord:drain kind=skip-pr prNumber=${prNum} ts=${msg.timestamp}] drainMessageQueue: skip-pr signal received -- message: "${text}"`,
+      );
+      outboxEntries.push(
+        JSON.stringify({
+          id: deps.generateId(),
+          message: `WorkTrain coordinator skipping PR #${prNum} per queued message: "${text}" (queued at ${msg.timestamp})`,
+          timestamp: deps.nowIso(),
+        }) + '\n',
+      );
+      continue;
+    }
+
+    const addMatch = ADD_PR_RE.exec(text);
+    if (addMatch !== null) {
+      const prNum = parseInt(addMatch[1]!, 10);
+      addSet.add(prNum);
+      deps.stderr(
+        `[INFO coord:drain kind=add-pr prNumber=${prNum} ts=${msg.timestamp}] drainMessageQueue: add-pr signal received -- message: "${text}"`,
+      );
+      outboxEntries.push(
+        JSON.stringify({
+          id: deps.generateId(),
+          message: `WorkTrain coordinator adding PR #${prNum} per queued message: "${text}" (queued at ${msg.timestamp})`,
+          timestamp: deps.nowIso(),
+        }) + '\n',
+      );
+      continue;
+    }
+
+    // Informational note -- no action taken.
+  }
+
+  // ── Write outbox notifications ───────────────────────────────────────────
+
+  if (outboxEntries.length > 0) {
+    try {
+      await deps.mkdir(workrailDir, { recursive: true });
+      await deps.appendFile(outboxPath, outboxEntries.join(''));
+    } catch (err) {
+      // Outbox write failure is non-fatal. Actions are still honored.
+      deps.stderr(
+        `[WARN coord:drain reason=outbox_write_failed] drainMessageQueue: could not write outbox notifications: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // ── Advance cursor ───────────────────────────────────────────────────────
+  // WHY writeFile (not appendFile): the cursor is a single JSON object that
+  // must be overwritten on each run. appendFile would grow it unboundedly.
+
+  const newCursor = JSON.stringify({ lastReadCount: totalLines }, null, 2) + '\n';
+  try {
+    await deps.mkdir(workrailDir, { recursive: true });
+    await deps.writeFile(cursorPath, newCursor);
+  } catch (err) {
+    // Cursor write failure is non-fatal -- messages were already processed.
+    // Next run will re-read from the old cursor (at worst, messages are re-processed,
+    // which is safe for stop/skip/add idempotent actions).
+    deps.stderr(
+      `[WARN coord:drain reason=cursor_write_failed] drainMessageQueue: could not update cursor: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return {
+    stop,
+    stopReason,
+    skipPrNumbers: [...skipSet],
+    addPrNumbers: [...addSet],
+    messagesProcessed: newMessages.length,
+  };
+}
+
+/**
+ * Returns true if the error is a Node.js ENOENT (file not found).
+ * WHY local copy: worktrain-inbox.ts has an identical function -- this avoids
+ * a cross-module dependency for a 5-line utility.
+ */
+function isEnoentError(err: unknown): boolean {
+  return (
+    err !== null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as { code: unknown }).code === 'ENOENT'
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // COORDINATOR CORE
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -542,6 +836,37 @@ export async function runPrReviewCoordinator(
     reportLines.push(line);
   }
 
+  // ---- Message queue drain ----
+  // Drain before any spawn (never mid-agent-run). Acts on stop/skip-pr/add-pr
+  // signals queued via `worktrain tell` from phone or terminal.
+  // INVARIANT: check drainResult.stop BEFORE acting on skip/add arrays.
+  const drainResult = await drainMessageQueue(deps);
+  if (drainResult.messagesProcessed > 0) {
+    const skipStr = drainResult.skipPrNumbers.length > 0
+      ? `, skip=[${drainResult.skipPrNumbers.join(',')}]`
+      : '';
+    const addStr = drainResult.addPrNumbers.length > 0
+      ? `, add=[${drainResult.addPrNumbers.join(',')}]`
+      : '';
+    log(`[drain] processed ${drainResult.messagesProcessed} message(s)${skipStr}${addStr}${drainResult.stop ? ', STOP SIGNAL' : ''}`);
+  }
+
+  // Honor stop signal -- exit cleanly before spawning any agent.
+  if (drainResult.stop) {
+    const stopMsg = drainResult.stopReason ?? 'stop signal in message queue';
+    log(`  STOP: coordinator halted by queued message: "${stopMsg}"`);
+    const result: CoordinatorResult = {
+      reviewed: 0,
+      approved: 0,
+      escalated: 0,
+      mergedPrs: [],
+      reportPath,
+      hasErrors: false,
+    };
+    await writeReport(deps, reportPath, reportLines, result);
+    return result;
+  }
+
   // ---- Stage 1: Gather PRs ----
   log('[1/3] Gathering open PRs...');
   const stageStart = deps.now();
@@ -554,6 +879,29 @@ export async function runPrReviewCoordinator(
     log('  [dry-run] would call gh pr list');
   } else {
     prs = await deps.listOpenPRs(opts.workspace);
+  }
+
+  // Apply add-pr from message queue (before skip-pr, before dedup).
+  if (drainResult.addPrNumbers.length > 0) {
+    const existingNums = new Set(prs.map((p) => p.number));
+    for (const addNum of drainResult.addPrNumbers) {
+      if (!existingNums.has(addNum)) {
+        prs = [...prs, { number: addNum, title: `PR #${addNum}`, headRef: '' }];
+        existingNums.add(addNum);
+        log(`  [drain] added PR #${addNum} from message queue`);
+      }
+    }
+  }
+
+  // Apply skip-pr from message queue.
+  if (drainResult.skipPrNumbers.length > 0) {
+    const skipSet = new Set(drainResult.skipPrNumbers);
+    const prsBefore = prs.length;
+    prs = prs.filter((p) => !skipSet.has(p.number));
+    const skippedCount = prsBefore - prs.length;
+    if (skippedCount > 0) {
+      log(`  [drain] skipped ${skippedCount} PR(s) from message queue: [${[...skipSet].join(',')}]`);
+    }
   }
 
   log(`  done (${formatElapsed(deps.now() - stageStart)}) -- ${prs.length} PR(s) found`);

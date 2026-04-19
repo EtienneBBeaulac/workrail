@@ -15,7 +15,9 @@ import {
   buildFixGoal,
   formatElapsed,
   runPrReviewCoordinator,
+  drainMessageQueue,
   type CoordinatorDeps,
+  type DrainResult,
   type PrSummary,
   type ReviewFindings,
   type PrReviewOpts,
@@ -486,6 +488,9 @@ function makeFakeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps
   const writtenFiles = new Map<string, string>();
   const stderrLines: string[] = [];
 
+  // In-memory filesystem shared by readFile/appendFile/writeFile for drain tests.
+  const fakeFiles = new Map<string, string>();
+
   const base: CoordinatorDeps = {
     spawnSession: async (workflowId, goal) => {
       spawnCalls.push({ workflowId, goal });
@@ -515,12 +520,30 @@ function makeFakeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps
     },
     writeFile: async (path, content) => {
       writtenFiles.set(path, content);
+      fakeFiles.set(path, content);
     },
     stderr: (line) => {
       stderrLines.push(line);
     },
     now: () => Date.now(),
     port: 3456,
+    readFile: async (path) => {
+      const content = fakeFiles.get(path);
+      if (content === undefined) {
+        const err = new Error(`ENOENT: no such file, open '${path}'`) as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      }
+      return content;
+    },
+    appendFile: async (path, content) => {
+      fakeFiles.set(path, (fakeFiles.get(path) ?? '') + content);
+    },
+    mkdir: async (_path, _opts) => undefined,
+    homedir: () => '/home/testuser',
+    joinPath: (...parts) => parts.filter(Boolean).join('/').replace(/\/+/g, '/'),
+    nowIso: () => '2026-04-18T00:00:00.000Z',
+    generateId: () => 'test-uuid-drain',
     ...overrides,
   };
 
@@ -699,5 +722,297 @@ describe('runPrReviewCoordinator', () => {
     const result = await runPrReviewCoordinator(deps, defaultOpts);
     expect(result.approved).toBe(0);
     expect(result.escalated).toBeGreaterThan(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// drainMessageQueue -- unit tests
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build minimal fake deps for drainMessageQueue tests.
+ * Uses an in-memory file map to avoid real filesystem access.
+ */
+function makeDrainDeps(initialFiles: Record<string, string> = {}): {
+  deps: Parameters<typeof drainMessageQueue>[0];
+  files: Map<string, string>;
+  stderrLines: string[];
+} {
+  const files = new Map<string, string>(Object.entries(initialFiles));
+  const stderrLines: string[] = [];
+  let uuidCounter = 0;
+
+  const deps: Parameters<typeof drainMessageQueue>[0] = {
+    readFile: async (p) => {
+      const content = files.get(p);
+      if (content === undefined) {
+        const err = new Error(`ENOENT: no such file, open '${p}'`) as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      }
+      return content;
+    },
+    appendFile: async (p, content) => {
+      files.set(p, (files.get(p) ?? '') + content);
+    },
+    writeFile: async (p, content) => {
+      files.set(p, content);
+    },
+    mkdir: async () => undefined,
+    homedir: () => '/home/test',
+    joinPath: (...parts) => parts.filter(Boolean).join('/').replace(/\/+/g, '/'),
+    nowIso: () => '2026-04-18T00:00:00.000Z',
+    generateId: () => `uuid-${++uuidCounter}`,
+    stderr: (line) => stderrLines.push(line),
+  };
+
+  return { deps, files, stderrLines };
+}
+
+/** Build a JSONL queue file string from an array of message texts. */
+function buildQueue(messages: Array<{ message: string; priority?: string }>): string {
+  return messages
+    .map((m, i) =>
+      JSON.stringify({
+        id: `msg-${i}`,
+        message: m.message,
+        timestamp: `2026-04-18T00:0${i}:00.000Z`,
+        priority: m.priority ?? 'normal',
+      }),
+    )
+    .join('\n') + '\n';
+}
+
+describe('drainMessageQueue', () => {
+  it('returns empty DrainResult when message-queue.jsonl does not exist', async () => {
+    const { deps } = makeDrainDeps(); // no files
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(false);
+    expect(result.stopReason).toBeNull();
+    expect(result.skipPrNumbers).toHaveLength(0);
+    expect(result.addPrNumbers).toHaveLength(0);
+    expect(result.messagesProcessed).toBe(0);
+  });
+
+  it('processes all messages when no cursor exists', async () => {
+    const queue = buildQueue([{ message: 'just a note' }, { message: 'another note' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.messagesProcessed).toBe(2);
+    expect(result.stop).toBe(false);
+  });
+
+  it('skips already-processed messages using cursor', async () => {
+    const queue = buildQueue([
+      { message: 'old note' },
+      { message: 'old note 2' },
+      { message: 'new note' },
+    ]);
+    const cursor = JSON.stringify({ lastReadCount: 2 }) + '\n';
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+      '/home/test/.workrail/message-queue-cursor.json': cursor,
+    });
+    const result = await drainMessageQueue(deps);
+    // Only the 3rd message (new note) is unread.
+    expect(result.messagesProcessed).toBe(1);
+  });
+
+  it('returns stop=true when message starts with "stop"', async () => {
+    const queue = buildQueue([{ message: 'stop the coordinator' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(true);
+    expect(result.stopReason).toBe('stop the coordinator');
+  });
+
+  it('stop is not triggered when "stop" appears mid-sentence', async () => {
+    const queue = buildQueue([{ message: 'please stop worrying about this PR' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    // "please stop ..." does NOT start with "stop" -- no false positive.
+    expect(result.stop).toBe(false);
+  });
+
+  it('stop is triggered by bare "stop" message', async () => {
+    const queue = buildQueue([{ message: 'stop' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(true);
+    expect(result.stopReason).toBe('stop');
+  });
+
+  it('extracts PR number from skip-pr message', async () => {
+    const queue = buildQueue([{ message: 'skip-pr 42' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(false);
+    expect(result.skipPrNumbers).toContain(42);
+  });
+
+  it('extracts PR number from skip-pr with # prefix', async () => {
+    const queue = buildQueue([{ message: 'skip-pr #99' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.skipPrNumbers).toContain(99);
+  });
+
+  it('extracts PR number from add-pr message', async () => {
+    const queue = buildQueue([{ message: 'add-pr 7' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(false);
+    expect(result.addPrNumbers).toContain(7);
+  });
+
+  it('deduplicates multiple skip-pr for the same PR', async () => {
+    const queue = buildQueue([
+      { message: 'skip-pr 42' },
+      { message: 'skip-pr 42' },
+    ]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.skipPrNumbers).toHaveLength(1);
+    expect(result.skipPrNumbers[0]).toBe(42);
+  });
+
+  it('deduplicates multiple add-pr for the same PR', async () => {
+    const queue = buildQueue([
+      { message: 'add-pr 10' },
+      { message: 'add-pr 10' },
+    ]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.addPrNumbers).toHaveLength(1);
+    expect(result.addPrNumbers[0]).toBe(10);
+  });
+
+  it('skips malformed JSONL lines without crashing', async () => {
+    const badLine = 'not valid json\n';
+    const goodLine = JSON.stringify({ id: 'm1', message: 'note', timestamp: '2026-04-18T00:00:00.000Z', priority: 'normal' }) + '\n';
+    const { deps, stderrLines } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': badLine + goodLine,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.messagesProcessed).toBe(1); // only the good line
+    expect(stderrLines.some((l) => l.includes('malformed_line'))).toBe(true);
+  });
+
+  it('resets cursor to 0 when cursor exceeds total lines (desync guard)', async () => {
+    const queue = buildQueue([{ message: 'new message' }]); // 1 line total
+    const cursor = JSON.stringify({ lastReadCount: 99 }) + '\n'; // cursor beyond file
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+      '/home/test/.workrail/message-queue-cursor.json': cursor,
+    });
+    const result = await drainMessageQueue(deps);
+    // After desync reset, all 1 message is processed.
+    expect(result.messagesProcessed).toBe(1);
+  });
+
+  it('advances cursor after processing', async () => {
+    const queue = buildQueue([{ message: 'note 1' }, { message: 'note 2' }]);
+    const { deps, files } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    await drainMessageQueue(deps);
+    const cursorContent = files.get('/home/test/.workrail/message-queue-cursor.json');
+    expect(cursorContent).toBeDefined();
+    const cursor = JSON.parse(cursorContent!) as { lastReadCount: number };
+    expect(cursor.lastReadCount).toBe(2);
+  });
+
+  it('appends outbox notification when stop is triggered', async () => {
+    const queue = buildQueue([{ message: 'stop now' }]);
+    const { deps, files } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    await drainMessageQueue(deps);
+    const outbox = files.get('/home/test/.workrail/outbox.jsonl');
+    expect(outbox).toBeDefined();
+    expect(outbox).toContain('stop now');
+    expect(outbox).toContain('WorkTrain coordinator stopped');
+  });
+
+  it('appends outbox notification when skip-pr is triggered', async () => {
+    const queue = buildQueue([{ message: 'skip-pr 42' }]);
+    const { deps, files } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    await drainMessageQueue(deps);
+    const outbox = files.get('/home/test/.workrail/outbox.jsonl');
+    expect(outbox).toContain('skipping PR #42');
+  });
+
+  it('appends outbox notification when add-pr is triggered', async () => {
+    const queue = buildQueue([{ message: 'add-pr 7' }]);
+    const { deps, files } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    await drainMessageQueue(deps);
+    const outbox = files.get('/home/test/.workrail/outbox.jsonl');
+    expect(outbox).toContain('adding PR #7');
+  });
+
+  it('emits [INFO coord:drain] stderr log for stop signal', async () => {
+    const queue = buildQueue([{ message: 'stop' }]);
+    const { deps, stderrLines } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    await drainMessageQueue(deps);
+    expect(stderrLines.some((l) => l.includes('[INFO coord:drain kind=stop'))).toBe(true);
+  });
+
+  it('note-only messages do not produce outbox entries', async () => {
+    const queue = buildQueue([{ message: 'just thinking out loud' }]);
+    const { deps, files } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    await drainMessageQueue(deps);
+    expect(files.has('/home/test/.workrail/outbox.jsonl')).toBe(false);
+  });
+
+  it('stop takes precedence when mixed with skip-pr in same queue', async () => {
+    const queue = buildQueue([
+      { message: 'skip-pr 10' },
+      { message: 'stop' },
+    ]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(true);
+    // skip-pr is also recorded (informational) -- stop wins at call site
+    expect(result.skipPrNumbers).toContain(10);
+  });
+
+  it('handles cursor = totalLines (all messages already read) as no-op', async () => {
+    const queue = buildQueue([{ message: 'old note' }]);
+    const cursor = JSON.stringify({ lastReadCount: 1 }) + '\n';
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+      '/home/test/.workrail/message-queue-cursor.json': cursor,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.messagesProcessed).toBe(0);
+    expect(result.stop).toBe(false);
   });
 });
