@@ -372,6 +372,30 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Workflow
 export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
 
 /**
+ * Registry mapping WorkRail session IDs to steer callbacks.
+ *
+ * Used by the HTTP steer endpoint (POST /api/v2/sessions/:sessionId/steer) to inject
+ * text into a running daemon session's next agent turn. When a session starts, it
+ * registers a callback; when it ends, it deregisters. The HTTP handler calls the
+ * callback directly -- JavaScript's single-threaded event loop makes this safe without
+ * any locking (the HTTP handler and the turn_end subscriber cannot interleave).
+ *
+ * WHY a named type alias (not a class): three trivial operations (set, delete, get/call)
+ * don't warrant a class. The Map is the correct data structure; the alias names the
+ * domain concept at all call sites.
+ *
+ * WHY (text: string) => void and not a richer type: the steer callback is a one-way
+ * push into the pending steer queue. The HTTP layer handles response serialization;
+ * the registry is purely a dispatch table. For v2, consider adding a signalId for
+ * request/response correlation (see design-review-findings-mid-session-signaling.md).
+ *
+ * Daemon-only: this registry is only populated by daemon sessions. MCP-mode sessions
+ * do not register callbacks -- the HTTP endpoint returns 404 for their session IDs.
+ * TODO(v2): Extend to MCP-mode sessions if mid-step injection proves necessary.
+ */
+export type SteerRegistry = Map<string, (text: string) => void>;
+
+/**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
  *
  * Each active runWorkflow() call writes a per-session file to DAEMON_SESSIONS_DIR.
@@ -1110,7 +1134,7 @@ export function makeContinueWorkflowTool(
  * @param getCurrentToken - Getter that returns the current continueToken from the
  *   runWorkflow() closure. Called at tool execution time, not construction time.
  * @param onAdvance - Called after a successful step advance with the next step text
- *   and the new continueToken. Sets pendingSteerText and updates currentContinueToken.
+ *   and the new continueToken. Appends step text to pendingSteerParts and updates currentContinueToken.
  * @param onComplete - Called when the workflow is complete.
  * @param onTokenUpdate - Called when the continueToken changes without an advance
  *   (i.e., on a blocked retry). Updates currentContinueToken in the runWorkflow() closure.
@@ -2147,6 +2171,7 @@ export async function runWorkflow(
   apiKey: string,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
+  steerRegistry?: SteerRegistry,
 ): Promise<WorkflowRunResult> {
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
@@ -2369,6 +2394,21 @@ export async function runWorkflow(
   // paths above (model validation failure, start_workflow failure) happen before this point.
   if (workrailSessionId !== null) {
     daemonRegistry?.register(workrailSessionId, trigger.workflowId);
+  }
+
+  // ---- SteerRegistry: register steer callback for coordinator injection ----
+  // The steer callback pushes text onto pendingSteerParts; it is drained by the
+  // turn_end subscriber and delivered to the agent via agent.steer().
+  //
+  // WHY registered here (not at top of function): workrailSessionId is the registry key.
+  // It is only available after parseContinueTokenOrFail() succeeds above.
+  //
+  // Registration gap: there is a ~50ms window between session creation
+  // (executeStartWorkflow()) and this registration call. A coordinator that calls
+  // POST /api/v2/sessions/:sessionId/steer in that window receives 404. Coordinators
+  // should retry once on 404 during session start-up.
+  if (workrailSessionId !== null) {
+    steerRegistry?.set(workrailSessionId, (text: string) => { pendingSteerParts.push(text); });
   }
 
   // Crash safety: persist tokens before starting the agent loop. A crash between
@@ -2755,6 +2795,12 @@ export async function runWorkflow(
     // and mutate the closed-over timeoutReason variable. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    // Deregister steer callback so the HTTP endpoint returns 404 for completed sessions.
+    // WHY in finally: must run even on error or abort -- stale registry entries would make
+    // the endpoint return 200 (calling the closed-over callback) on a dead session.
+    if (workrailSessionId !== null) {
+      steerRegistry?.delete(workrailSessionId);
+    }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
   }
 

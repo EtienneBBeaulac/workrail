@@ -418,6 +418,7 @@ program
             triggerRouter: handle.router,
             serverVersion: pkg.version,
             workflowService,
+            steerRegistry: handle.steerRegistry,
           });
 
           let consoleHandle: import('./trigger/daemon-console.js').DaemonConsoleHandle | null = null;

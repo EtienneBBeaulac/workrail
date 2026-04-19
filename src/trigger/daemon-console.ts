@@ -27,6 +27,7 @@ import * as os from 'node:os';
 import type { V2ToolContext } from '../mcp/types.js';
 import type { TriggerRouter } from './trigger-router.js';
 import type { WorkflowService } from '../application/services/workflow-service.js';
+import type { SteerRegistry } from '../daemon/workflow-runner.js';
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 
@@ -60,6 +61,13 @@ export interface StartDaemonConsoleOptions {
   readonly workflowService?: WorkflowService;
   /** Override the lock file path (for testing). */
   readonly lockFilePath?: string;
+  /**
+   * Steer registry for coordinator injection via POST /sessions/:id/steer.
+   * Must be the same instance passed to TriggerRouter's constructor so the HTTP
+   * endpoint can reach callbacks registered by running daemon sessions.
+   * When absent, the steer endpoint returns 503.
+   */
+  readonly steerRegistry?: SteerRegistry;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +122,8 @@ export async function startDaemonConsole(
   });
 
   // Mount console routes. Pass ctx as v2ToolContext to enable the AUTO dispatch
-  // endpoint, and triggerRouter so dispatches go through the daemon's queue.
+  // endpoint, triggerRouter so dispatches go through the daemon's queue, and
+  // steerRegistry so POST /sessions/:id/steer can reach running session callbacks.
   // timingRingBuffer and toolCallsPerfFile are intentionally omitted -- the daemon
   // console does not track per-tool timing (dev perf endpoint returns empty).
   const stopWatcher = mountConsoleRoutes(
@@ -126,6 +135,7 @@ export async function startDaemonConsole(
     options.serverVersion,
     ctx,
     options.triggerRouter,
+    options.steerRegistry,
   );
 
   // 404 catch-all (must be installed after all routes)

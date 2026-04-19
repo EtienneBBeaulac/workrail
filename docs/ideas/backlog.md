@@ -5891,3 +5891,37 @@ Coordinator logic:
 - Phase 1: coordinator scripts withhold `complete_step` advancement until the condition is met. This already works today -- the coordinator just doesn't advance the session until the fix agent is done.
 - Phase 2: the coordinator passes structured context when advancing: `complete_step(session, { injectedContext: fixSummary })`. The session receives it as part of the next step's prompt.
 - Phase 3: declarative pipelines -- workflow JSON declares that step N waits for an external condition before proceeding. The coordinator reads this and manages the timing automatically. No hand-coded coordinator script needed for common patterns.
+
+---
+
+### Coordinatable workflow steps: confirmation points the coordinator can satisfy (needs discovery, Apr 18, 2026)
+
+⚠️ **Needs discovery before implementation. The questions below are open, not answered.**
+
+**The insight:** workflows already have `requireConfirmation: true` on certain steps -- these are natural coordination points. Right now they pause for a human. The idea is to make them also pausable-for-a-coordinator, so a coordinator (or another agent) can be the one that responds instead of a human.
+
+**The vision:**
+A workflow reaches a `requireConfirmation` step. In MCP mode (human-driven), it behaves exactly as today -- pauses and waits. In daemon/coordinator mode, instead of blocking forever, the coordinator can:
+- Inject a synthesized answer based on external work it just did ("architecture review found X, proceed with approach A")
+- Spawn another agent to generate the answer and inject its output
+- Ask a discovery agent to weigh in and forward the result
+- Simply forward a human's message from the message queue
+
+The original session never knows whether a human or a coordinator satisfied the confirmation. It just receives the next turn with context.
+
+**Why this is powerful:**
+Today the coordinator is external to the workflow -- it orchestrates sessions from outside. This makes the workflow itself coordinatable from within, so multi-agent collaboration can be declared in the workflow spec rather than bolted on in coordinator scripts.
+
+**What's unknown and needs discovery:**
+1. **Mechanism:** is this an enriched `requireConfirmation` (add a `coordinatable: true` flag?), a new step type (`requireCoordinatorInput`?), or something at the engine level? Tradeoffs between each.
+2. **What gets injected:** always a structured decision ("proceed/revise/abort + findings"), or also data injection ("here are the file contents", "here's what the API returned")? How does the step receive it -- as a new tool call result, as a steer, as part of the step prompt?
+3. **Coordinator discovery:** how does the coordinator know a step is waiting for it vs waiting for a human? Does it poll the session state? Does the session emit a `coordinator_gate_pending` event? (This connects to the `waitForCoordinator` spec in this backlog.)
+4. **Timeout/fallback:** if the coordinator never responds, what happens? Fall back to human? Error? Configurable?
+5. **MCP invariant:** must behave identically to today in MCP/human-driven mode. The coordinator path is additive, not a behavior change for existing users.
+
+**Relationship to other specs:**
+- "Long-running sessions: stay open across agent handoffs" -- the session pauses at the confirmation point, coordinator acts, session resumes
+- "POST /api/v2/sessions/:id/steer" -- this might be the injection mechanism
+- `signal_coordinator` tool -- the session might signal the coordinator instead of blocking
+- `waitForCoordinator` step flag (already in this backlog) -- same underlying need, different framing
+- "Coordinator review mode: self-healing vs comment-and-wait" -- confirmation points are where that routing decision gets expressed

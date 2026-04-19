@@ -21,6 +21,7 @@ import type { ToolCallTimingEntry, ToolCallTimingRingBuffer } from '../../mcp/to
 import { isDevMode } from '../../mcp/dev-mode.js';
 import type { TriggerRouter } from '../../trigger/trigger-router.js';
 import type { V2ToolContext } from '../../mcp/types.js';
+import type { SteerRegistry } from '../../daemon/workflow-runner.js';
 import { runWorkflow } from '../../daemon/workflow-runner.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
@@ -134,6 +135,7 @@ export function mountConsoleRoutes(
   serverVersion?: string,
   v2ToolContext?: V2ToolContext,
   triggerRouter?: TriggerRouter,
+  steerRegistry?: SteerRegistry,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -864,6 +866,9 @@ export function mountConsoleRoutes(
         trigger,
         v2ToolContext,
         apiKey ?? '',
+        undefined,   // daemonRegistry -- not available in this path
+        undefined,   // emitter -- not available in this path
+        steerRegistry,
       ).then((result) => {
         if (result._tag === 'success') {
           console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
@@ -911,6 +916,50 @@ export function mountConsoleRoutes(
     }));
 
     res.json({ success: true, data: { triggers } });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Session steer endpoint
+  //
+  // POST /api/v2/sessions/:sessionId/steer
+  //
+  // Injects text into a running daemon session's next agent turn. The coordinator
+  // calls this endpoint between a session's complete_step() call and the daemon's
+  // next agent.steer() invocation. The injected text is concatenated with the step
+  // advance text and delivered in a single steer message on the next turn_end event.
+  //
+  // Daemon-only: requires steerRegistry to be provided at server startup (i.e., the
+  // daemon passes it via mountConsoleRoutes). Standalone console returns 503.
+  //
+  // Auth: localhost-only (127.0.0.1 binding in daemon-console.ts). No token auth in v1.
+  // TODO(v2): Add token auth before any multi-user or remote deployment.
+  //
+  // Registration gap: sessions register their steer callback ~50ms after creation.
+  // A coordinator calling this endpoint immediately after POST /auto/dispatch may
+  // receive 404. Retry once on 404 during session start-up.
+  //
+  // MCP-mode sessions do not register callbacks -- this endpoint returns 404 for them.
+  // TODO(v2): Extend to MCP-mode sessions if mid-step injection proves necessary.
+  // ---------------------------------------------------------------------------
+  app.post('/api/v2/sessions/:sessionId/steer', express.json(), (req: Request, res: Response) => {
+    if (!steerRegistry) {
+      res.status(503).json({ success: false, error: 'Steer not available (not a daemon context).' });
+      return;
+    }
+    const { sessionId } = req.params;
+    const body = req.body as { text?: unknown };
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) {
+      res.status(400).json({ success: false, error: 'text is required and must be a non-empty string.' });
+      return;
+    }
+    const callback = steerRegistry.get(sessionId);
+    if (!callback) {
+      res.status(404).json({ success: false, error: 'Session not found or not a daemon session.' });
+      return;
+    }
+    callback(text);
+    res.json({ success: true });
   });
 
   // --- Static file serving for Console UI ---

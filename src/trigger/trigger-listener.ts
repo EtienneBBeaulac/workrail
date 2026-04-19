@@ -26,6 +26,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js';
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
+import type { SteerRegistry } from '../daemon/workflow-runner.js';
 import { loadWorkrailConfigFile, loadWorkspacesFromConfigFile } from '../config/config-file.js';
 import { NotificationService } from './notification-service.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
@@ -60,6 +61,12 @@ export interface TriggerListenerHandle {
    * listTriggers() without re-creating the router or duplicating dependencies.
    */
   readonly router: TriggerRouter;
+  /**
+   * The steer registry shared with TriggerRouter.
+   * Pass to startDaemonConsole() so POST /sessions/:id/steer can dispatch steers
+   * to sessions running inside TriggerRouter's dispatch queue.
+   */
+  readonly steerRegistry: SteerRegistry;
   stop(): Promise<void>;
 }
 
@@ -343,9 +350,15 @@ export async function startTriggerListener(
     ? new NotificationService({ macOs: notifyMacOs, webhookUrl: notifyWebhook })
     : undefined;
 
+  // Create the steer registry for coordinator injection via POST /sessions/:id/steer.
+  // WHY created here (not in TriggerRouter): trigger-listener.ts is the composition root
+  // that wires TriggerRouter and DaemonConsole together. Both need the SAME registry instance
+  // so the HTTP endpoint dispatches to callbacks registered by TriggerRouter's sessions.
+  const steerRegistry: SteerRegistry = new Map();
+
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry);
   const app = createTriggerApp(router);
 
   // Create and start the polling scheduler.
@@ -415,6 +428,7 @@ export async function startTriggerListener(
       resolve({
         port: actualPort,
         router,
+        steerRegistry,
         stop: async () => {
           // Stop polling BEFORE closing the HTTP server to prevent dispatch()
           // calls after the router's queue has been drained.
