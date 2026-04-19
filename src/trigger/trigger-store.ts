@@ -550,10 +550,11 @@ function validateAndResolveTrigger(
   }
 
   // Fields required unconditionally (workspacePath is handled separately below).
-  const requiredStringFields: Array<Extract<keyof ParsedTriggerRaw, 'provider' | 'workflowId' | 'goal'>> = [
+  // NOTE: 'goal' is intentionally excluded here -- it may be absent for late-bound triggers.
+  // See the late-bound goal injection block below (after hmacSecret resolution).
+  const requiredStringFields: Array<Extract<keyof ParsedTriggerRaw, 'provider' | 'workflowId'>> = [
     'provider',
     'workflowId',
-    'goal',
   ];
   for (const field of requiredStringFields) {
     const v: string | undefined = raw[field];
@@ -650,8 +651,45 @@ function validateAndResolveTrigger(
     hmacSecret = secretResult.value;
   }
 
-  // Assemble optional new fields
-  const goalTemplate = raw.goalTemplate?.trim();
+  // ---------------------------------------------------------------------------
+  // Late-bound goal injection (default goalTemplate: "{{$.goal}}")
+  //
+  // WHY: static goals in triggers.yml only work for scheduled/cron-style tasks.
+  // Dynamic-goal use cases (PR review, incident response, webhook dispatch) need
+  // the goal to come from the webhook payload at dispatch time. This default makes
+  // that work without any explicit triggers.yml configuration.
+  //
+  // Injection rules:
+  //   - goal absent + goalTemplate absent  -> inject both: use payload $.goal at dispatch
+  //     time; fall back to LATE_BOUND_GOAL_SENTINEL if payload has no goal field.
+  //   - goal absent + goalTemplate present -> inject sentinel as static fallback only.
+  //   - goal present (any)                 -> no injection; existing behavior unchanged.
+  //
+  // LATE_BOUND_GOAL_SENTINEL is the static fallback that TriggerDefinition.goal requires
+  // (type: string, never undefined). It only reaches the session if the webhook payload
+  // has no $.goal field -- in which case interpolateGoalTemplate already logs a warning.
+  // ---------------------------------------------------------------------------
+  const LATE_BOUND_GOAL_SENTINEL = 'Autonomous task';
+
+  let resolvedGoal: string;
+  let resolvedGoalTemplate: string | undefined = raw.goalTemplate?.trim();
+
+  if (!raw.goal?.trim()) {
+    resolvedGoal = LATE_BOUND_GOAL_SENTINEL;
+    if (!resolvedGoalTemplate) {
+      // Neither goal nor goalTemplate configured -- default to payload $.goal.
+      resolvedGoalTemplate = '{{$.goal}}';
+      console.log(
+        `[TriggerStore] Trigger "${rawId}" has no static goal or goalTemplate -- ` +
+        `defaulting to goalTemplate: "{{$.goal}}" (goal taken from webhook payload). ` +
+        `Fallback goal if payload has no goal field: "${LATE_BOUND_GOAL_SENTINEL}".`,
+      );
+    }
+  } else {
+    resolvedGoal = raw.goal.trim();
+  }
+
+  // Assemble optional new fields (goalTemplate already resolved above)
   const referenceUrlsRaw = raw.referenceUrls?.trim();
   // referenceUrls is stored as space-separated string in YAML (narrow parser limitation).
   // Split on whitespace and filter empty strings.
@@ -971,13 +1009,13 @@ function validateAndResolveTrigger(
     workflowId: raw.workflowId!.trim(),
     // workspacePath: always set -- from workspaceName resolution or from raw YAML.
     workspacePath: resolvedWorkspacePath,
-    goal: raw.goal!.trim(),
+    goal: resolvedGoal,
     concurrencyMode,
     ...(hmacSecret !== undefined ? { hmacSecret } : {}),
     ...(raw.contextMapping !== undefined
       ? { contextMapping: assembleContextMapping(raw.contextMapping) }
       : {}),
-    ...(goalTemplate ? { goalTemplate } : {}),
+    ...(resolvedGoalTemplate ? { goalTemplate: resolvedGoalTemplate } : {}),
     ...(referenceUrls !== undefined && referenceUrls.length > 0 ? { referenceUrls } : {}),
     ...(agentConfig !== undefined ? { agentConfig } : {}),
     ...(callbackUrl !== undefined ? { callbackUrl } : {}),
