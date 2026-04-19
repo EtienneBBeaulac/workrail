@@ -245,6 +245,36 @@ export interface ToolCallFailedEvent {
 }
 
 /**
+ * Emitted when the agent calls signal_coordinator to record a coordinator signal.
+ *
+ * WHY a separate event kind: coordinator signals are categorically different from
+ * tool calls, issues, or step advances. They are the agent-to-coordinator channel
+ * defined in docs/discovery/mid-session-coordinator-signaling.md (Phase 1 -- A).
+ * A distinct event kind lets the console, coordinator scripts, and `worktrain logs`
+ * filter and act on signals without parsing generic tool_called events.
+ *
+ * WHY signalKind is a string (not a closed enum here): the event layer mirrors the
+ * CoordinatorSignalKindSchema values from the artifact schema. Keeping it as a string
+ * avoids a cross-module enum import in daemon-events.ts. Consumers that need a closed
+ * enum should import CoordinatorSignalKindSchema from the artifact schema module.
+ */
+export interface SignalEmittedEvent {
+  readonly kind: 'signal_emitted';
+  readonly sessionId: string;
+  /**
+   * The signal kind ('progress' | 'finding' | 'data_needed' | 'approval_needed' | 'blocked').
+   * Matches the CoordinatorSignalKind values from coordinator-signal.ts.
+   */
+  readonly signalKind: string;
+  /** Short unique identifier for this signal (sig_<8 hex chars>). */
+  readonly signalId: string;
+  /** The payload provided by the agent (arbitrary key-value pairs). */
+  readonly payload: Readonly<Record<string, unknown>>;
+  /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
+  readonly workrailSessionId?: string;
+}
+
+/**
  * Emitted when the stuck-detection heuristics in workflow-runner.ts identify that
  * the agent is likely stuck and not making forward progress.
  *
@@ -301,7 +331,8 @@ export type DaemonEvent =
   | ToolCallStartedEvent
   | ToolCallCompletedEvent
   | ToolCallFailedEvent
-  | AgentStuckEvent;
+  | AgentStuckEvent
+  | SignalEmittedEvent;
 
 // ---------------------------------------------------------------------------
 // DaemonEventEmitter

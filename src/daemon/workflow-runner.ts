@@ -283,6 +283,19 @@ export interface WorkflowRunSuccess {
    * git commit + gh pr create as scripts. See src/trigger/delivery-action.ts.
    */
   readonly lastStepNotes?: string;
+  /**
+   * Artifacts from the last complete_step or continue_workflow call (the final step's artifacts).
+   * Populated when the agent calls complete_step or continue_workflow with artifacts[] on the
+   * completing step. Undefined if the agent did not provide artifacts on the final step.
+   *
+   * WHY this field exists: surfaces typed artifacts (e.g. wr.review_verdict) through the result
+   * type chain so callers -- including coordinators and spawn_agent parent sessions -- can read
+   * structured data without a separate HTTP round-trip. The pr-review coordinator currently reads
+   * artifacts via HTTP (getAgentResult), but future coordinators or spawn_agent calls can use this.
+   *
+   * Related: docs/discovery/artifacts-coordinator-channel.md, Candidate A.
+   */
+  readonly lastStepArtifacts?: readonly unknown[];
 }
 
 /** Failed workflow run (tool error, agent error, engine error, etc.). */
@@ -932,7 +945,7 @@ export function makeContinueWorkflowTool(
   sessionId: string,
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
-  onComplete: (notes: string | undefined) => void,
+  onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   // Optional injection point for testing -- defaults to the real implementation.
@@ -1041,9 +1054,13 @@ export function makeContinueWorkflowTool(
       }
 
       if (out.isComplete) {
-        // Pass the agent's notes from this final step to onComplete so the trigger
-        // layer can extract the structured handoff artifact for delivery.
-        onComplete(params.notesMarkdown as string | undefined);
+        // Pass the agent's notes and artifacts from this final step to onComplete so the
+        // trigger layer can extract the structured handoff artifact for delivery, and so
+        // coordinators can read typed artifacts via WorkflowRunSuccess.lastStepArtifacts.
+        onComplete(
+          params.notesMarkdown as string | undefined,
+          Array.isArray(params.artifacts) ? (params.artifacts as readonly unknown[]) : undefined,
+        );
         return {
           content: [{ type: 'text', text: 'Workflow complete. All steps have been executed.' }],
           details: out,
@@ -1107,7 +1124,7 @@ export function makeCompleteStepTool(
   ctx: V2ToolContext,
   getCurrentToken: () => string,
   onAdvance: (nextStepText: string, continueToken: string) => void,
-  onComplete: (notes: string | undefined) => void,
+  onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
   onTokenUpdate: (t: string) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
@@ -1246,7 +1263,9 @@ export function makeCompleteStepTool(
       }
 
       if (out.isComplete) {
-        onComplete(notes);
+        // Forward artifacts alongside notes so WorkflowRunSuccess.lastStepArtifacts is
+        // populated for coordinator consumption. See docs/discovery/artifacts-coordinator-channel.md.
+        onComplete(notes, Array.isArray(params.artifacts) ? (params.artifacts as readonly unknown[]) : undefined);
         return {
           content: [{ type: 'text', text: JSON.stringify({ status: 'complete' }) }],
           details: out,
@@ -1780,6 +1799,159 @@ export function makeReportIssueTool(
 }
 
 // ---------------------------------------------------------------------------
+// signal_coordinator tool
+// ---------------------------------------------------------------------------
+
+/**
+ * Directory that holds per-session signal JSONL files.
+ *
+ * Each concurrent runWorkflow() call appends its signals to
+ * ~/.workrail/signals/<sessionId>.jsonl. Coordinators can tail this file
+ * or read it at session boundaries without touching the durable session store.
+ *
+ * WHY a sidecar file instead of the v2 session store:
+ * The session store uses a re-entrancy guard (ExecutionSessionGate.activeSessions).
+ * At the point signal_coordinator executes, the gate is already held by the
+ * ongoing continue_workflow / complete_step machinery. Attempting a second
+ * session lock would return SESSION_LOCK_REENTRANT. The sidecar file avoids
+ * this entirely: it is a separate, lock-free append channel that the coordinator
+ * can read independently. The DaemonEventEmitter simultaneously broadcasts the
+ * signal to the daemon JSONL event stream for live console visibility.
+ */
+export const DAEMON_SIGNALS_DIR = path.join(os.homedir(), '.workrail', 'signals');
+
+/**
+ * Append a single JSON signal record to the per-session JSONL file.
+ *
+ * Fire-and-forget: errors are swallowed so a failed write never interrupts
+ * the session. Same contract as appendIssueAsync and DaemonEventEmitter.
+ */
+async function appendSignalAsync(
+  signalsDir: string,
+  sessionId: string,
+  record: SignalRecord,
+): Promise<void> {
+  await fs.mkdir(signalsDir, { recursive: true });
+  const filePath = path.join(signalsDir, `${sessionId}.jsonl`);
+  const line = JSON.stringify({ ...record, ts: Date.now() }) + '\n';
+  await fs.appendFile(filePath, line, 'utf8');
+}
+
+/** Payload written to the per-session JSONL sidecar (before ts is appended). */
+interface SignalRecord {
+  readonly signalId: string;
+  readonly sessionId: string;
+  readonly workrailSessionId?: string;
+  readonly signalKind: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Build the signal_coordinator tool for daemon sessions.
+ *
+ * The agent calls this to emit a structured coordinator signal without
+ * advancing the workflow step. The signal is written to:
+ * 1. ~/.workrail/signals/<sessionId>.jsonl -- sidecar JSONL for coordinator polling
+ * 2. The daemon event log (via DaemonEventEmitter) -- for live console visibility
+ *
+ * WHY NOT writing to the v2 session store directly:
+ * The session store uses a re-entrancy guard (ExecutionSessionGate). When
+ * signal_coordinator executes, the gate is already held by the in-flight
+ * continue_workflow / complete_step tool. Attempting withHealthySessionLock()
+ * would return SESSION_LOCK_REENTRANT and abort the signal write. The sidecar
+ * file is the correct channel for mid-step, non-advancing signal emission.
+ *
+ * WHY fire-and-observe (always returns immediately):
+ * The tool must not block the agent. Signals are best-effort observability
+ * artifacts -- a coordinator that reads them asynchronously is the intended
+ * consumer. The agent proceeds to its next tool call regardless.
+ *
+ * @param sessionId - Process-local UUID (keys the sidecar JSONL file).
+ * @param emitter - Optional event emitter for daemon JSONL visibility.
+ * @param workrailSessionId - WorkRail session ID for event correlation.
+ * @param signalsDirOverride - Override the signals directory (for tests).
+ */
+export function makeSignalCoordinatorTool(
+  sessionId: string,
+  emitter?: DaemonEventEmitter,
+  workrailSessionId?: string | null,
+  signalsDirOverride?: string,
+): AgentTool {
+  const signalsDir = signalsDirOverride ?? DAEMON_SIGNALS_DIR;
+
+  return {
+    name: 'signal_coordinator',
+    description:
+      'Emit a structured mid-session signal to the coordinator WITHOUT advancing the workflow step. ' +
+      'Use this to surface progress updates, intermediate findings, data requests, ' +
+      'approval requests, or blocking conditions while the session continues. ' +
+      'Always returns immediately -- fire-and-observe, never blocks. ' +
+      'Signal kinds: "progress" (heartbeat, no data needed), "finding" (intermediate result), ' +
+      '"data_needed" (request external data), "approval_needed" (request coordinator approval), ' +
+      '"blocked" (cannot continue without coordinator intervention).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        signalKind: {
+          type: 'string',
+          enum: ['progress', 'finding', 'data_needed', 'approval_needed', 'blocked'],
+          description: 'The kind of signal to emit.',
+        },
+        payload: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Structured data accompanying the signal. Pass {} for progress signals.',
+        },
+      },
+      required: ['signalKind', 'payload'],
+      additionalProperties: false,
+    },
+    label: 'signal_coordinator',
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+      const signalId = 'sig_' + randomUUID().replace(/-/g, '').slice(0, 8);
+      const signalKind = String(params.signalKind ?? 'progress');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload = (typeof params.payload === 'object' && params.payload !== null && !Array.isArray(params.payload))
+        ? (params.payload as Record<string, unknown>)
+        : {};
+
+      console.log(`[WorkflowRunner] Tool: signal_coordinator sessionId=${sessionId} signalKind=${signalKind} signalId=${signalId}`);
+
+      const record: SignalRecord = {
+        signalId,
+        sessionId,
+        ...(workrailSessionId != null ? { workrailSessionId } : {}),
+        signalKind,
+        payload,
+      };
+
+      // Fire-and-forget sidecar write. A failed write never blocks or throws.
+      void appendSignalAsync(signalsDir, sessionId, record).catch(() => {
+        // Intentionally empty: write failures are silently swallowed.
+      });
+
+      // Emit to the daemon event log for live console visibility.
+      emitter?.emit({
+        kind: 'signal_emitted',
+        sessionId,
+        signalKind,
+        signalId,
+        payload,
+        ...(workrailSessionId != null ? { workrailSessionId } : {}),
+      });
+
+      const result = { status: 'recorded' as const, signalId };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+        details: result,
+      };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------------------
 
@@ -1823,6 +1995,7 @@ Good pattern: "Question: Should I check the middleware? Answer: The workflow ste
 - \`Write\`: Write files.
 - \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND complete_step (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
 - \`spawn_agent\`: Delegate a sub-task to a child WorkRail session. BLOCKS until the child completes. Returns \`{ childSessionId, outcome: "success"|"error"|"timeout", notes: string }\`. Always check \`outcome\` before using \`notes\`. IMPORTANT: your session's time limit (maxSessionMinutes) keeps running while the child executes -- ensure your parent session has enough time for both your work AND the child's work. Maximum spawn depth is 3 by default (configurable). Use only when a step explicitly asks for delegation or when a clearly separable sub-task would benefit from its own WorkRail audit trail.
+- \`signal_coordinator\`: Emit a structured mid-session signal to the coordinator WITHOUT advancing the workflow step. Use when the step asks you to surface a finding, request data, request approval, or report a blocking condition. Always returns immediately -- fire-and-observe. Signal kinds: "progress", "finding", "data_needed", "approval_needed", "blocked".
 
 ## Execution contract
 1. Read the step carefully. Do ALL the work the step asks for.
@@ -2044,14 +2217,25 @@ export async function runWorkflow(
 
   // ---- Completion bridge ----
   // isComplete is written by continue_workflow tool's execute() when isComplete=true.
-  // pendingSteerText is written by the tool after a successful step advance.
+  // pendingSteerParts is written by the tool after a successful step advance.
   // Both are read only in the turn_end subscriber -- no race condition since
   // tool execution is sequential (toolExecution: 'sequential').
+  //
+  // WHY pendingSteerParts (array) instead of pendingSteerText (single string):
+  // Multiple complete_step/continue_workflow calls can fire in the same tool batch
+  // (though unusual). Using a push queue ensures no steer text is silently
+  // overwritten -- all parts are joined and injected together. This is also the
+  // correct shape for signal_coordinator to append coordinator context into the
+  // same steer window without clobbering the step-advance text.
   let isComplete = false;
-  let pendingSteerText: string | null = null;
+  const pendingSteerParts: string[] = [];
   // lastStepNotes is populated by onComplete when the agent's final continue_workflow
   // call includes output.notesMarkdown. Used by the trigger layer for delivery (git commit/PR).
   let lastStepNotes: string | undefined;
+  // lastStepArtifacts is populated by onComplete when the agent's final complete_step or
+  // continue_workflow call includes artifacts[]. Surfaces typed artifacts through the result
+  // type chain for coordinator consumption. See WorkflowRunSuccess.lastStepArtifacts.
+  let lastStepArtifacts: readonly unknown[] | undefined;
 
   // ---- Stuck detection state ----
   // WHY these variables: the turn_end subscriber needs them to check for stuck signals.
@@ -2076,7 +2260,7 @@ export async function runWorkflow(
   const MAX_ISSUE_SUMMARIES = 10;
 
   const onAdvance = (stepText: string, continueToken: string): void => {
-    pendingSteerText = stepText;
+    pendingSteerParts.push(stepText);
     stepAdvanceCount++;
     // WHY update currentContinueToken here: complete_step injects the token from
     // this closure variable. After each successful advance, the engine returns a new
@@ -2093,9 +2277,10 @@ export async function runWorkflow(
     emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(workrailSessionId) });
   };
 
-  const onComplete = (notes: string | undefined): void => {
+  const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
     isComplete = true;
     lastStepNotes = notes;
+    lastStepArtifacts = artifacts;
   };
 
   // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
@@ -2274,6 +2459,12 @@ export async function runWorkflow(
       schemas,
       emitter,
     ),
+    // WHY signal_coordinator is listed last: it is a mid-step observability tool,
+    // not a control-flow tool. Placing it after the primary workflow tools ensures
+    // the LLM reaches for complete_step / Bash / Read / Write before considering
+    // coordinator signals. The depth limit inside spawn_agent is a stricter
+    // enforcement boundary; signal_coordinator has no such guard.
+    makeSignalCoordinatorTool(sessionId, emitter, workrailSessionId),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----
@@ -2496,11 +2687,17 @@ export async function runWorkflow(
       });
     }
 
-    // If a step was advanced and workflow is not yet complete, inject the next step.
-    if (pendingSteerText !== null && !isComplete) {
-      const text = pendingSteerText;
-      pendingSteerText = null;
-      agent.steer(buildUserMessage(text));
+    // If step-advance parts are queued and workflow is not yet complete, inject them.
+    // WHY join with \n\n: each part is a full step prompt or context block. A blank
+    // line between them gives the LLM a clear visual separation without merging content.
+    // WHY drain-and-clear before steer: clearing the array synchronously before calling
+    // steer() prevents a second turn_end (fired after steer injects a message) from
+    // re-injecting stale parts if a concurrent tool were somehow to add to the array --
+    // though sequential tool execution makes this a theoretical concern only.
+    if (pendingSteerParts.length > 0 && !isComplete) {
+      const joined = pendingSteerParts.join('\n\n');
+      pendingSteerParts.length = 0;
+      agent.steer(buildUserMessage(joined));
     }
     // If isComplete, do not call steer() -- agent exits naturally on next turn
     // when there are no tool calls and no queued steering messages.
@@ -2623,5 +2820,6 @@ export async function runWorkflow(
     workflowId: trigger.workflowId,
     stopReason,
     ...(lastStepNotes !== undefined ? { lastStepNotes } : {}),
+    ...(lastStepArtifacts !== undefined ? { lastStepArtifacts } : {}),
   };
 }
