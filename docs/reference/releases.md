@@ -23,6 +23,8 @@ When beta is stable and ready to ship to users:
 
 The workflow runs `npm dist-tag add @exaudeus/workrail@<current-beta-version> latest`. No new version is created. The artifact users have been running on `@beta` becomes the stable release.
 
+**Known limitation:** the published version string retains the beta suffix (e.g. `3.41.0-beta.5`). This is correct for global CLI use (`npm install -g`) but means `^` semver ranges in `package.json` dependencies will not resolve to this version. This is acceptable for the current solo-developer phase and will be addressed before WorkRail has library consumers.
+
 ## Release authority
 
 Auto-releases to `@beta` are produced by **semantic-release** in GitHub Actions.
@@ -190,6 +192,7 @@ WORKRAIL_ALLOW_MAJOR_RELEASE=true npx semantic-release --dry-run --no-ci
 Use:
 
 - `.github/workflows/release-dry-run.yml`
+- `.github/workflows/promote-to-latest.yml`
 
 ## Source of truth
 
@@ -198,3 +201,4 @@ The behavior is implemented in:
 - `.releaserc.cjs`
 - `.github/workflows/release.yml`
 - `.github/workflows/release-dry-run.yml`
+- `.github/workflows/promote-to-latest.yml`

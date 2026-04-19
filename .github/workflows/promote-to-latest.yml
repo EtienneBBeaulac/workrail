@@ -31,7 +31,11 @@ jobs:
       - name: Find current @beta version
         id: beta
         run: |
-          VERSION=$(npm view @exaudeus/workrail@beta version)
+          VERSION=$(npm view @exaudeus/workrail@beta version 2>/dev/null || true)
+          if [ -z "$VERSION" ]; then
+            echo "No @beta version found. Merge to main first to publish a beta." >&2
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Promoting @exaudeus/workrail@$VERSION to @latest"
 
