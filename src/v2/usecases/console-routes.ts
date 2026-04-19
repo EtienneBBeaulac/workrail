@@ -278,6 +278,7 @@ export function mountConsoleRoutes(
     'agent_stuck',
     'llm_turn_started',
     'llm_turn_completed',
+    'signal_emitted',  // emitted by signal_coordinator tool
   ]);
 
   app.get('/api/v2/sessions/:sessionId/events', async (req: Request, res: Response) => {
@@ -313,6 +314,7 @@ export function mountConsoleRoutes(
     }
 
     let isClosed = false;
+    let isProcessing = false;
     let watcher: ReturnType<typeof fs.watch> | null = null;
 
     const cleanup = () => {
@@ -324,7 +326,8 @@ export function mountConsoleRoutes(
 
     /** Read new events from the log file, filter by sessionId, and write matching ones to the stream. */
     const processNewEvents = async () => {
-      if (isClosed) return;
+      if (isClosed || isProcessing) return;
+      isProcessing = true;
       const newEvents = await tailDaemonEvents(logFilePath, fileOffset);
 
       for (const event of newEvents) {
@@ -362,6 +365,7 @@ export function mountConsoleRoutes(
         // File was deleted or renamed mid-read -- reset to 0 for next poll.
         fileOffset = 0;
       }
+      isProcessing = false;
     };
 
     // Watch the daemon events directory. The log file for today may not exist yet;
