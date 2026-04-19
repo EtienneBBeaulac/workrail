@@ -5976,3 +5976,54 @@ When `coding-task-workflow-agentic` finds `.workrail/current-pitch.md`:
 5. Plan audit (Phase 4) checks for drift against the pitch
 6. Appetite is a hard ceiling -- oversized engineering work becomes follow-up tickets
 
+
+---
+
+## Idea: `context-gather` Step Type (Apr 19, 2026)
+
+### Problem
+
+Phase 0.5 in the coding workflow currently looks for a shaped pitch by checking a local path. This doesn't handle: coordinator-injected context, manually written docs (GDoc, Confluence, Notion), Glean-indexed artifacts, or URLs embedded in the task description. The search logic is duplicated if other workflows need the same document.
+
+### Proposed primitive
+
+A new engine-level step type `context-gather` that resolves a named context artifact from ordered sources:
+
+```json
+{
+  "type": "context-gather",
+  "id": "gather-pitch",
+  "contextType": "shaped-pitch",
+  "outputVar": "shapedInput",
+  "optional": true,
+  "sources": ["coordinator-injected", "local-paths", "task-url", "glean"]
+}
+```
+
+**Source resolution order (stops at first hit):**
+1. `coordinator-injected` -- coordinator already attached context of this type to the session (most common in autonomous mode)
+2. `local-paths` -- check `.workrail/current-pitch.md`, `pitch.md`, `PRD.md`, `.workrail/pitches/` (most recent)
+3. `task-url` -- extract any URL from the task description and fetch via WebFetch or matching MCP (GDoc, Confluence, Notion)
+4. `glean` -- search Glean for recent docs matching the task keywords and `contextType`; opt-in only (risk of false positives silently constraining wrong scope)
+
+If `optional: true` and no source resolves: `outputVar = null`, workflow continues normally.
+
+### Why engine-level, not a routine
+
+- Coordinator intercept requires the engine to check "has this type already been provided?" before running any search -- a routine can't express that
+- `contextType` is a declared intent multiple workflows can share (`wr.shaping`, `coding-task-workflow`, `wr.discovery`) without duplicating resolver logic
+- New sources (Linear, Jira, Notion) get added to the engine once, immediately available to all workflows
+
+### Relationship to existing work
+
+- Replaces/supersedes Phase 0.5's current local-path check in `coding-task-workflow-agentic`
+- Coordinator PR-review flow would inject `shaped-pitch` context before spawning the coding session
+- Any workflow that needs "find the spec/pitch/PRD for this task" uses the same step type
+
+### Open questions
+
+- How does the coordinator inject context into a session? Via a session variable set before `start_workflow`, or a new `inject_context` call?
+- How does `task-url` distinguish a GDoc URL from a Confluence URL from a Notion URL? MCP routing by domain?
+- What is the `contextType` vocabulary? Start with `shaped-pitch` -- what else? (`discovery-notes`, `design-spec`, `api-contract`?)
+- Glean false-positive risk: wrong document fed as shaped input silently constrains wrong scope. Needs confidence threshold or explicit user confirmation when Glean is the only hit.
+
