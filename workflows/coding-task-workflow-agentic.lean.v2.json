@@ -147,32 +147,6 @@
     "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS.",
     "SLICE DISCIPLINE: Phase 6 is a loop -- implement ONE slice per iteration. Do not implement multiple slices at once. The verification loop exists to catch drift per slice, not retroactively."
   ],
-  "references": [
-    {
-      "id": "authoring-spec",
-      "title": "Authoring Specification",
-      "source": "./spec/authoring-spec.json",
-      "purpose": "Canonical rules and constraints for workflow authoring. Consult when making structural decisions about workflow design.",
-      "authoritative": true,
-      "resolveFrom": "package"
-    },
-    {
-      "id": "workflow-schema",
-      "title": "Workflow JSON Schema",
-      "source": "./spec/workflow.schema.json",
-      "purpose": "The JSON schema that all workflow definitions must conform to. Use as the structural contract reference.",
-      "authoritative": true,
-      "resolveFrom": "package"
-    },
-    {
-      "id": "authoring-provenance",
-      "title": "Workflow Authoring Provenance",
-      "source": "./spec/authoring-spec.provenance.json",
-      "purpose": "Source-of-truth map showing what is canonical, derived, and non-canonical in workflow authoring guidance.",
-      "authoritative": false,
-      "resolveFrom": "package"
-    }
-  ],
   "steps": [
     {
       "id": "phase-0-understand-and-classify",
@@ -351,8 +325,23 @@
           }
         ]
       },
-      "prompt": "A shaped pitch exists. The product decisions are made -- your job is to translate them into an engineering approach.\n\nFrom the pitch, derive:\n1. **selectedApproach** -- the technical strategy that implements what the pitch describes. Name the key interfaces, types, and modules involved. Do not re-open product decisions (which features, what behavior) -- those are fixed by the pitch.\n2. **architectureRationale** -- which pitch invariants and no-gos drove the technical decisions.\n3. **pivotTriggers** -- conditions under which the approach needs revisiting (not product pivots -- engineering discoveries only).\n4. **acceptedTradeoffs** -- engineering tradeoffs accepted to stay within the pitch appetite.\n5. **identifiedFailureModes** -- technical risks in the approach.\n\nThe pitch appetite is a hard ceiling. If the full correct engineering approach would exceed the appetite, scope it down to fit -- do not expand. Record any engineering concerns that exceed the appetite as `followUpTickets`.\n\nCapture:\n- `selectedApproach`\n- `architectureRationale`\n- `pivotTriggers`\n- `acceptedTradeoffs`\n- `identifiedFailureModes`\n- `followUpTickets` (initialize if needed)",
-      "requireConfirmation": false
+      "prompt": "A shaped pitch exists. The product decisions are made -- your job is to translate them into an engineering approach, then pressure-test it on technical grounds.\n\nFrom the pitch, derive:\n1. **selectedApproach** -- the technical strategy that implements what the pitch describes. Name the key interfaces, types, and modules involved. Do not re-open product decisions (which features, what behavior) -- those are fixed by the pitch.\n2. **architectureRationale** -- which pitch invariants and no-gos drove the technical decisions.\n3. **pivotTriggers** -- conditions under which the approach needs revisiting (not product pivots -- engineering discoveries only).\n4. **acceptedTradeoffs** -- engineering tradeoffs accepted to stay within the pitch appetite.\n5. **identifiedFailureModes** -- technical risks in the approach.\n\nThen challenge the translation on purely technical grounds: what is the strongest engineering case against this approach? Which module boundary assumption is most likely wrong? Which integration point is least understood? This is not about product decisions -- those stay locked. Record your honest answer before continuing.\n\nThe pitch appetite is a hard ceiling. If the full correct engineering approach would exceed the appetite, scope it down to fit -- do not expand. Record any engineering concerns that exceed the appetite as `followUpTickets`.\n\nCapture:\n- `selectedApproach`\n- `architectureRationale`\n- `pivotTriggers`\n- `acceptedTradeoffs`\n- `identifiedFailureModes`\n- `followUpTickets` (initialize if needed)",
+      "requireConfirmation": {
+        "or": [
+          {
+            "var": "automationLevel",
+            "equals": "Low"
+          },
+          {
+            "var": "taskComplexity",
+            "equals": "Large"
+          },
+          {
+            "var": "riskLevel",
+            "equals": "High"
+          }
+        ]
+      }
     },
     {
       "id": "phase-2-design-review",
@@ -395,6 +384,14 @@
           "prompt": "Read `design-review-findings.md` and turn the review into workflow-owned decisions.\n\nCompare it against `designReviewAssessment`:\n- what did the review confirm?\n- what did it surface that you missed?\n- what changed your mind and what held firm?\n\nIf the findings are real, fix the design before you continue (`selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`).\n\nAfter any extra challenge, synthesize explicitly:\n- which findings actually matter\n- what changed in the design\n- what you reject and why\n\nFor any finding that changes the decision, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, artifacts, spec, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to drive the decision yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nCapture:\n- `designFindings`\n- `designRevised`",
           "promptFragments": [
             {
+              "id": "phase-2c-shaped-focus",
+              "when": {
+                "var": "shapedInputDetected",
+                "equals": true
+              },
+              "text": "In shaped mode, do NOT reopen product decisions the pitch already resolved. Critique the technical translation only: does the approach faithfully implement what the pitch's Interfaces, Invariants, and Exclusions describe? Does it stay within the appetite? Reject any review finding that is actually a product question."
+            },
+            {
               "id": "phase-2c-challenge-thorough",
               "when": {
                 "var": "rigorMode",
@@ -423,7 +420,7 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open issues that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High\n\nThe plan is the deliverable for this step. Do not implement anything -- not a \"quick win\", not a file read that bleeds into edits, nothing. Execution begins in Phase 6, one slice at a time. If you find yourself writing code or editing source files right now, stop immediately.",
+      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\n**Open questions gate:** check `openQuestions` from Phase 0. If any remain unanswered and would materially affect implementation quality, either resolve them now with tools or record them in the risk register with an explicit decision about how to proceed without them. Do not silently carry unanswered questions into implementation.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open questions that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High\n\nThe plan is the deliverable for this step. Do not implement anything -- not a \"quick win\", not a file read that bleeds into edits, nothing. Execution begins in Phase 6, one slice at a time. If you find yourself writing code or editing source files right now, stop immediately.",
       "assessmentRefs": [
         "plan-completeness-gate",
         "invariant-clarity-gate",
@@ -497,7 +494,7 @@
         {
           "id": "phase-4a-audit-and-refocus",
           "title": "Audit Plan and Apply Fixes",
-          "prompt": "Audit the plan and fix it in the same pass.\n\nLook for:\n- missing work\n- weak assumptions and risks\n- invariant gaps\n- bad slice boundaries\n- philosophy violations or tensions\n- regressions from things you already fixed\n- mismatches between `implementation_plan.md` and `spec.md` if there is a spec\n\nBefore you delegate, say what looks weakest right now and what you trust least.\n\nAfter the audit batch, synthesize explicitly:\n- what multiple auditors agreed on\n- what only one auditor raised\n- what you reject and why\n- what changed in the plan because of the audit\n\nFor any finding that changes the plan, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, plan/spec artifacts, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to change the plan yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nThen fix the plan immediately:\n- update `implementation_plan.md`\n- update `spec.md` if acceptance criteria or other observable behavior changed\n- update `slices` if the shape changed\n- move out-of-scope work into `followUpTickets`\n- track resolved findings (cap at 10, drop oldest)\n\nCapture:\n- `planFindings`\n- `planConfidence`\n- `resolvedFindings`\n- `followUpTickets`\n\nIf the plan drifted, fix the plan. Don't just keep going.",
+          "prompt": "Audit the plan and fix it in the same pass. Fix the plan -- do NOT write or edit source code here. If you find something that looks like a trivial code fix, note it in the plan for Phase 6. Do not implement anything.\n\nLook for:\n- missing work\n- weak assumptions and risks\n- invariant gaps\n- bad slice boundaries\n- philosophy violations or tensions\n- regressions from things you already fixed\n- mismatches between `implementation_plan.md` and `spec.md` if there is a spec\n\nBefore you delegate, say what looks weakest right now and what you trust least.\n\nAfter the audit batch, synthesize explicitly:\n- what multiple auditors agreed on\n- what only one auditor raised\n- what you reject and why\n- what changed in the plan because of the audit\n\nFor any finding that changes the plan, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, plan/spec artifacts, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to change the plan yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nThen fix the plan immediately:\n- update `implementation_plan.md`\n- update `spec.md` if acceptance criteria or other observable behavior changed\n- update `slices` if the shape changed\n- move out-of-scope work into `followUpTickets`\n- track resolved findings (cap at 10, drop oldest)\n\nCapture:\n- `planFindings`\n- `planConfidence`\n- `resolvedFindings`\n- `followUpTickets`\n\nIf the plan drifted, fix the plan. Don't just keep going.",
           "promptFragments": [
             {
               "id": "phase-4a-pitch-anchor",
@@ -552,7 +549,7 @@
         "var": "taskComplexity",
         "equals": "Small"
       },
-      "prompt": "For Small tasks, fast does not mean shallow. Every item below is required.\n\n**1. Confirm all wiring points with tools.**\nDon't assume a file you create is reachable. Check every public entry point:\n- Does the new symbol need to be exported from an index file?\n- Does it need to be imported and registered somewhere (CLI command map, router, DI container, plugin registry)?\n- Is there a test file that needs to reference it?\nTrace the full call path from the public interface down to your new code before writing anything.\n\n**2. Implement the smallest correct change.**\nChange exactly what needs changing. No drive-by refactors, no extra abstractions.\n\n**3. Verify end-to-end.**\n- Run build and tests. Both must pass.\n- Manually trace the new behavior through the public entry point (e.g. run the CLI command, check the export resolves, hit the endpoint). If you can't do this deterministically with tools, say why.\n- Apply the user's coding philosophy as the review lens. Flag any violation by principle name.\n\n**4. Produce a handoff note.**\nOutput a notes artifact containing a JSON fenced block with the following fields.\nThe daemon reads this block to run `git commit` and `gh pr create` -- write it exactly as shown:\n\n```json\n{\n  \"commitType\": \"feat\",\n  \"commitScope\": \"mcp\",\n  \"commitSubject\": \"imperative mood, max 72 chars total with type(scope): prefix, no period\",\n  \"prTitle\": \"same as full commit first line\",\n  \"prBody\": \"markdown with ## Summary (bullets) and ## Test plan (checklist)\",\n  \"followUpTickets\": [],\n  \"filesChanged\": [\"src/path/to/file.ts\", \"tests/unit/file.test.ts\"]\n}\n```\n\nFields:\n- `commitType`: feat / fix / chore / refactor / docs / test / perf (pick one)\n- `commitScope`: product area only (console / mcp / workflows / engine / schema / docs)\n- `commitSubject`: imperative mood, max 72 chars total with type(scope): prefix, no period\n- `prTitle`: same as full commit first line\n- `prBody`: markdown with ## Summary (bullets) and ## Test plan (checklist)\n- `followUpTickets`: list of deferred items, or empty array\n- `filesChanged`: list of every file you created or modified (required -- do not omit)\n\nThe daemon will use this artifact to run git commit and open the PR. Do not commit or push yourself.\n\nDo not create heavyweight planning artifacts unless risk unexpectedly grows.",
+      "prompt": "For Small tasks, fast does not mean shallow. Every item below is required.\n\n**Shaped-input check:** if `shapedInputDetected = true` and `taskComplexity = Small`, verify this classification is correct. A shaped pitch was written for this task -- Small tasks rarely need shaping. If the pitch describes more than one Interface element or has rabbit holes, the classification is likely wrong. Reclassify upward to Medium before proceeding if there's any doubt. Do not silently discard the pitch by staying on the Small fast path.\n\n**1. Confirm all wiring points with tools.**\nDon't assume a file you create is reachable. Check every public entry point:\n- Does the new symbol need to be exported from an index file?\n- Does it need to be imported and registered somewhere (CLI command map, router, DI container, plugin registry)?\n- Is there a test file that needs to reference it?\nTrace the full call path from the public interface down to your new code before writing anything.\n\n**2. Implement the smallest correct change.**\nChange exactly what needs changing. No drive-by refactors, no extra abstractions.\n\n**3. Verify end-to-end.**\n- Run build and tests. Both must pass.\n- Manually trace the new behavior through the public entry point (e.g. run the CLI command, check the export resolves, hit the endpoint). If you can't do this deterministically with tools, say why.\n- Apply the user's coding philosophy as the review lens. Flag any violation by principle name.\n\n**4. Produce a handoff note.**\nOutput a notes artifact containing a JSON fenced block with the following fields.\nThe daemon reads this block to run `git commit` and `gh pr create` -- write it exactly as shown:\n\n```json\n{\n  \"commitType\": \"feat\",\n  \"commitScope\": \"mcp\",\n  \"commitSubject\": \"imperative mood, max 72 chars total with type(scope): prefix, no period\",\n  \"prTitle\": \"same as full commit first line\",\n  \"prBody\": \"markdown with ## Summary (bullets) and ## Test plan (checklist)\",\n  \"followUpTickets\": [],\n  \"filesChanged\": [\"src/path/to/file.ts\", \"tests/unit/file.test.ts\"]\n}\n```\n\nFields:\n- `commitType`: feat / fix / chore / refactor / docs / test / perf (pick one)\n- `commitScope`: product area only (console / mcp / workflows / engine / schema / docs)\n- `commitSubject`: imperative mood, max 72 chars total with type(scope): prefix, no period\n- `prTitle`: same as full commit first line\n- `prBody`: markdown with ## Summary (bullets) and ## Test plan (checklist)\n- `followUpTickets`: list of deferred items, or empty array\n- `filesChanged`: list of every file you created or modified (required -- do not omit)\n\nThe daemon will use this artifact to run git commit and open the PR. Do not commit or push yourself.\n\nDo not create heavyweight planning artifacts unless risk unexpectedly grows.",
       "requireConfirmation": false
     },
     {
@@ -574,7 +571,7 @@
         {
           "id": "phase-6a-implement-slice",
           "title": "Implement Slice",
-          "prompt": "Implement the current slice: `{{currentSlice.name}}`.\n\nBefore writing a single line of code, declare your scope:\n- List the exact files and symbols this slice touches\n- Confirm none of them belong to a later slice\n- If you have already edited files from this or any other slice in a previous step, stop and report it\n\nHard scope rule: you may only modify what is described in `{{currentSlice.name}}`. Anything outside that boundary is out of scope for this iteration -- not \"do it early\", not \"while I'm here\". If you discover you need to touch something outside this slice to make it compile or integrate, set `unexpectedScopeChange = true` and do the minimum necessary to stay green, then stop.\n\nImplement incrementally. Run tests and build to prove the slice works before advancing.\n\nTrack:\n- `specialCaseIntroduced` -- did this slice require a new special-case?\n- `unplannedAbstractionIntroduced` -- did this slice introduce an abstraction not in the plan?\n- `unexpectedScopeChange` -- did this slice touch files outside its planned scope?\n\nSet `verifyNeeded` to true if ANY of:\n- `sliceIndex` is odd (verify every 2 slices)\n- `prStrategy = MultiPR`\n- `specialCaseIntroduced = true`\n- `unplannedAbstractionIntroduced = true`\n- `unexpectedScopeChange = true`\n- tests or build failed\n\nCapture: `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, `unexpectedScopeChange`, `verifyNeeded`",
+          "prompt": "Implement the current slice: `{{currentSlice.name}}`.\n\nBefore writing a single line of code, declare your scope:\n- List the exact files and symbols this slice touches\n- Confirm none of them belong to a later slice\n- If you have already edited files from this or any other slice in a previous step, stop and report it\n\nHard scope rule: you may only modify what is described in `{{currentSlice.name}}`. Anything outside that boundary is out of scope for this iteration -- not \"do it early\", not \"while I'm here\". If you discover you need to touch something outside this slice to make it compile or integrate, set `unexpectedScopeChange = true` and do the minimum necessary to stay green, then stop.\n\nImplement incrementally. Run tests and build to prove the slice works before advancing.\n\nTrack:\n- `specialCaseIntroduced` -- did this slice require a new special-case?\n- `unplannedAbstractionIntroduced` -- did this slice introduce an abstraction not in the plan?\n- `unexpectedScopeChange` -- did this slice touch files outside its planned scope?\n\nSet `verifyNeeded` to true if ANY of:\n- `prStrategy = MultiPR`\n- `specialCaseIntroduced = true`\n- `unplannedAbstractionIntroduced = true`\n- `unexpectedScopeChange = true`\n- tests or build failed\n\nCapture: `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, `unexpectedScopeChange`, `verifyNeeded`",
           "requireConfirmation": false
         },
         {
