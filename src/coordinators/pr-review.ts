@@ -31,6 +31,8 @@ import {
   ReviewVerdictArtifactV1Schema,
   isReviewVerdictArtifact,
 } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
+import { renderContextBundle } from '../context-assembly/index.js';
+import type { ContextAssembler } from '../context-assembly/types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOMAIN TYPES
@@ -148,7 +150,7 @@ export interface CoordinatorDeps {
    * WHY optional: backward-compatible with existing test fakes that construct
    * CoordinatorDeps without context assembly. Undefined = no assembly.
    */
-  readonly contextAssembler?: import('../context-assembly/types.js').ContextAssembler;
+  readonly contextAssembler?: ContextAssembler;
 
   /**
    * Wait for a set of sessions to complete.
@@ -972,7 +974,6 @@ export async function runPrReviewCoordinator(
         prNumber: pr.number,
         workspacePath: opts.workspace,
       });
-      const { renderContextBundle } = await import('../context-assembly/index.js');
       const rendered = renderContextBundle(bundle);
       if (rendered.trim().length > 0) {
         spawnContext = { assembledContextSummary: rendered };

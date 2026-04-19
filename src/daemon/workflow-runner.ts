@@ -142,6 +142,13 @@ const WORKRAIL_DIR = path.join(os.homedir(), '.workrail');
 const WORKSPACE_CONTEXT_MAX_BYTES = 32 * 1024;
 
 /**
+ * Maximum byte size for injected assembledContextSummary (prior session notes + git diff).
+ * WHY: caps the coordinator-assembled context to protect LLM token budget.
+ * Mirrors the WORKSPACE_CONTEXT_MAX_BYTES cap pattern used for CLAUDE.md injection.
+ */
+const MAX_ASSEMBLED_CONTEXT_BYTES = 8192;
+
+/**
  * Candidate workspace context files in priority order.
  * WHY: Higher-priority files (repo-specific Claude config) are included first.
  * If the combined size exceeds WORKSPACE_CONTEXT_MAX_BYTES, lower-priority files
@@ -2526,9 +2533,13 @@ export function buildSystemPrompt(
   // survives the HTTP transport (context map is already JSON-serialized).
   const assembledContextSummary = trigger.context?.['assembledContextSummary'];
   if (typeof assembledContextSummary === 'string' && assembledContextSummary.trim().length > 0) {
+    let ctxStr = assembledContextSummary as string;
+    if (Buffer.byteLength(ctxStr, 'utf8') > MAX_ASSEMBLED_CONTEXT_BYTES) {
+      ctxStr = ctxStr.slice(0, MAX_ASSEMBLED_CONTEXT_BYTES) + '\n[Prior context truncated at 8KB]';
+    }
     lines.push('');
     lines.push('## Prior Context');
-    lines.push(assembledContextSummary.trim());
+    lines.push(ctxStr.trim());
   }
 
   // Append reference URLs section when provided.

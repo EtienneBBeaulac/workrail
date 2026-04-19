@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as nodePath from 'node:path';
+import { createHash } from 'node:crypto';
 import { fromPromise } from 'neverthrow';
 import type { ResultAsync } from 'neverthrow';
 import { ok, err } from '../runtime/result.js';
@@ -129,10 +130,10 @@ function makeDirectoryListingOpsPort(): DirectoryListingOpsPortV2 {
  * Strict workspace filtering is a v2 improvement.
  */
 export function createListRecentSessions(): (
-  _workspacePath: string,
+  workspacePath: string,
   limit: number,
 ) => Promise<Result<readonly SessionNote[], string>> {
-  return async (_workspacePath: string, limit: number) => {
+  return async (workspacePath: string, limit: number) => {
     try {
       const dataDir = new LocalDataDirV2(process.env as Record<string, string | undefined>);
       const directoryListingOps = makeDirectoryListingOpsPort();
@@ -154,16 +155,26 @@ export function createListRecentSessions(): (
         return err(`listRecentSessions: ${result.error.message}`);
       }
 
+      // Compute sha256:<hex> hash of workspacePath to match observations.repoRootHash format.
+      // WHY: HealthySessionSummary stores a sha256 hash (not raw path) for workspace filtering.
+      // Sessions with null repoRootHash pass through for backward compat (recorded before the
+      // observation feature was added). Strict workspace filtering is a planned v2 improvement.
+      const workspaceHash = `sha256:${createHash('sha256').update(workspacePath).digest('hex')}`;
+
       const notes: SessionNote[] = result.value
+        .filter((s) =>
+          s.observations.repoRootHash === null ||
+          s.observations.repoRootHash === workspaceHash,
+        )
         .slice()
-        .sort((a, b) => (b.lastModifiedMs ?? 0) - (a.lastModifiedMs ?? 0))
+        .sort((a, b) => (b.lastModifiedMs ?? Date.now()) - (a.lastModifiedMs ?? Date.now()))
         .slice(0, limit)
         .map((s) => ({
           sessionId: String(s.sessionId),
           recapSnippet: s.recapSnippet != null ? String(s.recapSnippet) : null,
           sessionTitle: s.sessionTitle,
           gitBranch: s.observations.gitBranch,
-          lastModifiedMs: s.lastModifiedMs ?? 0,
+          lastModifiedMs: s.lastModifiedMs ?? Date.now(),
         }));
 
       return ok(notes);

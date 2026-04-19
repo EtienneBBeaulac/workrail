@@ -1008,20 +1008,16 @@ runCommand
 
       contextAssembler: createContextAssembler({
         execGit: async (args: readonly string[], cwd: string) => {
-          const { execFile: ef } = await import('node:child_process');
-          const { promisify: prom } = await import('node:util');
           try {
-            const { stdout } = await prom(ef)('git', [...args], { cwd });
+            const { stdout } = await execFileAsync('git', [...args], { cwd });
             return { kind: 'ok' as const, value: stdout };
           } catch (e) {
             return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
           }
         },
         execGh: async (args: readonly string[], cwd: string) => {
-          const { execFile: ef } = await import('node:child_process');
-          const { promisify: prom } = await import('node:util');
           try {
-            const { stdout } = await prom(ef)('gh', [...args], { cwd });
+            const { stdout } = await execFileAsync('gh', [...args], { cwd });
             return { kind: 'ok' as const, value: stdout };
           } catch (e) {
             return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };

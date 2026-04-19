@@ -189,4 +189,49 @@ describe('buildSystemPrompt()', () => {
       expect(contextIdx).toBeLessThan(refsIdx);
     });
   });
+
+  describe('prior context injection (F1)', () => {
+    it('injects ## Prior Context section when assembledContextSummary is a non-empty string', () => {
+      const trigger: WorkflowTrigger = {
+        ...baseTrigger,
+        context: { assembledContextSummary: 'prior-context-marker' },
+      };
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+
+      expect(prompt).toContain('## Prior Context');
+      expect(prompt).toContain('prior-context-marker');
+    });
+
+    it('## Prior Context appears before ## Reference documents', () => {
+      const trigger: WorkflowTrigger = {
+        ...baseTrigger,
+        context: { assembledContextSummary: 'prior-context-marker' },
+        referenceUrls: ['https://example.com/spec.md'],
+      };
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+
+      const priorCtxIdx = prompt.indexOf('## Prior Context');
+      const refsIdx = prompt.indexOf('## Reference documents');
+
+      expect(priorCtxIdx).toBeGreaterThan(-1);
+      expect(refsIdx).toBeGreaterThan(-1);
+      expect(priorCtxIdx).toBeLessThan(refsIdx);
+    });
+
+    it('omits ## Prior Context when assembledContextSummary is absent', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+
+      expect(prompt).not.toContain('## Prior Context');
+    });
+
+    it('omits ## Prior Context when assembledContextSummary is not a string (type guard)', () => {
+      const trigger: WorkflowTrigger = {
+        ...baseTrigger,
+        context: { assembledContextSummary: 42 },
+      };
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+
+      expect(prompt).not.toContain('## Prior Context');
+    });
+  });
 });

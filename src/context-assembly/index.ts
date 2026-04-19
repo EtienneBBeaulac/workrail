@@ -41,6 +41,12 @@ export function createContextAssembler(deps: ContextAssemblerDeps): ContextAssem
  * for PRs: shows base..head diff). On gh failure, fall back to `git diff HEAD~1 --stat`.
  * For coding_task: use `git diff HEAD~1 --stat` directly.
  *
+ * NOTE: format inconsistency -- `gh pr diff --name-only` returns a plain filename list
+ * (one file per line), while `git diff HEAD~1 --stat` returns stat output with change
+ * counts (e.g. "src/foo.ts | 5 ++"). Both land in the same `gitDiff` field and are
+ * rendered under `### Changed files`. The agent can parse either format; normalizing
+ * to `--name-only` for both paths is a future improvement.
+ *
  * Returns err() on all failures -- caller omits the section gracefully.
  */
 async function assembleGitDiff(
