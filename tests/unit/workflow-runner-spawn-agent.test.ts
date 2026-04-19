@@ -341,4 +341,35 @@ describe('makeSpawnAgentTool() result mapping', () => {
     // artifacts key must be absent (not null, not undefined) -- omit-not-null invariant
     expect(parsed).not.toHaveProperty('artifacts');
   });
+
+  it('returns artifacts: [] (not omitted) when lastStepArtifacts is empty array', async () => {
+    // WHY this test: the spread guard uses !== undefined (not ?.length), so an empty array
+    // is preserved and returned as artifacts: [] rather than omitted. This distinguishes
+    // "child produced no artifacts" (undefined) from "child confirmed empty artifacts" ([]).
+    const successResult: WorkflowRunSuccess = {
+      _tag: 'success',
+      workflowId: 'test-workflow',
+      stopReason: 'completed',
+      lastStepNotes: 'Done.',
+      lastStepArtifacts: [],
+    };
+
+    const tool = makeSpawnAgentTool(
+      'sess-1',
+      FAKE_CTX,
+      FAKE_API_KEY,
+      'parent-session-id',
+      0,
+      3,
+      makeRunWorkflowStub(successResult),
+      FAKE_SCHEMAS,
+    );
+
+    const result = await tool.execute('call-1', FAKE_PARAMS);
+    const parsed = JSON.parse(result.content[0]!.text as string);
+
+    expect(parsed.outcome).toBe('success');
+    // artifacts key must be present with value [] -- [] !== undefined, so the spread fires
+    expect(parsed.artifacts).toEqual([]);
+  });
 });

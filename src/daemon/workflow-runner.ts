@@ -1494,7 +1494,7 @@ export function makeSpawnAgentTool(
       'Use this when a step requires delegating a well-defined sub-task to a separate workflow. ' +
       'IMPORTANT: The parent session\'s time limit (maxSessionMinutes) keeps ticking while the child runs. ' +
       'Configure the parent with enough time to cover both its own work and the child\'s work. ' +
-      'Returns: { childSessionId, outcome: "success"|"error"|"timeout", notes: string, artifacts?: unknown[] }. ' +
+      'Returns: { childSessionId, outcome: "success"|"error"|"timeout", notes: string, artifacts?: readonly unknown[] }. ' +
       'On success, artifacts contains the child session\'s final step artifacts if any were produced. ' +
       'Check outcome before using notes -- on error/timeout, notes contains the error message.',
     inputSchema: schemas['SpawnAgentParams'],
