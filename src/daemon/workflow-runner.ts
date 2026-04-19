@@ -2518,6 +2518,19 @@ export function buildSystemPrompt(
     lines.push(workspaceContext);
   }
 
+  // Inject assembled task context (prior session notes + git diff stat) when provided.
+  // WHY before referenceUrls: task-specific runtime context should be visible before
+  // static reference documents. Earlier position improves agent attention.
+  // WHY trigger.context key: the coordinator serializes the rendered context bundle
+  // into trigger.context['assembledContextSummary'] (string) before spawning. This
+  // survives the HTTP transport (context map is already JSON-serialized).
+  const assembledContextSummary = trigger.context?.['assembledContextSummary'];
+  if (typeof assembledContextSummary === 'string' && assembledContextSummary.trim().length > 0) {
+    lines.push('');
+    lines.push('## Prior Context');
+    lines.push(assembledContextSummary.trim());
+  }
+
   // Append reference URLs section when provided.
   // WHY: some tasks require background context (specs, design docs, ADRs) that
   // the agent should fetch and read before starting work. Providing the URLs in

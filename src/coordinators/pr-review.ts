@@ -130,12 +130,25 @@ export interface CoordinatorDeps {
   /**
    * Dispatch a workflow session to the daemon.
    * Returns the session handle on success, or err() on connection/HTTP failure.
+   *
+   * The optional 4th arg passes assembled context (e.g. git diff summary, prior session
+   * notes) that gets injected into the session's system prompt before turn 1.
    */
   readonly spawnSession: (
     workflowId: string,
     goal: string,
     workspace: string,
+    context?: Readonly<Record<string, unknown>>,
   ) => Promise<Result<string, string>>;
+
+  /**
+   * Optional context assembler. When provided, assembles git diff summary and
+   * prior session notes before each review session spawn.
+   *
+   * WHY optional: backward-compatible with existing test fakes that construct
+   * CoordinatorDeps without context assembly. Undefined = no assembly.
+   */
+  readonly contextAssembler?: import('../context-assembly/types.js').ContextAssembler;
 
   /**
    * Wait for a set of sessions to complete.
@@ -941,6 +954,8 @@ export async function runPrReviewCoordinator(
   // Spawn review sessions in parallel
   const reviewHandles = new Map<number, string>(); // prNumber -> sessionHandle
   const spawnErrors = new Map<number, string>(); // prNumber -> error message
+  // Assembled context per PR -- forwarded to re-review spawns in runFixAgentLoop
+  const spawnContexts = new Map<number, Readonly<Record<string, unknown>>>();
 
   for (const pr of prs) {
     const goal = `Review PR #${pr.number} "${pr.title}" before merge`;
@@ -949,10 +964,34 @@ export async function runPrReviewCoordinator(
       continue;
     }
 
+    // Assemble context before spawning (optional -- skip if no assembler injected).
+    let spawnContext: Readonly<Record<string, unknown>> | undefined;
+    if (deps.contextAssembler) {
+      const bundle = await deps.contextAssembler.assemble({
+        kind: 'pr_review',
+        prNumber: pr.number,
+        workspacePath: opts.workspace,
+      });
+      const { renderContextBundle } = await import('../context-assembly/index.js');
+      const rendered = renderContextBundle(bundle);
+      if (rendered.trim().length > 0) {
+        spawnContext = { assembledContextSummary: rendered };
+        spawnContexts.set(pr.number, spawnContext);
+      }
+      // WARN log when a source fails so issues are surfaced in coordinator output
+      if (bundle.gitDiff.kind === 'err') {
+        deps.stderr(`[WARN coord:context prNumber=${pr.number}] gitDiff failed: ${bundle.gitDiff.error}`);
+      }
+      if (bundle.priorSessionNotes.kind === 'err') {
+        deps.stderr(`[WARN coord:context prNumber=${pr.number}] priorSessionNotes failed: ${bundle.priorSessionNotes.error}`);
+      }
+    }
+
     const spawnResult = await deps.spawnSession(
       'mr-review-workflow-agentic',
       goal,
       opts.workspace,
+      spawnContext,
     );
 
     if (spawnResult.kind === 'err') {
@@ -1059,6 +1098,7 @@ export async function runPrReviewCoordinator(
           outcome,
           coordinatorStartMs,
           log,
+          spawnContexts.get(prNum),
         );
         outcomes.set(prNum, processedOutcome);
       } else {
@@ -1161,6 +1201,8 @@ async function runFixAgentLoop(
   initialOutcome: PrOutcome,
   coordinatorStartMs: number,
   log: (line: string) => void,
+  /** Assembled context from the initial review spawn. Forwarded to re-review spawns. */
+  reviewSpawnContext?: Readonly<Record<string, unknown>>,
 ): Promise<PrOutcome> {
   let passCount = 0;
   let currentFindings = initialFindings;
@@ -1262,10 +1304,12 @@ async function runFixAgentLoop(
 
     // Re-review after fix
     const reReviewGoal = `Re-review PR #${pr.number} after fixes (pass ${passCount})`;
+    // Forward same context as the initial review spawn (assembled before first spawn).
     const reReviewSpawnResult = await deps.spawnSession(
       'mr-review-workflow-agentic',
       reReviewGoal,
       opts.workspace,
+      reviewSpawnContext,
     );
 
     if (reReviewSpawnResult.kind === 'err') {

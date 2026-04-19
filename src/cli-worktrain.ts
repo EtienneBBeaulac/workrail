@@ -26,6 +26,8 @@ import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
+import { createContextAssembler } from './context-assembly/index.js';
+import { createListRecentSessions } from './context-assembly/infra.js';
 import {
   executeWorktrainInitCommand,
   executeWorktrainTellCommand,
@@ -955,13 +957,23 @@ runCommand
 
     // Build real CoordinatorDeps
     const deps = {
-      spawnSession: async (workflowId: string, goal: string, workspace: string) => {
+      spawnSession: async (
+        workflowId: string,
+        goal: string,
+        workspace: string,
+        context?: Readonly<Record<string, unknown>>,
+      ) => {
         const url = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
         try {
           const response = await globalThis.fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workflowId, goal, workspacePath: workspace }),
+            body: JSON.stringify({
+              workflowId,
+              goal,
+              workspacePath: workspace,
+              ...(context !== undefined ? { context } : {}),
+            }),
             signal: AbortSignal.timeout(30_000),
           });
           const body = await response.json() as Record<string, unknown>;
@@ -993,6 +1005,31 @@ runCommand
           return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
         }
       },
+
+      contextAssembler: createContextAssembler({
+        execGit: async (args: readonly string[], cwd: string) => {
+          const { execFile: ef } = await import('node:child_process');
+          const { promisify: prom } = await import('node:util');
+          try {
+            const { stdout } = await prom(ef)('git', [...args], { cwd });
+            return { kind: 'ok' as const, value: stdout };
+          } catch (e) {
+            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        execGh: async (args: readonly string[], cwd: string) => {
+          const { execFile: ef } = await import('node:child_process');
+          const { promisify: prom } = await import('node:util');
+          try {
+            const { stdout } = await prom(ef)('gh', [...args], { cwd });
+            return { kind: 'ok' as const, value: stdout };
+          } catch (e) {
+            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        listRecentSessions: createListRecentSessions(),
+        nowIso: () => new Date().toISOString(),
+      }),
 
       awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
         const { executeWorktrainAwaitCommand } = await import('./cli/commands/worktrain-await.js');
