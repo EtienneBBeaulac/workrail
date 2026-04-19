@@ -5891,3 +5891,41 @@ Coordinator logic:
 - Phase 1: coordinator scripts withhold `complete_step` advancement until the condition is met. This already works today -- the coordinator just doesn't advance the session until the fix agent is done.
 - Phase 2: the coordinator passes structured context when advancing: `complete_step(session, { injectedContext: fixSummary })`. The session receives it as part of the next step's prompt.
 - Phase 3: declarative pipelines -- workflow JSON declares that step N waits for an external condition before proceeding. The coordinator reads this and manages the timing automatically. No hand-coded coordinator script needed for common patterns.
+
+---
+
+### Coordinator review mode: self-healing vs comment-and-wait vs hybrid (needs discovery/shaping, Apr 18, 2026)
+
+⚠️ **This needs more discovery and shaping before implementation. The ideas here are directional, not designed.**
+
+**The insight:** the review workflow produces findings. What happens with those findings is a coordinator decision, not a workflow decision. The workflow doesn't need to know whether its output goes to a human or loops back to a fix agent.
+
+**Three modes to explore:**
+
+**`self-healing`** (for solo/autonomous development like workrail itself)
+- Review finds issues → coordinator spawns fix agent → review re-runs with memory of original findings → loop until clean or max passes → coordinator approves and merges directly, no human involved
+- No PR comments posted unless something can't be auto-fixed
+
+**`comment-and-wait`** (for team projects with human reviewers)
+- Review finds issues → coordinator posts findings as PR comments → waits for human to act → human fixes or responds → review runs again
+- Coordinator is the "bot reviewer" in the team's normal workflow
+
+**`hybrid`** (most realistic for mixed environments)
+- Critical/blocking findings → post as PR comment, escalate to human
+- Minor/nit findings → route to fix agent loop, no comment
+- Clean → auto-approve + merge
+- Configurable threshold for what escalates vs auto-fixes
+
+**Questions that need answering before building:**
+1. How does the coordinator know which mode to use? Per-trigger config in triggers.yml (`reviewMode: 'self-healing'`)?
+2. When does a review session "know" it's in self-healing mode vs comment mode? Does it matter -- or is the routing entirely coordinator-side?
+3. The long-running session angle (from earlier): should the review session stay alive across fix cycles (preserving finding context) or spawn fresh each time (cleaner, more expensive)? Discovery needed on what the session store cost actually is.
+4. For workrail self-development specifically: is auto-approve + auto-merge acceptable once the full verification chain (MR review + prod audit + arch audit) passes? Or always require human sign-off on the final merge?
+5. Comment format: when posting to GitHub/GitLab, what's the right format? Inline diff comments? A single summary comment? Both?
+6. How does `autoCommit` / `autoOpenPR` interact with review mode? The commit/PR creation is pre-review; the merge decision is post-review. These might need separate flags.
+
+**Relationship to other backlog items:**
+- "Long-running sessions: stay open across agent handoffs" -- the self-healing loop benefits from session persistence
+- "Autonomous merge: WorkTrain approves and merges its own PRs after full vetting" -- the merge gate is part of this
+- "Verification and proof as first-class citizens" -- the full verification chain is what makes auto-merge safe
+- `worktrain run pr-review` coordinator -- this is where the mode logic lives today, needs to be generalized
