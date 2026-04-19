@@ -82,8 +82,6 @@ async function registerConfig(env?: Record<string, string | undefined>): Promise
     container.register(DI.Config.CacheTTL, { useValue: config.cache.ttlMs });
     container.register(DI.Config.WorkflowDir, { useValue: config.paths.workflowDir });
     container.register(DI.Config.ProjectPath, { useValue: config.paths.projectPath });
-    container.register(DI.Config.DashboardMode, { useValue: config.dashboard.mode });
-    container.register(DI.Config.BrowserBehavior, { useValue: config.dashboard.browserBehavior });
   }
 
   // Register FeatureFlags early - needed by storage layer
@@ -223,22 +221,21 @@ async function registerServices(): Promise<void> {
 
   // Infrastructure
   const { SessionManager } = await import('../infrastructure/session/SessionManager.js');
-  const { HttpServer } = await import('../infrastructure/session/HttpServer.js');
 
   // NOW register symbol token aliases
   // Using instanceCachingFactory with class resolution - ensures singleton behavior
   // The factory delegates to the @singleton() class registration
-  container.register(DI.Infra.EnhancedLoopValidator, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(EnhancedLoopValidator)) 
+  container.register(DI.Infra.EnhancedLoopValidator, {
+    useFactory: instanceCachingFactory((c) => c.resolve(EnhancedLoopValidator))
   });
-  container.register(DI.Infra.SessionDataNormalizer, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(SessionDataNormalizer)) 
+  container.register(DI.Infra.SessionDataNormalizer, {
+    useFactory: instanceCachingFactory((c) => c.resolve(SessionDataNormalizer))
   });
-  container.register(DI.Infra.SessionDataValidator, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(SessionDataValidator)) 
+  container.register(DI.Infra.SessionDataValidator, {
+    useFactory: instanceCachingFactory((c) => c.resolve(SessionDataValidator))
   });
-  container.register(DI.Infra.ValidationEngine, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(ValidationEngine)) 
+  container.register(DI.Infra.ValidationEngine, {
+    useFactory: instanceCachingFactory((c) => c.resolve(ValidationEngine))
   });
   container.register(DI.Services.WorkflowCompiler, {
     useFactory: instanceCachingFactory((c) => c.resolve(WorkflowCompiler)),
@@ -246,14 +243,11 @@ async function registerServices(): Promise<void> {
   container.register(DI.Services.WorkflowInterpreter, {
     useFactory: instanceCachingFactory((c) => c.resolve(WorkflowInterpreter)),
   });
-  container.register(DI.Services.Workflow, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(DefaultWorkflowService)) 
+  container.register(DI.Services.Workflow, {
+    useFactory: instanceCachingFactory((c) => c.resolve(DefaultWorkflowService))
   });
-  container.register(DI.Infra.SessionManager, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(SessionManager)) 
-  });
-  container.register(DI.Infra.HttpServer, { 
-    useFactory: instanceCachingFactory((c) => c.resolve(HttpServer)) 
+  container.register(DI.Infra.SessionManager, {
+    useFactory: instanceCachingFactory((c) => c.resolve(SessionManager))
   });
 
   // MCP layer
@@ -482,37 +476,19 @@ export async function initializeContainer(options: ContainerInitOptions = {}): P
 }
 
 /**
- * Initialize async services (HTTP server, etc).
+ * Initialize async services.
  * Call after initializeContainer().
+ *
+ * Previously started the dashboard HttpServer here. The HttpServer has been
+ * removed from the MCP server path -- the dashboard is served by `worktrain console`
+ * as a standalone process. This function is retained for API compatibility.
  */
 export async function startAsyncServices(): Promise<void> {
   if (!initialized) {
     await initializeContainer();
   }
   if (asyncInitialized) return;
-
-  try {
-    const flags = container.resolve<any>(DI.Infra.FeatureFlags);
-
-    if (flags.isEnabled('sessionTools')) {
-      const server = container.resolve<any>(DI.Infra.HttpServer);
-      try {
-        await server.start();
-        console.error('[DI] HTTP server started');
-      } catch (httpError) {
-        // The HTTP server (dashboard) is non-critical infrastructure.
-        // Port exhaustion or other startup failures must not crash the MCP server --
-        // all MCP tools remain available; only the dashboard console is unavailable.
-        const message = httpError instanceof Error ? httpError.message : String(httpError);
-        console.error(`[DI] Dashboard HTTP server unavailable: ${message}. MCP tools will still work.`);
-      }
-    }
-
-    asyncInitialized = true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[DI] Async services initialization failed: ${message}`);
-  }
+  asyncInitialized = true;
 }
 
 /**

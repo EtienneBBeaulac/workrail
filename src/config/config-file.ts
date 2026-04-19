@@ -39,9 +39,6 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
   // app-config.ts keys
   'CACHE_TTL',
   'WORKRAIL_WORKFLOWS_DIR',
-  'WORKRAIL_DISABLE_UNIFIED_DASHBOARD',
-  'WORKRAIL_DISABLE_AUTO_OPEN',
-  'WORKRAIL_DASHBOARD_PORT',
 
   // feature-flags.ts keys
   'WORKRAIL_DEV',

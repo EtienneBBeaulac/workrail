@@ -43,8 +43,6 @@ export const DI = {
     FeatureFlags: Symbol('Infra.FeatureFlags'),
     /** Session manager */
     SessionManager: Symbol('Infra.SessionManager'),
-    /** HTTP server for dashboard */
-    HttpServer: Symbol('Infra.HttpServer'),
     /** Validation engine */
     ValidationEngine: Symbol('Infra.ValidationEngine'),
     /** Enhanced loop validator */
@@ -124,10 +122,6 @@ export const DI = {
     WorkflowDir: Symbol('Config.WorkflowDir'),
     /** Project root path */
     ProjectPath: Symbol('Config.ProjectPath'),
-    /** Dashboard mode (unified vs legacy) */
-    DashboardMode: Symbol('Config.DashboardMode'),
-    /** Browser behavior (auto-open vs manual) */
-    BrowserBehavior: Symbol('Config.BrowserBehavior'),
   },
 } as const;
 

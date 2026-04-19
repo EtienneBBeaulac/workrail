@@ -19,7 +19,6 @@ import { initializeContainer, container } from './di/container.js';
 import { DI } from './di/tokens.js';
 import type { WorkflowService } from './application/services/workflow-service.js';
 import type { ValidationEngine } from './application/services/validation-engine.js';
-import type { HttpServer } from './infrastructure/session/HttpServer.js';
 import type { ProcessTerminator } from './runtime/ports/process-terminator.js';
 import { startStdioServer } from './mcp/transports/stdio-entry.js';
 import type { WorkflowDefinition } from './types/workflow.js';
@@ -40,7 +39,6 @@ import {
   executeListCommand,
   executeValidateCommand,
   executeStartCommand,
-  executeCleanupCommand,
   executeMigrateCommand,
   executeVersionCommand,
 } from './cli/commands/index.js';
@@ -206,29 +204,6 @@ program
     interpretCliResult(result, terminator);
   });
 
-program
-  .command('cleanup')
-  .description('Clean up orphaned workrail processes and free up ports')
-  .option('-f, --force', 'Force cleanup without confirmation')
-  .action(async (options: { force?: boolean }) => {
-    // Show warning unless force flag is set
-    if (!options.force) {
-      console.error('⚠️  This will terminate all workrail dashboard processes');
-      console.error('   Press Ctrl+C to cancel, or wait 3 seconds to continue...');
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
-
-    await initializeContainer({ runtimeMode: { kind: 'cli' } });
-
-    const terminator = container.resolve<ProcessTerminator>(DI.Runtime.ProcessTerminator);
-    const httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-
-    const result = await executeCleanupCommand({
-      fullCleanup: () => httpServer.fullCleanup(),
-    });
-
-    interpretCliResult(result, terminator);
-  });
 
 program
   .command('daemon')

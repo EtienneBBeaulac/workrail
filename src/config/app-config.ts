@@ -21,21 +21,12 @@ import type { ValidatedAppConfig } from '../errors/app-error.js';
 export type CacheTtlMs = Brand<number, 'CacheTtlMs'>;
 export type ProjectPath = Brand<string, 'ProjectPath'>;
 export type WorkflowDir = Brand<string, 'WorkflowDir'>;
-export type DashboardPort = Brand<number, 'DashboardPort'>;
-
-export type DashboardMode = { readonly kind: 'unified' } | { readonly kind: 'legacy' };
-export type BrowserBehavior = { readonly kind: 'auto_open' } | { readonly kind: 'manual' };
 
 export interface AppConfig {
   readonly cache: { readonly ttlMs: CacheTtlMs };
   readonly paths: {
     readonly projectPath: ProjectPath;
     readonly workflowDir: WorkflowDir;
-  };
-  readonly dashboard: {
-    readonly mode: DashboardMode;
-    readonly browserBehavior: BrowserBehavior;
-    readonly port: DashboardPort;
   };
 }
 
@@ -64,15 +55,6 @@ const EnvSchema = z.object({
     ),
 
   WORKRAIL_WORKFLOWS_DIR: z.string().optional(),
-
-  WORKRAIL_DISABLE_UNIFIED_DASHBOARD: z.enum(['0', '1']).default('0'),
-  WORKRAIL_DISABLE_AUTO_OPEN: z.enum(['0', '1']).default('0'),
-
-  WORKRAIL_DASHBOARD_PORT: z
-    .string()
-    .optional()
-    .transform((v) => (v === undefined ? undefined : Number(v)))
-    .pipe(z.number().int().min(1024, 'Port must be >= 1024').max(65535, 'Port must be <= 65535').default(3456)),
 });
 
 type ParsedEnv = z.infer<typeof EnvSchema>;
@@ -106,22 +88,11 @@ export function createValidatedConfig(value: AppConfig): ValidatedConfig {
 // =============================================================================
 
 function buildConfig(env: ParsedEnv, projectPath: string): AppConfig {
-  const dashboardMode: DashboardMode =
-    env.WORKRAIL_DISABLE_UNIFIED_DASHBOARD === '1' ? { kind: 'legacy' } : { kind: 'unified' };
-
-  const browserBehavior: BrowserBehavior =
-    env.WORKRAIL_DISABLE_AUTO_OPEN === '1' ? { kind: 'manual' } : { kind: 'auto_open' };
-
   return {
     cache: { ttlMs: env.CACHE_TTL as CacheTtlMs },
     paths: {
       projectPath: projectPath as ProjectPath,
       workflowDir: (env.WORKRAIL_WORKFLOWS_DIR ?? projectPath) as WorkflowDir,
-    },
-    dashboard: {
-      mode: dashboardMode,
-      browserBehavior,
-      port: env.WORKRAIL_DASHBOARD_PORT as DashboardPort,
     },
   };
 }

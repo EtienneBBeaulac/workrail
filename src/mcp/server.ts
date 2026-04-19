@@ -20,7 +20,6 @@ import { DI } from '../di/tokens.js';
 import type { WorkflowService } from '../application/services/workflow-service.js';
 import type { IFeatureFlagProvider } from '../config/feature-flags.js';
 import type { SessionManager } from '../infrastructure/session/SessionManager.js';
-import type { HttpServer } from '../infrastructure/session/HttpServer.js';
 import type { ToolContext, V2Dependencies } from './types.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { unsafeTokenCodecPorts } from '../v2/durable-core/tokens/token-codec-ports.js';
@@ -88,12 +87,10 @@ export async function createToolContext(): Promise<ToolContext> {
   const featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
 
   let sessionManager: SessionManager | null = null;
-  let httpServer: HttpServer | null = null;
 
   if (featureFlags.isEnabled('sessionTools')) {
     sessionManager = container.resolve<SessionManager>(DI.Infra.SessionManager);
-    httpServer = container.resolve<HttpServer>(DI.Infra.HttpServer);
-    console.error('[FeatureFlags] Session tools enabled');
+    console.error('[FeatureFlags] Session tools enabled (use \'worktrain console\' for the dashboard UI)');
   } else {
     console.error('[FeatureFlags] Session tools disabled (enable with WORKRAIL_ENABLE_SESSION_TOOLS=true)');
   }
@@ -197,7 +194,6 @@ export async function createToolContext(): Promise<ToolContext> {
     workflowService,
     featureFlags,
     sessionManager,
-    httpServer,
     v2,
   };
 }
@@ -295,34 +291,8 @@ export async function composeServer(): Promise<ComposedServerInternal> {
     ? path.join(ctx.v2.dataDir.perfDir(), 'tool-calls.jsonl')
     : null;
 
-  // Mount v2 Console API routes (read-only, if v2 + httpServer available)
-  if (ctx.v2 && ctx.httpServer && ctx.v2.dataDir && ctx.v2.directoryListing) {
-    const { ConsoleService } = await import('../v2/usecases/console-service.js');
-    const { mountConsoleRoutes } = await import('../v2/usecases/console-routes.js');
-    const consoleService = new ConsoleService({
-      directoryListing: ctx.v2.directoryListing,
-      dataDir: ctx.v2.dataDir,
-      sessionStore: ctx.v2.sessionStore,
-      snapshotStore: ctx.v2.snapshotStore,
-      pinnedWorkflowStore: ctx.v2.pinnedStore,
-    });
-    ctx.httpServer.mountRoutes((app) => mountConsoleRoutes(
-      app,
-      consoleService,
-      ctx.workflowService,
-      timingRingBuffer,
-      toolCallsPerfFile ?? undefined,
-      serverVersion,
-      // v2ToolContext enables autonomous dispatch (POST /api/v2/auto/dispatch).
-      // The TriggerRouter is not available in the MCP server process; the dispatch
-      // endpoint calls runWorkflow() directly when no triggerRouter is provided.
-      ctx.v2 ? ctx as import('../mcp/types.js').V2ToolContext : undefined,
-    ));
-    console.error('[Console] v2 Console API routes mounted at /api/v2/');
-  }
-
-  // Finalize HTTP server (install 404 handler after all routes are mounted)
-  ctx.httpServer?.finalize();
+  // Console API routes are served by `worktrain console` (a standalone process).
+  // The MCP server no longer owns HTTP infrastructure.
 
   // Resolve description provider from DI
   const descriptionProvider = container.resolve<IToolDescriptionProvider>(

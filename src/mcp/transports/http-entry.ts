@@ -35,12 +35,10 @@ export async function startHttpServer(port: number): Promise<void> {
   const scanEnd = Math.max(port, HTTP_PORT_SCAN_END);
   const listener = await bindWithPortFallback(port, scanEnd);
 
-  // Register graceful shutdown so that fatalExit() stops the HTTP servers cleanly
-  // before calling process.exit(1). Stops both the MCP HTTP listener and the
-  // dashboard HTTP server. The 3s timeout guarantees exit within a bounded window.
+  // Register graceful shutdown so that fatalExit() stops the MCP HTTP listener
+  // cleanly before calling process.exit(1). The 3s timeout guarantees exit within a bounded window.
   registerGracefulShutdown(async () => {
     await listener.stop();
-    await ctx.httpServer?.stop();
   });
 
   const { StreamableHTTPServerTransport } = await import(
@@ -90,7 +88,6 @@ export async function startHttpServer(port: number): Promise<void> {
   wireShutdownHooks({
     onBeforeTerminate: async () => {
       await listener.stop();
-      await ctx.httpServer?.stop();
     },
   });
 }

@@ -379,7 +379,6 @@ export async function createWorkRailEngine(
     workflowService,
     featureFlags,
     sessionManager: null,
-    httpServer: null,
     v2,
   };
 

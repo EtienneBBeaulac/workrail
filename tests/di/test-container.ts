@@ -6,7 +6,6 @@ import { StaticFeatureFlagProvider, IFeatureFlagProvider } from '../../src/confi
 import type {
   AppConfig,
   CacheTtlMs,
-  DashboardPort,
   ProjectPath,
   ValidatedConfig,
   WorkflowDir,
@@ -53,11 +52,6 @@ export async function setupTest(config: TestConfig = {}): Promise<DependencyCont
       workflowDir: tmpPath('workrail-test-workflows') as WorkflowDir,
       projectPath: process.cwd() as ProjectPath,
     },
-    dashboard: {
-      mode: { kind: 'legacy' },
-      browserBehavior: { kind: 'manual' },
-      port: 3456 as DashboardPort,
-    },
   };
 
   const validated: ValidatedConfig = createValidatedConfig(config.appConfig ?? defaultAppConfig);
@@ -67,8 +61,6 @@ export async function setupTest(config: TestConfig = {}): Promise<DependencyCont
   container.register(DI.Config.CacheTTL, { useValue: validated.cache.ttlMs });
   container.register(DI.Config.WorkflowDir, { useValue: validated.paths.workflowDir });
   container.register(DI.Config.ProjectPath, { useValue: validated.paths.projectPath });
-  container.register(DI.Config.DashboardMode, { useValue: validated.dashboard.mode });
-  container.register(DI.Config.BrowserBehavior, { useValue: validated.dashboard.browserBehavior });
 
   // Initialize container (imports services which self-register)
   await initializeContainer({ runtimeMode: { kind: 'test' } });

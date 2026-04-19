@@ -35,10 +35,9 @@ export async function startStdioServer(): Promise<void> {
 
   const { server, ctx, rootsManager } = await composeServer();
 
-  // Register graceful shutdown so that fatalExit() stops the HTTP server cleanly
-  // before calling process.exit(1). The 3s timeout gives the HTTP server a real
-  // opportunity to close open connections while guaranteeing the process exits.
-  registerGracefulShutdown(async () => { await ctx.httpServer?.stop(); });
+  // Register graceful shutdown callback. The MCP stdio server owns no HTTP
+  // infrastructure, so there is nothing to stop on fatal exit.
+  registerGracefulShutdown(async () => {});
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const {
@@ -106,7 +105,7 @@ export async function startStdioServer(): Promise<void> {
 
   wireShutdownHooks({
     onBeforeTerminate: async () => {
-      await ctx.httpServer?.stop();
+      // The MCP stdio server owns no HTTP infrastructure; nothing to stop here.
     },
   });
 }
