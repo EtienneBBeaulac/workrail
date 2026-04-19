@@ -6042,3 +6042,61 @@ Added Phase 0.5 "Locate Upstream Context" to `coding-task-workflow-agentic.json`
 
 Also consolidated from three workflow variants to one canonical file.
 
+
+---
+
+## Current state update (Apr 19, 2026)
+
+**npm version: v3.40.0**
+
+### What shipped since v3.36.0 (Apr 18 -- Apr 19)
+
+- ✅ **`wr.shaping`** -- faithful Shape Up shaping workflow (9 steps, two human gates with autonomous fallback)
+- ✅ **`coding-task-workflow-agentic` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
+- ✅ **Coding workflow consolidated** -- from three variants (lean, full, lean.v2) to one canonical file.
+- ✅ **HttpServer removed from MCP server** (#601) -- pure stdio. MCP server can no longer accidentally start an HTTP server.
+- ✅ **Late-bound goals** (#604) -- `goalTemplate: "{{$.goal}}"` defaults for webhook-driven sessions. Goals can come from the payload, not just the static trigger definition.
+- ✅ **Coordinator message queue drain** (#606) -- `pr-review` coordinator reads `~/.workrail/message-queue.jsonl` before each spawn cycle. `worktrain tell stop`, `skip-pr <n>`, `add-pr <n>` work.
+- ✅ **Notifications shipped** -- `NotificationService` implemented, wired into `TriggerRouter` via `trigger-listener.ts`. `WORKTRAIN_NOTIFY_MACOS=true` and `WORKTRAIN_NOTIFY_WEBHOOK=<url>` in `~/.workrail/config.json`.
+- ✅ **`worktrain run pr-review`** -- fully wired coordinator command. `spawnSession` → `awaitSessions` → `getAgentResult` (session-wide artifact aggregation) → `parseFindingsFromNotes` → route by severity.
+- ✅ **`wr.review_verdict` artifact path** -- end-to-end wired: `mr-review-workflow.agentic.v2.json` phase-6 emits it, `artifact-contract-validator.ts` validates it at `continue_workflow` time, coordinator reads it with keyword-scan fallback.
+- ✅ **`worktrain logs` / `worktrain health`** -- structured daemon log tailing and per-session health summary. `worktrain status <id>` deprecated in favor of `worktrain health <id>`.
+- ✅ **`signal_coordinator` tool** -- agent can emit structured mid-session signals (`progress`, `finding`, `data_needed`, `approval_needed`, `blocked`) without advancing the step.
+- ✅ **`ChildWorkflowRunResult` + `assertNever`** -- spawn_agent delivery_failed bug fixed. `delivery_failed` impossible state is compile-time excluded.
+- ✅ **`lastStepArtifacts` on `WorkflowRunSuccess`** -- `onComplete` callback forwards artifacts alongside notes. Coordinator can read typed artifacts from result without a separate HTTP call.
+- ✅ **`steerRegistry` + POST `/sessions/:id/steer`** -- coordinator injection endpoint wired in daemon console. Running sessions register a steer callback; coordinators can inject mid-session messages via HTTP.
+- ✅ **GitHub polling adapters** -- `github_issues_poll` and `github_prs_poll` providers fully implemented alongside existing `gitlab_poll`.
+- ✅ **Knowledge graph spike** -- `src/knowledge-graph/` module: DuckDB in-memory + ts-morph indexer + two validation queries. NOT yet wired to an MCP tool (ts-morph in devDependencies).
+- ✅ **`worktrain daemon --install`** -- launchd plist creation, load, verify. Daemon survives MCP server reconnects.
+- ✅ **Performance sweep** -- April 2026 sweep identified 10 highest-leverage fixes, filed as issues #248-257. Not yet merged.
+
+### Accurate limitations (as of v3.40.0)
+
+1. **Console session tree UI not built** -- `parentSessionId` is stored in the `session_created` event and in `WorkflowRunSuccess`. Console `RunLineageDag` shows the per-session step DAG only. Cross-session parent-child tree is data-only. PRs #607 (tree view) and #608 (steer endpoint) are OPEN.
+2. **Daemon tool set is minimal** -- agent has: `complete_step`, `continue_workflow` (deprecated), `Bash`, `Read`, `Write`, `report_issue`, `spawn_agent`, `signal_coordinator`. No `Glob`, `Grep`, or `Edit`. Read/Write are thin wrappers.
+3. **`worktrain tell` messages only drained by coordinator** -- `drainMessageQueue` is called by `runPrReviewCoordinator`, not by the daemon loop. A running autonomous session cannot receive mid-run injections from `worktrain tell`. The `steerRegistry` HTTP endpoint is the mid-session channel.
+4. **Knowledge graph not wired** -- module exists, ts-morph must move to dependencies before an MCP tool can be built.
+5. **`spawn_agent` return missing `artifacts`** -- returns `{ childSessionId, outcome, notes }` only. Typed artifacts from child session are not surfaced to the parent agent. `lastStepArtifacts` on `WorkflowRunSuccess` exists but spawn_agent doesn't return it.
+6. **`worktrain inbox --watch` stub** -- `--watch` flag prints "not yet implemented" and exits.
+7. **Artifact store not built** -- agents still dump markdown/files directly into the repo. `~/.workrail/artifacts/` directory structure not created.
+8. **Performance issues not fixed** -- issues #248-257 filed from April sweep. `continue_workflow` triggers 6+ event log scans, full session rebuild per `/api/v2/sessions` request, N+1 workflow fetches, no caching.
+9. **No auto-commit** -- agents can write code but do not commit, push, or open PRs autonomously.
+10. **Assessment gates not battle-tested** -- end-to-end flow with `outputContract: required: true` not validated in production use.
+
+### Open PRs to merge
+
+- **#607** `feat(console): add session tree view for coordinator sessions` -- cross-session parent-child hierarchy in console. Blocked on: `parentSessionId` data is in store but console routes need to surface it.
+- **#608** `feat(console): add POST /api/v2/sessions/:sessionId/steer for coordinator injection` -- NOTE: this endpoint is already implemented in `daemon-console.ts` via `steerRegistry`. PR #608 may be adding this to the MCP server console separately. Check before merging.
+- **#610** `feat(workflows): add wr.shaping` -- the shaping workflow. Ready to merge.
+- **#587** `fix(mcp): add assertNever exhaustiveness guard to TriggerRouter` -- likely already applied in codebase (ChildWorkflowRunResult assertNever is live). May be a duplicate or different scope. Check.
+
+### Next priorities (groomed Apr 19)
+
+1. **Merge #610 (wr.shaping)** -- ready. Workflow is implemented and in the branch.
+2. **Merge #587 (TriggerRouter assertNever)** -- quick fix, check if still relevant.
+3. **Review and merge #607 + #608** -- console tree view and steer endpoint. Verify #608 doesn't duplicate what's already live in daemon-console.ts.
+4. **Performance fixes** -- issues #248-257. Pick highest-leverage first: SessionIndex (#248) and console projection cache (#249) eliminate most of the repeated scans.
+5. **Daemon tool set: add Glob + Grep** -- agents routinely need to search files. `Read` + `Bash` grep is slow and lossy. Native `Glob` and `Grep` tools would make coding sessions more reliable.
+6. **`spawn_agent` artifacts gap** -- add `artifacts?: readonly unknown[]` to the return value. `lastStepArtifacts` is already on `WorkflowRunSuccess`; wiring it through is ~30 LOC.
+7. **Knowledge graph wiring** -- move `ts-morph` and `@duckdb/node-api` to dependencies, add `query_knowledge_graph` MCP tool.
+8. **Artifact store foundation** -- `~/.workrail/artifacts/` directory, write path in `complete_step`.
