@@ -850,6 +850,16 @@ describe('drainMessageQueue', () => {
     expect(result.stopReason).toBe('stop');
   });
 
+  it('stop is triggered when message has leading whitespace before "stop"', async () => {
+    // Verifies STOP_RE = /^\s*stop\b/i handles leading whitespace.
+    const queue = buildQueue([{ message: '  stop the run' }]);
+    const { deps } = makeDrainDeps({
+      '/home/test/.workrail/message-queue.jsonl': queue,
+    });
+    const result = await drainMessageQueue(deps);
+    expect(result.stop).toBe(true);
+  });
+
   it('extracts PR number from skip-pr message', async () => {
     const queue = buildQueue([{ message: 'skip-pr 42' }]);
     const { deps } = makeDrainDeps({
