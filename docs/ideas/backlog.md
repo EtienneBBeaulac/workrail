@@ -5925,3 +5925,54 @@ Today the coordinator is external to the workflow -- it orchestrates sessions fr
 - `signal_coordinator` tool -- the session might signal the coordinator instead of blocking
 - `waitForCoordinator` step flag (already in this backlog) -- same underlying need, different framing
 - "Coordinator review mode: self-healing vs comment-and-wait" -- confirmation points are where that routing decision gets expressed
+
+---
+
+## Architecture Decision: Three-Workflow Pipeline (Apr 18, 2026)
+
+### Decision
+
+The canonical WorkRail workflow pipeline for new features is:
+
+```
+wr.discovery (optional) → wr.shaping (optional) → coding-task-workflow-agentic
+```
+
+Each workflow is independently useful. The pipeline is an optional chain, not a required sequence.
+
+### Rationale
+
+**wr.discovery** produces a direction -- what problem is worth solving. Output: structured discovery notes at `.workrail/discovery/`.
+
+**wr.shaping** produces a bounded pitch -- what specifically to build and explicitly NOT build, at a product level. Output: `.workrail/current-pitch.md`. Faithful Shape Up methodology. Tech-agnostic. No code-level content.
+
+**coding-task-workflow-agentic** produces running code -- engineering approach, sliced implementation, verification. When pitch.md exists (Phase 0.5), it skips design ideation and translates the pitch directly into an engineering approach. The pitch's no-gos and appetite are binding constraints.
+
+### No TechSpec workflow needed
+
+The coding workflow already does everything a TechSpec workflow would do: Phase 1b generates design candidates, Phase 1c selects and challenges the approach, Phase 3 writes the spec and implementation plan. Adding a separate TechSpec workflow would duplicate this and create a question of which is canonical. The coding workflow is the engineering planning layer.
+
+**The split that matters is product vs engineering:**
+- Product decisions (what to build, for whom, within what time) → wr.shaping
+- Engineering decisions (how to build it, which interfaces, which tests) → coding workflow
+
+### When to skip shaping
+
+- Task is small, concrete, and clearly scoped → go straight to coding workflow
+- Discovery already produced a bounded, implementable direction
+- You have a pre-written ticket or spec that already defines what to build
+
+### Faithful Shape Up constraint
+
+wr.shaping is tech-agnostic. A pitch for a Kotlin Android app and a pitch for a Python API service look structurally identical. No file paths, no function signatures, no implementation details. This makes pitches usable by human engineering teams at companies using Shape Up, not just WorkRail's coding workflow.
+
+### Phase 0.5 mechanics
+
+When `coding-task-workflow-agentic` finds `.workrail/current-pitch.md`:
+1. Reads all five pitch sections (Problem, Appetite, Solution/Elements, Rabbit Holes, No-Gos)
+2. Sets `shapedInputDetected=true`
+3. Skips phases 1a-1c (hypothesis, design generation, challenge-and-select)
+4. Phase 1d translates pitch elements/invariants/no-gos into an engineering approach
+5. Plan audit (Phase 4) checks for drift against the pitch
+6. Appetite is a hard ceiling -- oversized engineering work becomes follow-up tickets
+
