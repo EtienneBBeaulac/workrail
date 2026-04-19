@@ -6133,3 +6133,28 @@ Also consolidated from three workflow variants to one canonical file.
 **Key insight for AI implementers:** LLMs need MORE explicit specs than humans on interfaces/invariants/file boundaries (no tacit knowledge, no scope-shame), but LESS explicit than junior humans on standard patterns. The dominant failure mode is confident architectural divergence -- working code that reinvents an existing utility. Context Pack (Step 7) directly prevents this.
 
 **Next action:** author `wr.shaping` as a WorkRail workflow JSON using workflow-for-workflows, then update `coding-task-workflow-agentic` Phase 0 to detect and consume `shape.json` when present.
+
+---
+
+## Coordinator architecture: separation of concerns (Apr 19, 2026)
+
+**Problem:** The current `src/coordinators/pr-review.ts` is a monolithic script doing too many things: session dispatch, result aggregation, finding classification, merge routing, message queue drain, and outbox writes. As we add knowledge graph queries, context bundle assembly, and more workflows, this becomes a god class fast.
+
+**The right mental model:** "Coordinator" is not a class or a script -- it is a **layer** that orchestrates across multiple concerns. Those concerns should be separated:
+
+- **Trigger layer** -- `src/trigger/` -- receives events, validates, enqueues. Already separate.
+- **Dispatch layer** -- decides which workflow to run with what goal and context. Currently embedded in coordinator scripts.
+- **Context assembly layer** -- gathers and packages context before spawning (workspace state, knowledge graph queries, upstream docs, prior session notes). Currently absent / ad-hoc.
+- **Orchestration layer** -- spawns sessions, awaits results, routes based on outcomes, handles retries and escalations. This is the "coordinator" proper.
+- **Delivery layer** -- `src/trigger/delivery-action.ts` -- posts results back to origin systems. Already exists.
+
+**The knowledge graph question surfaced this:** Before dispatching a coding session, someone needs to run `buildIndex()` and query "what imports the file being changed". That belongs in the **context assembly layer**, not in the orchestration script. The orchestration script should receive a pre-assembled context bundle and just dispatch.
+
+**What to build eventually:**
+- A `ContextAssembler` abstraction that takes a task description + workspace + trigger metadata and returns a structured context bundle
+- The knowledge graph is one of several context sources (alongside upstream docs, prior session notes, repo state)
+- The orchestration script (coordinator proper) calls `assembleContext()` before `spawnSession()`, completely decoupled from how the context was gathered
+
+**Anti-pattern to avoid:** Adding knowledge graph calls directly into `pr-review.ts` or any other coordinator script. That makes every coordinator responsible for knowing about every context source.
+
+**Priority:** Design before building the context assembly layer. The knowledge graph implementation should wait until this separation is clear.
