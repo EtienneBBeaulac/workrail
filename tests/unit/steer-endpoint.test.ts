@@ -12,6 +12,8 @@
 
 import express from 'express';
 import * as http from 'node:http';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountConsoleRoutes } from '../../src/v2/usecases/console-routes.js';
 import type { SteerRegistry } from '../../src/daemon/workflow-runner.js';
@@ -22,7 +24,7 @@ import type { ConsoleService } from '../../src/v2/usecases/console-service.js';
 // ---------------------------------------------------------------------------
 
 const FAKE_CONSOLE_SERVICE = {
-  getSessionsDir: () => '/tmp/steer-test-sessions',
+  getSessionsDir: () => path.join(os.tmpdir(), 'steer-test-sessions'),
   getSessionList: async () => ({ isOk: () => true, value: { sessions: [] } }),
   getSessionDetail: async () => ({ isOk: () => false, value: null, isErr: () => true, error: { code: 'SESSION_LOAD_FAILED', message: 'not found' } }),
   getNodeDetail: async () => ({ isOk: () => false, value: null, isErr: () => true, error: { code: 'NODE_NOT_FOUND', message: 'not found' } }),
