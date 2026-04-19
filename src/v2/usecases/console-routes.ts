@@ -12,6 +12,7 @@ import express from 'express';
 import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichmentCompleteCallback } from './worktree-service.js';
 import { toWorkflowSourceInfo } from '../../types/workflow.js';
@@ -204,6 +205,239 @@ export function mountConsoleRoutes(
     // Remove client on disconnect
     req.on('close', () => { sseClients.delete(res); });
     res.on('close', () => { sseClients.delete(res); }); // F4: catch external res.end() immediately
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-session SSE endpoint
+  //
+  // GET /api/v2/sessions/:sessionId/events
+  //
+  // Streams structured daemon events for a single session in real time. Designed
+  // for coordinator scripts that need to observe a running session and decide
+  // whether to call POST /sessions/:id/steer.
+  //
+  // Implementation notes:
+  // - Validates the session exists before opening the stream (404 if not found).
+  // - Watches the daemon event log file (~/.workrail/events/daemon/YYYY-MM-DD.jsonl)
+  //   and tails new events as they are appended by DaemonEventEmitter.
+  // - Filters events by workrailSessionId matching the URL param.
+  // - Included event kinds: tool_called, tool_call_started, tool_call_completed,
+  //   tool_call_failed, tool_error, step_advanced, session_completed, issue_reported,
+  //   agent_stuck, llm_turn_started, llm_turn_completed.
+  // - Closes the stream cleanly after a session_completed event is forwarded.
+  // - Auth: none required (localhost-only, 127.0.0.1 binding, same as all other routes).
+  // ---------------------------------------------------------------------------
+
+  /** Daemon event log directory -- matches the path in console-service.ts and daemon-events.ts. */
+  const daemonEventsDir = path.join(
+    process.env['HOME'] ?? os.homedir(),
+    '.workrail', 'events', 'daemon',
+  );
+
+  /**
+   * Tail-read all lines appended AFTER `prevSize` bytes from the daemon event log file.
+   * Returns an array of raw JSON-parsed event objects, skipping malformed lines.
+   * Returns [] when the file is not yet created or cannot be read.
+   */
+  async function tailDaemonEvents(filePath: string, prevSize: number): Promise<readonly Record<string, unknown>[]> {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (stat.size <= prevSize) return [];
+      const fd = await fs.promises.open(filePath, 'r');
+      const length = stat.size - prevSize;
+      const buf = Buffer.alloc(length);
+      try {
+        await fd.read(buf, 0, length, prevSize);
+      } finally {
+        await fd.close();
+      }
+      const chunk = buf.toString('utf8');
+      return chunk
+        .split('\n')
+        .filter(Boolean)
+        .flatMap((line) => {
+          try { return [JSON.parse(line) as Record<string, unknown>]; } catch { return []; }
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  // Event kinds forwarded to the per-session SSE stream.
+  // Omitted: daemon_started, trigger_fired, session_queued, session_started, delivery_attempted
+  // (these are workspace-level, not per-session coordinator signals).
+  const SESSION_SSE_EVENT_KINDS = new Set([
+    'tool_called',
+    'tool_call_started',
+    'tool_call_completed',
+    'tool_call_failed',
+    'tool_error',
+    'step_advanced',
+    'session_completed',
+    'issue_reported',
+    'agent_stuck',
+    'llm_turn_started',
+    'llm_turn_completed',
+    'signal_emitted',  // emitted by signal_coordinator tool
+  ]);
+
+  app.get('/api/v2/sessions/:sessionId/events', async (req: Request, res: Response) => {
+    const { sessionId } = req.params;
+
+    // Validate session exists before opening SSE stream.
+    // NOTE: the session store returns ok() for unknown IDs (empty manifest, not an error).
+    // We detect non-existent sessions by checking for an empty runs array.
+    const sessionResult = await consoleService.getSessionDetail(sessionId);
+    if (sessionResult.isErr()) {
+      const status = sessionResult.error.code === 'SESSION_LOAD_FAILED' ? 404 : 500;
+      res.status(status).json({ success: false, error: sessionResult.error.message });
+      return;
+    }
+    const sessionDetail = sessionResult.value;
+    if (!sessionDetail || !sessionDetail.runs || sessionDetail.runs.length === 0) {
+      res.status(404).json({ success: false, error: `Session not found: ${sessionId}` });
+      return;
+    }
+
+    // Set SSE headers.
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // Send connected event immediately so client knows the stream is live.
+    res.write(`data: ${JSON.stringify({ kind: 'connected', sessionId })}\n\n`);
+
+    // Track current file position so we only read newly-appended bytes.
+    // currentLogDate and currentLogPath are updated on every poll to handle UTC midnight rollover.
+    let currentLogDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    let currentLogPath = path.join(daemonEventsDir, `${currentLogDate}.jsonl`);
+    let fileOffset = 0;
+    try {
+      const stat = await fs.promises.stat(currentLogPath);
+      fileOffset = stat.size; // start from end of existing content
+    } catch {
+      // File not yet created -- start from 0
+    }
+
+    let isClosed = false;
+    let isProcessing = false;
+    let watcher: ReturnType<typeof fs.watch> | null = null;
+
+    const cleanup = () => {
+      if (isClosed) return;
+      isClosed = true;
+      try { watcher?.close(); } catch { /* ignore */ }
+      try { if (!res.writableEnded) res.end(); } catch { /* ignore */ }
+    };
+
+    /** Read new events from the log file, filter by sessionId, and write matching ones to the stream. */
+    const processNewEvents = async () => {
+      if (isClosed || isProcessing) return;
+      isProcessing = true;
+
+      // Handle UTC midnight rollover: if the date changed, switch to the new log file.
+      const todayDate = new Date().toISOString().slice(0, 10);
+      if (todayDate !== currentLogDate) {
+        currentLogDate = todayDate;
+        currentLogPath = path.join(daemonEventsDir, `${currentLogDate}.jsonl`);
+        fileOffset = 0;
+      }
+
+      const newEvents = await tailDaemonEvents(currentLogPath, fileOffset);
+
+      for (const event of newEvents) {
+        if (isClosed) break;
+
+        // Filter: must match this session and be a coordinator-relevant kind.
+        const kind = typeof event['kind'] === 'string' ? event['kind'] : null;
+        const evtSessionId = typeof event['workrailSessionId'] === 'string'
+          ? event['workrailSessionId']
+          : null;
+
+        if (!kind || !SESSION_SSE_EVENT_KINDS.has(kind)) continue;
+        if (evtSessionId !== sessionId) continue;
+
+        // Write the event to the SSE stream.
+        try {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch {
+          cleanup();
+          return;
+        }
+
+        // Close the stream after forwarding the terminal event.
+        if (kind === 'session_completed') {
+          cleanup();
+          return;
+        }
+      }
+
+      // Update fileOffset to current file size (covers all lines just consumed).
+      try {
+        const stat = await fs.promises.stat(currentLogPath);
+        fileOffset = stat.size;
+      } catch {
+        // File was deleted or renamed mid-read -- reset to 0 for next poll.
+        fileOffset = 0;
+      }
+      isProcessing = false;
+    };
+
+    // Watch the daemon events directory. The log file for today may not exist yet;
+    // fs.watch on the directory fires on any file change within it, including file creation.
+    // WHY directory not file: midnight rollover creates a new YYYY-MM-DD.jsonl file;
+    // watching the directory fires when that file is created. processNewEvents() handles
+    // the rollover by recomputing currentLogPath when the date changes.
+    try {
+      fs.mkdirSync(daemonEventsDir, { recursive: true });
+    } catch { /* ignore */ }
+
+    try {
+      watcher = fs.watch(daemonEventsDir, { recursive: false }, (_eventType, filename) => {
+        if (filename !== null && filename.endsWith('.jsonl')) {
+          void processNewEvents();
+        }
+      });
+      watcher.on('error', cleanup);
+    } catch {
+      // fs.watch not supported on this platform -- SSE stream stays open but receives no events
+      // (coordinator can still disconnect and poll via the session detail endpoint).
+    }
+
+    // Keepalive: send SSE comments every 30s to prevent proxy timeouts.
+    const keepaliveInterval = setInterval(() => {
+      if (isClosed) { clearInterval(keepaliveInterval); return; }
+      try {
+        res.write(': keepalive\n\n');
+      } catch {
+        clearInterval(keepaliveInterval);
+        cleanup();
+      }
+    }, 30_000);
+
+    // Max connection time: 4 hours. After that, close cleanly. Coordinators should
+    // reconnect if they need to observe beyond that window.
+    const maxConnectionTimeout = setTimeout(() => {
+      clearInterval(keepaliveInterval);
+      cleanup();
+    }, 4 * 60 * 60 * 1000);
+
+    req.on('close', () => {
+      clearInterval(keepaliveInterval);
+      clearTimeout(maxConnectionTimeout);
+      cleanup();
+    });
+    res.on('close', () => {
+      clearInterval(keepaliveInterval);
+      clearTimeout(maxConnectionTimeout);
+      cleanup();
+    });
+
+    // Do an initial scan to catch any events that fired between session validation and
+    // the watch being established (small race window).
+    void processNewEvents();
   });
 
   // ---------------------------------------------------------------------------
