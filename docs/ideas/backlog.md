@@ -6247,3 +6247,40 @@ Scheduled tasks are the entry point for fully autonomous work:
 - `node-cron` or `croner` npm package for cron expression parsing and next-fire-time calculation. Lightweight, no daemon dependencies.
 - Scheduled triggers have no webhook payload -- `contextMapping` is empty, `goalTemplate` uses only static text or env vars.
 - The schedule state (last-fired-at per trigger) persists to `~/.workrail/schedule-state.json` so the daemon can detect missed runs on restart.
+
+---
+
+## Escalating review gates based on finding severity (Apr 19, 2026)
+
+**The idea:** when an MR review returns a Critical finding post-implementation, the review is not over -- it triggers a deeper audit chain before merge is allowed.
+
+### Current state
+
+`worktrain run pr-review` routes by severity: `clean` → merge, `minor` → fix-agent loop, `blocking` → escalate to human. But "blocking" is binary -- a single Critical finding and a trivially incorrect comment are treated identically (both block, neither gets more scrutiny).
+
+### The right behavior
+
+After a fix round, if the re-review still returns a Critical finding (or the original review does):
+1. **Another full MR review** -- confirm the Critical is real, not a false positive from the reviewer
+2. **Production readiness audit** (`production-readiness-audit` workflow) -- a Critical finding often implies a runtime risk. Check for error handling gaps, security exposure, missing observability.
+3. **Architecture audit** (`architecture-scalability-audit`) -- if the Critical is architectural (wrong abstraction, tight coupling, violates invariants), run a targeted audit on the affected modules.
+
+Not all Criticals warrant all three. The coordinator should route based on the finding's `category` field (from `wr.review_verdict`):
+- `correctness` / `security` → always trigger prod audit
+- `architecture` / `design` → trigger arch audit
+- All → trigger re-review
+
+### Auto-merge policy interaction
+
+A PR that triggered the escalating audit chain should NEVER auto-merge, even if the final re-review comes back clean. The human should approve it explicitly after seeing the audit trail. This is a hard rule, not a setting.
+
+### Implementation notes
+
+- The escalation logic belongs in the `IMPLEMENT` and `REVIEW_ONLY` mode coordinators (part of the adaptive pipeline coordinator work).
+- `wr.review_verdict` `findings[].category` field needs to be defined if not already -- check `src/v2/durable-core/schemas/artifacts/review-verdict.ts`.
+- The audit chain runs sequentially (prod then arch), not in parallel -- each audit's output informs the next.
+- All audit session IDs should be linked to the same parent work unit so the console session tree shows the full chain.
+
+### Priority
+
+Design this alongside the adaptive pipeline coordinator (#3). The coordinator needs to know about this escalation policy before its routing logic is finalized -- the `IMPLEMENT` mode's post-review handling is incomplete without it.
