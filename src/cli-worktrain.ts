@@ -485,6 +485,21 @@ program
               // Clear heartbeat before stopping -- prevents timer from firing after
               // the process is in teardown state.
               clearInterval(heartbeatInterval);
+              // WHY emit session_aborted before handle.stop(): in-flight sessions have
+              // their agent loops killed by handle.stop() but never emit session_completed.
+              // Without these events the JSONL log shows them as RUNNING forever, making
+              // `worktrain health` and `worktrain status` untrustworthy after restart.
+              // steerRegistry keys are workrailSessionIds of sessions currently in the
+              // agent loop. Emit before handle.stop() while I/O is still active.
+              for (const workrailSessionId of handle.steerRegistry.keys()) {
+                emitter.emit({
+                  kind: 'session_aborted',
+                  sessionId: workrailSessionId,
+                  workrailSessionId,
+                  reason: 'daemon_shutdown',
+                  ts: Date.now(),
+                });
+              }
               emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
               if (consoleHandle) {
                 await consoleHandle.stop();
@@ -567,6 +582,8 @@ function formatDaemonEventLine(raw: string): string | null {
       }
       return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${outcome ?? '?'}${detail}`;
     }
+    case 'session_aborted':
+      return `${prefix}  reason=${obj['reason'] ?? '?'}`;
     case 'step_advanced':
       return `${prefix}  -> step advanced`;
     case 'issue_reported': {
@@ -1125,6 +1142,13 @@ function runHealthSummary(sessionId: string, raw: string): void {
         break;
       case 'session_completed':
         sessionOutcome = typeof obj['outcome'] === 'string' ? obj['outcome'] : null;
+        isLive = false;
+        break;
+      case 'session_aborted':
+        // WHY treat session_aborted as a terminal state: the daemon was stopped before
+        // the session completed. This is not a failure, but the session is definitively
+        // no longer running. Show ABORTED in the status line rather than RUNNING.
+        sessionOutcome = 'aborted';
         isLive = false;
         break;
     }
