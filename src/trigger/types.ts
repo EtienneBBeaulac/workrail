@@ -468,6 +468,50 @@ export interface TriggerDefinition {
    * In YAML:   soulFile: "~/.workrail/workspaces/my-project/daemon-soul.md"
    */
   readonly soulFile?: string;
+
+  /**
+   * Branch isolation strategy for this trigger's workflow sessions.
+   *
+   * - 'none' (default): no git worktree is created. The session uses
+   *   trigger.workspacePath directly (existing behavior). Safe for read-only
+   *   triggers (MR review, polling analysis) where the session does not commit.
+   * - 'worktree': runWorkflow() creates an isolated git worktree at
+   *   ~/.workrail/worktrees/<sessionId> on a fresh branch before the agent loop
+   *   starts. Each concurrent session gets its own checkout. The branch is pushed
+   *   and the worktree is removed after successful delivery. Kept for debugging
+   *   on failure or timeout.
+   *
+   * WHY: Without worktree isolation, concurrent coding sessions corrupt the main
+   * checkout. With 'worktree', trigger.workspacePath is never modified -- all
+   * agent writes go to the isolated checkout. trigger.workspacePath continues to
+   * be used for git operations (-C flag) that target the repo, not the worktree.
+   *
+   * Default: 'none' (opt-in). Use 'worktree' for coding triggers (autoCommit: true).
+   * In YAML: branchStrategy: worktree
+   */
+  readonly branchStrategy?: 'worktree' | 'none';
+
+  /**
+   * Base branch for the worktree. Only used when branchStrategy === 'worktree'.
+   *
+   * The session branch is created from origin/<baseBranch>. The remote branch
+   * is fetched as an auth pre-flight before worktree creation.
+   *
+   * Default: 'main'.
+   * In YAML: baseBranch: main
+   */
+  readonly baseBranch?: string;
+
+  /**
+   * Prefix for the session branch name. Only used when branchStrategy === 'worktree'.
+   *
+   * The full branch name is `${branchPrefix}${sessionId}`.
+   * Example: 'worktrain/' + 'abc123' = 'worktrain/abc123'.
+   *
+   * Default: 'worktrain/'.
+   * In YAML: branchPrefix: "worktrain/"
+   */
+  readonly branchPrefix?: string;
 }
 
 // ---------------------------------------------------------------------------

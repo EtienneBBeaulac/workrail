@@ -108,6 +108,10 @@ interface ParsedTriggerRaw {
   // Workspace namespacing (Phase 1).
   workspaceName?: string;  // raw string; validated + branded in validateAndResolveTrigger
   soulFile?: string;       // raw path; cascade-resolved in validateAndResolveTrigger
+  // Worktree isolation (Issue #627).
+  branchStrategy?: string; // validated as 'worktree' | 'none' at assemble time; default 'none'
+  baseBranch?: string;     // default 'main'
+  branchPrefix?: string;   // default 'worktrain/'
   // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   // Fields from all providers are unioned here -- the assembler validates which
@@ -472,6 +476,9 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'autoOpenPR':       trigger.autoOpenPR = value; break;
     case 'workspaceName':    trigger.workspaceName = value; break;
     case 'soulFile':         trigger.soulFile = value; break;
+    case 'branchStrategy':   trigger.branchStrategy = value; break;
+    case 'baseBranch':       trigger.baseBranch = value; break;
+    case 'branchPrefix':     trigger.branchPrefix = value; break;
     // contextMapping, agentConfig, onComplete, source handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -832,6 +839,35 @@ function validateAndResolveTrigger(
   }
 
   // ---------------------------------------------------------------------------
+  // Worktree isolation fields (Issue #627)
+  //
+  // branchStrategy: 'worktree' | 'none' -- default 'none' (opt-in to worktree isolation).
+  // baseBranch: the base branch to branch from; default 'main'.
+  // branchPrefix: prefix for the session branch name; default 'worktrain/'.
+  //
+  // WHY 'none' as default: worktree creation requires git auth (git fetch) and disk
+  // access. Read-only triggers (MR review, polling) should not incur this overhead.
+  // Only coding triggers that write to the repo should use 'worktree'.
+  //
+  // WHY validate at parse time: an invalid branchStrategy would silently fall through
+  // to 'none' if not caught here. Fail-fast at load time is consistent with other
+  // field validation in this function.
+  // ---------------------------------------------------------------------------
+  const rawBranchStrategy = raw.branchStrategy?.trim();
+  if (rawBranchStrategy !== undefined && rawBranchStrategy !== 'worktree' && rawBranchStrategy !== 'none') {
+    return err({
+      kind: 'invalid_field_value',
+      field: `branchStrategy (must be "worktree" or "none", got: "${rawBranchStrategy}")`,
+      triggerId: rawId,
+    });
+  }
+  const branchStrategy: 'worktree' | 'none' | undefined =
+    rawBranchStrategy === 'worktree' ? 'worktree' : rawBranchStrategy === 'none' ? 'none' : undefined;
+
+  const baseBranch = raw.baseBranch?.trim() || undefined;
+  const branchPrefix = raw.branchPrefix?.trim() || undefined;
+
+  // ---------------------------------------------------------------------------
   // pollingSource assembly (gitlab_poll, github_issues_poll, github_prs_poll)
   //
   // Invariants enforced here:
@@ -1026,6 +1062,10 @@ function validateAndResolveTrigger(
     // Workspace namespacing (Phase 1).
     ...(resolvedWorkspaceName !== undefined ? { workspaceName: resolvedWorkspaceName } : {}),
     ...(resolvedSoulFile ? { soulFile: resolvedSoulFile } : {}),
+    // Worktree isolation (Issue #627).
+    ...(branchStrategy !== undefined ? { branchStrategy } : {}),
+    ...(baseBranch !== undefined ? { baseBranch } : {}),
+    ...(branchPrefix !== undefined ? { branchPrefix } : {}),
   };
 
   return ok(trigger);
