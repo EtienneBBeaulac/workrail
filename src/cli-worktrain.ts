@@ -26,6 +26,7 @@ import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
+import { loadDaemonEnv } from './daemon/daemon-env.js';
 import { createContextAssembler } from './context-assembly/index.js';
 import { createListRecentSessions } from './context-assembly/infra.js';
 import {
@@ -311,6 +312,10 @@ program
   .option('--uninstall', 'Stop the daemon service and remove the launchd plist')
   .option('--status', 'Show the current status of the daemon service')
   .action(async (options: { install?: boolean; uninstall?: boolean; status?: boolean }) => {
+    // Load ~/.workrail/.env before anything else so secrets are available both
+    // for daemon startup (startDaemon path) and for plist construction (--install path).
+    await loadDaemonEnv();
+
     const { execFile: execFileRaw } = await import('child_process');
     const execFilePromise = promisify(execFileRaw);
 
@@ -353,6 +358,10 @@ program
         print: (line: string) => console.log(line),
         sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
         startDaemon: async () => {
+          // Load .env again as defense-in-depth: this callback may be invoked
+          // from paths other than the daemon action handler in the future.
+          await loadDaemonEnv();
+
           // This is the launchd entry point: `worktrain daemon` with no flags.
           // Run the same startup logic as `workrail daemon`.
           const { startTriggerListener } = await import('./trigger/trigger-listener.js');
@@ -438,8 +447,42 @@ program
 
           // Keep alive until SIGINT/SIGTERM.
           await new Promise<void>((resolve) => {
+            // Start periodic heartbeat. Emits daemon_heartbeat every 30s so
+            // `worktrain status` can determine whether the daemon is alive.
+            // WHY 30s: frequent enough to detect a crash within 90s (3x interval),
+            // cheap enough to not impact I/O (fire-and-forget JSONL append).
+            const heartbeatInterval = setInterval(() => {
+              const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+              // Count active sessions from the daemon-sessions dir. Best-effort:
+              // if the dir is unavailable, activeSessions defaults to 0.
+              fs.promises.readdir(sessionsDir)
+                .then((files) => files.filter((f) => f.endsWith('.json')).length)
+                .catch(() => 0)
+                .then((activeSessions) => {
+                  emitter.emit({ kind: 'daemon_heartbeat', activeSessions, ts: Date.now() });
+                });
+            }, 30_000);
+
+            // Best-effort crash event. Emitted when an uncaught exception reaches
+            // the process boundary. fire-and-forget -- the async write may not
+            // complete before process.exit(1), but this is explicitly acceptable:
+            // observability must never delay crash recovery.
+            // WHY process.on (not process.once): want to catch any uncaught exception,
+            // not only the first one. process.exit(1) after the emit prevents loops.
+            // WHY not re-throw: re-throwing after this handler fires will crash without
+            // the emit having a chance to initiate. Direct exit is more predictable.
+            process.on('uncaughtException', (err) => {
+              console.error('[WorkTrain] Uncaught exception -- daemon shutting down:', err);
+              emitter.emit({ kind: 'daemon_stopped', reason: 'crash', ts: Date.now() });
+              process.exit(1);
+            });
+
             const shutdown = async () => {
               console.log('\nShutting down daemon...');
+              // Clear heartbeat before stopping -- prevents timer from firing after
+              // the process is in teardown state.
+              clearInterval(heartbeatInterval);
+              emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
               if (consoleHandle) {
                 await consoleHandle.stop();
               }
@@ -761,6 +804,7 @@ program
         joinPath: path.join,
         print: (line: string) => process.stdout.write(line + '\n'),
         getDataDirEnv: () => process.env['WORKRAIL_DATA_DIR'],
+        readEventLog: (p: string) => fs.promises.readFile(p, 'utf-8').catch(() => ''),
       },
       {
         json: options.json,

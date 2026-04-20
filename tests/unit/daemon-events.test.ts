@@ -171,6 +171,9 @@ describe('DaemonEventEmitter', () => {
 
     const events: DaemonEvent[] = [
       { kind: 'daemon_started', port: 3200, workspacePath: '/ws' },
+      // Daemon lifecycle events.
+      { kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() },
+      { kind: 'daemon_heartbeat', activeSessions: 2, ts: Date.now() },
       { kind: 'trigger_fired', triggerId: 't1', workflowId: 'w1' },
       { kind: 'session_queued', triggerId: 't1', workflowId: 'w1' },
       { kind: 'session_started', sessionId: 's1', workflowId: 'w1', workspacePath: '/ws' },

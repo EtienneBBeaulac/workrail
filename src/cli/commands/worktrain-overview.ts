@@ -86,6 +86,15 @@ export interface WorktrainOverviewCommandDeps {
    * Injected for testability.
    */
   readonly getDataDirEnv: () => string | undefined;
+  /**
+   * Read the contents of a file as a UTF-8 string. Returns '' on any error
+   * (file not found, permission denied, etc.) so the caller can degrade
+   * gracefully without branching on error kinds.
+   *
+   * WHY injected: keeps executeWorktrainOverviewCommand a pure function with
+   * all I/O at the boundary. Enables unit tests without vi.mock.
+   */
+  readonly readEventLog: (filePath: string) => Promise<string>;
 }
 
 export interface WorktrainOverviewCommandOpts {
@@ -168,6 +177,88 @@ function buildSessionTitle(s: ConsoleSessionSummary): string {
  */
 function extractStepLabel(_s: ConsoleSessionSummary): string | null {
   return null;
+}
+
+/**
+ * Parse today's daemon JSONL event log and return a human-readable "Daemon: ..." status line.
+ *
+ * Logic:
+ * - Find the most recent `daemon_heartbeat` or `daemon_stopped` event.
+ * - If `daemon_stopped` is most recent: "stopped gracefully (HH:MM:SS)" or "crashed (HH:MM:SS)"
+ * - If `daemon_heartbeat` is most recent and < 90s ago: "running (last heartbeat Xs ago, N active sessions)"
+ * - If `daemon_heartbeat` is most recent but >= 90s ago: "may have crashed (last heartbeat Xh ago)"
+ * - If neither found: "no events today"
+ *
+ * WHY 90s staleness threshold: 3x the 30s heartbeat interval. One missed heartbeat is noise;
+ * three consecutive misses indicates the daemon is likely no longer running.
+ */
+function parseDaemonStatusLine(nowMs: number, eventLogContent: string): string {
+  let latestHeartbeat: { ts: number; activeSessions: number } | null = null;
+  let latestStopped: { ts: number; reason: string } | null = null;
+
+  for (const raw of eventLogContent.split('\n')) {
+    if (!raw.trim()) continue;
+    let obj: Record<string, unknown>;
+    try {
+      obj = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      continue; // Skip malformed lines silently.
+    }
+
+    const kind = typeof obj['kind'] === 'string' ? obj['kind'] : '';
+    const ts = typeof obj['ts'] === 'number' ? obj['ts'] : null;
+    if (ts === null) continue;
+
+    if (kind === 'daemon_heartbeat') {
+      if (latestHeartbeat === null || ts > latestHeartbeat.ts) {
+        const activeSessions = typeof obj['activeSessions'] === 'number' ? obj['activeSessions'] : 0;
+        latestHeartbeat = { ts, activeSessions };
+      }
+    } else if (kind === 'daemon_stopped') {
+      if (latestStopped === null || ts > latestStopped.ts) {
+        const reason = typeof obj['reason'] === 'string' ? obj['reason'] : 'unknown';
+        latestStopped = { ts, reason };
+      }
+    }
+  }
+
+  // Neither event found today.
+  if (latestHeartbeat === null && latestStopped === null) {
+    return 'Daemon: no events today';
+  }
+
+  // Determine which event is most recent.
+  const heartbeatTs = latestHeartbeat?.ts ?? -Infinity;
+  const stoppedTs = latestStopped?.ts ?? -Infinity;
+
+  if (stoppedTs >= heartbeatTs && latestStopped !== null) {
+    // Stopped event is most recent.
+    const stoppedTime = new Date(latestStopped.ts).toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    if (latestStopped.reason === 'graceful') {
+      return `Daemon: stopped gracefully (${stoppedTime})`;
+    }
+    return `Daemon: crashed (${stoppedTime})`;
+  }
+
+  // Heartbeat event is most recent.
+  if (latestHeartbeat !== null) {
+    const agoMs = nowMs - latestHeartbeat.ts;
+    if (agoMs < 90_000) {
+      const agoSec = Math.round(agoMs / 1000);
+      const sessions = latestHeartbeat.activeSessions;
+      const sessionStr = sessions === 1 ? '1 active session' : `${sessions} active sessions`;
+      return `Daemon: running (last heartbeat ${agoSec}s ago, ${sessionStr})`;
+    }
+    // Stale heartbeat -- daemon may have crashed.
+    return `Daemon: may have crashed (last heartbeat ${formatRelativeTime(agoMs)})`;
+  }
+
+  return 'Daemon: no events today';
 }
 
 /**
@@ -267,6 +358,14 @@ export async function executeWorktrainOverviewCommand(
     return;
   }
 
+  // Read today's daemon event log for the Daemon: status line.
+  // WHY async read before output: keeps all I/O at the top; the status line is
+  // printed as part of the header section below.
+  const todayDate = new Date(nowMs).toISOString().slice(0, 10); // YYYY-MM-DD
+  const eventLogPath = deps.joinPath(deps.homedir(), '.workrail', 'events', 'daemon', `${todayDate}.jsonl`);
+  const eventLogContent = await deps.readEventLog(eventLogPath);
+  const daemonStatusLine = parseDaemonStatusLine(nowMs, eventLogContent);
+
   // Human-readable output.
   const date = new Date(nowMs);
   const dateStr = date.toLocaleDateString('en-US', {
@@ -282,6 +381,7 @@ export async function executeWorktrainOverviewCommand(
   });
 
   deps.print(`WorkTrain  [${dateStr}  ${timeStr}]`);
+  deps.print(daemonStatusLine);
   deps.print('Note: live session detection requires daemon (showing last-known state).');
   deps.print('');
 

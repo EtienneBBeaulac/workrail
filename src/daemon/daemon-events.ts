@@ -244,6 +244,20 @@ export interface ToolCallFailedEvent {
   readonly workrailSessionId?: string;
 }
 
+/** Daemon process stopped cleanly (SIGTERM/SIGINT) or crashed (uncaught exception). */
+export interface DaemonStoppedEvent {
+  readonly kind: 'daemon_stopped';
+  readonly reason: 'graceful' | 'crash';
+  readonly ts: number;
+}
+
+/** Periodic heartbeat confirming the daemon is still alive. */
+export interface DaemonHeartbeatEvent {
+  readonly kind: 'daemon_heartbeat';
+  readonly activeSessions: number;
+  readonly ts: number;
+}
+
 /**
  * Emitted when the agent calls signal_coordinator to record a coordinator signal.
  *
@@ -317,6 +331,8 @@ export interface AgentStuckEvent {
  */
 export type DaemonEvent =
   | DaemonStartedEvent
+  | DaemonStoppedEvent
+  | DaemonHeartbeatEvent
   | TriggerFiredEvent
   | SessionQueuedEvent
   | SessionStartedEvent

@@ -5,11 +5,12 @@
  * launchctl. This makes the tests fast, deterministic, and macOS-agnostic.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   executeWorktrainDaemonCommand,
   type WorktrainDaemonCommandDeps,
 } from '../../src/cli/commands/worktrain-daemon.js';
+import { loadDaemonEnv, type LoadDaemonEnvDeps } from '../../src/daemon/daemon-env.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // FAKE BUILDER
@@ -455,5 +456,92 @@ describe('worktrain daemon -- flag validation', () => {
     if (result.kind === 'failure') {
       expect(result.output.message).toContain('mutually exclusive');
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// loadDaemonEnv
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Tests for loadDaemonEnv().
+ *
+ * loadDaemonEnv reads ~/.workrail/.env and sets env vars in process.env.
+ * Shell env always wins: existing keys are never overwritten.
+ * Missing .env file is silently ignored.
+ *
+ * WHY injected deps: ESM module namespace exports cannot be spied on in Vitest
+ * (vi.spyOn on os.homedir fails with "cannot redefine property"). Using injected
+ * deps avoids module mocking entirely and follows the repo's DI philosophy.
+ */
+describe('loadDaemonEnv', () => {
+  // Track keys set by each test so we can clean up after.
+  const keysToClean: string[] = [];
+
+  beforeEach(() => {
+    keysToClean.length = 0;
+  });
+
+  afterEach(() => {
+    // Restore process.env: delete any keys added by the test.
+    for (const key of keysToClean) {
+      delete process.env[key];
+    }
+  });
+
+  /** Build fake deps with the given .env file content (or null for missing). */
+  function fakeDeps(content: string | null): LoadDaemonEnvDeps {
+    return {
+      homedir: () => '/fake/home',
+      readFile: async (p) => {
+        if (content === null) {
+          throw Object.assign(new Error(`ENOENT: ${p}`), { code: 'ENOENT' });
+        }
+        return content;
+      },
+    };
+  }
+
+  it('loads .env file and sets missing env vars', async () => {
+    keysToClean.push('WORKTRAIN_BOT_TOKEN', 'ANOTHER_KEY');
+    delete process.env['WORKTRAIN_BOT_TOKEN'];
+    delete process.env['ANOTHER_KEY'];
+
+    await loadDaemonEnv(fakeDeps('WORKTRAIN_BOT_TOKEN=secret-token\nANOTHER_KEY=another-value'));
+
+    expect(process.env['WORKTRAIN_BOT_TOKEN']).toBe('secret-token');
+    expect(process.env['ANOTHER_KEY']).toBe('another-value');
+  });
+
+  it('does NOT override existing env vars (shell wins)', async () => {
+    process.env['EXISTING_KEY'] = 'original-shell-value';
+    keysToClean.push('EXISTING_KEY');
+
+    await loadDaemonEnv(fakeDeps('EXISTING_KEY=from-dot-env'));
+
+    expect(process.env['EXISTING_KEY']).toBe('original-shell-value');
+  });
+
+  it('silently ignores a missing .env file', async () => {
+    // Should not throw
+    await expect(loadDaemonEnv(fakeDeps(null))).resolves.toBeUndefined();
+  });
+
+  it('skips comment lines and empty lines', async () => {
+    keysToClean.push('ACTUAL_KEY');
+    delete process.env['ACTUAL_KEY'];
+
+    await loadDaemonEnv(fakeDeps('# this is a comment\n\nACTUAL_KEY=actual-value\n   # indented comment'));
+
+    expect(process.env['ACTUAL_KEY']).toBe('actual-value');
+  });
+
+  it('handles values containing = (splits on first = only)', async () => {
+    keysToClean.push('COMPLEX_VALUE');
+    delete process.env['COMPLEX_VALUE'];
+
+    await loadDaemonEnv(fakeDeps('COMPLEX_VALUE=value=with=equals=signs'));
+
+    expect(process.env['COMPLEX_VALUE']).toBe('value=with=equals=signs');
   });
 });
