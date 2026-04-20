@@ -316,6 +316,18 @@ async function maybeRunDelivery(
     {
       autoCommit: trigger.autoCommit,
       autoOpenPR: trigger.autoOpenPR,
+      // secretScan: pass trigger value (undefined = use default true in runDelivery).
+      // WHY ?? true not needed here: runDelivery checks flags.secretScan !== false,
+      // so undefined is equivalent to true. Passing trigger.secretScan preserves the
+      // explicit false from triggers.yml without needing a default here.
+      secretScan: trigger.secretScan ?? true,
+      // Attribution: triggerId and workflowId are used in the PR body footer so operators
+      // can trace the PR back to the trigger and workflow that produced it.
+      triggerId,
+      workflowId: trigger.workflowId,
+      // Per-command git identity: threaded from WorkflowRunSuccess.botIdentity (which was
+      // set from trigger.botIdentity in runWorkflow). Avoids writing to the shared .git/config.
+      ...(result.botIdentity !== undefined ? { botIdentity: result.botIdentity } : {}),
       // Branch assertion: verify HEAD matches expected branch before git push.
       // Only meaningful for worktree sessions -- 'none' sessions use trigger.workspacePath.
       // WHY result.sessionId (not split from path): sessionId is threaded directly through

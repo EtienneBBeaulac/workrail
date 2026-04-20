@@ -105,6 +105,7 @@ interface ParsedTriggerRaw {
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
   autoOpenPR?: string;   // 'true' | 'false' scalar
+  secretScan?: string;   // 'true' | 'false' scalar; default true (opt-out semantics)
   // Workspace namespacing (Phase 1).
   workspaceName?: string;  // raw string; validated + branded in validateAndResolveTrigger
   soulFile?: string;       // raw path; cascade-resolved in validateAndResolveTrigger
@@ -480,6 +481,7 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'callbackUrl':      trigger.callbackUrl = value; break;
     case 'autoCommit':       trigger.autoCommit = value; break;
     case 'autoOpenPR':       trigger.autoOpenPR = value; break;
+    case 'secretScan':       trigger.secretScan = value; break;
     case 'workspaceName':    trigger.workspaceName = value; break;
     case 'soulFile':         trigger.soulFile = value; break;
     case 'branchStrategy':   trigger.branchStrategy = value; break;
@@ -835,6 +837,17 @@ function validateAndResolveTrigger(
   const autoCommit = raw.autoCommit?.trim().toLowerCase() === 'true';
   const autoOpenPR = raw.autoOpenPR?.trim().toLowerCase() === 'true';
 
+  // Parse secretScan boolean flag.
+  // Default: true (opt-out semantics -- scan runs unless explicitly disabled).
+  // WHY opt-out: a scan that defaults to off provides no security value. Users who encounter
+  // false positives can disable with secretScan: false. Users who forget to enable it are safe.
+  // When absent: undefined (treated as true in runDelivery via flags.secretScan !== false).
+  // When 'false': false (scan is explicitly disabled for this trigger).
+  // When 'true': true (redundant but explicit; parsed for consistency).
+  const secretScan: boolean | undefined = raw.secretScan?.trim()
+    ? raw.secretScan.trim().toLowerCase() === 'true'
+    : undefined;
+
   // Warn if autoOpenPR is set without autoCommit -- a PR requires a commit.
   // WHY soft warning (not hard error): allows users to add autoOpenPR first and
   // configure autoCommit later without breaking the config load. Delivery is
@@ -1141,6 +1154,8 @@ function validateAndResolveTrigger(
     ...(onComplete !== undefined ? { onComplete } : {}),
     ...(autoCommit ? { autoCommit } : {}),
     ...(autoOpenPR ? { autoOpenPR } : {}),
+    // secretScan: only spread when explicitly set in YAML (undefined = use default true in runDelivery)
+    ...(secretScan !== undefined ? { secretScan } : {}),
     ...(pollingSource !== undefined ? { pollingSource } : {}),
     // Workspace namespacing (Phase 1).
     ...(resolvedWorkspaceName !== undefined ? { workspaceName: resolvedWorkspaceName } : {}),

@@ -481,6 +481,18 @@ export interface TriggerDefinition {
   readonly autoCommit?: boolean;
 
   /**
+   * When false, skip the secret scan before committing. Default: true (scan runs).
+   *
+   * WHY opt-out (not opt-in): the safer default is to scan. Operators who encounter
+   * false positives from the Generic secret assign pattern can explicitly disable
+   * the scan with secretScan: false in triggers.yml.
+   *
+   * Only meaningful when autoCommit: true. Has no effect when autoCommit is false.
+   * In YAML:   secretScan: false
+   */
+  readonly secretScan?: boolean;
+
+  /**
    * When true (and autoCommit is also true), the daemon runs `gh pr create` after
    * a successful commit. Reads prTitle and prBody from the handoff artifact.
    *
