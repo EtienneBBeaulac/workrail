@@ -65,6 +65,14 @@ export interface DeliveryFlags {
   /** When true (and autoCommit is also true), run gh pr create after the commit. */
   readonly autoOpenPR?: boolean;
   /**
+   * When false, skip the secret scan before committing. Default: true (scan runs by default).
+   *
+   * WHY opt-out semantics (not opt-in): the safer default is to scan. Users who encounter
+   * false positives from the Generic secret assign pattern can explicitly opt out with
+   * secretScan: false in their trigger config.
+   */
+  readonly secretScan?: boolean;
+  /**
    * Process-local session UUID used to construct the expected branch name for HEAD assertion.
    * Only set when branchStrategy === 'worktree'. When present (with branchPrefix), runDelivery()
    * asserts the current HEAD branch matches `${branchPrefix}${sessionId}` before staging files.
@@ -80,6 +88,36 @@ export interface DeliveryFlags {
    * Full expected branch: `${branchPrefix}${sessionId}`.
    */
   readonly branchPrefix?: string;
+  /**
+   * Trigger ID sourced from TriggerDefinition.id.
+   * Used in the PR body footer to identify which trigger produced this PR.
+   * When absent, the footer omits the trigger field.
+   */
+  readonly triggerId?: string;
+  /**
+   * Workflow ID sourced from TriggerDefinition.workflowId.
+   * Used in the PR body footer to identify which workflow produced this PR.
+   * When absent, the footer omits the workflow field.
+   */
+  readonly workflowId?: string;
+  /**
+   * Optional bot identity for per-command git attribution.
+   *
+   * When present, git commit is called with `-c user.name=X -c user.email=Y` flags
+   * instead of relying on the persisted git config. This is safe across parallel worktrees --
+   * identity is scoped to the single command, not written to the shared .git/config.
+   *
+   * WHY per-command (not git config): git config --local writes to the shared .git/config,
+   * which is shared across all worktrees of the same repo. In parallel sessions, last writer
+   * wins and silently stomps other sessions' identities. Per-command -c flags have no
+   * persistent side effects.
+   *
+   * When absent, git commit uses the git config identity already in the environment.
+   */
+  readonly botIdentity?: {
+    readonly name: string;
+    readonly email: string;
+  };
 }
 
 /**
@@ -97,10 +135,11 @@ export type DeliveryResult =
       /**
        * Phase where the error occurred.
        * - 'parse': handoff artifact could not be parsed from notes
+       * - 'secret_scan': staged diff contains a potential secret (delivery aborted before commit)
        * - 'commit': git add/commit failed
        * - 'pr': gh pr create failed (commit may have succeeded)
        */
-      readonly phase: 'parse' | 'commit' | 'pr';
+      readonly phase: 'parse' | 'secret_scan' | 'commit' | 'pr';
       /** stdout + stderr from the failed exec call, or parse error message */
       readonly details: string;
     };
@@ -132,6 +171,144 @@ export type ExecFn = (
  * Delivery commands should complete quickly; 60s is a generous timeout.
  */
 const DELIVERY_TIMEOUT_MS = 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Secret scanning
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of a secret scan over a staged diff.
+ *
+ * WHY no matchedValue field: we must NEVER log or surface the actual secret value,
+ * even in error messages or internal logs. Omitting the field from the type makes
+ * it structurally impossible to accidentally include the matched value downstream.
+ * Only the pattern name, file path, and line number are safe to surface.
+ */
+export interface SecretScanResult {
+  readonly found: boolean;
+  readonly findings: ReadonlyArray<{
+    readonly name: string;
+    readonly file: string;
+    readonly lineNumber: number;
+  }>;
+}
+
+/**
+ * Secret patterns to scan for in staged diffs.
+ *
+ * Each entry has a human-readable name (for error messages) and a regex with the global flag.
+ * WHY global flag: allows matchAll() to find ALL occurrences per line, not just the first.
+ * WHY reset lastIndex before each use: global regexes maintain state across calls.
+ * These patterns are the baseline; gitleaks is the optional upgrade.
+ */
+const SECRET_PATTERNS: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
+  { name: 'GitHub token',          pattern: /ghp_[A-Za-z0-9]{36}/g },
+  { name: 'GitHub OAuth token',    pattern: /gho_[A-Za-z0-9]{36}/g },
+  { name: 'GitHub app token',      pattern: /ghs_[A-Za-z0-9]{36}/g },
+  { name: 'OpenAI key',            pattern: /sk-[A-Za-z0-9]{48}/g },
+  { name: 'Anthropic key',         pattern: /sk-ant-[A-Za-z0-9\-_]{90,}/g },
+  { name: 'AWS access key',        pattern: /AKIA[0-9A-Z]{16}/g },
+  { name: 'AWS secret key',        pattern: /[Aa][Ww][Ss][._-]?[Ss][Ee][Cc][Rr][Ee][Tt][._-]?[Kk][Ee][Yy]\s*[:=]\s*['"]?[A-Za-z0-9+\/]{40}/g },
+  { name: 'Slack token',           pattern: /xox[aboprs]-[A-Za-z0-9\-]+/g },
+  { name: 'Private key',           pattern: /-----BEGIN [A-Z]+ PRIVATE KEY-----/g },
+  { name: 'Generic secret assign', pattern: /(?:password|passwd|secret|api[_-]?key|auth[_-]?token)\s*[:=]\s*['"][^'"]{8,}/gi },
+];
+
+/**
+ * Scan a unified diff string for potential secrets.
+ *
+ * Strategy:
+ * 1. Parse the diff to extract file names and added lines (lines starting with '+').
+ * 2. Track file names from '+++' diff headers and line numbers from '@@ -l,s +l,s @@' hunks.
+ * 3. For each added line, run all SECRET_PATTERNS against the content (after stripping the '+').
+ * 4. Collect findings without capturing the matched value.
+ *
+ * WHY only '+' lines: removed lines are secrets being deleted (good). Context lines are
+ * unchanged and were already committed (would produce false positives). Only added lines
+ * represent new content being introduced.
+ *
+ * WHY parse hunk headers for line numbers: allows operators to navigate directly to the
+ * offending line in their editor rather than searching the file for the pattern.
+ *
+ * @param diff - Output of `git diff --cached` (unified diff format)
+ * @returns SecretScanResult with found=false if no secrets detected
+ */
+export function scanForSecrets(diff: string): SecretScanResult {
+  // Empty diff = nothing staged = nothing to scan
+  if (!diff.trim()) {
+    return { found: false, findings: [] };
+  }
+
+  const findings: Array<{ name: string; file: string; lineNumber: number }> = [];
+
+  // Parse unified diff line by line
+  const lines = diff.split('\n');
+  let currentFile = '(unknown)';
+  let currentLineNumber = 0;
+
+  for (const line of lines) {
+    // Track current file from '+++' header (e.g., '+++ b/src/foo.ts')
+    if (line.startsWith('+++ ')) {
+      // Strip 'b/' prefix from git diff output ('+++ b/src/foo.ts' -> 'src/foo.ts')
+      const filePath = line.slice(4);
+      currentFile = filePath.startsWith('b/') ? filePath.slice(2) : filePath;
+      currentLineNumber = 0;
+      continue;
+    }
+
+    // Parse hunk header to get the starting line number of the new file block
+    // Format: @@ -old_start[,old_count] +new_start[,new_count] @@ [context]
+    if (line.startsWith('@@')) {
+      const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunkMatch?.[1] !== undefined) {
+        // new_start - 1 because we increment before checking each line
+        currentLineNumber = parseInt(hunkMatch[1], 10) - 1;
+      }
+      continue;
+    }
+
+    // Skip diff metadata lines (--- header, diff --git, index lines, etc.)
+    if (line.startsWith('--- ') || line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('\\')) {
+      continue;
+    }
+
+    // Context lines (unchanged): advance the new-file line counter
+    if (line.startsWith(' ')) {
+      currentLineNumber++;
+      continue;
+    }
+
+    // Removed lines: do NOT advance the new-file line counter (these lines are not in the new file)
+    if (line.startsWith('-')) {
+      continue;
+    }
+
+    // Added lines: advance counter and scan for secrets
+    if (line.startsWith('+')) {
+      currentLineNumber++;
+      const content = line.slice(1); // Strip leading '+'
+
+      for (const { name, pattern } of SECRET_PATTERNS) {
+        // Reset lastIndex before each use -- global regexes maintain state across calls
+        pattern.lastIndex = 0;
+        if (pattern.test(content)) {
+          findings.push({ name, file: currentFile, lineNumber: currentLineNumber });
+          // WHY break after first pattern match per line: one finding per line is sufficient.
+          // Reporting multiple findings on the same line adds noise without operator value.
+          // The operator needs to find the line and review it -- the first match is enough signal.
+          break;
+        }
+        // Reset again after test() to leave the regex in a clean state
+        pattern.lastIndex = 0;
+      }
+    }
+  }
+
+  return {
+    found: findings.length > 0,
+    findings,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // parseHandoffArtifact
@@ -362,9 +539,23 @@ export async function runDelivery(
   // Build commit message: "<type>(<scope>): <subject>"
   // The subject already includes the full first line per the workflow prompt.
   // If commitSubject already starts with type(scope), use it as-is; otherwise build it.
-  const commitMessage = artifact.commitSubject.startsWith(`${artifact.commitType}(`)
+  const baseCommitMessage = artifact.commitSubject.startsWith(`${artifact.commitType}(`)
     ? artifact.commitSubject
     : `${artifact.commitType}(${artifact.commitScope}): ${artifact.commitSubject}`;
+
+  // Attribution trailers: appended to every commit WorkTrain opens.
+  //
+  // WHY always (not conditional on botIdentity): attribution signals identify WorkTrain
+  // commits in git log and blame regardless of which git identity signed the commit.
+  // The Co-authored-by trailer is a GitHub-recognized convention that surfaces in PR UIs.
+  //
+  // WHY Worktrain-Session (not X-Worktrain-Session): git trailers do not require the X-
+  // prefix. Using a clean namespace avoids confusion with HTTP headers.
+  const trailers = [
+    ...(flags.sessionId ? [`Worktrain-Session: ${flags.sessionId}`] : []),
+    'Co-authored-by: WorkTrain <worktrain@noreply.local>',
+  ].join('\n');
+  const commitMessage = `${baseCommitMessage}\n\n${trailers}`;
 
   // Stage and commit the specific files from filesChanged.
   //
@@ -380,8 +571,94 @@ export async function runDelivery(
   try {
     // Step 1: git add <file1> <file2> ...
     await execFn('git', ['add', ...artifact.filesChanged], { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
-    // Step 2: git commit -m <message>
-    const commitResult = await execFn('git', ['commit', '-m', commitMessage], { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
+
+    // Step 2: Secret scan -- run after staging so `git diff --cached` shows the full staged diff.
+    //
+    // WHY scan after git add, before git commit: the staged diff represents exactly what is about
+    // to be committed. Scanning before git add would miss newly staged content; scanning after
+    // git commit would be too late. git diff --cached is the only window where we see the precise
+    // content being committed.
+    //
+    // WHY secretScan !== false (not === true): opt-out semantics -- scan is the safe default.
+    // Only explicit secretScan: false bypasses the scan.
+    if (flags.secretScan !== false) {
+      let stagedDiff = '';
+      try {
+        const diffResult = await execFn('git', ['diff', '--cached'], { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
+        stagedDiff = diffResult.stdout;
+      } catch (e: unknown) {
+        // git diff --cached failure after a successful git add is unexpected.
+        // Abort delivery -- we cannot commit safely without scanning.
+        return {
+          _tag: 'error',
+          phase: 'secret_scan',
+          details: `Failed to retrieve staged diff for secret scan: ${formatExecError(e)}\nDelivery aborted.`,
+        };
+      }
+
+      const scanResult = scanForSecrets(stagedDiff);
+      if (scanResult.found) {
+        const findingLines = scanResult.findings
+          .map(f => `  - ${f.name} in ${f.file}:${f.lineNumber}`)
+          .join('\n');
+        return {
+          _tag: 'error',
+          phase: 'secret_scan',
+          details:
+            `Secret scan detected potential secrets in staged files:\n${findingLines}\n` +
+            `Delivery aborted. Review and remove secrets before retrying.\n` +
+            `Set secretScan: false in your trigger config to bypass this check.`,
+        };
+      }
+
+      // Optional upgrade: run gitleaks if available.
+      // WHY gitleaks is optional: the pattern scan is the baseline. gitleaks provides broader
+      // coverage but requires an external binary. If not installed (ENOENT), skip silently.
+      // WHY check exit code only (not stdout): gitleaks prints findings to stdout, but the
+      // authoritative signal is the exit code (0 = clean, non-zero = found secrets).
+      try {
+        await execFn(
+          'gitleaks',
+          ['detect', '--source', '.', '--staged', '--no-git'],
+          { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
+        );
+        // exit code 0: no secrets found by gitleaks -- continue
+      } catch (e: unknown) {
+        const execErr = e as Error & { code?: string };
+        if (execErr.code === 'ENOENT') {
+          // gitleaks binary not found -- skip silently (optional upgrade not installed)
+        } else {
+          // Non-zero exit code: gitleaks found secrets (or failed with an error).
+          // Treat any non-ENOENT failure as a signal to abort delivery.
+          return {
+            _tag: 'error',
+            phase: 'secret_scan',
+            details:
+              `gitleaks detected potential secrets in staged files.\n` +
+              `Delivery aborted. Review and remove secrets before retrying.\n` +
+              `Set secretScan: false in your trigger config to bypass this check.`,
+          };
+        }
+      }
+    }
+
+    // Step 3: git commit -m <message> [with optional per-command identity]
+    //
+    // WHY -c user.name/user.email instead of git config: git config --local writes to the
+    // shared .git/config, which is shared across all worktrees. In parallel sessions, last
+    // writer wins and silently stomps other sessions' identities. Per-command -c flags scope
+    // identity to this single command and have no persistent side effects.
+    //
+    // WHY only when botIdentity is set: if no bot identity is configured, use whatever git
+    // config identity is already in the environment (the operator's own identity).
+    const commitArgs: string[] = flags.botIdentity
+      ? [
+          '-c', `user.name=${flags.botIdentity.name}`,
+          '-c', `user.email=${flags.botIdentity.email}`,
+          'commit', '-m', commitMessage,
+        ]
+      : ['commit', '-m', commitMessage];
+    const commitResult = await execFn('git', commitArgs, { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS });
     commitStdout = commitResult.stdout;
     commitStderr = commitResult.stderr;
   } catch (e: unknown) {
@@ -398,6 +675,30 @@ export async function runDelivery(
     return { _tag: 'committed', sha };
   }
 
+  // Build PR title with [WT] prefix.
+  //
+  // WHY always (not conditional on botIdentity): the prefix identifies the PR as WorkTrain-
+  // generated regardless of which git identity was used. Operators need to distinguish
+  // WorkTrain PRs in PR lists without checking commit trailers.
+  //
+  // WHY idempotent guard: prevents a double prefix if the agent writes [WT] in the handoff
+  // artifact. The agent should NOT include [WT] (it is infrastructure, not agent content),
+  // but the guard protects against accidental contamination.
+  const prTitle = artifact.prTitle.startsWith('[WT] ')
+    ? artifact.prTitle
+    : `[WT] ${artifact.prTitle}`;
+
+  // Build PR body with attribution footer.
+  //
+  // WHY always (not conditional on botIdentity): the footer provides traceability for any
+  // WorkTrain-generated PR. Operators and reviewers need to find the session, trigger, and
+  // workflow that produced this PR without digging through logs.
+  const footerParts: string[] = ['---', '\u{1F916} **Automated by WorkTrain**'];
+  if (flags.sessionId) footerParts.push(`Session: \`${flags.sessionId}\``);
+  if (flags.triggerId) footerParts.push(`Trigger: \`${flags.triggerId}\``);
+  if (flags.workflowId) footerParts.push(`Workflow: \`${flags.workflowId}\``);
+  const prBodyWithFooter = `${artifact.prBody}\n\n${footerParts.join(' | ')}`;
+
   // Open PR via gh pr create.
   //
   // WHY --body-file instead of --body: prBody is arbitrary markdown that may contain
@@ -412,11 +713,11 @@ export async function runDelivery(
 
   let prStdout: string;
   try {
-    await fs.writeFile(tmpFile, artifact.prBody, 'utf8');
+    await fs.writeFile(tmpFile, prBodyWithFooter, 'utf8');
     try {
       const prResult = await execFn(
         'gh',
-        ['pr', 'create', '--title', artifact.prTitle, '--body-file', tmpFile],
+        ['pr', 'create', '--title', prTitle, '--body-file', tmpFile],
         { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
       );
       prStdout = prResult.stdout;
@@ -440,6 +741,43 @@ export async function runDelivery(
 
   // Extract PR URL from gh output (typically the last line)
   const prUrl = prStdout.trim().split('\n').at(-1)?.trim() ?? '';
+
+  // Add worktrain:generated label to the PR.
+  //
+  // WHY non-fatal: label creation is best-effort. If gh label create or gh pr edit fails
+  // (permissions, network, API error), the PR was already opened successfully. Failing the
+  // entire delivery for a missing label would be a worse outcome than missing the label.
+  //
+  // WHY two calls (label create then pr edit): gh pr create --label requires the label to
+  // already exist. Creating it first is idempotent (2>/dev/null || true equivalent via
+  // try/catch). Then pr edit adds it to the specific PR by URL.
+  //
+  // WHY if (prUrl): gh pr edit requires a valid PR URL or number. If gh pr create returned
+  // empty output, prUrl is '' and gh pr edit would fail with an unhelpful error.
+  if (prUrl) {
+    try {
+      await execFn(
+        'gh',
+        ['label', 'create', 'worktrain:generated', '--description', 'PR authored by WorkTrain', '--color', '0075ca'],
+        { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
+      );
+    } catch {
+      // Label may already exist -- ignore the error and proceed to gh pr edit.
+    }
+    try {
+      await execFn(
+        'gh',
+        ['pr', 'edit', prUrl, '--add-label', 'worktrain:generated'],
+        { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
+      );
+    } catch (e: unknown) {
+      // Non-fatal: log the failure so operators can investigate, but do not change the result.
+      console.warn(
+        `[runDelivery] WARNING: Failed to add worktrain:generated label to PR ${prUrl}: ` +
+        `${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
 
   return { _tag: 'pr_opened', url: prUrl };
 }

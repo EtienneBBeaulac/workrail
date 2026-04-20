@@ -433,6 +433,22 @@ export interface WorkflowRunSuccess {
    * Follows the sessionWorkspacePath threading pattern.
    */
   readonly sessionId?: string;
+  /**
+   * Bot identity sourced from trigger.botIdentity.
+   * Present only when trigger.botIdentity is set.
+   * Absent when no bot identity is configured for this trigger.
+   *
+   * WHY this field exists: trigger-router.ts reads this to pass per-command identity
+   * flags to runDelivery() via DeliveryFlags.botIdentity. Threading it here keeps the
+   * same pattern as sessionId/sessionWorkspacePath -- trigger-layer consumers read what
+   * they need from WorkflowRunSuccess without coupling to WorkflowTrigger internals.
+   *
+   * Follows the sessionId/sessionWorkspacePath threading pattern.
+   */
+  readonly botIdentity?: {
+    readonly name: string;
+    readonly email: string;
+  };
 }
 
 /** Failed workflow run (tool error, agent error, engine error, etc.). */
@@ -3212,31 +3228,18 @@ export async function runWorkflow(
     }
   }
 
-  // Bot identity: if trigger.botIdentity is set, configure git user.name/email on the
-  // session workspace. For worktree sessions this targets the worktree; for 'none'
-  // strategy it targets trigger.workspacePath directly.
-  // This ensures commits from autonomous sessions use the bot account rather
-  // than the operator's personal git identity.
+  // Bot identity: trigger.botIdentity is passed through WorkflowRunSuccess so that
+  // delivery-action.ts can use per-command `-c user.name=X -c user.email=Y` git flags.
   //
-  // WHY deterministic (not delegated to LLM): git attribution is infra, not agent work.
-  // WHY non-fatal: a failure to set git identity is a warning, not a session abort.
-  // The session continues -- commits will use the fallback git global config.
-  if (trigger.botIdentity) {
-    try {
-      await execFileAsync('git', ['-C', sessionWorkspacePath, 'config', 'user.name', trigger.botIdentity.name]);
-      await execFileAsync('git', ['-C', sessionWorkspacePath, 'config', 'user.email', trigger.botIdentity.email]);
-      console.log(
-        `[WorkflowRunner] Bot identity set: sessionId=${sessionId} ` +
-        `name=${trigger.botIdentity.name} email=${trigger.botIdentity.email}`,
-      );
-    } catch (identityErr) {
-      console.warn(
-        `[WorkflowRunner] WARNING: Failed to set bot identity for sessionId=${sessionId}: ` +
-        `${identityErr instanceof Error ? identityErr.message : String(identityErr)}. ` +
-        `Commits will use default git config.`,
-      );
-    }
-  }
+  // WHY per-command (not git config): git config --local writes to the shared .git/config,
+  // which is shared across all worktrees of the same repo. In parallel sessions, last writer
+  // wins and silently stomps other sessions' identities. Per-command -c flags scope identity
+  // to a single command and have no persistent side effects.
+  //
+  // WHY threaded through WorkflowRunSuccess (not called here): the delivery step (git commit)
+  // happens in delivery-action.ts after runWorkflow() returns. Passing botIdentity through the
+  // result type keeps delivery-action.ts self-contained and avoids race conditions from writing
+  // to shared git config during the agent loop.
 
   // Edge case: workflow completes immediately on start (single-step workflow with
   // no pending continuation). Return success without creating an Agent.
@@ -3253,6 +3256,9 @@ export async function runWorkflow(
       stopReason: 'stop',
       ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
       ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
+      // WHY botIdentity here: even single-step workflows that complete immediately (no agent loop)
+      // go through delivery. The delivery step needs botIdentity for per-command git identity.
+      ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
     };
   }
 
@@ -3805,5 +3811,9 @@ export async function runWorkflow(
     // (verifying HEAD matches branchPrefix + sessionId). Threading it here avoids fragile
     // path-parsing (.split('/').at(-1)) that couples branch naming convention to the caller.
     ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
+    // WHY botIdentity: trigger-router.ts passes this to delivery-action.ts for per-command
+    // git identity (-c user.name/email flags on git commit). Threading here avoids writing
+    // to the shared .git/config which is shared across all worktrees.
+    ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
   };
 }
