@@ -573,4 +573,84 @@ describe('doPollGitHubQueue adaptive routing', () => {
       (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger),
     ).rejects.toThrow('dispatchAdaptivePipeline not available on router');
   });
+
+  it('blocks same issue from being dispatched twice while first Promise is in flight', async () => {
+    // Proves I1+I3: dispatchingIssues.has() check prevents duplicate dispatch
+    // within the same process when the first dispatchAdaptivePipeline() Promise has not settled.
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+
+    // Deferred Promise: won't resolve until we call resolve() manually.
+    // This simulates a long-running session still in flight.
+    let resolveDispatch!: () => void;
+    const deferredDispatch = new Promise<void>((resolve) => { resolveDispatch = resolve; });
+
+    const adaptiveDispatched: Array<{ goal: string }> = [];
+    const router = {
+      dispatch: () => { throw new Error('dispatch() should not be called'); },
+      dispatchAdaptivePipeline: async (goal: string) => {
+        adaptiveDispatched.push({ goal });
+        return deferredDispatch;
+      },
+    } as unknown as TriggerRouter;
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+
+    // First poll: issue #42 dispatched, Promise in flight
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    expect(adaptiveDispatched).toHaveLength(1);
+
+    // Second poll before Promise settles: issue #42 is in dispatchingIssues -> blocked
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    expect(adaptiveDispatched).toHaveLength(1); // still 1, not 2
+
+    // Unblock the deferred Promise to avoid hanging
+    resolveDispatch();
+    await deferredDispatch;
+  });
+
+  it('allows re-dispatch of issue after dispatchAdaptivePipeline Promise settles', async () => {
+    // Proves I2: cleanup in .then() removes issue from dispatchingIssues,
+    // making it eligible for dispatch on the next poll cycle.
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+
+    // Deferred Promise pattern -- controlled resolution
+    let resolveDispatch!: () => void;
+    let deferredDispatch = new Promise<void>((resolve) => { resolveDispatch = resolve; });
+
+    const adaptiveDispatched: Array<{ goal: string }> = [];
+    const router = {
+      dispatch: () => { throw new Error('dispatch() should not be called'); },
+      dispatchAdaptivePipeline: async (goal: string) => {
+        adaptiveDispatched.push({ goal });
+        return deferredDispatch;
+      },
+    } as unknown as TriggerRouter;
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+
+    // First poll: issue #42 dispatched
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    expect(adaptiveDispatched).toHaveLength(1);
+
+    // Resolve the deferred Promise -- .then() handler fires (microtask), clears dispatchingIssues
+    resolveDispatch();
+    await deferredDispatch;
+    // Drain microtasks so .then() cleanup runs before the next doPoll call
+    await Promise.resolve();
+
+    // Re-arm the deferred Promise for the second dispatch
+    deferredDispatch = new Promise<void>((resolve) => { resolveDispatch = resolve; });
+
+    // Second poll after Promise settled: issue #42 no longer in dispatchingIssues -> dispatched again
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    expect(adaptiveDispatched).toHaveLength(2);
+
+    // Cleanup
+    resolveDispatch();
+    await deferredDispatch;
+  });
 });

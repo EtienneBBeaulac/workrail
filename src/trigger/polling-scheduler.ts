@@ -82,6 +82,22 @@ export class PollingScheduler {
    * Prevents concurrent polls for the same trigger.
    */
   private readonly polling = new Map<string, boolean>();
+  /**
+   * In-memory set of issue numbers currently being dispatched via dispatchAdaptivePipeline().
+   *
+   * WHY this exists instead of using DaemonRegistry:
+   * DaemonRegistry tracks ephemeral session liveness (start/stop signals) and does not
+   * carry issue-domain knowledge. Adding issueNumber to DaemonEntry would violate its
+   * single responsibility (liveness tracking) and require 4+ file changes. This Set
+   * follows the existing this.polling Map pattern in the same class -- a private readonly
+   * mutable guard behind the class boundary -- and is sufficient for same-process duplicate
+   * prevention. Cross-restart idempotency is handled by checkIdempotency() (sidecar scan).
+   *
+   * Lifecycle: issue added BEFORE dispatchAdaptivePipeline() call (I1). Removed in both
+   * .then() and .catch() handlers unconditionally (I2). Never awaited in the poll cycle
+   * body to preserve fire-and-forget semantics.
+   */
+  private readonly dispatchingIssues = new Set<number>();
 
   constructor(
     private readonly triggers: readonly TriggerDefinition[],
@@ -431,6 +447,14 @@ export class PollingScheduler {
       // H3: session ID pattern in body (active/skip)
       if (/sess_[a-z0-9]+/.test(issue.body)) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
 
+      // Fast in-memory idempotency check (I3: runs before sidecar scan).
+      // Guards against duplicate dispatch within a single process lifetime for issues
+      // whose dispatchAdaptivePipeline() Promise is still in flight.
+      if (this.dispatchingIssues.has(issue.number)) {
+        skipped.push({ issue, reason: 'active_session_in_process' });
+        continue;
+      }
+
       // Per-issue idempotency (conservative: any parse error = active)
       const idempotencyStatus = await checkIdempotency(issue.number, sessionsDir);
       if (idempotencyStatus === 'active') { skipped.push({ issue, reason: 'active_session' }); continue; }
@@ -510,7 +534,15 @@ export class PollingScheduler {
         'Inject coordinatorDeps and modeExecutors in the TriggerRouter constructor.',
       );
     }
-    void (this.router as {
+
+    // I1: Add to dispatchingIssues BEFORE calling dispatchAdaptivePipeline().
+    // Prevents duplicate dispatch if the next poll cycle fires before this Promise settles.
+    this.dispatchingIssues.add(top.issue.number);
+    console.log(`[QueuePoll] in-flight-add #${top.issue.number}`);
+
+    // Capture the Promise without awaiting it (fire-and-forget semantics preserved).
+    // I2: Cleanup in BOTH .then() and .catch() -- unconditional regardless of outcome.
+    const dispatchP = (this.router as {
       dispatchAdaptivePipeline: (
         goal: string,
         workspace: string,
@@ -521,6 +553,15 @@ export class PollingScheduler {
       workflowTrigger.workspacePath,
       workflowTrigger.context,
     );
+    void dispatchP
+      .then(() => {
+        this.dispatchingIssues.delete(top.issue.number);
+        console.log(`[QueuePoll] in-flight-clear #${top.issue.number} reason=completed`);
+      })
+      .catch(() => {
+        this.dispatchingIssues.delete(top.issue.number);
+        console.log(`[QueuePoll] in-flight-clear #${top.issue.number} reason=error`);
+      });
     console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
 
     for (let i = 1; i < candidates.length; i++) {
