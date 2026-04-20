@@ -1618,6 +1618,10 @@ triggerCommand
   .description('Static analysis of triggers.yml -- reports issues without running anything. Exits 1 if any errors found.')
   .option('--config <path>', 'Path to triggers.yml (default: ~/.workrail/triggers.yml)')
   .action(async (options: { config?: string }) => {
+    // Load ~/.workrail/.env so $ENV_VAR secret references in triggers.yml resolve correctly.
+    await loadDaemonEnv();
+    process.stdout.write('[Note: loaded ~/.workrail/.env for secret resolution]\n');
+
     const { loadTriggerConfigFromFile } = await import('./trigger/trigger-store.js');
 
     const defaultConfigFilePath = path.join(os.homedir(), '.workrail', 'triggers.yml');
