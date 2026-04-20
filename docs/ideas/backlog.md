@@ -6628,3 +6628,74 @@ The full Jira integration is a round-trip, not just a poll. Design the return pa
 **Kill switch:** `worktrain kill-sessions` -- aborts all running daemon sessions immediately. Useful when WorkTrain is doing something unexpected. Sends abort signal to all active sessions, marks them user-killed in the event log.
 
 **Commit signing:** verify `git commit` honors existing `commit.gpgsign` config, or add explicit opt-out for bot identities that don't have signing keys. Empirically verify before declaring this solved.
+
+---
+
+## triggers.yml hot-reload (Apr 20, 2026)
+
+The daemon reads `triggers.yml` once at startup. Any change requires a full daemon restart. This creates friction during trigger configuration iteration.
+
+**The fix:** watch `triggers.yml` for changes using `fs.watch()` or `chokidar`, re-validate the file on change, and if valid swap the in-memory trigger index without restarting the daemon. Active sessions in flight are unaffected (they hold their own trigger snapshot). New sessions after the reload use the new config.
+
+**Partial hot-reload is acceptable:** if the new `triggers.yml` fails validation, log a warning and keep the old config. Don't crash the daemon on a syntax error.
+
+**Implementation:** `TriggerRouter` already accepts a `TriggerIndex` at construction. The hot-reload path re-calls `loadTriggerStore()` and swaps the index reference on the router. `PollingScheduler` loops are keyed per trigger -- swapping the index would also require restarting the polling loops cleanly.
+
+**Priority:** Medium -- useful for onboarding and trigger iteration, not a production blocker.
+
+---
+
+## GitHub webhook trigger with assignee/event filtering (Apr 20, 2026)
+
+**The problem:** `github_queue_poll` has a 5-minute latency floor. Assigning an issue fires a GitHub webhook immediately -- WorkTrain should start within seconds, not minutes.
+
+### What exists today
+
+- `provider: generic` handles arbitrary POST webhooks with HMAC validation
+- `goalTemplate: "{{$.issue.title}}"` extracts issue title from payload
+- `hmacSecret: $MY_SECRET` validates `X-Hub-Signature-256`
+
+**You can use this today** but without an assignee filter -- any issue event fires the trigger regardless of who it's assigned to.
+
+### What's missing: assignee filtering
+
+A `contextCondition` or `dispatchCondition` field on the trigger that gates dispatch on a payload value:
+
+```yaml
+- id: self-improvement-hook
+  provider: generic
+  workflowId: coding-task-workflow-agentic
+  workspacePath: /path/to/repo
+  goalTemplate: "{{$.issue.title}}"
+  hmacSecret: $GITHUB_WEBHOOK_SECRET
+  dispatchCondition:
+    payloadPath: "$.assignee.login"
+    equals: "worktrain-etienneb"
+```
+
+Without this, the workaround is to create a dedicated webhook URL per-trigger so only the right events reach it (GitHub lets you filter by event type at the webhook level -- set it to "Issues" events only, which already narrows scope significantly).
+
+### The hook+poll pattern (recommended for production)
+
+```yaml
+# Primary: instant response via webhook
+- id: self-improvement-hook
+  provider: generic
+  goalTemplate: "{{$.issue.title}}"
+  hmacSecret: $GITHUB_WEBHOOK_SECRET
+  dispatchCondition:
+    payloadPath: "$.assignee.login"
+    equals: "worktrain-etienneb"
+
+# Fallback: catch anything missed during downtime
+- id: self-improvement-poll
+  provider: github_queue_poll
+  pollIntervalSeconds: 3600   # once per hour, safety net only
+```
+
+### Implementation
+
+1. Add `dispatchCondition: { payloadPath, equals }` to `TriggerDefinition` -- parsed in `trigger-store.ts`, checked in `trigger-router.ts` before enqueuing. Single condition is MVP; AND/OR logic is follow-up.
+2. Add `github_issues_webhook` as a named provider (wraps generic with GitHub-specific HMAC and event schema awareness). Convenience only -- generic already works.
+
+**Priority:** Medium-high. The 5-minute latency is the main UX gap once the queue is live. `dispatchCondition` is ~50 LOC in trigger-store + trigger-router.
