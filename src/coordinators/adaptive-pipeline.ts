@@ -13,16 +13,16 @@
  * - COORDINATOR_SPAWN_CUTOFF_MS is checked before every spawn point.
  *
  * Timeout constants (hardcoded, never LLM-computed -- pitch invariant 17):
- * - Discovery: 35 minutes
+ * - Discovery: 55 minutes
  * - Shaping: 35 minutes
  * - Coding: 65 minutes
  * - Review (child): 25 minutes
- * - Refuse new spawns after: 100 minutes
- * - Total wall-clock cap: 120 minutes
+ * - Refuse new spawns after: 150 minutes
+ * - Total wall-clock cap: 180 minutes
  *
  * WHY separate timeout constants for spawn cutoff vs. total cap:
- * At 35+35+65 = 135 minutes, a maximally slow FULL pipeline can exceed the 120m cap.
- * The COORDINATOR_SPAWN_CUTOFF_MS (100m) guard prevents new spawns after 100 minutes
+ * At 55+35+65 = 155 minutes, a maximally slow FULL pipeline can exceed the 150m cutoff.
+ * The COORDINATOR_SPAWN_CUTOFF_MS (150m) guard prevents new spawns after 150 minutes
  * of elapsed time. Phases already started run to their per-phase timeout.
  * This resolves the budget conflict without reducing per-phase budgets (rabbit hole #2).
  */
@@ -35,8 +35,8 @@ import type { PipelineMode } from './routing/route-task.js';
 // TIMEOUT CONSTANTS (hardcoded, never LLM-computed)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Discovery session timeout: 35 minutes. */
-export const DISCOVERY_TIMEOUT_MS = 35 * 60 * 1000;
+/** Discovery session timeout: 55 minutes -- workrail codebase needs more time on complex questions. */
+export const DISCOVERY_TIMEOUT_MS = 55 * 60 * 1000;
 
 /** Shaping session timeout: 35 minutes. */
 export const SHAPING_TIMEOUT_MS = 35 * 60 * 1000;
@@ -48,21 +48,21 @@ export const CODING_TIMEOUT_MS = 65 * 60 * 1000;
 export const REVIEW_TIMEOUT_MS = 25 * 60 * 1000;
 
 /**
- * Coordinator spawn cutoff: refuse new spawns after 100 minutes of elapsed time.
+ * Coordinator spawn cutoff: refuse new spawns after 150 minutes of elapsed time.
  *
- * WHY 100 minutes (not 120):
- * Provides a 20-minute buffer before the total cap to allow any in-flight
+ * WHY 150 minutes (not 180):
+ * Provides a 30-minute buffer before the total cap to allow any in-flight
  * session to complete within the COORDINATOR_MAX_MS wall-clock limit.
- * A phase started at exactly 100m has up to 20m to finish before the coordinator
- * exits at 120m.
+ * A phase started at exactly 150m has up to 30m to finish before the coordinator
+ * exits at 180m. The 30m buffer exceeds the longest single phase (REVIEW_TIMEOUT_MS=25m).
  */
-export const COORDINATOR_SPAWN_CUTOFF_MS = 100 * 60 * 1000;
+export const COORDINATOR_SPAWN_CUTOFF_MS = 150 * 60 * 1000;
 
 /**
- * Total coordinator wall-clock cap: 120 minutes.
+ * Total coordinator wall-clock cap: 180 minutes.
  * The coordinator must exit (escalate) by this time regardless of phase status.
  */
-export const COORDINATOR_MAX_MS = 120 * 60 * 1000;
+export const COORDINATOR_MAX_MS = 180 * 60 * 1000;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOMAIN TYPES

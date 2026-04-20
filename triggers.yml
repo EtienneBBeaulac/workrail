@@ -38,6 +38,9 @@ triggers:
     workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
     queueType: assignee
+    # goalTemplate is unused for github_queue_poll triggers -- the poller sets goal
+    # directly from the issue title at dispatch time. This explicit value suppresses
+    # the startup warning: "no static goal or goalTemplate -- defaulting to {{$.goal}}".
     goalTemplate: "{{$.issue.title}}"
     branchStrategy: worktree
     baseBranch: main

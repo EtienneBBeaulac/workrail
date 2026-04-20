@@ -383,8 +383,8 @@ describe('runImplementPipeline - fix loop cap', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('runImplementPipeline - spawn cutoff', () => {
-  it('escalates on coding spawn if coordinator elapsed > 100 minutes', async () => {
-    const pastStart = Date.now() - 101 * 60 * 1000; // 101 minutes ago
+  it('escalates on coding spawn if coordinator elapsed > 150 minutes', async () => {
+    const pastStart = Date.now() - 151 * 60 * 1000; // 151 minutes ago
     const deps = makeFakeDeps();
 
     const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', pastStart);

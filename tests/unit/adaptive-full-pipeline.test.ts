@@ -10,7 +10,7 @@
  * - Fallback skipped when notes length <= 50 (no assembledContextSummary injected)
  * - Fallback skipped when recapMarkdown is null
  * - Escalation on discovery session failure (shaping never called)
- * - Spawn cutoff check prevents spawn after 100 minutes
+ * - Spawn cutoff check prevents spawn after 150 minutes
  * - renderHandoff() generates expected markdown structure
  */
 
@@ -346,8 +346,8 @@ describe('runFullPipeline - discovery session failure', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('runFullPipeline - spawn cutoff', () => {
-  it('escalates immediately if coordinator started > 100 minutes ago', async () => {
-    const pastStart = Date.now() - 101 * 60 * 1000;
+  it('escalates immediately if coordinator started > 150 minutes ago', async () => {
+    const pastStart = Date.now() - 151 * 60 * 1000;
     const deps = makeFakeDeps();
 
     const outcome = await runFullPipeline(deps, makeOpts(), pastStart);
