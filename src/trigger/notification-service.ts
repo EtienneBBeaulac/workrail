@@ -105,7 +105,7 @@ export interface NotificationConfig {
 export interface NotificationPayload {
   readonly event: 'session_completed';
   readonly workflowId: string;
-  readonly outcome: 'success' | 'error' | 'timeout' | 'delivery_failed';
+  readonly outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'delivery_failed';
   readonly detail: string;
   readonly goal: string;
   readonly timestamp: string;
@@ -130,6 +130,8 @@ export function buildNotificationBody(result: WorkflowRunResult, goal: string): 
       return `Session failed: ${truncated}`;
     case 'timeout':
       return `Session timed out: ${truncated}`;
+    case 'stuck':
+      return `Session stuck (${result.reason}): ${truncated}`;
     case 'delivery_failed':
       return `Session completed but result delivery failed: ${truncated}`;
   }
@@ -152,6 +154,8 @@ export function buildDetail(result: WorkflowRunResult): string {
     case 'error':
       return result.message;
     case 'timeout':
+      return result.message;
+    case 'stuck':
       return result.message;
     case 'delivery_failed':
       return `stopReason: ${result.stopReason}; deliveryError: ${result.deliveryError}`;

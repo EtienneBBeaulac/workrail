@@ -223,17 +223,39 @@ export interface GitHubPollingSource {
 
 // ---------------------------------------------------------------------------
 // GitHubQueuePollingSource: configuration for GitHub queue-poll triggers.
+//
+// Used when provider === 'github_queue_poll'. Queue filter params are read
+// from ~/.workrail/config.json at poll time. Trigger only provides repo,
+// token, and poll interval.
+//
+// Invariants:
+// - token is already resolved from environment (never a $SECRET_NAME ref here).
+// - repo is in "owner/repo" format.
+// - pollIntervalSeconds defaults to 300 if not specified.
 // ---------------------------------------------------------------------------
 
 export interface GitHubQueuePollingSource {
+  /** GitHub repository in "owner/repo" format. */
   readonly repo: string;
+  /**
+   * GitHub personal access token for the bot account.
+   * Already resolved from environment (never a $SECRET_NAME ref here).
+   * Requires at least repo:read scope.
+   */
   readonly token: string;
+  /** How often to poll in seconds. Default: 300. */
   readonly pollIntervalSeconds: number;
 }
 
 // ---------------------------------------------------------------------------
 // TaskCandidate: the structured output of the queue picker, injected into
 // the dispatched session as context.taskCandidate.
+//
+// Invariants:
+// - inferredMaturity is produced by exactly 3 deterministic heuristics (see pitch).
+//   It is NOT an LLM call.
+// - upstreamSpecUrl: extracted from upstream_spec: line or first paragraph URL.
+// - queueConfigType: snapshot of the queue config type that produced this candidate.
 // ---------------------------------------------------------------------------
 
 export interface TaskCandidate {
@@ -374,6 +396,18 @@ export interface TriggerDefinition {
      * for no turn limit.
      */
     readonly maxTurns?: number;
+    /**
+     * Abort policy when stuck detection fires.
+     * - 'abort' (default): call agent.abort() and return _tag: 'stuck'.
+     * - 'notify_only': write to outbox.jsonl but do NOT abort the session.
+     */
+    readonly stuckAbortPolicy?: 'abort' | 'notify_only';
+    /**
+     * When true, the no_progress heuristic (80%+ of turns with 0 step advances)
+     * also participates in stuck-abort (subject to stuckAbortPolicy).
+     * Default: false.
+     */
+    readonly noProgressAbortEnabled?: boolean;
   };
 
   /**

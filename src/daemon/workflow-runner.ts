@@ -255,6 +255,25 @@ export interface WorkflowTrigger {
      * Default: 3. Configurable per-trigger for workflows that intentionally delegate deeply.
      */
     readonly maxSubagentDepth?: number;
+    /**
+     * Abort policy when stuck detection fires.
+     * - 'abort' (default): call agent.abort() and return _tag: 'stuck'.
+     * - 'notify_only': write to outbox.jsonl but do NOT abort the session.
+     *   Use for research workflows where the repeated_tool_call heuristic may
+     *   fire on legitimate retry sequences.
+     *
+     * Default: 'abort'.
+     */
+    readonly stuckAbortPolicy?: 'abort' | 'notify_only';
+    /**
+     * When true, the no_progress heuristic (80%+ of turns with 0 step advances)
+     * also participates in stuck-abort (subject to stuckAbortPolicy).
+     *
+     * Default: false. The no_progress heuristic has real false-positive risk on
+     * research sessions that spend many turns reading before advancing. Only set
+     * this to true for workflows where zero advances at 80% turns is always a bug.
+     */
+    readonly noProgressAbortEnabled?: boolean;
   };
   /**
    * Pre-allocated session start result from a caller that already called executeStartWorkflow().
@@ -356,6 +375,27 @@ export interface WorkflowTrigger {
    * Default: 'worktrain/' (applied at parse time or at use time in runWorkflow()).
    */
   readonly branchPrefix?: string;
+
+  /**
+   * Optional bot identity for git commit attribution in autonomous sessions.
+   * Set by queue-poll dispatch (polling-scheduler.ts doPollGitHubQueue) for sessions
+   * dispatched by the GitHub queue poller.
+   *
+   * When present and branchStrategy === 'worktree', workflow-runner.ts runs:
+   *   git -C <worktreePath> config user.name <name>
+   *   git -C <worktreePath> config user.email <email>
+   * after worktree creation, so commits from autonomous sessions use the bot account
+   * rather than the operator's personal git identity.
+   *
+   * WHY deterministic (not delegated to LLM): git attribution is infra, not agent work.
+   * Setting it deterministically prevents silent identity leakage.
+   *
+   * Default: undefined (no identity override -- git falls back to global config).
+   */
+  readonly botIdentity?: {
+    readonly name: string;
+    readonly email: string;
+  };
 }
 
 /** Successful completion of a workflow run. */
@@ -451,6 +491,40 @@ export interface WorkflowRunTimeout {
 }
 
 /**
+ * Workflow run aborted because the agent was detected as stuck before the
+ * wall-clock or turn limit fired.
+ *
+ * WHY a separate discriminant (not reusing 'timeout'): stuck fires before the wall
+ * clock, so conflating them forces string-parsing to distinguish the two cases.
+ * Separate discriminants keep the union exhaustive and callers honest.
+ *
+ * WHY 'abort' is the default policy: stuck loops consume queue slots and API quota
+ * without producing value. Aborting early is the safe default. Operators running
+ * research workflows should set stuckAbortPolicy: 'notify_only' in agentConfig.
+ */
+export interface WorkflowRunStuck {
+  readonly _tag: 'stuck';
+  readonly workflowId: string;
+  /**
+   * Which heuristic triggered the abort.
+   * - 'repeated_tool_call': same tool + same args called STUCK_REPEAT_THRESHOLD (3)
+   *   times in a row.
+   * - 'no_progress': 80%+ of turns used with 0 step advances. Only fires when
+   *   noProgressAbortEnabled: true is set in agentConfig (default: false).
+   */
+  readonly reason: 'repeated_tool_call' | 'no_progress';
+  readonly message: string;
+  /** Always 'aborted' -- the agent loop was stopped via agent.abort(). */
+  readonly stopReason: string;
+  /**
+   * Issue summaries from the agent's report_issue calls during this session.
+   * Populated from the issueSummaries ring buffer at abort time.
+   * Absent when the agent made no report_issue calls.
+   */
+  readonly issueSummaries?: readonly string[];
+}
+
+/**
  * Workflow completed successfully, but the delivery POST to callbackUrl failed.
  *
  * WHY a separate discriminant: this outcome is categorically different from a
@@ -469,7 +543,7 @@ export interface WorkflowDeliveryFailed {
 }
 
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowDeliveryFailed;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed;
 
 /**
  * The three result variants that runWorkflow() can actually return.
@@ -486,8 +560,14 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Workflow
  *
  * If runWorkflow() ever gains direct callbackUrl support (bypassing TriggerRouter), this
  * type alias must be updated to include WorkflowDeliveryFailed.
+ *
+ * INVARIANT: WorkflowRunStuck must be added here in the SAME COMMIT as it is added to
+ * WorkflowRunResult. The `as ChildWorkflowRunResult` cast at the spawn_agent call site
+ * suppresses any compile-time error from a missing update -- only the assertNever guard
+ * catches the omission at runtime (crashing the parent session). Keep these two unions
+ * in sync atomically.
  */
-export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout;
+export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck;
 
 /**
  * Registry mapping WorkRail session IDs to steer callbacks.
@@ -2201,7 +2281,13 @@ export function makeSpawnAgentTool(
       // delivery_failed -- see ChildWorkflowRunResult type definition and WHY comment above.
       // Using the narrower type gives compile-time exhaustiveness over the 3 real variants;
       // assertNever guards against future additions.
-      let resultObj: { childSessionId: string | null; outcome: 'success' | 'error' | 'timeout'; notes: string; artifacts?: readonly unknown[] };
+      let resultObj: {
+        childSessionId: string | null;
+        outcome: 'success' | 'error' | 'timeout' | 'stuck';
+        notes: string;
+        artifacts?: readonly unknown[];
+        issueSummaries?: readonly string[];
+      };
 
       if (childResult._tag === 'success') {
         resultObj = {
@@ -2223,6 +2309,15 @@ export function makeSpawnAgentTool(
           childSessionId,
           outcome: 'timeout',
           notes: childResult.message,
+        };
+      } else if (childResult._tag === 'stuck') {
+        resultObj = {
+          childSessionId,
+          outcome: 'stuck',
+          notes: childResult.message,
+          ...(childResult.issueSummaries !== undefined
+            ? { issueSummaries: childResult.issueSummaries }
+            : {}),
         };
       } else {
         // Compile-time exhaustiveness guard. If ChildWorkflowRunResult gains a new variant
@@ -2260,6 +2355,46 @@ export function makeSpawnAgentTool(
  * @param sessionId - Session identifier used as the filename.
  * @param record - The issue payload to serialize as a JSON line.
  */
+/**
+ * Append a stuck-escalation entry to ~/.workrail/outbox.jsonl.
+ *
+ * WHY fire-and-forget (called as void): outbox write is best-effort. A failed
+ * write must never affect the session result or abort the turn_end subscriber.
+ *
+ * WHY a separate helper: keeps the turn_end subscriber readable. The outbox write
+ * requires async fs operations that would add noise inside the subscriber.
+ */
+async function writeStuckOutboxEntry(opts: {
+  workflowId: string;
+  reason: 'repeated_tool_call' | 'no_progress';
+  issueSummaries?: readonly string[];
+}): Promise<void> {
+  try {
+    const outboxPath = path.join(os.homedir(), '.workrail', 'outbox.jsonl');
+    const entry = JSON.stringify({
+      id: randomUUID(),
+      kind: 'stuck',
+      message:
+        `Session stuck (${opts.reason}): workflowId=${opts.workflowId}` +
+        (opts.issueSummaries && opts.issueSummaries.length > 0
+          ? ` -- issues: ${opts.issueSummaries.join('; ')}`
+          : ''),
+      timestamp: new Date().toISOString(),
+      workflowId: opts.workflowId,
+      reason: opts.reason,
+      ...(opts.issueSummaries && opts.issueSummaries.length > 0
+        ? { issueSummaries: opts.issueSummaries }
+        : {}),
+    });
+    await fs.appendFile(outboxPath, entry + '\n');
+  } catch (err) {
+    console.warn(
+      `[WorkflowRunner] Could not write stuck outbox entry: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 async function appendIssueAsync(
   issuesDir: string,
   sessionId: string,
@@ -3117,6 +3252,32 @@ export async function runWorkflow(
     }
   }
 
+  // Bot identity: if trigger.botIdentity is set, configure git user.name/email on the
+  // session workspace. For worktree sessions this targets the worktree; for 'none'
+  // strategy it targets trigger.workspacePath directly.
+  // This ensures commits from autonomous sessions use the bot account rather
+  // than the operator's personal git identity.
+  //
+  // WHY deterministic (not delegated to LLM): git attribution is infra, not agent work.
+  // WHY non-fatal: a failure to set git identity is a warning, not a session abort.
+  // The session continues -- commits will use the fallback git global config.
+  if (trigger.botIdentity) {
+    try {
+      await execFileAsync('git', ['-C', sessionWorkspacePath, 'config', 'user.name', trigger.botIdentity.name]);
+      await execFileAsync('git', ['-C', sessionWorkspacePath, 'config', 'user.email', trigger.botIdentity.email]);
+      console.log(
+        `[WorkflowRunner] Bot identity set: sessionId=${sessionId} ` +
+        `name=${trigger.botIdentity.name} email=${trigger.botIdentity.email}`,
+      );
+    } catch (identityErr) {
+      console.warn(
+        `[WorkflowRunner] WARNING: Failed to set bot identity for sessionId=${sessionId}: ` +
+        `${identityErr instanceof Error ? identityErr.message : String(identityErr)}. ` +
+        `Commits will use default git config.`,
+      );
+    }
+  }
+
   // Edge case: workflow completes immediately on start (single-step workflow with
   // no pending continuation). Return success without creating an Agent.
   if (firstStep.isComplete) {
@@ -3339,11 +3500,25 @@ export async function runWorkflow(
     (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
   const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
 
+  // ---- Session start timestamp ----
+  // WHY: reserved for Signal 5 (wall-clock at 80% with < 2 advances) in a future shape.
+  // Set here -- before the agent loop begins -- so it measures total session time,
+  // not time from first turn.
+  const sessionStartMs = Date.now();
+  void sessionStartMs; // suppress unused-variable lint until Signal 5 is wired
+
   // ---- Timeout reason flag ----
   // Tracks which limit fired first. Set synchronously before agent.abort() so the
   // catch block can read it on the next microtask tick. JS single-thread guarantees
   // no race condition. Guard: first writer wins -- ignore if already set.
   let timeoutReason: 'wall_clock' | 'max_turns' | null = null;
+
+  // ---- Stuck reason flag ----
+  // Parallel to timeoutReason. Set synchronously before agent.abort() in the
+  // turn_end subscriber. Checked in the return path BEFORE timeoutReason so that
+  // a stuck abort takes priority over a wall-clock timeout that fired on the same turn.
+  // Guard: first writer wins (same pattern as timeoutReason).
+  let stuckReason: 'repeated_tool_call' | 'no_progress' | null = null;
 
   // ---- Turn counter ----
   // Incremented on each turn_end event (one complete LLM response turn).
@@ -3412,6 +3587,24 @@ export async function runWorkflow(
         argsSummary: lastNToolCalls[0]?.argsSummary,
         ...withWorkrailSession(workrailSessionId),
       });
+
+      // Outbox notification: fires regardless of abort policy (notify_only still notifies).
+      // WHY: the notification and the abort are independent effects.
+      void writeStuckOutboxEntry({
+        workflowId: trigger.workflowId,
+        reason: 'repeated_tool_call',
+        ...(issueSummaries.length > 0 ? { issueSummaries: [...issueSummaries] } : {}),
+      });
+
+      // Abort: only when policy allows AND no prior abort has fired.
+      // NOTE: if max_turns fired on this same turn, it returned early above, so we
+      // never reach here in that case -- stuck takes a clean signal.
+      const stuckPolicy = trigger.agentConfig?.stuckAbortPolicy ?? 'abort';
+      if (stuckPolicy !== 'notify_only' && stuckReason === null && timeoutReason === null) {
+        stuckReason = 'repeated_tool_call';
+        agent.abort();
+        return; // Do not inject next step -- session is aborting.
+      }
     }
 
     // Signal 2: 80%+ of turns used with 0 step advances.
@@ -3430,6 +3623,23 @@ export async function runWorkflow(
         detail: `${turnCount} turns used, 0 step advances (${maxTurns} turn limit)`,
         ...withWorkrailSession(workrailSessionId),
       });
+
+      // no_progress abort is off by default (false-positive risk on research workflows).
+      const noProgressAbortEnabled = trigger.agentConfig?.noProgressAbortEnabled ?? false;
+      if (noProgressAbortEnabled) {
+        void writeStuckOutboxEntry({
+          workflowId: trigger.workflowId,
+          reason: 'no_progress',
+          ...(issueSummaries.length > 0 ? { issueSummaries: [...issueSummaries] } : {}),
+        });
+
+        const noProgressPolicy = trigger.agentConfig?.stuckAbortPolicy ?? 'abort';
+        if (noProgressPolicy !== 'notify_only' && stuckReason === null && timeoutReason === null) {
+          stuckReason = 'no_progress';
+          agent.abort();
+          return;
+        }
+      }
     }
 
     // Signal 3: wall-clock timeout is already firing (session is aborting).
@@ -3523,6 +3733,31 @@ export async function runWorkflow(
       steerRegistry?.delete(workrailSessionId);
     }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
+  }
+
+  // ---- Stuck result (repeated_tool_call or no_progress abort) ----
+  // Checked before timeoutReason: if both somehow fired (same-turn race), stuck
+  // is the more specific signal and takes priority over the generic wall-clock timeout.
+  // In practice, the max_turns path returns early (before stuck checks run) so the
+  // race only applies to wall_clock -- stuck fires before the limit, which fires later.
+  if (stuckReason !== null) {
+    emitter?.emit({
+      kind: 'session_completed',
+      sessionId,
+      workflowId: trigger.workflowId,
+      outcome: 'timeout',   // backward-compat in event log; _tag: 'stuck' distinguishes at result level
+      detail: stuckReason,
+      ...withWorkrailSession(workrailSessionId),
+    });
+    if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+    return {
+      _tag: 'stuck',
+      workflowId: trigger.workflowId,
+      reason: stuckReason,
+      message: `Session aborted: stuck heuristic fired (${stuckReason})`,
+      stopReason: 'aborted',
+      ...(issueSummaries.length > 0 ? { issueSummaries: [...issueSummaries] } : {}),
+    };
   }
 
   // ---- Timeout result (wall-clock or max-turn limit) ----

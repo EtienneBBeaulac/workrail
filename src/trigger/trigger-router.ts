@@ -682,6 +682,12 @@ export class TriggerRouter {
           `[TriggerRouter] Workflow failed: triggerId=${trigger.id} ` +
             `workflowId=${trigger.workflowId} error=${result.message} stopReason=${result.stopReason}`,
         );
+      } else if (result._tag === 'stuck') {
+        console.log(
+          `[TriggerRouter] Workflow stuck: triggerId=${trigger.id} ` +
+          `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
+          // TODO(follow-up): add onStuck: trigger hook support here
+        );
       } else {
         // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
         // this will fail to compile, forcing the developer to handle the new case.
@@ -762,6 +768,12 @@ export class TriggerRouter {
         console.log(
           `[TriggerRouter] Dispatch failed: workflowId=${workflowTrigger.workflowId} ` +
             `error=${result.message} stopReason=${result.stopReason}`,
+        );
+      } else if (result._tag === 'stuck') {
+        console.log(
+          `[TriggerRouter] Dispatch stuck: workflowId=${workflowTrigger.workflowId} ` +
+          `reason=${result.reason} message=${result.message}`,
+          // TODO(follow-up): add onStuck: trigger hook support here
         );
       } else {
         // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant

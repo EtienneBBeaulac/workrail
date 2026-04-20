@@ -885,6 +885,8 @@ export function mountConsoleRoutes(
           console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId}`);
         } else if (result._tag === 'error') {
           console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
+        } else if (result._tag === 'stuck') {
+          console.log(`[ConsoleRoutes] Auto dispatch stuck: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
         } else {
           // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
           // this will fail to compile, forcing the developer to handle the new case.
