@@ -375,27 +375,6 @@ export interface WorkflowTrigger {
    * Default: 'worktrain/' (applied at parse time or at use time in runWorkflow()).
    */
   readonly branchPrefix?: string;
-
-  /**
-   * Optional bot identity for git commit attribution in autonomous sessions.
-   * Set by queue-poll dispatch (polling-scheduler.ts doPollGitHubQueue) for sessions
-   * dispatched by the GitHub queue poller.
-   *
-   * When present and branchStrategy === 'worktree', workflow-runner.ts runs:
-   *   git -C <worktreePath> config user.name <name>
-   *   git -C <worktreePath> config user.email <email>
-   * after worktree creation, so commits from autonomous sessions use the bot account
-   * rather than the operator's personal git identity.
-   *
-   * WHY deterministic (not delegated to LLM): git attribution is infra, not agent work.
-   * Setting it deterministically prevents silent identity leakage.
-   *
-   * Default: undefined (no identity override -- git falls back to global config).
-   */
-  readonly botIdentity?: {
-    readonly name: string;
-    readonly email: string;
-  };
 }
 
 /** Successful completion of a workflow run. */
@@ -3156,26 +3135,6 @@ export async function runWorkflow(
   // this point and the first continue_workflow call leaves a recoverable state file.
   if (startContinueToken) {
     await persistTokens(sessionId, startContinueToken, startCheckpointToken);
-  }
-
-// Bot identity: if trigger.botIdentity is set, configure git user.name/email on the
-  // workspace so commits from autonomous sessions use the bot account rather than the
-  // operator's personal git identity. Non-fatal: failure logs a warning and continues.
-  if (trigger.botIdentity) {
-    try {
-      await execFileAsync('git', ['-C', trigger.workspacePath, 'config', 'user.name', trigger.botIdentity.name]);
-      await execFileAsync('git', ['-C', trigger.workspacePath, 'config', 'user.email', trigger.botIdentity.email]);
-      console.log(
-        `[WorkflowRunner] Bot identity set: sessionId=${sessionId} ` +
-        `name=${trigger.botIdentity.name} email=${trigger.botIdentity.email}`,
-      );
-    } catch (identityErr) {
-      console.warn(
-        `[WorkflowRunner] WARNING: Failed to set bot identity for sessionId=${sessionId}: ` +
-        `${identityErr instanceof Error ? identityErr.message : String(identityErr)}. ` +
-        `Commits will use default git config.`,
-      );
-    }
   }
 
   // ---- Worktree isolation (Issue #627) ----
