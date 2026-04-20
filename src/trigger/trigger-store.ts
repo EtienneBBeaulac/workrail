@@ -867,6 +867,33 @@ function validateAndResolveTrigger(
   const baseBranch = raw.baseBranch?.trim() || undefined;
   const branchPrefix = raw.branchPrefix?.trim() || undefined;
 
+  // Validate baseBranch and branchPrefix for git-safe characters.
+  // WHY validate here (not at worktree creation): a branchPrefix starting with '--' or
+  // containing shell-special characters produces a cryptic git error deep in session setup.
+  // Fail-fast at parse time gives a clear config error at daemon startup instead.
+  // WHY this regex: allows all characters git accepts for branch names in common usage:
+  // alphanumeric, dot, underscore, hyphen, forward-slash. Excludes shell metacharacters
+  // (~, ^, :, ?, *, [, \, space) and values starting with '-' (git flag confusion).
+  const GIT_SAFE_RE = /^[a-zA-Z0-9._/-]+$/;
+  if (baseBranch !== undefined) {
+    if (!GIT_SAFE_RE.test(baseBranch) || baseBranch.startsWith('-')) {
+      return err({
+        kind: 'invalid_field_value',
+        field: `baseBranch (must match /^[a-zA-Z0-9._/-]+$/ and not start with "-", got: "${baseBranch}")`,
+        triggerId: rawId,
+      });
+    }
+  }
+  if (branchPrefix !== undefined) {
+    if (!GIT_SAFE_RE.test(branchPrefix) || branchPrefix.startsWith('-')) {
+      return err({
+        kind: 'invalid_field_value',
+        field: `branchPrefix (must match /^[a-zA-Z0-9._/-]+$/ and not start with "-", got: "${branchPrefix}")`,
+        triggerId: rawId,
+      });
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // pollingSource assembly (gitlab_poll, github_issues_poll, github_prs_poll)
   //

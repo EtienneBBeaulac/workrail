@@ -316,9 +316,12 @@ async function maybeRunDelivery(
       autoOpenPR: trigger.autoOpenPR,
       // Branch assertion: verify HEAD matches expected branch before git push.
       // Only meaningful for worktree sessions -- 'none' sessions use trigger.workspacePath.
+      // WHY result.sessionId (not split from path): sessionId is threaded directly through
+      // WorkflowRunSuccess to avoid fragile path-parsing that couples branch naming convention
+      // to the calling code. See WorkflowRunSuccess.sessionId for the full rationale.
       ...(trigger.branchStrategy === 'worktree' && result.sessionWorkspacePath
         ? {
-            sessionId: result.sessionWorkspacePath.split('/').at(-1) ?? '',
+            sessionId: result.sessionId ?? '',
             branchPrefix: trigger.branchPrefix ?? 'worktrain/',
           }
         : {}),
