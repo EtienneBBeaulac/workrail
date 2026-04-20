@@ -491,7 +491,30 @@ export class PollingScheduler {
     console.log(`[QueuePoll] selected #${top.issue.number} "${top.issue.title}" maturity=${top.maturity} reason="${maturityReason}"`);
     await appendQueuePollLog({ event: 'task_selected', issueNumber: top.issue.number, title: top.issue.title, maturity: top.maturity, reason: maturityReason, ts: new Date().toISOString() });
 
-    this.router.dispatch(workflowTrigger);
+    // Route through the adaptive pipeline coordinator when available (Option B in-process).
+    // Type guard: check for method presence to support test mocks that only implement dispatch().
+    // WHY type guard (not static cast): PollingScheduler holds `TriggerRouter` by type import,
+    // but test fakes may not implement dispatchAdaptivePipeline. The guard ensures safe fallback.
+    // @see TriggerRouter.dispatchAdaptivePipeline for the full Option B design rationale.
+    if (
+      'dispatchAdaptivePipeline' in this.router &&
+      typeof (this.router as { dispatchAdaptivePipeline?: unknown }).dispatchAdaptivePipeline === 'function'
+    ) {
+      void (this.router as {
+        dispatchAdaptivePipeline: (
+          goal: string,
+          workspace: string,
+          context?: Readonly<Record<string, unknown>>,
+        ) => Promise<unknown>
+      }).dispatchAdaptivePipeline(
+        workflowTrigger.goal,
+        workflowTrigger.workspacePath,
+        workflowTrigger.context,
+      );
+      console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
+    } else {
+      this.router.dispatch(workflowTrigger);
+    }
 
     for (let i = 1; i < candidates.length; i++) {
       const { issue, maturity } = candidates[i]!;

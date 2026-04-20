@@ -460,6 +460,8 @@ export class TriggerRouter {
   private readonly emitter: DaemonEventEmitter | undefined;
   private readonly notificationService: NotificationService | undefined;
   private readonly steerRegistry: SteerRegistry | undefined;
+  private readonly _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
+  private readonly _modeExecutors: ModeExecutors | undefined;
 
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
@@ -497,11 +499,34 @@ export class TriggerRouter {
      * When absent, the steer endpoint returns 404 for all sessions handled by this router.
      */
     steerRegistry?: SteerRegistry,
+    /**
+     * Optional adaptive coordinator dependencies for in-process pipeline dispatch.
+     * When provided, dispatchAdaptivePipeline() uses these as default deps.
+     * When absent, dispatchAdaptivePipeline() logs a warning and returns an escalated outcome.
+     *
+     * WHY optional injection: follows the same DI pattern as execFn, emitter, etc.
+     * Production wiring is done in trigger-listener.ts (bootstrap level).
+     * Tests that do not need adaptive dispatch omit this parameter.
+     *
+     * @see dispatchAdaptivePipeline
+     */
+    coordinatorDeps?: AdaptiveCoordinatorDeps,
+    /**
+     * Optional mode executors for the adaptive pipeline coordinator.
+     * Must be provided alongside coordinatorDeps for adaptive dispatch to activate.
+     * When absent (or when coordinatorDeps is absent), dispatchAdaptivePipeline falls back
+     * to logging a warning and returning an escalated outcome.
+     *
+     * @see dispatchAdaptivePipeline
+     */
+    modeExecutors?: ModeExecutors,
   ) {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
     this.notificationService = notificationService;
     this.steerRegistry = steerRegistry;
+    this._coordinatorDeps = coordinatorDeps;
+    this._modeExecutors = modeExecutors;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -807,10 +832,6 @@ export class TriggerRouter {
   }
 
   /**
-   * @see feat/github-queue-poll -- polling-scheduler.ts must be updated to call
-   * this method instead of dispatch() when context.taskCandidate is present.
-   * This is intentionally unconnected until that branch is rebased onto main.
-   *
    * Dispatch the adaptive pipeline coordinator in-process (Option B).
    *
    * Called by the GitHub issue queue poller when a task candidate arrives.
@@ -823,26 +844,49 @@ export class TriggerRouter {
    * - Same approach as the CLI entry point (both call runAdaptivePipeline directly).
    * (Pitch invariant 9: "The poller owns the process; the coordinator is a function call.")
    *
+   * Deps precedence: caller-provided params (3rd/4th positional args) override the stored
+   * constructor-injected fields. When neither is present, logs a warning and returns an
+   * escalated outcome (does NOT throw).
+   *
    * @param goal - The task goal string from the incoming queue event
    * @param workspace - Absolute path to the workspace
-   * @param coordinatorDeps - Injected AdaptiveCoordinatorDeps for the pipeline
-   * @param modeExecutors - Injected mode executor functions
    * @param context - Optional task context (taskCandidate from queue poller)
+   * @param coordinatorDeps - Optional caller override; falls back to constructor-injected deps
+   * @param modeExecutors - Optional caller override; falls back to constructor-injected executors
    * @returns The PipelineOutcome (merged, escalated, or dry_run)
    */
   async dispatchAdaptivePipeline(
     goal: string,
     workspace: string,
-    coordinatorDeps: AdaptiveCoordinatorDeps,
-    modeExecutors: ModeExecutors,
     context?: Readonly<Record<string, unknown>>,
+    coordinatorDeps?: AdaptiveCoordinatorDeps,
+    modeExecutors?: ModeExecutors,
   ): ReturnType<typeof runAdaptivePipeline> {
+    // Resolve effective deps: caller-provided overrides stored fields.
+    const effectiveDeps = coordinatorDeps ?? this._coordinatorDeps;
+    const effectiveExecutors = modeExecutors ?? this._modeExecutors;
+
+    if (effectiveDeps === undefined || effectiveExecutors === undefined) {
+      console.warn(
+        '[TriggerRouter] dispatchAdaptivePipeline called but coordinatorDeps not injected -- ' +
+        'adaptive dispatch disabled. Inject coordinatorDeps and modeExecutors in the ' +
+        'TriggerRouter constructor to activate. Returning escalated outcome.',
+      );
+      return {
+        kind: 'escalated',
+        escalationReason: {
+          phase: 'dispatch',
+          reason: 'coordinatorDeps or modeExecutors not injected into TriggerRouter',
+        },
+      };
+    }
+
     const opts: AdaptivePipelineOpts = {
       goal,
       workspace,
       taskCandidate: context,
     };
 
-    return runAdaptivePipeline(coordinatorDeps, opts, modeExecutors);
+    return runAdaptivePipeline(effectiveDeps, opts, effectiveExecutors);
   }
 }
