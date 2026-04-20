@@ -1,115 +1,77 @@
-# Design Candidates: assertNever exhaustiveness guard for TriggerRouter
+# Design Candidates: WorkTrain Worktree Isolation + Auto-commit Wire-up (Issue #627)
 
-**Date:** 2026-04-18
-**Status:** Ready for main-agent review
-
----
+**Date:** 2026-04-19
+**Status:** Candidate A selected -- implementation in progress
 
 ## Problem Understanding
 
-### Core Tensions
-1. **Runtime correctness vs compile-time safety**: Both `route()` and `dispatch()` have open `else` branches that assume `result._tag === 'error'`. They work today because `WorkflowRunResult` has exactly 4 variants and the first 3 are handled explicitly. Adding a 5th variant would silently route through the error-handling log path with no compiler warning.
-2. **Soft handling rationale vs exhaustiveness**: The existing `dispatch()` code has a comment explaining WHY `delivery_failed` uses soft handling (log-only, no assertNever). The fix must not conflate this deliberate decision with the unguarded `else` for the `error` variant.
-3. **DRY vs stability**: `workflow-source.ts` has a local `assertNever` that duplicates the canonical one. Consolidating it is trivial but is a separate concern.
+### Tensions
+
+1. **Data flow for sessionWorkspacePath**: `runWorkflow()` creates the worktree (and therefore knows `sessionWorkspacePath`). `maybeRunDelivery()` in trigger-router needs the path for `runDelivery()`. The return value channel (`WorkflowRunSuccess`) is the natural bridge -- adding `sessionWorkspacePath?` to that type surfaces it without coupling trigger-router to runWorkflow internals.
+
+2. **WorkflowTrigger vs TriggerDefinition split**: `runWorkflow()` receives `WorkflowTrigger` (internal type), not `TriggerDefinition` (external type). The trigger-router maps TriggerDefinition -> WorkflowTrigger at route() time. New fields `branchStrategy/baseBranch/branchPrefix` must be added to both types AND the mapping. The existing `soulFile` field is the exact precedent.
+
+3. **Delivery-action branch assertion seam**: The spec places branch assertion in delivery-action.ts "before git push". This requires `expectedBranch?: string` as a new parameter to `runDelivery()`. The alternative (assertion in runWorkflow()) is simpler but violates the architectural principle that delivery concerns belong in delivery-action.
+
+4. **Multi-exit cleanup**: runWorkflow() has multiple exit paths (success, error, timeout, early error). Worktree removal must happen on success only; failure/timeout keeps the worktree for debugging. The pre-created worktree must be tracked so the success path can remove it.
 
 ### Likely Seam
-The seam is exactly where identified: the final `else` branches in `route()` (line 604) and `dispatch()` (line 675) of `src/trigger/trigger-router.ts`. These are not symptoms of a deeper design flaw -- they are simply unguarded fallthrough branches that need an explicit tag check and an assertNever guard.
+
+The real seam is in `runWorkflow()` immediately after `persistTokens()`. This is explicitly called out in the spec: "Right after `persistTokens()`, when `trigger.branchStrategy === 'worktree'`...". The worktree creation is a session-lifecycle concern that belongs at the same point as crash-recovery state creation.
 
 ### What Makes This Hard
-Almost nothing. The only non-obvious point: you cannot add `assertNever(result)` inside the existing `else` directly -- TypeScript would see `result: WorkflowRunError` (the one unhandled variant), not `never`. You must add `else if (result._tag === 'error') { ... }` first so TypeScript can narrow `result` to `never` in the subsequent `else { assertNever(result); }`.
 
----
+- **Multiple exit paths**: `let worktreeCreated = false` must be tracked so early errors (before worktree creation) don't try to remove a non-existent worktree.
+- **Crash between worktree creation and sidecar write**: if the process dies after `git worktree add` but before `persistTokens(worktreePath)`, the worktree is untracked. Mitigation: persist `worktreePath` in the sidecar JSON immediately after worktree creation.
+- **Recovery in tests**: `runStartupRecovery()` calls `git worktree remove` -- tests can't run real git commands. Solution: injectable `execFn` parameter (same pattern as delivery-action).
 
 ## Philosophy Constraints
 
-From `CLAUDE.md`:
-- **Exhaustiveness everywhere** -- use discriminated unions so handling is complete and refactor-safe
-- **Type safety as the first line of defense** -- prefer compile-time guarantees over runtime checks
-- **Make illegal states unrepresentable** -- model domain states so invalid combinations cannot be constructed
-- **YAGNI with discipline** -- avoid speculative abstractions; don't restructure working code without a concrete reason
-- **Document why, not what** -- comments explain intent and invariants
+- **execFile not exec** (CLAUDE.md + spec): all git commands use `execFileAsync`, never `execAsync`. No shell injection.
+- **Immutability by default**: `trigger.workspacePath` is never mutated. `sessionWorkspacePath` is a derived local variable.
+- **Make illegal states unrepresentable**: `branchStrategy: 'worktree' | 'none'` union type catches typos at compile time.
+- **Errors as data**: `runDelivery()` returns `DeliveryResult` discriminated union. Branch assertion on mismatch returns `{ _tag: 'error', phase: 'commit', details: '...' }` rather than throwing.
+- **Validate at boundaries**: new YAML fields parsed and validated in `validateAndResolveTrigger()` at load time.
+- **Prefer fakes over mocks**: tests use real temp dirs (following existing crash-recovery test pattern).
+- **YAGNI with discipline**: no WorktreeManager class, no abstraction beyond what the spec requires.
 
-**Conflicts:** None. All principles align toward Candidate 1.
-
----
+No philosophy conflicts found. Spec, CLAUDE.md, and repo patterns are aligned.
 
 ## Impact Surface
 
-- `src/trigger/trigger-router.ts`: 2 locations changed (route() + dispatch())
-- `src/types/workflow-source.ts`: local assertNever removed, import added (bonus consolidation)
-- No callers change -- these are internal logging branches with no return value
-- `src/runtime/assert-never.ts`: read-only (adding a consumer, no changes)
-- `tests/unit/trigger-router.test.ts`: existing tests verify the router behavior; no new tests needed for assertNever (unreachable at runtime)
-
----
+- `src/trigger/types.ts`: `TriggerDefinition` gains 3 optional fields.
+- `src/daemon/workflow-runner.ts`: `WorkflowTrigger` gains 3 optional fields; `WorkflowRunSuccess` gains `sessionWorkspacePath?`; `persistTokens()` signature changes (2 internal call sites); `OrphanedSession` type gains `worktreePath?`; `readAllDaemonSessions()` returns `worktreePath`; `runStartupRecovery()` gains injectable `execFn` parameter.
+- `src/trigger/delivery-action.ts`: `runDelivery()` signature gains `expectedBranch?: string` parameter (1 call site in trigger-router).
+- `src/trigger/trigger-router.ts`: `maybeRunDelivery()` gains worktree-path pass-through; WorkflowTrigger mapping gains 3 fields.
+- `triggers.yml`: test-task and mr-review triggers updated.
 
 ## Candidates
 
-### Candidate 1: Minimal fix -- else if + assertNever (recommended)
+### Candidate A: Spec-literal implementation (SELECTED)
 
-**Summary:** Add `else if (result._tag === 'error') { ... }` guard before the existing else body, then add `else { assertNever(result); }` after. Add the import at the top of the file.
+Thread `branchStrategy/baseBranch/branchPrefix` through the type hierarchy; derive `sessionWorkspacePath` as a `let` variable in `runWorkflow()`; thread to tool factories; surface in `WorkflowRunSuccess`; add branch assertion to `runDelivery()`.
 
-**Tensions resolved:** Closes exhaustiveness gap with compile-time protection. Preserves all existing structure and comments.
+- Resolves all four tensions
+- Follows soulFile/referenceUrls/agentConfig extension pattern exactly
+- Honors all philosophy principles
+- Minimal blast radius
 
-**Tensions accepted:** If/else chains are slightly less idiomatic for discriminated unions than switch statements, but acceptable given existing code style.
+### Candidate B: Branch assertion inside runWorkflow
 
-**Boundary solved at:** Exact symptom location -- the open else branches. This IS the right seam; no deeper architectural change is needed.
+Rejected -- spec explicitly places assertion in delivery-action.
 
-**Failure mode:** If `WorkflowRunError._tag` is renamed from `'error'`, the `else if (result._tag === 'error')` will fail to compile -- which is correct behavior.
+### Candidate C: WorktreeManager class
 
-**Repo-pattern relationship:** Adapts the `workflow-runner.ts` assertNever pattern from switch/default to if/else form.
+Rejected -- YAGNI, spec doesn't call for this abstraction.
 
-**Gains:** Compile-time exhaustiveness, minimal diff, zero behavior change.
+## Recommendation
 
-**Losses:** None.
-
-**Scope judgment:** Best-fit.
-
-**Philosophy fit:** Honors exhaustiveness, type safety, YAGNI. No conflicts.
-
----
-
-### Candidate 2: Refactor to switch statements + assertNever default
-
-**Summary:** Convert both if/else chains to `switch (result._tag)` with explicit cases and `default: assertNever(result)`, matching the pattern in `workflow-runner.ts` lines 1571-1600.
-
-**Tensions resolved:** Same exhaustiveness gap. More literal match to the workflow-runner.ts pattern.
-
-**Tensions accepted:** More invasive change -- restructures 20+ lines of working code per location. Inline WHY comments for `delivery_failed` need careful migration into case blocks.
-
-**Failure mode:** Risk of introducing a logic error or losing a comment during restructuring.
-
-**Repo-pattern relationship:** Matches `workflow-runner.ts` switch pattern literally.
-
-**Gains:** Possibly more idiomatic discriminated union matching.
-
-**Losses:** Larger diff, higher risk surface, no additional compile-time benefit over Candidate 1.
-
-**Scope judgment:** Too broad -- no concrete evidence that switch is required here.
-
-**Philosophy fit:** Conflicts with YAGNI (restructuring working code without concrete benefit).
-
----
-
-## Comparison and Recommendation
-
-**Recommendation: Candidate 1.**
-
-Both candidates achieve identical compile-time exhaustiveness. Candidate 1 does so with minimal diff surface and no restructuring of working code. CLAUDE.md's YAGNI principle directly supports not refactoring the if/else chains into switches when the only goal is adding an exhaustiveness guard.
-
----
+**Candidate A.** Spec is solution-fixed. All three candidates converge on the same data flow. Candidates B and C are ruled out by spec requirements and YAGNI respectively.
 
 ## Self-Critique
 
-**Strongest counter-argument:** If/else chains are less conventional for exhaustive discriminated-union matching than switch statements. Resolved with a comment following the workflow-runner.ts style.
+**Counter-argument**: `sessionWorkspacePath?` on `WorkflowRunSuccess` could become a grab-bag. A `sessionMetadata?` sub-object would be cleaner.
 
-**Pivot condition:** Switch refactor would be justified if a team standard explicitly required switch for discriminated unions. No such requirement exists.
+**Response**: Premature abstraction. One field, one use case. Refactor to sub-object if a second session-scoped metadata field is needed.
 
-**Invalidating assumption:** If TypeScript's narrowing failed to reduce `result` to `never` after explicit handling of all 4 variants -- not a real risk.
-
----
-
-## Open Questions for the Main Agent
-
-1. Should `console-routes.ts` (line 646) also be fixed? Task description only mentions trigger-router.ts. Decision: leave out of scope.
-2. For `workflow-source.ts` consolidation: the local assertNever has a more specific error message (`Unexpected source kind`) vs the shared one (`Unexpected value`). Decision: shared message is sufficient; the source kind appears in JSON.stringify output anyway.
+**Pivot condition**: If a second PR adds more session-scoped metadata, introduce `sessionMetadata` sub-object at that point.
