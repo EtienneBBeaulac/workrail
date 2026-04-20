@@ -28,20 +28,13 @@ triggers:
     agentConfig:
       maxSessionMinutes: 30
 
-  # Self-improvement queue: apply "worktrain:ready" label to any issue to queue it.
-  # WorkTrain acts as EtienneBBeaulac. PRs are identifiable by [WT] prefix and
-  # worktrain/ branch name. Token resolved from $WORKTRAIN_BOT_TOKEN env var.
   # Self-improvement queue: assign issues to worktrain-etienneb to queue them.
   # WorkTrain acts as EtienneBBeaulac. PRs get [WT] prefix and worktrain/ branch.
   - id: self-improvement
     provider: github_queue_poll
-    workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
-    queueType: assignee
-    # goalTemplate is unused for github_queue_poll triggers -- the poller sets goal
-    # directly from the issue title at dispatch time. This explicit value suppresses
-    # the startup warning: "no static goal or goalTemplate -- defaulting to {{$.goal}}".
     goalTemplate: "{{$.issue.title}}"
+    queueType: assignee
     branchStrategy: worktree
     baseBranch: main
     branchPrefix: "worktrain/"
