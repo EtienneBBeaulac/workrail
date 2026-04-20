@@ -316,6 +316,11 @@ async function maybeRunDelivery(
     {
       autoCommit: trigger.autoCommit,
       autoOpenPR: trigger.autoOpenPR,
+      // secretScan: pass trigger value (undefined = use default true in runDelivery).
+      // WHY ?? true not needed here: runDelivery checks flags.secretScan !== false,
+      // so undefined is equivalent to true. Passing trigger.secretScan preserves the
+      // explicit false from triggers.yml without needing a default here.
+      secretScan: trigger.secretScan ?? true,
       // Attribution: triggerId and workflowId are used in the PR body footer so operators
       // can trace the PR back to the trigger and workflow that produced it.
       triggerId,
