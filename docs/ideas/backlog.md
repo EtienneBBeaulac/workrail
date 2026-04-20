@@ -6395,3 +6395,89 @@ When a post-implementation MR review finds a UI/UX finding (wrong affordance, mi
 ### Priority
 
 Design this as part of the adaptive coordinator (#3). The `touchesUI` flag belongs on the classification output alongside `taskComplexity` and `maturity`. The UI detection logic and the design workflow insertion are both coordinator-level concerns, not engine-level.
+
+---
+
+## Current state update (Apr 20, 2026)
+
+**npm version: v3.45.0**
+
+### What shipped in this session (Apr 19-20, 2026)
+
+All five top-priority autonomous pipeline items shipped:
+
+- ✅ **#1 -- Worktree isolation + auto-commit** (PR #630) -- Each WorkTrain coding session now runs in an isolated git worktree (`~/.workrail/worktrees/<sessionId>`). `trigger.workspacePath` is never mutated; all tool factories receive `sessionWorkspacePath`. Crash recovery sidecar persists `worktreePath` for orphan cleanup. `delivery-action.ts` asserts HEAD branch before push. `test-task` trigger: `branchStrategy: worktree`, `autoCommit: true`, `autoOpenPR: true`.
+
+- ✅ **#2 -- Stuck detection escalation** (PR #636) -- New `WorkflowRunResult._tag: 'stuck'` discriminant. When `repeated_tool_call` heuristic fires and `stuckAbortPolicy !== 'notify_only'` (default: `'abort'`), daemon aborts the session immediately instead of burning the 30-min wall clock. Writes structured entry to `~/.workrail/outbox.jsonl`. `stuckAbortPolicy` and `noProgressAbortEnabled` configurable per trigger in `agentConfig`. `ChildWorkflowRunResult` updated atomically.
+
+- ✅ **#3 -- Adaptive pipeline coordinator** (PR #639) -- `worktrain run pipeline --issue N --workspace path` routes tasks to the right pipeline via pure static routing:
+  - dep-bump + PR number → QUICK_REVIEW (delegates to `runPrReviewCoordinator`)
+  - PR/MR number → REVIEW_ONLY
+  - `current-pitch.md` exists → IMPLEMENT (coding + PR + review + merge)
+  - Default → FULL (discovery → shaping → coding → PR → review → merge)
+  - Fix loop cap: 2 iterations max. Escalating audit chain for Critical findings. UX gate for UI-touching tasks. 6 hardcoded timeout constants. Pitch archived after IMPLEMENT/FULL completes.
+
+- ✅ **#4 -- GitHub issue queue poll trigger** (PR #637) -- New `github_queue_poll` trigger provider. Polls GitHub issues matching `GitHubQueueConfig` (assignee-based MVP, `label`/`mention`/`query` typed but `not_implemented`). Maturity inference from 3 deterministic heuristics. Idempotency check (conservative: parse errors = active). JSONL decision log at `~/.workrail/queue-poll.jsonl`. `maxTotalConcurrentSessions` cap. Bot identity config (`botName`, `botEmail`).
+
+- ✅ **#5 -- Context assembly layer** (PR #624, shipped earlier) -- `ContextAssembler` injects git diff summary + prior session notes before turn 1. Feeds into coordinator pre-dispatch.
+
+- ✅ **Performance sweep** (all 10 issues #248-257 -- already confirmed complete)
+- ✅ **Console session tree** (PR #607 -- parentSessionId rendered in UI)
+- ✅ **Daemon file-nav tools** (PR #619) -- Glob, Grep, Edit + upgraded Read/Write with staleness guard
+- ✅ **`spawn_agent` artifacts** (PR #613) -- `lastStepArtifacts` surfaced through spawn_agent return
+- ✅ **`wr.shaping` workflow** (PR #610) -- faithful Shape Up shaping, 9 steps
+- ✅ **Coding workflow Phase 0.5** (PR #610) -- upstream context detection, three-workflow pipeline
+
+### WorkTrain current capabilities (v3.45.0)
+
+**Autonomous workflow execution -- confirmed working:**
+- `worktrain run pipeline --issue N` routes to the right pipeline and runs it end-to-end
+- `worktrain run pr-review` autonomous PR review with structured verdicts and auto-merge
+- Coding sessions run in isolated worktrees, auto-commit, auto-open PR
+- Sessions abort when stuck (instead of burning 30-min wall clock)
+- GitHub issue queue polling: assign issue to `worktrain-etienneb` → daemon picks it up automatically
+- All sessions start with git diff + prior session notes injected (ContextAssembler)
+- Daemon file-nav tools: Glob, Grep, Edit, Read (paginated), Write (staleness guard)
+- Escalating audit chain: Critical findings → prod audit → re-review → escalate if still Critical
+- Fix loop: minor findings → max 2 fix iterations before escalation
+
+**WorkTrain agent tool set (v3.45.0):**
+`complete_step`, `continue_workflow` (deprecated), `Bash`, `Read`, `Write`, `Glob`, `Grep`, `Edit`, `report_issue`, `spawn_agent`, `signal_coordinator`
+
+**Trigger system:**
+- Generic webhook, GitLab MR polling, GitHub Issues polling, GitHub PR polling
+- **NEW: `github_queue_poll`** -- assignee-based issue queue with maturity inference
+- `branchStrategy: worktree` -- isolated worktree per session
+- `autoCommit: true` / `autoOpenPR: true` -- full delivery pipeline
+- `stuckAbortPolicy: 'abort' | 'notify_only'`
+- `goalTemplate`, `referenceUrls`, `contextMapping`, `agentConfig`
+
+### Accurate limitations (v3.45.0)
+
+1. **`dispatchAdaptivePipeline()` not yet connected** -- `TriggerRouter.dispatchAdaptivePipeline()` exists but `polling-scheduler.ts` still calls `router.dispatch()`. Queue poll sessions run as generic sessions, not routed through the adaptive coordinator. Cross-PR gap documented with TODO.
+
+2. **`findingCategory` not on review-verdict** -- Audit chain always dispatches `production-readiness-audit` for Critical findings regardless of finding type. `findingCategory` field on `findings[]` items needs to be added to `wr.review_verdict` schema as a follow-up so architecture findings can route to `architecture-scalability-audit` correctly.
+
+3. **Bot account setup required before first queue run** -- `worktrain-etienneb` GitHub account must be created, PAT generated with `repo:read` scope, stored as `WORKTRAIN_BOT_TOKEN`, and added as repo collaborator. Commit identity: `worktrain-etienneb@users.noreply.github.com`. Without this, `github_queue_poll` trigger has no bot identity.
+
+4. **No auto-merge setting in `worktrain init`** -- Auto-merge policy is hardcoded in the coordinator. Should be a `~/.workrail/config.json` setting exposed during `worktrain init`.
+
+5. **Grooming loop not built** -- Three open design decisions must be settled before building (human-ack boundary, compute budget, priority signal source). Deferred until Level 1 usage data exists.
+
+6. **Knowledge graph not wired** -- `src/knowledge-graph/` module exists (DuckDB + ts-morph), `ts-morph` in devDependencies. No daemon tool yet. Architecture decision: belongs in context assembly layer, not as a daemon tool.
+
+7. **`worktrain inbox --watch` stub** -- Prints "not yet implemented." The outbox mechanism exists; just needs a polling loop.
+
+8. **Artifact store not built** -- Agents dump markdown in the repo. `~/.workrail/artifacts/` not created.
+
+### Next priorities (groomed Apr 20)
+
+1. **Connect `dispatchAdaptivePipeline()`** -- Wire `polling-scheduler.ts` to call `TriggerRouter.dispatchAdaptivePipeline()` when `context.taskCandidate` is present. Small change, unlocks the full autonomous queue → pipeline connection.
+
+2. **`findingCategory` on review-verdict schema** -- Add `findingCategory: 'correctness' | 'security' | 'architecture' | 'ux' | 'performance' | 'testing'` to `findings[]` in `ReviewVerdictArtifactV1Schema`. Update `mr-review-workflow-agentic` final step to emit it. Unlocks correct audit routing.
+
+3. **Bot account setup + `worktrain init` overhaul** -- Create `worktrain-etienneb`, add `worktrain daemon --check` command (API key + git fetch dry run), expose auto-merge policy in `worktrain init`.
+
+4. **Level 1 usage: run WorkTrain on its own backlog** -- Create `worktrain:ready` issues for the top 10 ready tasks, assign to `worktrain-etienneb`, observe one full queue → pipeline run. Collect data on misclassifications and weak PRs before designing the grooming loop.
+
+5. **`worktrain inbox --watch`** -- Close the notification loop. Outbox exists, just needs the polling implementation.
