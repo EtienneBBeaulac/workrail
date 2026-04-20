@@ -6853,3 +6853,41 @@ Medium -- essential before WorkTrain manages more than 2-3 repos. Single file is
 - Does `extends` merge deeply (arrays concatenated) or shallowly (top-level keys override)?
 - How does `worktrain trigger validate` handle templates -- validate the template in isolation, or only validate instantiated triggers?
 - Where do trigger templates live: `config.json` (structured), a separate `trigger-defaults.yml`, or inline in `triggers.yml` as a `defaults:` section?
+
+---
+
+## MR/PR template support (Apr 20, 2026)
+
+**The problem:** WorkTrain opens PRs using a generic body format hardcoded in `delivery-action.ts`. Teams maintain `.github/PULL_REQUEST_TEMPLATE.md` (GitHub), `.gitlab/merge_request_templates/` (GitLab), or custom templates -- WorkTrain ignores all of them. PRs opened by WorkTrain look structurally different from human-authored PRs and skip required fields (checklists, reviewer guidelines, linked issue fields).
+
+### What needs to happen
+
+Before `gh pr create`, `delivery-action.ts` should:
+1. Check for a PR/MR template in standard locations:
+   - `.github/PULL_REQUEST_TEMPLATE.md` (GitHub default)
+   - `.github/pull_request_template.md` (case variant)
+   - `.github/PULL_REQUEST_TEMPLATE/*.md` (multiple templates -- pick default or first)
+   - `.gitlab/merge_request_templates/Default.md` (GitLab)
+   - `.gitlab/merge_request_templates/*.md` (GitLab named templates)
+2. If a template exists: merge the agent's `HandoffArtifact.prBody` into the template structure rather than replacing it. Strategy: fill in template sections that match (Summary, Description, Changes) and mark template checkboxes as checked/unchecked based on what the agent actually did.
+3. If no template: current behavior (use `prBody` directly).
+
+### The merge challenge
+
+Template merging is non-trivial. A template may have:
+- Checklists: `- [ ] Tests added` -- agent should check based on what it did
+- Required sections: `## Description` -- agent fills in
+- Guidelines/instructions: `<!-- Please describe your changes -->` -- strip before submitting
+- Linked issue refs: `Closes #N` -- agent knows the issue number from `taskCandidate`
+
+**Recommended approach:** Pass the template to the agent's final step as additional context. The final step (phase-7-final-verification or phase-5-small-task-fast-path) already produces the `HandoffArtifact.prBody`. Inject the template there so the agent fills it out correctly rather than trying to merge post-hoc.
+
+Alternatively: post-hoc mechanical merge -- fill `## Summary` and `## Changes` sections with the agent's content, auto-check boxes where the agent produced evidence (test files changed = check "Tests added"), leave the rest empty/unchecked.
+
+### GitLab MR description templates
+
+Same concept for GitLab MRs. WorkTrain uses `gh pr create` for GitHub and `glab mr create` (or the GitLab API) for GitLab. Both have template support.
+
+### Priority
+
+Medium. Teams with strict PR templates will notice WorkTrain's PRs immediately. Not a blocker for solo repos. Should land before WorkTrain is used in team repos.
