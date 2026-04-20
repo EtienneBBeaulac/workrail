@@ -52,6 +52,15 @@ export {
   type ReviewVerdictArtifactV1,
 } from './review-verdict.js';
 
+export {
+  // Discovery Handoff
+  DISCOVERY_HANDOFF_CONTRACT_REF,
+  DiscoveryHandoffArtifactV1Schema,
+  isDiscoveryHandoffArtifact,
+  parseDiscoveryHandoffArtifact,
+  type DiscoveryHandoffArtifactV1,
+} from './discovery-handoff.js';
+
 /**
  * Registry of all artifact contract references.
  * Used for validation and documentation.
@@ -61,6 +70,7 @@ export const ARTIFACT_CONTRACT_REFS = [
   'wr.contracts.loop_control',
   'wr.contracts.coordinator_signal',
   'wr.contracts.review_verdict',
+  'wr.contracts.discovery_handoff',
 ] as const;
 
 export type ArtifactContractRef = (typeof ARTIFACT_CONTRACT_REFS)[number];
