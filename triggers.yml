@@ -1,9 +1,11 @@
 triggers:
+  # Direct webhook trigger: POST /webhook/test-task {"goal": "your task description"}
+  # Use for one-off tasks when you don't want to go through the queue.
   - id: test-task
     provider: generic
     workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
-    goal: "Add the evidenceFrom field to the AssessmentDimension type in src/mcp/output-schemas.ts -- this is the backlog item that makes assessment gates declare their evidence sources. The field should be optional (string[]), with a JSDoc comment explaining it links an assessment dimension to the context keys a prep step must produce before the gate fires."
+    goalTemplate: "{{$.goal}}"
     concurrencyMode: parallel
     branchStrategy: worktree
     baseBranch: main
@@ -13,14 +15,13 @@ triggers:
     agentConfig:
       maxSessionMinutes: 60
 
-  # MR review: pass a PR number in the goal to get a full review
-  # Dispatch via: POST /webhook/mr-review {"goal": "Review PR #123: <title>"}
-  # Or use goalTemplate with GitHub polling (when github_poll is configured)
+  # MR review: fires when a PR is opened/updated via GitHub PR polling or webhook.
+  # Dispatch manually: POST /webhook/mr-review {"pull_request": {"title": "PR #123: ...", "number": 123}}
   - id: mr-review
-    goal: "Review the PR specified in the webhook payload goal field"
     provider: generic
     workflowId: mr-review-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
+    goalTemplate: "Review PR {{$.pull_request.number}}: {{$.pull_request.title}}"
     concurrencyMode: parallel
     branchStrategy: none
     autoCommit: false
