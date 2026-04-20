@@ -89,10 +89,12 @@ const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
  * Per-trigger overrides are set via triggers.yml agentConfig.maxTurns.
  * WHY: prevents infinite retry loops when the LLM keeps calling continue_workflow
  * with a broken token -- without a cap, each isError tool_result is visible to the
- * LLM and it will simply retry, looping forever. 50 turns is generous enough for
- * long coding tasks while still being a hard safety net.
+ * LLM and it will simply retry, looping forever. 200 turns provides a generous
+ * safety net for complex autonomous workflows (e.g. wr.discovery deep codebase
+ * exploration) without being the bottleneck -- wall-clock maxSessionMinutes is
+ * the primary cap for runaway sessions.
  */
-const DEFAULT_MAX_TURNS = 50;
+const DEFAULT_MAX_TURNS = 200;
 
 /**
  * Conditionally spreads workrailSessionId into a daemon event object.
