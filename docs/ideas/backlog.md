@@ -6555,3 +6555,54 @@ Proposed `jira_poll` config:
 ### Priority
 
 Medium. GitLab MR review already works. Jira issue queue is the next most impactful integration for enterprise users. Design alongside the label-based GitHub queue -- the patterns are identical, just different API shapes.
+
+---
+
+## Queue opt-in design: unresolved decisions (Apr 20, 2026)
+
+**Status: DO NOT IMPLEMENT until these questions are answered.**
+
+The self-improvement queue was partially implemented using label-based opt-in, then later walked back. This section records what's actually unresolved so future work starts from the right place.
+
+### What's wrong with the current state
+
+The `github_queue_poll` trigger now supports both `assignee` and `label` queue types. The code is correct. But `triggers.yml` has no active queue trigger because the opt-in mechanism isn't settled -- see below.
+
+The label approach was implemented as a practical fallback when "no bot account" ruled out assignee-based. But labels were what we explicitly rejected in the original design because they require humans to apply them per issue. Reversing that decision without acknowledging it was a mistake. The right answer isn't to pick one mechanism -- it's to keep the queue shape configurable (which we already designed) and pick the right shape per context.
+
+### The configurable queue shape (already designed, partially implemented)
+
+```
+{ "queue": { "type": "github_assignee", "user":  "worktrain-etienneb" } }
+{ "queue": { "type": "github_label",    "name":  "worktrain:ready" } }
+{ "queue": { "type": "github_query",    "search": "is:issue is:open ..." } }
+{ "queue": { "type": "jql",             "query": "assignee=currentUser() AND status='Ready for Dev'" } }
+{ "queue": { "type": "gitlab_label",    "name":  "worktrain" } }
+```
+
+For the workrail repo specifically: either `github_assignee` (accept the conflation between your personal assignments and WorkTrain's queue -- fine for a solo repo) or `github_label` (apply label per issue -- more discipline, more friction). Neither is wrong; pick based on preference.
+
+### Enterprise implications that must be resolved before Zillow work
+
+Three questions for the user to verify before designing any Zillow path:
+
+1. **Service account process**: Does Zillow have a ServiceDesk or security review process for requesting service accounts (`worktrain-etienneb@zillow`)? If yes, request one through proper channels rather than acting under your personal identity.
+
+2. **AUP check**: Does Zillow's Acceptable Use Policy permit automation acting under employee identities without an explicit security review? If not, "WorkTrain acts as you" is not viable -- a service account is required.
+
+3. **Self-approval rules**: Can you approve your own MRs in Zillow's GitLab? If "no self-approval" is enforced, every WorkTrain MR needs a human reviewer. That changes the pipeline (no auto-merge under personal identity).
+
+These three answers determine the entire architecture for Zillow. Do not design the Jira/GitLab path until they are known.
+
+### Enterprise identity risk (important)
+
+"WorkTrain acts as you" is different from "Dependabot acts as you." Dependabot does narrow, predictable operations (dependency bumps). WorkTrain does arbitrary LLM-driven code changes. Every autonomous action -- MR opened, commit pushed, comment posted -- is attributed to you in audit logs. If WorkTrain does something wrong under your identity, the audit trail points to you. Understand this risk before turning on autonomy against company repos.
+
+### Jira return path (missing from current jira_poll design)
+
+The `jira_poll` backlog entry describes pulling tickets from Jira. It does not describe writing back:
+- Moving the ticket to "In Review" when an MR is opened
+- Adding the MR URL to the Jira ticket (a Jira field or comment)
+- Reacting to Jira transitions mid-work (ticket moved back to "To Do" → WorkTrain stops)
+
+The full Jira integration is a round-trip, not just a poll. Design the return path before implementing `jira_poll`.
