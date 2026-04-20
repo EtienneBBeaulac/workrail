@@ -101,7 +101,7 @@ interface ParsedTriggerRaw {
   // Note: maxSessionMinutes and maxTurns are stored as raw strings here because
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
-  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string };
+  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; stuckAbortPolicy?: string };
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
   autoOpenPR?: string;   // 'true' | 'false' scalar
@@ -323,7 +323,7 @@ function parseTriggersYaml(
         // agentConfig is a sub-object block with scalar string values.
         // Baseline indent: lineIndent (indent of the "agentConfig:" key line).
         lineIndex++;
-        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string } = {};
+        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string; stuckAbortPolicy?: string } = {};
         while (lineIndex < lines.length) {
           const acLine = lines[lineIndex];
           if (acLine === undefined) break;
@@ -351,6 +351,7 @@ function parseTriggersYaml(
             if (acKey === 'model') agentConfig.model = acValueResult.value;
             else if (acKey === 'maxSessionMinutes') agentConfig.maxSessionMinutes = acValueResult.value;
             else if (acKey === 'maxTurns') agentConfig.maxTurns = acValueResult.value;
+            else if (acKey === 'stuckAbortPolicy') agentConfig.stuckAbortPolicy = acValueResult.value;
           }
           lineIndex++;
         }
@@ -853,11 +854,29 @@ function validateAndResolveTrigger(
       maxTurns = asNumber;
     }
 
-    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined) {
+    // stuckAbortPolicy: validate against the closed 'abort' | 'notify_only' enum.
+    // WHY fail-fast: an invalid value silently falls through to undefined (no abort),
+    // which defeats the operator's intent. Validation at parse time matches the pattern
+    // used for concurrencyMode and branchStrategy.
+    let stuckAbortPolicy: 'abort' | 'notify_only' | undefined;
+    if (raw.agentConfig.stuckAbortPolicy !== undefined) {
+      const rawSap = raw.agentConfig.stuckAbortPolicy.trim();
+      if (rawSap !== 'abort' && rawSap !== 'notify_only') {
+        return err({
+          kind: 'invalid_field_value',
+          field: `agentConfig.stuckAbortPolicy (must be "abort" or "notify_only", got: "${rawSap}")`,
+          triggerId: rawId,
+        });
+      }
+      stuckAbortPolicy = rawSap;
+    }
+
+    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || stuckAbortPolicy !== undefined) {
       agentConfig = {
         ...(model !== undefined ? { model } : {}),
         ...(maxSessionMinutes !== undefined ? { maxSessionMinutes } : {}),
         ...(maxTurns !== undefined ? { maxTurns } : {}),
+        ...(stuckAbortPolicy !== undefined ? { stuckAbortPolicy } : {}),
       };
     }
   }
@@ -928,13 +947,18 @@ function validateAndResolveTrigger(
   // ---------------------------------------------------------------------------
   // Worktree isolation fields (Issue #627)
   //
-  // branchStrategy: 'worktree' | 'none' -- default 'none' (opt-in to worktree isolation).
+  // branchStrategy: 'worktree' | 'none'
+  //   - Default 'none' for read-only triggers (no autoCommit, no autoOpenPR):
+  //     worktree creation requires git auth (git fetch) and disk access; read-only
+  //     triggers (MR review, polling) should not incur this overhead.
+  //   - Smart default 'worktree' when autoCommit or autoOpenPR is true and
+  //     branchStrategy is absent: concurrent coding sessions corrupt the main
+  //     checkout without isolation. Making this the default prevents accidental
+  //     clobber for the common coding-trigger case.
+  //   - Explicit 'branchStrategy: none' is the opt-out (always wins).
+  //
   // baseBranch: the base branch to branch from; default 'main'.
   // branchPrefix: prefix for the session branch name; default 'worktrain/'.
-  //
-  // WHY 'none' as default: worktree creation requires git auth (git fetch) and disk
-  // access. Read-only triggers (MR review, polling) should not incur this overhead.
-  // Only coding triggers that write to the repo should use 'worktree'.
   //
   // WHY validate at parse time: an invalid branchStrategy would silently fall through
   // to 'none' if not caught here. Fail-fast at load time is consistent with other
@@ -948,8 +972,20 @@ function validateAndResolveTrigger(
       triggerId: rawId,
     });
   }
-  const branchStrategy: 'worktree' | 'none' | undefined =
-    rawBranchStrategy === 'worktree' ? 'worktree' : rawBranchStrategy === 'none' ? 'none' : undefined;
+  // Smart default: if autoCommit or autoOpenPR is set but branchStrategy is absent,
+  // default to 'worktree'. Isolated worktrees prevent concurrent session clobber.
+  // Explicit 'branchStrategy: none' is the opt-out.
+  let branchStrategy: 'worktree' | 'none' | undefined;
+  if (!rawBranchStrategy && (autoCommit || autoOpenPR)) {
+    branchStrategy = 'worktree';
+    console.log(
+      `[TriggerStore] Trigger "${rawId}" has autoCommit/autoOpenPR but no branchStrategy -- ` +
+      `defaulting to branchStrategy: "worktree" for session isolation. ` +
+      `Use branchStrategy: none to opt out.`,
+    );
+  } else {
+    branchStrategy = rawBranchStrategy === 'worktree' ? 'worktree' : rawBranchStrategy === 'none' ? 'none' : undefined;
+  }
 
   const baseBranch = raw.baseBranch?.trim() || undefined;
   const branchPrefix = raw.branchPrefix?.trim() || undefined;

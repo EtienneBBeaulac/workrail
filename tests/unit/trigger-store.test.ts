@@ -1340,3 +1340,154 @@ triggers:
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// branchStrategy smart default
+// ---------------------------------------------------------------------------
+
+describe('branchStrategy smart default', () => {
+  it('defaults branchStrategy to worktree when autoCommit is true and branchStrategy is absent', () => {
+    const yaml = `
+triggers:
+  - id: auto-commit-no-strategy
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoCommit: "true"
+`;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.branchStrategy).toBe('worktree');
+    }
+    // Should log an informational message about the smart default
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('defaulting to branchStrategy: "worktree"'));
+    logSpy.mockRestore();
+  });
+
+  it('defaults branchStrategy to worktree when autoOpenPR is true and branchStrategy is absent', () => {
+    const yaml = `
+triggers:
+  - id: auto-pr-no-strategy
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoCommit: "true"
+    autoOpenPR: "true"
+`;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.branchStrategy).toBe('worktree');
+    }
+    logSpy.mockRestore();
+  });
+
+  it('keeps branchStrategy none when explicit branchStrategy: none and autoCommit: true (explicit opt-out wins)', () => {
+    const yaml = `
+triggers:
+  - id: explicit-none
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    branchStrategy: none
+    autoCommit: "true"
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.branchStrategy).toBe('none');
+    }
+  });
+
+  it('keeps branchStrategy undefined when neither autoCommit nor autoOpenPR is set and branchStrategy is absent', () => {
+    const yaml = `
+triggers:
+  - id: read-only-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // No branchStrategy in YAML and no autoCommit/autoOpenPR -- stays undefined (no git overhead)
+      expect(result.value.triggers[0]?.branchStrategy).toBeUndefined();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stuckAbortPolicy parsing
+// ---------------------------------------------------------------------------
+
+describe('stuckAbortPolicy parsing', () => {
+  it('parses agentConfig.stuckAbortPolicy: "abort" correctly', () => {
+    const yaml = `
+triggers:
+  - id: stuck-abort-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      maxSessionMinutes: 60
+      stuckAbortPolicy: abort
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.agentConfig?.stuckAbortPolicy).toBe('abort');
+    }
+  });
+
+  it('parses agentConfig.stuckAbortPolicy: "notify_only" correctly', () => {
+    const yaml = `
+triggers:
+  - id: stuck-notify-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      stuckAbortPolicy: notify_only
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.agentConfig?.stuckAbortPolicy).toBe('notify_only');
+    }
+  });
+
+  it('skips trigger when stuckAbortPolicy has an invalid value', () => {
+    const yaml = `
+triggers:
+  - id: bad-stuck-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      stuckAbortPolicy: kill
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // Trigger is skipped due to invalid stuckAbortPolicy value
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+});

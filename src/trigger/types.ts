@@ -601,7 +601,8 @@ export interface TriggerDefinition {
    * agent writes go to the isolated checkout. trigger.workspacePath continues to
    * be used for git operations (-C flag) that target the repo, not the worktree.
    *
-   * Default: 'none' (opt-in). Use 'worktree' for coding triggers (autoCommit: true).
+   * Default: 'worktree' when autoCommit or autoOpenPR is true; 'none' otherwise.
+   * Explicit 'branchStrategy: none' is the opt-out when autoCommit/autoOpenPR is set.
    * In YAML: branchStrategy: worktree
    */
   readonly branchStrategy?: 'worktree' | 'none';

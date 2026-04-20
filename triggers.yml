@@ -38,6 +38,7 @@ triggers:
     workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
     queueType: assignee
+    goalTemplate: "{{$.issue.title}}"
     branchStrategy: worktree
     baseBranch: main
     branchPrefix: "worktrain/"
@@ -46,6 +47,8 @@ triggers:
     source:
       repo: EtienneBBeaulac/workrail
       token: $WORKTRAIN_BOT_TOKEN
+      pollIntervalSeconds: 3600
     agentConfig:
-      maxSessionMinutes: 90
+      maxSessionMinutes: 120
       maxTurns: 60
+      stuckAbortPolicy: abort
