@@ -387,3 +387,281 @@ describe('formatDaemonEventLine', () => {
     expect(bracketed.length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Replicated tsToMs logic (mirrors cli-worktrain.ts)
+// ---------------------------------------------------------------------------
+
+function tsToMs(ts: unknown): number {
+  if (typeof ts === 'number') return ts;
+  if (typeof ts === 'string') {
+    const parsed = Date.parse(ts);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Replicated formatQueuePollLine logic (mirrors cli-worktrain.ts)
+// ---------------------------------------------------------------------------
+
+function formatQueuePollLine(raw: string): string | null {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const tsRaw = obj['ts'];
+  const time = typeof tsRaw === 'string' && tsRaw.length >= 19
+    ? tsRaw.slice(11, 19)
+    : '?';
+
+  const event = typeof obj['event'] === 'string' ? obj['event'] : 'unknown';
+
+  switch (event) {
+    case 'task_selected': {
+      const num = obj['issueNumber'] ?? '?';
+      const title = String(obj['title'] ?? '').slice(0, 80);
+      const maturity = obj['maturity'] ?? '?';
+      return `[${time}] queue_poll selected #${num} "${title}" maturity=${maturity}`;
+    }
+    case 'task_skipped': {
+      const num = obj['issueNumber'] ?? '?';
+      const title = String(obj['title'] ?? '').slice(0, 80);
+      const reason = obj['reason'] ?? '?';
+      return `[${time}] queue_poll skipped #${num} "${title}" reason=${reason}`;
+    }
+    case 'poll_cycle_complete': {
+      const selected = obj['selected'] ?? '?';
+      const skipped = obj['skipped'] ?? '?';
+      const elapsed = obj['elapsed'];
+      const elapsedStr = typeof elapsed === 'number' ? `${elapsed}ms` : '?';
+      return `[${time}] queue_poll cycle_complete selected=${selected} skipped=${skipped} elapsed=${elapsedStr}`;
+    }
+    default:
+      return `[${time}] queue_poll ${event} ${JSON.stringify(obj).slice(0, 100)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Replicated shouldShowStderrLine logic (mirrors cli-worktrain.ts)
+// ---------------------------------------------------------------------------
+
+function shouldShowStderrLine(line: string): boolean {
+  const NOISE_PREFIXES = [
+    '[WorkRail] config',
+    '[DI]',
+    '[FeatureFlags]',
+    '[Console]',
+    '[DaemonConsole]',
+  ];
+  for (const prefix of NOISE_PREFIXES) {
+    if (line.includes(prefix)) return false;
+  }
+  return (
+    line.includes('error') ||
+    line.includes('Error') ||
+    line.includes('WARN') ||
+    line.includes('failed') ||
+    line.includes('stuck') ||
+    line.includes('crash') ||
+    line.includes('adaptive-pipeline')
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tests: tsToMs
+// ---------------------------------------------------------------------------
+
+describe('tsToMs', () => {
+  it('returns a number as-is', () => {
+    expect(tsToMs(1_700_000_000_000)).toBe(1_700_000_000_000);
+  });
+
+  it('parses an ISO 8601 string to ms', () => {
+    const iso = '2026-04-20T19:10:53Z';
+    expect(tsToMs(iso)).toBe(Date.parse(iso));
+  });
+
+  it('returns 0 for undefined', () => {
+    expect(tsToMs(undefined)).toBe(0);
+  });
+
+  it('returns 0 for null', () => {
+    expect(tsToMs(null)).toBe(0);
+  });
+
+  it('returns 0 for an invalid string', () => {
+    expect(tsToMs('not-a-date')).toBe(0);
+  });
+
+  it('returns 0 for an empty string', () => {
+    expect(tsToMs('')).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: formatQueuePollLine
+// ---------------------------------------------------------------------------
+
+describe('formatQueuePollLine', () => {
+  it('returns null for malformed JSON', () => {
+    expect(formatQueuePollLine('{bad json')).toBeNull();
+    expect(formatQueuePollLine('')).toBeNull();
+  });
+
+  it('formats task_selected with issueNumber, title, and maturity', () => {
+    const line = JSON.stringify({
+      event: 'task_selected',
+      issueNumber: 393,
+      title: 'test(daemon): add coverage for loadSessionNotes',
+      maturity: 'specced',
+      reason: 'has acceptance criteria',
+      ts: '2026-04-20T19:10:53Z',
+    });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('queue_poll selected');
+    expect(result).toContain('#393');
+    expect(result).toContain('"test(daemon): add coverage for loadSessionNotes"');
+    expect(result).toContain('maturity=specced');
+    expect(result).toContain('[19:10:53]');
+  });
+
+  it('formats task_skipped with issueNumber, title, and reason', () => {
+    const line = JSON.stringify({
+      event: 'task_skipped',
+      issueNumber: 42,
+      title: 'Implement login flow',
+      reason: 'active_session',
+      ts: '2026-04-20T19:10:53Z',
+    });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('queue_poll skipped');
+    expect(result).toContain('#42');
+    expect(result).toContain('"Implement login flow"');
+    expect(result).toContain('reason=active_session');
+  });
+
+  it('formats poll_cycle_complete with selected, skipped, and elapsed', () => {
+    const line = JSON.stringify({
+      event: 'poll_cycle_complete',
+      selected: 1,
+      skipped: 2,
+      elapsed: 234,
+      ts: '2026-04-20T19:10:53Z',
+    });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('queue_poll cycle_complete');
+    expect(result).toContain('selected=1');
+    expect(result).toContain('skipped=2');
+    expect(result).toContain('elapsed=234ms');
+  });
+
+  it('formats an unknown event type as a generic line', () => {
+    const line = JSON.stringify({
+      event: 'some_future_event',
+      ts: '2026-04-20T19:10:53Z',
+    });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('queue_poll some_future_event');
+  });
+
+  it('uses ? for time when ts field is missing', () => {
+    const line = JSON.stringify({ event: 'task_selected', issueNumber: 1, title: 'x', maturity: 'idea' });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('[?]');
+  });
+
+  it('uses ? for time when ts is a number (daemon-style ts)', () => {
+    // Queue poll ts should be ISO string; if someone passes a number it falls back to ?
+    const line = JSON.stringify({ event: 'task_selected', issueNumber: 1, title: 'x', maturity: 'idea', ts: 1700000000000 });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    // A number is not a string with length >= 19, so time = '?'
+    expect(result).toContain('[?]');
+  });
+
+  it('truncates long titles to 80 characters', () => {
+    const longTitle = 'A'.repeat(100);
+    const line = JSON.stringify({
+      event: 'task_selected',
+      issueNumber: 1,
+      title: longTitle,
+      maturity: 'idea',
+      ts: '2026-04-20T19:10:53Z',
+    });
+    const result = formatQueuePollLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('"' + 'A'.repeat(80) + '"');
+    expect(result).not.toContain('A'.repeat(81));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: shouldShowStderrLine
+// ---------------------------------------------------------------------------
+
+describe('shouldShowStderrLine', () => {
+  it('returns false for a [WorkRail] config line even with error keyword', () => {
+    expect(shouldShowStderrLine('[WorkRail] config loaded with 3 keys (error in config)')).toBe(false);
+  });
+
+  it('returns false for a [DI] line', () => {
+    expect(shouldShowStderrLine('[DI] container initialized')).toBe(false);
+  });
+
+  it('returns false for a [FeatureFlags] line', () => {
+    expect(shouldShowStderrLine('[FeatureFlags] flags loaded')).toBe(false);
+  });
+
+  it('returns false for a [Console] line', () => {
+    expect(shouldShowStderrLine('[Console] listening on port 3456')).toBe(false);
+  });
+
+  it('returns false for a [DaemonConsole] line', () => {
+    expect(shouldShowStderrLine('[DaemonConsole] started on port 3456')).toBe(false);
+  });
+
+  it('returns true for a line containing "error"', () => {
+    expect(shouldShowStderrLine('Unhandled error in session handler')).toBe(true);
+  });
+
+  it('returns true for a line containing "Error"', () => {
+    expect(shouldShowStderrLine('TypeError: cannot read property of undefined')).toBe(true);
+  });
+
+  it('returns true for a line containing "WARN"', () => {
+    expect(shouldShowStderrLine('[WARN] Rate limit approaching')).toBe(true);
+  });
+
+  it('returns true for a line containing "failed"', () => {
+    expect(shouldShowStderrLine('Session dispatch failed after 3 retries')).toBe(true);
+  });
+
+  it('returns true for a line containing "stuck"', () => {
+    expect(shouldShowStderrLine('Agent appears stuck -- no progress in 10 turns')).toBe(true);
+  });
+
+  it('returns true for a line containing "crash"', () => {
+    expect(shouldShowStderrLine('Process crash detected, restarting')).toBe(true);
+  });
+
+  it('returns true for a line containing "adaptive-pipeline"', () => {
+    expect(shouldShowStderrLine('adaptive-pipeline: switching to conservative mode')).toBe(true);
+  });
+
+  it('returns false for a routine non-noise line with no keywords', () => {
+    expect(shouldShowStderrLine('WorkRail daemon started on port 3456')).toBe(false);
+  });
+
+  it('returns false for an empty line', () => {
+    expect(shouldShowStderrLine('')).toBe(false);
+  });
+});

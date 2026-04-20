@@ -582,6 +582,110 @@ function formatDaemonEventLine(raw: string): string | null {
   }
 }
 
+/**
+ * Normalize a ts field to Unix ms for sorting.
+ *
+ * WHY needed: daemon events use ts as a Unix ms number; queue poll events use ts as an
+ * ISO 8601 string (from new Date().toISOString()). One-shot mode needs a unified
+ * comparator. Check number first (daemon) because typeof === 'number' is O(1) and
+ * the majority of lines in a busy log are daemon events.
+ */
+function tsToMs(ts: unknown): number {
+  if (typeof ts === 'number') return ts;
+  if (typeof ts === 'string') {
+    const parsed = Date.parse(ts);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return 0; // Fallback: sort unknowns to the beginning.
+}
+
+/**
+ * Format a single queue-poll JSONL line for human-readable output.
+ *
+ * WHY inline: the logs command is the only consumer.
+ * Queue poll events use `event` (not `kind`) and an ISO 8601 `ts`.
+ * Supported events: task_selected, task_skipped, poll_cycle_complete.
+ */
+function formatQueuePollLine(raw: string): string | null {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null; // Skip malformed lines silently.
+  }
+
+  const tsRaw = obj['ts'];
+  // WHY slice(11, 19): ISO 8601 is "YYYY-MM-DDTHH:MM:SSZ"; characters 11-19 are HH:MM:SS.
+  const time = typeof tsRaw === 'string' && tsRaw.length >= 19
+    ? tsRaw.slice(11, 19)
+    : '?';
+
+  const event = typeof obj['event'] === 'string' ? obj['event'] : 'unknown';
+
+  switch (event) {
+    case 'task_selected': {
+      const num = obj['issueNumber'] ?? '?';
+      const title = String(obj['title'] ?? '').slice(0, 80);
+      const maturity = obj['maturity'] ?? '?';
+      return `[${time}] queue_poll selected #${num} "${title}" maturity=${maturity}`;
+    }
+    case 'task_skipped': {
+      const num = obj['issueNumber'] ?? '?';
+      const title = String(obj['title'] ?? '').slice(0, 80);
+      const reason = obj['reason'] ?? '?';
+      return `[${time}] queue_poll skipped #${num} "${title}" reason=${reason}`;
+    }
+    case 'poll_cycle_complete': {
+      const selected = obj['selected'] ?? '?';
+      const skipped = obj['skipped'] ?? '?';
+      const elapsed = obj['elapsed'];
+      const elapsedStr = typeof elapsed === 'number' ? `${elapsed}ms` : '?';
+      return `[${time}] queue_poll cycle_complete selected=${selected} skipped=${skipped} elapsed=${elapsedStr}`;
+    }
+    default:
+      return `[${time}] queue_poll ${event} ${JSON.stringify(obj).slice(0, 100)}`;
+  }
+}
+
+/**
+ * Decide whether a stderr line should be shown in the unified log.
+ *
+ * WHY two-stage filter:
+ * 1. Suppress routine startup noise (prefix match) regardless of content.
+ *    These lines are always safe to hide: [WorkRail] config, [DI], [FeatureFlags],
+ *    [Console], [DaemonConsole].
+ * 2. Show only lines that signal actionable state: error, WARN, failed, stuck, crash,
+ *    adaptive-pipeline.
+ */
+function shouldShowStderrLine(line: string): boolean {
+  // Stage 1: suppress known-noisy prefixes.
+  // WHY these specific prefixes: they are routine startup/config log lines that
+  // produce many lines on every daemon start with no diagnostic value in a unified log.
+  const NOISE_PREFIXES = [
+    '[WorkRail] config',
+    '[DI]',
+    '[FeatureFlags]',
+    '[Console]',
+    '[DaemonConsole]',
+  ];
+  for (const prefix of NOISE_PREFIXES) {
+    if (line.includes(prefix)) return false;
+  }
+
+  // Stage 2: show only lines that signal problems or noteworthy events.
+  // WHY keyword list: these are the actionable signals a developer needs to see
+  // without tailing the full stderr log.
+  return (
+    line.includes('error') ||
+    line.includes('Error') ||
+    line.includes('WARN') ||
+    line.includes('failed') ||
+    line.includes('stuck') ||
+    line.includes('crash') ||
+    line.includes('adaptive-pipeline')
+  );
+}
+
 program
   .command('logs')
   .description('Read and display the WorkRail daemon event log. Use --follow to stream new events in real time.')
@@ -589,6 +693,11 @@ program
   .option('--session <id>', 'Filter events by sessionId (UUID prefix) or workrailSessionId (sess_xxx prefix)')
   .action(async (options: { follow?: boolean; session?: string }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+
+    // WHY constants: queue-poll and stderr are permanent files that never rotate.
+    // Only the daemon event file uses todayFilePath() to handle midnight rotation.
+    const queuePollPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
+    const stderrPath = path.join(os.homedir(), '.workrail', 'logs', 'daemon.stderr.log');
 
     /**
      * Compute today's log file path.
@@ -629,9 +738,9 @@ program
     }
 
     /**
-     * Print a set of raw JSONL lines, applying the session filter if set.
+     * Print daemon event JSONL lines, applying the session filter if set.
      */
-    function printLines(lines: string[]): void {
+    function printDaemonLines(lines: string[]): void {
       for (const line of lines) {
         // Apply session filter if --session was provided.
         if (options.session) {
@@ -655,16 +764,107 @@ program
       }
     }
 
+    /**
+     * Print queue poll JSONL lines.
+     * WHY no session filter: queue poll events have no sessionId field.
+     * They always pass through regardless of --session flag.
+     */
+    function printQueuePollLines(lines: string[]): void {
+      for (const line of lines) {
+        const formatted = formatQueuePollLine(line);
+        if (formatted !== null) {
+          process.stdout.write(formatted + '\n');
+        }
+      }
+    }
+
+    /**
+     * Print stderr lines that pass the shouldShowStderrLine filter.
+     */
+    function printStderrLines(lines: string[]): void {
+      for (const line of lines) {
+        if (shouldShowStderrLine(line)) {
+          process.stdout.write(`[stderr] ${line}\n`);
+        }
+      }
+    }
+
     const filePath = todayFilePath();
 
     if (!options.follow) {
-      // One-shot: read the file and exit.
-      const result = readNewLines(filePath, 0);
-      if (result === null) {
+      // One-shot: read all three files, sort by timestamp, print in order.
+      type TaggedLine = { ts: number; line: string; source: 'daemon' | 'queue_poll' | 'stderr' };
+      const tagged: TaggedLine[] = [];
+
+      // Daemon events
+      const daemonResult = readNewLines(filePath, 0);
+      if (daemonResult !== null) {
+        for (const line of daemonResult.lines) {
+          try {
+            const obj = JSON.parse(line) as Record<string, unknown>;
+            tagged.push({ ts: tsToMs(obj['ts']), line, source: 'daemon' });
+          } catch {
+            tagged.push({ ts: 0, line, source: 'daemon' });
+          }
+        }
+      }
+
+      // Queue poll events
+      const queueResult = readNewLines(queuePollPath, 0);
+      if (queueResult !== null) {
+        for (const line of queueResult.lines) {
+          try {
+            const obj = JSON.parse(line) as Record<string, unknown>;
+            tagged.push({ ts: tsToMs(obj['ts']), line, source: 'queue_poll' });
+          } catch {
+            tagged.push({ ts: 0, line, source: 'queue_poll' });
+          }
+        }
+      }
+
+      // Stderr lines (no structured ts -- use 0 to sort to the beginning)
+      const stderrResult = readNewLines(stderrPath, 0);
+      if (stderrResult !== null) {
+        for (const line of stderrResult.lines) {
+          tagged.push({ ts: 0, line, source: 'stderr' });
+        }
+      }
+
+      if (tagged.length === 0) {
         process.stdout.write(`No events yet. Is the daemon running? (Expected: ${filePath})\n`);
         return;
       }
-      printLines(result.lines);
+
+      // Sort by timestamp ascending (stable sort: same-ts lines stay in file order).
+      tagged.sort((a, b) => a.ts - b.ts);
+
+      for (const { line, source } of tagged) {
+        if (source === 'daemon') {
+          // Apply session filter for daemon lines
+          if (options.session) {
+            try {
+              const obj = JSON.parse(line) as Record<string, unknown>;
+              const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
+              const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
+              const matchesSession = sid.startsWith(options.session) || sid === options.session ||
+                wrid.startsWith(options.session) || wrid === options.session;
+              if (!matchesSession) continue;
+            } catch {
+              continue;
+            }
+          }
+          const formatted = formatDaemonEventLine(line);
+          if (formatted !== null) process.stdout.write(formatted + '\n');
+        } else if (source === 'queue_poll') {
+          const formatted = formatQueuePollLine(line);
+          if (formatted !== null) process.stdout.write(formatted + '\n');
+        } else {
+          // stderr
+          if (shouldShowStderrLine(line)) {
+            process.stdout.write(`[stderr] ${line}\n`);
+          }
+        }
+      }
       return;
     }
 
@@ -676,22 +876,38 @@ program
 
     let currentFilePath = filePath;
     let offset = 0;
+    let queuePollOffset = 0;
+    let stderrOffset = 0;
 
-    // Print all existing lines first.
+    // Print all existing lines first (all three sources).
     const initial = readNewLines(currentFilePath, 0);
     if (initial !== null) {
-      printLines(initial.lines);
+      printDaemonLines(initial.lines);
       offset = initial.newOffset;
     } else {
       process.stdout.write(`Waiting for events... (${currentFilePath})\n`);
     }
 
-    // Poll every 500ms for new lines.
-    // Handles midnight rotation: recompute file path on each iteration.
+    const initialQueue = readNewLines(queuePollPath, 0);
+    if (initialQueue !== null) {
+      printQueuePollLines(initialQueue.lines);
+      queuePollOffset = initialQueue.newOffset;
+    }
+
+    const initialStderr = readNewLines(stderrPath, 0);
+    if (initialStderr !== null) {
+      printStderrLines(initialStderr.lines);
+      stderrOffset = initialStderr.newOffset;
+    }
+
+    // Poll every 500ms for new lines from all three sources.
+    // WHY midnight rotation only on daemon file: queue-poll.jsonl and daemon.stderr.log
+    // are permanent files -- they do not rotate at midnight.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
+      // Daemon file with midnight rotation.
       const newFilePath = todayFilePath();
       if (newFilePath !== currentFilePath) {
         // Day rolled over -- switch to the new file from the beginning.
@@ -699,12 +915,30 @@ program
         offset = 0;
       }
 
-      const result = readNewLines(currentFilePath, offset);
-      if (result !== null && result.lines.length > 0) {
-        printLines(result.lines);
-        offset = result.newOffset;
-      } else if (result !== null) {
-        offset = result.newOffset; // Update offset even if no new lines.
+      const daemonPoll = readNewLines(currentFilePath, offset);
+      if (daemonPoll !== null && daemonPoll.lines.length > 0) {
+        printDaemonLines(daemonPoll.lines);
+        offset = daemonPoll.newOffset;
+      } else if (daemonPoll !== null) {
+        offset = daemonPoll.newOffset;
+      }
+
+      // Queue poll file (permanent path, no rotation).
+      const queuePoll = readNewLines(queuePollPath, queuePollOffset);
+      if (queuePoll !== null && queuePoll.lines.length > 0) {
+        printQueuePollLines(queuePoll.lines);
+        queuePollOffset = queuePoll.newOffset;
+      } else if (queuePoll !== null) {
+        queuePollOffset = queuePoll.newOffset;
+      }
+
+      // Stderr file (permanent path, no rotation).
+      const stderrPoll = readNewLines(stderrPath, stderrOffset);
+      if (stderrPoll !== null && stderrPoll.lines.length > 0) {
+        printStderrLines(stderrPoll.lines);
+        stderrOffset = stderrPoll.newOffset;
+      } else if (stderrPoll !== null) {
+        stderrOffset = stderrPoll.newOffset;
       }
     }
   });
