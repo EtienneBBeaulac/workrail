@@ -1474,8 +1474,15 @@ export function validateTriggerStrict(
   // --- Warning-severity rules ---
 
   // Rule: parallel-without-worktree (warning)
-  // concurrencyMode: 'parallel' without worktree isolation risks concurrent checkout clobber.
-  if (trigger.concurrencyMode === 'parallel' && (!trigger.branchStrategy || trigger.branchStrategy === 'none')) {
+  // concurrencyMode: 'parallel' without worktree isolation risks concurrent checkout clobber,
+  // but ONLY when sessions write to the checkout (autoCommit or autoOpenPR). Read-only triggers
+  // running in parallel on the same checkout are safe -- they never modify the working tree.
+  // If new write-operation fields are added to TriggerDefinition, update this guard.
+  if (
+    trigger.concurrencyMode === 'parallel' &&
+    (!trigger.branchStrategy || trigger.branchStrategy === 'none') &&
+    (trigger.autoCommit || trigger.autoOpenPR)
+  ) {
     issues.push({
       rule: 'parallel-without-worktree',
       severity: 'warning',
