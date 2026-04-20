@@ -20,6 +20,12 @@
 import 'reflect-metadata';
 import express from 'express';
 import * as http from 'node:http';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 import type { V2ToolContext } from '../mcp/types.js';
@@ -36,6 +42,13 @@ import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 import { PollingScheduler } from './polling-scheduler.js';
 import { PolledEventStore } from './polled-event-store.js';
 import type { FetchFn } from './adapters/gitlab-poller.js';
+import { createContextAssembler } from '../context-assembly/index.js';
+import { createListRecentSessions } from '../context-assembly/infra.js';
+import type { AdaptiveCoordinatorDeps, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
+import { runQuickReviewPipeline } from '../coordinators/modes/quick-review.js';
+import { runReviewOnlyPipeline } from '../coordinators/modes/review-only.js';
+import { runImplementPipeline } from '../coordinators/modes/implement.js';
+import { runFullPipeline } from '../coordinators/modes/full-pipeline.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -356,9 +369,361 @@ export async function startTriggerListener(
   // so the HTTP endpoint dispatches to callbacks registered by TriggerRouter's sessions.
   const steerRegistry: SteerRegistry = new Map();
 
+  // ---------------------------------------------------------------------------
+  // Adaptive coordinator deps: wire real implementations for dispatchAdaptivePipeline.
+  //
+  // WHY here (not in TriggerRouter): trigger-listener.ts is the composition root.
+  // TriggerRouter receives deps as optional injection -- it does not know about
+  // fs/exec/HTTP implementations. This pattern mirrors the pr-review command in
+  // cli-worktrain.ts (lines 958-1244), which uses the same deps interface.
+  //
+  // WHY port=3456 (DAEMON_CONSOLE_PORT): the daemon console starts after startTriggerListener
+  // returns, so no lock file exists at construction time. 3456 is the daemon console default
+  // and the explicit fallback used by discoverConsolePort() in cli-worktrain.ts.
+  // ---------------------------------------------------------------------------
+  const DAEMON_CONSOLE_PORT = 3456;
+  const execFileAsync = promisify(execFile);
+
+  const coordinatorDeps: AdaptiveCoordinatorDeps = {
+    spawnSession: async (
+      workflowId: string,
+      goal: string,
+      workspace: string,
+      context?: Readonly<Record<string, unknown>>,
+    ) => {
+      const url = `http://127.0.0.1:${DAEMON_CONSOLE_PORT}/api/v2/auto/dispatch`;
+      try {
+        const response = await globalThis.fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workflowId,
+            goal,
+            workspacePath: workspace,
+            ...(context !== undefined ? { context } : {}),
+          }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const body = await response.json() as Record<string, unknown>;
+        if (!response.ok) {
+          const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
+          if (response.status === 503) {
+            return { kind: 'err' as const, error: `WorkTrain daemon is not ready: ${errMsg}` };
+          }
+          return { kind: 'err' as const, error: `Dispatch failed: ${errMsg}` };
+        }
+        if (body['success'] !== true || typeof body['data'] !== 'object') {
+          return { kind: 'err' as const, error: 'Unexpected response from dispatch endpoint' };
+        }
+        const data = body['data'] as Record<string, unknown>;
+        const handle = typeof data['sessionHandle'] === 'string' ? data['sessionHandle'] : '';
+        if (!handle) {
+          return { kind: 'err' as const, error: 'Dispatch succeeded but no session handle returned' };
+        }
+        return { kind: 'ok' as const, value: handle };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const isConnRefused = msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
+        if (isConnRefused) {
+          return { kind: 'err' as const, error: `Could not connect to WorkTrain daemon on port ${DAEMON_CONSOLE_PORT}. Ensure the daemon is running.` };
+        }
+        if (e instanceof Error && e.name === 'TimeoutError') {
+          return { kind: 'err' as const, error: `Daemon request timed out after 30s` };
+        }
+        return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
+      }
+    },
+
+    contextAssembler: createContextAssembler({
+      execGit: async (args: readonly string[], cwd: string) => {
+        try {
+          const { stdout } = await execFileAsync('git', [...args], { cwd });
+          return { kind: 'ok' as const, value: stdout };
+        } catch (e) {
+          return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      execGh: async (args: readonly string[], cwd: string) => {
+        try {
+          const { stdout } = await execFileAsync('gh', [...args], { cwd });
+          return { kind: 'ok' as const, value: stdout };
+        } catch (e) {
+          return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
+        }
+      },
+      listRecentSessions: createListRecentSessions(),
+      nowIso: () => new Date().toISOString(),
+    }),
+
+    awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
+      const { executeWorktrainAwaitCommand } = await import('../cli/commands/worktrain-await.js');
+      let resolvedResult: import('../cli/commands/worktrain-await.js').AwaitResult | null = null;
+
+      await executeWorktrainAwaitCommand(
+        {
+          fetch: (url: string) => globalThis.fetch(url),
+          readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+          stdout: (line: string) => {
+            try {
+              resolvedResult = JSON.parse(line) as import('../cli/commands/worktrain-await.js').AwaitResult;
+            } catch { /* ignore */ }
+          },
+          stderr: (line: string) => process.stderr.write(line + '\n'),
+          homedir: os.homedir,
+          joinPath: path.join,
+          sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+          now: () => Date.now(),
+        },
+        {
+          sessions: [...handles].join(','),
+          mode: 'all',
+          timeout: `${Math.round(timeoutMs / 1000)}s`,
+          port: DAEMON_CONSOLE_PORT,
+        },
+      );
+
+      if (resolvedResult === null) {
+        process.stderr.write(
+          `[WARN coord:reason=await_failed] awaitSessions: could not get session results -- daemon may be unreachable or timed out. Returning all ${handles.length} session(s) as failed.\n`,
+        );
+      }
+      return resolvedResult ?? {
+        results: [...handles].map((h) => ({
+          handle: h,
+          outcome: 'failed' as const,
+          status: null,
+          durationMs: 0,
+        })),
+        allSucceeded: false,
+      };
+    },
+
+    getAgentResult: async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
+      const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
+      try {
+        const sessionUrl = `http://127.0.0.1:${DAEMON_CONSOLE_PORT}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
+        const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
+        if (!sessionRes.ok) {
+          process.stderr.write(`[WARN coord:reason=http_error status=${sessionRes.status} handle=${sessionHandle.slice(0, 16)}] getAgentResult: session fetch returned HTTP ${sessionRes.status}\n`);
+          return emptyResult;
+        }
+        const sessionBody = await sessionRes.json() as Record<string, unknown>;
+        if (sessionBody['success'] !== true) {
+          return emptyResult;
+        }
+        const data = sessionBody['data'] as Record<string, unknown> | undefined;
+        if (!data) return emptyResult;
+        const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
+        if (!Array.isArray(runs) || runs.length === 0) return emptyResult;
+
+        const firstRun = runs[0] as Record<string, unknown>;
+        const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string'
+          ? firstRun['preferredTipNodeId']
+          : null;
+        if (!tipNodeId) return emptyResult;
+
+        const allNodes = Array.isArray(firstRun['nodes'])
+          ? (firstRun['nodes'] as Array<Record<string, unknown>>)
+          : [];
+        const allNodeIds = allNodes
+          .map((n) => (typeof n['nodeId'] === 'string' ? n['nodeId'] : null))
+          .filter((id): id is string => id !== null);
+        const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
+
+        const baseNodeUrl = `http://127.0.0.1:${DAEMON_CONSOLE_PORT}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/`;
+        let recap: string | null = null;
+        const collectedArtifacts: unknown[] = [];
+
+        for (const nodeId of nodeIdsToFetch) {
+          try {
+            const nodeRes = await globalThis.fetch(
+              baseNodeUrl + encodeURIComponent(nodeId),
+              { signal: AbortSignal.timeout(30_000) },
+            );
+            if (!nodeRes.ok) continue;
+            const nodeBody = await nodeRes.json() as Record<string, unknown>;
+            if (nodeBody['success'] !== true) continue;
+            const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
+            if (!nodeData) continue;
+
+            if (nodeId === tipNodeId) {
+              recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
+            }
+            const nodeArtifacts = nodeData['artifacts'];
+            if (Array.isArray(nodeArtifacts) && nodeArtifacts.length > 0) {
+              collectedArtifacts.push(...nodeArtifacts);
+            }
+          } catch (nodeErr) {
+            const msg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+            process.stderr.write(`[WARN coord:reason=node_exception handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: ${msg}\n`);
+          }
+        }
+
+        return { recapMarkdown: recap, artifacts: collectedArtifacts };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[WARN coord:reason=exception handle=${sessionHandle.slice(0, 16)}] getAgentResult: ${msg}\n`);
+        return emptyResult;
+      }
+    },
+
+    listOpenPRs: async (workspace: string) => {
+      try {
+        const { stdout } = await execFileAsync('gh', ['pr', 'list', '--json', 'number,title,headRefName'], {
+          cwd: workspace,
+          timeout: 30_000,
+        });
+        const parsed = JSON.parse(stdout) as Array<{ number: number; title: string; headRefName: string }>;
+        return parsed.map((p) => ({ number: p.number, title: p.title, headRef: p.headRefName }));
+      } catch {
+        return [];
+      }
+    },
+
+    mergePR: async (prNumber: number, workspace: string) => {
+      try {
+        await execFileAsync('gh', ['pr', 'merge', String(prNumber), '--squash', '--auto'], {
+          cwd: workspace,
+          timeout: 60_000,
+        });
+        return { kind: 'ok' as const, value: undefined };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { kind: 'err' as const, error: msg };
+      }
+    },
+
+    writeFile: async (filePath: string, content: string) => {
+      await fs.promises.writeFile(filePath, content, 'utf-8');
+    },
+
+    readFile: (filePath: string) => fs.promises.readFile(filePath, 'utf-8'),
+
+    appendFile: (filePath: string, content: string) =>
+      fs.promises.appendFile(filePath, content, 'utf-8'),
+
+    mkdir: (dirPath: string, opts: { recursive: boolean }) =>
+      fs.promises.mkdir(dirPath, opts),
+
+    homedir: os.homedir,
+    joinPath: path.join,
+    nowIso: () => new Date().toISOString(),
+    generateId: () => randomUUID(),
+
+    stderr: (line: string) => process.stderr.write(line + '\n'),
+    now: () => Date.now(),
+    port: DAEMON_CONSOLE_PORT,
+
+    // AdaptiveCoordinatorDeps extensions (beyond CoordinatorDeps)
+
+    fileExists: (p: string): boolean => fs.existsSync(p),
+
+    archiveFile: (src: string, dest: string): Promise<void> =>
+      fs.promises.rename(src, dest),
+
+    pollForPR: async (branchPattern: string, timeoutMs: number): Promise<string | null> => {
+      // Poll `gh pr list --head <branchPattern>` every 30 seconds until a PR is found
+      // or the timeout elapses. Returns the PR URL or null.
+      const pollIntervalMs = 30_000;
+      const deadline = Date.now() + timeoutMs;
+
+      while (Date.now() < deadline) {
+        try {
+          const { stdout } = await execFileAsync(
+            'gh',
+            ['pr', 'list', '--head', branchPattern, '--json', 'url', '--limit', '1'],
+            { timeout: 30_000 },
+          );
+          const parsed = JSON.parse(stdout) as Array<{ url: string }>;
+          if (parsed.length > 0 && parsed[0] && parsed[0].url) {
+            return parsed[0].url;
+          }
+        } catch {
+          // gh command failed -- continue polling (PR may not exist yet)
+        }
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.min(pollIntervalMs, remaining)),
+        );
+      }
+      return null;
+    },
+
+    postToOutbox: async (message: string, metadata: Readonly<Record<string, unknown>>): Promise<void> => {
+      const workrailDir = path.join(os.homedir(), '.workrail');
+      const outboxPath = path.join(workrailDir, 'outbox.jsonl');
+      await fs.promises.mkdir(workrailDir, { recursive: true });
+      const entry = JSON.stringify({
+        id: randomUUID(),
+        message,
+        metadata,
+        timestamp: new Date().toISOString(),
+      });
+      await fs.promises.appendFile(outboxPath, entry + '\n', 'utf-8');
+    },
+
+    pollOutboxAck: async (requestId: string, timeoutMs: number): Promise<'acked' | 'timeout'> => {
+      // Poll ~/.workrail/inbox-cursor.json every 5 minutes.
+      // The human acknowledges by running `worktrain inbox`, which advances the cursor.
+      // Resolve 'acked' when the cursor has advanced past the snapshot line count.
+      //
+      // WHY snapshot approach: postToOutbox appends a line to outbox.jsonl. The inbox
+      // command sets lastReadCount = total valid lines in outbox.jsonl. When the cursor
+      // advances beyond the snapshot count, the human has read the notification.
+      const pollIntervalMs = 5 * 60 * 1000; // 5 minutes
+      const workrailDir = path.join(os.homedir(), '.workrail');
+      const outboxPath = path.join(workrailDir, 'outbox.jsonl');
+      const cursorPath = path.join(workrailDir, 'inbox-cursor.json');
+
+      // Take snapshot of current outbox line count
+      let snapshotCount = 0;
+      try {
+        const outboxContent = await fs.promises.readFile(outboxPath, 'utf-8');
+        snapshotCount = outboxContent.split('\n').filter((l) => l.trim() !== '').length;
+      } catch {
+        // outbox.jsonl doesn't exist yet -- snapshot is 0
+      }
+
+      // Suppress unused parameter warning: requestId is for traceability in logs
+      void requestId;
+
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, Math.min(pollIntervalMs, remaining)),
+        );
+
+        try {
+          const cursorContent = await fs.promises.readFile(cursorPath, 'utf-8');
+          const cursor = JSON.parse(cursorContent) as { lastReadCount?: number };
+          if (typeof cursor.lastReadCount === 'number' && cursor.lastReadCount > snapshotCount) {
+            return 'acked';
+          }
+        } catch {
+          // cursor file missing or malformed -- not yet acked, continue polling
+        }
+      }
+      return 'timeout';
+    },
+  };
+
+  // Mode executors: map the pipeline function names to the ModeExecutors interface.
+  // WHY these names: the ModeExecutors interface uses short names (runQuickReview, etc.)
+  // while the mode module exports use the longer Pipeline suffix. This mapping follows
+  // the same pattern as src/cli/commands/worktrain-pipeline.ts.
+  const modeExecutors: ModeExecutors = {
+    runQuickReview: runQuickReviewPipeline,
+    runReviewOnly: runReviewOnlyPipeline,
+    runImplement: runImplementPipeline,
+    runFull: runFullPipeline,
+  };
+
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry, coordinatorDeps, modeExecutors);
   const app = createTriggerApp(router);
 
   // Create and start the polling scheduler.

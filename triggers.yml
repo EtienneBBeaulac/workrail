@@ -26,3 +26,20 @@ triggers:
     autoCommit: false
     agentConfig:
       maxSessionMinutes: 30
+
+  # Self-improvement queue: assign issues to worktrain-etienneb to queue them
+  # WorkTrain picks the highest-priority issue and runs the adaptive pipeline
+  - id: self-improvement
+    provider: github_queue_poll
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /Users/etienneb/git/personal/workrail
+    repo: EtienneBBeaulac/workrail
+    token: $WORKTRAIN_BOT_TOKEN
+    branchStrategy: worktree
+    baseBranch: main
+    branchPrefix: "worktrain/"
+    autoCommit: true
+    autoOpenPR: true
+    agentConfig:
+      maxSessionMinutes: 90
+      maxTurns: 60
