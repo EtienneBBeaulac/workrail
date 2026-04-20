@@ -6940,3 +6940,75 @@ Phase-scoped files are additive, not a replacement. The existing `AGENTS.md` / `
 ### Priority
 
 Medium. Phase-scoped rules make WorkTrain's autonomous actions more consistent with team conventions without requiring custom workflows per team. Design alongside multi-workspace support and trigger templates (they share the "per-workspace configuration" concern).
+
+---
+
+## MR lifecycle manager: autonomous coordinator from branch to merged (Apr 20, 2026)
+
+**The gap:** WorkTrain currently creates a PR and dispatches an MR review session. If the review returns minor findings, a fix loop runs. But everything between "PR created" and "PR merged" that isn't covered by the review verdict is invisible to WorkTrain: CI failures, reviewer comments, requested changes, label requirements, required approvals, merge conflicts. A human has to watch and intervene.
+
+**The vision:** A `runMRLifecycleManager()` coordinator that takes ownership of the MR from creation to merge and handles everything autonomously.
+
+### Responsibilities
+
+**1. MR creation (already partially done, needs hardening)**
+- Apply PR template (`.github/PULL_REQUEST_TEMPLATE.md` or GitLab equivalent) -- see PR template backlog entry
+- Set correct title format per team convention (from `delivery.md` phase rules)
+- Apply correct labels (from `worktrain:generated` + workflow-specific labels)
+- Set milestone, assignee, reviewers per team convention
+- Link to the originating ticket (Jira issue number, GitHub issue number) in description
+
+**2. CI pipeline monitoring**
+- Poll CI status after PR creation
+- On failure: parse the failed job, determine if it's a flaky test (retry) or a real failure (spawn a fix session with the failing job log as context)
+- On persistent failure (N retries): escalate to Human Outbox with structured summary
+- On success: proceed to review phase
+
+**3. Review comment triage**
+- Poll for new review comments/threads after reviewer activity
+- For each comment/thread: classify as:
+  - `actionable`: code change requested -- feed to fix loop as a finding
+  - `question`: reviewer is asking for clarification -- generate a reply explaining the decision
+  - `nit`: style suggestion -- optionally apply or reply "acknowledged, will address in follow-up"
+  - `approval`: positive review, no action needed
+  - `blocker`: security/architecture concern -- escalate to Human Outbox
+- Reply to questions and nits autonomously (following `pr-management.md` rules)
+- Never resolve threads on behalf of the reviewer (that's their action)
+
+**4. Approval tracking**
+- Track required approvals (from branch protection rules or CODEOWNERS)
+- When approved: check all CI green + all required approvals → trigger merge
+- When changes requested: run targeted fix loop, re-push, re-request review
+
+**5. Merge conflict resolution**
+- Detect merge conflicts (target branch moved while PR was open)
+- Rebase or merge main into the branch
+- If conflicts are in files the agent touched: attempt auto-resolution
+- If conflicts are complex: escalate to Human Outbox
+
+**6. Merge execution**
+- When all gates pass: merge with correct strategy (squash/rebase/merge per team convention)
+- Delete the source branch
+- Update the originating ticket (Jira: move to "Done", GitHub: close issue)
+- Notify via outbox: "PR #N merged. Ticket ACEI-1234 updated."
+
+### Architecture
+
+This is a coordinator script (`src/coordinators/mr-lifecycle.ts`), not a workflow session. It loops with polling, spawning fix sessions as needed. The MR review workflow (`mr-review-workflow-agentic`) becomes one of the tools it calls, not the full pipeline.
+
+The adaptive coordinator's IMPLEMENT and FULL modes would call `runMRLifecycleManager()` instead of `runPrReviewCoordinator()` after the coding session completes. `runPrReviewCoordinator()` becomes a thin wrapper around the lifecycle manager for the standalone `worktrain run pr-review` use case.
+
+### Phase-scoped rules integration
+
+`pr-management.md` in `.worktrain/rules/` defines team-specific behavior:
+- Which comment types to auto-reply vs escalate
+- Whether to rebase or merge for conflict resolution
+- How many CI retry attempts before escalating
+- Whether to request specific reviewers
+- Auto-merge policy (clean + approved = merge, or always wait for human)
+
+### Priority
+
+High -- this is the most visible gap in the autonomous pipeline. Without it, every PR needs human monitoring. With it, WorkTrain can own an MR from first commit to merge with zero human involvement for clean cases.
+
+**Dependency:** PR template support (needed for step 1). Phase-scoped rules (needed for step 3). `dispatchCondition` webhook filter (needed for GitLab MR event triggers).
