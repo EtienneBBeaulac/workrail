@@ -38,6 +38,7 @@ import {
   executeWorktrainDaemonCommand,
   executeWorktrainOverviewCommand,
   executeWorktrainTriggerTestCommand,
+  executeWorktrainTriggerPollCommand,
   executeWorktrainTriggerValidateCommand,
   buildConsoleServiceFromDataDir,
   type Priority,
@@ -432,6 +433,7 @@ program
             serverVersion: pkg.version,
             workflowService,
             steerRegistry: handle.steerRegistry,
+            pollingScheduler: handle.scheduler,
           });
 
           let consoleHandle: import('./trigger/daemon-console.js').DaemonConsoleHandle | null = null;
@@ -1611,6 +1613,26 @@ triggerCommand
     if (result.kind === 'failure') {
       process.exit(1);
     }
+  });
+
+triggerCommand
+  .command('poll <triggerId>')
+  .description('Force an immediate poll cycle on a queue trigger (does not wait for interval)')
+  .option('-p, --port <n>', 'Console server port', parseInt)
+  .action(async (triggerId: string, options: { port?: number }) => {
+    const result = await executeWorktrainTriggerPollCommand(
+      {
+        fetch: (url, opts) => globalThis.fetch(url, opts),
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        print: (line: string) => process.stdout.write(line + '\n'),
+        stderr: (line: string) => process.stderr.write(line + '\n'),
+        homedir: os.homedir,
+        joinPath: path.join,
+      },
+      { triggerId, port: options.port },
+    );
+
+    interpretCliResultWithoutDI(result);
   });
 
 triggerCommand
