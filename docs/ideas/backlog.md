@@ -6183,3 +6183,67 @@ The daemon tool approach is only better for ad-hoc mid-session queries the agent
 ### Anti-pattern to avoid
 
 Adding knowledge graph calls directly into `pr-review.ts` or any other coordinator script. That immediately creates the god class we're trying to avoid and couples the orchestration layer to a specific context source.
+
+---
+
+## Scheduled tasks (Apr 19, 2026)
+
+**The idea:** WorkTrain runs tasks on a schedule -- not triggered by an external event, but by time. "Every Monday morning, run the code health scan." "Every night at 2am, check for new GitHub issues and triage them." "First of the month, run the production readiness audit."
+
+### Why this matters for the autonomous pipeline vision
+
+The full autonomous pipeline (prioritize → discover → shape → implement → test → PR → review → fix → merge) needs a way to start without a human pushing a button. Scheduled tasks are the trigger layer for proactive, time-driven work. Without them, WorkTrain is purely reactive -- it only acts when a webhook fires or a human dispatches it.
+
+### What exists today
+
+The trigger system (`src/trigger/`) supports `generic` (webhook) and polling providers (`gitlab_poll`, `github_issues_poll`, `github_prs_poll`). There is no native cron/schedule provider. The workaround today is OS crontab calling `curl` to fire a webhook.
+
+### What to build
+
+A `schedule` provider in triggers.yml:
+
+```yaml
+triggers:
+  - id: weekly-code-health
+    provider: schedule
+    cron: "0 9 * * 1"          # every Monday at 9am
+    workflowId: architecture-scalability-audit
+    workspacePath: /path/to/repo
+    goal: "Run weekly code health scan -- identify coupling violations, complexity hotspots, and performance anti-patterns introduced this week"
+
+  - id: nightly-issue-triage
+    provider: schedule
+    cron: "0 2 * * *"          # every night at 2am
+    workflowId: wr.discovery
+    workspacePath: /path/to/repo
+    goal: "Review open GitHub issues created in the last 24 hours and triage them: classify severity, identify duplicates, suggest which to prioritize"
+
+  - id: backlog-next-task
+    provider: schedule
+    cron: "0 8 * * 1-5"        # weekday mornings at 8am
+    workflowId: coding-task-workflow-agentic
+    workspacePath: /path/to/repo
+    goal: "Pick the highest-priority unstarted task from docs/ideas/backlog.md and implement it"
+```
+
+### Key design decisions
+
+- **Cron syntax**: standard 5-field cron (`min hour dom month dow`). Parsed by `node-cron` or equivalent -- already a pattern in the codebase (backlog mentions cron).
+- **Timezone**: configurable per trigger, defaults to system timezone. Important for "weekday morning" schedules that need to fire in the user's timezone.
+- **Missed runs**: if the daemon was down when a scheduled run should have fired, it does NOT catch up on missed runs by default. "Run at 9am Monday" means "run the next time 9am Monday arrives." Optional `catchUp: true` flag for cases where missing a run should be recovered.
+- **Overlap prevention**: if a scheduled run fires while the previous run is still active, it should be skipped (not queued). A `coding-task` that takes 2 hours should not spawn a second instance at the next cron tick.
+- **Manual trigger**: `worktrain run schedule <trigger-id>` to fire a scheduled trigger immediately without waiting for the cron time. Useful for testing.
+
+### Integration with the autonomous pipeline
+
+Scheduled tasks are the entry point for fully autonomous work:
+- "Every weekday morning, pick the next backlog item and run the full pipeline" -- this is how WorkTrain improves WorkTrain without any human input.
+- "Every time a PR is opened, run the MR review pipeline" -- this is github_prs_poll, already exists.
+- "Every Monday, run the architecture audit and file GitHub issues for findings" -- new scheduled capability.
+
+### Implementation notes
+
+- The `PollingScheduler` in `src/trigger/polling-scheduler.ts` already runs time-based loops for GitLab/GitHub polling. The schedule provider would be a similar loop, using cron expression matching instead of API polling.
+- `node-cron` or `croner` npm package for cron expression parsing and next-fire-time calculation. Lightweight, no daemon dependencies.
+- Scheduled triggers have no webhook payload -- `contextMapping` is empty, `goalTemplate` uses only static text or env vars.
+- The schedule state (last-fired-at per trigger) persists to `~/.workrail/schedule-state.json` so the daemon can detect missed runs on restart.
