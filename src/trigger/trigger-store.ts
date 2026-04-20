@@ -64,7 +64,7 @@ export type TriggerStoreError =
 // Supported providers (extensible: add post-MVP providers here)
 // ---------------------------------------------------------------------------
 
-const SUPPORTED_PROVIDERS = new Set(['generic', 'gitlab_poll', 'github_issues_poll', 'github_prs_poll']);
+const SUPPORTED_PROVIDERS = new Set(['generic', 'gitlab_poll', 'github_issues_poll', 'github_prs_poll', 'github_queue_poll']);
 
 // ---------------------------------------------------------------------------
 // Narrow YAML parser
@@ -993,13 +993,52 @@ function validateAndResolveTrigger(
         labelFilter,
       };
     }
+  } else if (provider === 'github_queue_poll') {
+    // github_queue_poll does NOT require 'events'. Only repo, token, pollIntervalSeconds.
+    // Queue filter (assignee, excludeLabels) comes from ~/.workrail/config.json at runtime.
+    // pollIntervalSeconds defaults to 300 (not 60) per pitch design.
+    if (!raw.source) {
+      return err({ kind: 'missing_field', field: 'source', triggerId: rawId });
+    }
+
+    const queueSrc = raw.source;
+
+    if (!queueSrc.repo?.trim()) {
+      return err({ kind: 'missing_field', field: 'source.repo', triggerId: rawId });
+    }
+
+    if (!queueSrc.token?.trim()) {
+      return err({ kind: 'missing_field', field: 'source.token', triggerId: rawId });
+    }
+    const queueTokenResult = resolveSecret(queueSrc.token.trim(), rawId, env);
+    if (queueTokenResult.kind === 'err') return queueTokenResult;
+
+    let queuePollIntervalSeconds = 300;
+    if (queueSrc.pollIntervalSeconds?.trim()) {
+      const asNumber = Number(queueSrc.pollIntervalSeconds.trim());
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        return err({
+          kind: 'invalid_field_value',
+          field: `source.pollIntervalSeconds (must be a positive integer, got: ${queueSrc.pollIntervalSeconds})`,
+          triggerId: rawId,
+        });
+      }
+      queuePollIntervalSeconds = asNumber;
+    }
+
+    pollingSource = {
+      provider: 'github_queue_poll',
+      repo: queueSrc.repo.trim(),
+      token: queueTokenResult.value,
+      pollIntervalSeconds: queuePollIntervalSeconds,
+    };
   } else if (raw.source) {
     // provider === 'generic' but source: is present -- warn, do not error.
     // The source: block is only meaningful for polling providers.
     console.warn(
       `[TriggerStore] WARNING: trigger '${rawId}' has provider='${provider}' but also ` +
       `defines a source: block. The source: block is only used for polling providers ` +
-      `(gitlab_poll, github_issues_poll, github_prs_poll). It will be ignored for this trigger.`,
+      `(gitlab_poll, github_issues_poll, github_prs_poll, github_queue_poll). It will be ignored for this trigger.`,
     );
   }
 

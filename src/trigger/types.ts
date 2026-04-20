@@ -222,6 +222,31 @@ export interface GitHubPollingSource {
 }
 
 // ---------------------------------------------------------------------------
+// GitHubQueuePollingSource: configuration for GitHub queue-poll triggers.
+// ---------------------------------------------------------------------------
+
+export interface GitHubQueuePollingSource {
+  readonly repo: string;
+  readonly token: string;
+  readonly pollIntervalSeconds: number;
+}
+
+// ---------------------------------------------------------------------------
+// TaskCandidate: the structured output of the queue picker, injected into
+// the dispatched session as context.taskCandidate.
+// ---------------------------------------------------------------------------
+
+export interface TaskCandidate {
+  readonly issueNumber: number;
+  readonly title: string;
+  readonly body: string;
+  readonly url: string;
+  readonly inferredMaturity: 'idea' | 'specced' | 'ready';
+  readonly upstreamSpecUrl?: string;
+  readonly queueConfigType: 'assignee' | 'label' | 'mention' | 'query';
+}
+
+// ---------------------------------------------------------------------------
 // PollingSource: discriminated union of all polling source configurations
 //
 // Tagged by provider so the polling scheduler can narrow to the correct source
@@ -229,16 +254,18 @@ export interface GitHubPollingSource {
 //
 // Usage in polling-scheduler.ts:
 //   switch (trigger.pollingSource.provider) {
-//     case 'gitlab_poll':       /* trigger.pollingSource is GitLabPollingSource */ break;
-//     case 'github_issues_poll': /* trigger.pollingSource is GitHubPollingSource */ break;
-//     case 'github_prs_poll':   /* trigger.pollingSource is GitHubPollingSource */ break;
+//     case 'gitlab_poll':        /* GitLabPollingSource */ break;
+//     case 'github_issues_poll': /* GitHubPollingSource */ break;
+//     case 'github_prs_poll':    /* GitHubPollingSource */ break;
+//     case 'github_queue_poll':  /* GitHubQueuePollingSource */ break;
 //   }
 // ---------------------------------------------------------------------------
 
 export type PollingSource =
   | (GitLabPollingSource & { readonly provider: 'gitlab_poll' })
   | (GitHubPollingSource & { readonly provider: 'github_issues_poll' })
-  | (GitHubPollingSource & { readonly provider: 'github_prs_poll' });
+  | (GitHubPollingSource & { readonly provider: 'github_prs_poll' })
+  | (GitHubQueuePollingSource & { readonly provider: 'github_queue_poll' });
 
 // ---------------------------------------------------------------------------
 // TriggerDefinition: a single configured trigger loaded from triggers.yml
