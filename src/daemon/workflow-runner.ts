@@ -174,16 +174,84 @@ const WORKSPACE_CONTEXT_MAX_BYTES = 32 * 1024;
 const MAX_ASSEMBLED_CONTEXT_BYTES = 8192;
 
 /**
- * Candidate workspace context files in priority order.
- * WHY: Higher-priority files (repo-specific Claude config) are included first.
- * If the combined size exceeds WORKSPACE_CONTEXT_MAX_BYTES, lower-priority files
- * are truncated or dropped so the most relevant context always fits.
+ * A literal path entry: a single file at a known relative path.
+ * WHY: Claude Code and AGENTS.md paths are stable single-file conventions.
  */
-const WORKSPACE_CONTEXT_CANDIDATE_PATHS = [
-  '.claude/CLAUDE.md',
-  'CLAUDE.md',
-  'AGENTS.md',
-  '.github/AGENTS.md',
+type LiteralCandidatePath = {
+  readonly kind: 'literal';
+  readonly relativePath: string;
+};
+
+/**
+ * A glob pattern entry: zero or more files matching a pattern in a directory.
+ * WHY: Cursor, Windsurf, and Firebender all use directory-based conventions
+ * where teams add multiple rule files. A glob pattern discovers them all.
+ */
+type GlobCandidatePath = {
+  readonly kind: 'glob';
+  /** Relative to workspacePath, e.g. '.cursor/rules/*.mdc' */
+  readonly pattern: string;
+  /**
+   * WHY: .mdc (Cursor/Firebender) and .windsurf/rules/*.md files have YAML
+   * frontmatter with metadata (alwaysApply, description, etc.) not meant for
+   * LLM consumption. Must be stripped before injection.
+   */
+  readonly stripFrontmatter: boolean;
+  /**
+   * WHY: tinyglobby order is filesystem-dependent. Alpha sort ensures the same
+   * workspace produces the same context on every WorkTrain session.
+   */
+  readonly sort: 'alpha';
+};
+
+type WorkspaceContextCandidate = LiteralCandidatePath | GlobCandidatePath;
+
+/**
+ * Maximum files to read per glob pattern.
+ * WHY: Prevents I/O cost and context budget waste in repos where .cursor/rules/
+ * or similar directories contain many files (generated artifacts, etc.).
+ */
+const MAX_GLOB_FILES_PER_PATTERN = 20;
+
+/**
+ * Candidate workspace context files in priority order.
+ * WHY: More specific (tool-specific, project-specific) before more general.
+ * User-written Claude Code config takes top priority. Glob formats (newer) come
+ * before legacy single-file formats (older) for each tool to reduce duplicate
+ * injection when both coexist.
+ *
+ * Sources:
+ *   Claude Code: https://code.claude.com/docs/en/memory (April 2026)
+ *   Cursor .cursorrules: empirical (zillow-android-2/.cursorrules)
+ *   Cursor .cursor/rules/*.mdc: empirical (zillow-android-2/.cursor/rules/)
+ *   Windsurf .windsurf/rules/*.md: https://docs.windsurf.com/windsurf/cascade/memories (April 2026)
+ *   Firebender .firebender/rules/*.mdc: empirical (zillow-android-2/.firebender/rules/)
+ *   Firebender AGENTS.md: docs/integrations/firebender.md + empirical
+ *   GitHub Copilot: https://docs.github.com/en/copilot/customizing-copilot (April 2026)
+ *   Continue.dev: https://docs.continue.dev/customize/deep-dives/rules (April 2026)
+ *
+ * NOTE: .windsurfrules does NOT exist -- Windsurf uses .windsurf/rules/ directory.
+ * NOTE: alwaysApply: false rules in .mdc files are injected unconditionally in
+ *   Phase 1. Phase 2 will add filtering based on the alwaysApply frontmatter field.
+ */
+const WORKSPACE_CONTEXT_CANDIDATE_PATHS: readonly WorkspaceContextCandidate[] = [
+  { kind: 'literal', relativePath: '.claude/CLAUDE.md' },
+  { kind: 'literal', relativePath: 'CLAUDE.md' },
+  { kind: 'literal', relativePath: 'CLAUDE.local.md' },
+  { kind: 'literal', relativePath: 'AGENTS.md' },
+  { kind: 'literal', relativePath: '.github/AGENTS.md' },
+  // Cursor: newer directory format before legacy single-file format
+  { kind: 'glob', pattern: '.cursor/rules/*.mdc', stripFrontmatter: true, sort: 'alpha' },
+  { kind: 'literal', relativePath: '.cursorrules' },
+  // Windsurf: directory format only (.windsurfrules does NOT exist per official docs)
+  { kind: 'glob', pattern: '.windsurf/rules/*.md', stripFrontmatter: true, sort: 'alpha' },
+  // Firebender: both rules directory and AGENTS.md convention
+  { kind: 'glob', pattern: '.firebender/rules/*.mdc', stripFrontmatter: true, sort: 'alpha' },
+  { kind: 'literal', relativePath: '.firebender/AGENTS.md' },
+  // GitHub Copilot
+  { kind: 'literal', relativePath: '.github/copilot-instructions.md' },
+  // Continue.dev
+  { kind: 'glob', pattern: '.continue/rules/*.md', stripFrontmatter: false, sort: 'alpha' },
 ] as const;
 
 // WHY: Soul content is defined in soul-template.ts (zero imports) so the CLI
@@ -941,7 +1009,26 @@ async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
 }
 
 /**
- * Scan the workspace for CLAUDE.md / AGENTS.md context files and combine them
+ * Strip YAML frontmatter from file content before injection into the system prompt.
+ *
+ * WHY: .mdc files (Cursor, Firebender) and .windsurf/rules/*.md files include
+ * YAML metadata (alwaysApply, description, trigger) that is tool-specific and
+ * not meaningful in a WorkTrain system prompt context.
+ *
+ * Safety: Only strips if the file starts with '---\n' or '---\r\n' (YAML frontmatter
+ * is always at the start of the file). Returns original content unchanged if:
+ * - File does not start with '---' (no frontmatter present -- safe no-op)
+ * - No closing '---' delimiter found (malformed frontmatter -- preserve as-is)
+ */
+export function stripFrontmatter(content: string): string {
+  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) return content;
+  const endIdx = content.indexOf('\n---', 4);
+  if (endIdx === -1) return content;
+  return content.slice(endIdx + 4).trimStart();
+}
+
+/**
+ * Scan the workspace for convention files across 7 AI tools and combine them
  * into a single string for injection into the system prompt.
  *
  * Files are read in priority order (WORKSPACE_CONTEXT_CANDIDATE_PATHS). Combined
@@ -954,39 +1041,78 @@ async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
  * skipped (or logged at warn level for non-ENOENT errors). The agent can still run
  * without workspace context.
  */
-async function loadWorkspaceContext(workspacePath: string): Promise<string | null> {
+export async function loadWorkspaceContext(workspacePath: string): Promise<string | null> {
   const parts: string[] = [];
+  const injectedPaths: string[] = [];
   let combinedBytes = 0;
   let truncated = false;
 
-  for (const relativePath of WORKSPACE_CONTEXT_CANDIDATE_PATHS) {
-    if (truncated) break;
-
-    const fullPath = path.join(workspacePath, relativePath);
-    let content: string;
-    try {
-      content = await fs.readFile(fullPath, 'utf8');
-    } catch (err: unknown) {
-      const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
-      if (!isEnoent) {
-        // Unexpected error (permissions, etc.) -- log and skip.
-        console.warn(
-          `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      continue;
-    }
-
+  /**
+   * Accumulates a single file's content into parts[], respecting the byte budget.
+   * WHY extracted as inner helper: the same accumulation logic is needed for both
+   * literal and glob candidates.
+   */
+  function accumulateFile(relativePath: string, content: string): void {
     const contentBytes = Buffer.byteLength(content, 'utf8');
     if (combinedBytes + contentBytes > WORKSPACE_CONTEXT_MAX_BYTES) {
       // Fit as much of this file as will fill the remaining budget.
       const remaining = WORKSPACE_CONTEXT_MAX_BYTES - combinedBytes;
       const truncatedContent = content.slice(0, remaining);
       parts.push(`### ${relativePath}\n${truncatedContent}`);
+      injectedPaths.push(relativePath);
       truncated = true;
     } else {
       parts.push(`### ${relativePath}\n${content}`);
+      injectedPaths.push(relativePath);
       combinedBytes += contentBytes;
+    }
+  }
+
+  for (const entry of WORKSPACE_CONTEXT_CANDIDATE_PATHS) {
+    if (truncated) break;
+
+    if (entry.kind === 'literal') {
+      const fullPath = path.join(workspacePath, entry.relativePath);
+      let content: string;
+      try {
+        content = await fs.readFile(fullPath, 'utf8');
+      } catch (err: unknown) {
+        const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+        if (!isEnoent) {
+          // Unexpected error (permissions, etc.) -- log and skip.
+          console.warn(
+            `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        continue;
+      }
+      accumulateFile(entry.relativePath, content);
+    } else {
+      // kind === 'glob': expand pattern, sort, cap, read each file.
+      const matches = await tinyGlob(entry.pattern, { cwd: workspacePath, absolute: false });
+      const sorted = [...matches].sort(); // alpha sort for determinism
+      if (sorted.length > MAX_GLOB_FILES_PER_PATTERN) {
+        console.warn(
+          `[WorkflowRunner] ${entry.pattern}: ${sorted.length} files found, capped at ${MAX_GLOB_FILES_PER_PATTERN}`,
+        );
+      }
+      for (const relativePath of sorted.slice(0, MAX_GLOB_FILES_PER_PATTERN)) {
+        if (truncated) break;
+        const fullPath = path.join(workspacePath, relativePath);
+        let content: string;
+        try {
+          content = await fs.readFile(fullPath, 'utf8');
+        } catch (err: unknown) {
+          const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+          if (!isEnoent) {
+            console.warn(
+              `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+          continue;
+        }
+        accumulateFile(relativePath, entry.stripFrontmatter ? stripFrontmatter(content) : content);
+      }
     }
   }
 
@@ -998,9 +1124,7 @@ async function loadWorkspaceContext(workspacePath: string): Promise<string | nul
   }
 
   console.log(
-    `[WorkflowRunner] Injecting workspace context from: ${WORKSPACE_CONTEXT_CANDIDATE_PATHS.filter(
-      (p) => parts.some((part) => part.startsWith(`### ${p}`)),
-    ).join(', ')}`,
+    `[WorkflowRunner] Injecting workspace context from: ${injectedPaths.join(', ')}`,
   );
 
   return combined;
