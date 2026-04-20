@@ -332,6 +332,56 @@ describe('pollGitHubQueueIssues', () => {
       expect(result.value[0]?.number).toBe(44);
     }
   });
+
+  it('multi-assignee: issue assigned to alice AND bob with config.user=alice passes filter', async () => {
+    // The assignee pre-filter uses Array.some() -- any matching assignee is sufficient.
+    // An issue with multiple assignees should pass when config.user matches any one of them.
+    const issue = makeIssue({ number: 50, assignees: [{ login: 'alice' }, { login: 'bob' }] });
+    const fetchFn = makeFetch({ ok: true, json: () => Promise.resolve([issue]) });
+
+    const result = await pollGitHubQueueIssues(makeSource(), makeConfig({ user: 'alice' }), fetchFn);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]?.number).toBe(50);
+    }
+  });
+
+  it('pull_request: null still gets filtered (key presence, not value truthiness)', async () => {
+    // toGitHubQueueIssue() uses `'pull_request' in obj` -- a key-presence check.
+    // An issue with pull_request: null has the key present, so it IS filtered out.
+    // This documents the invariant: the guard is not `if (obj.pull_request)`.
+    const issueWithNullPR = { ...makeIssue({ number: 51 }), pull_request: null };
+    const fetchFn = makeFetch({ ok: true, json: () => Promise.resolve([issueWithNullPR]) });
+
+    const result = await pollGitHubQueueIssues(makeSource(), makeConfig(), fetchFn);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('label config ignores assignee field entirely (no assignees, correct label -> passes)', async () => {
+    // The assignee pre-filter is gated on config.type === 'assignee'.
+    // A type: 'label' config skips the pre-filter entirely, so an issue with no
+    // assignees but the correct label should pass through to results.
+    const issue = makeIssue({ number: 52, assignees: [], labels: [{ name: 'worktrain:ready' }] });
+    const fetchFn = makeFetch({ ok: true, json: () => Promise.resolve([issue]) });
+
+    const result = await pollGitHubQueueIssues(
+      makeSource(),
+      makeConfig({ type: 'label', queueLabel: 'worktrain:ready' }),
+      fetchFn,
+    );
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]?.number).toBe(52);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
