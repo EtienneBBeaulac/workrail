@@ -804,6 +804,7 @@ program
         joinPath: path.join,
         print: (line: string) => process.stdout.write(line + '\n'),
         getDataDirEnv: () => process.env['WORKRAIL_DATA_DIR'],
+        readEventLog: (p: string) => fs.promises.readFile(p, 'utf-8').catch(() => ''),
       },
       {
         json: options.json,

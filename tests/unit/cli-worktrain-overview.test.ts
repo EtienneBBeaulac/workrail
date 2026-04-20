@@ -111,6 +111,9 @@ function makeDeps(
     joinPath: path.join,
     print: (line: string) => lines.push(line),
     getDataDirEnv: () => undefined,
+    // Default: no events today. Tests that need specific daemon status pass their
+    // own readEventLog via overrides.
+    readEventLog: () => Promise.resolve(''),
     ...overrides,
   };
   return { deps, lines };
@@ -555,5 +558,82 @@ describe('executeWorktrainOverviewCommand -- custom thresholds', () => {
     // Custom window (6h): 12h-old session should NOT show.
     await executeWorktrainOverviewCommand(deps2, { recentWindowMs: 6 * ONE_HOUR_MS });
     expect(linesCustom.some((l) => l.includes('Completed 12h ago'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: daemon status line
+// ---------------------------------------------------------------------------
+
+describe('executeWorktrainOverviewCommand -- daemon status line', () => {
+  /**
+   * Build a JSONL string with a single daemon event.
+   * ts is relative to NOW_MS so tests are deterministic.
+   */
+  function makeEventLog(...events: Array<Record<string, unknown>>): string {
+    return events.map((e) => JSON.stringify(e)).join('\n') + '\n';
+  }
+
+  it('shows "running" when recent daemon_heartbeat exists (< 90s ago)', async () => {
+    // Heartbeat 30 seconds ago.
+    const heartbeatTs = NOW_MS - 30_000;
+    const eventLog = makeEventLog({ kind: 'daemon_heartbeat', activeSessions: 2, ts: heartbeatTs });
+
+    const { deps, lines } = makeDeps(makeFakeConsoleService([]), {
+      readEventLog: () => Promise.resolve(eventLog),
+    });
+    await executeWorktrainOverviewCommand(deps);
+
+    const daemonLine = lines.find((l) => l.startsWith('Daemon:'));
+    expect(daemonLine).toBeDefined();
+    expect(daemonLine).toContain('running');
+    expect(daemonLine).toContain('30s ago');
+    expect(daemonLine).toContain('2 active sessions');
+  });
+
+  it('shows "may have crashed" when heartbeat is stale (>= 90s ago)', async () => {
+    // Heartbeat 4 hours ago (stale).
+    const heartbeatTs = NOW_MS - 4 * ONE_HOUR_MS;
+    const eventLog = makeEventLog({ kind: 'daemon_heartbeat', activeSessions: 0, ts: heartbeatTs });
+
+    const { deps, lines } = makeDeps(makeFakeConsoleService([]), {
+      readEventLog: () => Promise.resolve(eventLog),
+    });
+    await executeWorktrainOverviewCommand(deps);
+
+    const daemonLine = lines.find((l) => l.startsWith('Daemon:'));
+    expect(daemonLine).toBeDefined();
+    expect(daemonLine).toContain('may have crashed');
+    expect(daemonLine).toContain('4h ago');
+  });
+
+  it('shows "stopped gracefully" when daemon_stopped (graceful) is the most recent event', async () => {
+    // Stopped event is more recent than the last heartbeat.
+    const heartbeatTs = NOW_MS - 120_000; // 2 minutes ago
+    const stoppedTs = NOW_MS - 60_000;   // 1 minute ago (more recent)
+    const eventLog = makeEventLog(
+      { kind: 'daemon_heartbeat', activeSessions: 1, ts: heartbeatTs },
+      { kind: 'daemon_stopped', reason: 'graceful', ts: stoppedTs },
+    );
+
+    const { deps, lines } = makeDeps(makeFakeConsoleService([]), {
+      readEventLog: () => Promise.resolve(eventLog),
+    });
+    await executeWorktrainOverviewCommand(deps);
+
+    const daemonLine = lines.find((l) => l.startsWith('Daemon:'));
+    expect(daemonLine).toBeDefined();
+    expect(daemonLine).toContain('stopped gracefully');
+  });
+
+  it('shows "no events today" when event log is empty', async () => {
+    const { deps, lines } = makeDeps(makeFakeConsoleService([]), {
+      readEventLog: () => Promise.resolve(''),
+    });
+    await executeWorktrainOverviewCommand(deps);
+
+    const daemonLine = lines.find((l) => l.startsWith('Daemon:'));
+    expect(daemonLine).toBeDefined();
+    expect(daemonLine).toContain('no events today');
   });
 });
