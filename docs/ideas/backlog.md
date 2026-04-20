@@ -7056,3 +7056,86 @@ The adaptive coordinator's IMPLEMENT and FULL modes would call `runMRLifecycleMa
 High -- this is the most visible gap in the autonomous pipeline. Without it, every PR needs human monitoring. With it, WorkTrain can own an MR from first commit to merge with zero human involvement for clean cases.
 
 **Dependency:** PR template support (needed for step 1). Phase-scoped rules (needed for step 3). `dispatchCondition` webhook filter (needed for GitLab MR event triggers).
+
+---
+
+## Event-driven agent coordination: coordinator as event bus (Apr 20, 2026)
+
+**The principle:** Agents should be event-driven, not poll-driven. An agent managing an MR should not repeatedly call `gh pr view --comments` to check for new activity. That wastes turns, burns tokens, and puts timing logic in the wrong place. Instead, the coordinator registers for events and steers the agent when something relevant happens.
+
+**The current infrastructure (already built):**
+- `steerRegistry` + `POST /sessions/:id/steer` -- coordinator can inject a message into a running agent's next turn
+- `signal_coordinator` tool -- agent can surface structured findings to the coordinator without advancing the workflow step
+- `DaemonEventEmitter` -- structured lifecycle events for observability
+
+**What's missing:**
+
+### 1. Coordinator-side event sources
+
+The coordinator needs to listen for MR/PR lifecycle events from external systems:
+
+**GitHub webhooks** (if the repo is reachable):
+- `pull_request_review` -- reviewer approved, requested changes, or dismissed
+- `pull_request_review_comment` -- inline comment added
+- `check_suite` / `check_run` -- CI status changed (pass, fail, queued)
+- `issue_comment` -- general PR comment
+- `pull_request` -- PR labeled, unlabeled, merged, closed
+
+**Polling fallback** (for systems without webhook delivery):
+- Poll `gh pr view`, `gh pr checks`, `gh pr review` on a schedule
+- Diff against last-known state to detect new events
+- Same interface as webhooks, different source
+
+### 2. Event-to-steer mapping
+
+When an event arrives, the coordinator translates it into a structured steer message and injects it into the running MR management agent session:
+
+```typescript
+// CI failure → steer
+steer(sessionId, `[CI_FAILURE] Job: build-and-test (Node 20, ubuntu)
+Status: failed
+Error: 3 tests failed in tests/unit/workflow-runner.test.ts
+Failing tests: loadSessionNotes failure paths (3 cases)
+Log tail: ${logExcerpt}
+Action: fix the failing tests and push a new commit to this branch.`);
+
+// Review comment → steer
+steer(sessionId, `[REVIEW_COMMENT] @kenton-acei commented on src/daemon/workflow-runner.ts:568:
+"This function should export a type alias for the return value"
+Thread ID: thread_abc123
+Action: decide whether to address this comment (reply, fix, or acknowledge as out-of-scope).`);
+
+// Approval → steer
+steer(sessionId, `[REVIEW_APPROVED] @etienneb approved the PR.
+Required approvals: 1/1 met. CI: all green.
+Action: the PR is ready to merge. Execute merge now unless any open threads need resolution.`);
+```
+
+### 3. Agent waits; coordinator drives
+
+The MR management agent's session prompt should explicitly say:
+- "Do not poll for PR status, CI results, or review comments. Wait for the coordinator to deliver events via injected messages."
+- "When you receive a `[CI_FAILURE]` message, fix it. When you receive a `[REVIEW_COMMENT]` message, triage it. When you receive a `[REVIEW_APPROVED]` message, execute merge."
+- "Use `signal_coordinator` to surface anything the coordinator needs to know (blocker found, question for reviewer, etc.)."
+
+This is the `pr-management.md` phase rules file in action -- it defines how the agent should respond to each event type.
+
+### 4. Session lifecycle alignment
+
+A MR management session is inherently long-lived -- it exists for the full lifetime of the PR (hours to days). Today's session model assumes sessions complete in under 2 hours. Long-lived sessions need:
+- Checkpoint/resume support (already exists via `checkpointToken`)
+- Heartbeat-based liveness (already exists via `daemon_heartbeat`)
+- Coordinator-driven wakeup (the steer mechanism is exactly this)
+
+The coordinator parks the session (no pending turns), registers for events, and wakes the session when something happens. No busy-waiting, no polling from the agent side.
+
+### Implementation order
+
+1. **Coordinator event listener** -- `src/coordinators/mr-event-listener.ts`. Registers GitHub webhook handlers OR runs a polling loop. Normalizes events to a common `MREvent` type.
+2. **Event-to-steer bridge** -- maps `MREvent` to structured steer message text, calls `steerRegistry` callback.
+3. **MR management session prompt** -- defines agent behavior for each event type (from `pr-management.md` phase rules).
+4. **Session parking** -- coordinator marks session as "waiting" when no events are pending; wakes it when an event arrives.
+
+### Priority
+
+High -- required for the MR lifecycle manager to work correctly. Without event-driven coordination, the MR management agent burns all its turns polling and times out before the PR is merged. This is the missing architectural piece that makes long-running coordinator sessions viable.
