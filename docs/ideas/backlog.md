@@ -6699,3 +6699,95 @@ Without this, the workaround is to create a dedicated webhook URL per-trigger so
 2. Add `github_issues_webhook` as a named provider (wraps generic with GitHub-specific HMAC and event schema awareness). Convenience only -- generic already works.
 
 **Priority:** Medium-high. The 5-minute latency is the main UX gap once the queue is live. `dispatchCondition` is ~50 LOC in trigger-store + trigger-router.
+
+---
+
+## Demo repo feedback loop: WorkTrain improves itself via real task execution (Apr 20, 2026)
+
+### The idea
+
+Run WorkTrain against a real demo repo, observe what breaks, automatically file issues against the workrail repo, and have WorkTrain fix them. A self-improving feedback loop that surfaces real production failures faster than any manual testing.
+
+### Why this matters
+
+Right now WorkTrain's quality is validated by: the tasks we built it on (workrail itself) and manual inspection. That's a small, biased sample. A demo repo with diverse real tasks reveals failure modes in the full pipeline that workrail's self-improvement loop won't surface -- because the workrail tasks are always WorkTrain-flavored (TypeScript, same patterns, same tool use).
+
+### The loop
+
+```
+Demo repo tasks (worktrain:ready issues)
+  ↓
+WorkTrain runs full pipeline: discover → shape → code → PR → review → merge
+  ↓
+Failure classifier watches daemon event log
+  ↓
+For each failure: structured issue filed against workrail repo
+  (what task, what step, what went wrong, session ID, relevant log lines)
+  ↓
+worktrain-etienneb assigned → WorkTrain fixes itself
+  ↓
+WorkTrain re-runs the failed task → confirms fix
+```
+
+### What to build
+
+**Phase 1: Demo repo + manual observation**
+- Create or pick a demo repo -- real TypeScript project, diverse tasks (feature add, refactor, bug fix, test coverage, docs)
+- Add 5-10 `worktrain:ready` issues with acceptance criteria
+- Run WorkTrain on them, manually supervise first few runs
+- Collect failure patterns: what breaks, how often, at which pipeline step
+
+**Phase 2: Failure classifier**
+- Scheduled session (nightly cron trigger) that reads `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`
+- Classifies sessions by outcome: success, error, timeout, stuck
+- For non-success sessions: extracts failure context (last tool call, stuck reason, step that failed, issue summaries from `report_issue`)
+- For each new failure: creates a GitHub issue against the workrail repo with:
+  ```
+  Title: [WorkTrain failure] <workflow> failed at <step>: <reason>
+  Body: Session: sess_xxx | Trigger: self-improvement | Task: #N "<title>"
+        Step: phase-3-plan-and-test-design
+        Failure: repeated_tool_call (grep on same pattern 3x)
+        Last tool args: {"pattern": "...", "path": "..."}
+        Issue summaries: ["Could not find X in codebase"]
+  Labels: worktrain:ready, bug
+  Assignee: worktrain-etienneb
+  ```
+- Deduplicates: doesn't file if an identical failure issue already exists and is open
+- ~100-150 LOC, new coordinator script `src/coordinators/failure-classifier.ts`
+
+**Phase 3: Auto-rerun after fix**
+- When WorkTrain merges a fix for a failure issue, the failure classifier re-queues the original demo task
+- Confirms the fix actually resolved the failure
+- Closes the failure issue if the task now succeeds
+
+### Demo repo criteria
+
+Good demo repo characteristics:
+- Real TypeScript project with actual functionality (not just stubs)
+- Has existing tests (so WorkTrain's changes can be verified)
+- Diverse task types: feature addition, refactor, bug fix, test coverage gap, documentation
+- Small enough that sessions complete within the 90-min timeout
+- Not workrail itself (avoids circular dependency in failure classification)
+
+Options:
+- A new personal project created specifically for this
+- An existing open source tool or library you maintain
+- A stripped-down clone of a Zillow service (no internal dependencies)
+
+### Demo repo tasks for first run (suggested)
+
+1. Add a new CLI flag with validation and tests
+2. Refactor a module to use a different pattern
+3. Fix a bug from a failing test
+4. Add test coverage for an uncovered function
+5. Write a README section documenting a feature
+
+These span the full task maturity spectrum and exercise different pipeline paths.
+
+### Relationship to benchmarking
+
+The same 10 demo tasks run after each WorkTrain release become a regression benchmark. Track: % completing successfully, # fix loop iterations needed, LLM turns per task, token cost per task. Plot over time. When the numbers improve, the release is better. When they regress, something broke.
+
+### Priority
+
+High -- this is the fastest path to data-driven self-improvement. Build Phase 1 first (pick a demo repo, run tasks manually), then Phase 2 (failure classifier) once you've seen 2-3 recurring failure patterns.
