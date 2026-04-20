@@ -61,6 +61,25 @@ export const ReviewVerdictArtifactV1Schema = z
           severity: z.enum(['critical', 'major', 'minor', 'nit']),
           /** One-line finding description (for fix-agent goal string) */
           summary: z.string().min(1),
+          /**
+           * Category of the finding. Used by coordinators to route audit chains.
+           * Optional for backward compatibility with sessions that do not emit this field.
+           * architecture -> architecture-scalability-audit; all others -> production-readiness-audit.
+           */
+          findingCategory: z
+            .enum([
+              'correctness',
+              'security',
+              'architecture',
+              'ux',
+              'performance',
+              'testing',
+              'style',
+            ])
+            .optional()
+            .describe(
+              'Category of the finding. Used by coordinators to route audit chains.',
+            ),
         })
         .strict(),
     ),

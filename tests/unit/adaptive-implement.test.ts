@@ -522,6 +522,85 @@ describe('runAuditChain', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// runAuditChain -- findingCategory routing
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runAuditChain - findingCategory routing', () => {
+  it('routes to architecture-scalability-audit when any finding has findingCategory=architecture', async () => {
+    const spawnedWorkflows: string[] = [];
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnedWorkflows.push(workflowId);
+        return ok(`h${++spawnCount}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'APPROVE -- LGTM. Architecture fixed.',
+        artifacts: [],
+      }),
+    });
+
+    const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix arch issue', dryRun: false };
+    const findings = [{ severity: 'critical' as const, summary: 'Tight coupling in auth module', findingCategory: 'architecture' as const }];
+    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
+
+    expect(spawnedWorkflows).toContain('architecture-scalability-audit');
+    expect(spawnedWorkflows).not.toContain('production-readiness-audit');
+  });
+
+  it('routes to production-readiness-audit when findingCategory is security', async () => {
+    const spawnedWorkflows: string[] = [];
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnedWorkflows.push(workflowId);
+        return ok(`h${++spawnCount}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'APPROVE -- LGTM. Security issue fixed.',
+        artifacts: [],
+      }),
+    });
+
+    const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix security issue', dryRun: false };
+    const findings = [{ severity: 'critical' as const, summary: 'SQL injection risk', findingCategory: 'security' as const }];
+    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
+
+    expect(spawnedWorkflows).toContain('production-readiness-audit');
+    expect(spawnedWorkflows).not.toContain('architecture-scalability-audit');
+  });
+
+  it('routes to production-readiness-audit (safe default) when findingCategory is missing', async () => {
+    const spawnedWorkflows: string[] = [];
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnedWorkflows.push(workflowId);
+        return ok(`h${++spawnCount}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'APPROVE -- LGTM. Issues fixed.',
+        artifacts: [],
+      }),
+    });
+
+    const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix issue', dryRun: false };
+    // findings items have no findingCategory (optional field omitted)
+    const findings = [{ severity: 'critical' as const, summary: 'Some critical finding' }];
+    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
+
+    expect(spawnedWorkflows).toContain('production-readiness-audit');
+    expect(spawnedWorkflows).not.toContain('architecture-scalability-audit');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // buildDepBumpGoal -- pure helper from quick-review.ts
 // ═══════════════════════════════════════════════════════════════════════════
 

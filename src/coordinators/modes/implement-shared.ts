@@ -13,6 +13,8 @@
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, PipelineOutcome } from '../adaptive-pipeline.js';
 import { CODING_TIMEOUT_MS, REVIEW_TIMEOUT_MS, checkSpawnCutoff } from '../adaptive-pipeline.js';
 import { readVerdictArtifact, parseFindingsFromNotes } from '../pr-review.js';
+import type { ReviewVerdictArtifactV1 } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
+import { parseReviewVerdictArtifact } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -98,6 +100,13 @@ export async function runReviewAndVerdictCycle(
   const findings = findingsResult.value;
   deps.stderr(`[review-cycle] Verdict: ${findings.severity} (iteration=${iteration})`);
 
+  // Parse the raw verdict artifact to extract findingCategory for audit chain routing.
+  // Done here (not in readVerdictArtifact) to avoid widening the ReviewFindings interface.
+  const rawVerdict: ReviewVerdictArtifactV1 | null = agentResult.artifacts.reduce<ReviewVerdictArtifactV1 | null>(
+    (acc, a) => acc ?? parseReviewVerdictArtifact(a),
+    null,
+  );
+
   switch (findings.severity) {
     case 'clean':
       deps.stderr(`[review-cycle] Verdict clean -- merging PR`);
@@ -161,7 +170,7 @@ export async function runReviewAndVerdictCycle(
 
     case 'blocking':
     case 'unknown': {
-      return runAuditChain(deps, opts, prUrl, coordinatorStartMs, findings.severity);
+      return runAuditChain(deps, opts, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings);
     }
   }
 }
@@ -174,14 +183,14 @@ export async function runReviewAndVerdictCycle(
  * Run the escalating audit chain for blocking/critical findings.
  *
  * Steps:
- * 1. Dispatch production-readiness-audit
- *    NOTE: findingCategory is NOT in the verdict schema (rabbit hole #5).
- *    TODO(follow-up): add findingCategory to ReviewVerdictArtifactV1 and branch:
- *      - correctness/security Critical -> production-readiness-audit
- *      - architecture Critical -> architecture-scalability-audit
- *    For MVP: always dispatch production-readiness-audit (safe default).
+ * 1. Dispatch audit workflow -- routes based on findingCategory when available:
+ *      - architecture findings -> architecture-scalability-audit
+ *      - all others (correctness, security, ux, performance, testing, style, or unknown) -> production-readiness-audit
  * 2. Re-review with mr-review-workflow-agentic
  * 3. If still Critical/blocking: post to Human Outbox, do NOT auto-merge
+ *
+ * @param findings - Raw findings from the verdict artifact, if available.
+ *   Used to select the audit workflow. Absent on the keyword-scan path (safe default applies).
  */
 export async function runAuditChain(
   deps: AdaptiveCoordinatorDeps,
@@ -189,15 +198,19 @@ export async function runAuditChain(
   prUrl: string,
   coordinatorStartMs: number,
   severity: 'blocking' | 'unknown',
+  findings?: ReviewVerdictArtifactV1['findings'],
 ): Promise<PipelineOutcome> {
   deps.stderr(`[audit-chain] ${severity.toUpperCase()} finding -- running audit chain`);
 
   const auditCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'audit');
   if (auditCutoff) return auditCutoff;
 
-  // TODO(follow-up): branch on findingCategory when it's added to the verdict schema.
-  // For MVP: always dispatch production-readiness-audit (safe default -- pitch rabbit hole #5).
-  const auditWorkflow = 'production-readiness-audit';
+  // Route to the appropriate audit workflow based on findingCategory.
+  // Architecture findings dispatch architecture-scalability-audit; all others use production-readiness-audit.
+  // When findings is absent (keyword-scan path), safe default production-readiness-audit applies.
+  const auditWorkflow = findings?.some((f) => f.findingCategory === 'architecture')
+    ? 'architecture-scalability-audit'
+    : 'production-readiness-audit';
 
   const auditSpawnResult = await deps.spawnSession(
     auditWorkflow,
