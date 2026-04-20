@@ -6606,3 +6606,25 @@ The `jira_poll` backlog entry describes pulling tickets from Jira. It does not d
 - Reacting to Jira transitions mid-work (ticket moved back to "To Do" → WorkTrain stops)
 
 The full Jira integration is a round-trip, not just a poll. Design the return path before implementing `jira_poll`.
+
+---
+
+## Gate 2 follow-up: per-trigger gh CLI token for delivery (Apr 20, 2026)
+
+`delivery-action.ts` calls `gh pr create` using whatever `gh` CLI auth is configured globally -- it does not pass a per-trigger token. For single-identity (always acting as yourself) this is fine. For multi-identity (Zillow service account alongside personal trigger), the globally authenticated `gh` user handles all PR creation, silently using the wrong identity.
+
+**Fix when multi-identity is needed:** Pass `GH_TOKEN=<triggerToken>` env override to `execFn` when calling `gh pr create` and `gh pr merge`. Not a blocker for single-identity. Prerequisite for multi-identity support.
+
+---
+
+## Queue config discriminated union tightening (Apr 20, 2026)
+
+`GitHubQueueConfig` uses a flat interface with runtime validation. Should be a proper TypeScript discriminated union so `type: 'assignee'` requires `user` at compile time. Low priority but tracked per "make illegal states unrepresentable."
+
+---
+
+## Kill switch and commit signing (Apr 20, 2026)
+
+**Kill switch:** `worktrain kill-sessions` -- aborts all running daemon sessions immediately. Useful when WorkTrain is doing something unexpected. Sends abort signal to all active sessions, marks them user-killed in the event log.
+
+**Commit signing:** verify `git commit` honors existing `commit.gpgsign` config, or add explicit opt-out for bot identities that don't have signing keys. Empirically verify before declaring this solved.
