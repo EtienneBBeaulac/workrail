@@ -1347,6 +1347,101 @@ describe('TriggerRouter notify() wiring', () => {
 // Late-bound goals: {{$.goal}} dispatches correctly via TriggerRouter.route()
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TriggerRouter.route: dispatchCondition filter
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.route dispatchCondition', () => {
+  it('dispatches when dispatchCondition is met (extracted value strictly equals condition.equals)', async () => {
+    // Proves the pass-through path: when condition is met, runWorkflow is called normally.
+    const trigger = makeTrigger({
+      dispatchCondition: {
+        payloadPath: '$.assignee.login',
+        equals: 'worktrain-etienneb',
+      },
+    });
+    const { fn, calls } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const payload = { assignee: { login: 'worktrain-etienneb' } };
+    router.route(makeEvent({ payload, rawBody: Buffer.from(JSON.stringify(payload)) }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Condition met: dispatch proceeds, runWorkflow called
+    expect(calls).toHaveLength(1);
+  });
+
+  it('skips dispatch when dispatchCondition not met (wrong value)', async () => {
+    // Proves the skip path: when condition not met, runWorkflow is NOT called.
+    // route() still returns { _tag: 'enqueued' } -- silent skip.
+    const trigger = makeTrigger({
+      dispatchCondition: {
+        payloadPath: '$.assignee.login',
+        equals: 'worktrain-etienneb',
+      },
+    });
+    const { fn, calls } = makeFakeRunWorkflow();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const payload = { assignee: { login: 'other-user' } };
+    const result = router.route(makeEvent({ payload, rawBody: Buffer.from(JSON.stringify(payload)) }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    // route() returns enqueued (silent -- 202 was already sent)
+    expect(result._tag).toBe('enqueued');
+    // runWorkflow NOT called (dispatch skipped)
+    expect(calls).toHaveLength(0);
+    // Debug log line emitted
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('dispatch skipped: condition not met'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('other-user'));
+
+    logSpy.mockRestore();
+  });
+
+  it('skips dispatch when dispatchCondition path not found in payload (undefined !== equals)', async () => {
+    // Proves that a missing path also counts as condition not met.
+    // undefined !== 'worktrain-etienneb' -> skip.
+    const trigger = makeTrigger({
+      dispatchCondition: {
+        payloadPath: '$.nonexistent.field',
+        equals: 'worktrain-etienneb',
+      },
+    });
+    const { fn, calls } = makeFakeRunWorkflow();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const payload = { action: 'opened' }; // no assignee field
+    const result = router.route(makeEvent({ payload, rawBody: Buffer.from(JSON.stringify(payload)) }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(result._tag).toBe('enqueued');
+    expect(calls).toHaveLength(0);
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('dispatch skipped: condition not met'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('undefined'));
+
+    logSpy.mockRestore();
+  });
+
+  it('dispatches normally when dispatchCondition is absent (no filter configured)', async () => {
+    // Proves backward compatibility: triggers without dispatchCondition always dispatch.
+    const trigger = makeTrigger({ dispatchCondition: undefined });
+    const { fn, calls } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const payload = { action: 'opened' };
+    router.route(makeEvent({ payload, rawBody: Buffer.from(JSON.stringify(payload)) }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(calls).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Late-bound goals
+// ---------------------------------------------------------------------------
+
 describe('late-bound goals integration', () => {
   it('dispatches with payload goal when trigger has goalTemplate={{$.goal}}', async () => {
     const { fn, calls } = makeFakeRunWorkflow();

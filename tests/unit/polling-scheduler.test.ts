@@ -25,6 +25,7 @@ import { asTriggerId } from '../../src/trigger/types.js';
 import type { TriggerRouter } from '../../src/trigger/trigger-router.js';
 import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
 import type { FetchFn } from '../../src/trigger/adapters/gitlab-poller.js';
+import type { FetchFn as QueueFetchFn } from '../../src/trigger/adapters/github-queue-poller.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,13 +93,34 @@ function makeFailingFetch(error: Error): FetchFn {
   return vi.fn().mockRejectedValue(error);
 }
 
-function makeRouter(): { router: TriggerRouter; dispatched: WorkflowTrigger[] } {
+function makeRouter(): { router: TriggerRouter; dispatched: WorkflowTrigger[]; adaptiveDispatched: Array<{ goal: string; workspace: string; context?: Readonly<Record<string, unknown>> }> } {
+  const dispatched: WorkflowTrigger[] = [];
+  const adaptiveDispatched: Array<{ goal: string; workspace: string; context?: Readonly<Record<string, unknown>> }> = [];
+  const router = {
+    dispatch: (trigger: WorkflowTrigger) => {
+      dispatched.push(trigger);
+      return trigger.workflowId;
+    },
+    dispatchAdaptivePipeline: async (
+      goal: string,
+      workspace: string,
+      context?: Readonly<Record<string, unknown>>,
+    ) => {
+      adaptiveDispatched.push({ goal, workspace, context });
+      return { kind: 'merged' as const };
+    },
+  } as unknown as TriggerRouter;
+  return { router, dispatched, adaptiveDispatched };
+}
+
+function makeRouterWithoutAdaptive(): { router: TriggerRouter; dispatched: WorkflowTrigger[] } {
   const dispatched: WorkflowTrigger[] = [];
   const router = {
     dispatch: (trigger: WorkflowTrigger) => {
       dispatched.push(trigger);
       return trigger.workflowId;
     },
+    // dispatchAdaptivePipeline intentionally absent -- tests the throw path
   } as unknown as TriggerRouter;
   return { router, dispatched };
 }
@@ -434,5 +456,119 @@ describe('PollingScheduler skip-cycle guard', () => {
     );
 
     warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// github_queue_poll: adaptive routing
+// ---------------------------------------------------------------------------
+
+/**
+ * Make a github_queue_poll trigger for queue poll tests.
+ */
+function makeQueuePollTrigger(overrides: Partial<TriggerDefinition> = {}): TriggerDefinition {
+  return {
+    id: asTriggerId('test-queue-poll'),
+    provider: 'github_queue_poll',
+    workflowId: '',
+    workspacePath: '/workspace',
+    goal: 'Work on queue task',
+    concurrencyMode: 'serial',
+    pollingSource: {
+      provider: 'github_queue_poll',
+      repo: 'acme/my-project',
+      token: 'test-token',
+      pollIntervalSeconds: 300,
+    },
+    ...overrides,
+  };
+}
+
+/**
+ * Make a fake fetch that returns a single GitHub queue issue.
+ */
+function makeQueueFetch(): QueueFetchFn {
+  const issue = {
+    id: 1001,
+    number: 42,
+    title: 'Implement login flow',
+    body: 'upstream_spec: https://spec.example.com/login',
+    html_url: 'https://github.com/acme/my-project/issues/42',
+    url: 'https://github.com/acme/my-project/issues/42',
+    labels: [],
+    created_at: '2026-04-19T00:00:00Z',
+    state: 'open',
+    assignee: { login: 'worktrain-etienneb' },
+  };
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: {
+      get: (name: string) => name === 'X-RateLimit-Remaining' ? '500' : null,
+    },
+    json: () => Promise.resolve([issue]),
+  } as unknown as Response);
+}
+
+// vi.mock() must be at module level (hoisted). See vitest docs.
+vi.mock('../../src/trigger/github-queue-config.js', () => ({
+  loadQueueConfig: vi.fn().mockResolvedValue({
+    kind: 'ok',
+    value: {
+      type: 'assignee',
+      user: 'worktrain-etienneb',
+      repo: 'acme/my-project',
+      token: 'test-token',
+      pollIntervalSeconds: 300,
+      maxTotalConcurrentSessions: 3,
+      excludeLabels: [],
+    },
+  }),
+}));
+
+describe('doPollGitHubQueue adaptive routing', () => {
+  afterEach(() => {
+    // Use clearAllMocks (not restoreAllMocks) to preserve vi.mock() implementations.
+    // vi.restoreAllMocks() would clear the loadQueueConfig mock's return value,
+    // causing subsequent tests in this suite to receive undefined.
+    vi.clearAllMocks();
+  });
+
+  it('always calls dispatchAdaptivePipeline, never dispatch()', async () => {
+    // Proves Change 2: queue poll always routes through adaptive coordinator.
+    // dispatch() must NOT be called even if adaptive call succeeds.
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router, dispatched, adaptiveDispatched } = makeRouter();
+
+    const dispatchSpy = vi.spyOn(router, 'dispatch');
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+
+    // Call doPoll directly (bypasses interval scheduling)
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+
+    // Adaptive coordinator called, dispatch() NOT called
+    expect(adaptiveDispatched).toHaveLength(1);
+    expect(adaptiveDispatched[0]?.goal).toBe('Implement login flow');
+    expect(dispatched).toHaveLength(0);
+    expect(dispatchSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws when dispatchAdaptivePipeline is not available on router', async () => {
+    // Proves Change 2: no silent fallback to dispatch() when adaptive unavailable.
+    // The throw is caught by runPollCycle's try/catch and logged as a warning.
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router: routerWithoutAdaptive } = makeRouterWithoutAdaptive();
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], routerWithoutAdaptive, store, makeQueueFetch());
+
+    // doPoll should throw (not silently fall back to dispatch())
+    await expect(
+      (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger),
+    ).rejects.toThrow('dispatchAdaptivePipeline not available on router');
   });
 });

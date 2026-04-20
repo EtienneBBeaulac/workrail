@@ -596,6 +596,29 @@ export class TriggerRouter {
       }
     }
 
+    // Check dispatchCondition (if configured): gate dispatch on a payload value.
+    // Runs AFTER HMAC validation (payload is authentic) and BEFORE context mapping.
+    // WHY: filter early so unauthenticated payloads never reach this check (HMAC first),
+    // and so skipped dispatches never build context (avoid wasted work).
+    //
+    // Silent skip: returns { _tag: 'enqueued' } without calling runWorkflowFn.
+    // The 202 response was already sent before route() is called -- the HTTP contract
+    // is 'accepted for processing', not 'guaranteed to dispatch'. A debug log provides
+    // the only observability when a dispatch is skipped by this condition.
+    if (trigger.dispatchCondition) {
+      const { payloadPath, equals } = trigger.dispatchCondition;
+      const extracted = extractDotPath(event.payload, payloadPath);
+      // Strict identity check (no type coercion): string '42' does NOT match number 42.
+      if (extracted !== equals) {
+        const actual = extracted === undefined ? 'undefined' : String(extracted);
+        console.log(
+          `[TriggerRouter] dispatch skipped: condition not met ` +
+          `(${payloadPath}=${actual} !== ${equals}) for triggerId=${trigger.id}`,
+        );
+        return { _tag: 'enqueued', triggerId: trigger.id };
+      }
+    }
+
     // Build workflow context from contextMapping + raw payload fallback
     let workflowContext: Record<string, unknown>;
     if (trigger.contextMapping?.mappings.length) {

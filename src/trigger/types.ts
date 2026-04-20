@@ -369,6 +369,35 @@ export interface TriggerDefinition {
   readonly referenceUrls?: readonly string[];
 
   /**
+   * Optional condition that must be true for the trigger to dispatch.
+   * Checked against the webhook payload before enqueueing.
+   * When absent: always dispatch (current behavior).
+   *
+   * WHY: enables safe webhook triggers for queue use cases -- e.g., only fire
+   * when `assignee.login === 'worktrain-etienneb'` so shared GitHub webhooks
+   * can be scoped to a specific bot account without a separate endpoint.
+   *
+   * MVP: equals-only (strict string match). No regex, no AND/OR, no nested conditions.
+   * When a skip occurs, route() returns { _tag: 'enqueued' } (silent -- the 202 was
+   * already sent) and a debug log line is emitted for observability.
+   *
+   * In YAML:
+   *   dispatchCondition:
+   *     payloadPath: "$.assignee.login"
+   *     equals: "worktrain-etienneb"
+   *
+   * payloadPath uses the same dot-path syntax as contextMapping.payloadPath.
+   * Leading "$." is optional and stripped before traversal.
+   * Array indexing (e.g. "$.labels[0]") returns undefined -> condition not met.
+   */
+  readonly dispatchCondition?: {
+    /** Dot-path into the webhook payload. Same syntax as contextMapping payloadPath. */
+    readonly payloadPath: string;
+    /** Dispatch only when the extracted value strictly equals this string. */
+    readonly equals: string;
+  };
+
+  /**
    * Optional agent configuration overrides for this trigger.
    * When absent, the default model selection (env-based) is used.
    */

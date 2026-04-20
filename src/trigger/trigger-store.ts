@@ -119,6 +119,10 @@ interface ParsedTriggerRaw {
   // queueType maps to GitHubQueueConfig.type; queueLabel to GitHubQueueConfig.queueLabel.
   queueType?: string;   // e.g. 'label', 'assignee'
   queueLabel?: string;  // e.g. 'worktrain:ready' (when queueType === 'label')
+  // Dispatch condition for generic webhook triggers.
+  // Both payloadPath and equals must be present strings when the block is set.
+  // Validated at assembly time; missing either field is a TriggerStoreError.
+  dispatchCondition?: { payloadPath?: string; equals?: string };
   // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   // Fields from all providers are unioned here -- the assembler validates which
@@ -396,6 +400,48 @@ function parseTriggersYaml(
         continue;
       }
 
+      if (key === 'dispatchCondition') {
+        // dispatchCondition: is a sub-object block for generic webhook triggers.
+        // Validates payloadPath and equals at assembly time (not here).
+        // Baseline indent: lineIndent (indent of the "dispatchCondition:" key line).
+        lineIndex++;
+        const dispatchCondition: { payloadPath?: string; equals?: string } = {};
+        while (lineIndex < lines.length) {
+          const dcLine = lines[lineIndex];
+          if (dcLine === undefined) break;
+          const dcTrimmed = dcLine.trim();
+          if (dcTrimmed === '' || dcTrimmed.startsWith('#')) {
+            lineIndex++;
+            continue;
+          }
+          const dcIndent = dcLine.search(/\S/);
+          if (dcIndent <= lineIndent) break;
+
+          const dcColonIdx = dcTrimmed.indexOf(':');
+          if (dcColonIdx === -1) {
+            return err({
+              kind: 'parse_error',
+              message: `Missing colon in dispatchCondition entry at line ${lineIndex + 1}: "${dcTrimmed}"`,
+              lineNumber: lineIndex + 1,
+            });
+          }
+          const dcKey = dcTrimmed.slice(0, dcColonIdx).trim();
+          const dcRawValue = dcTrimmed.slice(dcColonIdx + 1).trim();
+          if (dcRawValue !== '') {
+            const dcValueResult = parseScalar(dcRawValue, lineIndex + 1);
+            if (dcValueResult.kind === 'err') return dcValueResult;
+            switch (dcKey) {
+              case 'payloadPath': dispatchCondition.payloadPath = dcValueResult.value; break;
+              case 'equals':      dispatchCondition.equals = dcValueResult.value; break;
+              default: break; // unknown sub-keys silently ignored
+            }
+          }
+          lineIndex++;
+        }
+        trigger.dispatchCondition = dispatchCondition;
+        continue;
+      }
+
       if (key === 'source') {
         // source: is a sub-object block for gitlab_poll triggers.
         // Contains baseUrl, projectId, token, events, pollIntervalSeconds.
@@ -569,15 +615,35 @@ function validateAndResolveTrigger(
   // Fields required unconditionally (workspacePath is handled separately below).
   // NOTE: 'goal' is intentionally excluded here -- it may be absent for late-bound triggers.
   // See the late-bound goal injection block below (after hmacSecret resolution).
-  const requiredStringFields: Array<Extract<keyof ParsedTriggerRaw, 'provider' | 'workflowId'>> = [
+  // NOTE: 'workflowId' is excluded for github_queue_poll -- the adaptive coordinator
+  // determines the pipeline based on task content; workflowId is intentionally ignored.
+  // We check provider first to gate this, but provider validation (SUPPORTED_PROVIDERS)
+  // happens after this block. For github_queue_poll we skip workflowId validation here.
+  const isQueuePollProvider = raw.provider?.trim() === 'github_queue_poll';
+  const requiredStringFields: Array<Extract<keyof ParsedTriggerRaw, 'provider'>> = [
     'provider',
-    'workflowId',
   ];
   for (const field of requiredStringFields) {
     const v: string | undefined = raw[field];
     if (!v?.trim()) {
       return err({ kind: 'missing_field', field, triggerId: rawId });
     }
+  }
+
+  // workflowId is required for all providers EXCEPT github_queue_poll.
+  // For github_queue_poll, the adaptive coordinator decides the pipeline -- workflowId
+  // from triggers.yml is intentionally ignored. Existing configs with workflowId set
+  // will parse successfully (backward-compatible) with a warning that it is ignored.
+  if (!isQueuePollProvider && !raw.workflowId?.trim()) {
+    return err({ kind: 'missing_field', field: 'workflowId', triggerId: rawId });
+  }
+  if (isQueuePollProvider && raw.workflowId?.trim()) {
+    console.warn(
+      `[TriggerStore] WARNING: trigger "${rawId}" has provider='github_queue_poll' and ` +
+      `workflowId='${raw.workflowId.trim()}'. For queue poll triggers, workflowId is ignored -- ` +
+      `the adaptive coordinator determines the pipeline based on task content. ` +
+      `You can remove workflowId from this trigger definition.`,
+    );
   }
 
   const provider = raw.provider!.trim();
@@ -1135,10 +1201,31 @@ function validateAndResolveTrigger(
     );
   }
 
+  // For github_queue_poll, workflowId is optional and ignored at dispatch time.
+  // The adaptive coordinator determines the pipeline based on task content.
+  // Use '' as a sentinel value -- it is never forwarded to the adaptive dispatcher
+  // (only goal, workspacePath, and context are passed to dispatchAdaptivePipeline).
+  const resolvedWorkflowId = raw.workflowId?.trim() ?? '';
+
+  // Assemble and validate dispatchCondition if present.
+  // Both payloadPath and equals must be non-empty strings.
+  let dispatchCondition: TriggerDefinition['dispatchCondition'] | undefined;
+  if (raw.dispatchCondition) {
+    const rawDcPayloadPath = raw.dispatchCondition.payloadPath?.trim();
+    const rawDcEquals = raw.dispatchCondition.equals?.trim();
+    if (!rawDcPayloadPath) {
+      return err({ kind: 'missing_field', field: 'dispatchCondition.payloadPath', triggerId: rawId });
+    }
+    if (rawDcEquals === undefined || rawDcEquals === '') {
+      return err({ kind: 'missing_field', field: 'dispatchCondition.equals', triggerId: rawId });
+    }
+    dispatchCondition = { payloadPath: rawDcPayloadPath, equals: rawDcEquals };
+  }
+
   const trigger: TriggerDefinition = {
     id: asTriggerId(rawId),
     provider,
-    workflowId: raw.workflowId!.trim(),
+    workflowId: resolvedWorkflowId,
     // workspacePath: always set -- from workspaceName resolution or from raw YAML.
     workspacePath: resolvedWorkspacePath,
     goal: resolvedGoal,
@@ -1164,6 +1251,8 @@ function validateAndResolveTrigger(
     ...(branchStrategy !== undefined ? { branchStrategy } : {}),
     ...(baseBranch !== undefined ? { baseBranch } : {}),
     ...(branchPrefix !== undefined ? { branchPrefix } : {}),
+    // Dispatch condition for generic webhook triggers (payload-based dispatch gate).
+    ...(dispatchCondition !== undefined ? { dispatchCondition } : {}),
   };
 
   return ok(trigger);
