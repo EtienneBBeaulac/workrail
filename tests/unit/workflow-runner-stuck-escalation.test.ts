@@ -195,9 +195,9 @@ describe('stuck escalation: repeated_tool_call with abort policy', () => {
       stuckReason: null,
       stepAdvanceCount: 0,
       lastNToolCalls: [
-        { toolName: 'Read', argsSummary: '{"file_path":"/tmp/foo.ts"}' },
-        { toolName: 'Read', argsSummary: '{"file_path":"/tmp/foo.ts"}' },
-        { toolName: 'Read', argsSummary: '{"file_path":"/tmp/foo.ts"}' },
+        { toolName: 'Read', argsSummary: '{"file_path":"/workspace/foo.ts"}' },
+        { toolName: 'Read', argsSummary: '{"file_path":"/workspace/foo.ts"}' },
+        { toolName: 'Read', argsSummary: '{"file_path":"/workspace/foo.ts"}' },
       ],
       issueSummaries: [],
     };
