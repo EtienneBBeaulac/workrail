@@ -36,6 +36,7 @@ import {
   executeWorktrainAwaitCommand,
   executeWorktrainDaemonCommand,
   executeWorktrainOverviewCommand,
+  executeWorktrainTriggerTestCommand,
   buildConsoleServiceFromDataDir,
   type Priority,
 } from './cli/commands/index.js';
@@ -1251,6 +1252,86 @@ runCommand
     });
 
     process.exit(result.hasErrors ? 1 : 0);
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRIGGER COMMAND GROUP
+// ═══════════════════════════════════════════════════════════════════════════
+
+const triggerCommand = program
+  .command('trigger')
+  .description('Trigger management commands');
+
+triggerCommand
+  .command('test <triggerId>')
+  .description('Dry-run the queue picker for a trigger -- shows what would dispatch without dispatching')
+  .option('-p, --port <n>', 'Console server port for active session count', parseInt)
+  .action(async (triggerId: string, options: { port?: number }) => {
+    const { loadTriggerConfigFromFile, buildTriggerIndex } = await import('./trigger/trigger-store.js');
+    const { loadQueueConfig } = await import('./trigger/github-queue-config.js');
+    const { pollGitHubQueueIssues, checkIdempotency, inferMaturity } = await import('./trigger/adapters/github-queue-poller.js');
+
+    const cwd = process.cwd();
+
+    const result = await executeWorktrainTriggerTestCommand(
+      {
+        loadTriggerConfig: async () => {
+          const configResult = await loadTriggerConfigFromFile(cwd, process.env);
+          if (configResult.kind === 'err') {
+            const e = configResult.error;
+            const msg = e.kind === 'file_not_found'
+              ? `triggers.yml not found at ${e.filePath}`
+              : e.kind === 'io_error'
+              ? `IO error reading triggers.yml: ${e.message}`
+              : `Failed to parse triggers.yml: ${JSON.stringify(e)}`;
+            return { kind: 'err', error: msg };
+          }
+          const indexResult = buildTriggerIndex(configResult.value);
+          if (indexResult.kind === 'err') {
+            const idxErr = indexResult.error;
+            const triggerId2 = 'triggerId' in idxErr ? idxErr.triggerId : '(unknown)';
+            return { kind: 'err', error: `Duplicate trigger ID: ${triggerId2}` };
+          }
+          return { kind: 'ok', value: indexResult.value };
+        },
+        loadQueueConfig: async () => {
+          return loadQueueConfig();
+        },
+        pollGitHubQueueIssues: async (source, config) => {
+          const result2 = await pollGitHubQueueIssues(source, config);
+          if (result2.kind === 'err') {
+            const e = result2.error;
+            return { kind: 'err', error: `${e.kind}: ${(e as { message: string }).message}` };
+          }
+          return result2;
+        },
+        countActiveSessions: async () => {
+          const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+          try {
+            const files = await fs.promises.readdir(sessionsDir);
+            return files.filter((f) => f.endsWith('.json')).length;
+          } catch {
+            return 0;
+          }
+        },
+        checkIdempotency: async (issueNumber: number) => {
+          const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+          return checkIdempotency(issueNumber, sessionsDir);
+        },
+        inferMaturity: (issue) => inferMaturity(issue.body),
+        print: (line: string) => process.stdout.write(line + '\n'),
+        stderr: (line: string) => process.stderr.write(line + '\n'),
+      },
+      { triggerId, port: options.port },
+    );
+
+    // WHY handle exit code directly (not via interpretCliResultWithoutDI):
+    // All dry-run output is already printed via deps.print(). The CliResult.failure
+    // carries an empty message to avoid the output-formatter printing a redundant
+    // '❌ ...' prefix after the [DryRun] summary. We only need the exit code.
+    if (result.kind === 'failure') {
+      process.exit(1);
+    }
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
