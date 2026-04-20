@@ -25,12 +25,17 @@
  *   These are available to goalTemplate interpolation and workflow context.
  */
 
-import type { TriggerDefinition, PollingSource, TriggerId } from './types.js';
+import type { TriggerDefinition, PollingSource, TriggerId, TaskCandidate } from './types.js';
 import type { TriggerRouter } from './trigger-router.js';
 import type { PolledEventStore } from './polled-event-store.js';
 import { pollGitLabMRs, type FetchFn, type GitLabMR } from './adapters/gitlab-poller.js';
 import { pollGitHubIssues, pollGitHubPRs, type GitHubIssue, type GitHubPR } from './adapters/github-poller.js';
+import { pollGitHubQueueIssues, inferMaturity, checkIdempotency, type GitHubQueueIssue, type FetchFn as QueueFetchFn } from './adapters/github-queue-poller.js';
+import { loadQueueConfig } from './github-queue-config.js';
 import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -211,6 +216,9 @@ export class PollingScheduler {
       case 'github_prs_poll':
         await this.doPollGitHub(trigger, triggerId, pollStartAt, lastPollAt, trigger.pollingSource, 'prs');
         break;
+      case 'github_queue_poll':
+        await this.doPollGitHubQueue(trigger, triggerId, trigger.pollingSource);
+        break;
       default: {
         // TypeScript exhaustiveness: if a new provider is added to the PollingSource union
         // without a case here, this line becomes unreachable and the compiler warns.
@@ -357,6 +365,144 @@ export class PollingScheduler {
       );
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // doPollGitHubQueue: one poll cycle for a github_queue_poll trigger
+  //
+  // Does NOT use PolledEventStore (queue-poll semantics differ from event-poll).
+  // At most one session dispatched per cycle.
+  // Cycle order is fixed and critical -- see implementation_plan.md.
+  // ---------------------------------------------------------------------------
+
+  private async doPollGitHubQueue(
+    trigger: PollingTriggerDefinition,
+    triggerId: TriggerId,
+    source: Extract<PollingSource, { readonly provider: 'github_queue_poll' }>,
+  ): Promise<void> {
+    const cycleStart = Date.now();
+
+    const configResult = await loadQueueConfig();
+    if (configResult.kind === 'err') {
+      console.warn(`[QueuePoll] Failed to load queue config for trigger '${triggerId}': ${configResult.error}. Skipping cycle.`);
+      return;
+    }
+
+    const queueConfig = configResult.value;
+    if (queueConfig === null) return;
+
+    if (queueConfig.type !== 'assignee') {
+      console.error(`[QueuePoll] Queue type '${queueConfig.type}' is not implemented. Only 'assignee' is supported. Skipping cycle.`);
+      // N2: write poll_cycle_complete (not poll_cycle_error) so operators can grep a uniform event name.
+      await appendQueuePollLog({ event: 'poll_cycle_complete', triggerId, reason: 'not_implemented', queueType: queueConfig.type, ts: new Date().toISOString() });
+      return;
+    }
+
+    // Concurrency cap check BEFORE per-issue evaluation (INVARIANT per pitch)
+    const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+    const activeSessions = await countActiveSessions(sessionsDir);
+    if (activeSessions >= queueConfig.maxTotalConcurrentSessions) {
+      console.log(`[QueuePoll] Skipping cycle: active sessions (${activeSessions}) >= maxTotalConcurrentSessions (${queueConfig.maxTotalConcurrentSessions}).`);
+      await appendQueuePollLog({ event: 'poll_cycle_skipped', triggerId, reason: 'max_concurrency_reached', activeSessions, maxTotalConcurrentSessions: queueConfig.maxTotalConcurrentSessions, ts: new Date().toISOString() });
+      return;
+    }
+
+    const fetchResult = await pollGitHubQueueIssues(source, queueConfig, this.fetchFn as QueueFetchFn | undefined);
+    if (fetchResult.kind === 'err') {
+      console.warn(`[QueuePoll] GitHub API error for trigger '${triggerId}': ${fetchResult.error.kind}. Skipping cycle.`);
+      return;
+    }
+
+    const issues = fetchResult.value;
+    console.log(`[QueuePoll] cycle start repo=${source.repo} issues_fetched=${issues.length}`);
+
+    type ScoredIssue = { issue: GitHubQueueIssue; maturity: 'idea' | 'specced' | 'ready' };
+    const candidates: ScoredIssue[] = [];
+    const skipped: Array<{ issue: GitHubQueueIssue; reason: string }> = [];
+
+    for (const issue of issues) {
+      const issueLabels = issue.labels.map((l) => l.name);
+
+      const excludedLabel = queueConfig.excludeLabels.find((el) => issueLabels.includes(el));
+      if (excludedLabel) { skipped.push({ issue, reason: `excluded_label: ${excludedLabel}` }); continue; }
+
+      // H3: worktrain:in-progress label (active/skip -- not a maturity level)
+      if (issueLabels.includes('worktrain:in-progress')) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
+
+      // H3: session ID pattern in body (active/skip)
+      if (/sess_[a-z0-9]+/.test(issue.body)) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
+
+      // Per-issue idempotency (conservative: any parse error = active)
+      const idempotencyStatus = await checkIdempotency(issue.number, sessionsDir);
+      if (idempotencyStatus === 'active') { skipped.push({ issue, reason: 'active_session' }); continue; }
+
+      // Infer maturity (exactly 3 heuristics -- SCOPE LOCK)
+      const maturity = inferMaturity(issue.body);
+      candidates.push({ issue, maturity });
+    }
+
+    // Rank: ready > specced > idea, ties by issue number ascending
+    const MATURITY_RANK: Record<string, number> = { ready: 0, specced: 1, idea: 2 };
+    candidates.sort((a, b) => {
+      const rankDiff = (MATURITY_RANK[a.maturity] ?? 2) - (MATURITY_RANK[b.maturity] ?? 2);
+      return rankDiff !== 0 ? rankDiff : a.issue.number - b.issue.number;
+    });
+
+    for (const { issue, reason } of skipped) {
+      console.log(`[QueuePoll] skipped #${issue.number} "${issue.title}" reason=${reason}`);
+      await appendQueuePollLog({ event: 'task_skipped', issueNumber: issue.number, title: issue.title, reason, ts: new Date().toISOString() });
+    }
+
+    if (candidates.length === 0) {
+      console.log('[QueuePoll] No actionable issues found in this poll cycle.');
+      await appendQueuePollLog({ event: 'poll_cycle_complete', selected: 0, skipped: skipped.length, elapsed: Date.now() - cycleStart, ts: new Date().toISOString() });
+      return;
+    }
+
+    const top = candidates[0]!;
+    const upstreamSpecUrl = extractUpstreamSpecUrl(top.issue.body);
+
+    const taskCandidate: TaskCandidate = {
+      issueNumber: top.issue.number,
+      title: top.issue.title,
+      body: top.issue.body,
+      url: top.issue.url,
+      inferredMaturity: top.maturity,
+      ...(upstreamSpecUrl !== undefined ? { upstreamSpecUrl } : {}),
+      queueConfigType: queueConfig.type,
+    };
+
+    const workflowTrigger: WorkflowTrigger = {
+      workflowId: trigger.workflowId,
+      goal: top.issue.title,
+      workspacePath: trigger.workspacePath,
+      context: { taskCandidate },
+      ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
+      ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
+      ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
+      // Bot identity for queue-poll sessions: autonomous commits use bot account.
+      // Read from queue config when present; fall back to generic defaults.
+      botIdentity: {
+        name: queueConfig.botName ?? 'worktrain',
+        email: queueConfig.botEmail ?? 'worktrain@users.noreply.github.com',
+      },
+    };
+
+    const maturityReason = describeMaturityReason(top.maturity);
+    console.log(`[QueuePoll] selected #${top.issue.number} "${top.issue.title}" maturity=${top.maturity} reason="${maturityReason}"`);
+    await appendQueuePollLog({ event: 'task_selected', issueNumber: top.issue.number, title: top.issue.title, maturity: top.maturity, reason: maturityReason, ts: new Date().toISOString() });
+
+    this.router.dispatch(workflowTrigger);
+
+    for (let i = 1; i < candidates.length; i++) {
+      const { issue, maturity } = candidates[i]!;
+      console.log(`[QueuePoll] skipped #${issue.number} "${issue.title}" reason=lower_priority_${maturity}`);
+      await appendQueuePollLog({ event: 'task_skipped', issueNumber: issue.number, title: issue.title, inferredMaturity: maturity, reason: `lower_priority_${maturity}`, ts: new Date().toISOString() });
+    }
+
+    const elapsed = Date.now() - cycleStart;
+    console.log(`[QueuePoll] cycle complete selected=1 skipped=${skipped.length + candidates.length - 1} elapsed=${elapsed}ms`);
+    await appendQueuePollLog({ event: 'poll_cycle_complete', selected: 1, skipped: skipped.length + candidates.length - 1, elapsed, ts: new Date().toISOString() });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -492,11 +638,11 @@ function interpolateGoalFromPayload(
  * Returns undefined for missing paths or array-indexed paths.
  */
 function extractDotPath(obj: Record<string, unknown>, rawPath: string): unknown {
-  let path = rawPath.trim();
-  if (path.startsWith('$.')) path = path.slice(2);
-  else if (path.startsWith('$')) path = path.slice(1);
+  let dotPath = rawPath.trim();
+  if (dotPath.startsWith('$.')) dotPath = dotPath.slice(2);
+  else if (dotPath.startsWith('$')) dotPath = dotPath.slice(1);
 
-  const segments = path.split('.');
+  const segments = dotPath.split('.');
   let current: unknown = obj;
   for (const segment of segments) {
     if (segment.includes('[') || current === null || typeof current !== 'object') {
@@ -505,4 +651,42 @@ function extractDotPath(obj: Record<string, unknown>, rawPath: string): unknown 
     current = (current as Record<string, unknown>)[segment];
   }
   return current;
+}
+
+// ---------------------------------------------------------------------------
+// Queue poll helper functions
+// ---------------------------------------------------------------------------
+
+async function countActiveSessions(sessionsDir: string): Promise<number> {
+  try {
+    const files = await fs.readdir(sessionsDir);
+    return files.filter((f) => f.endsWith('.json')).length;
+  } catch {
+    return 0;
+  }
+}
+
+async function appendQueuePollLog(entry: Record<string, unknown>): Promise<void> {
+  const logPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
+  try {
+    await fs.appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
+  } catch (e) {
+    console.warn(`[QueuePoll] Failed to write queue-poll.jsonl: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+function extractUpstreamSpecUrl(body: string): string | undefined {
+  const specLineMatch = /upstream_spec:\s*(https?:\/\/\S+)/i.exec(body);
+  if (specLineMatch?.[1]) return specLineMatch[1];
+  const firstPara = body.split(/\n\s*\n/)[0] ?? '';
+  const urlMatch = /(https?:\/\/\S+)/.exec(firstPara);
+  return urlMatch?.[1];
+}
+
+function describeMaturityReason(maturity: 'idea' | 'specced' | 'ready'): string {
+  switch (maturity) {
+    case 'ready': return 'has upstream spec URL';
+    case 'specced': return 'has acceptance criteria or checklist';
+    case 'idea': return 'maturity=idea, no upstream spec';
+  }
 }

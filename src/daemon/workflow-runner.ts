@@ -315,6 +315,25 @@ export interface WorkflowTrigger {
   readonly soulFile?: string;
 
   /**
+   * Optional bot identity for git commit attribution in autonomous sessions.
+   * Set by queue-poll dispatch (polling-scheduler.ts doPollGitHubQueue).
+   *
+   * When present, workflow-runner.ts runs:
+   *   git -C <workspacePath> config user.name <name>
+   *   git -C <workspacePath> config user.email <email>
+   * after session initialization, before the agent loop begins.
+   *
+   * WHY deterministic (not delegated to LLM): git attribution is infra, not agent work.
+   * WHY non-fatal: if git config fails, session continues with default git config.
+   *
+   * Default: undefined (no identity override).
+   */
+  readonly botIdentity?: {
+    readonly name: string;
+    readonly email: string;
+  };
+
+  /**
    * Branch isolation strategy for this workflow session.
    * Sourced from TriggerDefinition.branchStrategy (parsed from triggers.yml).
    * - 'worktree': runWorkflow() creates an isolated git worktree before the agent loop.
@@ -3003,6 +3022,26 @@ export async function runWorkflow(
     await persistTokens(sessionId, startContinueToken, startCheckpointToken);
   }
 
+// Bot identity: if trigger.botIdentity is set, configure git user.name/email on the
+  // workspace so commits from autonomous sessions use the bot account rather than the
+  // operator's personal git identity. Non-fatal: failure logs a warning and continues.
+  if (trigger.botIdentity) {
+    try {
+      await execFileAsync('git', ['-C', trigger.workspacePath, 'config', 'user.name', trigger.botIdentity.name]);
+      await execFileAsync('git', ['-C', trigger.workspacePath, 'config', 'user.email', trigger.botIdentity.email]);
+      console.log(
+        `[WorkflowRunner] Bot identity set: sessionId=${sessionId} ` +
+        `name=${trigger.botIdentity.name} email=${trigger.botIdentity.email}`,
+      );
+    } catch (identityErr) {
+      console.warn(
+        `[WorkflowRunner] WARNING: Failed to set bot identity for sessionId=${sessionId}: ` +
+        `${identityErr instanceof Error ? identityErr.message : String(identityErr)}. ` +
+        `Commits will use default git config.`,
+      );
+    }
+  }
+
   // ---- Worktree isolation (Issue #627) ----
   // When branchStrategy === 'worktree', create an isolated git worktree for this session.
   // All tool factories and agent file operations use sessionWorkspacePath (the worktree),
@@ -3495,6 +3534,10 @@ export async function runWorkflow(
     const limitDescription = timeoutReason === 'wall_clock'
       ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
       : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
+    // Clean up session file on timeout -- same pattern as success path.
+    // WHY: a timed-out session is no longer in-flight. Leaving the file causes
+    // countActiveSessions() to permanently inflate until daemon restart.
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
     return {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
@@ -3524,6 +3567,10 @@ export async function runWorkflow(
       ...(lastToolCalled !== null && { lastToolCalled }),
       ...(issueSummaries.length > 0 && { issueSummaries }),
     })}`;
+    // Clean up session file on error -- same pattern as success path.
+    // WHY: an errored session is no longer in-flight. Leaving the file causes
+    // countActiveSessions() to permanently inflate until daemon restart.
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
