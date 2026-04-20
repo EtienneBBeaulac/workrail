@@ -110,17 +110,18 @@ describe('OrphanedSession worktreePath field', () => {
 
   it('does not reject sessions with extra fields (forward compatibility)', async () => {
     const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const worktreePath = path.join(tmpDir, 'wt', 'abc');
     await writeSession(tmpDir, sessionId, {
       continueToken: 'ct_test',
       checkpointToken: null,
       ts: Date.now(),
-      worktreePath: '/tmp/wt/abc',
+      worktreePath,
       futureField: 'some future value',
     });
 
     const sessions = await readAllDaemonSessions(tmpDir);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]!.worktreePath).toBe('/tmp/wt/abc');
+    expect(sessions[0]!.worktreePath).toBe(worktreePath);
   });
 });
 
@@ -295,7 +296,8 @@ describe('runStartupRecovery() orphan worktree cleanup', () => {
 // ---------------------------------------------------------------------------
 
 describe('delivery-action: branch assertion', () => {
-  const WORKSPACE = '/tmp/fake-workspace';
+  // Use os.tmpdir() for cross-platform compatibility (avoids /tmp hardcode)
+  const WORKSPACE = path.join(os.tmpdir(), 'workrail-test-fake-workspace');
   const SESSION_ID = 'test-session-uuid-1234';
   const BRANCH_PREFIX = 'worktrain/';
   const EXPECTED_BRANCH = `${BRANCH_PREFIX}${SESSION_ID}`;
