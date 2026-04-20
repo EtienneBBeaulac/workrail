@@ -6791,3 +6791,65 @@ The same 10 demo tasks run after each WorkTrain release become a regression benc
 ### Priority
 
 High -- this is the fastest path to data-driven self-improvement. Build Phase 1 first (pick a demo repo, run tasks manually), then Phase 2 (failure classifier) once you've seen 2-3 recurring failure patterns.
+
+---
+
+## triggers.yml: composable configuration for multi-workspace support (Apr 20, 2026)
+
+**Current state:** Single `triggers.yml` at `WORKRAIL_DEFAULT_WORKSPACE`. Works well for one workspace. Becomes boilerplate-heavy and hard to read as more repos are added.
+
+**The scaling problem:** Each new repo needs a full trigger block repeating shared fields (`branchStrategy`, `branchPrefix`, `autoCommit`, `autoOpenPR`, `agentConfig`). A three-repo setup has 3x the duplication. The file mixes two concerns: **what to watch** (source, provider, repo, token, poll interval) and **what to do** (workflow, branch strategy, delivery, timeouts).
+
+### Proposed direction: two-layer config
+
+**Layer 1: Trigger templates** (global defaults)
+
+Defined in `~/.workrail/config.json` or a global `~/.workrail/trigger-defaults.yml`:
+```yaml
+defaults:
+  coding-pipeline:
+    branchStrategy: worktree
+    baseBranch: main
+    branchPrefix: "worktrain/"
+    autoCommit: true
+    autoOpenPR: true
+    agentConfig:
+      maxSessionMinutes: 120
+      maxTurns: 60
+      stuckAbortPolicy: abort
+
+  review-only:
+    branchStrategy: none
+    autoCommit: false
+    agentConfig:
+      maxSessionMinutes: 30
+```
+
+**Layer 2: Per-workspace or per-trigger overrides**
+
+Each trigger references a template and only specifies what's different:
+```yaml
+triggers:
+  - id: self-improvement
+    extends: coding-pipeline
+    provider: github_queue_poll
+    workspacePath: /path/to/repo
+    queueType: assignee
+    source:
+      repo: owner/repo
+      token: $WORKTRAIN_BOT_TOKEN
+```
+
+**Alternative: per-workspace discovery**
+
+WorkTrain scans each configured `workspaceRoots` entry for `.workrail/triggers.yml`. Per-workspace files apply only to that repo. Global `~/.workrail/triggers.yml` defines cross-workspace triggers. This is the GitHub Actions model -- one file per workflow per repo.
+
+### Priority
+
+Medium -- essential before WorkTrain manages more than 2-3 repos. Single file is fine for the workrail self-improvement loop today. Design this when adding the second workspace.
+
+### Open questions
+
+- Does `extends` merge deeply (arrays concatenated) or shallowly (top-level keys override)?
+- How does `worktrain trigger validate` handle templates -- validate the template in isolation, or only validate instantiated triggers?
+- Where do trigger templates live: `config.json` (structured), a separate `trigger-defaults.yml`, or inline in `triggers.yml` as a `defaults:` section?
