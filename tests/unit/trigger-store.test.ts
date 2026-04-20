@@ -116,6 +116,7 @@ triggers:
     workspacePath: /workspace
     goal: Run workflow
     autoCommit: "true"
+    branchStrategy: worktree
 `;
 
 const WITH_AUTO_OPEN_PR_TRUE_YAML = `
@@ -127,6 +128,7 @@ triggers:
     goal: Run workflow
     autoCommit: "true"
     autoOpenPR: "true"
+    branchStrategy: worktree
 `;
 
 // ---------------------------------------------------------------------------
@@ -1342,11 +1344,14 @@ triggers:
 });
 
 // ---------------------------------------------------------------------------
-// branchStrategy smart default
+// branchStrategy validation (Phase 1 breaking change)
 // ---------------------------------------------------------------------------
 
-describe('branchStrategy smart default', () => {
-  it('defaults branchStrategy to worktree when autoCommit is true and branchStrategy is absent', () => {
+describe('branchStrategy validation', () => {
+  // Phase 1: autoCommit + absent/none branchStrategy is a hard error.
+  // The smart default (silently use worktree) was removed to prevent silent checkout corruption.
+
+  it('hard error: autoCommit + absent branchStrategy -> trigger skipped', () => {
     const yaml = `
 triggers:
   - id: auto-commit-no-strategy
@@ -1356,40 +1361,18 @@ triggers:
     goal: Run workflow
     autoCommit: "true"
 `;
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = loadTriggerConfig(yaml, {});
+    warnSpy.mockRestore();
 
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
-      expect(result.value.triggers[0]?.branchStrategy).toBe('worktree');
+      // Invalid trigger is skipped; returned config has 0 valid triggers
+      expect(result.value.triggers).toHaveLength(0);
     }
-    // Should log an informational message about the smart default
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('defaulting to branchStrategy: "worktree"'));
-    logSpy.mockRestore();
   });
 
-  it('defaults branchStrategy to worktree when autoOpenPR is true and branchStrategy is absent', () => {
-    const yaml = `
-triggers:
-  - id: auto-pr-no-strategy
-    provider: generic
-    workflowId: my-workflow
-    workspacePath: /workspace
-    goal: Run workflow
-    autoCommit: "true"
-    autoOpenPR: "true"
-`;
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const result = loadTriggerConfig(yaml, {});
-
-    expect(result.kind).toBe('ok');
-    if (result.kind === 'ok') {
-      expect(result.value.triggers[0]?.branchStrategy).toBe('worktree');
-    }
-    logSpy.mockRestore();
-  });
-
-  it('keeps branchStrategy none when explicit branchStrategy: none and autoCommit: true (explicit opt-out wins)', () => {
+  it('hard error: autoCommit + branchStrategy: none -> trigger skipped', () => {
     const yaml = `
 triggers:
   - id: explicit-none
@@ -1400,11 +1383,79 @@ triggers:
     branchStrategy: none
     autoCommit: "true"
 `;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = loadTriggerConfig(yaml, {});
+    warnSpy.mockRestore();
 
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
-      expect(result.value.triggers[0]?.branchStrategy).toBe('none');
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('hard error: autoOpenPR + absent autoCommit -> trigger skipped', () => {
+    const yaml = `
+triggers:
+  - id: auto-pr-no-autocommit
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoOpenPR: "true"
+`;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+    warnSpy.mockRestore();
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('valid: autoCommit + branchStrategy: worktree is accepted', () => {
+    const yaml = `
+triggers:
+  - id: auto-commit-with-worktree
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoCommit: "true"
+    branchStrategy: worktree
+`;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+    logSpy.mockRestore();
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(1);
+      expect(result.value.triggers[0]?.branchStrategy).toBe('worktree');
+      expect(result.value.triggers[0]?.autoCommit).toBe(true);
+    }
+  });
+
+  it('valid: autoCommit + autoOpenPR + branchStrategy: worktree is accepted', () => {
+    const yaml = `
+triggers:
+  - id: auto-pr-with-worktree
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    autoCommit: "true"
+    autoOpenPR: "true"
+    branchStrategy: worktree
+`;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result = loadTriggerConfig(yaml, {});
+    logSpy.mockRestore();
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(1);
+      expect(result.value.triggers[0]?.branchStrategy).toBe('worktree');
     }
   });
 

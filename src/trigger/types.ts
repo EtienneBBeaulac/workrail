@@ -667,3 +667,61 @@ export interface WebhookEvent {
   /** X-WorkRail-Signature header value (optional). */
   readonly signature?: string;
 }
+
+// ---------------------------------------------------------------------------
+// TriggerValidationRule: stable rule identifiers for semantic validation.
+//
+// INVARIANT: Every rule that causes validateAndResolveTrigger() to return
+// a TriggerStoreError MUST have a corresponding entry here with severity
+// 'error' in validateTriggerStrict(). Run 'worktrain trigger validate'
+// to check both layers simultaneously. Sync enforced by unit test.
+//
+// Rule IDs are kebab-case strings used for programmatic identification
+// (scripting, CI integration, documentation). They are stable -- do not
+// rename a rule ID once it ships.
+// ---------------------------------------------------------------------------
+
+export type TriggerValidationRule =
+  /** autoCommit: true AND branchStrategy absent or 'none' -- checkout corruption risk */
+  | 'autocommit-needs-worktree'
+  /** autoOpenPR: true AND autoCommit not true -- PR requires a commit */
+  | 'autoopenpr-needs-autocommit'
+  /** branchStrategy: 'worktree' AND baseBranch absent */
+  | 'worktree-needs-base-branch'
+  /** branchStrategy: 'worktree' AND branchPrefix absent */
+  | 'worktree-needs-prefix'
+  /** concurrencyMode: 'parallel' AND branchStrategy absent or 'none' -- concurrent clobber risk */
+  | 'parallel-without-worktree'
+  /** goalTemplate absent AND no static goal -- agent will use sentinel "Autonomous task" */
+  | 'missing-goal-template'
+  /** agentConfig.maxSessionMinutes absent -- effective default is 30 minutes */
+  | 'missing-max-session-minutes'
+  /** agentConfig.maxTurns absent -- no turn limit will apply */
+  | 'missing-max-turns'
+  /** autoCommit: true AND branchStrategy: 'none' explicit -- latent danger in serial mode */
+  | 'autocommit-on-main-checkout';
+
+// ---------------------------------------------------------------------------
+// TriggerValidationIssue: a single named validation issue for a trigger.
+//
+// Returned by validateTriggerStrict() and validateAllTriggers().
+// severity 'error' issues match the hard errors in validateAndResolveTrigger().
+// severity 'warning' and 'info' issues are informational -- they do not block
+// daemon startup but are surfaced by 'worktrain trigger validate'.
+// ---------------------------------------------------------------------------
+
+export interface TriggerValidationIssue {
+  /** Stable rule identifier. Used for programmatic identification and scripting. */
+  readonly rule: TriggerValidationRule;
+  /** Severity of the issue. 'error' = daemon would skip this trigger. */
+  readonly severity: 'error' | 'warning' | 'info';
+  /** The trigger ID this issue belongs to. */
+  readonly triggerId: string;
+  /** Human-readable description of the issue. */
+  readonly message: string;
+  /**
+   * Optional suggested fix (config change that would resolve the issue).
+   * Absent when no simple single-line fix applies.
+   */
+  readonly suggestedFix?: string;
+}

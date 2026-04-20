@@ -36,6 +36,7 @@ import { ok, err } from '../runtime/result.js';
 import {
   type TriggerConfig,
   type TriggerDefinition,
+  type TriggerValidationIssue,
   type ContextMapping,
   type ContextMappingEntry,
   type PollingSource,
@@ -933,15 +934,17 @@ function validateAndResolveTrigger(
     ? raw.secretScan.trim().toLowerCase() === 'true'
     : undefined;
 
-  // Warn if autoOpenPR is set without autoCommit -- a PR requires a commit.
-  // WHY soft warning (not hard error): allows users to add autoOpenPR first and
-  // configure autoCommit later without breaking the config load. Delivery is
-  // gated in code (runDelivery checks flags.autoCommit !== true).
+  // Hard error if autoOpenPR is set without autoCommit -- a PR requires a commit.
+  // WHY hard error (not warning): autoOpenPR: true + autoCommit: false is a broken config
+  // that can never open a PR. Silently loading and skipping delivery at runtime is actively
+  // misleading. Fail-fast at config load ensures the operator sees the misconfiguration
+  // immediately. Run 'worktrain trigger validate' for a full config health check.
   if (autoOpenPR && !autoCommit) {
-    console.warn(
-      `[TriggerStore] Warning: trigger "${rawId}" has autoOpenPR: true but autoCommit is not true. ` +
-      `A PR requires a commit -- delivery will be skipped unless autoCommit is also set to true.`,
-    );
+    return err({
+      kind: 'invalid_field_value',
+      field: 'autoOpenPR',
+      triggerId: rawId,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -951,11 +954,9 @@ function validateAndResolveTrigger(
   //   - Default 'none' for read-only triggers (no autoCommit, no autoOpenPR):
   //     worktree creation requires git auth (git fetch) and disk access; read-only
   //     triggers (MR review, polling) should not incur this overhead.
-  //   - Smart default 'worktree' when autoCommit or autoOpenPR is true and
-  //     branchStrategy is absent: concurrent coding sessions corrupt the main
-  //     checkout without isolation. Making this the default prevents accidental
-  //     clobber for the common coding-trigger case.
-  //   - Explicit 'branchStrategy: none' is the opt-out (always wins).
+  //   - 'worktree' REQUIRED when autoCommit is true: concurrent coding sessions
+  //     corrupt the main checkout without isolation. autoCommit with no branch
+  //     isolation is a hard error -- fail-fast prevents silent checkout clobber.
   //
   // baseBranch: the base branch to branch from; default 'main'.
   // branchPrefix: prefix for the session branch name; default 'worktrain/'.
@@ -972,20 +973,20 @@ function validateAndResolveTrigger(
       triggerId: rawId,
     });
   }
-  // Smart default: if autoCommit or autoOpenPR is set but branchStrategy is absent,
-  // default to 'worktree'. Isolated worktrees prevent concurrent session clobber.
-  // Explicit 'branchStrategy: none' is the opt-out.
-  let branchStrategy: 'worktree' | 'none' | undefined;
-  if (!rawBranchStrategy && (autoCommit || autoOpenPR)) {
-    branchStrategy = 'worktree';
-    console.log(
-      `[TriggerStore] Trigger "${rawId}" has autoCommit/autoOpenPR but no branchStrategy -- ` +
-      `defaulting to branchStrategy: "worktree" for session isolation. ` +
-      `Use branchStrategy: none to opt out.`,
-    );
-  } else {
-    branchStrategy = rawBranchStrategy === 'worktree' ? 'worktree' : rawBranchStrategy === 'none' ? 'none' : undefined;
+  // Hard error: autoCommit requires branchStrategy 'worktree'.
+  // WHY hard error (not smart default): silently defaulting to 'worktree' was a previous
+  // behavior that masked misconfigured triggers. The correct operator action is to
+  // explicitly set branchStrategy: worktree. An absent or 'none' strategy with autoCommit
+  // risks concurrent checkout corruption. Run 'worktrain trigger validate' for full checks.
+  if (autoCommit && (!rawBranchStrategy || rawBranchStrategy === 'none')) {
+    return err({
+      kind: 'invalid_field_value',
+      field: 'branchStrategy',
+      triggerId: rawId,
+    });
   }
+  const branchStrategy: 'worktree' | 'none' | undefined =
+    rawBranchStrategy === 'worktree' ? 'worktree' : rawBranchStrategy === 'none' ? 'none' : undefined;
 
   const baseBranch = raw.baseBranch?.trim() || undefined;
   const branchPrefix = raw.branchPrefix?.trim() || undefined;
@@ -1335,6 +1336,16 @@ export function loadTriggerConfig(
     );
   }
 
+  // Startup hint: guide operator to the validate command for a full config health check.
+  // This fires even when no validation errors occurred -- warnings (missing limits, etc.)
+  // are not surfaced at startup. The validate command shows the full picture.
+  if (validTriggers.length > 0) {
+    console.log(
+      `[TriggerStore] Loaded ${validTriggers.length} trigger(s). ` +
+      `Run 'worktrain trigger validate' for a full config health check.`,
+    );
+  }
+
   return ok({ triggers: validTriggers });
 }
 
@@ -1386,4 +1397,178 @@ export function buildTriggerIndex(
     index.set(trigger.id, trigger);
   }
   return ok(index);
+}
+
+// ---------------------------------------------------------------------------
+// Semantic Validator
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a single trigger against all 9 semantic rules.
+ *
+ * INVARIANT: This function MUST reproduce all error checks from
+ * validateAndResolveTrigger() as TriggerValidationIssue with severity:'error'.
+ * The validate CLI must be a strict superset of what the daemon checks at startup.
+ * When adding a new hard error to validateAndResolveTrigger(), add the corresponding
+ * error-severity rule here. Enforced by unit tests (sync coverage test).
+ *
+ * Takes an already-parsed TriggerDefinition (post structural validation by
+ * loadTriggerConfig). Checks all 9 semantic rules and returns all issues found.
+ * Returns an empty array for a fully valid trigger.
+ */
+export function validateTriggerStrict(
+  trigger: TriggerDefinition,
+): readonly TriggerValidationIssue[] {
+  const issues: TriggerValidationIssue[] = [];
+  const id = trigger.id;
+
+  // --- Error-severity rules (must match validateAndResolveTrigger hard errors) ---
+
+  // Rule: autocommit-needs-worktree (error)
+  // Mirrors validateAndResolveTrigger Phase 1 hard error: autoCommit + absent/none branchStrategy.
+  if (trigger.autoCommit && (!trigger.branchStrategy || trigger.branchStrategy === 'none')) {
+    issues.push({
+      rule: 'autocommit-needs-worktree',
+      severity: 'error',
+      triggerId: id,
+      message:
+        "autoCommit requires branchStrategy 'worktree' to prevent checkout corruption; " +
+        'set branchStrategy: worktree (or remove autoCommit: true)',
+    });
+  }
+
+  // Rule: autoopenpr-needs-autocommit (error)
+  // Mirrors validateAndResolveTrigger Phase 1 hard error: autoOpenPR + !autoCommit.
+  if (trigger.autoOpenPR && !trigger.autoCommit) {
+    issues.push({
+      rule: 'autoopenpr-needs-autocommit',
+      severity: 'error',
+      triggerId: id,
+      message:
+        'autoOpenPR requires autoCommit: true; either add autoCommit: true or remove autoOpenPR: true',
+    });
+  }
+
+  // Rule: worktree-needs-base-branch (error)
+  if (trigger.branchStrategy === 'worktree' && !trigger.baseBranch) {
+    issues.push({
+      rule: 'worktree-needs-base-branch',
+      severity: 'error',
+      triggerId: id,
+      message: 'branchStrategy: worktree requires baseBranch to be set; add baseBranch: main (or your base branch)',
+      suggestedFix: 'baseBranch: main',
+    });
+  }
+
+  // Rule: worktree-needs-prefix (error)
+  if (trigger.branchStrategy === 'worktree' && !trigger.branchPrefix) {
+    issues.push({
+      rule: 'worktree-needs-prefix',
+      severity: 'error',
+      triggerId: id,
+      message: 'branchStrategy: worktree requires branchPrefix to be set; add branchPrefix: worktrain/',
+      suggestedFix: 'branchPrefix: worktrain/',
+    });
+  }
+
+  // --- Warning-severity rules ---
+
+  // Rule: parallel-without-worktree (warning)
+  // concurrencyMode: 'parallel' without worktree isolation risks concurrent checkout clobber.
+  if (trigger.concurrencyMode === 'parallel' && (!trigger.branchStrategy || trigger.branchStrategy === 'none')) {
+    issues.push({
+      rule: 'parallel-without-worktree',
+      severity: 'warning',
+      triggerId: id,
+      message:
+        'concurrencyMode: parallel without branchStrategy: worktree risks concurrent sessions ' +
+        'clobbering the same checkout; add branchStrategy: worktree for safe parallel execution',
+    });
+  }
+
+  // Rule: missing-goal-template (warning)
+  // A trigger with no explicit goalTemplate and no static goal will have the loader inject
+  // goalTemplate: '{{$.goal}}' and goal: 'Autonomous task' as defaults.
+  // After loadTriggerConfig, these sentinels indicate "no explicit goal was configured".
+  // WHY check sentinels: validateTriggerStrict takes an assembled TriggerDefinition where
+  // the injected defaults are indistinguishable from explicit operator values unless we
+  // check the specific sentinel values. Operators who explicitly set these exact values
+  // will see the warning (false positive) -- this is acceptable because the warning is
+  // informational and the operator can confirm their intent is correct.
+  const LATE_BOUND_GOAL_SENTINEL = 'Autonomous task';
+  const LATE_BOUND_TEMPLATE_SENTINEL = '{{$.goal}}';
+  if (
+    trigger.goalTemplate === LATE_BOUND_TEMPLATE_SENTINEL &&
+    trigger.goal === LATE_BOUND_GOAL_SENTINEL
+  ) {
+    issues.push({
+      rule: 'missing-goal-template',
+      severity: 'warning',
+      triggerId: id,
+      message:
+        'No explicit goalTemplate or goal is set -- the loader injected the default goalTemplate: "{{$.goal}}"; ' +
+        'if goal comes from the webhook payload this is expected, otherwise set goalTemplate explicitly',
+    });
+  }
+
+  // Rule: missing-max-session-minutes (warning)
+  if (!trigger.agentConfig?.maxSessionMinutes) {
+    issues.push({
+      rule: 'missing-max-session-minutes',
+      severity: 'warning',
+      triggerId: id,
+      message:
+        'agentConfig.maxSessionMinutes not set -- effective default is 30 minutes; ' +
+        'set maxSessionMinutes explicitly to control the session wall-clock limit',
+      suggestedFix: 'agentConfig:\n  maxSessionMinutes: 60',
+    });
+  }
+
+  // --- Info-severity rules ---
+
+  // Rule: missing-max-turns (info)
+  if (!trigger.agentConfig?.maxTurns) {
+    issues.push({
+      rule: 'missing-max-turns',
+      severity: 'info',
+      triggerId: id,
+      message: 'agentConfig.maxTurns not set; no turn limit will apply to this trigger',
+    });
+  }
+
+  // Rule: autocommit-on-main-checkout (warning)
+  // autoCommit: true AND branchStrategy: 'none' (explicit opt-out from worktree isolation).
+  // This is a warning (not error) -- the operator explicitly opted out. The 'autocommit-needs-worktree'
+  // error fires first (above), so this rule only adds additional context when branchStrategy is explicit.
+  // WHY both rules: the error covers the safety violation; the warning covers the explicit opt-out
+  // that may be intentional in serial mode but is still latently dangerous.
+  if (trigger.autoCommit && trigger.branchStrategy === 'none') {
+    issues.push({
+      rule: 'autocommit-on-main-checkout',
+      severity: 'warning',
+      triggerId: id,
+      message:
+        'autoCommit: true with branchStrategy: none commits directly to the main checkout; ' +
+        'concurrent sessions will corrupt the checkout -- use branchStrategy: worktree instead',
+    });
+  }
+
+  return issues;
+}
+
+/**
+ * Validate all triggers in a TriggerConfig and collect all issues.
+ *
+ * Maps validateTriggerStrict over config.triggers and returns a flat array
+ * of all issues. Issues include the triggerId field so callers can group by trigger.
+ */
+export function validateAllTriggers(
+  config: TriggerConfig,
+): readonly TriggerValidationIssue[] {
+  const allIssues: TriggerValidationIssue[] = [];
+  for (const trigger of config.triggers) {
+    const issues = validateTriggerStrict(trigger);
+    allIssues.push(...issues);
+  }
+  return allIssues;
 }

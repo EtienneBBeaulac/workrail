@@ -38,6 +38,7 @@ import {
   executeWorktrainDaemonCommand,
   executeWorktrainOverviewCommand,
   executeWorktrainTriggerTestCommand,
+  executeWorktrainTriggerValidateCommand,
   buildConsoleServiceFromDataDir,
   type Priority,
 } from './cli/commands/index.js';
@@ -1610,6 +1611,25 @@ triggerCommand
     if (result.kind === 'failure') {
       process.exit(1);
     }
+  });
+
+triggerCommand
+  .command('validate')
+  .description('Static analysis of triggers.yml -- reports issues without running anything. Exits 1 if any errors found.')
+  .option('--config <path>', 'Path to triggers.yml (default: ~/.workrail/triggers.yml)')
+  .action(async (options: { config?: string }) => {
+    const { loadTriggerConfigFromFile } = await import('./trigger/trigger-store.js');
+
+    const defaultConfigFilePath = path.join(os.homedir(), '.workrail', 'triggers.yml');
+    const configFilePath = options.config ?? defaultConfigFilePath;
+
+    await executeWorktrainTriggerValidateCommand({
+      loadTriggerConfigFromFile: (dirPath: string) => loadTriggerConfigFromFile(dirPath, process.env),
+      stdout: process.stdout,
+      stderr: process.stderr,
+      exit: process.exit as (code: number) => never,
+      configFilePath,
+    });
   });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -76,3 +76,7 @@ export {
   type WorktrainTriggerTestDeps,
   type WorktrainTriggerTestOpts,
 } from './worktrain-trigger-test.js';
+export {
+  executeWorktrainTriggerValidateCommand,
+  type WorktrainTriggerValidateDeps,
+} from './worktrain-trigger-validate.js';
