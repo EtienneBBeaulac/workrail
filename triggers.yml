@@ -27,14 +27,18 @@ triggers:
     agentConfig:
       maxSessionMinutes: 30
 
-  # Self-improvement queue: assign issues to worktrain-etienneb to queue them
-  # WorkTrain picks the highest-priority issue and runs the adaptive pipeline
+  # Self-improvement queue: label issues with "worktrain:ready" to queue them.
+  # WorkTrain acts as EtienneBBeaulac (no bot account needed).
+  # PRs are identifiable by the worktrain/ branch prefix and co-author footer.
+  # Token: use your own GitHub PAT with repo scope ($GITHUB_TOKEN or $WORKTRAIN_TOKEN).
   - id: self-improvement
     provider: github_queue_poll
     workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
     repo: EtienneBBeaulac/workrail
-    token: $WORKTRAIN_BOT_TOKEN
+    token: $GITHUB_TOKEN
+    queueType: label
+    queueLabel: "worktrain:ready"
     branchStrategy: worktree
     baseBranch: main
     branchPrefix: "worktrain/"
