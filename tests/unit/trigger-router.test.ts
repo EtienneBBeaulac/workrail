@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
+import type { AdaptiveCoordinatorDeps, ModeExecutors, PipelineOutcome } from '../../src/coordinators/adaptive-pipeline.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
 import type { ExecFn } from '../../src/trigger/delivery-action.js';
@@ -1490,5 +1491,207 @@ describe('late-bound goals integration', () => {
     // interpolateGoalTemplate should have warned about the missing token
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("goalTemplate variable '$.goal' not found"));
     warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.dispatchAdaptivePipeline: deduplication within 30s window
+//
+// Verifies that rapid-fire calls for the same goal+workspace are deduplicated
+// within a 30-second TTL window, preventing duplicate adaptive pipeline sessions
+// from webhook retries or daemon restarts.
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
+  /**
+   * Build a minimal fake AdaptiveCoordinatorDeps that satisfies the type.
+   *
+   * runAdaptivePipeline calls deps.now() and deps.nowIso() BEFORE dispatching
+   * to executors (for timing and log-file naming). Both must be provided.
+   * deps.writeFile and deps.mkdir are needed for the pipeline-run log write
+   * that also happens before executor dispatch. deps.stderr is called for
+   * routing progress messages.
+   *
+   * All other fields are cast to satisfy TypeScript -- they are never reached
+   * because the fake ModeExecutors short-circuit before any other dep call.
+   */
+  const FAKE_DEPS = {
+    now: () => Date.now(),
+    nowIso: () => new Date().toISOString(),
+    writeFile: async () => {},
+    mkdir: async () => undefined,
+    stderr: () => {},
+    port: 0,
+  } as unknown as AdaptiveCoordinatorDeps;
+
+  /**
+   * Build a ModeExecutors fake whose execute function records each call and
+   * resolves immediately. Returns the call-count accessor alongside the fake.
+   *
+   * WHY fake ModeExecutors instead of mocking runAdaptivePipeline directly:
+   * dispatchAdaptivePipeline calls runAdaptivePipeline(deps, opts, executors).
+   * We inject coordinatorDeps + modeExecutors through the constructor, so the
+   * injected executors are what actually gets invoked.
+   */
+  function makeFakeModeExecutors(): { executors: ModeExecutors; callCount: () => number } {
+    let count = 0;
+    const outcome: PipelineOutcome = { kind: 'merged', prUrl: null };
+    const executor = async () => {
+      count++;
+      return outcome;
+    };
+    const executors: ModeExecutors = {
+      runQuickReview: executor,
+      runReviewOnly: executor,
+      runImplement: executor,
+      runFull: executor,
+    };
+    return { executors, callCount: () => count };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('blocks the second dispatch for the same goal+workspace within 30s', async () => {
+    // WHY: proves that rapid-fire webhook retries for the same goal+workspace
+    // do not spawn duplicate adaptive pipeline sessions within the TTL window.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { executors, callCount } = makeFakeModeExecutors();
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined, // execFn
+      undefined, // maxConcurrentSessions
+      undefined, // emitter
+      undefined, // notificationService
+      undefined, // steerRegistry
+      FAKE_DEPS,
+      executors,
+    );
+
+    const goal = 'review PR #42';
+    const workspace = '/workspace';
+
+    // First dispatch: should proceed
+    await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Advance time by 10 seconds (within 30s window)
+    vi.advanceTimersByTime(10_000);
+
+    // Second dispatch: same goal+workspace, within TTL -- should be blocked
+    const secondResult = await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Pipeline called only once (second dispatch was blocked)
+    expect(callCount()).toBe(1);
+
+    // Skip log message emitted for the blocked dispatch
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate adaptive dispatch'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('already dispatched within 30s'),
+    );
+
+    // Blocked dispatch returns escalated outcome
+    expect(secondResult.kind).toBe('escalated');
+
+    logSpy.mockRestore();
+  });
+
+  it('allows the second dispatch for the same goal+workspace after 30s', async () => {
+    // WHY: proves that after the TTL expires, the same goal+workspace can dispatch again.
+    // This covers the legitimate refire case (e.g. a corrective retry after failure).
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { executors, callCount } = makeFakeModeExecutors();
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      FAKE_DEPS,
+      executors,
+    );
+
+    const goal = 'review PR #42';
+    const workspace = '/workspace';
+
+    // First dispatch at t=0
+    await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Advance time by 31 seconds (TTL has expired)
+    vi.advanceTimersByTime(31_000);
+
+    // Second dispatch: same goal+workspace, after TTL -- should proceed
+    const secondResult = await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Both dispatches proceeded
+    expect(callCount()).toBe(2);
+
+    // Skip log NOT emitted for the second dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate adaptive dispatch'),
+    );
+
+    // Second dispatch returned a real pipeline outcome (not escalated-for-skip)
+    expect(secondResult.kind).toBe('merged');
+
+    logSpy.mockRestore();
+  });
+
+  it('does not block dispatches for different goals on the same workspace within 30s', async () => {
+    // WHY: proves the deduplication key is goal+workspace (not workspace-only).
+    // Different tasks arriving for the same repo within 30s must all dispatch.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { executors, callCount } = makeFakeModeExecutors();
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      FAKE_DEPS,
+      executors,
+    );
+
+    const workspace = '/workspace';
+
+    // Two different goals on the same workspace within 5 seconds
+    await router.dispatchAdaptivePipeline('review PR #42', workspace);
+    vi.advanceTimersByTime(5_000);
+    await router.dispatchAdaptivePipeline('review PR #43', workspace);
+
+    // Both dispatches proceeded (different goals = different deduplication keys)
+    expect(callCount()).toBe(2);
+
+    // Skip log NOT emitted for either dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate adaptive dispatch'),
+    );
+
+    logSpy.mockRestore();
   });
 });

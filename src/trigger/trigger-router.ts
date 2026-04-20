@@ -475,6 +475,33 @@ export class TriggerRouter {
   private readonly _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
 
+  /**
+   * Recent adaptive dispatch timestamps keyed by `${goal}::${workspace}`.
+   *
+   * WHY Map<string, number> (not a Set): we need the timestamp to implement
+   * a TTL-based sliding window. A Set can only answer "was this dispatched?",
+   * not "was this dispatched within the last N milliseconds?".
+   *
+   * WHY cleanup-on-entry (not a background timer): a timer would introduce
+   * async state that conflicts with the determinism principle and complicates
+   * testing. Cleanup-on-entry is O(n) per dispatch call, bounded by the
+   * number of unique goal+workspace pairs dispatched in the last 30s -- always
+   * a small number in practice.
+   *
+   * @see dispatchAdaptivePipeline
+   * @see ADAPTIVE_DEDUPE_TTL_MS
+   */
+  private readonly _recentAdaptiveDispatches = new Map<string, number>();
+
+  /**
+   * TTL for adaptive dispatch deduplication: 30 seconds.
+   *
+   * A second dispatch for the same goal+workspace within this window is
+   * silently skipped to prevent duplicate pipeline sessions from webhook
+   * retries or rapid-fire test triggers.
+   */
+  private static readonly ADAPTIVE_DEDUPE_TTL_MS = 30_000;
+
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
     private readonly ctx: V2ToolContext,
@@ -915,6 +942,47 @@ export class TriggerRouter {
         },
       };
     }
+
+    // Deduplication guard: prevent duplicate adaptive pipeline sessions from
+    // rapid-fire webhook retries or daemon restarts.
+    //
+    // WHY here (after deps check, not before): we only want to record timestamps
+    // for calls that would actually dispatch -- calls that fail the deps check are
+    // already guarded above and should not consume a deduplication window slot.
+    //
+    // WHY 'escalated' as the return kind: PipelineOutcome has no 'skipped' variant.
+    // Using 'escalated' is slightly semantically impure, but it is the established
+    // early-exit pattern in this method (see deps guard above). Callers are
+    // fire-and-forget and do not branch on outcome.kind, so the impurity is harmless.
+    // A 'skipped' variant would require widening PipelineOutcome, which is scope creep.
+    const dedupeKey = `${goal}::${workspace}`;
+    const now = Date.now();
+
+    // Cleanup-on-entry: purge stale entries before checking/inserting.
+    // WHY cleanup-on-entry (not a background timer): avoids async state, keeps the
+    // implementation deterministic and trivially testable with vi.useFakeTimers().
+    for (const [key, ts] of this._recentAdaptiveDispatches) {
+      if (now - ts >= TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+        this._recentAdaptiveDispatches.delete(key);
+      }
+    }
+
+    const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
+    if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+      console.log(
+        `[TriggerRouter] Skipping duplicate adaptive dispatch: goal="${goal.slice(0, 60)}" ` +
+        `(already dispatched within 30s)`,
+      );
+      return {
+        kind: 'escalated',
+        escalationReason: {
+          phase: 'dispatch',
+          reason: 'duplicate adaptive dispatch within 30s window',
+        },
+      };
+    }
+
+    this._recentAdaptiveDispatches.set(dedupeKey, now);
 
     const opts: AdaptivePipelineOpts = {
       goal,
