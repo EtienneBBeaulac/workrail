@@ -30,12 +30,13 @@ triggers:
   # Self-improvement queue: apply "worktrain:ready" label to any issue to queue it.
   # WorkTrain acts as EtienneBBeaulac. PRs are identifiable by [WT] prefix and
   # worktrain/ branch name. Token resolved from $WORKTRAIN_BOT_TOKEN env var.
+  # Self-improvement queue: assign issues to worktrain-etienneb to queue them.
+  # WorkTrain acts as EtienneBBeaulac. PRs get [WT] prefix and worktrain/ branch.
   - id: self-improvement
     provider: github_queue_poll
     workflowId: coding-task-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
-    queueType: label
-    queueLabel: "worktrain:ready"
+    queueType: assignee
     branchStrategy: worktree
     baseBranch: main
     branchPrefix: "worktrain/"
