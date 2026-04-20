@@ -807,6 +807,10 @@ export class TriggerRouter {
   }
 
   /**
+   * @see feat/github-queue-poll -- polling-scheduler.ts must be updated to call
+   * this method instead of dispatch() when context.taskCandidate is present.
+   * This is intentionally unconnected until that branch is rebased onto main.
+   *
    * Dispatch the adaptive pipeline coordinator in-process (Option B).
    *
    * Called by the GitHub issue queue poller when a task candidate arrives.

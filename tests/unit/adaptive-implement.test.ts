@@ -17,6 +17,7 @@ import {
   runImplementPipeline,
   touchesUI,
 } from '../../src/coordinators/modes/implement.js';
+import { runAuditChain } from '../../src/coordinators/modes/implement-shared.js';
 import { buildDepBumpGoal } from '../../src/coordinators/modes/quick-review.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts } from '../../src/coordinators/adaptive-pipeline.js';
 import type { AwaitResult } from '../../src/cli/commands/worktrain-await.js';
@@ -425,6 +426,97 @@ describe('runImplementPipeline - happy path', () => {
       expect.any(String),
       '/workspace',
       expect.objectContaining({ pitchPath: '/workspace/.workrail/current-pitch.md' }),
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runAuditChain -- escalating audit chain for blocking/critical findings
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runAuditChain', () => {
+  it('dispatches production-readiness-audit when review returns blocking', async () => {
+    const spawnedWorkflows: string[] = [];
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnedWorkflows.push(workflowId);
+        return ok(`h${++spawnCount}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      // Re-review after audit returns clean so we can verify the audit was dispatched
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'APPROVE -- LGTM. All findings addressed.',
+        artifacts: [],
+      }),
+    });
+
+    const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
+    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
+
+    // Must dispatch production-readiness-audit as the audit workflow
+    expect(spawnedWorkflows).toContain('production-readiness-audit');
+    expect(deps.spawnSession).toHaveBeenCalledWith(
+      'production-readiness-audit',
+      expect.any(String),
+      '/workspace',
+      expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42', severity: 'blocking' }),
+    );
+  });
+
+  it('merges PR when post-audit re-review returns clean verdict', async () => {
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        // No blocking keywords -- 'APPROVE' and 'LGTM' are clean signals
+        recapMarkdown: 'APPROVE -- LGTM. All findings addressed and verified.',
+        artifacts: [],
+      }),
+    });
+
+    const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
+    const outcome = await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
+
+    expect(outcome.kind).toBe('merged');
+    if (outcome.kind === 'merged') {
+      expect(outcome.prUrl).toBe('https://github.com/org/repo/pull/42');
+    }
+    // Must NOT post the do-not-merge escalation when verdict is clean
+    expect(deps.postToOutbox).not.toHaveBeenCalledWith(
+      expect.stringContaining('Do NOT auto-merge'),
+      expect.any(Object),
+    );
+  });
+
+  it('escalates to Human Outbox and does NOT merge when post-audit re-review is still blocking', async () => {
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      // Post-audit re-review still returns blocking
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'CRITICAL findings remain: SQL injection vulnerability not resolved.',
+        artifacts: [],
+      }),
+    });
+
+    const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
+    const outcome = await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
+
+    // Must NOT merge
+    expect(outcome.kind).toBe('escalated');
+    // Must post to Human Outbox: message indicates human review required, metadata has do-not-merge note
+    expect(deps.postToOutbox).toHaveBeenCalledWith(
+      expect.stringContaining('human review'),
+      expect.objectContaining({
+        prUrl: 'https://github.com/org/repo/pull/42',
+        note: 'Do NOT auto-merge. Human review required.',
+      }),
     );
   });
 });

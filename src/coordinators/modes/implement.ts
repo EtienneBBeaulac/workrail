@@ -44,12 +44,6 @@ import { runReviewAndVerdictCycle, MAX_FIX_ITERATIONS } from './implement-shared
 const PR_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * UX gate outbox poll timeout: 24 hours.
- * After 24 hours with no human ack: escalate (pitch element 5).
- */
-const UX_GATE_ACK_TIMEOUT_MS = 24 * 60 * 60 * 1000;
-
-/**
  * UI-touching keyword signals (case-insensitive).
  * If the goal contains any of these, dispatch ui-ux-design-workflow first.
  * (Pitch invariant 16.)

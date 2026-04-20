@@ -450,3 +450,53 @@ describe('runFullPipeline - happy path', () => {
     expect(codingIdx).toBeLessThan(reviewIdx);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runFullPipeline -- pitch archival
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runFullPipeline - pitch archival', () => {
+  it('archives current-pitch.md on successful FULL pipeline run', async () => {
+    const artifact = makeHandoffArtifact();
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(nextHandle())),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'APPROVE -- LGTM',
+        artifacts: [artifact],
+      }),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(outcome.kind).toBe('merged');
+    expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.archiveFile).mock.calls[0]![0]).toBe('/workspace/.workrail/current-pitch.md');
+    expect(vi.mocked(deps.archiveFile).mock.calls[0]![1]).toContain('used-pitches/pitch-');
+  });
+
+  it('archives current-pitch.md even when coding session spawn fails (finally block)', async () => {
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnCount++;
+        // discovery and shaping succeed; coding fails
+        if (workflowId === 'coding-task-workflow-agentic') {
+          return err('daemon not running');
+        }
+        return ok(nextHandle());
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: null,
+        artifacts: [],
+      }),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    // Pitch archival must still happen even though coding session failed
+    expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+  });
+});

@@ -145,6 +145,10 @@ function readDiscoveryHandoffArtifact(
  * Run the FULL pipeline mode.
  *
  * Sequences: discovery -> context bridge -> shaping -> [UX gate] -> coding -> PR poll -> review.
+ *
+ * INVARIANT: current-pitch.md is archived in a finally block regardless of outcome.
+ * WHY: if the coding or review phases fail, the pitch must still be archived so it
+ * does not route the next task to IMPLEMENT mode incorrectly. (Pitch invariant 11.)
  */
 export async function runFullPipeline(
   deps: AdaptiveCoordinatorDeps,
@@ -152,6 +156,46 @@ export async function runFullPipeline(
   coordinatorStartMs: number,
 ): Promise<PipelineOutcome> {
   deps.stderr(`[full-pipeline] Starting FULL pipeline for workspace=${opts.workspace}`);
+
+  // ── Pitch archival setup ──────────────────────────────────────────────
+  // Build the archive path now so it's available in the finally block.
+  // The shaping session creates current-pitch.md; we archive it on success or failure.
+  const pitchPath = opts.workspace + '/.workrail/current-pitch.md';
+  const archiveDir = opts.workspace + '/.workrail/used-pitches';
+  const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
+  const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
+
+  let outcome: PipelineOutcome;
+
+  try {
+    outcome = await runFullPipelineCore(deps, opts, coordinatorStartMs);
+  } finally {
+    // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
+    // WHY finally: if outcome is escalated (discovery failed, shaping failed,
+    // coding failed, etc.), the pitch must still be archived so it doesn't
+    // incorrectly route future tasks to IMPLEMENT mode. (Pitch invariant 11.)
+    try {
+      await deps.mkdir(archiveDir, { recursive: true });
+      await deps.archiveFile(pitchPath, archivePath);
+      deps.stderr(`[full-pipeline] Pitch archived to ${archivePath}`);
+    } catch (e) {
+      // Archive failure is logged but must not override the pipeline outcome.
+      // WHY: if we throw here, the coordinator would have no outcome to return.
+      deps.stderr(`[WARN full-pipeline] Failed to archive pitch.md: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return outcome;
+}
+
+/**
+ * Core FULL pipeline logic (extracted so pitch archival is always in finally).
+ */
+async function runFullPipelineCore(
+  deps: AdaptiveCoordinatorDeps,
+  opts: AdaptivePipelineOpts,
+  coordinatorStartMs: number,
+): Promise<PipelineOutcome> {
 
   // ── Stage 1: Discovery session ────────────────────────────────────────
   const discoveryCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'discovery');
