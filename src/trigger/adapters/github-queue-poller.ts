@@ -198,6 +198,27 @@ export async function pollGitHubQueueIssues(
 
   const issues: GitHubQueueIssue[] = [];
   for (const item of raw) {
+    // Assignee pre-filter (type: assignee only): defensive client-side check to confirm the
+    // item is actually assigned to the configured user. Config is not available inside
+    // toGitHubQueueIssue(), so this check lives here.
+    // WHY: API assignee filter is correct, but caching or API bugs could return unassigned items.
+    // See toGitHubQueueIssue() for the state and pull_request guards.
+    if (config.type === 'assignee' && config.user) {
+      const rawItem = item as Record<string, unknown>;
+      const assignees = rawItem['assignees'];
+      if (
+        !Array.isArray(assignees) ||
+        !assignees.some(
+          (a): a is Record<string, unknown> =>
+            typeof a === 'object' &&
+            a !== null &&
+            (a as Record<string, unknown>)['login'] === config.user,
+        )
+      ) {
+        continue;
+      }
+    }
+
     const shaped = toGitHubQueueIssue(item);
     if (shaped !== null) {
       issues.push(shaped);
@@ -341,7 +362,10 @@ export async function checkIdempotency(
 
 /**
  * Map a raw GitHub API issue object to GitHubQueueIssue.
- * Returns null if the item does not have the required shape.
+ * Returns null if the item does not have the required shape, is not open, or is a PR.
+ *
+ * NOTE: assignee pre-filter for type: assignee configs runs in pollGitHubQueueIssues()
+ * before this function is called (config is not available here).
  */
 function toGitHubQueueIssue(item: unknown): GitHubQueueIssue | null {
   if (typeof item !== 'object' || item === null) return null;
@@ -355,6 +379,14 @@ function toGitHubQueueIssue(item: unknown): GitHubQueueIssue | null {
   ) {
     return null;
   }
+
+  // Defensive state guard: API sends state=open but caching or API quirks can return closed items.
+  // WHY: a closed issue should never enter the queue regardless of how it arrived.
+  if (obj['state'] !== 'open') return null;
+
+  // PR filter: GitHub Issues API returns PRs alongside issues. PRs have a pull_request field.
+  // WHY: queue poll should only dispatch coding tasks from issues, not from PRs.
+  if ('pull_request' in obj) return null;
 
   // body can be null in GitHub API (no body set)
   const body = typeof obj['body'] === 'string' ? obj['body'] : '';
