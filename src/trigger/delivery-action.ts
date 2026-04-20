@@ -64,6 +64,22 @@ export interface DeliveryFlags {
   readonly autoCommit?: boolean;
   /** When true (and autoCommit is also true), run gh pr create after the commit. */
   readonly autoOpenPR?: boolean;
+  /**
+   * Process-local session UUID used to construct the expected branch name for HEAD assertion.
+   * Only set when branchStrategy === 'worktree'. When present (with branchPrefix), runDelivery()
+   * asserts the current HEAD branch matches `${branchPrefix}${sessionId}` before staging files.
+   *
+   * WHY sessionId not expectedBranch: the session UUID is already used as the worktree path
+   * component and branch name suffix. Passing it here (rather than the full branch name) keeps
+   * the contract consistent with how the branch was created in runWorkflow().
+   */
+  readonly sessionId?: string;
+  /**
+   * Branch prefix used to construct the expected HEAD branch name for assertion.
+   * Only meaningful when sessionId is also set. Defaults to 'worktrain/' if absent.
+   * Full expected branch: `${branchPrefix}${sessionId}`.
+   */
+  readonly branchPrefix?: string;
 }
 
 /**
@@ -303,6 +319,44 @@ export async function runDelivery(
       _tag: 'skipped',
       reason: 'filesChanged is empty -- cannot stage files safely (no git add -A fallback)',
     };
+  }
+
+  // Gate 3 (worktree sessions only): assert HEAD branch matches expected branch before staging.
+  //
+  // WHY: when branchStrategy === 'worktree', the agent should have been working on
+  // worktrain/<sessionId>. If HEAD points elsewhere (e.g. the agent ran git checkout),
+  // pushing would corrupt an unrelated branch. This assertion is the last safety check.
+  //
+  // WHY errors as data (not throw): branch mismatch returns DeliveryResult, not an exception.
+  // Callers (trigger-router) log the result and continue regardless.
+  if (flags.sessionId) {
+    const expectedBranch = `${flags.branchPrefix ?? 'worktrain/'}${flags.sessionId}`;
+    let headBranch: string;
+    try {
+      const result = await execFn(
+        'git',
+        ['rev-parse', '--abbrev-ref', 'HEAD'],
+        { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
+      );
+      headBranch = result.stdout.trim();
+    } catch (e: unknown) {
+      return {
+        _tag: 'error',
+        phase: 'commit',
+        details: `HEAD branch check failed (cannot stage): ${formatExecError(e)}`,
+      };
+    }
+
+    if (headBranch !== expectedBranch) {
+      return {
+        _tag: 'error',
+        phase: 'commit',
+        details:
+          `HEAD branch mismatch: expected "${expectedBranch}" but found "${headBranch}". ` +
+          `Refusing to stage or push -- the agent may have switched branches. ` +
+          `Worktree path: ${workspacePath}`,
+      };
+    }
   }
 
   // Build commit message: "<type>(<scope>): <subject>"

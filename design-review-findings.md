@@ -1,53 +1,57 @@
-# Design Review Findings: Regression Test for delivery_failed Bug (PR #580)
+# Design Review Findings: WorkTrain Worktree Isolation + Auto-commit (Issue #627)
 
-**Date:** 2026-04-18
-**Status:** Review complete
-
----
+**Date:** 2026-04-19
+**Design:** Worktree isolation for coding sessions + branch assertion in delivery-action
+**Status:** No blocking findings. Proceed to implementation.
 
 ## Tradeoff Review
 
-- `as any` cast to bypass ChildWorkflowRunResult type: acceptable. Confined to test only. Substring match `.toThrow('Unexpected value')` tolerates minor message changes. assertNever is called synchronously in the else branch.
-- Relies on beforeEach mockExecuteStartWorkflow setup: acceptable. Vitest guarantees beforeEach runs before each test. Isolation confirmed by 5 existing passing tests.
-
----
+| Tradeoff | Verdict |
+|----------|---------|
+| `sessionWorkspacePath?` on `WorkflowRunSuccess` | Acceptable. Optional field, backward-compatible. Refactor to `sessionMetadata` sub-object if more fields accumulate. |
+| Keep worktree on failure/timeout | Acceptable per spec. Disk bounded by concurrent sessions * repo size. |
+| git worktree remove best-effort on success | Acceptable. Best-effort + recovery within 24h. |
+| No injectable execFn in runWorkflow() worktree creation | Acceptable. Tests use real git repos in temp dirs. |
 
 ## Failure Mode Review
 
-- Test not reaching assertNever: disproved by existing timeout/error tests with identical setup.
-- assertNever message format change: handled by substring match.
-- Branch conflict on merge: user instructions cover this; main has no conflicting changes to the test file.
-
----
+| Failure Mode | Coverage | Risk |
+|-------------|----------|------|
+| Crash between worktree creation and sidecar write | Partially mitigated (tiny window, untracked worktrees recoverable via directory scan as future improvement) | Low |
+| git fetch fails (credentials) | Clean error path, no orphan worktree | Medium operationally, Low architecturally |
+| git worktree remove fails on success | Best-effort, logged, 24h recovery | Very Low |
+| Branch mismatch in delivery | Asserted before push, returns DeliveryResult error | Low |
+| Disk space from concurrent worktrees | Not handled. Deferred per YAGNI. | Low (local dev), Medium (production burst) |
 
 ## Runner-Up / Simpler Alternative Review
 
-No runner-up exists. The provided test is the simplest valid approach. makeRunWorkflowStub cannot be used because delivery_failed is not assignable to ChildWorkflowRunResult.
-
----
+- Candidate B (assertion in runWorkflow): rejected -- violates spec placement, would corrupt main checkout.
+- Simpler (skip branch assertion): rejected -- spec acceptance criterion.
+- Simpler (always pass trigger.workspacePath to delivery): rejected -- would stage/commit in main checkout instead of worktree.
 
 ## Philosophy Alignment
 
-- exhaustiveness everywhere: satisfied (assertNever guard verified)
-- prefer fakes over mocks: satisfied (inline async stub)
-- document why not what: satisfied (test description names the regression explicitly)
-- type safety: acceptable tension (as-any required to test impossible state)
-- make illegal states unrepresentable: satisfied (ChildWorkflowRunResult excludes delivery_failed)
-
----
+All principles satisfied. Two acceptable tensions:
+- `WorkflowRunSuccess.sessionWorkspacePath` is optional -- accurate domain model (no worktree when branchStrategy=none).
+- Direct execFileAsync in runWorkflow() for worktree creation -- consistent with existing bash tool usage; spec doesn't require injectable execFn here.
 
 ## Findings
 
-None. No red, orange, or yellow findings.
+**No RED findings.**
 
----
+**ORANGE (fix before shipping):**
+- None.
+
+**YELLOW (watch during implementation):**
+- Y1: `runStartupRecovery()` needs injectable `execFn` parameter for testability. Do not call execFileAsync directly in the recovery path.
+- Y2: The sidecar write with `worktreePath` must happen immediately after `git worktree add` -- do not defer or batch with other work.
+- Y3: The `git worktree remove --force` call on the success path should be wrapped in try/catch (same pattern as `fs.unlink()` for the session file at line 3294).
 
 ## Recommended Revisions
 
-None. Proceed with the provided test snippet verbatim.
-
----
+None. Design is sound. YELLOW items are implementation-time reminders, not design changes.
 
 ## Residual Concerns
 
-None.
+- FM1 (crash between worktree creation and sidecar write): accepted. A directory scan of `~/.workrail/worktrees/` as a future improvement would fully close this.
+- FM5 (disk space under burst load): accepted. Deferred to a future maxConcurrentSessions + disk-space guard.

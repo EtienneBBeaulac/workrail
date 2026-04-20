@@ -5,7 +5,11 @@ triggers:
     workspacePath: /Users/etienneb/git/personal/workrail
     goal: "Add the evidenceFrom field to the AssessmentDimension type in src/mcp/output-schemas.ts -- this is the backlog item that makes assessment gates declare their evidence sources. The field should be optional (string[]), with a JSDoc comment explaining it links an assessment dimension to the context keys a prep step must produce before the gate fires."
     concurrencyMode: parallel
-    autoCommit: false
+    branchStrategy: worktree
+    baseBranch: main
+    branchPrefix: "worktrain/"
+    autoCommit: true
+    autoOpenPR: true
     agentConfig:
       maxSessionMinutes: 60
 
@@ -18,6 +22,7 @@ triggers:
     workflowId: mr-review-workflow-agentic
     workspacePath: /Users/etienneb/git/personal/workrail
     concurrencyMode: parallel
+    branchStrategy: none
     autoCommit: false
     agentConfig:
       maxSessionMinutes: 30

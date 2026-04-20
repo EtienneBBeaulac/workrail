@@ -127,12 +127,35 @@ export const DAEMON_SESSIONS_DIR = path.join(os.homedir(), '.workrail', 'daemon-
 const MAX_ORPHAN_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 /**
+ * Maximum age for an orphaned worktree before it is removed during startup recovery.
+ *
+ * WHY 24h instead of 2h: failed worktrees are more useful for debugging than session
+ * sidecars. A developer investigating a failed session wants the worktree intact for
+ * a reasonable inspection window. 24h is long enough for overnight debugging.
+ *
+ * WHY different from MAX_ORPHAN_AGE_MS: session sidecar files hold tokens that expire
+ * quickly (2h is generous). Worktrees hold file state that may be needed for debugging.
+ * Using different thresholds makes the different purposes explicit.
+ */
+const MAX_WORKTREE_ORPHAN_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
  * Root directory for WorkRail user data (crash recovery, soul file, etc.).
  * WHY: daemon-soul.md lives alongside daemon-sessions/ in ~/.workrail/, not in
  * the data/ subdirectory controlled by WORKRAIL_DATA_DIR. This is consistent with
  * other files in the ~/.workrail/ root that are not part of the structured data store.
  */
 const WORKRAIL_DIR = path.join(os.homedir(), '.workrail');
+
+/**
+ * Directory that holds per-session isolated git worktrees.
+ * Each runWorkflow() call with branchStrategy === 'worktree' creates a subdirectory
+ * at <WORKTREES_DIR>/<sessionId>/ containing the git worktree for that session.
+ * Worktrees are removed on successful session completion (after delivery).
+ * Failed/timed-out sessions keep their worktree for debugging; runStartupRecovery()
+ * reaps orphans older than MAX_WORKTREE_ORPHAN_AGE_MS on the next daemon start.
+ */
+export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
 
 /**
  * Maximum combined byte size of all workspace context files.
@@ -309,6 +332,30 @@ export interface WorkflowTrigger {
     readonly name: string;
     readonly email: string;
   };
+
+  /**
+   * Branch isolation strategy for this workflow session.
+   * Sourced from TriggerDefinition.branchStrategy (parsed from triggers.yml).
+   * - 'worktree': runWorkflow() creates an isolated git worktree before the agent loop.
+   * - 'none': no worktree; session writes directly to trigger.workspacePath.
+   * When absent, defaults to 'none' behavior.
+   * Kept here so workflow-runner.ts remains decoupled from trigger system types.
+   */
+  readonly branchStrategy?: 'worktree' | 'none';
+
+  /**
+   * Base branch for the worktree. Only used when branchStrategy === 'worktree'.
+   * Sourced from TriggerDefinition.baseBranch.
+   * Default: 'main' (applied at parse time in trigger-store.ts or at use time in runWorkflow()).
+   */
+  readonly baseBranch?: string;
+
+  /**
+   * Prefix for the session branch name. Only used when branchStrategy === 'worktree'.
+   * Sourced from TriggerDefinition.branchPrefix.
+   * Default: 'worktrain/' (applied at parse time or at use time in runWorkflow()).
+   */
+  readonly branchPrefix?: string;
 }
 
 /** Successful completion of a workflow run. */
@@ -339,6 +386,34 @@ export interface WorkflowRunSuccess {
    * Related: docs/discovery/artifacts-coordinator-channel.md, Candidate A.
    */
   readonly lastStepArtifacts?: readonly unknown[];
+  /**
+   * The isolated worktree path created by runWorkflow() for this session.
+   * Present only when trigger.branchStrategy === 'worktree'.
+   * Absent for 'none' strategy (session used trigger.workspacePath directly).
+   *
+   * WHY this field exists: delivery (git add, git commit, git push, gh pr create) runs
+   * in trigger-router.ts AFTER runWorkflow() returns. The delivery must use the worktree
+   * path (where the agent's changes live), not trigger.workspacePath (the clean main checkout).
+   * trigger-router.ts reads this field to determine the correct working directory for delivery.
+   *
+   * Follows the lastStepNotes/lastStepArtifacts precedent of threading session-level
+   * context through the result type for trigger-layer consumers.
+   */
+  readonly sessionWorkspacePath?: string;
+  /**
+   * The process-local session UUID for this workflow run.
+   * Present only when trigger.branchStrategy === 'worktree'.
+   * Absent for 'none' strategy.
+   *
+   * WHY this field exists: trigger-router.ts uses sessionId for branch assertion before
+   * git push (verifying HEAD matches the expected branch name `branchPrefix + sessionId`).
+   * Threading sessionId here avoids fragile path-parsing: extracting sessionId from
+   * sessionWorkspacePath via `.split('/').at(-1)` couples branch naming convention to
+   * the caller and breaks if the path structure ever changes.
+   *
+   * Follows the sessionWorkspacePath threading pattern.
+   */
+  readonly sessionId?: string;
 }
 
 /** Failed workflow run (tool error, agent error, engine error, etc.). */
@@ -455,6 +530,13 @@ export interface OrphanedSession {
   readonly checkpointToken: string | null;
   /** Unix timestamp (ms) when the token was last written. Used for staleness checks. */
   readonly ts: number;
+  /**
+   * Absolute path to the isolated git worktree created for this session.
+   * Present when branchStrategy === 'worktree'; absent for 'none' sessions or
+   * sessions created before Issue #627 was implemented (backward compat).
+   * Used by runStartupRecovery() to remove orphan worktrees older than MAX_WORKTREE_ORPHAN_AGE_MS.
+   */
+  readonly worktreePath?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -468,16 +550,27 @@ export interface OrphanedSession {
  * corrupt state file. A previous checkpoint token survives if the rename fails.
  *
  * @param sessionId - Process-local UUID generated at runWorkflow() entry. Keys the file.
+ * @param worktreePath - Absolute path to the isolated git worktree for this session.
+ *   Present only when branchStrategy === 'worktree'. Persisted so runStartupRecovery()
+ *   can remove orphan worktrees on the next daemon start. Omit for 'none' sessions.
+ *   WHY persisted immediately after worktree creation (not at session end): a crash
+ *   between worktree creation and sidecar write would leave an untracked orphan.
+ *   Writing immediately ensures the recovery path can always find the worktree.
  */
 async function persistTokens(
   sessionId: string,
   continueToken: string,
   checkpointToken: string | null,
+  worktreePath?: string,
 ): Promise<void> {
   await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
 
   const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
-  const state = JSON.stringify({ continueToken, checkpointToken, ts: Date.now() }, null, 2);
+  const state = JSON.stringify(
+    { continueToken, checkpointToken, ts: Date.now(), ...(worktreePath !== undefined ? { worktreePath } : {}) },
+    null,
+    2,
+  );
   const tmp = `${sessionPath}.tmp`;
   await fs.writeFile(tmp, state, 'utf8');
   await fs.rename(tmp, sessionPath);
@@ -556,6 +649,7 @@ export async function readAllDaemonSessions(
         continueToken?: unknown;
         checkpointToken?: unknown;
         ts?: unknown;
+        worktreePath?: unknown;
       };
 
       if (typeof parsed.continueToken !== 'string' || typeof parsed.ts !== 'number') {
@@ -568,6 +662,9 @@ export async function readAllDaemonSessions(
         continueToken: parsed.continueToken,
         checkpointToken: typeof parsed.checkpointToken === 'string' ? parsed.checkpointToken : null,
         ts: parsed.ts,
+        // worktreePath is optional -- absent in sessions created before Issue #627.
+        // Use undefined (not null) to match the OrphanedSession.worktreePath? type.
+        ...(typeof parsed.worktreePath === 'string' ? { worktreePath: parsed.worktreePath } : {}),
       });
     } catch (err: unknown) {
       console.warn(
@@ -602,9 +699,15 @@ export async function readAllDaemonSessions(
  *
  * @param sessionsDir - Optional override for the sessions directory. Defaults to
  *   DAEMON_SESSIONS_DIR. Pass a temp dir in tests to avoid touching real state.
+ * @param execFn - Injectable exec function for git worktree removal.
+ *   Defaults to execFileAsync. Override in tests to avoid real git calls.
+ *   WHY injectable: runStartupRecovery runs git commands (git worktree remove --force)
+ *   that require a real git repo. Tests cannot create real repos easily; an injectable
+ *   execFn lets tests verify the removal is attempted without running actual git.
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
+  execFn: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }> = execFileAsync,
 ): Promise<void> {
   // Read all parseable session files.
   const sessions = await readAllDaemonSessions(sessionsDir);
@@ -629,6 +732,42 @@ export async function runStartupRecovery(
     console.log(
       `[WorkflowRunner] Clearing ${label}: sessionId=${session.sessionId} age=${ageSec}s`,
     );
+
+    // Orphan worktree cleanup: if this session created a worktree and the worktree
+    // has been orphaned long enough (24h), remove it.
+    //
+    // WHY different age threshold (MAX_WORKTREE_ORPHAN_AGE_MS = 24h) from session sidecar
+    // threshold (MAX_ORPHAN_AGE_MS = 2h): failed worktrees are useful for debugging.
+    // A developer investigating a failed session wants the worktree intact for a reasonable
+    // inspection window. Session sidecars hold expired tokens; worktrees hold file state.
+    //
+    // WHY best-effort (try/catch, log + continue): worktree removal must never block
+    // daemon startup. A non-removable worktree (e.g. disk full, path deleted by user)
+    // is logged and skipped; the session sidecar is still deleted so the next startup
+    // does not attempt the removal again.
+    if (session.worktreePath && ageMs > MAX_WORKTREE_ORPHAN_AGE_MS) {
+      console.log(
+        `[WorkflowRunner] Removing orphan worktree: sessionId=${session.sessionId} worktreePath=${session.worktreePath}`,
+      );
+      try {
+        await execFn('git', ['worktree', 'remove', '--force', session.worktreePath]);
+        console.log(`[WorkflowRunner] Removed orphan worktree: ${session.worktreePath}`);
+      } catch (err: unknown) {
+        // Best-effort: log and continue. The sidecar will still be deleted below so
+        // the next startup does not attempt this removal again.
+        console.warn(
+          `[WorkflowRunner] Could not remove orphan worktree ${session.worktreePath}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else if (session.worktreePath && ageMs <= MAX_WORKTREE_ORPHAN_AGE_MS) {
+      // Worktree exists but is not yet old enough to reap. Keep it for debugging.
+      const ageHours = (ageMs / (60 * 60 * 1000)).toFixed(1);
+      console.log(
+        `[WorkflowRunner] Keeping recent orphan worktree: sessionId=${session.sessionId} ` +
+        `age=${ageHours}h (threshold=24h) worktreePath=${session.worktreePath}`,
+      );
+    }
 
     try {
       await fs.unlink(path.join(sessionsDir, `${session.sessionId}.json`));
@@ -1900,6 +2039,25 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
  * @param schemas - Plain JSON Schema map from getSchemas().
  * @param emitter - Optional event emitter for structured lifecycle events.
  */
+/**
+ * Factory for the `spawn_agent` tool, which lets a parent session delegate sub-tasks
+ * to child WorkRail sessions.
+ *
+ * LIMITATION -- branchStrategy: Child sessions spawned by this tool always have
+ * `branchStrategy: 'none'`. They operate in the parent's workspace (or the workspace
+ * provided via the spawn_agent params) without their own isolated worktree or feature
+ * branch. The child session writes directly to whatever workspace path it is given.
+ *
+ * WHY: spawn_agent constructs a WorkflowTrigger without a branchStrategy field, so the
+ * child defaults to 'none'. Creating an isolated worktree for each child session would
+ * require git credentials, disk allocation, and a branch-naming scheme per child --
+ * overhead that is unnecessary for most coordinator/sub-agent patterns.
+ *
+ * Coordinators that need isolated child sessions (i.e. a child that fetches a branch,
+ * makes changes, and opens a PR independently) should dispatch them via
+ * `TriggerRouter.dispatch()` instead, which supports the full trigger configuration
+ * including branchStrategy: 'worktree'.
+ */
 export function makeSpawnAgentTool(
   sessionId: string,
   ctx: V2ToolContext,
@@ -2864,7 +3022,7 @@ export async function runWorkflow(
     await persistTokens(sessionId, startContinueToken, startCheckpointToken);
   }
 
-  // Bot identity: if trigger.botIdentity is set, configure git user.name/email on the
+// Bot identity: if trigger.botIdentity is set, configure git user.name/email on the
   // workspace so commits from autonomous sessions use the bot account rather than the
   // operator's personal git identity. Non-fatal: failure logs a warning and continues.
   if (trigger.botIdentity) {
@@ -2884,13 +3042,97 @@ export async function runWorkflow(
     }
   }
 
+  // ---- Worktree isolation (Issue #627) ----
+  // When branchStrategy === 'worktree', create an isolated git worktree for this session.
+  // All tool factories and agent file operations use sessionWorkspacePath (the worktree),
+  // NOT trigger.workspacePath (the main checkout). trigger.workspacePath is used only
+  // for git -C operations that target the repo itself (fetch, worktree add, worktree remove).
+  //
+  // WHY after persistTokens(): the sidecar must exist before worktree creation. If the
+  // process crashes after worktree creation but before the sidecar is updated with
+  // worktreePath, the orphan is untracked. Writing the sidecar first and then re-writing
+  // it with worktreePath minimizes this window.
+  //
+  // WHY sessionWorkspacePath is a let: the value is trigger.workspacePath for 'none'
+  // strategy, but derived at runtime for 'worktree' strategy. Using let avoids conditional
+  // branching at every call site.
+  let sessionWorkspacePath = trigger.workspacePath;
+  let sessionWorktreePath: string | undefined;
+
+  if (trigger.branchStrategy === 'worktree') {
+    const branchPrefix = trigger.branchPrefix ?? 'worktrain/';
+    const baseBranch = trigger.baseBranch ?? 'main';
+    sessionWorkspacePath = path.join(WORKTREES_DIR, sessionId);
+    sessionWorktreePath = sessionWorkspacePath;
+
+    try {
+      // Create the worktrees root directory if it doesn't exist.
+      await fs.mkdir(WORKTREES_DIR, { recursive: true });
+
+      // Pre-flight: verify git fetch works (auth check).
+      // WHY -C trigger.workspacePath: all git operations target the main repo,
+      // not the (not-yet-existing) worktree.
+      await execFileAsync('git', ['-C', trigger.workspacePath, 'fetch', 'origin', baseBranch]);
+
+      // Create the isolated worktree at sessionWorkspacePath.
+      // The branch name is unique per session, preventing concurrent sessions
+      // from clobbering each other.
+      await execFileAsync('git', [
+        '-C', trigger.workspacePath,
+        'worktree', 'add',
+        sessionWorkspacePath,
+        '-b', `${branchPrefix}${sessionId}`,
+        `origin/${baseBranch}`,
+      ]);
+
+      // Persist worktreePath immediately after creation (crash safety).
+      // WHY call persistTokens again: the initial call above does not include worktreePath.
+      // Re-calling with all 4 args is intentional -- it is the only way to update
+      // the sidecar with the worktreePath using the atomic temp-rename pattern.
+      // WHY unconditional (no `if (startContinueToken)` guard): if startContinueToken is falsy,
+      // skipping this call leaves worktreePath untracked in the sidecar. An untracked worktree
+      // is an orphan that startup recovery cannot find or reap. Writing '' as token fallback
+      // is acceptable -- startup recovery clears malformed sidecars regardless of token value.
+      await persistTokens(sessionId, startContinueToken ?? currentContinueToken, startCheckpointToken, sessionWorktreePath);
+
+      console.log(
+        `[WorkflowRunner] Worktree created: sessionId=${sessionId} ` +
+        `branch=${branchPrefix}${sessionId} path=${sessionWorkspacePath}`,
+      );
+    } catch (err: unknown) {
+      // Worktree creation failed -- return an error. The session sidecar was written
+      // without worktreePath, so startup recovery will clean it up normally.
+      // No worktree cleanup needed here: git worktree add is atomic; if it fails,
+      // no worktree is registered with git.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
+      emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
+      if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+      return {
+        _tag: 'error',
+        workflowId: trigger.workflowId,
+        message: `Worktree creation failed: ${errMsg}`,
+        stopReason: 'error',
+      };
+    }
+  }
+
   // Edge case: workflow completes immediately on start (single-step workflow with
   // no pending continuation). Return success without creating an Agent.
   if (firstStep.isComplete) {
+    // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
+    // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
+    // finishes. trigger-router.ts maybeRunDelivery() is the sole success-path removal.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
-    return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'stop' };
+    return {
+      _tag: 'success',
+      workflowId: trigger.workflowId,
+      stopReason: 'stop',
+      ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
+      ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
+    };
   }
 
   // ---- Schemas ----
@@ -2943,12 +3185,15 @@ export async function runWorkflow(
       workrailSessionId,
     ),
     makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSessionId),
-    makeBashTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
+    // WHY sessionWorkspacePath (not trigger.workspacePath): when branchStrategy === 'worktree',
+    // all agent file operations must target the isolated worktree, not the main checkout.
+    // For 'none' strategy, sessionWorkspacePath === trigger.workspacePath (no difference).
+    makeBashTool(sessionWorkspacePath, schemas, sessionId, emitter, workrailSessionId),
     makeReadTool(readFileState, schemas, sessionId, emitter, workrailSessionId),
     makeWriteTool(readFileState, schemas, sessionId, emitter, workrailSessionId),
-    makeGlobTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
-    makeGrepTool(trigger.workspacePath, schemas, sessionId, emitter, workrailSessionId),
-    makeEditTool(trigger.workspacePath, readFileState, schemas, sessionId, emitter, workrailSessionId),
+    makeGlobTool(sessionWorkspacePath, schemas, sessionId, emitter, workrailSessionId),
+    makeGrepTool(sessionWorkspacePath, schemas, sessionId, emitter, workrailSessionId),
+    makeEditTool(sessionWorkspacePath, readFileState, schemas, sessionId, emitter, workrailSessionId),
     makeReportIssueTool(sessionId, emitter, workrailSessionId, undefined, (summary: string) => {
       // Accumulate issue summaries for WORKTRAIN_STUCK marker.
       // WHY cap: bounds memory on pathological sessions.
@@ -3335,6 +3580,11 @@ export async function runWorkflow(
     };
   }
 
+  // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
+  // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
+  // finishes. trigger-router.ts maybeRunDelivery() is the sole success-path removal.
+  // Failure/timeout path cleanup above is intentionally kept -- those paths never reach delivery.
+
   // ---- Clean up state file on success ----
   // The state file is evidence of an in-flight session. Delete it on clean completion
   // so the CLI crash-recovery scan only surfaces genuinely orphaned sessions.
@@ -3351,5 +3601,14 @@ export async function runWorkflow(
     stopReason,
     ...(lastStepNotes !== undefined ? { lastStepNotes } : {}),
     ...(lastStepArtifacts !== undefined ? { lastStepArtifacts } : {}),
+    // WHY sessionWorkspacePath: trigger-router.ts reads this to use the correct working
+    // directory for delivery (git add, commit, push, gh pr create). The delivery must
+    // run inside the worktree where the agent's changes live, not in the main checkout.
+    // Absent for 'none' strategy (no worktree was created; trigger.workspacePath is used).
+    ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
+    // WHY sessionId: trigger-router.ts reads this for branch assertion before git push
+    // (verifying HEAD matches branchPrefix + sessionId). Threading it here avoids fragile
+    // path-parsing (.split('/').at(-1)) that couples branch naming convention to the caller.
+    ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
   };
 }

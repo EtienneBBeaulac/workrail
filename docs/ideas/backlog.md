@@ -6250,6 +6250,73 @@ Scheduled tasks are the entry point for fully autonomous work:
 
 ---
 
+## Autonomous grooming loop + workOnAll mode (Apr 19, 2026)
+
+### The vision
+
+WorkTrain eventually finds and executes its own work without any human seeding the queue. This is the full autonomous loop: raw backlog idea → groomed issue → discovered/shaped spec → implemented PR → reviewed → merged. Zero human input required once configured.
+
+### Three autonomy levels
+
+**Level 0 -- Opt-in queue (current design)**
+Human adds `worktrain` label to specific issues. WorkTrain works those issues only. Safe, predictable, explicit.
+
+**Level 1 -- workOnAll mode**
+Config flag `workOnAll: true` in `~/.workrail/config.json`. WorkTrain looks at ALL open issues, infers which ones are actionable, picks the highest-priority one. Human escape hatch: `worktrain:skip` label blocks WorkTrain from touching a specific issue. Status labels (`worktrain:in-progress`, `worktrain:done`) are coordinator-managed for observability. No human-set maturity labels needed -- coordinator infers from content.
+
+**Level 2 -- Fully proactive**
+WorkTrain also surfaces work it found itself: failing CI, Dependabot alerts, backlog items with no issue, patterns in git history suggesting missing tests or docs. Creates its own work items, runs them, closes the loop.
+
+### The grooming loop (scheduled, e.g. nightly)
+
+Runs on a cron trigger. Responsibilities:
+1. Read `docs/ideas/backlog.md`, `docs/roadmap/now-next-later.md`, open GitHub issues
+2. Reconcile: close issues that are already done (PR merged), update priorities based on what shipped recently, flag duplicate or obsolete items
+3. For each ungroomed `worktrain` issue (or all issues in workOnAll mode): infer maturity -- does it have a linked spec? acceptance criteria? concrete implementation plan?
+4. For high-value `idea`-level items: autonomously run `wr.discovery` → `wr.shaping` → update or create issue with pitch attached, set `worktrain:specced`
+5. Backlog → issue promotion: when a backlog item crosses a readiness threshold (has enough context to act on), create a GitHub issue from it
+
+### Maturity inference (no human-set labels required in Level 1+)
+
+The coordinator reads issue content and infers:
+- Linked pitch/PRD/spec URL → `ready` or `specced`
+- Has acceptance criteria or concrete implementation plan → `specced` or `ready`
+- Vague/exploratory language → `idea`
+- Has open PR or recent branch activity → skip (already in flight)
+
+The `worktrain:idea/specced/ready` taxonomy is the coordinator's internal model, not something humans set. In Level 1+ the coordinator manages it automatically.
+
+### workOnAll config
+
+```json
+// ~/.workrail/config.json
+{
+  "workOnAll": true,
+  "workOnAllExclusions": ["needs-design", "blocked-external", "wontfix"],
+  "maxConcurrentSelf": 2
+}
+```
+
+`maxConcurrentSelf` caps how many autonomous self-improvement sessions run simultaneously -- important so WorkTrain doesn't try to implement 10 things at once and create merge conflicts.
+
+### Design notes
+
+- The grooming loop and the work loop are **separate triggers** with separate schedules. Grooming runs more frequently (nightly or post-merge). Work loop runs on demand or weekly.
+- The grooming loop requires LLM judgment ("is this ready?") -- it's a `wr.discovery`-style session on the backlog, not a deterministic script. This is a feature, not a limitation.
+- `worktrain:skip` is the only label humans need to set in Level 1+ -- it's the explicit "not this one" override.
+- Auto-PR-from-backlog requires careful scope: WorkTrain should create draft PRs for its own discoveries, not automatically push to open issues on other people's repos.
+
+### Priority
+
+This is the long-term autonomous vision. Implement in order:
+1. Level 0 (current, task queue PR #4)
+2. workOnAll config flag (small addition to the coordinator, after #4 ships)
+3. Maturity inference (replace label-based routing with content inference)
+4. Grooming loop (scheduled cron trigger, wr.discovery session on backlog)
+5. Level 2 proactive work (post-grooming, after proving the loop works)
+
+---
+
 ## Escalating review gates based on finding severity (Apr 19, 2026)
 
 **The idea:** when an MR review returns a Critical finding post-implementation, the review is not over -- it triggers a deeper audit chain before merge is allowed.

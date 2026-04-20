@@ -426,6 +426,66 @@ describe('TriggerRouter.route', () => {
       // execFn must NOT be called -- autoCommit is false (opt-in semantics)
       expect(fakeExec).not.toHaveBeenCalled();
     });
+
+    it('uses sessionWorkspacePath as cwd for delivery when runWorkflow returns a worktree session', async () => {
+      // Regression guard for the CRITICAL bug: delivery (git add, commit, push, gh pr create)
+      // must run inside the worktree, not trigger.workspacePath. This test closes the gap that
+      // let the bug go undetected.
+      //
+      // Setup: trigger with branchStrategy:'worktree' and autoCommit:true.
+      // runWorkflowFn returns a WorkflowRunSuccess with sessionWorkspacePath pointing to a
+      // (fake) worktree directory. The test verifies that execFn is called with the worktree
+      // path as the cwd -- NOT trigger.workspacePath ('/workspace').
+      const SESSION_ID = 'test-session-abc123';
+      const WORKTREE_PATH = `/worktrees/${SESSION_ID}`;
+      const BRANCH_PREFIX = 'worktrain/';
+      // fakeExec returns different values per command:
+      // - git rev-parse (HEAD branch check) must return the expected branch name
+      // - git add / git commit return a standard commit line
+      // - git worktree remove returns empty (cleanup after delivery)
+      const fakeExec: ExecFn = vi.fn().mockImplementation((_file: string, args: string[]) => {
+        if (args[0] === 'rev-parse') {
+          return Promise.resolve({ stdout: `${BRANCH_PREFIX}${SESSION_ID}\n`, stderr: '' });
+        }
+        return Promise.resolve({ stdout: '[main abc1234] feat: test\n', stderr: '' });
+      });
+
+      const trigger = makeTrigger({
+        autoCommit: true,
+        branchStrategy: 'worktree',
+        workspacePath: '/workspace',
+        branchPrefix: BRANCH_PREFIX,
+      });
+
+      const fn: RunWorkflowFn = async (t) => ({
+        _tag: 'success',
+        workflowId: t.workflowId,
+        stopReason: 'stop',
+        lastStepNotes: VALID_HANDOFF_NOTES,
+        sessionWorkspacePath: WORKTREE_PATH,
+        sessionId: SESSION_ID,
+      });
+
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, fakeExec);
+
+      router.route(makeEvent());
+
+      // Wait for the async queue to process (runWorkflow + maybeRunDelivery)
+      await new Promise<void>((r) => setTimeout(r, 50));
+
+      // execFn must have been called
+      expect(fakeExec).toHaveBeenCalled();
+
+      // Every git call that involves file operations (add, commit) must use the worktree path.
+      // The first call is git add -- verify cwd is the worktree path, NOT trigger.workspacePath.
+      const allCalls = (fakeExec as ReturnType<typeof vi.fn>).mock.calls as [string, string[], { cwd?: string }][];
+      const addCall = allCalls.find(([, args]) => args[0] === 'add');
+      expect(addCall).toBeDefined();
+      if (addCall !== undefined) {
+        const opts = addCall[2];
+        expect(opts?.cwd).toBe(WORKTREE_PATH);
+      }
+    });
   });
 });
 

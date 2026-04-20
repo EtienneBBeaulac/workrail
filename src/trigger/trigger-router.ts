@@ -303,10 +303,29 @@ async function maybeRunDelivery(
     return;
   }
 
+  // Use sessionWorkspacePath when available (worktree sessions must commit from the worktree,
+  // not from the main checkout). Fall back to trigger.workspacePath for 'none' sessions.
+  // WHY: the agent's changes live in the worktree. git add/commit/push must run there.
+  const deliveryCwd = result.sessionWorkspacePath ?? trigger.workspacePath;
+
   const deliveryResult = await runDelivery(
     parseResult.value,
-    trigger.workspacePath,
-    { autoCommit: trigger.autoCommit, autoOpenPR: trigger.autoOpenPR },
+    deliveryCwd,
+    {
+      autoCommit: trigger.autoCommit,
+      autoOpenPR: trigger.autoOpenPR,
+      // Branch assertion: verify HEAD matches expected branch before git push.
+      // Only meaningful for worktree sessions -- 'none' sessions use trigger.workspacePath.
+      // WHY result.sessionId (not split from path): sessionId is threaded directly through
+      // WorkflowRunSuccess to avoid fragile path-parsing that couples branch naming convention
+      // to the calling code. See WorkflowRunSuccess.sessionId for the full rationale.
+      ...(trigger.branchStrategy === 'worktree' && result.sessionWorkspacePath
+        ? {
+            sessionId: result.sessionId ?? '',
+            branchPrefix: trigger.branchPrefix ?? 'worktrain/',
+          }
+        : {}),
+    },
     execFn,
   );
 
@@ -332,6 +351,32 @@ async function maybeRunDelivery(
         `details=${deliveryResult.details}`,
       );
       break;
+  }
+
+  // Worktree cleanup on success: remove the isolated worktree after delivery completes.
+  //
+  // WHY here (not in runWorkflow()): delivery (git add, commit, push, gh pr create) all
+  // run inside the worktree. The worktree must exist until delivery finishes. Removing it
+  // inside runWorkflow() before delivery would break the delivery path.
+  //
+  // WHY after delivery regardless of deliveryResult._tag: the worktree's purpose is to
+  // serve the session. Once delivery has been attempted (success or error), the worktree
+  // has served its purpose and should be cleaned up to avoid disk accumulation.
+  //
+  // WHY best-effort (catch + log): cleanup failure must never affect the workflow result.
+  // A non-removable worktree will be reaped by runStartupRecovery() after 24h.
+  if (trigger.branchStrategy === 'worktree' && result.sessionWorkspacePath) {
+    try {
+      await execFn('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', result.sessionWorkspacePath], { cwd: trigger.workspacePath, timeout: 60_000 });
+      console.log(
+        `[TriggerRouter] Worktree removed: triggerId=${triggerId} path=${result.sessionWorkspacePath}`,
+      );
+    } catch (err: unknown) {
+      console.warn(
+        `[TriggerRouter] Could not remove worktree: triggerId=${triggerId} ` +
+        `path=${result.sessionWorkspacePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }
 
@@ -535,6 +580,12 @@ export class TriggerRouter {
       ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
       // soulFile is cascade-resolved in trigger-store.ts (trigger -> workspace -> undefined).
       ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
+      // Worktree isolation fields (Issue #627). Forwarded from TriggerDefinition so
+      // runWorkflow() can create an isolated git worktree when branchStrategy === 'worktree'.
+      // Follows the soulFile forwarding pattern.
+      ...(trigger.branchStrategy !== undefined ? { branchStrategy: trigger.branchStrategy } : {}),
+      ...(trigger.baseBranch !== undefined ? { baseBranch: trigger.baseBranch } : {}),
+      ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
     };
 
     // Emit trigger_fired: the webhook was accepted and validated.
