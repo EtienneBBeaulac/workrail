@@ -40,6 +40,10 @@ function makeBaseDeps(overrides: Partial<WorktrainTriggerPollDeps> = {}): {
       }),
     }),
     readFile: async () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); },
+    // Default: all PIDs are alive (no stale lock behavior unless overridden)
+    isPidAlive: () => true,
+    // Default: no-op cleanup (tests that verify deletion must override and capture calls)
+    deleteFile: async () => {},
     print: (line) => printLines.push(line),
     stderr: (line) => stderrLines.push(line),
     homedir: () => '/home/test',
@@ -145,7 +149,7 @@ describe('executeWorktrainTriggerPollCommand', () => {
     expect(stderrLines.some((l) => l.includes('Could not connect to WorkTrain daemon'))).toBe(true);
   });
 
-  it('uses daemon-console.lock port when lock file is present', async () => {
+  it('uses daemon-console.lock port when lock file is present and PID is alive', async () => {
     let capturedUrl = '';
     const { deps } = makeBaseDeps({
       readFile: async (p) => {
@@ -154,6 +158,8 @@ describe('executeWorktrainTriggerPollCommand', () => {
         }
         throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       },
+      // Explicitly mark PID 1234 as alive
+      isPidAlive: () => true,
       fetch: async (url) => {
         capturedUrl = url;
         return {
@@ -170,6 +176,58 @@ describe('executeWorktrainTriggerPollCommand', () => {
     await executeWorktrainTriggerPollCommand(deps, { triggerId: 'self-improvement' });
 
     expect(capturedUrl).toContain('3456');
+  });
+
+  it('falls back to port 3200 when daemon-console.lock PID is dead', async () => {
+    let capturedUrl = '';
+    const { deps, stderrLines } = makeBaseDeps({
+      readFile: async (p) => {
+        if (p.includes('daemon-console.lock')) {
+          // PID 99999 is dead -- will not be alive
+          return JSON.stringify({ pid: 99999, port: 3456 });
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      isPidAlive: () => false,
+      fetch: async (url) => {
+        capturedUrl = url;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: { triggerId: 'self-improvement', cycleRan: true, message: 'Done.' },
+          }),
+        };
+      },
+    });
+
+    await executeWorktrainTriggerPollCommand(deps, { triggerId: 'self-improvement' });
+
+    // Should fall back to 3200, not use the stale 3456
+    expect(capturedUrl).toContain('3200');
+    expect(capturedUrl).not.toContain('3456');
+    // Should warn about the dead PID
+    expect(stderrLines.some((l) => l.includes('dead PID 99999'))).toBe(true);
+  });
+
+  it('deletes stale lock file when PID is dead', async () => {
+    const deletedPaths: string[] = [];
+    const { deps } = makeBaseDeps({
+      readFile: async (p) => {
+        if (p.includes('daemon-console.lock')) {
+          return JSON.stringify({ pid: 99999, port: 3456 });
+        }
+        throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      },
+      isPidAlive: () => false,
+      deleteFile: async (path) => { deletedPaths.push(path); },
+    });
+
+    await executeWorktrainTriggerPollCommand(deps, { triggerId: 'self-improvement' });
+
+    // The stale daemon-console.lock should have been deleted
+    expect(deletedPaths.some((p) => p.includes('daemon-console.lock'))).toBe(true);
   });
 
   it('defaults to port 3200 when no lock file and no --port', async () => {

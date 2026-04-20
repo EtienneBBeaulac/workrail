@@ -34,6 +34,19 @@ export interface WorktrainTriggerPollDeps {
   ) => Promise<{ readonly ok: boolean; readonly status: number; readonly json: () => Promise<unknown> }>;
   /** Read a file as UTF-8 string. Used for daemon-console.lock port discovery. */
   readonly readFile: (path: string) => Promise<string>;
+  /**
+   * Delete a file. Used to remove stale lock files when a dead PID is detected.
+   * Errors are swallowed by the caller -- this is best-effort cleanup.
+   * WHY injectable: allows tests to verify cleanup without real filesystem side-effects.
+   */
+  readonly deleteFile: (path: string) => Promise<void>;
+  /**
+   * Check whether a process ID is alive.
+   * WHY injectable: allows tests to simulate dead-PID scenarios without spawning/killing real processes.
+   * Real implementation: process.kill(pid, 0) -- signal 0 = existence check, no actual signal sent.
+   * Returns false for any PID that is not alive (ESRCH) or for which we lack permission.
+   */
+  readonly isPidAlive: (pid: number) => boolean;
   /** Write a line to stdout (progress and results). */
   readonly print: (line: string) => void;
   /** Write a line to stderr (errors and warnings). */
@@ -79,28 +92,61 @@ const LOCK_FILE_NAMES = ['daemon-console.lock', 'dashboard.lock'] as const;
  *
  * Priority:
  * 1. Explicit --port flag (caller-provided override)
- * 2. Port from ~/.workrail/daemon-console.lock (daemon console)
- * 3. Port from ~/.workrail/dashboard.lock (MCP server, legacy)
+ * 2. Port from ~/.workrail/daemon-console.lock (daemon console), if PID is alive
+ * 3. Port from ~/.workrail/dashboard.lock (MCP server, legacy), if PID is alive
  * 4. Default: 3200 (spec requirement for trigger commands)
+ *
+ * Stale lock handling: if a lock file contains a `pid` field whose process is no
+ * longer alive, that lock file is skipped and the stale file is deleted as
+ * best-effort cleanup (errors from deletion are swallowed).
  */
 async function discoverConsolePort(
-  deps: Pick<WorktrainTriggerPollDeps, 'readFile' | 'homedir' | 'joinPath'>,
+  deps: Pick<WorktrainTriggerPollDeps, 'readFile' | 'deleteFile' | 'isPidAlive' | 'homedir' | 'joinPath' | 'stderr'>,
   portOverride?: number,
 ): Promise<number> {
   if (portOverride !== undefined && portOverride > 0) {
     return portOverride;
   }
 
+  let staleLockPath: string | undefined;
+
   for (const lockFileName of LOCK_FILE_NAMES) {
     const lockPath = deps.joinPath(deps.homedir(), '.workrail', lockFileName);
     try {
       const raw = await deps.readFile(lockPath);
-      const parsed = JSON.parse(raw) as { port?: unknown };
+      const parsed = JSON.parse(raw) as { port?: unknown; pid?: unknown };
+
+      // Validate the PID in the lock file before trusting the port.
+      // WHY: a stale lock file pointing to a dead PID causes the command to
+      // target a dead port, producing 404 or ECONNREFUSED. Signal 0 checks
+      // process existence without sending an actual signal.
+      // WHY guard pid > 0: process.kill(0, 0) kills the current process group;
+      // process.kill(negative, 0) targets a process group by PGID. Both are wrong here.
+      if (typeof parsed.pid === 'number' && parsed.pid > 0) {
+        if (!deps.isPidAlive(parsed.pid)) {
+          deps.stderr(
+            `[Poll] ${lockFileName} points to dead PID ${parsed.pid} -- skipping stale lock, falling back to port ${DEFAULT_POLL_PORT}`,
+          );
+          staleLockPath = lockPath;
+          continue; // skip this lock file
+        }
+      }
+
       if (typeof parsed.port === 'number' && parsed.port > 0) {
         return parsed.port;
       }
     } catch {
       // ENOENT or parse error -- try next lock file
+    }
+  }
+
+  // Best-effort cleanup: delete the stale lock file so future invocations
+  // don't have to work around it. Errors are swallowed -- cleanup is advisory.
+  if (staleLockPath !== undefined) {
+    try {
+      await deps.deleteFile(staleLockPath);
+    } catch {
+      // Swallow -- stale lock cleanup is best-effort
     }
   }
 
