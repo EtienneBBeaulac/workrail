@@ -1,0 +1,452 @@
+/**
+ * Unit tests for src/coordinators/modes/implement.ts
+ *
+ * Tests runImplementPipeline() with faked AdaptiveCoordinatorDeps.
+ * All I/O is injected -- no HTTP calls, no exec calls, no filesystem access.
+ *
+ * Key invariants verified:
+ * - Pitch archival called on success
+ * - Pitch archival called when coding session spawn fails (finally block)
+ * - UX gate dispatched when goal contains UI keywords
+ * - Escalation returned on coding session failure
+ * - Fix loop cap at exactly 2 iterations
+ */
+
+import { describe, it, expect, vi } from 'vitest';
+import {
+  runImplementPipeline,
+  touchesUI,
+} from '../../src/coordinators/modes/implement.js';
+import { buildDepBumpGoal } from '../../src/coordinators/modes/quick-review.js';
+import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts } from '../../src/coordinators/adaptive-pipeline.js';
+import type { AwaitResult } from '../../src/cli/commands/worktrain-await.js';
+import { ok, err } from '../../src/runtime/result.js';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Fake builders
+// ═══════════════════════════════════════════════════════════════════════════
+
+let sessionCounter = 0;
+function nextHandle(): string {
+  return `session-handle-${++sessionCounter}`;
+}
+
+function makeSuccessAwait(handle: string, durationMs = 5000): AwaitResult {
+  return {
+    results: [{ handle, outcome: 'success', status: 'completed', durationMs }],
+    allSucceeded: true,
+  };
+}
+
+function makeFailedAwait(handle: string): AwaitResult {
+  return {
+    results: [{ handle, outcome: 'failed', status: 'failed', durationMs: 1000 }],
+    allSucceeded: false,
+  };
+}
+
+function makeTimeoutAwait(handle: string): AwaitResult {
+  return {
+    results: [{ handle, outcome: 'timeout', status: null, durationMs: 65000 }],
+    allSucceeded: false,
+  };
+}
+
+/**
+ * Build a minimal fake AdaptiveCoordinatorDeps.
+ * Override specific methods to test different scenarios.
+ */
+function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): AdaptiveCoordinatorDeps {
+  const deps: AdaptiveCoordinatorDeps = {
+    spawnSession: vi.fn().mockResolvedValue(ok(nextHandle())),
+    awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => {
+      const handle = handles[0] ?? 'default-handle';
+      return makeSuccessAwait(handle);
+    }),
+    getAgentResult: vi.fn().mockResolvedValue({
+      recapMarkdown: 'APPROVE -- no findings. LGTM.',
+      artifacts: [],
+    }),
+    listOpenPRs: vi.fn().mockResolvedValue([]),
+    mergePR: vi.fn().mockResolvedValue(ok(undefined)),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    readFile: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+    appendFile: vi.fn().mockResolvedValue(undefined),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    stderr: vi.fn(),
+    now: vi.fn().mockReturnValue(Date.now()),
+    port: 3456,
+    homedir: () => '/home/test',
+    joinPath: (...parts: string[]) => parts.join('/'),
+    nowIso: () => new Date().toISOString(),
+    generateId: () => 'test-id-' + Math.random().toString(36).slice(2),
+    fileExists: vi.fn().mockReturnValue(false),
+    archiveFile: vi.fn().mockResolvedValue(undefined),
+    pollForPR: vi.fn().mockResolvedValue('https://github.com/org/repo/pull/42'),
+    postToOutbox: vi.fn().mockResolvedValue(undefined),
+    pollOutboxAck: vi.fn().mockResolvedValue('acked'),
+    ...overrides,
+  };
+  return deps;
+}
+
+function makeOpts(goal = 'Implement auth feature'): AdaptivePipelineOpts {
+  return {
+    workspace: '/workspace',
+    goal,
+    dryRun: false,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// touchesUI -- pure helper
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('touchesUI', () => {
+  it('returns true for "ui" keyword', () => {
+    expect(touchesUI('Add a new UI component')).toBe(true);
+  });
+
+  it('returns true for "screen" keyword', () => {
+    expect(touchesUI('Build the login screen')).toBe(true);
+  });
+
+  it('returns true for "component" keyword', () => {
+    expect(touchesUI('Create a Button component')).toBe(true);
+  });
+
+  it('returns true for "design" keyword', () => {
+    expect(touchesUI('Design the checkout flow')).toBe(true);
+  });
+
+  it('returns true for "ux" keyword', () => {
+    expect(touchesUI('Improve ux for mobile')).toBe(true);
+  });
+
+  it('returns true for "frontend" keyword', () => {
+    expect(touchesUI('Refactor the frontend state management')).toBe(true);
+  });
+
+  it('returns false for backend goal', () => {
+    expect(touchesUI('Implement OAuth refresh token rotation')).toBe(false);
+  });
+
+  it('returns false for generic coding goal', () => {
+    expect(touchesUI('Add database migration for users table')).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    expect(touchesUI('Add a UI modal')).toBe(true);
+    expect(touchesUI('Add a ui modal')).toBe(true);
+    expect(touchesUI('Add a UI modal'.toUpperCase())).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runImplementPipeline -- pitch archival
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - pitch archival', () => {
+  it('archives pitch.md on successful pipeline run', async () => {
+    const deps = makeFakeDeps();
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('merged');
+    expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.archiveFile).mock.calls[0]![0]).toBe('/workspace/.workrail/current-pitch.md');
+    expect(vi.mocked(deps.archiveFile).mock.calls[0]![1]).toContain('used-pitches/pitch-');
+  });
+
+  it('archives pitch.md even when coding session spawn fails (finally block)', async () => {
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockResolvedValue(err('connection refused')),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    // Pitch archival must still happen even though the coding session failed
+    expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('archives pitch.md even when coding session times out', async () => {
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => {
+        spawnCount++;
+        return ok(`handle-${spawnCount}`);
+      }),
+      awaitSessions: vi.fn().mockResolvedValue(makeTimeoutAwait('handle-1')),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a warning if archiveFile throws but does not change the outcome', async () => {
+    const deps = makeFakeDeps({
+      archiveFile: vi.fn().mockRejectedValue(new Error('disk full')),
+    });
+
+    // Pipeline should succeed even if archive fails
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('merged');
+    expect(deps.stderr).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to archive pitch.md'),
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runImplementPipeline -- UX gate
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - UX gate', () => {
+  it('dispatches ui-ux-design-workflow when goal contains UI keywords', async () => {
+    const spawnGoals: string[] = [];
+    const spawnWorkflows: string[] = [];
+
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string, goal: string) => {
+        spawnWorkflows.push(workflowId);
+        spawnGoals.push(goal);
+        return ok(`handle-${++spawnCount}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => {
+        return makeSuccessAwait(handles[0]!);
+      }),
+    });
+
+    await runImplementPipeline(deps, makeOpts('Build the login screen with proper UX'), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(spawnWorkflows).toContain('ui-ux-design-workflow');
+  });
+
+  it('does NOT dispatch UX workflow for non-UI goal', async () => {
+    const spawnWorkflows: string[] = [];
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnWorkflows.push(workflowId);
+        return ok(`handle-${Math.random()}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => {
+        return makeSuccessAwait(handles[0]!);
+      }),
+    });
+
+    await runImplementPipeline(deps, makeOpts('Implement OAuth token refresh'), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(spawnWorkflows).not.toContain('ui-ux-design-workflow');
+  });
+
+  it('escalates if UX gate spawn fails', async () => {
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
+        spawnCount++;
+        if (workflowId === 'ui-ux-design-workflow') {
+          return err('ui workflow not found');
+        }
+        return ok(`handle-${spawnCount}`);
+      }),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts('Build new UI screen'), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('ux-gate');
+    }
+    // Still archives pitch even on UX gate failure
+    expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runImplementPipeline -- coding session escalation
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - coding session', () => {
+  it('escalates with phase=coding when coding session spawn fails', async () => {
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockResolvedValue(err('daemon not running')),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('coding');
+    }
+  });
+
+  it('escalates with phase=coding when coding session times out', async () => {
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => {
+        return makeTimeoutAwait(handles[0]!);
+      }),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('coding');
+      expect(outcome.escalationReason.reason).toContain('timeout');
+    }
+  });
+
+  it('escalates when no PR is found after coding session', async () => {
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      pollForPR: vi.fn().mockResolvedValue(null), // no PR found
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('pr-detection');
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runImplementPipeline -- fix loop cap
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - fix loop cap', () => {
+  it('escalates after exactly 2 fix iterations with minor verdict', async () => {
+    // Review always returns 'minor' verdict
+    const minorNotes = 'Some MINOR findings found. NIT: missing test.';
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: minorNotes,
+        artifacts: [],
+      }),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('fix-loop');
+      expect(outcome.escalationReason.reason).toContain('2 fix iterations exhausted');
+    }
+
+    // postToOutbox called when fix loop exhausted
+    expect(deps.postToOutbox).toHaveBeenCalledWith(
+      expect.stringContaining('fix loop exhausted'),
+      expect.any(Object),
+    );
+  });
+
+  it('merges on clean verdict after first fix iteration', async () => {
+    let reviewCount = 0;
+    let spawnCount = 0;
+
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        reviewCount++;
+        if (reviewCount === 1) {
+          // First review: minor
+          return { recapMarkdown: 'MINOR findings: missing test', artifacts: [] };
+        }
+        // Second review (after fix): clean
+        return { recapMarkdown: 'APPROVE -- LGTM, all findings addressed', artifacts: [] };
+      }),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('merged');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runImplementPipeline -- spawn cutoff
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - spawn cutoff', () => {
+  it('escalates on coding spawn if coordinator elapsed > 100 minutes', async () => {
+    const pastStart = Date.now() - 101 * 60 * 1000; // 101 minutes ago
+    const deps = makeFakeDeps();
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', pastStart);
+
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.reason).toContain('coordinator elapsed');
+    }
+    // No spawn should have been attempted
+    expect(deps.spawnSession).not.toHaveBeenCalledWith('coding-task-workflow-agentic', expect.any(String), expect.any(String), expect.any(Object));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// runImplementPipeline -- happy path
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - happy path', () => {
+  it('returns merged outcome when review is clean', async () => {
+    let spawnCount = 0;
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'APPROVE -- LGTM. No findings.',
+        artifacts: [],
+      }),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('merged');
+    if (outcome.kind === 'merged') {
+      expect(outcome.prUrl).toBeTruthy();
+    }
+    // coding-task-workflow-agentic was spawned with pitchPath in context
+    expect(deps.spawnSession).toHaveBeenCalledWith(
+      'coding-task-workflow-agentic',
+      expect.any(String),
+      '/workspace',
+      expect.objectContaining({ pitchPath: '/workspace/.workrail/current-pitch.md' }),
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// buildDepBumpGoal -- pure helper from quick-review.ts
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('buildDepBumpGoal', () => {
+  it('includes [DEP BUMP] prefix', () => {
+    const goal = buildDepBumpGoal([123], 'bump lodash from 4.17.20 to 4.17.21');
+    expect(goal).toMatch(/^\[DEP BUMP\]/);
+  });
+
+  it('includes PR number', () => {
+    const goal = buildDepBumpGoal([99], 'bump react to 18.2.0');
+    expect(goal).toContain('PR #99');
+  });
+
+  it('includes skip architecture audit instruction', () => {
+    const goal = buildDepBumpGoal([1], 'bump dep');
+    expect(goal).toContain('skip architecture audit');
+    expect(goal).toContain('version compatibility');
+  });
+});

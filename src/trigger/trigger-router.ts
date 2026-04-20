@@ -39,6 +39,8 @@ import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecFn } from './delivery-action.js';
 import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 import type { NotificationService } from './notification-service.js';
+import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
+import { runAdaptivePipeline } from '../coordinators/adaptive-pipeline.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -802,5 +804,41 @@ export class TriggerRouter {
    */
   listTriggers(): readonly TriggerDefinition[] {
     return [...this.index.values()];
+  }
+
+  /**
+   * Dispatch the adaptive pipeline coordinator in-process (Option B).
+   *
+   * Called by the GitHub issue queue poller when a task candidate arrives.
+   * Calls runAdaptivePipeline() directly as a function call in the same process.
+   * No separate workflow session is spawned for routing.
+   *
+   * WHY Option B (in-process) over Option A (dispatch session):
+   * - The coordinator is a TypeScript script, not a workflow session definition.
+   * - In-process call avoids the session indirection and is directly testable.
+   * - Same approach as the CLI entry point (both call runAdaptivePipeline directly).
+   * (Pitch invariant 9: "The poller owns the process; the coordinator is a function call.")
+   *
+   * @param goal - The task goal string from the incoming queue event
+   * @param workspace - Absolute path to the workspace
+   * @param coordinatorDeps - Injected AdaptiveCoordinatorDeps for the pipeline
+   * @param modeExecutors - Injected mode executor functions
+   * @param context - Optional task context (taskCandidate from queue poller)
+   * @returns The PipelineOutcome (merged, escalated, or dry_run)
+   */
+  async dispatchAdaptivePipeline(
+    goal: string,
+    workspace: string,
+    coordinatorDeps: AdaptiveCoordinatorDeps,
+    modeExecutors: ModeExecutors,
+    context?: Readonly<Record<string, unknown>>,
+  ): ReturnType<typeof runAdaptivePipeline> {
+    const opts: AdaptivePipelineOpts = {
+      goal,
+      workspace,
+      taskCandidate: context,
+    };
+
+    return runAdaptivePipeline(coordinatorDeps, opts, modeExecutors);
   }
 }

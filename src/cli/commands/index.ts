@@ -66,3 +66,8 @@ export {
   type StatusDataPacket,
   type StatusSession,
 } from './worktrain-overview.js';
+export {
+  executeWorktrainPipelineCommand,
+  type WorktrainPipelineCommandDeps,
+  type WorktrainPipelineCommandOpts,
+} from './worktrain-pipeline.js';
