@@ -6284,3 +6284,47 @@ A PR that triggered the escalating audit chain should NEVER auto-merge, even if 
 ### Priority
 
 Design this alongside the adaptive pipeline coordinator (#3). The coordinator needs to know about this escalation policy before its routing logic is finalized -- the `IMPLEMENT` mode's post-review handling is incomplete without it.
+
+---
+
+## UX/UI impact detection and design workflow integration (Apr 19, 2026)
+
+**The idea:** When the adaptive pipeline coordinator classifies a task, it should detect whether the task touches user-facing surfaces (UI components, user flows, API contracts that clients consume) and automatically insert a `ui-ux-design-workflow` run before implementation.
+
+### Why this matters
+
+Coding tasks that touch UI get implemented without a design pass today. The agent writes functional code but often produces interfaces that are technically correct but experientially wrong -- wrong information hierarchy, wrong affordances, missing error states, missing loading states, wrong copy. A `ui-ux-design-workflow` run before coding forces the "multiple design directions before converging" discipline that prevents the single-solution trap.
+
+### Detection signals (what marks a task as UX-impactful)
+
+The coordinator should classify a task as `touchesUI: true` when any of:
+- Issue title or body mentions: component, screen, page, modal, dialog, button, form, flow, onboarding, dashboard, table, list, navigation, UX, UI, design, user-facing, frontend, console, web
+- Affected files (from git diff or knowledge graph) include: `console/src/`, `*.tsx`, `*.css`, `web/`, `views/`
+- The task has a `ui` or `frontend` label
+- The upstream spec (pitch/PRD) explicitly calls out visual or interaction design requirements
+
+False positives (running design workflow unnecessarily) are cheaper than false negatives (shipping bad UX). Default to `touchesUI: true` when signals are ambiguous and the task is `complexity: Medium` or larger.
+
+### Pipeline integration
+
+When `touchesUI: true`, the `IMPLEMENT` pipeline becomes:
+
+```
+coding-task-classify → ui-ux-design-workflow → coding-task-workflow-agentic → PR → review → merge
+```
+
+The `ui-ux-design-workflow` output (a design spec with chosen direction, information architecture, component breakdown, error states) feeds into Phase 0.5 of `coding-task-workflow-agentic` as the upstream spec. The coding agent then implements against a concrete design spec, not ad-hoc intuition.
+
+### Relationship to escalating review gates
+
+When a post-implementation MR review finds a UI/UX finding (wrong affordance, missing state, confusing flow), the escalation should include a targeted `ui-ux-design-workflow` audit pass, not just a code review. UX regressions need design eyes, not just code eyes.
+
+### Open design questions
+
+- **Who reviews the design spec before coding starts?** If the UX design workflow runs autonomously at 2am and coding starts immediately after, there is no human review of the design direction. This is fine for small UI tweaks; it's wrong for new user flows. The coordinator needs a complexity gate: `complexity: Large AND touchesUI: true` → require human ack on the design spec before coding.
+- **Design spec format:** `ui-ux-design-workflow` currently produces a markdown design document. Does the coding workflow reliably consume this as an upstream spec via Phase 0.5? Verify before relying on the automated handoff.
+- **Console-specific workflows:** WorkRail's console is a React/TypeScript SPA. Consider a `worktrain:console` label or file-path heuristic that routes to a console-specific design workflow variant.
+
+### Priority
+
+Design this as part of the adaptive coordinator (#3). The `touchesUI` flag belongs on the classification output alongside `taskComplexity` and `maturity`. The UI detection logic and the design workflow insertion are both coordinator-level concerns, not engine-level.
