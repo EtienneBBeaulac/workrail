@@ -110,7 +110,11 @@ export interface AdaptivePipelineOpts {
   readonly triggerProvider?: string;
   /**
    * Task candidate from the queue poller (Option B in-process integration).
-   * When present, the trigger provider is 'github_prs_poll'.
+   *
+   * WHY: taskCandidate comes from the github_queue_poll provider, NOT github_prs_poll.
+   * The PR poll trigger (github_prs_poll) passes triggerProvider directly in opts and
+   * never sets taskCandidate. These are two completely separate dispatch paths.
+   * Do NOT infer triggerProvider from taskCandidate presence.
    */
   readonly taskCandidate?: Readonly<Record<string, unknown>>;
 }
@@ -285,9 +289,12 @@ export async function runAdaptivePipeline(
   const coordinatorStartMs = deps.now();
 
   // ── Step 1: Determine trigger provider ──────────────────────────────────
-  const triggerProvider = opts.taskCandidate !== undefined
-    ? 'github_prs_poll'
-    : opts.triggerProvider;
+  // WHY: opts.triggerProvider is the authoritative source of provider identity.
+  // taskCandidate comes from github_queue_poll (not github_prs_poll) -- do NOT
+  // infer provider from its presence. The PR poller passes triggerProvider
+  // directly; the queue poller sets taskCandidate but leaves triggerProvider
+  // undefined, which correctly falls through to Rule 3 (IMPLEMENT) or Rule 4 (FULL).
+  const triggerProvider = opts.triggerProvider;
 
   // ── Step 2: Route the task (pure function, no I/O except fileExists) ────
   let pipelineMode: PipelineMode;
