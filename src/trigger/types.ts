@@ -245,6 +245,19 @@ export interface GitHubQueuePollingSource {
   readonly token: string;
   /** How often to poll in seconds. Default: 300. */
   readonly pollIntervalSeconds: number;
+  /**
+   * Queue filter type from triggers.yml queueType field.
+   * Maps to GitHubQueueConfig.type. When present, the polling scheduler
+   * may use this to override or supplement the global config.json queue type.
+   * Example values: 'assignee', 'label'
+   */
+  readonly queueType?: string;
+  /**
+   * Label name for label-based queue filtering, from triggers.yml queueLabel field.
+   * Only relevant when queueType === 'label'.
+   * Example: 'worktrain:ready'
+   */
+  readonly queueLabel?: string;
 }
 
 // ---------------------------------------------------------------------------

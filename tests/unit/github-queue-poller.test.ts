@@ -3,7 +3,9 @@
  *
  * Covers:
  * - Fetches issues matching assignee filter (assignee query param set)
- * - Returns not_implemented for non-assignee queue types
+ * - type: label with queueLabel fetches with labels= query param
+ * - type: label without queueLabel returns not_implemented
+ * - type: assignee regression (still works after label support added)
  * - Skips cycle on GitHub API error (network error, HTTP error)
  * - Idempotency: skips issue with matching active session file
  * - Idempotency: returns 'clear' when no matching session
@@ -123,12 +125,38 @@ describe('pollGitHubQueueIssues', () => {
     expect(fetchCall?.[0]).toContain('assignee=bob');
   });
 
-  it('returns not_implemented for non-assignee queue type', async () => {
+  it('type: label with queueLabel fetches with labels= query param', async () => {
+    const issue = makeIssue({ number: 55, title: 'Label issue' });
+    const fetchFn = makeFetch({
+      ok: true,
+      json: () => Promise.resolve([issue]),
+    });
+
+    const result = await pollGitHubQueueIssues(
+      makeSource(),
+      makeConfig({ type: 'label', queueLabel: 'worktrain:ready' }),
+      fetchFn,
+    );
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]?.number).toBe(55);
+    }
+
+    // Verify labels query param was set correctly (colon is percent-encoded)
+    const fetchCall = (fetchFn as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(fetchCall?.[0]).toContain('labels=worktrain%3Aready');
+    // Should NOT have assignee param
+    expect(fetchCall?.[0]).not.toContain('assignee=');
+  });
+
+  it('type: label without queueLabel returns not_implemented', async () => {
     const fetchFn = makeFetch({ ok: true });
 
     const result = await pollGitHubQueueIssues(
       makeSource(),
-      makeConfig({ type: 'label', name: 'my-label' }),
+      makeConfig({ type: 'label' }),
       fetchFn,
     );
 
@@ -136,8 +164,29 @@ describe('pollGitHubQueueIssues', () => {
     if (result.kind === 'err') {
       expect(result.error.kind).toBe('not_implemented');
     }
-    // fetchFn should NOT be called for not_implemented types
+    // fetchFn should NOT be called when config is invalid
     expect((fetchFn as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+  });
+
+  it('type: assignee regression - still works after label support added', async () => {
+    const issue = makeIssue({ number: 99, title: 'Assignee issue' });
+    const fetchFn = makeFetch({
+      ok: true,
+      json: () => Promise.resolve([issue]),
+    });
+
+    const result = await pollGitHubQueueIssues(makeSource(), makeConfig({ user: 'alice' }), fetchFn);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]?.number).toBe(99);
+    }
+
+    // Verify assignee param and no labels param
+    const fetchCall = (fetchFn as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(fetchCall?.[0]).toContain('assignee=alice');
+    expect(fetchCall?.[0]).not.toContain('labels=');
   });
 
   it('returns network_error on fetch throw', async () => {

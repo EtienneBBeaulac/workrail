@@ -112,6 +112,12 @@ interface ParsedTriggerRaw {
   branchStrategy?: string; // validated as 'worktree' | 'none' at assemble time; default 'none'
   baseBranch?: string;     // default 'main'
   branchPrefix?: string;   // default 'worktrain/'
+  // Queue filter fields for github_queue_poll triggers.
+  // These are top-level trigger fields (not inside source:) because they configure
+  // the queue filter type, not the polling source connection details.
+  // queueType maps to GitHubQueueConfig.type; queueLabel to GitHubQueueConfig.queueLabel.
+  queueType?: string;   // e.g. 'label', 'assignee'
+  queueLabel?: string;  // e.g. 'worktrain:ready' (when queueType === 'label')
   // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   // Fields from all providers are unioned here -- the assembler validates which
@@ -479,6 +485,8 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'branchStrategy':   trigger.branchStrategy = value; break;
     case 'baseBranch':       trigger.baseBranch = value; break;
     case 'branchPrefix':     trigger.branchPrefix = value; break;
+    case 'queueType':        trigger.queueType = value; break;
+    case 'queueLabel':       trigger.queueLabel = value; break;
     // contextMapping, agentConfig, onComplete, source handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -1089,11 +1097,20 @@ function validateAndResolveTrigger(
       queuePollIntervalSeconds = asNumber;
     }
 
+    // Parse queueType and queueLabel from top-level trigger fields.
+    // These are stored in the source so the polling scheduler can read them.
+    // WHY top-level (not source:): avoids collision with source.token/repo fields
+    // and matches the queueType/queueLabel convention in triggers.yml.
+    const rawQueueType = raw.queueType?.trim();
+    const rawQueueLabel = raw.queueLabel?.trim();
+
     pollingSource = {
       provider: 'github_queue_poll',
       repo: queueSrc.repo.trim(),
       token: queueTokenResult.value,
       pollIntervalSeconds: queuePollIntervalSeconds,
+      ...(rawQueueType ? { queueType: rawQueueType } : {}),
+      ...(rawQueueLabel ? { queueLabel: rawQueueLabel } : {}),
     };
   } else if (raw.source) {
     // provider === 'generic' but source: is present -- warn, do not error.

@@ -11,8 +11,9 @@
  * - Token resolution: if token starts with '$', resolve from process.env.
  *   Returns err if the env var is unset or empty.
  * - The type field is validated against the allowed union values.
- *   Only 'assignee' is implemented -- other types parse fine but throw not_implemented
- *   at dispatch time in polling-scheduler.ts.
+ *   'assignee' and 'label' are implemented. 'mention' and 'query' parse fine but
+ *   throw not_implemented at dispatch time in github-queue-poller.ts.
+ *   When type === 'label', queueLabel is required and validated at load time.
  * - repo is required. pollIntervalSeconds, maxTotalConcurrentSessions, excludeLabels are optional
  *   with documented defaults.
  */
@@ -33,8 +34,8 @@ import { ok, err } from '../runtime/result.js';
  * Invariants:
  * - token is already resolved from environment when returned from loadQueueConfig().
  *   The raw config may contain a '$ENV_VAR' reference; loadQueueConfig() resolves it.
- * - type === 'assignee' is the only implemented filter at runtime.
- *   Other types are accepted by the type system but throw not_implemented at dispatch.
+ * - type === 'assignee' and type === 'label' are implemented at runtime.
+ *   'mention' and 'query' are accepted by the type system but throw not_implemented at dispatch.
  * - repo is in "owner/repo" format.
  * - pollIntervalSeconds: default 300 if absent.
  * - maxTotalConcurrentSessions: default 1 if absent.
@@ -42,13 +43,20 @@ import { ok, err } from '../runtime/result.js';
  */
 export interface GitHubQueueConfig {
   /**
-   * Opt-in mechanism. MVP: only "assignee" is implemented.
-   * Other types are defined in the type but throw 'not_implemented' at runtime.
+   * Opt-in mechanism. 'assignee' and 'label' are implemented.
+   * 'mention' and 'query' are typed but throw 'not_implemented' at runtime.
    */
   readonly type: 'assignee' | 'label' | 'mention' | 'query';
   /** Required when type === 'assignee'. The GitHub login to poll for. */
   readonly user?: string;
-  /** Required when type === 'label'. The label name to match. */
+  /**
+   * Required when type === 'label'. The label name to filter issues by.
+   * Example: 'worktrain:ready'
+   * WHY queueLabel (not name): avoids collision with trigger-level 'name' field conventions
+   * and matches the queueLabel key used in triggers.yml.
+   */
+  readonly queueLabel?: string;
+  /** @deprecated Use queueLabel instead. Legacy field name from earlier design iteration. */
   readonly name?: string;
   /** Required when type === 'mention'. The handle (with @) to match. */
   readonly handle?: string;
@@ -224,12 +232,25 @@ export async function loadQueueConfig(
     excludeLabels = rawExcludeLabels as string[];
   }
 
+  // Validate type-specific required fields at load time.
+  // WHY here (not in poller): fail-fast at config load means the operator sees the error
+  // immediately at daemon startup rather than at the first poll cycle.
+  if (rawType === 'label') {
+    const rawQueueLabel = q['queueLabel'];
+    if (typeof rawQueueLabel !== 'string' || !rawQueueLabel.trim()) {
+      return err('config.queue.queueLabel is required when type is "label"');
+    }
+  }
+
   // Optional string fields
   const rawUser = q['user'];
   const user = typeof rawUser === 'string' && rawUser.trim() ? rawUser.trim() : undefined;
 
   const rawName = q['name'];
   const labelName = typeof rawName === 'string' && rawName.trim() ? rawName.trim() : undefined;
+
+  const rawQueueLabel = q['queueLabel'];
+  const queueLabel = typeof rawQueueLabel === 'string' && rawQueueLabel.trim() ? rawQueueLabel.trim() : undefined;
 
   const rawHandle = q['handle'];
   const handle = typeof rawHandle === 'string' && rawHandle.trim() ? rawHandle.trim() : undefined;
@@ -249,6 +270,7 @@ export async function loadQueueConfig(
   return ok({
     type: rawType as 'assignee' | 'label' | 'mention' | 'query',
     ...(user !== undefined ? { user } : {}),
+    ...(queueLabel !== undefined ? { queueLabel } : {}),
     ...(labelName !== undefined ? { name: labelName } : {}),
     ...(handle !== undefined ? { handle } : {}),
     ...(search !== undefined ? { search } : {}),

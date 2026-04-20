@@ -6,7 +6,8 @@
  * ALL open issues matching the queue config filter (e.g. assigned to a user).
  *
  * API used:
- *   GET /repos/:owner/:repo/issues?state=open&assignee=<user>&per_page=100
+ *   Assignee filter: GET /repos/:owner/:repo/issues?state=open&assignee=<user>&per_page=100
+ *   Label filter:    GET /repos/:owner/:repo/issues?state=open&labels=<label>&per_page=100
  *   Header: Authorization: Bearer <token>
  *
  * Design notes:
@@ -118,6 +119,7 @@ function checkRateLimit(response: Response): boolean {
  * Fetch open GitHub issues matching the queue config filter.
  *
  * For type === 'assignee': fetches issues with assignee=<config.user>.
+ * For type === 'label': fetches issues with labels=<config.queueLabel>.
  * For other types: returns err({ kind: 'not_implemented' }) -- caller skips cycle.
  *
  * @param source - Queue polling source configuration (repo, token, pollInterval)
@@ -130,22 +132,23 @@ export async function pollGitHubQueueIssues(
   config: GitHubQueueConfig,
   fetchFn: FetchFn = globalThis.fetch,
 ): Promise<Result<GitHubQueueIssue[], GitHubQueuePollError>> {
-  // Only 'assignee' type is implemented -- other types throw not_implemented at runtime
-  if (config.type !== 'assignee') {
-    return err({
-      kind: 'not_implemented',
-      message: `Queue type '${config.type}' is not implemented. Only 'assignee' is supported.`,
-    });
-  }
-
   const [owner, repo] = source.repo.split('/');
   const url = new URL(`https://api.github.com/repos/${owner}/${repo}/issues`);
   url.searchParams.set('state', 'open');
   url.searchParams.set('per_page', '100');
 
-  // Apply assignee filter
-  if (config.user) {
+  // Apply queue filter based on config type.
+  // WHY: only assignee and label are implemented; other types return not_implemented
+  // so the caller (polling-scheduler) can skip the cycle cleanly.
+  if (config.type === 'assignee' && config.user) {
     url.searchParams.set('assignee', config.user);
+  } else if (config.type === 'label' && config.queueLabel) {
+    url.searchParams.set('labels', config.queueLabel);
+  } else {
+    return err({
+      kind: 'not_implemented',
+      message: `Queue type "${config.type}" is not yet implemented`,
+    });
   }
 
   let response: Response;
