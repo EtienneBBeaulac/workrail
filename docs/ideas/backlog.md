@@ -6481,3 +6481,77 @@ All five top-priority autonomous pipeline items shipped:
 4. **Level 1 usage: run WorkTrain on its own backlog** -- Create `worktrain:ready` issues for the top 10 ready tasks, assign to `worktrain-etienneb`, observe one full queue → pipeline run. Collect data on misclassifications and weak PRs before designing the grooming loop.
 
 5. **`worktrain inbox --watch`** -- Close the notification loop. Outbox exists, just needs the polling implementation.
+
+---
+
+## WorkTrain identity model: act as the user, not as a bot (Apr 20, 2026)
+
+**Design decision:** WorkTrain acts as the configured user, not as a separate bot account.
+
+### Why bot accounts are the wrong default
+
+Most developers -- especially at companies -- cannot create separate bot GitHub accounts. Jira, GitLab, and other enterprise systems tie authentication to employee identity. Requiring a separate account creates friction that blocks adoption entirely.
+
+WorkTrain's attribution signal is the **work pattern**, not the identity:
+- Branch name: `worktrain/<sessionId>` -- immediately recognizable
+- PR body footer: "🤖 Automated by WorkTrain" + session ID + workflow name
+- Commit co-author: `Co-Authored-By: WorkTrain <worktrain@noreply>`
+
+Anyone reviewing a PR knows it was autonomous. The developer's name on the PR is not a lie -- they configured WorkTrain to do this work on their behalf.
+
+### Queue membership without a bot account
+
+Assignee-based opt-in only works with a dedicated bot account. Label-based opt-in works with any setup:
+- Apply `worktrain:ready` label to an issue → WorkTrain picks it up
+- The queue poll trigger uses `queueType: label` + `queueLabel: "worktrain:ready"`
+- No bot account, no special permissions, no friction
+
+`workOnAll: true` (future) processes any open issue -- also requires no bot account.
+
+### Token: use your own PAT
+
+`$GITHUB_TOKEN` (your personal token) or a fine-grained PAT scoped to the target repo. WorkTrain uses it for API calls; the commit identity (`git user.name`, `git user.email`) is set separately in the worktree and can be whatever you want.
+
+---
+
+## Jira + GitLab integration for WorkTrain (Apr 20, 2026)
+
+**Context:** Most enterprise developers use Jira for tickets and GitLab for code hosting. WorkTrain should work in this environment without requiring GitHub or a bot account.
+
+### What exists
+
+`gitlab_poll` trigger already exists -- polls GitLab MR list and dispatches sessions when new/updated MRs appear. WorkTrain can already do autonomous MR review on GitLab.
+
+### What's missing
+
+**`jira_poll` trigger:** Poll a Jira board/sprint/filter for issues in a specific status (e.g., "In Progress", "Ready for Dev") assigned to the configured user, and dispatch WorkTrain sessions for them. The developer labels Jira issues for WorkTrain the same way they'd assign to a teammate.
+
+Proposed `jira_poll` config:
+```yaml
+- id: jira-queue
+  provider: jira_poll
+  jiraBaseUrl: https://zillow.atlassian.net
+  token: $JIRA_API_TOKEN
+  project: ACEI
+  statusFilter: "Ready for Dev"
+  assigneeFilter: "$JIRA_USERNAME"
+  workspacePath: /path/to/repo
+  branchStrategy: worktree
+  autoCommit: true
+  autoOpenPR: true
+  agentConfig:
+    maxSessionMinutes: 90
+```
+
+**GitLab issue queue:** Same as `github_queue_poll` but for GitLab issues. Dispatch coding sessions for GitLab issues labeled `worktrain` or in a specific milestone.
+
+### Implementation notes
+
+- `jira_poll` follows the same `PollingSource` discriminated union pattern as `gitlab_poll` and `github_queue_poll`
+- Jira REST API v3: `GET /rest/api/3/search?jql=project=X+AND+status="Ready for Dev"+AND+assignee=currentUser()`
+- Token: Jira API token (not OAuth -- simpler for developer tools)
+- `jira_poll` should extract issue title + description as the goal, and the Jira issue URL as `upstreamSpecUrl` in `TaskCandidate`
+
+### Priority
+
+Medium. GitLab MR review already works. Jira issue queue is the next most impactful integration for enterprise users. Design alongside the label-based GitHub queue -- the patterns are identical, just different API shapes.
