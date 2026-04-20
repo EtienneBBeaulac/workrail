@@ -1,7 +1,7 @@
 /**
  * WorkRail Auto: GitHub Queue Configuration
  *
- * Loads and validates the `queue` key from ~/.workrail/config.json.
+ * Loads and validates the `queue` key from ~/.workrail/queue-config.json.
  * Returns the parsed GitHubQueueConfig or null when no queue config is present.
  *
  * Design notes:
@@ -107,28 +107,33 @@ export interface GitHubQueueConfig {
 // Default config path
 // ---------------------------------------------------------------------------
 
-export const WORKRAIL_CONFIG_PATH = path.join(os.homedir(), '.workrail', 'config.json');
+export const WORKRAIL_CONFIG_PATH = path.join(os.homedir(), '.workrail', 'queue-config.json');
 
 // ---------------------------------------------------------------------------
 // loadQueueConfig
 // ---------------------------------------------------------------------------
 
+// WHY separate file (not config.json): WorkRail MCP server validates config.json
+// as a flat key-value map with string values only. Nested objects like the queue
+// config break that validation and cause the entire config.json to be ignored.
+// WorkTrain queue config lives in queue-config.json to keep the two systems' configs separate.
+
 /**
- * Load and validate the `queue` key from ~/.workrail/config.json.
+ * Load and validate the `queue` key from ~/.workrail/queue-config.json.
  *
  * Returns:
- * - ok(null) when config.json does not exist or has no `queue` key
+ * - ok(null) when queue-config.json does not exist or has no `queue` key
  * - ok(GitHubQueueConfig) when the queue config is present and valid
  * - err(string) when the queue key is present but invalid
  *
- * @param configPath - Injectable path to config.json (default: ~/.workrail/config.json)
+ * @param configPath - Injectable path to queue-config.json (default: ~/.workrail/queue-config.json)
  * @param env - Injectable environment map for $SECRET resolution (default: process.env)
  */
 export async function loadQueueConfig(
   configPath: string = WORKRAIL_CONFIG_PATH,
   env: Record<string, string | undefined> = process.env,
 ): Promise<Result<GitHubQueueConfig | null, string>> {
-  // Read config.json
+  // Read queue-config.json
   let raw: string;
   try {
     raw = await fs.readFile(configPath, 'utf8');
