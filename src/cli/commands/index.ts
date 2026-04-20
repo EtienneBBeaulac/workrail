@@ -71,3 +71,8 @@ export {
   type WorktrainPipelineCommandDeps,
   type WorktrainPipelineCommandOpts,
 } from './worktrain-pipeline.js';
+export {
+  executeWorktrainTriggerTestCommand,
+  type WorktrainTriggerTestDeps,
+  type WorktrainTriggerTestOpts,
+} from './worktrain-trigger-test.js';
