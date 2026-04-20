@@ -67,6 +67,8 @@ function makeIssue(overrides: Partial<{
   html_url: string;
   labels: Array<{ name: string }>;
   created_at: string;
+  state: string;
+  assignees: Array<{ login: string }>;
 }> = {}): object {
   return {
     id: 1001,
@@ -77,6 +79,9 @@ function makeIssue(overrides: Partial<{
     labels: [],
     created_at: '2026-04-19T00:00:00Z',
     state: 'open',
+    // Default assignee matches makeConfig() default user so existing tests pass the
+    // defensive client-side assignee pre-filter in pollGitHubQueueIssues().
+    assignees: [{ login: 'worktrain-etienneb' }],
     ...overrides,
   };
 }
@@ -105,7 +110,7 @@ function makeFetch(response: {
 
 describe('pollGitHubQueueIssues', () => {
   it('fetches issues matching assignee filter', async () => {
-    const issue = makeIssue({ number: 42, title: 'Add Glob tool', body: 'Simple body' });
+    const issue = makeIssue({ number: 42, title: 'Add Glob tool', body: 'Simple body', assignees: [{ login: 'bob' }] });
     const fetchFn = makeFetch({
       ok: true,
       json: () => Promise.resolve([issue]),
@@ -169,7 +174,7 @@ describe('pollGitHubQueueIssues', () => {
   });
 
   it('type: assignee regression - still works after label support added', async () => {
-    const issue = makeIssue({ number: 99, title: 'Assignee issue' });
+    const issue = makeIssue({ number: 99, title: 'Assignee issue', assignees: [{ login: 'alice' }] });
     const fetchFn = makeFetch({
       ok: true,
       json: () => Promise.resolve([issue]),
@@ -280,6 +285,51 @@ describe('pollGitHubQueueIssues', () => {
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
       expect(result.value[0]?.body).toBe('');
+    }
+  });
+
+  it('filters out closed issues in API response (state guard)', async () => {
+    // Defensive guard: API sends state=open but caching or API quirks can return closed items.
+    // A closed issue should never enter the queue regardless of how it arrived.
+    const closedIssue = makeIssue({ number: 42, state: 'closed' });
+    const fetchFn = makeFetch({ ok: true, json: () => Promise.resolve([closedIssue]) });
+
+    const result = await pollGitHubQueueIssues(makeSource(), makeConfig(), fetchFn);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('filters out pull requests in API response (pull_request field guard)', async () => {
+    // GitHub Issues API returns PRs alongside issues. PRs have a pull_request field.
+    // Queue poll should only dispatch coding tasks from issues, not PRs.
+    const pr = {
+      ...makeIssue({ number: 43 }),
+      pull_request: { url: 'https://api.github.com/repos/acme/my-project/pulls/43' },
+    };
+    const fetchFn = makeFetch({ ok: true, json: () => Promise.resolve([pr]) });
+
+    const result = await pollGitHubQueueIssues(makeSource(), makeConfig(), fetchFn);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(0);
+    }
+  });
+
+  it('passes through open issues without pull_request field', async () => {
+    // Regression guard: a standard open issue with no pull_request field must pass all filters.
+    const openIssue = makeIssue({ number: 44, title: 'Valid open issue' });
+    const fetchFn = makeFetch({ ok: true, json: () => Promise.resolve([openIssue]) });
+
+    const result = await pollGitHubQueueIssues(makeSource(), makeConfig(), fetchFn);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value).toHaveLength(1);
+      expect(result.value[0]?.number).toBe(44);
     }
   });
 });
