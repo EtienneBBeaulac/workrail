@@ -498,7 +498,9 @@ function makeQueueFetch(): QueueFetchFn {
     labels: [],
     created_at: '2026-04-19T00:00:00Z',
     state: 'open',
-    assignee: { login: 'worktrain-etienneb' },
+    // Use assignees array (not singular assignee) to match the defensive client-side
+    // assignee pre-filter in pollGitHubQueueIssues() which checks the assignees array.
+    assignees: [{ login: 'worktrain-etienneb' }],
   };
   return vi.fn().mockResolvedValue({
     ok: true,

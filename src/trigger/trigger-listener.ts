@@ -49,6 +49,8 @@ import { runQuickReviewPipeline } from '../coordinators/modes/quick-review.js';
 import { runReviewOnlyPipeline } from '../coordinators/modes/review-only.js';
 import { runImplementPipeline } from '../coordinators/modes/implement.js';
 import { runFullPipeline } from '../coordinators/modes/full-pipeline.js';
+import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
+import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -377,12 +379,21 @@ export async function startTriggerListener(
   // fs/exec/HTTP implementations. This pattern mirrors the pr-review command in
   // cli-worktrain.ts (lines 958-1244), which uses the same deps interface.
   //
-  // WHY port=3456 (DAEMON_CONSOLE_PORT): the daemon console starts after startTriggerListener
-  // returns, so no lock file exists at construction time. 3456 is the daemon console default
-  // and the explicit fallback used by discoverConsolePort() in cli-worktrain.ts.
+  // WHY port=3456 (DAEMON_CONSOLE_PORT): still used by awaitSessions and getAgentResult
+  // which poll the console HTTP API. This constant is kept for those paths.
+  //
+  // WHY let routerRef (forward reference): coordinatorDeps must be constructed before
+  // TriggerRouter (it is a constructor argument). spawnSession needs the router to
+  // call router.dispatch() in-process. The forward-ref is assigned exactly once,
+  // immediately after new TriggerRouter(), and never mutated again.
   // ---------------------------------------------------------------------------
   const DAEMON_CONSOLE_PORT = 3456;
   const execFileAsync = promisify(execFile);
+
+  // Forward reference for in-process dispatch. Assigned after router construction.
+  // WHY let (not const): construction order requires coordinatorDeps before router.
+  // Assigned exactly once; never mutated after assignment.
+  let routerRef: TriggerRouter | undefined;
 
   const coordinatorDeps: AdaptiveCoordinatorDeps = {
     spawnSession: async (
@@ -391,47 +402,65 @@ export async function startTriggerListener(
       workspace: string,
       context?: Readonly<Record<string, unknown>>,
     ) => {
-      const url = `http://127.0.0.1:${DAEMON_CONSOLE_PORT}/api/v2/auto/dispatch`;
-      try {
-        const response = await globalThis.fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workflowId,
-            goal,
-            workspacePath: workspace,
-            ...(context !== undefined ? { context } : {}),
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
-        const body = await response.json() as Record<string, unknown>;
-        if (!response.ok) {
-          const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
-          if (response.status === 503) {
-            return { kind: 'err' as const, error: `WorkTrain daemon is not ready: ${errMsg}` };
-          }
-          return { kind: 'err' as const, error: `Dispatch failed: ${errMsg}` };
-        }
-        if (body['success'] !== true || typeof body['data'] !== 'object') {
-          return { kind: 'err' as const, error: 'Unexpected response from dispatch endpoint' };
-        }
-        const data = body['data'] as Record<string, unknown>;
-        const handle = typeof data['sessionHandle'] === 'string' ? data['sessionHandle'] : '';
-        if (!handle) {
-          return { kind: 'err' as const, error: 'Dispatch succeeded but no session handle returned' };
-        }
-        return { kind: 'ok' as const, value: handle };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const isConnRefused = msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
-        if (isConnRefused) {
-          return { kind: 'err' as const, error: `Could not connect to WorkTrain daemon on port ${DAEMON_CONSOLE_PORT}. Ensure the daemon is running.` };
-        }
-        if (e instanceof Error && e.name === 'TimeoutError') {
-          return { kind: 'err' as const, error: `Daemon request timed out after 30s` };
-        }
-        return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
+      // WHY in-process (not HTTP): the coordinator runs inside the daemon process.
+      // POSTing to /api/v2/auto/dispatch would go out-of-process to itself, hitting
+      // the HTTP handler's LLM credential check which can fail even when the daemon
+      // is running correctly (the daemon already validated credentials at startup).
+      // Calling executeStartWorkflow + router.dispatch() directly bypasses the
+      // redundant credential check and eliminates the HTTP roundtrip.
+      // This mirrors the pattern used in console-routes.ts:810-863 (the HTTP handler
+      // uses this same flow: executeStartWorkflow -> _preAllocatedStartResponse -> dispatch).
+      if (routerRef === undefined) {
+        return { kind: 'err' as const, error: 'in-process router not initialized -- coordinator deps not ready' };
       }
+
+      // Step 1: Allocate a session in the store synchronously.
+      // WHY _preAllocatedStartResponse: runWorkflow() skips its own executeStartWorkflow()
+      // call when this field is set, preventing double session creation.
+      const startResult = await executeStartWorkflow(
+        { workflowId, workspacePath: workspace, goal },
+        ctx,
+        { is_autonomous: 'true', workspacePath: workspace },
+      );
+      if (startResult.isErr()) {
+        const detail = `${startResult.error.kind}${'message' in startResult.error ? ': ' + (startResult.error as { message: string }).message : ''}`;
+        return { kind: 'err' as const, error: `Session creation failed: ${detail}` };
+      }
+
+      const startContinueToken = startResult.value.response.continueToken;
+      if (!startContinueToken) {
+        // Workflow completed immediately (single-step); no agent loop session needed.
+        // Use workflowId as fallback handle (matches console-routes.ts:854-856 behavior).
+        return { kind: 'ok' as const, value: workflowId };
+      }
+
+      // Step 2: Decode the session ID from the continueToken.
+      // WHY parseContinueTokenOrFail: V2StartWorkflowOutputSchema does not expose sessionId
+      // directly (to avoid a breaking schema change). Same approach as console-routes.ts:837-851.
+      const tokenResult = await parseContinueTokenOrFail(
+        startContinueToken,
+        ctx.v2.tokenCodecPorts,
+        ctx.v2.tokenAliasStore,
+      );
+      if (tokenResult.isErr()) {
+        process.stderr.write(
+          `[ERROR trigger-listener:spawnSession] Failed to decode session handle from new session: ${tokenResult.error.message}\n`,
+        );
+        return { kind: 'err' as const, error: 'Internal error: could not extract session handle from new session' };
+      }
+      const sessionHandle = tokenResult.value.sessionId;
+
+      // Step 3: Enqueue the agent loop via TriggerRouter's queue and semaphore.
+      // Pass _preAllocatedStartResponse so runWorkflow() skips executeStartWorkflow().
+      routerRef.dispatch({
+        workflowId,
+        goal,
+        workspacePath: workspace,
+        context,
+        _preAllocatedStartResponse: startResult.value.response,
+      });
+
+      return { kind: 'ok' as const, value: sessionHandle };
     },
 
     contextAssembler: createContextAssembler({
@@ -724,6 +753,11 @@ export async function startTriggerListener(
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
   const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry, coordinatorDeps, modeExecutors);
+  // Populate the forward reference so spawnSession can dispatch in-process.
+  // WHY here (not before construction): routerRef is a forward-ref needed because
+  // coordinatorDeps must be constructed before TriggerRouter (it's a constructor arg).
+  // Assigned exactly once, immediately after construction.
+  routerRef = router;
   const app = createTriggerApp(router);
 
   // Create and start the polling scheduler.
