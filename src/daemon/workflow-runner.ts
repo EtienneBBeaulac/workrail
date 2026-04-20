@@ -2371,6 +2371,7 @@ async function writeStuckOutboxEntry(opts: {
 }): Promise<void> {
   try {
     const outboxPath = path.join(os.homedir(), '.workrail', 'outbox.jsonl');
+    await fs.mkdir(path.dirname(outboxPath), { recursive: true });
     const entry = JSON.stringify({
       id: randomUUID(),
       kind: 'stuck',
@@ -3745,7 +3746,7 @@ export async function runWorkflow(
       kind: 'session_completed',
       sessionId,
       workflowId: trigger.workflowId,
-      outcome: 'timeout',   // backward-compat in event log; _tag: 'stuck' distinguishes at result level
+      outcome: 'timeout',   // WHY outcome:'timeout': stuck is not yet a first-class outcome in the event schema; backward compat with log parsers that expect 'timeout' for non-success non-error outcomes.
       detail: stuckReason,
       ...withWorkrailSession(workrailSessionId),
     });
