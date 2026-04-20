@@ -26,6 +26,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import type { V2ToolContext } from '../mcp/types.js';
 import type { TriggerRouter } from './trigger-router.js';
+import type { PollingScheduler } from './polling-scheduler.js';
 import type { WorkflowService } from '../application/services/workflow-service.js';
 import type { SteerRegistry } from '../daemon/workflow-runner.js';
 import type { Result } from '../runtime/result.js';
@@ -68,6 +69,12 @@ export interface StartDaemonConsoleOptions {
    * When absent, the steer endpoint returns 503.
    */
   readonly steerRegistry?: SteerRegistry;
+  /**
+   * PollingScheduler instance for POST /api/v2/triggers/:id/poll (force immediate poll).
+   * Must be the same instance created by startTriggerListener().
+   * When absent, the poll endpoint returns 503.
+   */
+  readonly pollingScheduler?: PollingScheduler;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,8 +129,9 @@ export async function startDaemonConsole(
   });
 
   // Mount console routes. Pass ctx as v2ToolContext to enable the AUTO dispatch
-  // endpoint, triggerRouter so dispatches go through the daemon's queue, and
-  // steerRegistry so POST /sessions/:id/steer can reach running session callbacks.
+  // endpoint, triggerRouter so dispatches go through the daemon's queue,
+  // steerRegistry so POST /sessions/:id/steer can reach running session callbacks,
+  // and pollingScheduler so POST /api/v2/triggers/:id/poll can force immediate cycles.
   // timingRingBuffer and toolCallsPerfFile are intentionally omitted -- the daemon
   // console does not track per-tool timing (dev perf endpoint returns empty).
   const stopWatcher = mountConsoleRoutes(
@@ -136,6 +144,7 @@ export async function startDaemonConsole(
     ctx,
     options.triggerRouter,
     options.steerRegistry,
+    options.pollingScheduler,
   );
 
   // 404 catch-all (must be installed after all routes)

@@ -137,6 +137,7 @@ export function mountConsoleRoutes(
   v2ToolContext?: V2ToolContext,
   triggerRouter?: TriggerRouter,
   steerRegistry?: SteerRegistry,
+  pollingScheduler?: import('../../trigger/polling-scheduler.js').PollingScheduler,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -923,6 +924,69 @@ export function mountConsoleRoutes(
     }));
 
     res.json({ success: true, data: { triggers } });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Trigger force-poll endpoint
+  //
+  // POST /api/v2/triggers/:triggerId/poll
+  //
+  // Forces one immediate poll cycle for the named github_queue_poll trigger,
+  // bypassing the configured interval timer. Useful for manual testing and
+  // for cases where operators want to trigger a cycle without restarting the daemon.
+  //
+  // Daemon-only: requires pollingScheduler to be provided at server startup.
+  // Standalone console returns 503.
+  //
+  // Returns:
+  //   200 { success: true, data: { cycleRan: boolean, triggerId: string } }
+  //   400 if trigger not found or not a github_queue_poll trigger
+  //   503 if pollingScheduler not available (standalone console)
+  // ---------------------------------------------------------------------------
+  app.post('/api/v2/triggers/:triggerId/poll', async (req: Request, res: Response) => {
+    if (!pollingScheduler) {
+      res.status(503).json({ success: false, error: 'Force poll not available (not a daemon context).' });
+      return;
+    }
+
+    const triggerId = req.params['triggerId'] ?? '';
+    if (!triggerId) {
+      res.status(400).json({ success: false, error: 'Missing triggerId' });
+      return;
+    }
+
+    const result = await pollingScheduler.forcePoll(triggerId);
+
+    switch (result.kind) {
+      case 'ok':
+        res.json({
+          success: true,
+          data: {
+            triggerId,
+            cycleRan: result.cycleRan,
+            message: result.cycleRan
+              ? `Poll cycle started for trigger '${triggerId}'.`
+              : `Poll cycle skipped for trigger '${triggerId}' -- a previous cycle is still running.`,
+          },
+        });
+        return;
+      case 'not_found':
+        res.status(400).json({ success: false, error: `Trigger '${triggerId}' not found` });
+        return;
+      case 'wrong_provider':
+        res.status(400).json({
+          success: false,
+          error: `Trigger '${triggerId}' is not a queue poll trigger (provider: ${result.provider})`,
+        });
+        return;
+      default: {
+        // TypeScript exhaustiveness check
+        const _exhaustive: never = result;
+        res.status(500).json({ success: false, error: 'Unexpected forcePoll result' });
+        void _exhaustive;
+        return;
+      }
+    }
   });
 
   // ---------------------------------------------------------------------------

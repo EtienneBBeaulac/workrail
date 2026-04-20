@@ -82,6 +82,12 @@ export interface TriggerListenerHandle {
    * to sessions running inside TriggerRouter's dispatch queue.
    */
   readonly steerRegistry: SteerRegistry;
+  /**
+   * The PollingScheduler instance created by this listener.
+   * Exposed so the daemon console can wire POST /api/v2/triggers/:id/poll
+   * to forcePoll() without re-creating the scheduler.
+   */
+  readonly scheduler: PollingScheduler;
   stop(): Promise<void>;
 }
 
@@ -828,6 +834,7 @@ export async function startTriggerListener(
         port: actualPort,
         router,
         steerRegistry,
+        scheduler: pollingScheduler,
         stop: async () => {
           // Stop polling BEFORE closing the HTTP server to prevent dispatch()
           // calls after the router's queue has been drained.

@@ -55,6 +55,19 @@ function isPollingTrigger(trigger: TriggerDefinition): trigger is PollingTrigger
   return trigger.pollingSource !== undefined;
 }
 
+/**
+ * Result type for PollingScheduler.forcePoll().
+ *
+ * ok: Poll cycle was attempted. cycleRan=true if a new cycle was started;
+ *     cycleRan=false if the skip-cycle guard fired (previous cycle still running).
+ * not_found: No trigger with the given ID exists in the scheduler.
+ * wrong_provider: Trigger exists but is not a github_queue_poll trigger.
+ */
+export type ForcePollResult =
+  | { readonly kind: 'ok'; readonly cycleRan: boolean }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'wrong_provider'; readonly provider: string };
+
 // ---------------------------------------------------------------------------
 // PollingScheduler class
 // ---------------------------------------------------------------------------
@@ -168,6 +181,53 @@ export class PollingScheduler {
       this.intervals.delete(id);
     }
     console.log('[PollingScheduler] All polling loops stopped.');
+  }
+
+  // ---------------------------------------------------------------------------
+  // forcePoll: fire one immediate poll cycle (bypasses interval timer)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Force an immediate poll cycle for the named trigger, bypassing the interval timer.
+   *
+   * WHY this exists: the scheduled poll interval can be minutes. This method lets operators
+   * trigger an immediate cycle from the CLI (via POST /api/v2/triggers/:triggerId/poll)
+   * without restarting the daemon.
+   *
+   * Behavior:
+   * - Returns not_found if no trigger with this ID exists in the scheduler's trigger list.
+   * - Returns wrong_provider if the trigger exists but is not a github_queue_poll trigger.
+   *   (Only queue poll triggers support manual polling.)
+   * - Runs one poll cycle via runPollCycle(). Returns ok with cycleRan=true if the cycle
+   *   was actually started, cycleRan=false if the skip-cycle guard fired (previous cycle
+   *   still running).
+   *
+   * WHY cycleRan is determined BEFORE runPollCycle: runPollCycle checks this.polling.get(triggerId)
+   * internally and returns early if true. Reading the flag here lets us tell the caller whether
+   * a new cycle was actually initiated without exposing runPollCycle's internals.
+   */
+  async forcePoll(triggerId: string): Promise<ForcePollResult> {
+    const trigger = this.triggers.find((t) => t.id === triggerId);
+    if (!trigger) {
+      return { kind: 'not_found' };
+    }
+
+    if (trigger.provider !== 'github_queue_poll' || !trigger.pollingSource) {
+      return { kind: 'wrong_provider', provider: trigger.provider };
+    }
+
+    // WHY read before runPollCycle: the skip-cycle guard inside runPollCycle checks
+    // this.polling.get(triggerId) and returns early if true. By reading here first,
+    // we can surface cycleRan to the caller without needing to change runPollCycle.
+    const pollInFlight = this.polling.get(triggerId) === true;
+    const cycleRan = !pollInFlight;
+
+    // runPollCycle handles the skip-cycle guard, error logging, and finally cleanup.
+    // We await it so the HTTP response is sent only after the cycle completes.
+    const pollingTrigger = trigger as PollingTriggerDefinition;
+    await this.runPollCycle(pollingTrigger);
+
+    return { kind: 'ok', cycleRan };
   }
 
   // ---------------------------------------------------------------------------

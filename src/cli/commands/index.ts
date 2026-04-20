@@ -77,6 +77,11 @@ export {
   type WorktrainTriggerTestOpts,
 } from './worktrain-trigger-test.js';
 export {
+  executeWorktrainTriggerPollCommand,
+  type WorktrainTriggerPollDeps,
+  type WorktrainTriggerPollOpts,
+} from './worktrain-trigger-poll.js';
+export {
   executeWorktrainTriggerValidateCommand,
   type WorktrainTriggerValidateDeps,
 } from './worktrain-trigger-validate.js';
