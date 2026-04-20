@@ -18,9 +18,10 @@
  *
  * Maturity inference (3 deterministic heuristics -- SCOPE LOCK, no LLM):
  * - H1 (ready): body contains upstream_spec: line with http/https URL, OR a http/https
- *   URL in the first paragraph
- * - H2 (specced): body contains `- [ ]` checklist items OR heading matching
- *   /acceptance criteria|test plan|implementation checklist/i OR `### Implementation`
+ *   URL with a spec-implying path segment (/pitch|prd|spec|brd|rfc|design/) in the first
+ *   paragraph (plain issue/PR URLs do NOT trigger ready)
+ * - H2 (specced): body contains `- [ ]` checklist items OR an exact heading line of
+ *   `## Acceptance Criteria` or `## Implementation Plan` (case-insensitive)
  * - Default: 'idea'
  * Note: H3 (active/skip) is applied in polling-scheduler.ts before calling inferMaturity().
  *
@@ -213,10 +214,12 @@ export async function pollGitHubQueueIssues(
  * Infer the maturity of an issue from its body.
  *
  * Heuristics (applied in order, first match wins):
- * H1 (ready): body has upstream_spec: line with http/https URL, OR any http/https URL
- *   in the first paragraph
- * H2 (specced): body has `- [ ]` checklist items, OR heading matching
- *   /acceptance criteria|test plan|implementation checklist/i, OR `### Implementation`
+ * H1 (ready): body has upstream_spec: line with http/https URL, OR a http/https URL
+ *   containing a spec-implying path segment (/pitch|prd|spec|brd|rfc|design/) in the
+ *   first paragraph. WHY path segment: avoids plain issue/PR URLs triggering 'ready'.
+ * H2 (specced): body has `- [ ]` checklist items, OR an exact heading line matching
+ *   `## Acceptance Criteria` or `## Implementation Plan` (any level, case-insensitive).
+ *   WHY exact: loose match on 'implementation' catches non-spec sentences.
  * Default: 'idea'
  *
  * Note: H3 (active/in-progress exclusion) is NOT a maturity level -- it is applied
@@ -225,16 +228,21 @@ export async function pollGitHubQueueIssues(
  * SCOPE LOCK: exactly 3 heuristics (H1, H2, default). Do not add more without a new pitch.
  */
 export function inferMaturity(body: string): 'idea' | 'specced' | 'ready' {
-  // H1: ready -- upstream_spec: line with URL, OR http/https URL in first paragraph
+  // H1: ready -- upstream_spec: line with http/https URL (any URL), OR http/https URL
+  // with a spec-implying path segment in the first paragraph.
+  // WHY path segment requirement on first-para: prevents plain GitHub issue links,
+  // PR links, and other non-spec URLs from falsely triggering 'ready'.
   const specLineMatch = /upstream_spec:\s*(https?:\/\/\S+)/i.exec(body);
   if (specLineMatch) return 'ready';
 
   const firstPara = body.split(/\n\s*\n/)[0] ?? '';
-  if (/(https?:\/\/\S+)/.test(firstPara)) return 'ready';
+  if (/https?:\/\/\S*\/(?:pitch|prd|spec|brd|rfc|design)\b/i.test(firstPara)) return 'ready';
 
-  // H2: specced -- checklist items OR acceptance criteria heading OR ### Implementation
+  // H2: specced -- checklist items OR exact headings (Acceptance Criteria / Implementation Plan)
+  // WHY exact headings: loose matching on 'implementation' would catch sentences like
+  // "implementation details are TBD" and falsely elevate issues to 'specced'.
   if (/- \[ \]/.test(body)) return 'specced';
-  if (/#{1,6}\s*(acceptance criteria|test plan|implementation checklist|implementation)/i.test(body)) return 'specced';
+  if (/^#{1,6}\s*(Acceptance Criteria|Implementation Plan)\s*$/im.test(body)) return 'specced';
 
   // Default: idea
   return 'idea';
@@ -253,12 +261,19 @@ export function inferMaturity(body: string): 'idea' | 'specced' | 'ready' {
  *   - Parse the file as JSON
  *   - Check if context.taskCandidate.issueNumber === issueNumber
  *   - If match: return 'active'
- *   - On ANY error (ENOENT, parse, missing field): return 'active' (conservative)
+ *   - If file has no context or no taskCandidate: return 'clear'
+ *     WHY: real session files written by persistTokens() contain only
+ *     { continueToken, checkpointToken, ts } -- no context field. A file
+ *     without taskCandidate cannot claim ownership of any issue.
+ *   - On any read/parse error: return 'active' (conservative)
+ *     WHY: if we cannot read the file we cannot trust its content is safe.
+ *     Double-dispatch is worse than a missed dispatch.
  *
- * Returns 'clear' only if no session file claims this issue number.
+ * Returns 'clear' if no session file explicitly claims this issue number.
  *
- * INVARIANT: Conservative default -- any error = 'active', not 'clear'.
- * Double-dispatch is worse than missed dispatch.
+ * INVARIANT: 'active' ONLY when (a) the file is unreadable/unparseable, OR
+ * (b) context.taskCandidate.issueNumber === issueNumber.
+ * 'clear' when the file exists but has no context/taskCandidate field.
  *
  * @param issueNumber - The GitHub issue number to check
  * @param sessionsDir - Path to daemon-sessions directory (injectable for testing)
@@ -278,29 +293,29 @@ export async function checkIdempotency(
   const jsonFiles = files.filter(f => f.endsWith('.json'));
 
   for (const filename of jsonFiles) {
-    // Outer try/catch: conservative default -- any error for this file = treat as active
     try {
       const content = await fs.readFile(path.join(sessionsDir, filename), 'utf8');
       const parsed: unknown = JSON.parse(content);
 
       if (typeof parsed !== 'object' || parsed === null) {
-        // Malformed session file -- treat as active (conservative)
+        // Malformed session file -- cannot trust it, conservative default: treat as active
         return 'active';
       }
 
       const session = parsed as Record<string, unknown>;
       const context = session['context'];
       if (typeof context !== 'object' || context === null) {
-        // No context -- can't determine if this session owns the issue
-        // Conservative default: treat as active
-        return 'active';
+        // No context field -- this is a normal persistTokens() session file that does not
+        // own any issue. Cannot block dispatch. Return 'clear' for this file.
+        continue;
       }
 
       const ctx = context as Record<string, unknown>;
       const taskCandidate = ctx['taskCandidate'];
       if (typeof taskCandidate !== 'object' || taskCandidate === null) {
-        // No taskCandidate in context -- conservative default: treat as active
-        return 'active';
+        // Context exists but no taskCandidate -- not a queue-originated session.
+        // Cannot claim issue ownership. Return 'clear' for this file.
+        continue;
       }
 
       const tc = taskCandidate as Record<string, unknown>;
@@ -309,6 +324,7 @@ export async function checkIdempotency(
       }
     } catch {
       // Any read/parse error -- conservative default: treat as active
+      // WHY: we cannot determine whether this file owns the issue.
       return 'active';
     }
   }

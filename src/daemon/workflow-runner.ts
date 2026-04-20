@@ -3289,6 +3289,10 @@ export async function runWorkflow(
     const limitDescription = timeoutReason === 'wall_clock'
       ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
       : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
+    // Clean up session file on timeout -- same pattern as success path.
+    // WHY: a timed-out session is no longer in-flight. Leaving the file causes
+    // countActiveSessions() to permanently inflate until daemon restart.
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
     return {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
@@ -3318,6 +3322,10 @@ export async function runWorkflow(
       ...(lastToolCalled !== null && { lastToolCalled }),
       ...(issueSummaries.length > 0 && { issueSummaries }),
     })}`;
+    // Clean up session file on error -- same pattern as success path.
+    // WHY: an errored session is no longer in-flight. Leaving the file causes
+    // countActiveSessions() to permanently inflate until daemon restart.
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,

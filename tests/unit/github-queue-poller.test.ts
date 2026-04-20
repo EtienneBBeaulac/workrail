@@ -51,7 +51,7 @@ function makeConfig(overrides: Partial<GitHubQueueConfig> = {}): GitHubQueueConf
     repo: 'acme/my-project',
     token: 'test-token',
     pollIntervalSeconds: 300,
-    maxConcurrentSelf: 1,
+    maxTotalConcurrentSessions: 1,
     excludeLabels: [],
     ...overrides,
   };
@@ -245,9 +245,20 @@ describe('inferMaturity', () => {
     expect(inferMaturity(body)).toBe('ready');
   });
 
-  it('H1: body with http URL in first paragraph -> ready', () => {
-    const body = `See https://github.com/acme/my-project/issues/1 for the full spec.\n\nDetails here.`;
+  it('H1: body with spec-implying URL (/spec path) in first paragraph -> ready', () => {
+    const body = `See https://example.com/spec/my-feature for the full spec.\n\nDetails here.`;
     expect(inferMaturity(body)).toBe('ready');
+  });
+
+  it('H1: body with spec-implying URL (/prd path) in first paragraph -> ready', () => {
+    const body = `Spec: https://docs.example.com/prd/feature-123\n\nDetails here.`;
+    expect(inferMaturity(body)).toBe('ready');
+  });
+
+  it('H1: plain GitHub issue URL in first paragraph does NOT trigger ready (no spec path)', () => {
+    // A plain issue link has no spec-implying path segment -> falls through to H2/default
+    const body = `See https://github.com/acme/my-project/issues/1 for context.\n\nDetails here.`;
+    expect(inferMaturity(body)).toBe('idea');
   });
 
   it('H1: URL in second paragraph does NOT trigger ready', () => {
@@ -267,14 +278,21 @@ describe('inferMaturity', () => {
     expect(inferMaturity(body)).toBe('specced');
   });
 
-  it('H2: Test Plan heading -> specced', () => {
-    const body = `## Test Plan\n1. Run unit tests\n2. Check integration`;
+  it('H2: Implementation Plan heading -> specced', () => {
+    const body = `## Implementation Plan\nDo this then that.`;
     expect(inferMaturity(body)).toBe('specced');
   });
 
-  it('H2: Implementation heading -> specced', () => {
+  it('H2: loose implementation mention does NOT trigger specced (N1 tightening)', () => {
+    // "### Implementation" and "Test Plan" no longer match -- only exact headings do.
     const body = `### Implementation\nDo this then that.`;
-    expect(inferMaturity(body)).toBe('specced');
+    expect(inferMaturity(body)).toBe('idea');
+  });
+
+  it('H2: Test Plan heading does NOT trigger specced after N1 tightening', () => {
+    // Only "Acceptance Criteria" and "Implementation Plan" are exact matches.
+    const body = `## Test Plan\n1. Run unit tests\n2. Check integration`;
+    expect(inferMaturity(body)).toBe('idea');
   });
 
   it('Default: plain body -> idea', () => {
@@ -346,15 +364,19 @@ describe('checkIdempotency', () => {
     expect(status).toBe('active');
   });
 
-  it('returns active (conservative) when session file has no context field', async () => {
+  it('returns clear when session file has no context field (real persistTokens format)', async () => {
+    // Real session files written by persistTokens() contain only { continueToken, checkpointToken, ts }.
+    // A file without context cannot claim ownership of any issue.
     const sessionFile = { continueToken: 'ct_abc', checkpointToken: null, ts: Date.now() };
     await fs.writeFile(path.join(tmpDir, 'sess_nocontext.json'), JSON.stringify(sessionFile), 'utf8');
 
     const status = await checkIdempotency(42, tmpDir);
-    expect(status).toBe('active');
+    expect(status).toBe('clear');
   });
 
-  it('returns active (conservative) when context has no taskCandidate', async () => {
+  it('returns clear when context has no taskCandidate (non-queue session)', async () => {
+    // A session file with context but no taskCandidate is not a queue-originated session.
+    // It cannot claim ownership of any issue.
     const sessionFile = {
       continueToken: 'ct_abc',
       context: { someOtherField: 'value' },
@@ -362,7 +384,17 @@ describe('checkIdempotency', () => {
     await fs.writeFile(path.join(tmpDir, 'sess_notask.json'), JSON.stringify(sessionFile), 'utf8');
 
     const status = await checkIdempotency(42, tmpDir);
-    expect(status).toBe('active');
+    expect(status).toBe('clear');
+  });
+
+  it('regression C1: real-format session file {continueToken, checkpointToken, ts} returns clear', async () => {
+    // Regression test for C1: persistTokens() writes this format -- no context field.
+    // Before the C1 fix, this would return 'active' and permanently block queue dispatch.
+    const sessionFile = { continueToken: 'ct_xxx', checkpointToken: 'cp_xxx', ts: 123 };
+    await fs.writeFile(path.join(tmpDir, 'sess_real.json'), JSON.stringify(sessionFile), 'utf8');
+
+    const status = await checkIdempotency(42, tmpDir);
+    expect(status).toBe('clear');
   });
 
   it('returns clear when sessions dir does not exist', async () => {

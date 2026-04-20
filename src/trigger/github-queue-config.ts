@@ -13,7 +13,7 @@
  * - The type field is validated against the allowed union values.
  *   Only 'assignee' is implemented -- other types parse fine but throw not_implemented
  *   at dispatch time in polling-scheduler.ts.
- * - repo is required. pollIntervalSeconds, maxConcurrentSelf, excludeLabels are optional
+ * - repo is required. pollIntervalSeconds, maxTotalConcurrentSessions, excludeLabels are optional
  *   with documented defaults.
  */
 
@@ -37,7 +37,7 @@ import { ok, err } from '../runtime/result.js';
  *   Other types are accepted by the type system but throw not_implemented at dispatch.
  * - repo is in "owner/repo" format.
  * - pollIntervalSeconds: default 300 if absent.
- * - maxConcurrentSelf: default 1 if absent.
+ * - maxTotalConcurrentSessions: default 1 if absent.
  * - excludeLabels: default [] if absent.
  */
 export interface GitHubQueueConfig {
@@ -64,11 +64,11 @@ export interface GitHubQueueConfig {
    */
   readonly pollIntervalSeconds: number;
   /**
-   * Maximum concurrent self-improvement sessions.
+   * Maximum total concurrent sessions (across all triggers).
    * Poller skips dispatch when active sessions >= this value.
    * Default: 1.
    */
-  readonly maxConcurrentSelf: number;
+  readonly maxTotalConcurrentSessions: number;
   /**
    * Issues with ANY of these labels are skipped by the poller.
    * Default: [].
@@ -83,6 +83,16 @@ export interface GitHubQueueConfig {
    * Requires repo:read scope.
    */
   readonly token: string;
+  /**
+   * Display name for the bot account used when committing from queue sessions.
+   * Defaults to 'worktrain' when absent.
+   */
+  readonly botName?: string;
+  /**
+   * Email for the bot account used when committing from queue sessions.
+   * Defaults to 'worktrain@users.noreply.github.com' when absent.
+   */
+  readonly botEmail?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,13 +203,15 @@ export async function loadQueueConfig(
     pollIntervalSeconds = rawPollInterval;
   }
 
-  const rawMaxConcurrent = q['maxConcurrentSelf'];
-  let maxConcurrentSelf = 1;
+  // Support both old name (maxConcurrentSelf) and new name (maxTotalConcurrentSessions)
+  // for backward compatibility with existing config files.
+  const rawMaxConcurrent = q['maxTotalConcurrentSessions'] ?? q['maxConcurrentSelf'];
+  let maxTotalConcurrentSessions = 1;
   if (rawMaxConcurrent !== undefined) {
     if (typeof rawMaxConcurrent !== 'number' || !Number.isInteger(rawMaxConcurrent) || rawMaxConcurrent <= 0) {
-      return err('config.queue.maxConcurrentSelf must be a positive integer');
+      return err('config.queue.maxTotalConcurrentSessions must be a positive integer');
     }
-    maxConcurrentSelf = rawMaxConcurrent;
+    maxTotalConcurrentSessions = rawMaxConcurrent;
   }
 
   // Optional array fields
@@ -228,6 +240,12 @@ export async function loadQueueConfig(
   const rawWorkOnAll = q['workOnAll'];
   const workOnAll = rawWorkOnAll === true;
 
+  const rawBotName = q['botName'];
+  const botName = typeof rawBotName === 'string' && rawBotName.trim() ? rawBotName.trim() : undefined;
+
+  const rawBotEmail = q['botEmail'];
+  const botEmail = typeof rawBotEmail === 'string' && rawBotEmail.trim() ? rawBotEmail.trim() : undefined;
+
   return ok({
     type: rawType as 'assignee' | 'label' | 'mention' | 'query',
     ...(user !== undefined ? { user } : {}),
@@ -236,9 +254,11 @@ export async function loadQueueConfig(
     ...(search !== undefined ? { search } : {}),
     ...(workOnAll ? { workOnAll } : {}),
     pollIntervalSeconds,
-    maxConcurrentSelf,
+    maxTotalConcurrentSessions,
     excludeLabels,
     repo: rawRepo.trim(),
     token: resolvedToken,
+    ...(botName !== undefined ? { botName } : {}),
+    ...(botEmail !== undefined ? { botEmail } : {}),
   });
 }

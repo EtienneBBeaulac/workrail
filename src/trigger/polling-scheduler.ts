@@ -392,16 +392,17 @@ export class PollingScheduler {
 
     if (queueConfig.type !== 'assignee') {
       console.error(`[QueuePoll] Queue type '${queueConfig.type}' is not implemented. Only 'assignee' is supported. Skipping cycle.`);
-      await appendQueuePollLog({ event: 'poll_cycle_error', triggerId, reason: `not_implemented: queue type '${queueConfig.type}'`, ts: new Date().toISOString() });
+      // N2: write poll_cycle_complete (not poll_cycle_error) so operators can grep a uniform event name.
+      await appendQueuePollLog({ event: 'poll_cycle_complete', triggerId, reason: 'not_implemented', queueType: queueConfig.type, ts: new Date().toISOString() });
       return;
     }
 
     // Concurrency cap check BEFORE per-issue evaluation (INVARIANT per pitch)
     const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
     const activeSessions = await countActiveSessions(sessionsDir);
-    if (activeSessions >= queueConfig.maxConcurrentSelf) {
-      console.log(`[QueuePoll] Skipping cycle: active sessions (${activeSessions}) >= maxConcurrentSelf (${queueConfig.maxConcurrentSelf}).`);
-      await appendQueuePollLog({ event: 'poll_cycle_skipped', triggerId, reason: 'max_concurrency_reached', activeSessions, maxConcurrentSelf: queueConfig.maxConcurrentSelf, ts: new Date().toISOString() });
+    if (activeSessions >= queueConfig.maxTotalConcurrentSessions) {
+      console.log(`[QueuePoll] Skipping cycle: active sessions (${activeSessions}) >= maxTotalConcurrentSessions (${queueConfig.maxTotalConcurrentSessions}).`);
+      await appendQueuePollLog({ event: 'poll_cycle_skipped', triggerId, reason: 'max_concurrency_reached', activeSessions, maxTotalConcurrentSessions: queueConfig.maxTotalConcurrentSessions, ts: new Date().toISOString() });
       return;
     }
 
@@ -479,9 +480,10 @@ export class PollingScheduler {
       ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
       ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
       // Bot identity for queue-poll sessions: autonomous commits use bot account.
+      // Read from queue config when present; fall back to generic defaults.
       botIdentity: {
-        name: 'worktrain-etienneb',
-        email: 'worktrain-etienneb@users.noreply.github.com',
+        name: queueConfig.botName ?? 'worktrain',
+        email: queueConfig.botEmail ?? 'worktrain@users.noreply.github.com',
       },
     };
 
