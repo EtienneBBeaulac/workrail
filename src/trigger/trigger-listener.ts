@@ -78,14 +78,12 @@ export interface TriggerListenerHandle {
   readonly router: TriggerRouter;
   /**
    * The steer registry shared with TriggerRouter.
-   * Pass to mountConsoleRoutes() so POST /sessions/:id/steer can dispatch steers
-   * to sessions running inside TriggerRouter's dispatch queue.
+   * Used during daemon shutdown to abort in-flight sessions gracefully.
    */
   readonly steerRegistry: SteerRegistry;
   /**
    * The PollingScheduler instance created by this listener.
-   * Exposed so the daemon console can wire POST /api/v2/triggers/:id/poll
-   * to forcePoll() without re-creating the scheduler.
+   * Used to manage the polling loop lifecycle (start/stop).
    */
   readonly scheduler: PollingScheduler;
   stop(): Promise<void>;

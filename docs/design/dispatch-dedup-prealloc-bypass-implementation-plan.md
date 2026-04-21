@@ -1,3 +1,5 @@
+> Note: worktrain trigger poll was removed in PR #755.
+
 # Implementation Plan: Bypass Dispatch Dedup for Pre-Allocated Sessions
 
 **Date:** 2026-04-19
