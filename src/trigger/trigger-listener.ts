@@ -314,6 +314,12 @@ export async function startTriggerListener(
     // WHY two passes: do not mutate the Map while iterating it.
     const unknownTriggerIds: string[] = [];
     for (const [triggerId, trigger] of triggerIndex) {
+      // github_queue_poll triggers have no workflowId -- the adaptive coordinator
+      // decides the pipeline based on task content. Skip workflowId validation for
+      // these triggers; the sentinel '' would always fail the resolver lookup.
+      if (trigger.provider === 'github_queue_poll') {
+        continue;
+      }
       let found: boolean;
       try {
         found = await getWorkflowByIdFn(trigger.workflowId);
