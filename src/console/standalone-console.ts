@@ -170,7 +170,6 @@ export async function startStandaloneConsole(
     undefined,   // toolCallsPerfFile -- same as above
     undefined,   // serverVersion -- no stamping needed
     undefined,   // v2ToolContext -- no autonomous dispatch
-    undefined,   // triggerRouter -- no trigger info
   );
 
   // Redirect / to /console for convenience (must be before 404 catch-all).
