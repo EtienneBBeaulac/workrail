@@ -6891,3 +6891,96 @@ Same concept for GitLab MRs. WorkTrain uses `gh pr create` for GitHub and `glab 
 ### Priority
 
 Medium. Teams with strict PR templates will notice WorkTrain's PRs immediately. Not a blocker for solo repos. Should land before WorkTrain is used in team repos.
+
+---
+
+## Coordinator as comment router: right agent for each review comment (Apr 20, 2026)
+
+**The principle:** When a reviewer comments on a PR, the MR lifecycle coordinator shouldn't handle it in one monolithic agent. Instead, it routes each comment to the agent best positioned to respond.
+
+### Routing table
+
+| Comment type | Who handles it | Why |
+|---|---|---|
+| "Why did you use X pattern?" | Original implementing agent (resumed with notes) | It wrote the code and has the design decisions in its session notes |
+| "Please change this to Y" | New fix session seeded with implementing agent's notes + the comment | Targeted change, needs implementation context |
+| "This has a security concern" | Review agent (spawned with the specific finding) | Security judgment is a review-domain skill |
+| "This violates our architecture" | Discovery/design agent | Needs architectural perspective, may require rethinking the approach |
+| "Nit: rename this variable" | Coordinator directly | No agent needed -- just apply the change programmatically |
+| "LGTM" / "Approved" | Coordinator tracks approval state | No comment response needed |
+
+### The session notes advantage
+
+The original implementing agent has institutional knowledge in its session notes: why it chose approach A over B, what alternatives it considered, what edge cases it intentionally deferred. Today that knowledge dies when the session ends.
+
+With coordinator routing:
+1. Coordinator looks up the original implementing session for the PR
+2. Reads its `lastStepNotes` and any `report_issue` summaries
+3. Seeds the response session with that context bundle
+4. The response agent can say "I chose X because Y (from the original design decision)" rather than re-inferring from the code alone
+
+This is the first concrete use case for the cross-session prior notes system (`ContextAssembler.listRecentSessions`).
+
+### What the coordinator does (not the agent)
+
+- Classifies each comment by type (question, change request, concern, nit, approval)
+- Routes to the right handler
+- Collects the response (text reply, code fix, or architectural recommendation)
+- Posts the reply to GitHub/GitLab via API
+- Marks threads as resolved when the response is accepted
+- Aggregates all comment outcomes before deciding to re-request review
+
+The MR management agent (if there is one) becomes thin: it's the interface for complex judgment calls that don't fit the routing table. The coordinator handles the mechanical parts.
+
+### Dependency
+
+Requires the event-driven coordination architecture (coordinator as event bus) -- so the coordinator knows when new comments arrive rather than the agent polling for them.
+
+---
+
+## Phase-scoped context files: rules targeted at specific pipeline phases (Apr 20, 2026)
+
+**The idea:** Instead of injecting all rules into every session, let teams define context files scoped to specific pipeline phases. A rule about "how we write commit messages" only matters at delivery time. A rule about "what makes a blocking finding" only matters during MR review. Injecting everything into every session wastes tokens and dilutes relevance.
+
+### Proposed convention
+
+**Phase-scoped files under `.worktrain/rules/`:**
+
+```
+.worktrain/rules/
+  discovery.md       -- injected into wr.discovery sessions only
+  shaping.md         -- injected into wr.shaping sessions only
+  implementation.md  -- injected into coding-task-workflow-agentic sessions
+  review.md          -- injected into mr-review-workflow-agentic sessions
+  delivery.md        -- injected at commit/push/PR-creation time (delivery-action.ts)
+  pr-management.md   -- injected into sessions that manage the MR lifecycle:
+                        answering review comments, applying requested changes,
+                        resolving conversations, updating PR description
+  all.md             -- injected into every session (same as today's AGENTS.md)
+```
+
+**Examples of what goes in each:**
+
+- `delivery.md`: "Commit messages must reference the Jira ticket. PR title must start with ticket number. Always request review from @team-lead."
+- `review.md`: "A blocking finding requires reproducible evidence. Performance findings are major only if the regression exceeds 10%. Security findings are always blocking."
+- `implementation.md`: "Never use `any`. Always write tests before implementation. Follow the Result/Either pattern, no thrown exceptions."
+- `pr-management.md`: "When a reviewer requests changes: acknowledge in a comment, create a fixup commit per finding, re-request review when done. Never resolve review threads yourself."
+
+### Relationship to existing AGENTS.md / CLAUDE.md
+
+Phase-scoped files are additive, not a replacement. The existing `AGENTS.md` / `CLAUDE.md` continue to apply to all sessions. Phase-scoped files are additional context loaded on top.
+
+**Load order (most specific wins if conflict):**
+1. `AGENTS.md` / `CLAUDE.md` (base, all sessions)
+2. `.worktrain/rules/all.md` (WorkTrain-specific base)
+3. Phase-specific file (e.g. `.worktrain/rules/review.md` for review sessions)
+
+### Implementation notes
+
+- The workflow runner already has `WORKSPACE_CONTEXT_CANDIDATE_PATHS`. Phase-scoped files add a second lookup: at session spawn time, the coordinator or trigger knows which workflow is being run and can pass an additional `phaseContextPath` to inject.
+- `delivery.md` is special -- it's injected into `delivery-action.ts`'s git commit message construction, not into a session prompt. The delivery action would read it and pass it as additional context to the `HandoffArtifact` construction.
+- The `pr-management.md` concept implies a new pipeline phase that doesn't exist yet: an autonomous PR management agent that monitors review comments and responds. This is a substantial new feature -- the rules file is ahead of the implementation.
+
+### Priority
+
+Medium. Phase-scoped rules make WorkTrain's autonomous actions more consistent with team conventions without requiring custom workflows per team. Design alongside multi-workspace support and trigger templates (they share the "per-workspace configuration" concern).
