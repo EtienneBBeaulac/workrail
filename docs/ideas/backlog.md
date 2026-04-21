@@ -7399,3 +7399,50 @@ Track step-advance rate (steps per turn) as a proxy for workflow efficiency. A s
 ### Priority
 
 Medium. The data collection is small (~5 lines in `runWorkflow()`). The prediction and calibration are more involved. Ship collection first, calibration second.
+
+---
+
+## WorkRail MCP server self-cleanup (Apr 21, 2026)
+
+**The problem:** The WorkRail MCP server accumulates stale state that never cleans itself up: old workflow copies in `~/.workrail/workflows/`, dead managed sources, git repo caches that can't pull, 500+ sessions in the store, stale remembered roots. None of it has a TTL or cleanup mechanism. Every server startup loads everything and logs validation errors for stale state.
+
+### Sources of stale state
+
+1. **`~/.workrail/workflows/`** -- manually copied or `worktrain init`-placed workflows that go stale when the repo updates. MCP server loads both repo copy and user copy; older one fails validation silently or noisily.
+
+2. **Managed sources** (`~/.workrail/data/managed-sources/`) -- paths that no longer exist stay registered. Server tries to load them on every startup.
+
+3. **Git workflow cache** (`~/.workrail/cache/git-*`) -- cloned repos whose remotes have changed, been deleted, or whose auth has expired. `git pull` fails; errors logged on every startup.
+
+4. **Session store** (`~/.workrail/data/sessions/`) -- sessions accumulate forever. No TTL, no archival. Console loads all 500+ on every `/api/v2/sessions` request (partially mitigated by mtime cache).
+
+5. **Remembered roots** (`~/.workrail/data/managed-sources/remembered-roots.json`) -- workspace paths from past sessions that no longer exist.
+
+### Fix: two layers
+
+**Layer 1: Defensive loading (mostly already done)**
+Every loader should already handle missing/broken sources gracefully. Audit: are all managed source failures caught and logged as warnings rather than errors? Are git cache failures non-fatal?
+
+**Layer 2: `workrail cleanup` command**
+```
+workrail cleanup [--yes] [--sessions --older-than <age>] [--sources] [--cache] [--roots]
+```
+- `--sources`: remove managed sources where path doesn't exist on disk
+- `--cache`: remove git caches where `git pull` fails (remote gone or auth expired)  
+- `--sessions --older-than 30d`: archive or delete sessions older than N days
+- `--roots`: remove remembered roots where path doesn't exist
+- Without `--yes`: show what would be removed and ask for confirmation
+- With `--yes`: remove without prompting (for CI / worktrain init)
+
+**Layer 3: Automatic startup cleanup (light)**
+On MCP server startup, silently remove managed sources where the filesystem path doesn't exist (non-destructive -- the path is already gone). Log a single "removed N stale sources" line. Do not auto-remove sessions or caches -- those require explicit user intent.
+
+**Layer 4: User workflow directory sync**
+`~/.workrail/workflows/` should not be a place users copy workflows to manually. It should either:
+- Be deprecated entirely (use managed sources / workspace roots instead)
+- Have a `workrail sync` command that updates it from the canonical sources
+- Auto-detect when a user workflow is an older version of a bundled workflow and skip loading it
+
+### Priority
+
+Medium for the cleanup command (quality of life, stops log noise). High for startup auto-cleanup of dead managed sources (prevents the `Invalid workflow` errors that have been confusing throughout this session). Low for session TTL/archival (the mtime cache handles the performance concern).
