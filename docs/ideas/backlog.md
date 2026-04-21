@@ -7351,3 +7351,45 @@ An agent can die from: stream watchdog timeout (600s no progress), OOM kill, or 
 ### Priority
 
 High. Agent crash recovery makes the overnight-autonomous bar achievable. Without it, any hung LLM call or tool timeout fails the entire pipeline silently. With it, transient failures are automatically retried and the pipeline continues.
+
+---
+
+## Persist agent conversation history for true crash recovery (Apr 21, 2026) -- HIGH PRIORITY
+
+**The gap:** The session event log records workflow execution state (step advances, notes, artifacts). The LLM conversation history (every message, tool call, and response) lives in-memory only. When the agent process dies, the conversation is gone. Resuming a session restores the workflow step but not the agent's reasoning within that step.
+
+**Why this matters:** Without persisted conversation history, "bring the agent back with the same history" is impossible. The resumed agent starts fresh at the step, has to re-read files, re-establish context. With persisted history, resuming is literally just feeding the message array back to the LLM and continuing.
+
+### Recommended design: separate conversation log per session
+
+**File:** `~/.workrail/data/sessions/<sessionId>/conversation.jsonl`
+
+One append-only JSONL file per session. One line per LLM turn, written immediately after the LLM responds:
+
+```json
+{"kind":"llm_turn","turnIndex":0,"ts":1234567890,"input":[...messages...],"output":{...response...}}
+```
+
+On crash and resume: load `conversation.jsonl`, reconstruct the `AgentLoop._messages` array, feed it back to `AgentLoop` as the starting history, then continue.
+
+### Why not the domain event log
+
+The event log is designed for structured domain events (step advances, assessments, tool calls at the workflow level). Raw LLM API payloads are large (2-5MB for a 50-turn session with tool outputs) and would bloat the event log. Keeping them separate preserves the event log's role as a compact, queryable domain record.
+
+### Why not a snapshot (overwrite on checkpoint)
+
+Overwriting loses turns between checkpoints. A session that crashes mid-step (most common case) would lose everything since the last `step_advanced`. Append-only per-turn is the only model that guarantees no data loss.
+
+### Context window management
+
+On resume, the full history may not fit in the LLM's context window for very long sessions. Truncation strategy: keep all tool results from the last N steps plus all step notes, drop oldest middle turns. The step notes in the event log serve as compressed summaries of truncated sections. This is the same problem LLMs solve with conversation compaction.
+
+### Implementation
+
+1. `AgentLoop.prompt()` currently appends to `_messages` in memory. Add a write path: after appending each turn, serialize it to `conversation.jsonl` via `DaemonEventEmitter` or directly via `fs.appendFile`.
+2. `runWorkflow()` on session start: check if `conversation.jsonl` exists for this `sessionId` (crash recovery case). If yes, load it and pass as initial history to `AgentLoop`.
+3. `runStartupRecovery()` already handles sidecar files -- extend to also load `conversation.jsonl` when resuming an orphaned session.
+
+### Priority: HIGH
+
+This is the prerequisite for reliable overnight-autonomous operation. Any LLM call timeout or tool hang currently loses the session. With persisted conversation history, the coordinator can resume silently and the agent continues as if nothing happened.
