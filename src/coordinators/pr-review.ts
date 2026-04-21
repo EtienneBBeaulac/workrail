@@ -206,8 +206,8 @@ export interface CoordinatorDeps {
   /** Return the current wall-clock time in milliseconds. */
   readonly now: () => number;
 
-  /** Resolved console HTTP server port (after lock file discovery). */
-  readonly port: number;
+  /** Resolved console HTTP server port (after lock file discovery). Optional in in-process contexts. */
+  readonly port?: number;
 
   /**
    * Read file contents as UTF-8 string.
