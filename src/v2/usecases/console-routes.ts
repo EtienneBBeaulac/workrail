@@ -624,15 +624,14 @@ export function mountConsoleRoutes(
       }
       const repoRoots = cachedRepoRoots;
 
-      // WHY clearTimeout in .finally(): cancels the timer as soon as the work
-      // finishes. Idiomatic pattern -- earlier cancellation, less timer overhead,
-      // and prevents the timeout reject from firing after the race settles.
-      const data = await Promise.race([
-        getWorktreeList(repoRoots, activeSessions).finally(() => {
-          if (timeoutId !== null) clearTimeout(timeoutId);
-        }),
-        timeoutPromise,
-      ]);
+      // WHY .catch() on worktreeWork: if the timeout wins the race, getWorktreeList
+      // keeps running in the background. If it later rejects, that rejection becomes
+      // an unhandled rejection (uncaughtException) because nothing is awaiting it.
+      // The .catch() swallows the post-race rejection silently.
+      const worktreeWork = getWorktreeList(repoRoots, activeSessions)
+        .finally(() => { if (timeoutId !== null) clearTimeout(timeoutId); })
+        .catch(() => ({ repos: [] }) as Awaited<ReturnType<typeof getWorktreeList>>);
+      const data = await Promise.race([worktreeWork, timeoutPromise]);
       if (timeoutId !== null) clearTimeout(timeoutId);
       res.json({ success: true, data });
     } catch (e) {
@@ -755,7 +754,7 @@ export function mountConsoleRoutes(
   // TODO(security): add token auth before any multi-user deployment.
   app.post('/api/v2/auto/dispatch', express.json(), async (req: Request, res: Response) => {
     if (!v2ToolContext) {
-      res.status(503).json({ success: false, error: 'Autonomous dispatch requires v2 tools enabled.' });
+      res.status(503).json({ success: false, error: 'Autonomous dispatch requires the WorkTrain daemon. Run worktrain console alongside worktrain daemon to enable browser dispatch.' });
       return;
     }
 
@@ -1007,7 +1006,7 @@ export function mountConsoleRoutes(
   // Daemon-only: requires steerRegistry to be provided at server startup (i.e., the
   // daemon passes it via mountConsoleRoutes). Standalone console returns 503.
   //
-  // Auth: localhost-only (127.0.0.1 binding in daemon-console.ts). No token auth in v1.
+  // Auth: localhost-only (127.0.0.1 binding in standalone-console.ts). No token auth in v1.
   // TODO(v2): Add token auth before any multi-user or remote deployment.
   //
   // Registration gap: sessions register their steer callback ~50ms after creation.

@@ -7486,3 +7486,94 @@ Medium for the cleanup command (quality of life, stops log noise). High for star
 **Files:** `src/coordinators/modes/implement-shared.ts`, `src/coordinators/pr-review.ts`.
 
 **Priority:** Medium. Correctness issues that won't crash in production but make future refactors unsafe.
+
+---
+
+## Current state update (Apr 21, 2026)
+
+**npm version: v3.59.6** | Daemon PID: 54113 | Status: Running, pipeline active
+
+### What shipped in this session (Apr 19-21, 2026)
+
+**All five autonomous pipeline items (previously recorded) plus:**
+
+- ✅ **Discovery loop fix** (#748) -- three coupled fixes: thread `maxSessionMinutes` through `spawnSession` (sessions now get 55/35/65 min instead of 30 min default), inspect `PipelineOutcome` in polling-scheduler and apply `worktrain:in-progress` label on escalation, write issue-ownership sidecar for cross-restart idempotency
+- ✅ **In-process `awaitSessions` and `getAgentResult`** (#741) -- replaced HTTP calls to the daemon's own console with direct `ConsoleService` access
+- ✅ **Try/catch on all coordinator I/O** (#740) -- `getAgentResult`, `pollForPR`, `postToOutbox` all wrapped; coordinator no longer crashes on I/O failure
+- ✅ **Dispatch dedup prealloc bypass** (#744) -- `dispatch()` now bypasses dedup for pre-allocated sessions, fixing the zombie session bug that prevented discovery from starting
+- ✅ **Promise.race crash fix** (#733) -- worktrees scan timeout no longer crashes the daemon via unhandled rejection
+- ✅ **Trigger validator** (#690) -- `worktrain trigger validate` command, `validateTriggerStrict()` pure function
+- ✅ **`worktrain trigger poll`** (#697) -- force immediate poll cycle on any queue trigger
+- ✅ **`worktrain trigger test`** (#656) -- dry-run showing what would dispatch
+- ✅ **Auto-load ~/.workrail/.env** (#673) -- daemon reads secrets from .env automatically
+- ✅ **Daemon lifecycle events** (#674) -- `session_aborted` on SIGTERM, `daemon_heartbeat` every 30s
+- ✅ **Attribution signals** (#658) -- `[WT]` PR title prefix, `Co-authored-by: WorkTrain` commit trailers, `worktrain:generated` label
+- ✅ **Secret scan before push** (#660) -- pattern-based scan blocks commits with leaked credentials
+- ✅ **Unified logs stream** (#680) -- `worktrain logs` now merges daemon events, queue-poll.jsonl, and filtered stderr
+- ✅ **Stale lock file handling** (#705) -- validates lock file PID before trusting port discovery
+- ✅ **5 architectural audits** (docs/design/) -- coordinator access, error handling, testability, type bloat, memory management
+- ✅ **Stale user workflow cleanup** -- removed old copies from `~/.workrail/workflows/` that were causing ValidationError noise
+
+### Current pipeline state (live)
+
+Discovery session `ecf359d7` running: 77 turns, 11 step advances (active, making real progress on issue #393). Session `b7df0c8b` also running (just started). First clean run after all pipeline fixes landed.
+
+### Accurate limitations (v3.59.6)
+
+1. **Ghost sessions in event log** -- sessions killed by daemon crashes don't get `session_aborted` events from old daemon instances. New daemons emit it on shutdown, but historical sessions show as RUNNING.
+2. **Worktree orphan leak** -- if `maybeRunDelivery()` worktree removal fails after sidecar deletion, orphan is invisible to `runStartupRecovery`. See backlog.
+3. **`queue-poll.jsonl` never rotated** -- disk exhaustion risk on long-running daemons. See backlog.
+4. **`ReviewSeverity` missing `assertNever`** -- future variants silently fall through. See backlog.
+5. **`process.stderr.write` in `readVerdictArtifact`** -- bypasses injected dep, invisible to test fakes. See backlog.
+6. **WorkRail MCP stale state** -- `workrail cleanup` command doesn't exist yet. Manual cleanup needed for dead managed sources, old session accumulation.
+7. **Trigger validation static/runtime gap** -- some runtime checks not in static validator. See trigger-validation-gap-audit.md.
+8. **WorkflowTrigger type bloat** -- mixes trigger config, session runtime state, delivery config. See workflow-trigger-lifecycle-audit.md.
+9. **Conversation history not persisted** -- LLM conversation history is in-memory only. On crash, context is lost. See backlog.
+
+### Next priorities (groomed Apr 21)
+
+1. **Watch the current pipeline run** -- discovery `ecf359d7` is active at 77 turns/11 steps. If it completes, shaping and coding should fire automatically. First end-to-end validation.
+2. **Execution time tracking** -- add session timing to `execution-stats.jsonl` for timeout calibration. Small change in `runWorkflow()` finally block.
+3. **Three audit findings from above** -- worktree orphan leak, queue-poll rotation, assertNever fixes. All small, targeted.
+4. **`workrail cleanup` command** -- removes dead managed sources, rotates old session files, clears stale git caches. Stops ValidationError noise in MCP server logs.
+5. **Conversation history persistence** -- `conversation.jsonl` per session, append-only. Prerequisite for true crash recovery.
+6. **Autonomous crash recovery and interrupted-session resume** -- see full entry below (Apr 21).
+
+---
+
+## Autonomous crash recovery and interrupted-session resume (Apr 21, 2026)
+
+**The problem we hit today:** A daemon crash loop (console `worktrees scan` unhandled rejection) killed all in-flight sessions. The queue correctly detected the sidecar and skipped re-dispatch for 56 min (TTL), but when the sidecar expired the session was re-dispatched from scratch with zero context from the previous attempt. The agent had already spent ~10 min in Phase 0, read codebase files, and formed a plan -- all of that work was lost.
+
+**What we want:** WorkTrain should be able to detect orphaned sessions on startup and make an autonomous decision: resume if the session had meaningful progress, discard and re-dispatch from scratch if it was too early to be worth resuming.
+
+**Resumability decision criteria (heuristics):**
+- Session had >= 1 `continue_workflow` call (at least one step advance): worth resuming -- the agent made real progress.
+- Session is at step 0 with 0 advances but > 5 LLM turns: borderline -- context was accumulated but no checkpoint written. Resume is risky (stale context), discard is safer. Could surface to console for human decision.
+- Session is at step 0, < 5 turns, < 2 min: discard -- nothing was lost.
+- Session's worktree is missing or corrupted: discard -- can't resume cleanly.
+- Session is on a coding workflow and has uncommitted changes in the worktree: pause for human review before discarding (could have partial work).
+
+**Implementation sketch:**
+
+1. **On daemon startup**, `runStartupRecovery()` already scans `daemon-sessions/` for orphaned token files. Extend it to also inspect the session event log for each orphan:
+   - Count `continue_workflow` calls and LLM turns from `~/.workrail/events/<sessionId>.jsonl`
+   - Apply decision criteria above
+   - For resume candidates: call `continue_workflow` with the checkpoint token and a synthesized re-entry prompt: "You are resuming a session that was interrupted by a daemon crash. Your last known step was [stepLabel]. Continue from where you left off."
+   - For discard candidates: emit `session_aborted` event, delete the sidecar, re-add the issue to the queue (or just let the TTL expire and the queue re-select naturally)
+
+2. **Conversation history prerequisite**: Resume is only useful if the agent can reconstruct its context. Today, conversation history is in-memory only -- it is lost on crash. The `conversation.jsonl` per-session persistence (backlog item #5 above) is a prerequisite for high-quality resume. Without it, resume starts from the workflow system prompt plus the current step recap only. This is enough for mid-pipeline phases (shaping, coding) since they read artifacts from disk. It may be insufficient for early discovery phases.
+
+3. **`worktrain session resume <sessionId>` CLI** -- manual override for human-initiated resume. Useful when the daemon's automatic heuristic chose to discard but the user sees partial work worth keeping.
+
+4. **Queue sidecar TTL for resume vs. discard**: Today the sidecar TTL prevents re-dispatch during the entire pipeline window (56 min). With autonomous resume, the TTL for a discarded session should be much shorter (5 min) so the queue can quickly re-select. For a resumed session, keep the full TTL and extend it by the time already spent.
+
+**Files to change:**
+- `src/daemon/workflow-runner.ts` -- `runStartupRecovery()`: add event log inspection and conditional resume
+- `src/trigger/polling-scheduler.ts` -- `doPollGitHubQueue()`: accept a `ttlOverride` param so discard path uses short TTL
+- `src/trigger/adapters/github-queue-poller.ts` -- `checkIdempotency()`: handle expired sidecars with `ttlOverride`
+- New: `src/daemon/session-recovery-policy.ts` -- pure function `evaluateRecovery(orphan, eventLog) -> 'resume' | 'discard' | 'human_review'`
+
+**Priority:** High. Every daemon crash currently wastes all in-flight work and waits up to 56 min before retrying. With even basic resume (step > 0 → resume, step = 0 → discard + fast re-dispatch), we'd recover most of the lost work and reduce retry latency from 56 min to < 5 min.
+
+**Depends on:** Conversation history persistence (for high-quality resume context).

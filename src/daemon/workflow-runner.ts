@@ -783,7 +783,8 @@ export async function readAllDaemonSessions(
     // Only consider complete session files. Temp files are named <sessionId>.json.tmp
     // (i.e. they end with .tmp, not .json) -- the endsWith('.json') check already
     // excludes them. The belt-and-suspenders check keeps this robust to naming changes.
-    if (!entry.endsWith('.json')) continue;
+    // queue-issue-*.json sidecars live in the same directory; skip them here.
+    if (!entry.endsWith('.json') || entry.startsWith('queue-issue-')) continue;
 
     const sessionId = entry.slice(0, -5); // strip .json
     const filePath = path.join(sessionsDir, entry);

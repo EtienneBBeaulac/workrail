@@ -863,7 +863,7 @@ function extractDotPath(obj: Record<string, unknown>, rawPath: string): unknown 
 async function countActiveSessions(sessionsDir: string): Promise<number> {
   try {
     const files = await fs.readdir(sessionsDir);
-    return files.filter((f) => f.endsWith('.json')).length;
+    return files.filter((f) => f.endsWith('.json') && !f.startsWith('queue-issue-')).length;
   } catch {
     return 0;
   }
