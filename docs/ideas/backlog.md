@@ -7251,3 +7251,51 @@ Option C (hybrid): Heuristic pass first, LLM for anything ambiguous or conflicti
 This IS the implementation of that feature. The manually-authored `.worktrain/rules/*.md` files are the canonical output. The preprocessing is how you get there automatically without having to write them by hand.
 
 **Priority:** Medium. Useful for any workspace with multiple tools. Essential for team repos where Cursor rules, AGENTS.md, and custom conventions might conflict. Build the categorized injection path (phase-scoped rules) first; add the automated preprocessing as a follow-up.
+
+---
+
+## True session status for WorkTrain: live agent state, not activity inference (Apr 21, 2026)
+
+**The problem:** The console currently infers session status from last event timestamp. A session with no events for >1 hour becomes "dormant." For the WorkRail MCP server this is unavoidable -- it doesn't have access to the agent loop state. But WorkTrain does. It should show true status.
+
+### What WorkTrain knows that the MCP server doesn't
+
+WorkTrain has direct access to:
+- `DaemonRegistry` -- tracks every active session by workrailSessionId in memory. If a session is in the registry, it's running. If not, it's not.
+- `DaemonEventEmitter` -- structured events fired synchronously by the agent loop
+- `daemon_heartbeat` -- fires every 30s. If last heartbeat >90s ago, daemon is down.
+- Turn-level events -- `llm_turn_started/completed`, `tool_call_started/completed` -- know exactly what the agent is doing RIGHT NOW
+- `agent_stuck` -- stuck heuristic fired, session may be stalled
+- `session_aborted` -- daemon killed mid-session (now emitted on SIGTERM)
+
+### True session status taxonomy
+
+| Status | Meaning | Detection |
+|---|---|---|
+| `active:thinking` | LLM API call in progress | `llm_turn_started` without `llm_turn_completed` |
+| `active:tool` | Tool executing | `tool_call_started` without `tool_call_completed`, name=Bash/Read/etc. |
+| `active:idle` | Between turns | Last event was `llm_turn_completed`, session in DaemonRegistry |
+| `stuck` | Stuck heuristic fired | `agent_stuck` event, session still in DaemonRegistry |
+| `completed:success` | Done successfully | `session_completed` outcome=success |
+| `completed:timeout` | Hit wall-clock limit | `session_completed` outcome=timeout |
+| `completed:stuck` | Aborted by stuck policy | `session_completed` outcome=stuck |
+| `completed:max_turns` | Hit turn limit | `session_completed` outcome=timeout detail=max_turns |
+| `aborted` | Daemon killed mid-run | `session_aborted` event |
+| `daemon:down` | No recent heartbeat | Last `daemon_heartbeat` >90s ago |
+
+### Where to surface this
+
+1. **`worktrain status`** -- already shows session overview. Replace activity-inferred "RUNNING" with true status labels.
+2. **`worktrain health <sessionId>`** -- already shows per-session summary. Add "Current state: active:tool (Bash, 23s)" line.
+3. **Console workspace view** -- each session row should show true status badge, not just "live" vs "dormant."
+4. **`worktrain logs --follow`** -- prefix each event with the derived session state so the log stream is self-explanatory.
+
+### Implementation
+
+The status is derivable from the event log in O(N) where N is events for this session -- scan from the end, find the most recent relevant event. For live sessions, also check DaemonRegistry membership.
+
+The daemon heartbeat + DaemonRegistry membership is the key insight: if the session's workrailSessionId is in DaemonRegistry AND the daemon is alive (recent heartbeat), the session is definitely running. If it's not in DaemonRegistry, the session is done regardless of what the event log says.
+
+### Priority
+
+Medium-high. True session status makes WorkTrain trustworthy as an autonomous system -- operators can see exactly what's happening without guessing. Especially important as session durations get longer (55-minute discovery sessions, 120-minute pipeline runs).
