@@ -33,6 +33,8 @@ import { pollGitHubIssues, pollGitHubPRs, type GitHubIssue, type GitHubPR } from
 import { pollGitHubQueueIssues, inferMaturity, checkIdempotency, type GitHubQueueIssue, type FetchFn as QueueFetchFn } from './adapters/github-queue-poller.js';
 import { loadQueueConfig } from './github-queue-config.js';
 import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
+import type { PipelineOutcome } from '../coordinators/adaptive-pipeline.js';
+import { DISCOVERY_TIMEOUT_MS } from '../coordinators/adaptive-pipeline.js';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -600,27 +602,57 @@ export class PollingScheduler {
     this.dispatchingIssues.add(top.issue.number);
     console.log(`[QueuePoll] in-flight-add #${top.issue.number}`);
 
+    // Write cross-restart ownership sidecar BEFORE dispatch.
+    // WHY: in-memory dispatchingIssues is cleared on daemon restart. The sidecar persists
+    // across restarts so checkIdempotency() can detect active queue sessions even after crash.
+    // TTL = DISCOVERY_TIMEOUT_MS + 60s: if the daemon crashes mid-run, the sidecar expires
+    // naturally after this window and the issue becomes eligible for re-dispatch (RC3 fix).
+    const sidecarPath = path.join(sessionsDir, `queue-issue-${top.issue.number}.json`);
+    const sidecarContent = JSON.stringify({
+      issueNumber: top.issue.number,
+      triggerId,
+      dispatchedAt: Date.now(),
+      ttlMs: DISCOVERY_TIMEOUT_MS + 60_000,
+    }, null, 2);
+    void fs.writeFile(sidecarPath, sidecarContent, 'utf8').catch((e: unknown) => {
+      console.warn(`[QueuePoll] Failed to write sidecar for issue #${top.issue.number}: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
     // Capture the Promise without awaiting it (fire-and-forget semantics preserved).
     // I2: Cleanup in BOTH .then() and .catch() -- unconditional regardless of outcome.
+    // WHY Promise<PipelineOutcome> (not Promise<unknown>): the outcome is inspected
+    // to apply worktrain:in-progress label on escalation/dry_run, preventing re-selection.
+    // Without this type, the outcome is silently discarded (discovery-loop-fix, RC2).
     const dispatchP = (this.router as {
       dispatchAdaptivePipeline: (
         goal: string,
         workspace: string,
         context?: Readonly<Record<string, unknown>>,
-      ) => Promise<unknown>
+      ) => Promise<PipelineOutcome>
     }).dispatchAdaptivePipeline(
       workflowTrigger.goal,
       workflowTrigger.workspacePath,
       workflowTrigger.context,
     );
+    const issueNumber = top.issue.number;
     void dispatchP
-      .then(() => {
-        this.dispatchingIssues.delete(top.issue.number);
-        console.log(`[QueuePoll] in-flight-clear #${top.issue.number} reason=completed`);
+      .then((outcome: PipelineOutcome) => {
+        this.dispatchingIssues.delete(issueNumber);
+        console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=completed`);
+        // Apply worktrain:in-progress label on escalation or dry_run to prevent re-selection.
+        // WHY worktrain:in-progress (not a new label): already in excludeLabels (line 505).
+        // A new label has zero effect unless the user also adds it to queueConfig.excludeLabels.
+        if (outcome.kind === 'escalated' || outcome.kind === 'dry_run') {
+          void this.applyGitHubLabel(issueNumber, 'worktrain:in-progress', queueConfig.token, source.repo);
+        }
+        // Delete sidecar on completion (pipeline resolved).
+        void fs.unlink(sidecarPath).catch(() => {});
       })
       .catch(() => {
-        this.dispatchingIssues.delete(top.issue.number);
-        console.log(`[QueuePoll] in-flight-clear #${top.issue.number} reason=error`);
+        this.dispatchingIssues.delete(issueNumber);
+        console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=error`);
+        // Delete sidecar on error (pipeline rejected).
+        void fs.unlink(sidecarPath).catch(() => {});
       });
     console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
 
@@ -633,6 +665,46 @@ export class PollingScheduler {
     const elapsed = Date.now() - cycleStart;
     console.log(`[QueuePoll] cycle complete selected=1 skipped=${skipped.length + candidates.length - 1} elapsed=${elapsed}ms`);
     await appendQueuePollLog({ event: 'poll_cycle_complete', selected: 1, skipped: skipped.length + candidates.length - 1, elapsed, ts: new Date().toISOString() });
+  }
+
+  /**
+   * Apply a label to a GitHub issue via the GitHub API.
+   *
+   * Non-fatal: logs warn and returns on any error. Does not throw.
+   * WHY non-fatal: label application is a best-effort operation. The primary loop-prevention
+   * mechanism is the in-memory dispatchingIssues set and the existing excludeLabels check.
+   * A label failure should not disrupt the poll cycle or lose the pipeline outcome.
+   *
+   * Uses the injected fetchFn if available (for testing), falls back to globalThis.fetch.
+   */
+  private async applyGitHubLabel(
+    issueNumber: number,
+    label: string,
+    token: string,
+    repo: string,
+  ): Promise<void> {
+    const fetchFn = (this.fetchFn as QueueFetchFn | undefined) ?? globalThis.fetch;
+    const url = `https://api.github.com/repos/${repo}/issues/${issueNumber}/labels`;
+    try {
+      const response = await fetchFn(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: JSON.stringify({ labels: [label] }),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        console.warn(`[QueuePoll] Failed to apply label '${label}' to issue #${issueNumber}: HTTP ${response.status} ${text.slice(0, 200)}`);
+      } else {
+        console.log(`[QueuePoll] Applied label '${label}' to issue #${issueNumber}`);
+      }
+    } catch (e: unknown) {
+      console.warn(`[QueuePoll] Failed to apply label '${label}' to issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 }
 

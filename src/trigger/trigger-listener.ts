@@ -438,6 +438,7 @@ export async function startTriggerListener(
       goal: string,
       workspace: string,
       context?: Readonly<Record<string, unknown>>,
+      agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
     ) => {
       // WHY in-process (not HTTP): the coordinator runs inside the daemon process.
       // POSTing to /api/v2/auto/dispatch would go out-of-process to itself, hitting
@@ -489,11 +490,15 @@ export async function startTriggerListener(
 
       // Step 3: Enqueue the agent loop via TriggerRouter's queue and semaphore.
       // Pass _preAllocatedStartResponse so runWorkflow() skips executeStartWorkflow().
+      // WHY agentConfig forwarded: coordinator sets per-phase timeouts (e.g. 55m for discovery)
+      // that exceed DEFAULT_SESSION_TIMEOUT_MINUTES=30. Without forwarding, sessions die at 30m
+      // and the coordinator's phase budget is never consumed (discovery-loop-fix, RC1).
       routerRef.dispatch({
         workflowId,
         goal,
         workspacePath: workspace,
         context,
+        ...(agentConfig !== undefined ? { agentConfig } : {}),
         _preAllocatedStartResponse: startResult.value.response,
       });
 

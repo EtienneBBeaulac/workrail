@@ -141,6 +141,7 @@ export interface CoordinatorDeps {
     goal: string,
     workspace: string,
     context?: Readonly<Record<string, unknown>>,
+    agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
   ) => Promise<Result<string, string>>;
 
   /**

@@ -207,6 +207,8 @@ async function runFullPipelineCore(
     'wr.discovery',
     opts.goal,
     opts.workspace,
+    undefined,
+    { maxSessionMinutes: Math.ceil(DISCOVERY_TIMEOUT_MS / 60_000) },
   );
 
   if (discoverySpawnResult.kind === 'err') {
@@ -296,6 +298,7 @@ async function runFullPipelineCore(
     opts.goal,
     opts.workspace,
     shapingContext,
+    { maxSessionMinutes: Math.ceil(SHAPING_TIMEOUT_MS / 60_000) },
   );
 
   if (shapingSpawnResult.kind === 'err') {
@@ -343,6 +346,7 @@ async function runFullPipelineCore(
       opts.goal,
       opts.workspace,
       { shapingComplete: true },
+      { maxSessionMinutes: Math.ceil(REVIEW_TIMEOUT_MS / 60_000) },
     );
 
     if (uxSpawnResult.kind === 'err') {
@@ -434,6 +438,7 @@ async function runFullPipelineCore(
       // The shaping session should have created current-pitch.md
       pitchPath: opts.workspace + '/.workrail/current-pitch.md',
     },
+    { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
   );
 
   if (codingSpawnResult.kind === 'err') {
