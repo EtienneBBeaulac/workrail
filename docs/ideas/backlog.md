@@ -7204,3 +7204,50 @@ A completed session is not dead. It's paused. The conversation is still there --
 **`worktrain session continue <sessionId> "<message>"`** -- sends a message to a completed session. New events appended to the same log. Same session ID. The agent has full context of everything it ever did.
 
 Context window overflow (very long sessions) is a separate optimization problem -- truncate oldest turns while keeping step notes. Don't solve it now.
+
+---
+
+## Rules preprocessing: normalize and categorize workspace rules before injection (Apr 21, 2026)
+
+**The problem with direct injection:** WorkTrain currently injects all rules files raw into every agent's system prompt. A workspace with `.cursorrules`, `CLAUDE.md`, `.windsurf/rules/*.md`, and `AGENTS.md` might inject 10KB of rules into a discovery session that only needs 2KB of it. Rules from different tools that say the same thing get repeated. The agent gets everything, not what's relevant.
+
+**The better approach: preprocess once, inject targeted**
+
+A `worktrain rules build` command (or automatic first-run) that:
+1. Reads all IDE rules files from the workspace (the full set from `WORKSPACE_CONTEXT_CANDIDATE_PATHS`)
+2. Deduplicates overlapping rules (same constraint stated multiple ways)
+3. Categorizes by phase: implementation, review, delivery, discovery, all
+4. Resolves conflicts between tools (precedence: `.worktrain/rules/` > `CLAUDE.md` > `.cursorrules` > tool-specific)
+5. Writes to `.worktrain/rules/`:
+   - `implementation.md` -- coding conventions, patterns, what to avoid
+   - `review.md` -- what makes a finding, severity criteria, blocking vs non-blocking
+   - `delivery.md` -- commit message format, PR title format, required labels
+   - `discovery.md` -- what to investigate, what to ignore, architecture invariants
+   - `all.md` -- cross-cutting rules for every session
+   - `manifest.json` -- which files exist, when they were last generated, source files used
+
+At session time: WorkTrain injects only the phase-relevant file, not all files.
+
+**What runs the preprocessing**
+
+Option A (LLM): A lightweight `wr.rules-build` workflow session that reads the source files and writes the categorized output. Better categorization, costs a few turns.
+
+Option B (heuristic): Pattern matching on section headers, keywords, file origins. Zero LLM cost, runs on every `worktrain init` or `rules build` call.
+
+Option C (hybrid): Heuristic pass first, LLM for anything ambiguous or conflicting.
+
+**Automatic rebuild triggers:**
+- `worktrain rules build` manual command
+- Automatic on first session if `.worktrain/rules/` doesn't exist
+- On a schedule (weekly) to pick up new rules added to the repo
+- When any source rules file changes (file watcher)
+
+**The manifest enables smart injection:**
+- Each pipeline phase knows which rule file to request
+- If a phase-specific file doesn't exist, fall back to `all.md`
+- The manifest records which source files were used -- if sources change, mark rules as stale
+
+**Relationship to phase-scoped rules files (.worktrain/rules/)**
+This IS the implementation of that feature. The manually-authored `.worktrain/rules/*.md` files are the canonical output. The preprocessing is how you get there automatically without having to write them by hand.
+
+**Priority:** Medium. Useful for any workspace with multiple tools. Essential for team repos where Cursor rules, AGENTS.md, and custom conventions might conflict. Build the categorized injection path (phase-scoped rules) first; add the automated preprocessing as a follow-up.
