@@ -175,5 +175,27 @@ describe('FileWorkflowStorage (Recursive & Flags)', () => {
     const workflow = await storage.getWorkflowById('same');
     expect(workflow?.definition.name).toBe('Workflow same standard');
   });
+
+  it('should return null for empty string id without throwing', async () => {
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(false),
+      {}
+    );
+    const result = await storage.getWorkflowById('');
+    expect(result).toBeNull();
+  });
+
+  it('should return null for whitespace-only id without throwing', async () => {
+    const storage = new FileWorkflowStorage(
+      tempDir,
+      createCustomDirectorySource(tempDir, 'Test'),
+      createMockFlags(false),
+      {}
+    );
+    const result = await storage.getWorkflowById('  ');
+    expect(result).toBeNull();
+  });
 });
 
