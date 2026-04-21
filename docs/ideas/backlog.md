@@ -7190,3 +7190,17 @@ The session's worktree and branch become the persistent workspace for the full l
 ### Priority
 
 Medium-high for basic `worktrain session ask`. The engine checkpoint enrichment is a longer-term investment that pays dividends across observability, coordinator coordination, and session quality.
+
+---
+
+## Session continuation: just keep talking (Apr 21, 2026)
+
+A completed session is not dead. It's paused. The conversation is still there -- all the LLM turns, all the tool calls, all the responses, in the event log. To continue it, you just send the next message.
+
+**The only thing blocking this:** the engine rejects messages to sessions in `complete` state. Remove that gate.
+
+**That's the entire change.** No rehydration. No resumption protocol. No special context injection. The LLM receives the full conversation history (it's already stored) and continues as if it never stopped. Because it didn't.
+
+**`worktrain session continue <sessionId> "<message>"`** -- sends a message to a completed session. New events appended to the same log. Same session ID. The agent has full context of everything it ever did.
+
+Context window overflow (very long sessions) is a separate optimization problem -- truncate oldest turns while keeping step notes. Don't solve it now.
