@@ -7446,3 +7446,43 @@ On MCP server startup, silently remove managed sources where the filesystem path
 ### Priority
 
 Medium for the cleanup command (quality of life, stops log noise). High for startup auto-cleanup of dead managed sources (prevents the `Invalid workflow` errors that have been confusing throughout this session). Low for session TTL/archival (the mtime cache handles the performance concern).
+
+---
+
+## Worktree orphan leak on delivery failure (Apr 21, 2026, from Audit 4)
+
+**The bug:** In `src/trigger/trigger-router.ts`, `maybeRunDelivery()` on the success path deletes the session sidecar file before attempting worktree removal. If worktree removal fails (network error, git command failure), the sidecar is already gone. `runStartupRecovery()` scans sidecar files to find orphan worktrees -- so the orphaned worktree is invisible and accumulates indefinitely.
+
+**Fix:** In the success path cleanup, delete the sidecar AFTER worktree removal, not before. Or better: always attempt worktree removal in a `try/finally` that deletes the sidecar regardless of whether removal succeeded.
+
+**File:** `src/trigger/trigger-router.ts`, `maybeRunDelivery()` success path.
+
+**Priority:** Medium. Worktrees are small, but the leak is permanent across daemon restarts.
+
+---
+
+## queue-poll.jsonl never rotated (Apr 21, 2026, from Audit 5)
+
+**The bug:** `~/.workrail/queue-poll.jsonl` grows indefinitely. `appendFile`-only, no rotation. At 5-minute poll intervals with 2-3 events per cycle, this is ~8-87 MB/month depending on activity. Disk exhaustion risk on long-running daemons.
+
+**Fix:** Add a size check before appending in `appendQueuePollLog()`. If file exceeds 10 MB, rotate it: rename to `queue-poll.jsonl.1`, start fresh. Keep at most 2 rotated files.
+
+**File:** `src/trigger/polling-scheduler.ts`, `appendQueuePollLog()` function.
+
+**Priority:** Medium. Not urgent but a production correctness issue.
+
+---
+
+## ReviewSeverity missing assertNever + stderr bypassing injected dep (Apr 21, 2026, from Audit 2)
+
+**Bug 1 (Major):** In `src/coordinators/modes/implement-shared.ts`, the `switch(findings.severity)` over `ReviewSeverity` has no `default: assertNever(findings.severity)`. Widening `ReviewSeverity` with a new variant compiles cleanly and falls through silently.
+
+**Fix:** Add `default: assertNever(findings.severity)` to the switch.
+
+**Bug 2 (Major):** In `src/coordinators/pr-review.ts`, `readVerdictArtifact()` calls `process.stderr.write(...)` directly instead of using the injected `deps.stderr`. Tests that inject a fake dep will miss this log.
+
+**Fix:** Replace `process.stderr.write(...)` with `deps.stderr(...)`.
+
+**Files:** `src/coordinators/modes/implement-shared.ts`, `src/coordinators/pr-review.ts`.
+
+**Priority:** Medium. Correctness issues that won't crash in production but make future refactors unsafe.
