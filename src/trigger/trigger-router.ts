@@ -488,6 +488,12 @@ export class TriggerRouter {
    * number of unique goal+workspace pairs dispatched in the last 30s -- always
    * a small number in practice.
    *
+   * IMPORTANT: This map is shared across route(), dispatch(), and
+   * dispatchAdaptivePipeline(). Any new dispatch path added to this class
+   * MUST include the dedup check (cleanup-on-entry + check + set) before
+   * calling queue.enqueue(). Omitting it from a new path silently re-opens
+   * the duplicate-pipeline bug on that path.
+   *
    * @see dispatchAdaptivePipeline
    * @see ADAPTIVE_DEDUPE_TTL_MS
    */
@@ -677,6 +683,30 @@ export class TriggerRouter {
       ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
     };
 
+    // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
+    // WHY here (after workflowTrigger construction, before emitter.emit):
+    // - The goal must be fully resolved (goalTemplate interpolation happens above).
+    // - No trigger_fired event is emitted for deduped dispatches -- consistent with
+    //   the dispatchCondition guard which also returns before the emitter call.
+    // WHY shared map (_recentAdaptiveDispatches): cross-path dedup is intentional --
+    // a dispatch via any path (route, dispatch, dispatchAdaptivePipeline) sets the key.
+    {
+      const dedupeKey = `${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
+      const now = Date.now();
+      // Cleanup-on-entry: purge stale entries before checking/inserting.
+      for (const [key, ts] of this._recentAdaptiveDispatches) {
+        if (now - ts >= TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+          this._recentAdaptiveDispatches.delete(key);
+        }
+      }
+      const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
+      if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+        console.log(`[TriggerRouter] Skipping duplicate route dispatch: goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
+        return { _tag: 'enqueued', triggerId: trigger.id };
+      }
+      this._recentAdaptiveDispatches.set(dedupeKey, now);
+    }
+
     // Emit trigger_fired: the webhook was accepted and validated.
     this.emitter?.emit({ kind: 'trigger_fired', triggerId: trigger.id, workflowId: trigger.workflowId });
 
@@ -815,6 +845,26 @@ export class TriggerRouter {
    * @returns The workflowId that was dispatched.
    */
   dispatch(workflowTrigger: WorkflowTrigger): string {
+    // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
+    // WHY same map and pattern as route() and dispatchAdaptivePipeline():
+    // cross-path dedup is intentional -- a dispatch via any path sets the key.
+    {
+      const dedupeKey = `${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
+      const now = Date.now();
+      // Cleanup-on-entry: purge stale entries before checking/inserting.
+      for (const [key, ts] of this._recentAdaptiveDispatches) {
+        if (now - ts >= TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+          this._recentAdaptiveDispatches.delete(key);
+        }
+      }
+      const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
+      if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+        console.log(`[TriggerRouter] Skipping duplicate dispatch: goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
+        return workflowTrigger.workflowId;
+      }
+      this._recentAdaptiveDispatches.set(dedupeKey, now);
+    }
+
     void this.queue.enqueue(workflowTrigger.workflowId, async () => {
       // Same semaphore pattern as route(): acquire inside the callback so dispatch()
       // returns immediately, then wait for a slot before calling runWorkflowFn().
