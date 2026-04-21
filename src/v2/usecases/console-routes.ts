@@ -754,7 +754,7 @@ export function mountConsoleRoutes(
   // TODO(security): add token auth before any multi-user deployment.
   app.post('/api/v2/auto/dispatch', express.json(), async (req: Request, res: Response) => {
     if (!v2ToolContext) {
-      res.status(503).json({ success: false, error: 'Autonomous dispatch requires v2 tools enabled.' });
+      res.status(503).json({ success: false, error: 'Autonomous dispatch requires the WorkTrain daemon. Run worktrain console alongside worktrain daemon to enable browser dispatch.' });
       return;
     }
 

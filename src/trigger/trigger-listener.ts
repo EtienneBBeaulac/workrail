@@ -78,7 +78,7 @@ export interface TriggerListenerHandle {
   readonly router: TriggerRouter;
   /**
    * The steer registry shared with TriggerRouter.
-   * Pass to startDaemonConsole() so POST /sessions/:id/steer can dispatch steers
+   * Pass to mountConsoleRoutes() so POST /sessions/:id/steer can dispatch steers
    * to sessions running inside TriggerRouter's dispatch queue.
    */
   readonly steerRegistry: SteerRegistry;
@@ -405,12 +405,10 @@ export async function startTriggerListener(
   // visible via HTTP when the first poll fired. ConsoleService provides the same data
   // via direct store access, eliminating both failure modes.
   //
-  // Construction mirrors daemon-console.ts lines 123-129. A second ConsoleService
-  // instance has no correctness issue -- the summary cache is instance-scoped and
-  // mtime-invalidated. The instance is cheap to construct.
+  // A second ConsoleService instance has no correctness issue -- the summary cache
+  // is instance-scoped and mtime-invalidated. The instance is cheap to construct.
   //
-  // WHY lazy import: avoids circular dependency at module load time (same pattern as
-  // daemon-console.ts which also uses await import for ConsoleService).
+  // WHY lazy import: avoids circular dependency at module load time.
   const { ConsoleService } = await import('../v2/usecases/console-service.js');
   let consoleService: InstanceType<typeof ConsoleService> | null = null;
   if (!ctx.v2?.dataDir || !ctx.v2?.directoryListing) {

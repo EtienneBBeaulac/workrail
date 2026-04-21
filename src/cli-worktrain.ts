@@ -367,10 +367,8 @@ program
           // This is the launchd entry point: `worktrain daemon` with no flags.
           // Run the same startup logic as `workrail daemon`.
           const { startTriggerListener } = await import('./trigger/trigger-listener.js');
-          const { startDaemonConsole } = await import('./trigger/daemon-console.js');
           const { DaemonEventEmitter } = await import('./daemon/daemon-events.js');
-          const { initializeContainer, container } = await import('./di/container.js');
-          const { DI } = await import('./di/tokens.js');
+          const { initializeContainer } = await import('./di/container.js');
 
           await initializeContainer({ runtimeMode: { kind: 'cli' } });
           const { createToolContext } = await import('./mcp/server.js');
@@ -420,33 +418,7 @@ program
           console.log(`WorkRail daemon running on port ${handle.port}`);
           console.log(`Workspace: ${workspacePath}`);
           console.log('Waiting for webhook triggers...');
-
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const pkg = require('../package.json') as { version: string };
-
-          // Resolve workflowService from the DI container.
-          type WorkflowService = import('./application/services/workflow-service.js').WorkflowService;
-          const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
-
-          const consoleResult = await startDaemonConsole(ctx, {
-            triggerRouter: handle.router,
-            serverVersion: pkg.version,
-            workflowService,
-            steerRegistry: handle.steerRegistry,
-            pollingScheduler: handle.scheduler,
-          });
-
-          let consoleHandle: import('./trigger/daemon-console.js').DaemonConsoleHandle | null = null;
-          if (consoleResult.kind === 'ok') {
-            consoleHandle = consoleResult.value;
-          } else if (consoleResult.error.kind === 'port_conflict') {
-            console.warn(
-              `[DaemonConsole] Port ${consoleResult.error.port} is already held. ` +
-              `The daemon is running but the console is unavailable.`,
-            );
-          } else {
-            console.warn(`[DaemonConsole] Could not start console: ${consoleResult.error.message}`);
-          }
+          console.log("[Daemon] Run 'worktrain console' to start the dashboard");
 
           // Keep alive until SIGINT/SIGTERM.
           await new Promise<void>((resolve) => {
@@ -501,9 +473,6 @@ program
                 });
               }
               emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
-              if (consoleHandle) {
-                await consoleHandle.stop();
-              }
               await handle.stop();
               resolve();
             };
