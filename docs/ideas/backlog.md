@@ -7299,3 +7299,20 @@ The daemon heartbeat + DaemonRegistry membership is the key insight: if the sess
 ### Priority
 
 Medium-high. True session status makes WorkTrain trustworthy as an autonomous system -- operators can see exactly what's happening without guessing. Especially important as session durations get longer (55-minute discovery sessions, 120-minute pipeline runs).
+
+---
+
+## Workflows tab: incorrect source attribution for bundled workflows (Apr 21, 2026)
+
+**The bug:** The Workflows tab in the console shows bundled workflows (e.g. `coding-task-workflow-agentic`, `workflow-for-workflows`) as coming from "User Library" instead of "WorkRail Built-in". This is a WorkRail MCP server issue, not a WorkTrain issue.
+
+**Likely cause:** The source attribution logic reads from the workflow's loaded source (the `WorkflowSource` type). When a workflow exists in both the bundled set AND a user's managed sources or remembered roots, the source returned is the one that "wins" in the storage layer -- which may be the user path rather than the bundled path. Or the `source.kind` field is incorrectly set to `'personal'` for workflows that were loaded from the bundled workflows directory.
+
+**Where to look:**
+- `src/infrastructure/storage/schema-validating-workflow-storage.ts` -- source kind propagation
+- `src/mcp/handlers/shared/workflow-source-visibility.ts` -- how source is mapped to display label in `list_workflows`
+- `src/infrastructure/storage/file-workflow-storage.ts` -- how `source.kind` is assigned when loading from disk
+
+**Expected behavior:** Workflows in the `workflows/` directory of the workrail package should always display as "WorkRail Built-in" regardless of whether the user also has a managed source that happens to include the same directory.
+
+**Priority:** Low for WorkTrain (doesn't affect functionality). Medium for WorkRail MCP (misleading UI, users may think they accidentally modified bundled workflows).
