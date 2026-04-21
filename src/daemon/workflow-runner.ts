@@ -3047,6 +3047,11 @@ export async function runWorkflow(
   // sessionOutcome is updated before each return path and read in the finally block.
   // Default 'unknown' is a valid data point (not silent data loss) if a future return
   // path is added without updating this variable.
+  //
+  // CLOSURE NOTE: the finally block's async stats write reads sessionOutcome via closure
+  // reference inside a Promise .then() microtask. Microtasks fire after the synchronous
+  // return completes, so the .then() always sees the final value assigned before the return.
+  // This is standard JS closure + microtask sequencing -- it is correct, just subtle.
   let sessionOutcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown' = 'unknown';
 
   // ---- Session ID (process-local, crash safety) ----
@@ -3094,7 +3099,7 @@ export async function runWorkflow(
     const slashIdx = trigger.agentConfig.model.indexOf('/');
     if (slashIdx === -1) {
       // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
-      sessionOutcome = 'error'; // timing written in finally block
+      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3211,7 +3216,7 @@ export async function runWorkflow(
 
     if (startResult.isErr()) {
       // Registration has not happened yet (happens after token decode below).
-      sessionOutcome = 'error'; // timing written in finally block
+      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3361,7 +3366,7 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
-      sessionOutcome = 'error'; // timing written in finally block
+      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3403,7 +3408,7 @@ export async function runWorkflow(
     }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
-    sessionOutcome = 'success'; // timing written in finally block
+    // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
     return {
       _tag: 'success',
       workflowId: trigger.workflowId,
