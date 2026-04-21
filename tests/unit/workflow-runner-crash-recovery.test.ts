@@ -16,6 +16,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { okAsync, errAsync } from 'neverthrow';
 import {
   readAllDaemonSessions,
   runStartupRecovery,
@@ -23,6 +24,8 @@ import {
   countOrphanStepAdvances,
 } from '../../src/daemon/workflow-runner.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
+import type { SessionId } from '../../src/v2/durable-core/ids/index.js';
+import type { DomainEventV1 } from '../../src/v2/durable-core/schemas/session/index.js';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -341,13 +344,13 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
 
   const noopExecFn = async () => ({ stdout: '', stderr: '' });
 
-  it('resumes a session when _countStepAdvancesFn returns 1', async () => {
+  it('preserves sidecar (does not call executeContinueWorkflow) when _countStepAdvancesFn returns 1', async () => {
     const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
     await writeSession(tmpDir, sessionId, validSessionData());
 
-    const resumedTokens: string[] = [];
+    const executeCalls: string[] = [];
     const fakeExecute = async (input: { continueToken: string; intent: string }) => {
-      resumedTokens.push(input.continueToken);
+      executeCalls.push(input.continueToken);
       return { content: [], isError: false } as unknown as Awaited<ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>>;
     };
 
@@ -355,14 +358,15 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
       tmpDir,
       noopExecFn,
       stubCtx,
-      async () => 1, // stepAdvances = 1 -> resume
+      async () => 1, // stepAdvances = 1 -> preserve
       fakeExecute as Parameters<typeof runStartupRecovery>[4],
     );
 
-    // Resume path: executeContinueWorkflow called with the session's continueToken
-    expect(resumedTokens).toHaveLength(1);
+    // Phase B honest deferral: executeContinueWorkflow is NOT called.
+    // Full agent restart is not yet implemented -- sidecar is preserved for future Phase B.
+    expect(executeCalls).toHaveLength(0);
 
-    // Sidecar is NOT deleted on resume (agent will update it on next advance)
+    // Sidecar is NOT deleted -- retained for future resumption.
     await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
   });
 
@@ -416,7 +420,9 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
   });
 
-  it('falls back to discard when _executeContinueWorkflowFn throws', async () => {
+  it('preserves sidecar for sessions with step advances (executeContinueWorkflow is not called)', async () => {
+    // Phase B honest deferral: even if a fakeExecute that would throw is passed,
+    // it is never invoked -- the resume path only logs and preserves the sidecar.
     const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
     await writeSession(tmpDir, sessionId, validSessionData());
 
@@ -424,12 +430,12 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
       tmpDir,
       noopExecFn,
       stubCtx,
-      async () => 3, // stepAdvances = 3 -> resume
-      async () => { throw new Error('rehydrate failed'); }, // resume fails
+      async () => 3, // stepAdvances = 3 -> preserve
+      async () => { throw new Error('should not be called'); },
     );
 
-    // Resume failed -> sidecar is deleted (fall to discard)
-    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+    // Sidecar is preserved -- executeContinueWorkflow is never invoked, so no throw occurs.
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
   });
 
   it('clears queue-issue sidecars even when ctx is provided', async () => {
@@ -445,37 +451,95 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     await expect(fs.access(sidecarPath)).rejects.toThrow();
   });
 
-  it('resumes multiple sessions with step advances', async () => {
+  it('preserves sidecars for multiple sessions with step advances', async () => {
     const id1 = 'aaaaaaaa-0000-0000-0000-000000000001';
     const id2 = 'aaaaaaaa-0000-0000-0000-000000000002';
     await writeSession(tmpDir, id1, { ...validSessionData(), continueToken: 'ct_token1' });
     await writeSession(tmpDir, id2, { ...validSessionData(), continueToken: 'ct_token2' });
 
-    const resumedTokens: string[] = [];
-    const fakeExecute = async (input: { continueToken: string }) => {
-      resumedTokens.push(input.continueToken);
-      return { content: [], isError: false } as unknown as Awaited<ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>>;
-    };
-
     await runStartupRecovery(
       tmpDir,
       noopExecFn,
       stubCtx,
-      async () => 2, // both have advances -> resume both
-      fakeExecute as Parameters<typeof runStartupRecovery>[4],
+      async () => 2, // both have advances -> both preserved
+      async () => { throw new Error('should not be called'); },
     );
 
-    expect(resumedTokens).toHaveLength(2);
+    // Both sidecars are preserved -- no agent restart attempted.
+    await expect(fs.access(path.join(tmpDir, `${id1}.json`))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(tmpDir, `${id2}.json`))).resolves.toBeUndefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// countOrphanStepAdvances() -- exported for testability
+// countOrphanStepAdvances() -- behavioral tests via injectable fns
 // ---------------------------------------------------------------------------
 
 describe('countOrphanStepAdvances()', () => {
-  it('is exported from workflow-runner', () => {
-    // Verify the function is exported (import check)
-    expect(typeof countOrphanStepAdvances).toBe('function');
+  // stubCtx is not used by countOrphanStepAdvances when both _parseFn and _loadFn are injected
+  // (the defaults that would access ctx.v2.* are never reached).
+  const stubCtx = {} as unknown as V2ToolContext;
+
+  // Fake parseFn that succeeds, returning a ContinueTokenResolved with a fixed sessionId.
+  const okParseFn = (_raw: string) =>
+    okAsync({ sessionId: 'sess_fake_001', runId: 'r', nodeId: 'n', attemptId: 'a', workflowHashRef: 'h' } as import('../../src/mcp/handlers/v2-token-ops.js').ContinueTokenResolved);
+
+  // Fake parseFn that always fails.
+  const failParseFn = (_raw: string) =>
+    errAsync({ code: 'TOKEN_INVALID_FORMAT', message: 'bad token', kind: 'not_retryable' } as unknown as import('../../src/mcp/handlers/v2-execution-helpers.js').ToolFailure);
+
+  // Builds a fake loadFn returning N advance_recorded events in the session event log.
+  function fakeLoadFn(advanceCount: number) {
+    return (_sessionId: SessionId) => {
+      const events: DomainEventV1[] = Array.from({ length: advanceCount }, (_, i) => ({
+        kind: 'advance_recorded' as const,
+        eventId: `evt_${i}`,
+        eventIndex: i,
+        sessionId: 'sess_fake_001',
+        ts: Date.now(),
+        scope: { runId: 'r', nodeId: `n_${i}` },
+        data: {},
+      } as unknown as DomainEventV1));
+      return okAsync({ kind: 'complete' as const, truth: { manifest: [], events } });
+    };
+  }
+
+  it('returns 2 when the session event log contains 2 advance_recorded events', async () => {
+    const result = await countOrphanStepAdvances('ct_fake', stubCtx, okParseFn, fakeLoadFn(2));
+    expect(result).toBe(2);
+  });
+
+  it('returns 0 when the session event log contains no advance_recorded events', async () => {
+    const result = await countOrphanStepAdvances('ct_fake', stubCtx, okParseFn, fakeLoadFn(0));
+    expect(result).toBe(0);
+  });
+
+  it('returns 0 when parseFn fails (token decode error)', async () => {
+    const result = await countOrphanStepAdvances('ct_fake', stubCtx, failParseFn, fakeLoadFn(5));
+    expect(result).toBe(0);
+  });
+
+  it('returns 0 when loadFn fails (session store error)', async () => {
+    const failLoadFn = (_sessionId: SessionId) =>
+      errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'disk failure' });
+    const result = await countOrphanStepAdvances('ct_fake', stubCtx, okParseFn, failLoadFn);
+    expect(result).toBe(0);
+  });
+
+  it('counts only advance_recorded events and ignores other event kinds', async () => {
+    const mixedLoadFn = (_sessionId: SessionId) =>
+      okAsync({
+        kind: 'complete' as const,
+        truth: {
+          manifest: [],
+          events: [
+            { kind: 'advance_recorded', eventId: 'e1', eventIndex: 0 } as unknown as DomainEventV1,
+            { kind: 'session_started', eventId: 'e2', eventIndex: 1 } as unknown as DomainEventV1,
+            { kind: 'advance_recorded', eventId: 'e3', eventIndex: 2 } as unknown as DomainEventV1,
+          ],
+        },
+      });
+    const result = await countOrphanStepAdvances('ct_fake', stubCtx, okParseFn, mixedLoadFn);
+    expect(result).toBe(2);
   });
 });

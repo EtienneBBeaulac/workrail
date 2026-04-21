@@ -39,7 +39,11 @@ import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
 import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
+import type { ContinueTokenResolved } from '../mcp/handlers/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
+import type { SessionEventLogReadonlyStorePortV2, LoadedValidatedPrefixV2, SessionEventLogStoreError } from '../v2/ports/session-event-log-store.port.js';
+import type { ToolFailure } from '../mcp/handlers/v2-execution-helpers.js';
+import type { ResultAsync } from 'neverthrow';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
@@ -835,14 +839,14 @@ export async function readAllDaemonSessions(
  * Phase B (requires ctx): For each orphaned session, decode the continueToken,
  *   count advance_recorded events in the WorkRail session event log, and apply
  *   the binary evaluateRecovery() policy:
- *   - stepAdvances >= 1 -> resume via executeContinueWorkflow({ intent: 'rehydrate' })
+ *   - stepAdvances >= 1 -> preserve sidecar (log and skip deletion; Phase B full restart not yet implemented)
  *   - stepAdvances === 0 -> discard (sidecar deleted; issue re-dispatched)
  *   When ctx is absent, all sessions fall to discard (backward-compatible behavior).
  *
- * KNOWN LIMITATION: a planned deployment restart clears in-flight sessions just as
- * a crash does. Distinguishing crash from planned restart requires out-of-band
- * state (e.g. a shutdown token written on clean stop). Not implemented. Resuming
- * on a planned restart is safe -- intent: 'rehydrate' is read-only.
+ * WHY preserve instead of restart for stepAdvances >= 1: full agent loop restart
+ *   requires reconstructing the trigger context from session state, which is non-trivial.
+ *   The sidecar is kept so a future Phase B implementation can pick it up.
+ *   Tracked in backlog as "autonomous crash recovery -- Phase B".
  *
  * Non-fatal: any error during recovery is caught and logged. The daemon starts
  * regardless of whether recovery succeeds.
@@ -851,12 +855,12 @@ export async function readAllDaemonSessions(
  *   DAEMON_SESSIONS_DIR. Pass a temp dir in tests to avoid touching real state.
  * @param execFn - Injectable exec function for git worktree removal.
  *   Defaults to execFileAsync. Override in tests to avoid real git calls.
- * @param ctx - Optional V2ToolContext for resume-path logic. When provided,
- *   sessions with step advances are resumed rather than discarded.
+ * @param ctx - Optional V2ToolContext for phase B logic. When provided,
+ *   sessions with step advances are preserved rather than discarded.
  * @param _countStepAdvancesFn - Injectable step-count implementation for testing.
  *   Defaults to the real countOrphanStepAdvances() implementation.
  * @param _executeContinueWorkflowFn - Injectable continue-workflow implementation
- *   for testing. Defaults to the real executeContinueWorkflow() implementation.
+ *   (retained for signature backward-compatibility; not currently called in the resume path).
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
@@ -883,7 +887,7 @@ export async function runStartupRecovery(
 
   const now = Date.now();
   let cleared = 0;
-  let resumed = 0;
+  let preserved = 0;
 
   for (const session of sessions) {
     const ageMs = now - session.ts;
@@ -945,33 +949,17 @@ export async function runStartupRecovery(
       // Exhaustive switch: assertNever prevents silent fall-through if
       // RecoveryAction gains new variants in the future.
       switch (action) {
-        case 'resume': {
-          try {
-            console.log(
-              `[WorkflowRunner] Resuming orphaned session: sessionId=${session.sessionId} ` +
-              `stepAdvances=${stepAdvances} age=${ageSec}s (no conversation history -- agent will restart current step)`,
-            );
-            await _executeContinueWorkflowFn(
-              {
-                continueToken: session.continueToken,
-                intent: 'rehydrate' as const,
-                workspacePath: session.worktreePath,
-              },
-              ctx,
-            );
-            resumed++;
-            // Do NOT delete the sidecar -- it will be updated by the next
-            // executeContinueWorkflow call from the resumed agent run.
-            continue;
-          } catch (err: unknown) {
-            // Non-fatal: if resume fails, fall through to discard below.
-            console.warn(
-              `[WorkflowRunner] Could not resume orphaned session ${session.sessionId}: ` +
-              `${err instanceof Error ? err.message : String(err)} -- falling back to discard`,
-            );
-          }
-          break;
-        }
+        case 'resume':
+          console.log(
+            `[WorkflowRunner] Startup recovery: preserving sidecar for session with ${stepAdvances} step advance(s): ` +
+            `sessionId=${session.sessionId} age=${ageSec}s -- full agent restart not yet implemented; ` +
+            `sidecar retained for future resumption. Skipping sidecar deletion.`,
+          );
+          // WHY: sidecar is preserved so a future resumption implementation can pick it up.
+          // Full agent loop restart requires reconstructing the trigger context from session state,
+          // which is non-trivial. Tracked in backlog as "autonomous crash recovery -- Phase B".
+          preserved++;
+          continue;
         case 'discard': {
           const label = isStale ? 'stale orphaned session' : 'orphaned session';
           console.log(
@@ -1010,7 +998,7 @@ export async function runStartupRecovery(
 
   if (ctx !== undefined) {
     console.log(
-      `[WorkflowRunner] Startup recovery complete: resumed=${resumed} discarded=${cleared}/${sessions.length} orphaned session(s).`,
+      `[WorkflowRunner] Startup recovery complete: preserved=${preserved} discarded=${cleared}/${sessions.length} orphaned session(s).`,
     );
   } else {
     console.log(`[WorkflowRunner] Startup recovery complete: cleared ${cleared}/${sessions.length} orphaned session(s).`);
@@ -1021,24 +1009,38 @@ export async function runStartupRecovery(
  * Count the number of step advances (advance_recorded events) in a WorkRail session
  * event log for an orphaned session.
  *
- * WHY exported: injectable via _countStepAdvancesFn parameter for unit testing without
- * a real V2ToolContext.
+ * WHY exported: testable in isolation via injectable _parseFn and _loadFn params --
+ * callers can supply fakes without a real V2ToolContext.
+ *
+ * The injectable params are pre-bound: _parseFn takes only the raw token string, and
+ * _loadFn takes only the sessionId. This keeps the function testable without requiring
+ * real tokenCodecPorts or sessionStore instances in tests.
  *
  * Uses loadValidatedPrefix() instead of load() to handle truncated JSONL event logs
  * from a crash during append. Both 'complete' and 'truncated' kinds expose .truth.events.
  *
  * Returns 0 on any error (safe: caller falls back to discard).
+ *
+ * @param _parseFn - Injectable token parser. Receives the raw continueToken string and
+ *   returns a ResultAsync<ContinueTokenResolved, ToolFailure>. Defaults to calling
+ *   parseContinueTokenOrFail with ctx.v2.tokenCodecPorts and ctx.v2.tokenAliasStore.
+ * @param _loadFn - Injectable session loader. Receives the WorkRail SessionId and
+ *   returns a ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError>. Defaults to
+ *   ctx.v2.sessionStore.loadValidatedPrefix.
  */
 export async function countOrphanStepAdvances(
   continueToken: string,
   ctx: V2ToolContext,
+  _parseFn: ((raw: string) => ResultAsync<ContinueTokenResolved, ToolFailure>) | undefined = undefined,
+  _loadFn: SessionEventLogReadonlyStorePortV2['loadValidatedPrefix'] | undefined = undefined,
 ): Promise<number> {
-  // Decode the continueToken to extract the WorkRail sessionId.
-  const resolvedResult = await parseContinueTokenOrFail(
-    continueToken,
-    ctx.v2.tokenCodecPorts,
-    ctx.v2.tokenAliasStore,
+  const parseFn = _parseFn ?? ((raw: string) =>
+    parseContinueTokenOrFail(raw, ctx.v2.tokenCodecPorts, ctx.v2.tokenAliasStore)
   );
+  const loadFn = _loadFn ?? ctx.v2.sessionStore.loadValidatedPrefix.bind(ctx.v2.sessionStore);
+
+  // Decode the continueToken to extract the WorkRail sessionId.
+  const resolvedResult = await parseFn(continueToken);
 
   if (resolvedResult.isErr()) {
     console.warn(
@@ -1051,7 +1053,7 @@ export async function countOrphanStepAdvances(
 
   // Use loadValidatedPrefix to handle crash-truncated JSONL gracefully.
   // Both 'complete' and 'truncated' kinds expose .truth.events with the valid prefix.
-  const loadResult = await ctx.v2.sessionStore.loadValidatedPrefix(sessionId);
+  const loadResult = await loadFn(sessionId);
 
   if (loadResult.isErr()) {
     console.warn(

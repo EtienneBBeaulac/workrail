@@ -863,6 +863,12 @@ function extractDotPath(obj: Record<string, unknown>, rawPath: string): unknown 
 async function countActiveSessions(sessionsDir: string): Promise<number> {
   try {
     const files = await fs.readdir(sessionsDir);
+    // TODO(Phase B): sessions preserved by runStartupRecovery() (Phase B honest deferral)
+    // also land in this directory with the same filename pattern as live session sidecars.
+    // They cannot be distinguished here, so preserved sidecars count toward
+    // maxConcurrentSessions and may suppress new dispatches unnecessarily.
+    // Fix in Phase B: use a distinguishable filename (e.g. preserved-<sessionId>.json)
+    // or a marker field inside the sidecar so countActiveSessions can exclude them.
     return files.filter((f) => f.endsWith('.json') && !f.startsWith('queue-issue-')).length;
   } catch {
     return 0;
