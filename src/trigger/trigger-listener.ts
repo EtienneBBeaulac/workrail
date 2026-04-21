@@ -831,7 +831,9 @@ export async function startTriggerListener(
   // WHY: runStartupRecovery() is non-fatal -- any error is caught internally and the
   // daemon starts regardless. The additional catch here defends against unexpected
   // throws from the function's own error-handling path.
-  await runStartupRecovery().catch((err: unknown) => {
+  // WHY pass ctx: enables resume-path logic (decode token, count step advances,
+  // call executeContinueWorkflow with intent: 'rehydrate' for sessions with progress).
+  await runStartupRecovery(undefined, undefined, ctx).catch((err: unknown) => {
     console.warn(
       '[TriggerListener] Startup recovery encountered an unexpected error:',
       err instanceof Error ? err.message : String(err),
