@@ -6891,3 +6891,47 @@ Same concept for GitLab MRs. WorkTrain uses `gh pr create` for GitHub and `glab 
 ### Priority
 
 Medium. Teams with strict PR templates will notice WorkTrain's PRs immediately. Not a blocker for solo repos. Should land before WorkTrain is used in team repos.
+
+---
+
+## Coordinator as comment router: right agent for each review comment (Apr 20, 2026)
+
+**The principle:** When a reviewer comments on a PR, the MR lifecycle coordinator shouldn't handle it in one monolithic agent. Instead, it routes each comment to the agent best positioned to respond.
+
+### Routing table
+
+| Comment type | Who handles it | Why |
+|---|---|---|
+| "Why did you use X pattern?" | Original implementing agent (resumed with notes) | It wrote the code and has the design decisions in its session notes |
+| "Please change this to Y" | New fix session seeded with implementing agent's notes + the comment | Targeted change, needs implementation context |
+| "This has a security concern" | Review agent (spawned with the specific finding) | Security judgment is a review-domain skill |
+| "This violates our architecture" | Discovery/design agent | Needs architectural perspective, may require rethinking the approach |
+| "Nit: rename this variable" | Coordinator directly | No agent needed -- just apply the change programmatically |
+| "LGTM" / "Approved" | Coordinator tracks approval state | No comment response needed |
+
+### The session notes advantage
+
+The original implementing agent has institutional knowledge in its session notes: why it chose approach A over B, what alternatives it considered, what edge cases it intentionally deferred. Today that knowledge dies when the session ends.
+
+With coordinator routing:
+1. Coordinator looks up the original implementing session for the PR
+2. Reads its `lastStepNotes` and any `report_issue` summaries
+3. Seeds the response session with that context bundle
+4. The response agent can say "I chose X because Y (from the original design decision)" rather than re-inferring from the code alone
+
+This is the first concrete use case for the cross-session prior notes system (`ContextAssembler.listRecentSessions`).
+
+### What the coordinator does (not the agent)
+
+- Classifies each comment by type (question, change request, concern, nit, approval)
+- Routes to the right handler
+- Collects the response (text reply, code fix, or architectural recommendation)
+- Posts the reply to GitHub/GitLab via API
+- Marks threads as resolved when the response is accepted
+- Aggregates all comment outcomes before deciding to re-request review
+
+The MR management agent (if there is one) becomes thin: it's the interface for complex judgment calls that don't fit the routing table. The coordinator handles the mechanical parts.
+
+### Dependency
+
+Requires the event-driven coordination architecture (coordinator as event bus) -- so the coordinator knows when new comments arrive rather than the agent polling for them.
