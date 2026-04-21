@@ -6935,3 +6935,78 @@ The MR management agent (if there is one) becomes thin: it's the interface for c
 ### Dependency
 
 Requires the event-driven coordination architecture (coordinator as event bus) -- so the coordinator knows when new comments arrive rather than the agent polling for them.
+
+---
+
+## Persistent session identity: session resurrection and post-completion interaction (Apr 21, 2026)
+
+**The principle:** Sessions should never be permanently dead. A completed session is a knowledge artifact -- it contains design decisions, research findings, implementation rationale, and context that remains valuable long after the task is done. WorkTrain should be able to reactivate any session to ask questions, continue work, or revisit decisions.
+
+### Three resurrection modes
+
+**Mode 1: Ask a question (read-only)**
+After a session completes, spawn a lightweight Q&A session seeded with the completed session's notes and artifacts. No workflow steps -- just a direct conversation with an agent that has full context of what was done and why.
+
+```bash
+worktrain session ask sess_abc123 "Why did you choose the flat interface over a discriminated union?"
+# → Agent reads the session notes, explains the decision in context
+```
+
+**Mode 2: Continue the work (new constraints)**
+A new constraint emerged or the task changed. Spawn a continuation session that inherits the full context bundle (notes, artifacts, worktree state if available) and resumes work from where the previous session left off -- but with new information.
+
+```bash
+worktrain session continue sess_abc123 --context "New requirement: must support GitLab as well as GitHub"
+# → Agent picks up the existing work and adapts it to the new constraint
+```
+
+**Mode 3: Revisit a decision (targeted rewind)**
+Something went wrong -- a production bug, a review concern, a design decision that turned out to be wrong. Go back to the session that made the decision, feed in the new information, and ask for a re-evaluation.
+
+```bash
+worktrain session revisit sess_abc123 --finding "The flat interface causes a runtime error when token is null"
+# → Agent re-evaluates its design decision with the failure evidence
+```
+
+### Why this matters
+
+**The implementing agent's knowledge shouldn't die with the session.** The agent that wrote the code knows:
+- Why it chose approach A over B (in its session notes)
+- What edge cases it deferred and why
+- What the original acceptance criteria required
+- What alternatives it considered and rejected
+
+When a reviewer asks "why did you use X?", today that knowledge has to be re-inferred from the code. With resurrection, the original agent can answer directly from its own notes.
+
+**The session notes ARE the agent's memory.** Reactivating a session means feeding those notes back as starting context for a new agent loop. Not truly the same agent instance -- but from a knowledge continuity standpoint, identical. The session ID is the persistent identity; the agent loop is ephemeral.
+
+### Implementation
+
+**What exists already:**
+- `resume_session` MCP tool -- rehydrates mid-run sessions
+- Session notes stored in the event log (accessible via `projectNodeOutputsV2`)
+- `ContextAssembler.listRecentSessions` -- reads prior session notes
+- `checkpointToken` -- resumability token for mid-run recovery
+
+**What's needed:**
+- Terminal sessions currently have no resumability token (the `continueToken` expires on completion). A `postCompletionResumeToken` that allows starting a new agent loop on a completed session's context would enable modes 1-3.
+- Alternatively: a `worktrain session ask/continue/revisit` CLI command that reads the session's notes from the store and seeds a new ephemeral session with them. No changes to the engine -- just a new coordinator script that packages prior session context.
+- `worktrain session list` to browse completed sessions and pick one to reactivate.
+
+**Near-term MVP (no engine changes needed):**
+`worktrain session ask <sessionId> "<question>"` -- reads `lastStepNotes` and any step notes from the session, spawns a brief LLM call with that context, returns the answer. Single turn, no workflow, no session created. Effectively a "query the session archive" command.
+
+### Coordinator use case
+
+The comment routing coordinator (see backlog) can use session resurrection to route reviewer questions back to the implementing agent:
+1. Reviewer asks "why did you use X?"
+2. Coordinator looks up the original implementing session for the PR
+3. Calls `worktrain session ask <sessionId> "Reviewer asks: why did you use X?"` 
+4. Gets a context-aware answer
+5. Posts it as a PR comment
+
+This is far better than spawning a fresh agent that has to re-infer everything from the code.
+
+### Priority
+
+Medium-high. The MVP (`worktrain session ask`) is small -- maybe 100 LOC. The full resurrection modes are more involved but the Q&A mode unlocks the comment routing use case immediately.
