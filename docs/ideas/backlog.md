@@ -7316,3 +7316,38 @@ Medium-high. True session status makes WorkTrain trustworthy as an autonomous sy
 **Expected behavior:** Workflows in the `workflows/` directory of the workrail package should always display as "WorkRail Built-in" regardless of whether the user also has a managed source that happens to include the same directory.
 
 **Priority:** Low for WorkTrain (doesn't affect functionality). Medium for WorkRail MCP (misleading UI, users may think they accidentally modified bundled workflows).
+
+---
+
+## Coordinator-managed git state and agent crash recovery (Apr 21, 2026)
+
+### Git state management (coordinator's job)
+
+Before dispatching any WorkTrain session that does git work:
+1. Check for `.git/index.lock` -- if present, verify the owning PID is dead (via `lsof` on macOS), then remove it
+2. Abort any in-progress git operations: `git rebase --abort; git merge --abort`
+3. Verify the workspace is in a clean state before handing off to the agent
+
+Every session that touches files gets a worktree (already implemented). The coordinator ensures worktrees are created cleanly and removed after session completion. The orphan TTL cleanup (24h) handles crash cases.
+
+### Agent crash recovery (coordinator's job)
+
+An agent can die from: stream watchdog timeout (600s no progress), OOM kill, or SIGKILL. In all cases the session event log is intact -- the full conversation history is preserved.
+
+**The coordinator should detect and recover automatically:**
+
+1. Monitor child sessions via `worktrain await`
+2. If a session returns `_tag: 'aborted'` or `_tag: 'timeout'` mid-pipeline:
+   - Check if the session made meaningful progress (step advances > 0, or notes written)
+   - If yes: resume the session -- same session ID, same context, agent picks up at last checkpoint
+   - If no (zero progress): retry from scratch with a fresh session, same context bundle
+3. Retry up to N times (configurable, default 2) before escalating to Human Outbox
+4. Track which phase failed and inject a hint on retry: "Previous attempt failed at this step. Retry with fresh approach."
+
+**This is session continuation applied to crash recovery.** The agent's conversation history is fully preserved. Resuming puts it back exactly where it was. The 600s watchdog timeout (the most common failure) almost always means a hung LLM call or a tool timeout -- resuming naturally retries the step.
+
+**Implementation:** `runFullPipeline` and `runImplementPipeline` already have per-phase error handling. Extend each `awaitSessions` call: on non-success outcome, attempt resume before returning escalated. The resume logic is `worktrain session continue <sessionId>` (once that command exists) or `dispatchAdaptivePipeline` with the existing session's context.
+
+### Priority
+
+High. Agent crash recovery makes the overnight-autonomous bar achievable. Without it, any hung LLM call or tool timeout fails the entire pipeline silently. With it, transient failures are automatically retried and the pipeline continues.
