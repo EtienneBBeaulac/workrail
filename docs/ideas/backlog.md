@@ -7139,3 +7139,54 @@ The coordinator parks the session (no pending turns), registers for events, and 
 ### Priority
 
 High -- required for the MR lifecycle manager to work correctly. Without event-driven coordination, the MR management agent burns all its turns polling and times out before the PR is merged. This is the missing architectural piece that makes long-running coordinator sessions viable.
+
+---
+
+## Session as a living append-only record: richer checkpoints and post-completion phases (Apr 21, 2026)
+
+### complete ≠ terminal
+
+A `session_completed` event means the original workflow is done -- not that the session can never receive new events. The event log is append-only: we just keep appending. A post-completion interaction adds a `session_resumed` event, then new turns, then a new `session_completed`. The DAG advances; nothing is rewritten. The append-only invariant holds.
+
+This is already how mid-run resume works (`resume_session` + `continue_workflow`). The same mechanism extends naturally to post-completion: rehydrate the completed state, append a new lightweight phase, run it, complete again.
+
+### Richer automatic checkpoints
+
+Checkpoints are currently sparse -- mostly the automated one before the agent loop starts, plus manual `checkpoint_workflow` calls. A checkpoint is a durable queryable snapshot. Many session events should trigger one automatically:
+
+| Event | Why checkpoint |
+|---|---|
+| `step_advanced` | Already essentially a checkpoint -- make it explicit |
+| `signal_coordinator` fired | Agent surfaced meaningful mid-step state |
+| Worktree commit pushed | Code state is now durable on remote |
+| Coordinator steers the session | Notable injection worth marking |
+| Long `worktrain await` starts | Session about to be idle; preserve state before the wait |
+| Post-completion question asked | Marks the start of a resurrection phase |
+| `spawn_agent` child completes | Parent session has new information |
+
+Making checkpoints richer turns the session history from a raw event stream into a series of meaningful state snapshots -- queryable by the console, readable by the coordinator, resumable by future sessions.
+
+### How post-completion interaction works (engine view)
+
+1. Completed session has a final checkpoint at completion
+2. `worktrain session ask <id> "question"` appends `session_resumed` event
+3. Agent loop starts from the completion checkpoint context (notes, artifacts, DAG state)
+4. Agent answers the question, appends turn events to the same session log
+5. `session_completed` appended again -- now the session has two completion events
+6. The console session tree shows both phases; the lineage is intact
+
+No new session ID. No parentSessionId link needed (it's the same session). The history is continuous.
+
+### How "continue the work" works
+
+Same as above, but instead of a free-form question, the continuation appends a new workflow phase:
+- Coordinator injects new context: "new constraint X emerged"
+- A new workflow step (or a mini-workflow) runs on top of the completed session
+- Step output appended to the same log
+- The worktree (if still alive) gets new commits on the same branch
+
+The session's worktree and branch become the persistent workspace for the full lifetime of the task, not just the original coding session.
+
+### Priority
+
+Medium-high for basic `worktrain session ask`. The engine checkpoint enrichment is a longer-term investment that pays dividends across observability, coordinator coordination, and session quality.
