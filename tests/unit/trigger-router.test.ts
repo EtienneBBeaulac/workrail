@@ -1882,3 +1882,150 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
     logSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.dispatch: _preAllocatedStartResponse dedup bypass
+//
+// Verifies that dispatch() with _preAllocatedStartResponse set bypasses the
+// 30s dedup window and calls runWorkflowFn, even when the same goal+workspace
+// was recently dispatched via dispatchAdaptivePipeline().
+//
+// This is the regression guard for the zombie-session bug:
+// dispatchAdaptivePipeline() primes _recentAdaptiveDispatches with the same
+// goal::workspace key. Without the bypass, dispatch() returns early and the
+// pre-allocated session zombies in the store forever.
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
+  /**
+   * Minimal fake AdaptiveCoordinatorDeps for priming the dedup map via
+   * dispatchAdaptivePipeline(). Only the fields called before executor dispatch
+   * need to be present. All others are cast.
+   */
+  const FAKE_DEPS_FOR_BYPASS = {
+    now: () => Date.now(),
+    nowIso: () => new Date().toISOString(),
+    writeFile: async () => {},
+    mkdir: async () => undefined,
+    stderr: () => {},
+    port: 0,
+    // fileExists: required by routeTask() for pitch.md detection (Rule 3).
+    // Returns false so routeTask() falls through to FULL mode.
+    fileExists: () => false,
+  } as unknown as AdaptiveCoordinatorDeps;
+
+  function makeFakeModeExecutorsForBypass(): ModeExecutors {
+    const outcome: PipelineOutcome = { kind: 'merged', prUrl: null };
+    const executor = async () => outcome;
+    return {
+      runQuickReview: executor,
+      runReviewOnly: executor,
+      runImplement: executor,
+      runFull: executor,
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('dispatch() with _preAllocatedStartResponse bypasses dedup and calls runWorkflowFn', async () => {
+    // WHY: proves the fix for the zombie-session bug. The dedup map contains goal::workspace
+    // from a prior dispatch. dispatch() with _preAllocatedStartResponse must bypass the dedup
+    // check and call runWorkflowFn. Without the fix, runWorkflowFn is never called (dedup fires)
+    // and the pre-allocated session zombies in the store.
+    //
+    // Scenario:
+    // 1. First dispatch() (no preAlloc) -- primes _recentAdaptiveDispatches['goal::workspace']
+    // 2. Second dispatch() (with preAlloc) -- must bypass dedup and call runWorkflowFn
+    //
+    // NOTE: We prime the dedup map via dispatch() rather than dispatchAdaptivePipeline()
+    // to avoid async complexity with fake timers. The bug fires whenever the map has the key,
+    // regardless of how it was set. Real timers are used so the queue drains normally.
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const goal = trigger.goal;
+    const workspace = trigger.workspacePath;
+
+    // Step 1: First dispatch (no preAlloc) -- primes the dedup map AND calls runWorkflowFn (1st call)
+    router.dispatch({ workflowId: trigger.workflowId, goal, workspacePath: workspace, context: {} });
+
+    // Step 2: Second dispatch WITH _preAllocatedStartResponse -- must bypass dedup (2nd call)
+    router.dispatch({
+      workflowId: trigger.workflowId,
+      goal,
+      workspacePath: workspace,
+      context: {},
+      _preAllocatedStartResponse: {} as Parameters<typeof router.dispatch>[0]['_preAllocatedStartResponse'],
+    });
+
+    // Wait for the async queue to drain
+    await new Promise<void>((r) => setTimeout(r, 20));
+
+    // Both dispatches must have reached runWorkflowFn:
+    // - dispatch 1 (no preAlloc, first in window): primed map, called runWorkflowFn
+    // - dispatch 2 (with preAlloc): bypassed dedup map, called runWorkflowFn
+    // Total: exactly 2 calls
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.goal).toBe(goal);
+    expect(calls[1]?.goal).toBe(goal);
+  });
+
+  it('dispatch() WITHOUT _preAllocatedStartResponse still deduplicates within 30s after dispatchAdaptivePipeline', async () => {
+    // WHY: regression guard -- proves the dedup check still fires for normal dispatch()
+    // calls (without _preAllocatedStartResponse) after dispatchAdaptivePipeline() primes
+    // the map. This ensures the bypass only applies to pre-allocated sessions.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger();
+    const executors = makeFakeModeExecutorsForBypass();
+
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      FAKE_DEPS_FOR_BYPASS,
+      executors,
+    );
+
+    const goal = trigger.goal;
+    const workspace = trigger.workspacePath;
+
+    // Prime the dedup map
+    await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Advance by 10s (within 30s TTL)
+    vi.advanceTimersByTime(10_000);
+
+    // dispatch() WITHOUT _preAllocatedStartResponse -- dedup must fire
+    router.dispatch({
+      workflowId: trigger.workflowId,
+      goal,
+      workspacePath: workspace,
+      context: {},
+      // no _preAllocatedStartResponse
+    });
+
+    await Promise.resolve();
+
+    // runWorkflowFn must NOT have been called (dedup blocked the dispatch)
+    expect(calls).toHaveLength(0);
+
+    // Skip log must have been emitted
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate dispatch'),
+    );
+
+    logSpy.mockRestore();
+  });
+});

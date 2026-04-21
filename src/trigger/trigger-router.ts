@@ -845,10 +845,14 @@ export class TriggerRouter {
    * @returns The workflowId that was dispatched.
    */
   dispatch(workflowTrigger: WorkflowTrigger): string {
-    // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
-    // WHY same map and pattern as route() and dispatchAdaptivePipeline():
-    // cross-path dedup is intentional -- a dispatch via any path sets the key.
-    {
+    // Pre-allocated session: executeStartWorkflow already created the session in the store.
+    // Deduplication must not apply here -- dropping this dispatch would zombie the session.
+    // The presence of _preAllocatedStartResponse is authoritative evidence that the caller
+    // explicitly intends to start this session. Skip the dedup block entirely.
+    if (workflowTrigger._preAllocatedStartResponse === undefined) {
+      // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
+      // WHY same map and pattern as route() and dispatchAdaptivePipeline():
+      // cross-path dedup is intentional -- a dispatch via any path sets the key.
       const dedupeKey = `${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
       const now = Date.now();
       // Cleanup-on-entry: purge stale entries before checking/inserting.
@@ -863,6 +867,8 @@ export class TriggerRouter {
         return workflowTrigger.workflowId;
       }
       this._recentAdaptiveDispatches.set(dedupeKey, now);
+    } else {
+      console.log(`[TriggerRouter] Pre-allocated session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
     }
 
     void this.queue.enqueue(workflowTrigger.workflowId, async () => {
