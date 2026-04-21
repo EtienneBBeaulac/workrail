@@ -1006,7 +1006,7 @@ export function mountConsoleRoutes(
   // Daemon-only: requires steerRegistry to be provided at server startup (i.e., the
   // daemon passes it via mountConsoleRoutes). Standalone console returns 503.
   //
-  // Auth: localhost-only (127.0.0.1 binding in daemon-console.ts). No token auth in v1.
+  // Auth: localhost-only (127.0.0.1 binding in standalone-console.ts). No token auth in v1.
   // TODO(v2): Add token auth before any multi-user or remote deployment.
   //
   // Registration gap: sessions register their steer callback ~50ms after creation.

@@ -379,7 +379,7 @@ export async function startTriggerListener(
 
   // Create the steer registry for coordinator injection via POST /sessions/:id/steer.
   // WHY created here (not in TriggerRouter): trigger-listener.ts is the composition root
-  // that wires TriggerRouter and DaemonConsole together. Both need the SAME registry instance
+  // that wires TriggerRouter and the console route layer together. Both need the SAME registry instance
   // so the HTTP endpoint dispatches to callbacks registered by TriggerRouter's sessions.
   const steerRegistry: SteerRegistry = new Map();
 
