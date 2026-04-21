@@ -23,9 +23,12 @@
  */
 
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SteerRegistry } from '../daemon/workflow-runner.js';
+import { DAEMON_SESSIONS_DIR } from '../daemon/workflow-runner.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
@@ -389,6 +392,22 @@ async function maybeRunDelivery(
       console.warn(
         `[TriggerRouter] Could not remove worktree: triggerId=${triggerId} ` +
         `path=${result.sessionWorkspacePath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    // WHY here (not in runWorkflow()): this is the safe deletion point for the session
+    // sidecar after delivery and worktree removal are complete. Deleting the sidecar in
+    // runWorkflow() before returning would leave the worktree invisible to
+    // runStartupRecovery() if the daemon crashes between runWorkflow() returning and this
+    // point. The sidecar must outlive the runWorkflow() return for worktree sessions.
+    // For non-autoCommit sessions this block is unreachable (early return above); startup
+    // recovery handles sidecar cleanup for those sessions.
+    // NOTE: countActiveSessions() counts sidecars, so this brief inflation during delivery
+    // is intentional and semantically correct (the session is still completing).
+    if (result.sessionId !== undefined) {
+      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${result.sessionId}.json`)).catch(() => {});
+      console.log(
+        `[TriggerRouter] Session sidecar removed: triggerId=${triggerId} sessionId=${result.sessionId}`,
       );
     }
   }

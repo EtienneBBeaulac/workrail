@@ -3036,6 +3036,19 @@ export async function runWorkflow(
   emitter?: DaemonEventEmitter,
   steerRegistry?: SteerRegistry,
 ): Promise<WorkflowRunResult> {
+  // ---- Execution timing (for calibration of session timeouts) ----
+  // WHY at entry: captures the true start before any early-exit paths (model validation,
+  // start_workflow failure, worktree creation failure). A startMs captured after these
+  // paths would miss their duration entirely.
+  // WHY fire-and-forget write (in finally block): this is for timeout calibration, not
+  // crash recovery. A write failure must never affect the session.
+  // If adding a new result path, update sessionOutcome before the new return statement.
+  const startMs = Date.now();
+  // sessionOutcome is updated before each return path and read in the finally block.
+  // Default 'unknown' is a valid data point (not silent data loss) if a future return
+  // path is added without updating this variable.
+  let sessionOutcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown' = 'unknown';
+
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
   // state file in DAEMON_SESSIONS_DIR. This UUID is NOT the WorkRail server
@@ -3081,6 +3094,7 @@ export async function runWorkflow(
     const slashIdx = trigger.agentConfig.model.indexOf('/');
     if (slashIdx === -1) {
       // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
+      sessionOutcome = 'error'; // timing written in finally block
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3197,6 +3211,7 @@ export async function runWorkflow(
 
     if (startResult.isErr()) {
       // Registration has not happened yet (happens after token decode below).
+      sessionOutcome = 'error'; // timing written in finally block
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3346,6 +3361,7 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+      sessionOutcome = 'error'; // timing written in finally block
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3374,9 +3390,20 @@ export async function runWorkflow(
     // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
     // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
     // finishes. trigger-router.ts maybeRunDelivery() is the sole success-path removal.
-    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    //
+    // WHY conditional sidecar deletion: for worktree sessions, the sidecar must outlive
+    // this return so maybeRunDelivery() in trigger-router.ts can remove the worktree and
+    // then delete the sidecar. Deleting here would leave the worktree invisible to
+    // runStartupRecovery() if the daemon crashes before maybeRunDelivery() runs.
+    // Non-worktree sessions have no delivery cleanup gap and can delete immediately.
+    // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
+    // the active count during delivery (seconds). This is semantically correct.
+    if (trigger.branchStrategy !== 'worktree') {
+      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
+    sessionOutcome = 'success'; // timing written in finally block
     return {
       _tag: 'success',
       workflowId: trigger.workflowId,
@@ -3592,13 +3619,6 @@ export async function runWorkflow(
   const sessionTimeoutMs =
     (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
   const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
-
-  // ---- Session start timestamp ----
-  // WHY: reserved for Signal 5 (wall-clock at 80% with < 2 advances) in a future shape.
-  // Set here -- before the agent loop begins -- so it measures total session time,
-  // not time from first turn.
-  const sessionStartMs = Date.now();
-  void sessionStartMs; // suppress unused-variable lint until Signal 5 is wired
 
   // ---- Timeout reason flag ----
   // Tracks which limit fired first. Set synchronously before agent.abort() so the
@@ -3826,6 +3846,32 @@ export async function runWorkflow(
       steerRegistry?.delete(workrailSessionId);
     }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
+
+    // ---- Execution stats (for timeout calibration) ----
+    // WHY fire-and-forget: a stats write failure must never crash the session or
+    // block the return path. This is observability data, not crash recovery state.
+    // WHY finally block (not per-path): a single write site ensures every outcome is
+    // recorded regardless of which return path fires. See startMs/sessionOutcome above.
+    // If adding a new result path, update sessionOutcome before the new return statement.
+    const endMs = Date.now();
+    const statsDir = path.join(os.homedir(), '.workrail', 'data');
+    const statsPath = path.join(statsDir, 'execution-stats.jsonl');
+    fs.mkdir(statsDir, { recursive: true })
+      .then(() => fs.appendFile(
+        statsPath,
+        JSON.stringify({
+          sessionId,
+          workflowId: trigger.workflowId,
+          startMs,
+          endMs,
+          durationMs: endMs - startMs,
+          outcome: sessionOutcome,
+          stepCount: stepAdvanceCount,
+          ts: new Date().toISOString(),
+        }) + '\n',
+        'utf8',
+      ))
+      .catch(() => {}); // best-effort -- never propagate
   }
 
   // ---- Stuck result (repeated_tool_call or no_progress abort) ----
@@ -3843,6 +3889,7 @@ export async function runWorkflow(
       ...withWorkrailSession(workrailSessionId),
     });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+    sessionOutcome = 'stuck'; // timing written in finally block
     return {
       _tag: 'stuck',
       workflowId: trigger.workflowId,
@@ -3866,6 +3913,7 @@ export async function runWorkflow(
     // WHY: a timed-out session is no longer in-flight. Leaving the file causes
     // countActiveSessions() to permanently inflate until daemon restart.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    sessionOutcome = 'timeout'; // timing written in finally block
     return {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
@@ -3899,6 +3947,7 @@ export async function runWorkflow(
     // WHY: an errored session is no longer in-flight. Leaving the file causes
     // countActiveSessions() to permanently inflate until daemon restart.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    sessionOutcome = 'error'; // timing written in finally block
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
@@ -3916,13 +3965,24 @@ export async function runWorkflow(
   // ---- Clean up state file on success ----
   // The state file is evidence of an in-flight session. Delete it on clean completion
   // so the CLI crash-recovery scan only surfaces genuinely orphaned sessions.
-  await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
-    // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
-  });
+  //
+  // WHY conditional sidecar deletion: for worktree sessions, the sidecar must outlive
+  // this return so maybeRunDelivery() in trigger-router.ts can remove the worktree and
+  // then delete the sidecar. Deleting here would leave the worktree invisible to
+  // runStartupRecovery() if the daemon crashes before maybeRunDelivery() runs.
+  // Non-worktree sessions have no delivery cleanup gap and can delete immediately.
+  // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
+  // the active count during delivery (seconds). This is semantically correct.
+  if (trigger.branchStrategy !== 'worktree') {
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
+      // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
+    });
+  }
 
   emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...withWorkrailSession(workrailSessionId) });
   if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
 
+  sessionOutcome = 'success'; // timing written in finally block
   return {
     _tag: 'success',
     workflowId: trigger.workflowId,

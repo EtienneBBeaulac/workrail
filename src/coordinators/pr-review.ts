@@ -26,6 +26,7 @@
 
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
+import { assertNever } from '../runtime/assert-never.js';
 import type { AwaitResult, SessionResult } from '../cli/commands/worktrain-await.js';
 import {
   ReviewVerdictArtifactV1Schema,
@@ -1402,6 +1403,10 @@ async function runFixAgentLoop(
         passCount,
         sessionHandles,
       };
+    } else if (reSeverity !== 'minor') {
+      // Compile-time exhaustiveness guard: if ReviewSeverity gains a new variant,
+      // this will fail to compile, forcing the developer to handle the new case here.
+      assertNever(reSeverity);
     }
 
     // Still minor -- continue loop
