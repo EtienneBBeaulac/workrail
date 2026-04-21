@@ -6984,3 +6984,158 @@ Phase-scoped files are additive, not a replacement. The existing `AGENTS.md` / `
 ### Priority
 
 Medium. Phase-scoped rules make WorkTrain's autonomous actions more consistent with team conventions without requiring custom workflows per team. Design alongside multi-workspace support and trigger templates (they share the "per-workspace configuration" concern).
+
+---
+
+## MR lifecycle manager: autonomous coordinator from branch to merged (Apr 20, 2026)
+
+**The gap:** WorkTrain currently creates a PR and dispatches an MR review session. If the review returns minor findings, a fix loop runs. But everything between "PR created" and "PR merged" that isn't covered by the review verdict is invisible to WorkTrain: CI failures, reviewer comments, requested changes, label requirements, required approvals, merge conflicts. A human has to watch and intervene.
+
+**The vision:** A `runMRLifecycleManager()` coordinator that takes ownership of the MR from creation to merge and handles everything autonomously.
+
+### Responsibilities
+
+**1. MR creation (already partially done, needs hardening)**
+- Apply PR template (`.github/PULL_REQUEST_TEMPLATE.md` or GitLab equivalent) -- see PR template backlog entry
+- Set correct title format per team convention (from `delivery.md` phase rules)
+- Apply correct labels (from `worktrain:generated` + workflow-specific labels)
+- Set milestone, assignee, reviewers per team convention
+- Link to the originating ticket (Jira issue number, GitHub issue number) in description
+
+**2. CI pipeline monitoring**
+- Poll CI status after PR creation
+- On failure: parse the failed job, determine if it's a flaky test (retry) or a real failure (spawn a fix session with the failing job log as context)
+- On persistent failure (N retries): escalate to Human Outbox with structured summary
+- On success: proceed to review phase
+
+**3. Review comment triage**
+- Poll for new review comments/threads after reviewer activity
+- For each comment/thread: classify as:
+  - `actionable`: code change requested -- feed to fix loop as a finding
+  - `question`: reviewer is asking for clarification -- generate a reply explaining the decision
+  - `nit`: style suggestion -- optionally apply or reply "acknowledged, will address in follow-up"
+  - `approval`: positive review, no action needed
+  - `blocker`: security/architecture concern -- escalate to Human Outbox
+- Reply to questions and nits autonomously (following `pr-management.md` rules)
+- Never resolve threads on behalf of the reviewer (that's their action)
+
+**4. Approval tracking**
+- Track required approvals (from branch protection rules or CODEOWNERS)
+- When approved: check all CI green + all required approvals → trigger merge
+- When changes requested: run targeted fix loop, re-push, re-request review
+
+**5. Merge conflict resolution**
+- Detect merge conflicts (target branch moved while PR was open)
+- Rebase or merge main into the branch
+- If conflicts are in files the agent touched: attempt auto-resolution
+- If conflicts are complex: escalate to Human Outbox
+
+**6. Merge execution**
+- When all gates pass: merge with correct strategy (squash/rebase/merge per team convention)
+- Delete the source branch
+- Update the originating ticket (Jira: move to "Done", GitHub: close issue)
+- Notify via outbox: "PR #N merged. Ticket ACEI-1234 updated."
+
+### Architecture
+
+This is a coordinator script (`src/coordinators/mr-lifecycle.ts`), not a workflow session. It loops with polling, spawning fix sessions as needed. The MR review workflow (`mr-review-workflow-agentic`) becomes one of the tools it calls, not the full pipeline.
+
+The adaptive coordinator's IMPLEMENT and FULL modes would call `runMRLifecycleManager()` instead of `runPrReviewCoordinator()` after the coding session completes. `runPrReviewCoordinator()` becomes a thin wrapper around the lifecycle manager for the standalone `worktrain run pr-review` use case.
+
+### Phase-scoped rules integration
+
+`pr-management.md` in `.worktrain/rules/` defines team-specific behavior:
+- Which comment types to auto-reply vs escalate
+- Whether to rebase or merge for conflict resolution
+- How many CI retry attempts before escalating
+- Whether to request specific reviewers
+- Auto-merge policy (clean + approved = merge, or always wait for human)
+
+### Priority
+
+High -- this is the most visible gap in the autonomous pipeline. Without it, every PR needs human monitoring. With it, WorkTrain can own an MR from first commit to merge with zero human involvement for clean cases.
+
+**Dependency:** PR template support (needed for step 1). Phase-scoped rules (needed for step 3). `dispatchCondition` webhook filter (needed for GitLab MR event triggers).
+
+---
+
+## Event-driven agent coordination: coordinator as event bus (Apr 20, 2026)
+
+**The principle:** Agents should be event-driven, not poll-driven. An agent managing an MR should not repeatedly call `gh pr view --comments` to check for new activity. That wastes turns, burns tokens, and puts timing logic in the wrong place. Instead, the coordinator registers for events and steers the agent when something relevant happens.
+
+**The current infrastructure (already built):**
+- `steerRegistry` + `POST /sessions/:id/steer` -- coordinator can inject a message into a running agent's next turn
+- `signal_coordinator` tool -- agent can surface structured findings to the coordinator without advancing the workflow step
+- `DaemonEventEmitter` -- structured lifecycle events for observability
+
+**What's missing:**
+
+### 1. Coordinator-side event sources
+
+The coordinator needs to listen for MR/PR lifecycle events from external systems:
+
+**GitHub webhooks** (if the repo is reachable):
+- `pull_request_review` -- reviewer approved, requested changes, or dismissed
+- `pull_request_review_comment` -- inline comment added
+- `check_suite` / `check_run` -- CI status changed (pass, fail, queued)
+- `issue_comment` -- general PR comment
+- `pull_request` -- PR labeled, unlabeled, merged, closed
+
+**Polling fallback** (for systems without webhook delivery):
+- Poll `gh pr view`, `gh pr checks`, `gh pr review` on a schedule
+- Diff against last-known state to detect new events
+- Same interface as webhooks, different source
+
+### 2. Event-to-steer mapping
+
+When an event arrives, the coordinator translates it into a structured steer message and injects it into the running MR management agent session:
+
+```typescript
+// CI failure → steer
+steer(sessionId, `[CI_FAILURE] Job: build-and-test (Node 20, ubuntu)
+Status: failed
+Error: 3 tests failed in tests/unit/workflow-runner.test.ts
+Failing tests: loadSessionNotes failure paths (3 cases)
+Log tail: ${logExcerpt}
+Action: fix the failing tests and push a new commit to this branch.`);
+
+// Review comment → steer
+steer(sessionId, `[REVIEW_COMMENT] @kenton-acei commented on src/daemon/workflow-runner.ts:568:
+"This function should export a type alias for the return value"
+Thread ID: thread_abc123
+Action: decide whether to address this comment (reply, fix, or acknowledge as out-of-scope).`);
+
+// Approval → steer
+steer(sessionId, `[REVIEW_APPROVED] @etienneb approved the PR.
+Required approvals: 1/1 met. CI: all green.
+Action: the PR is ready to merge. Execute merge now unless any open threads need resolution.`);
+```
+
+### 3. Agent waits; coordinator drives
+
+The MR management agent's session prompt should explicitly say:
+- "Do not poll for PR status, CI results, or review comments. Wait for the coordinator to deliver events via injected messages."
+- "When you receive a `[CI_FAILURE]` message, fix it. When you receive a `[REVIEW_COMMENT]` message, triage it. When you receive a `[REVIEW_APPROVED]` message, execute merge."
+- "Use `signal_coordinator` to surface anything the coordinator needs to know (blocker found, question for reviewer, etc.)."
+
+This is the `pr-management.md` phase rules file in action -- it defines how the agent should respond to each event type.
+
+### 4. Session lifecycle alignment
+
+A MR management session is inherently long-lived -- it exists for the full lifetime of the PR (hours to days). Today's session model assumes sessions complete in under 2 hours. Long-lived sessions need:
+- Checkpoint/resume support (already exists via `checkpointToken`)
+- Heartbeat-based liveness (already exists via `daemon_heartbeat`)
+- Coordinator-driven wakeup (the steer mechanism is exactly this)
+
+The coordinator parks the session (no pending turns), registers for events, and wakes the session when something happens. No busy-waiting, no polling from the agent side.
+
+### Implementation order
+
+1. **Coordinator event listener** -- `src/coordinators/mr-event-listener.ts`. Registers GitHub webhook handlers OR runs a polling loop. Normalizes events to a common `MREvent` type.
+2. **Event-to-steer bridge** -- maps `MREvent` to structured steer message text, calls `steerRegistry` callback.
+3. **MR management session prompt** -- defines agent behavior for each event type (from `pr-management.md` phase rules).
+4. **Session parking** -- coordinator marks session as "waiting" when no events are pending; wakes it when an event arrives.
+
+### Priority
+
+High -- required for the MR lifecycle manager to work correctly. Without event-driven coordination, the MR management agent burns all its turns polling and times out before the PR is merged. This is the missing architectural piece that makes long-running coordinator sessions viable.
