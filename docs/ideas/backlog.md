@@ -7351,3 +7351,51 @@ An agent can die from: stream watchdog timeout (600s no progress), OOM kill, or 
 ### Priority
 
 High. Agent crash recovery makes the overnight-autonomous bar achievable. Without it, any hung LLM call or tool timeout fails the entire pipeline silently. With it, transient failures are automatically retried and the pipeline continues.
+
+---
+
+## Workflow execution time tracking and prediction (Apr 21, 2026)
+
+**The problem:** WorkTrain has no data on how long workflows actually take. Timeouts are set by intuition (55 min for discovery, 35 for shaping, 65 for coding). We just discovered that discovery on a real workrail task takes ~16 minutes. The 55-minute timeout is 3x the actual time -- but we didn't know that until we ran a benchmark manually.
+
+### What to track
+
+For every completed session, record:
+- Workflow ID
+- Total wall-clock duration
+- Number of turns
+- Number of step advances
+- Outcome (success / timeout / stuck / error)
+- Task complexity signals (codebase size, number of files read, task type from context)
+
+Store in `~/.workrail/data/execution-stats.jsonl` -- one line per completed session, append-only.
+
+### What to do with it
+
+**Immediate use: calibrate timeouts automatically**
+
+Instead of hardcoded `DISCOVERY_TIMEOUT_MS = 55 * 60 * 1000`, read the p95 completion time from execution stats and set the timeout to `p95 * 1.5`. Start with the hardcoded values as seeds; refine after 10+ samples.
+
+**Medium-term use: predict duration before dispatch**
+
+Given: task description + workflow ID + codebase characteristics → predicted duration range.
+
+The coordinator could use this to:
+- Warn when a task is likely to exceed session limits before starting
+- Adjust timeout budgets per-dispatch based on predicted complexity
+- Surface "this type of task usually takes 45 minutes" in `worktrain trigger test` output
+
+**Longer-term use: quality/efficiency metrics**
+
+Track step-advance rate (steps per turn) as a proxy for workflow efficiency. A session with 50 turns and 2 step advances is spending too many turns between steps. This feeds into the workflow improvement loop.
+
+### Implementation notes
+
+- Append to `execution-stats.jsonl` in `runWorkflow()`'s finally block, same pattern as the daemon event log
+- Keep it simple: flat JSONL, no database, no schema migration
+- `worktrain status` can show recent timing stats: "Last 10 wr.discovery sessions: avg 18min, p95 31min"
+- `worktrain trigger validate` can warn if configured timeouts are well below historical p95
+
+### Priority
+
+Medium. The data collection is small (~5 lines in `runWorkflow()`). The prediction and calibration are more involved. Ship collection first, calibration second.
