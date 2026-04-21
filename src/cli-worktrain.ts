@@ -38,7 +38,6 @@ import {
   executeWorktrainDaemonCommand,
   executeWorktrainOverviewCommand,
   executeWorktrainTriggerTestCommand,
-  executeWorktrainTriggerPollCommand,
   executeWorktrainTriggerValidateCommand,
   buildConsoleServiceFromDataDir,
   type Priority,
@@ -1606,35 +1605,6 @@ triggerCommand
     if (result.kind === 'failure') {
       process.exit(1);
     }
-  });
-
-triggerCommand
-  .command('poll <triggerId>')
-  .description('Force an immediate poll cycle on a queue trigger (does not wait for interval)')
-  .option('-p, --port <n>', 'Console server port', parseInt)
-  .action(async (triggerId: string, options: { port?: number }) => {
-    const result = await executeWorktrainTriggerPollCommand(
-      {
-        fetch: (url, opts) => globalThis.fetch(url, opts),
-        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-        deleteFile: (p: string) => fs.promises.unlink(p),
-        isPidAlive: (pid: number) => {
-          try {
-            process.kill(pid, 0); // signal 0 = existence check, no actual signal sent
-            return true;
-          } catch {
-            return false; // ESRCH = no such process
-          }
-        },
-        print: (line: string) => process.stdout.write(line + '\n'),
-        stderr: (line: string) => process.stderr.write(line + '\n'),
-        homedir: os.homedir,
-        joinPath: path.join,
-      },
-      { triggerId, port: options.port },
-    );
-
-    interpretCliResultWithoutDI(result);
   });
 
 triggerCommand

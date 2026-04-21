@@ -19,9 +19,8 @@ import { toWorkflowSourceInfo } from '../../types/workflow.js';
 import type { WorkflowService } from '../../application/services/workflow-service.js';
 import type { ToolCallTimingEntry, ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 import { isDevMode } from '../../mcp/dev-mode.js';
-import type { TriggerRouter } from '../../trigger/trigger-router.js';
 import type { V2ToolContext } from '../../mcp/types.js';
-import type { SteerRegistry } from '../../daemon/workflow-runner.js';
+// TODO: runWorkflow is imported from src/daemon/ -- remaining coupling to address when browser dispatch is redesigned
 import { runWorkflow } from '../../daemon/workflow-runner.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
@@ -135,9 +134,6 @@ export function mountConsoleRoutes(
   toolCallsPerfFile?: string,
   serverVersion?: string,
   v2ToolContext?: V2ToolContext,
-  triggerRouter?: TriggerRouter,
-  steerRegistry?: SteerRegistry,
-  pollingScheduler?: import('../../trigger/polling-scheduler.js').PollingScheduler,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -860,46 +856,39 @@ export function mountConsoleRoutes(
       sessionHandle = workflowId;
     }
 
-    // If TriggerRouter is available, use its queue (serializes by workflowId).
-    // Otherwise, fire directly using the shared runWorkflow() function.
-    // In both cases, pass _preAllocatedStartResponse to skip re-creating the session.
+    // Direct fire-and-forget: no queue serialization in this path.
     const trigger = { workflowId, goal, workspacePath, context, _preAllocatedStartResponse: startResponse };
-    if (triggerRouter) {
-      triggerRouter.dispatch(trigger);
-    } else {
-      // Direct fire-and-forget: no queue serialization in this path.
-      void runWorkflow(
-        trigger,
-        v2ToolContext,
-        apiKey ?? '',
-        undefined,   // daemonRegistry -- not available in this path
-        undefined,   // emitter -- not available in this path
-        steerRegistry,
-      ).then((result) => {
-        if (result._tag === 'success') {
-          console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
-        } else if (result._tag === 'delivery_failed') {
-          // delivery_failed not expected here -- this path has no callbackUrl.
-          // Handled to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
-          // WHY soft handling (log-only, not assertNever): this is a fire-and-forget .then() callback
-          // with no user-visible outcome; there is no parent LLM that acts on the result. Contrast
-          // with makeSpawnAgentTool, which uses assertNever because the outcome is returned to the
-          // parent LLM and silently mapping delivery_failed to success would corrupt the session.
-          console.log(`[ConsoleRoutes] Auto dispatch delivery failed: workflowId=${workflowId}`);
-        } else if (result._tag === 'timeout') {
-          console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId}`);
-        } else if (result._tag === 'error') {
-          console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
-        } else if (result._tag === 'stuck') {
-          console.log(`[ConsoleRoutes] Auto dispatch stuck: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
-        } else {
-          // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
-          // this will fail to compile, forcing the developer to handle the new case.
-          // At runtime this is unreachable -- all current variants are handled above.
-          assertNever(result);
-        }
-      });
-    }
+    void runWorkflow(
+      trigger,
+      v2ToolContext,
+      apiKey ?? '',
+      undefined,   // daemonRegistry -- not available in this path
+      undefined,   // emitter -- not available in this path
+      undefined,   // steer callbacks -- not applicable in standalone console
+    ).then((result) => {
+      if (result._tag === 'success') {
+        console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);
+      } else if (result._tag === 'delivery_failed') {
+        // delivery_failed not expected here -- this path has no callbackUrl.
+        // Handled to keep the union exhaustive after WorkflowRunResult was widened (GAP-3).
+        // WHY soft handling (log-only, not assertNever): this is a fire-and-forget .then() callback
+        // with no user-visible outcome; there is no parent LLM that acts on the result. Contrast
+        // with makeSpawnAgentTool, which uses assertNever because the outcome is returned to the
+        // parent LLM and silently mapping delivery_failed to success would corrupt the session.
+        console.log(`[ConsoleRoutes] Auto dispatch delivery failed: workflowId=${workflowId}`);
+      } else if (result._tag === 'timeout') {
+        console.log(`[ConsoleRoutes] Auto dispatch timed out: workflowId=${workflowId}`);
+      } else if (result._tag === 'error') {
+        console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
+      } else if (result._tag === 'stuck') {
+        console.log(`[ConsoleRoutes] Auto dispatch stuck: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
+      } else {
+        // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
+        // this will fail to compile, forcing the developer to handle the new case.
+        // At runtime this is unreachable -- all current variants are handled above.
+        assertNever(result);
+      }
+    });
 
     res.json({ success: true, data: { status: 'dispatched', workflowId, sessionHandle } });
   });
@@ -909,132 +898,11 @@ export function mountConsoleRoutes(
   //
   // GET /api/v2/triggers
   //
-  // Returns the current trigger index. When the trigger system is disabled
-  // (no triggerRouter), returns an empty list rather than an error -- the
-  // console handles the empty case gracefully.
+  // Always returns an empty list. The standalone console has no trigger system;
+  // the browser frontend (DispatchPane.tsx) handles the empty case gracefully.
   // ---------------------------------------------------------------------------
   app.get('/api/v2/triggers', (_req: Request, res: Response) => {
-    if (!triggerRouter) {
-      res.json({ success: true, data: { triggers: [] } });
-      return;
-    }
-
-    const triggers = triggerRouter.listTriggers().map((t) => ({
-      id: t.id,
-      provider: t.provider,
-      workflowId: t.workflowId,
-      workspacePath: t.workspacePath,
-      goal: t.goal,
-    }));
-
-    res.json({ success: true, data: { triggers } });
-  });
-
-  // ---------------------------------------------------------------------------
-  // Trigger force-poll endpoint
-  //
-  // POST /api/v2/triggers/:triggerId/poll
-  //
-  // Forces one immediate poll cycle for the named github_queue_poll trigger,
-  // bypassing the configured interval timer. Useful for manual testing and
-  // for cases where operators want to trigger a cycle without restarting the daemon.
-  //
-  // Daemon-only: requires pollingScheduler to be provided at server startup.
-  // Standalone console returns 503.
-  //
-  // Returns:
-  //   200 { success: true, data: { cycleRan: boolean, triggerId: string } }
-  //   400 if trigger not found or not a github_queue_poll trigger
-  //   503 if pollingScheduler not available (standalone console)
-  // ---------------------------------------------------------------------------
-  app.post('/api/v2/triggers/:triggerId/poll', async (req: Request, res: Response) => {
-    if (!pollingScheduler) {
-      res.status(503).json({ success: false, error: 'Force poll not available (not a daemon context).' });
-      return;
-    }
-
-    const triggerId = req.params['triggerId'] ?? '';
-    if (!triggerId) {
-      res.status(400).json({ success: false, error: 'Missing triggerId' });
-      return;
-    }
-
-    const result = await pollingScheduler.forcePoll(triggerId);
-
-    switch (result.kind) {
-      case 'ok':
-        res.json({
-          success: true,
-          data: {
-            triggerId,
-            cycleRan: result.cycleRan,
-            message: result.cycleRan
-              ? `Poll cycle started for trigger '${triggerId}'.`
-              : `Poll cycle skipped for trigger '${triggerId}' -- a previous cycle is still running.`,
-          },
-        });
-        return;
-      case 'not_found':
-        res.status(400).json({ success: false, error: `Trigger '${triggerId}' not found` });
-        return;
-      case 'wrong_provider':
-        res.status(400).json({
-          success: false,
-          error: `Trigger '${triggerId}' is not a queue poll trigger (provider: ${result.provider})`,
-        });
-        return;
-      default: {
-        // TypeScript exhaustiveness check
-        const _exhaustive: never = result;
-        res.status(500).json({ success: false, error: 'Unexpected forcePoll result' });
-        void _exhaustive;
-        return;
-      }
-    }
-  });
-
-  // ---------------------------------------------------------------------------
-  // Session steer endpoint
-  //
-  // POST /api/v2/sessions/:sessionId/steer
-  //
-  // Injects text into a running daemon session's next agent turn. The coordinator
-  // calls this endpoint between a session's complete_step() call and the daemon's
-  // next agent.steer() invocation. The injected text is concatenated with the step
-  // advance text and delivered in a single steer message on the next turn_end event.
-  //
-  // Daemon-only: requires steerRegistry to be provided at server startup (i.e., the
-  // daemon passes it via mountConsoleRoutes). Standalone console returns 503.
-  //
-  // Auth: localhost-only (127.0.0.1 binding in standalone-console.ts). No token auth in v1.
-  // TODO(v2): Add token auth before any multi-user or remote deployment.
-  //
-  // Registration gap: sessions register their steer callback ~50ms after creation.
-  // A coordinator calling this endpoint immediately after POST /auto/dispatch may
-  // receive 404. Retry once on 404 during session start-up.
-  //
-  // MCP-mode sessions do not register callbacks -- this endpoint returns 404 for them.
-  // TODO(v2): Extend to MCP-mode sessions if mid-step injection proves necessary.
-  // ---------------------------------------------------------------------------
-  app.post('/api/v2/sessions/:sessionId/steer', express.json(), (req: Request, res: Response) => {
-    if (!steerRegistry) {
-      res.status(503).json({ success: false, error: 'Steer not available (not a daemon context).' });
-      return;
-    }
-    const { sessionId } = req.params;
-    const body = req.body as { text?: unknown };
-    const text = typeof body.text === 'string' ? body.text.trim() : '';
-    if (!text) {
-      res.status(400).json({ success: false, error: 'text is required and must be a non-empty string.' });
-      return;
-    }
-    const callback = steerRegistry.get(sessionId);
-    if (!callback) {
-      res.status(404).json({ success: false, error: 'Session not found or not a daemon session.' });
-      return;
-    }
-    callback(text);
-    res.json({ success: true });
+    res.json({ success: true, data: { triggers: [] } });
   });
 
   // --- Static file serving for Console UI ---
