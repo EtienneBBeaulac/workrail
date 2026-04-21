@@ -624,15 +624,14 @@ export function mountConsoleRoutes(
       }
       const repoRoots = cachedRepoRoots;
 
-      // WHY clearTimeout in .finally(): cancels the timer as soon as the work
-      // finishes. Idiomatic pattern -- earlier cancellation, less timer overhead,
-      // and prevents the timeout reject from firing after the race settles.
-      const data = await Promise.race([
-        getWorktreeList(repoRoots, activeSessions).finally(() => {
-          if (timeoutId !== null) clearTimeout(timeoutId);
-        }),
-        timeoutPromise,
-      ]);
+      // WHY .catch() on worktreeWork: if the timeout wins the race, getWorktreeList
+      // keeps running in the background. If it later rejects, that rejection becomes
+      // an unhandled rejection (uncaughtException) because nothing is awaiting it.
+      // The .catch() swallows the post-race rejection silently.
+      const worktreeWork = getWorktreeList(repoRoots, activeSessions)
+        .finally(() => { if (timeoutId !== null) clearTimeout(timeoutId); })
+        .catch(() => ({ repos: [] }) as Awaited<ReturnType<typeof getWorktreeList>>);
+      const data = await Promise.race([worktreeWork, timeoutPromise]);
       if (timeoutId !== null) clearTimeout(timeoutId);
       res.json({ success: true, data });
     } catch (e) {
