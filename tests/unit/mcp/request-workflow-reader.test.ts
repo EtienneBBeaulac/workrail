@@ -594,7 +594,8 @@ describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
       try { gitExecSync(mainRepo, ['worktree', 'remove', '--force', siblingWorktree], { silent: true }); } catch { /* ignore */ }
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  // WHY 30s: git init + worktree add are slow on Windows runners, especially Node 22.
+  }, 30000);
 
   it('still excludes a remembered root from an unrelated repo (cross-repo non-bleed regression)', async () => {
     // This is the original regression test replicated in this suite to confirm the
@@ -692,7 +693,8 @@ describe('filterRememberedRootsForWorkspace', () => {
       try { gitExecSync(mainRepo, ['worktree', 'remove', '--force', siblingWorktree], { silent: true }); } catch { /* ignore */ }
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  // WHY 30s: git init + worktree add are slow on Windows runners, especially Node 22.
+  }, 30000);
 
   it('returns only ancestor roots when workspace is not in a git repo (workspaceCommonDir is null)', async () => {
     // Use plain temp directories (not git repos). Ancestor root is included; non-ancestor is excluded.
