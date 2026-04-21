@@ -7486,3 +7486,54 @@ Medium for the cleanup command (quality of life, stops log noise). High for star
 **Files:** `src/coordinators/modes/implement-shared.ts`, `src/coordinators/pr-review.ts`.
 
 **Priority:** Medium. Correctness issues that won't crash in production but make future refactors unsafe.
+
+---
+
+## Current state update (Apr 21, 2026)
+
+**npm version: v3.59.6** | Daemon PID: 54113 | Status: Running, pipeline active
+
+### What shipped in this session (Apr 19-21, 2026)
+
+**All five autonomous pipeline items (previously recorded) plus:**
+
+- ✅ **Discovery loop fix** (#748) -- three coupled fixes: thread `maxSessionMinutes` through `spawnSession` (sessions now get 55/35/65 min instead of 30 min default), inspect `PipelineOutcome` in polling-scheduler and apply `worktrain:in-progress` label on escalation, write issue-ownership sidecar for cross-restart idempotency
+- ✅ **In-process `awaitSessions` and `getAgentResult`** (#741) -- replaced HTTP calls to the daemon's own console with direct `ConsoleService` access
+- ✅ **Try/catch on all coordinator I/O** (#740) -- `getAgentResult`, `pollForPR`, `postToOutbox` all wrapped; coordinator no longer crashes on I/O failure
+- ✅ **Dispatch dedup prealloc bypass** (#744) -- `dispatch()` now bypasses dedup for pre-allocated sessions, fixing the zombie session bug that prevented discovery from starting
+- ✅ **Promise.race crash fix** (#733) -- worktrees scan timeout no longer crashes the daemon via unhandled rejection
+- ✅ **Trigger validator** (#690) -- `worktrain trigger validate` command, `validateTriggerStrict()` pure function
+- ✅ **`worktrain trigger poll`** (#697) -- force immediate poll cycle on any queue trigger
+- ✅ **`worktrain trigger test`** (#656) -- dry-run showing what would dispatch
+- ✅ **Auto-load ~/.workrail/.env** (#673) -- daemon reads secrets from .env automatically
+- ✅ **Daemon lifecycle events** (#674) -- `session_aborted` on SIGTERM, `daemon_heartbeat` every 30s
+- ✅ **Attribution signals** (#658) -- `[WT]` PR title prefix, `Co-authored-by: WorkTrain` commit trailers, `worktrain:generated` label
+- ✅ **Secret scan before push** (#660) -- pattern-based scan blocks commits with leaked credentials
+- ✅ **Unified logs stream** (#680) -- `worktrain logs` now merges daemon events, queue-poll.jsonl, and filtered stderr
+- ✅ **Stale lock file handling** (#705) -- validates lock file PID before trusting port discovery
+- ✅ **5 architectural audits** (docs/design/) -- coordinator access, error handling, testability, type bloat, memory management
+- ✅ **Stale user workflow cleanup** -- removed old copies from `~/.workrail/workflows/` that were causing ValidationError noise
+
+### Current pipeline state (live)
+
+Discovery session `ecf359d7` running: 77 turns, 11 step advances (active, making real progress on issue #393). Session `b7df0c8b` also running (just started). First clean run after all pipeline fixes landed.
+
+### Accurate limitations (v3.59.6)
+
+1. **Ghost sessions in event log** -- sessions killed by daemon crashes don't get `session_aborted` events from old daemon instances. New daemons emit it on shutdown, but historical sessions show as RUNNING.
+2. **Worktree orphan leak** -- if `maybeRunDelivery()` worktree removal fails after sidecar deletion, orphan is invisible to `runStartupRecovery`. See backlog.
+3. **`queue-poll.jsonl` never rotated** -- disk exhaustion risk on long-running daemons. See backlog.
+4. **`ReviewSeverity` missing `assertNever`** -- future variants silently fall through. See backlog.
+5. **`process.stderr.write` in `readVerdictArtifact`** -- bypasses injected dep, invisible to test fakes. See backlog.
+6. **WorkRail MCP stale state** -- `workrail cleanup` command doesn't exist yet. Manual cleanup needed for dead managed sources, old session accumulation.
+7. **Trigger validation static/runtime gap** -- some runtime checks not in static validator. See trigger-validation-gap-audit.md.
+8. **WorkflowTrigger type bloat** -- mixes trigger config, session runtime state, delivery config. See workflow-trigger-lifecycle-audit.md.
+9. **Conversation history not persisted** -- LLM conversation history is in-memory only. On crash, context is lost. See backlog.
+
+### Next priorities (groomed Apr 21)
+
+1. **Watch the current pipeline run** -- discovery `ecf359d7` is active at 77 turns/11 steps. If it completes, shaping and coding should fire automatically. First end-to-end validation.
+2. **Execution time tracking** -- add session timing to `execution-stats.jsonl` for timeout calibration. Small change in `runWorkflow()` finally block.
+3. **Three audit findings from above** -- worktree orphan leak, queue-poll rotation, assertNever fixes. All small, targeted.
+4. **`workrail cleanup` command** -- removes dead managed sources, rotates old session files, clears stale git caches. Stops ValidationError noise in MCP server logs.
+5. **Conversation history persistence** -- `conversation.jsonl` per session, append-only. Prerequisite for true crash recovery.
