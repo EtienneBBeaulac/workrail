@@ -39,10 +39,15 @@ import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
 import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
+import type { ContinueTokenResolved } from '../mcp/handlers/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
+import type { SessionEventLogReadonlyStorePortV2, LoadedValidatedPrefixV2, SessionEventLogStoreError } from '../v2/ports/session-event-log-store.port.js';
+import type { ToolFailure } from '../mcp/handlers/v2-execution-helpers.js';
+import type { ResultAsync } from 'neverthrow';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
+import { evaluateRecovery } from './session-recovery-policy.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -823,22 +828,25 @@ export async function readAllDaemonSessions(
 }
 
 /**
- * Scan DAEMON_SESSIONS_DIR for orphaned session files and clear them.
+ * Scan DAEMON_SESSIONS_DIR for orphaned session files and handle them.
  *
  * Called once during daemon startup, before the HTTP server begins accepting
- * webhook requests. This ensures no new workflow triggers arrive while recovery
- * is in progress.
+ * webhook requests. Two recovery behaviors fire unconditionally:
  *
- * WHY this function and not a rehydrate call: clearing orphans satisfies the
- * crash recovery invariant (abandoned sessions do not persist indefinitely).
- * Calling executeContinueWorkflow({ intent: 'rehydrate' }) would only add a
- * 'token valid vs. expired' log distinction while requiring a V2ToolContext
- * dependency and risking transient engine startup errors. Clear-regardless-of-result
- * is the correct MVP behavior.
+ * Phase A: Delete all queue-issue-*.json sidecars so blocked GitHub issues
+ *   become eligible for re-dispatch within one poll cycle (~5 min).
  *
- * KNOWN LIMITATION: a planned deployment restart clears in-flight sessions just as
- * a crash does. Distinguishing crash from planned restart requires out-of-band
- * state (e.g. a shutdown token written on clean stop). Not implemented at MVP.
+ * Phase B (requires ctx): For each orphaned session, decode the continueToken,
+ *   count advance_recorded events in the WorkRail session event log, and apply
+ *   the binary evaluateRecovery() policy:
+ *   - stepAdvances >= 1 -> preserve sidecar (log and skip deletion; Phase B full restart not yet implemented)
+ *   - stepAdvances === 0 -> discard (sidecar deleted; issue re-dispatched)
+ *   When ctx is absent, all sessions fall to discard (backward-compatible behavior).
+ *
+ * WHY preserve instead of restart for stepAdvances >= 1: full agent loop restart
+ *   requires reconstructing the trigger context from session state, which is non-trivial.
+ *   The sidecar is kept so a future Phase B implementation can pick it up.
+ *   Tracked in backlog as "autonomous crash recovery -- Phase B".
  *
  * Non-fatal: any error during recovery is caught and logged. The daemon starts
  * regardless of whether recovery succeeds.
@@ -847,14 +855,25 @@ export async function readAllDaemonSessions(
  *   DAEMON_SESSIONS_DIR. Pass a temp dir in tests to avoid touching real state.
  * @param execFn - Injectable exec function for git worktree removal.
  *   Defaults to execFileAsync. Override in tests to avoid real git calls.
- *   WHY injectable: runStartupRecovery runs git commands (git worktree remove --force)
- *   that require a real git repo. Tests cannot create real repos easily; an injectable
- *   execFn lets tests verify the removal is attempted without running actual git.
+ * @param ctx - Optional V2ToolContext for phase B logic. When provided,
+ *   sessions with step advances are preserved rather than discarded.
+ * @param _countStepAdvancesFn - Injectable step-count implementation for testing.
+ *   Defaults to the real countOrphanStepAdvances() implementation.
+ * @param _executeContinueWorkflowFn - Injectable continue-workflow implementation
+ *   (retained for signature backward-compatibility; not currently called in the resume path).
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
   execFn: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }> = execFileAsync,
+  ctx?: V2ToolContext,
+  _countStepAdvancesFn: typeof countOrphanStepAdvances = countOrphanStepAdvances,
+  _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
 ): Promise<void> {
+  // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
+  // WHY first: queue-issue cleanup is independent of session state and must
+  // always run, even if session recovery fails or ctx is absent.
+  await clearQueueIssueSidecars(sessionsDir);
+
   // Read all parseable session files.
   const sessions = await readAllDaemonSessions(sessionsDir);
 
@@ -868,16 +887,12 @@ export async function runStartupRecovery(
 
   const now = Date.now();
   let cleared = 0;
+  let preserved = 0;
 
   for (const session of sessions) {
     const ageMs = now - session.ts;
     const isStale = ageMs > MAX_ORPHAN_AGE_MS;
     const ageSec = Math.round(ageMs / 1000);
-
-    const label = isStale ? 'stale orphaned session' : 'orphaned session';
-    console.log(
-      `[WorkflowRunner] Clearing ${label}: sessionId=${session.sessionId} age=${ageSec}s`,
-    );
 
     // Orphan worktree cleanup: if this session created a worktree and the worktree
     // has been orphaned long enough (24h), remove it.
@@ -915,6 +930,55 @@ export async function runStartupRecovery(
       );
     }
 
+    // Phase B: Resume-or-discard decision when ctx is available.
+    // When ctx is absent, fall through to discard (same as previous behavior).
+    if (ctx !== undefined) {
+      let stepAdvances = 0;
+      try {
+        stepAdvances = await _countStepAdvancesFn(session.continueToken, ctx);
+      } catch (err: unknown) {
+        // Non-fatal: if step count fails, fall through to discard.
+        console.warn(
+          `[WorkflowRunner] Could not count step advances for orphaned session ${session.sessionId}: ` +
+          `${err instanceof Error ? err.message : String(err)} -- falling back to discard`,
+        );
+      }
+
+      const action = evaluateRecovery({ stepAdvances, ageMs });
+
+      // Exhaustive switch: assertNever prevents silent fall-through if
+      // RecoveryAction gains new variants in the future.
+      switch (action) {
+        case 'resume':
+          console.log(
+            `[WorkflowRunner] Startup recovery: preserving sidecar for session with ${stepAdvances} step advance(s): ` +
+            `sessionId=${session.sessionId} age=${ageSec}s -- full agent restart not yet implemented; ` +
+            `sidecar retained for future resumption. Skipping sidecar deletion.`,
+          );
+          // WHY: sidecar is preserved so a future resumption implementation can pick it up.
+          // Full agent loop restart requires reconstructing the trigger context from session state,
+          // which is non-trivial. Tracked in backlog as "autonomous crash recovery -- Phase B".
+          preserved++;
+          continue;
+        case 'discard': {
+          const label = isStale ? 'stale orphaned session' : 'orphaned session';
+          console.log(
+            `[WorkflowRunner] Discarding ${label}: sessionId=${session.sessionId} ` +
+            `stepAdvances=${stepAdvances} age=${ageSec}s`,
+          );
+          break;
+        }
+        default:
+          assertNever(action);
+      }
+    } else {
+      // No ctx: log discard as before (backward-compatible behavior).
+      const label = isStale ? 'stale orphaned session' : 'orphaned session';
+      console.log(
+        `[WorkflowRunner] Clearing ${label}: sessionId=${session.sessionId} age=${ageSec}s`,
+      );
+    }
+
     try {
       await fs.unlink(path.join(sessionsDir, `${session.sessionId}.json`));
       cleared++;
@@ -932,7 +996,121 @@ export async function runStartupRecovery(
   // Also clear any stray .tmp files left from a crash mid-write.
   await clearStrayTmpFiles(sessionsDir);
 
-  console.log(`[WorkflowRunner] Startup recovery complete: cleared ${cleared}/${sessions.length} orphaned session(s).`);
+  if (ctx !== undefined) {
+    console.log(
+      `[WorkflowRunner] Startup recovery complete: preserved=${preserved} discarded=${cleared}/${sessions.length} orphaned session(s).`,
+    );
+  } else {
+    console.log(`[WorkflowRunner] Startup recovery complete: cleared ${cleared}/${sessions.length} orphaned session(s).`);
+  }
+}
+
+/**
+ * Count the number of step advances (advance_recorded events) in a WorkRail session
+ * event log for an orphaned session.
+ *
+ * WHY exported: testable in isolation via injectable _parseFn and _loadFn params --
+ * callers can supply fakes without a real V2ToolContext.
+ *
+ * The injectable params are pre-bound: _parseFn takes only the raw token string, and
+ * _loadFn takes only the sessionId. This keeps the function testable without requiring
+ * real tokenCodecPorts or sessionStore instances in tests.
+ *
+ * Uses loadValidatedPrefix() instead of load() to handle truncated JSONL event logs
+ * from a crash during append. Both 'complete' and 'truncated' kinds expose .truth.events.
+ *
+ * Returns 0 on any error (safe: caller falls back to discard).
+ *
+ * @param _parseFn - Injectable token parser. Receives the raw continueToken string and
+ *   returns a ResultAsync<ContinueTokenResolved, ToolFailure>. Defaults to calling
+ *   parseContinueTokenOrFail with ctx.v2.tokenCodecPorts and ctx.v2.tokenAliasStore.
+ * @param _loadFn - Injectable session loader. Receives the WorkRail SessionId and
+ *   returns a ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError>. Defaults to
+ *   ctx.v2.sessionStore.loadValidatedPrefix.
+ */
+export async function countOrphanStepAdvances(
+  continueToken: string,
+  ctx: V2ToolContext,
+  _parseFn: ((raw: string) => ResultAsync<ContinueTokenResolved, ToolFailure>) | undefined = undefined,
+  _loadFn: SessionEventLogReadonlyStorePortV2['loadValidatedPrefix'] | undefined = undefined,
+): Promise<number> {
+  const parseFn = _parseFn ?? ((raw: string) =>
+    parseContinueTokenOrFail(raw, ctx.v2.tokenCodecPorts, ctx.v2.tokenAliasStore)
+  );
+  const loadFn = _loadFn ?? ctx.v2.sessionStore.loadValidatedPrefix.bind(ctx.v2.sessionStore);
+
+  // Decode the continueToken to extract the WorkRail sessionId.
+  const resolvedResult = await parseFn(continueToken);
+
+  if (resolvedResult.isErr()) {
+    console.warn(
+      `[WorkflowRunner] Could not decode continueToken for orphaned session: ${resolvedResult.error.message}`,
+    );
+    return 0;
+  }
+
+  const sessionId = asSessionId(resolvedResult.value.sessionId);
+
+  // Use loadValidatedPrefix to handle crash-truncated JSONL gracefully.
+  // Both 'complete' and 'truncated' kinds expose .truth.events with the valid prefix.
+  const loadResult = await loadFn(sessionId);
+
+  if (loadResult.isErr()) {
+    console.warn(
+      `[WorkflowRunner] Could not load session event log for orphaned session: ${loadResult.error.code} -- ${loadResult.error.message}`,
+    );
+    return 0;
+  }
+
+  const events = loadResult.value.truth.events;
+  return events.filter((e) => e.kind === 'advance_recorded').length;
+}
+
+/**
+ * Best-effort cleanup of queue-issue idempotency sidecars in the sessions directory.
+ *
+ * WHY these files exist: polling-scheduler.ts writes `queue-issue-<N>.json` BEFORE
+ * dispatching a GitHub issue to prevent duplicate dispatch within a 56-minute window
+ * (DISCOVERY_TIMEOUT_MS + 60s). On clean completion or error, the sidecar is deleted.
+ * On daemon crash, it is NOT deleted -- it has a different JSON shape
+ * ({ issueNumber, dispatchedAt, ttlMs }) than session sidecars ({ continueToken, ts })
+ * and is silently skipped by readAllDaemonSessions().
+ *
+ * WHY unconditional: there is no link from OrphanedSession to the queue-issue sidecar
+ * (OrphanedSession does not store the issue number). We must scan ALL queue-issue-*.json
+ * files and delete them all.
+ *
+ * After deletion, the affected issue becomes eligible for re-dispatch in the next poll
+ * cycle (~5 minutes).
+ *
+ * Non-fatal: any error (ENOENT, permissions) is caught per-file and logged. Never throws.
+ *
+ * WHY exported: called by runStartupRecovery() and testable in isolation.
+ */
+export async function clearQueueIssueSidecars(sessionsDir: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch {
+    return; // ENOENT or permission error -- nothing to clean up
+  }
+
+  for (const entry of entries) {
+    if (!entry.startsWith('queue-issue-') || !entry.endsWith('.json')) continue;
+    try {
+      await fs.unlink(path.join(sessionsDir, entry));
+      // Extract issue number from filename for log clarity.
+      const issueNum = entry.slice('queue-issue-'.length, -'.json'.length);
+      console.log(`[WorkflowRunner] Cleared queue-issue sidecar: issue=${issueNum}`);
+    } catch (err: unknown) {
+      const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+      if (!isEnoent) {
+        console.warn(
+          `[WorkflowRunner] Could not clear queue-issue sidecar ${entry}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
 }
 
 /**
