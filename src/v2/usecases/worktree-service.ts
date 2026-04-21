@@ -541,9 +541,11 @@ async function runBackgroundEnrichment(
   repoRootsKey: string,
 ): Promise<void> {
   try {
-    // WHY clearTimeout pattern: Promise.race leaves the losing promise dangling.
-    // If scanRepos wins, the timeout's reject() fires later as an unhandled rejection
-    // and crashes the process. clearTimeout() prevents the reject from ever firing.
+    // WHY clearTimeout pattern: cancels the timeout timer as soon as the work
+    // finishes so the setTimeout callback never fires. This prevents the timeout
+    // promise from rejecting after the race has already settled, which in some
+    // Node.js versions can surface as an unhandledRejection if the void-called
+    // runBackgroundEnrichment's internal race settles before the catch is attached.
     let bgTimeoutId: ReturnType<typeof setTimeout> | undefined;
     const bgTimeoutPromise = new Promise<never>((_, reject) => {
       bgTimeoutId = setTimeout(() => reject(new Error('background enrichment timeout')), BACKGROUND_ENRICHMENT_TIMEOUT_MS);
