@@ -64,6 +64,7 @@ describe('event-kinds-closed-set: event kind discriminated union is exhaustive',
     'gap_recorded',
     'divergence_recorded',
     'decision_trace_appended',
+    'run_completed',
   ] as const;
 
   interface TestCase {
@@ -197,6 +198,20 @@ describe('event-kinds-closed-set: event kind discriminated union is exhaustive',
       data: {
         traceId: 'tr_123',
         entries: [{ kind: 'selected_next_step', summary: 'Chose step X' }],
+      },
+      expectValid: true,
+    },
+
+    {
+      kind: 'run_completed',
+      scope: { runId: 'run_123' },
+      data: {
+        startGitSha: 'abc123',
+        endGitSha: 'def456',
+        gitBranch: 'main',
+        agentCommitShas: ['abc123'],
+        captureConfidence: 'high',
+        durationMs: 12345,
       },
       expectValid: true,
     },
@@ -859,6 +874,7 @@ describe('schema-additive-within-version: event kind additions are locked', () =
       'gap_recorded',
       'divergence_recorded',
       'decision_trace_appended',
+      'run_completed',
     ];
 
     currentKinds.forEach((kind) => {
