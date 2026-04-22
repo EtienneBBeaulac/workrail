@@ -8,6 +8,9 @@
  * until a shared codegen solution exists.
  */
 
+import type { SessionMetricsV2 } from '../projections/session-metrics.js';
+export type { SessionMetricsV2 };
+
 // ---------------------------------------------------------------------------
 // Session List
 // ---------------------------------------------------------------------------
@@ -50,6 +53,9 @@ export interface ConsoleSessionSummary {
    * False on any read error (safe default). */
   readonly isLive: boolean;
   readonly parentSessionId: string | null;
+  /** Structured outcome metrics for the session's first completed run.
+   * Null for sessions still in progress or sessions that predate the run_completed feature. */
+  readonly metrics: SessionMetricsV2 | null;
 }
 
 export interface ConsoleSessionListResponse {

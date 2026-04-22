@@ -35,6 +35,7 @@ import { projectNodeOutputsV2 } from '../projections/node-outputs.js';
 import { projectAdvanceOutcomesV2 } from '../projections/advance-outcomes.js';
 import { projectArtifactsV2 } from '../projections/artifacts.js';
 import { projectRunContextV2 } from '../projections/run-context.js';
+import { projectSessionMetricsV2 } from '../projections/session-metrics.js';
 import { asSortedEventLog, type SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { projectRunExecutionTraceV2 } from '../projections/run-execution-trace.js';
 import { OUTPUT_CHANNEL, PAYLOAD_KIND, EVENT_KIND } from '../durable-core/constants.js';
@@ -1029,6 +1030,8 @@ function projectSessionSummary(
     );
   })();
 
+  const metrics = projectSessionMetricsV2(events);
+
   const runs = Object.values(dag.runsById);
   const run = runs[0];
   if (!run) {
@@ -1054,6 +1057,7 @@ function projectSessionSummary(
       isAutonomous,
       isLive,
       parentSessionId,
+      metrics,
     };
   }
 
@@ -1110,6 +1114,7 @@ function projectSessionSummary(
     isAutonomous,
     isLive,
     parentSessionId,
+    metrics,
   };
 }
 
