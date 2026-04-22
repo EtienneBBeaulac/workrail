@@ -48,6 +48,7 @@ import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { evaluateRecovery } from './session-recovery-policy.js';
+import { writeStatsSummary } from './stats-summary.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -4105,6 +4106,11 @@ export async function runWorkflow(
         }) + '\n',
         'utf8',
       ))
+      // WHY chained after appendFile (not called independently): writeStatsSummary reads
+      // execution-stats.jsonl and must include the record just appended above. Chaining in
+      // .then() ensures the append completes before the read starts. Calling in parallel
+      // would cause a race where the just-completed session is absent from the summary.
+      .then(() => { writeStatsSummary(statsDir).catch(() => {}); })
       .catch(() => {}); // best-effort -- never propagate
   }
 

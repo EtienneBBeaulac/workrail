@@ -42,6 +42,7 @@ import {
   buildConsoleServiceFromDataDir,
   type Priority,
 } from './cli/commands/index.js';
+import { writeStatsSummary } from './daemon/stats-summary.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -427,6 +428,7 @@ program
             // cheap enough to not impact I/O (fire-and-forget JSONL append).
             const heartbeatInterval = setInterval(() => {
               const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+              const statsDir = path.join(os.homedir(), '.workrail', 'data');
               // Count active sessions from the daemon-sessions dir. Best-effort:
               // if the dir is unavailable, activeSessions defaults to 0.
               fs.promises.readdir(sessionsDir)
@@ -435,6 +437,9 @@ program
                 .then((activeSessions) => {
                   emitter.emit({ kind: 'daemon_heartbeat', activeSessions, ts: Date.now() });
                 });
+              // Update stats-summary.json as a safety net. Covers sessions whose post-session
+              // write failed (e.g. daemon restart mid-write). Fire-and-forget.
+              writeStatsSummary(statsDir).catch(() => {});
             }, 30_000);
 
             // Best-effort crash event. Emitted when an uncaught exception reaches
