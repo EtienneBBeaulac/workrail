@@ -160,8 +160,10 @@ function aggregate(records: ExecutionStatRecord[], malformedLineCount: number): 
   }
 
   const n = records.length;
-  const minStep = Math.min(...steps);
-  const maxStep = Math.max(...steps);
+  // WHY reduce not spread: Math.min/max(...array) throws RangeError at ~115k+ elements
+  // because spread pushes all values onto the call stack. reduce is O(n) and stack-safe.
+  const minStep = steps.reduce((min, v) => (v < min ? v : min), Infinity);
+  const maxStep = steps.reduce((max, v) => (v > max ? v : max), -Infinity);
 
   return {
     version: 1,
