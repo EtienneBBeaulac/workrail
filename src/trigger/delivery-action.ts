@@ -742,43 +742,6 @@ export async function runDelivery(
   // Extract PR URL from gh output (typically the last line)
   const prUrl = prStdout.trim().split('\n').at(-1)?.trim() ?? '';
 
-  // Add worktrain:generated label to the PR.
-  //
-  // WHY non-fatal: label creation is best-effort. If gh label create or gh pr edit fails
-  // (permissions, network, API error), the PR was already opened successfully. Failing the
-  // entire delivery for a missing label would be a worse outcome than missing the label.
-  //
-  // WHY two calls (label create then pr edit): gh pr create --label requires the label to
-  // already exist. Creating it first is idempotent (2>/dev/null || true equivalent via
-  // try/catch). Then pr edit adds it to the specific PR by URL.
-  //
-  // WHY if (prUrl): gh pr edit requires a valid PR URL or number. If gh pr create returned
-  // empty output, prUrl is '' and gh pr edit would fail with an unhelpful error.
-  if (prUrl) {
-    try {
-      await execFn(
-        'gh',
-        ['label', 'create', 'worktrain:generated', '--description', 'PR authored by WorkTrain', '--color', '0075ca'],
-        { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
-      );
-    } catch {
-      // Label may already exist -- ignore the error and proceed to gh pr edit.
-    }
-    try {
-      await execFn(
-        'gh',
-        ['pr', 'edit', prUrl, '--add-label', 'worktrain:generated'],
-        { cwd: workspacePath, timeout: DELIVERY_TIMEOUT_MS },
-      );
-    } catch (e: unknown) {
-      // Non-fatal: log the failure so operators can investigate, but do not change the result.
-      console.warn(
-        `[runDelivery] WARNING: Failed to add worktrain:generated label to PR ${prUrl}: ` +
-        `${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-  }
-
   return { _tag: 'pr_opened', url: prUrl };
 }
 

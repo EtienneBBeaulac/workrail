@@ -215,18 +215,6 @@ export async function executeWorktrainTriggerTestCommand(
       continue;
     }
 
-    // H3: worktrain:in-progress label (active/skip -- not a maturity level)
-    if (issueLabels.includes('worktrain:in-progress')) {
-      decisions.push({ kind: 'skip', issue, reason: 'active_session_or_in_progress' });
-      continue;
-    }
-
-    // H3: session ID pattern in body (active/skip)
-    if (/sess_[a-z0-9]+/.test(issue.body)) {
-      decisions.push({ kind: 'skip', issue, reason: 'active_session_or_in_progress' });
-      continue;
-    }
-
     // Per-issue idempotency check (conservative: any parse error = active)
     const idempotencyStatus = await deps.checkIdempotency(issue.number);
     if (idempotencyStatus === 'active') {
