@@ -241,6 +241,7 @@ describe('event-kinds-closed-set: event kind discriminated union is exhaustive',
         dedupeKey: 'dedup_001',
         scope: tc.scope,
         data: tc.data,
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -298,6 +299,7 @@ describe('user-only-dependency-closed-set: reason enum is exhaustive', () => {
           summary: 'Test gap',
           resolution: { kind: 'unresolved' },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -346,6 +348,7 @@ describe('non-assumable-choice-closed-set: gap categories are exhaustive', () =>
           summary: 'Test gap',
           resolution: { kind: 'unresolved' },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -406,6 +409,7 @@ describe('blocker-codes-closed-set: code enum is exhaustive and unified', () => 
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -498,6 +502,7 @@ describe('schema-versioned: event schema envelope has explicit version', () => {
       kind: 'session_created',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventEnvelopeV1Schema.safeParse(withV1);
@@ -513,6 +518,7 @@ describe('schema-versioned: event schema envelope has explicit version', () => {
       kind: 'session_created',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventEnvelopeV1Schema.safeParse(withV2);
@@ -527,6 +533,7 @@ describe('schema-versioned: event schema envelope has explicit version', () => {
       kind: 'session_created',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventEnvelopeV1Schema.safeParse(noVersion);
@@ -628,6 +635,7 @@ describe('schema-unknown-version-fail-fast: unknown versions are rejected', () =
       kind: 'session_created',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventEnvelopeV1Schema.safeParse(withV99);
@@ -688,6 +696,7 @@ describe('schema-unknown-version-fail-fast: unknown versions are rejected', () =
       kind: 'session_created',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(eventV99);
@@ -743,6 +752,7 @@ describe('reason-code-unified: blocker codes are unified closed set', () => {
           },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -785,6 +795,7 @@ describe('reason-code-unified: blocker codes are unified closed set', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -817,6 +828,7 @@ describe('reason-code-unified: blocker codes are unified closed set', () => {
           },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -840,6 +852,7 @@ describe('schema-additive-within-version: event kind additions are locked', () =
       kind: 'future_new_event_kind',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(hypotheticalNewKind);
@@ -890,6 +903,7 @@ describe('cross-field locks: edge_created cause.kind must match edgeKind', () =>
         toNodeId: 'node_2',
         cause: { kind: 'checkpoint_created', eventId: 'evt_999' },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -911,6 +925,7 @@ describe('cross-field locks: edge_created cause.kind must match edgeKind', () =>
         toNodeId: 'node_2',
         cause: { kind: 'idempotent_replay', eventId: 'evt_999' },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -933,6 +948,7 @@ describe('cross-field locks: node_output_appended recap channel requires notes p
         outputChannel: 'recap',
         payload: { payloadKind: 'notes', notesMarkdown: 'Summary of results' },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -958,6 +974,7 @@ describe('cross-field locks: node_output_appended recap channel requires notes p
           byteLength: 1024,
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -983,6 +1000,7 @@ describe('cross-field locks: node_output_appended recap channel requires notes p
           byteLength: 1024,
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -1010,6 +1028,7 @@ describe('cross-field locks: capability_observed attempted_use failure requires 
           detail: { attemptContext: 'workflow_step', result: 'success' },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -1035,6 +1054,7 @@ describe('cross-field locks: capability_observed attempted_use failure requires 
           detail: { attemptContext: 'workflow_step', result: 'failure' },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -1060,6 +1080,7 @@ describe('cross-field locks: capability_observed attempted_use failure requires 
           detail: { attemptContext: 'workflow_step', result: 'failure', failureCode: 'tool_missing' },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -1107,6 +1128,7 @@ describe('blocker ordering: blockers must be deterministically sorted', () => {
           },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -1143,6 +1165,7 @@ describe('blocker ordering: blockers must be deterministically sorted', () => {
           },
         },
       },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(event);
@@ -1202,6 +1225,7 @@ describe('schema-unknown-fields-ignored-conditionally: strictness varies by sche
       dedupeKey: 'dedup_001',
       data: {},
       futureField: 'ignored-by-v1-consumer',
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(eventWithExtraField);
@@ -1220,6 +1244,7 @@ describe('schema-unknown-fields-ignored-conditionally: strictness varies by sche
       kind: 'session_created',
       dedupeKey: 'dedup_001',
       data: { unknownField: 'silently ignored' },
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(eventWithBadData);
@@ -1273,6 +1298,7 @@ describe('schema-unknown-fields-ignored-conditionally: strictness varies by sche
       kind: 'future_unknown_kind',
       dedupeKey: 'dedup_001',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const result = DomainEventV1Schema.safeParse(eventWithUnknownKind);

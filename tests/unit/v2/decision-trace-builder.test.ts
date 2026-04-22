@@ -380,6 +380,7 @@ describe('buildDecisionTraceEventData', () => {
         dedupeKey: 'decision_trace_appended:sess_1:trace_005',
         scope: { runId: 'run_1', nodeId: 'node_1' },
         data: result.value,
+        timestampMs: Date.now(),
       };
       expect(() => DomainEventV1Schema.parse(event)).not.toThrow();
     }

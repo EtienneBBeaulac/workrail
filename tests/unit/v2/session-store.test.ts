@@ -162,6 +162,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       kind: 'session_created',
       dedupeKey: `session_created:${sessionId}`,
       data: {},
+      timestampMs: Date.now(),
     };
 
     let leaked: WithHealthySessionLock | null = null;
@@ -208,6 +209,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       kind: 'session_created',
       dedupeKey: `session_created:${sessionId}`,
       data: {},
+      timestampMs: Date.now(),
     };
 
     const snapshotRef = asSnapshotRef(asSha256Digest('sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11'));
@@ -276,6 +278,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         workflowHash: 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11',
         snapshotRef,
       },
+      timestampMs: Date.now(),
     };
 
     // Write the segment file
@@ -339,6 +342,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       kind: 'session_created',
       dedupeKey: `session_created:${sessionId}`,
       data: {},
+      timestampMs: Date.now(),
     };
 
     await gate
@@ -398,6 +402,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         kind: 'session_created',
         dedupeKey: 'session_created:sess_pin_order',
         data: {},
+        timestampMs: Date.now(),
       };
 
       const result = await gate.withHealthySessionLock(sessionId, (lock) =>
@@ -513,6 +518,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         kind: 'session_created',
         dedupeKey: `session_created:${sessionId}`,
         data: {},
+        timestampMs: Date.now(),
       };
 
       const result = await gate.withHealthySessionLock(sessionId, (lock) =>
@@ -557,6 +563,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         kind: 'session_created',
         dedupeKey: `session_created:${sessionId}`,
         data: {},
+        timestampMs: Date.now(),
       };
 
       // Append events
@@ -644,6 +651,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
           workflowHash: 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11',
           snapshotRef,
         },
+        timestampMs: Date.now(),
       };
 
       // Write the segment file
@@ -666,6 +674,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         segmentRelPath: 'events/00000000-00000000.jsonl',
         sha256: digest,
         bytes: segmentContent.length,
+        timestampMs: Date.now(),
       };
 
       await fs.writeFile(manifestPath, JSON.stringify(segmentClosedRecord) + '\n');
@@ -723,6 +732,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
           outputChannel: 'recap',
           payload: { payloadKind: 'notes', notesMarkdown: overBudget },
         },
+        timestampMs: Date.now(),
       };
 
       // Write this event to a segment file
@@ -745,6 +755,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
         segmentRelPath: 'events/00000000-00000000.jsonl',
         sha256: digest,
         bytes: segmentContent.length,
+        timestampMs: Date.now(),
       };
 
       await fs.writeFile(manifestPath, JSON.stringify(segmentClosedRecord) + '\n');
@@ -789,6 +800,7 @@ describe('v2 local session store (Slice 2 substrate)', () => {
       kind: 'session_created',
       dedupeKey: `session_created:${sessionId}`,
       data: {},
+      timestampMs: Date.now(),
     };
 
     // Test through the gate - this verifies orElse cleanup works

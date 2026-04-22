@@ -177,6 +177,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                 kind: 'session_created',
                 dedupeKey: `session_created:${sessionId}`,
                 data: {},
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -187,6 +188,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'mode-blocking', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/mode.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -197,6 +199,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],
@@ -319,6 +322,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                 kind: 'session_created',
                 dedupeKey: `session_created:${sessionId}`,
                 data: {},
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -329,6 +333,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'mode-blocking', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/mode.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -339,6 +344,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -354,6 +360,7 @@ describe('v2 continue_workflow: validationCriteria enforcement (mode-driven)', (
                   delta: [{ key: 'autonomy', value: 'full_auto_never_stop' }],
                   effective: { autonomy: 'full_auto_never_stop', riskPolicy: 'conservative' },
                 },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],

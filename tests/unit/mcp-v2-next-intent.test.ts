@@ -169,6 +169,7 @@ describe('v2 execution: nextIntent', () => {
                 kind: 'session_created',
                 dedupeKey: `session_created:${sessionId}`,
                 data: {},
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -179,6 +180,7 @@ describe('v2 execution: nextIntent', () => {
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'next-intent', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/next.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -189,6 +191,7 @@ describe('v2 execution: nextIntent', () => {
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],
