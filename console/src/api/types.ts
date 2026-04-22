@@ -378,3 +378,10 @@ export interface AutoDispatchResponse {
   readonly status: 'dispatched';
   readonly workflowId: string;
 }
+
+/** Response from GET /api/v2/sessions/:id/diff-summary */
+export interface DiffSummaryResponse {
+  readonly linesAdded: number;
+  readonly linesRemoved: number;
+  readonly filesChanged: number;
+}

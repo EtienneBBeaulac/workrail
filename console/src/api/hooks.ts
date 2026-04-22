@@ -1,14 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse, TriggerListResponse, AutoDispatchRequest, AutoDispatchResponse } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse, TriggerListResponse, AutoDispatchRequest, AutoDispatchResponse, DiffSummaryResponse } from './types';
 import { mapPerfQueryToResult } from './perf-state';
 
-/** Response shape for GET /api/v2/sessions/:id/diff-summary */
-export interface DiffSummaryResponse {
-  readonly linesAdded: number;
-  readonly linesRemoved: number;
-  readonly filesChanged: number;
-}
+export type { DiffSummaryResponse };
 
 // Typed HTTP error so callers can check status without brittle string parsing.
 export class HttpError extends Error {
