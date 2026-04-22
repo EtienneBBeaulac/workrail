@@ -171,10 +171,18 @@ export interface ConsoleSessionDetail {
    */
   readonly liveActivity?: readonly ConsoleToolActivity[] | null;
   /**
-   * TODO(step-5): Add `metrics: SessionMetricsV2 | null` here and wire it in
-   * `getSessionDetail()` in console-service.ts so the session detail view can
-   * display structured outcome metrics. Blocked on step-5 console display PR.
+   * Structured outcome metrics for the session's first completed run.
+   * Null for sessions still in progress or sessions that predate the run_completed feature.
+   * Engine-authoritative fields are directly from run_completed event.
+   * Agent-reported fields come from metrics_* context_set keys.
    */
+  readonly metrics: SessionMetricsV2 | null;
+  /**
+   * Absolute filesystem path to the repo root.
+   * Derived from repo_root observation event or workspacePath context_set fallback.
+   * Used by the diff-summary endpoint to run git diff in the correct directory.
+   */
+  readonly repoRoot: string | null;
 }
 
 // ---------------------------------------------------------------------------

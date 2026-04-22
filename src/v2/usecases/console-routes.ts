@@ -13,6 +13,8 @@ import type { Application, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichmentCompleteCallback } from './worktree-service.js';
 import { toWorkflowSourceInfo } from '../../types/workflow.js';
@@ -666,6 +668,104 @@ export function mountConsoleRoutes(
         res.status(status).json({ success: false, error: error.message });
       },
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // Diff summary endpoint
+  //
+  // GET /api/v2/sessions/:sessionId/diff-summary
+  //
+  // Runs `git diff startGitSha..endGitSha --shortstat` in the session's repo root
+  // and returns parsed LOC statistics. Never auto-fetched -- only called on explicit
+  // user action via the 'Load diff' button in the console session detail view.
+  //
+  // Best-effort: git errors, timeouts, and missing SHAs are returned as { error }
+  // with the appropriate HTTP status rather than propagating as 500s.
+  //
+  // WHY execFile not exec: AGENTS.md requires execFile for all subprocess calls
+  // to avoid shell injection via user-controlled content.
+  // ---------------------------------------------------------------------------
+  const execFileAsync = promisify(execFile);
+  /** 10-second ceiling for git diff operations. Large repos may have many changed files. */
+  const DIFF_GIT_TIMEOUT_MS = 10_000;
+
+  /**
+   * Discriminate child_process execution errors from programmer errors.
+   * Mirrors the isExecError helper in worktree-service.ts.
+   */
+  function isDiffExecError(e: unknown): boolean {
+    if (!(e instanceof Error)) return false;
+    if ('killed' in e) return true; // ExecFileException (non-zero exit, timeout)
+    const sys = (e as NodeJS.ErrnoException).syscall ?? '';
+    return sys.startsWith('spawn'); // ENOENT/EACCES from spawn (bad cwd or missing binary)
+  }
+
+  app.get('/api/v2/sessions/:sessionId/diff-summary', async (req: Request, res: Response) => {
+    const { sessionId } = req.params;
+
+    // Load session detail to get metrics (SHAs) and repoRoot.
+    const sessionResult = await consoleService.getSessionDetail(sessionId);
+    if (sessionResult.isErr()) {
+      const status = sessionResult.error.code === 'SESSION_LOAD_FAILED' ? 404 : 500;
+      res.status(status).json({ success: false, error: sessionResult.error.message });
+      return;
+    }
+
+    const sessionDetail = sessionResult.value;
+    const metrics = sessionDetail.metrics;
+    if (!metrics) {
+      res.status(422).json({ success: false, error: 'No metrics available for this session' });
+      return;
+    }
+
+    const { startGitSha, endGitSha } = metrics;
+    if (!startGitSha || !endGitSha) {
+      res.status(422).json({ success: false, error: 'Git SHAs not available in session metrics' });
+      return;
+    }
+
+    const repoRoot = sessionDetail.repoRoot;
+    if (!repoRoot) {
+      res.status(422).json({ success: false, error: 'Repo root not available for this session' });
+      return;
+    }
+
+    try {
+      const { stdout } = await execFileAsync(
+        'git',
+        ['diff', `${startGitSha}..${endGitSha}`, '--shortstat'],
+        { cwd: repoRoot, encoding: 'utf-8', timeout: DIFF_GIT_TIMEOUT_MS },
+      );
+
+      // Parse `git diff --shortstat` output. Example formats:
+      //   "3 files changed, 45 insertions(+), 12 deletions(-)"
+      //   "1 file changed, 2 insertions(+)"
+      //   "1 file changed, 1 deletion(-)"
+      //   "2 files changed"  (binary/renamed files only)
+      const match = stdout.trim().match(
+        /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/,
+      );
+      if (!match) {
+        // Output did not match expected shortstat format (e.g. identical commits, empty diff).
+        res.json({ success: true, data: { linesAdded: 0, linesRemoved: 0, filesChanged: 0 } });
+        return;
+      }
+
+      const filesChanged = parseInt(match[1] ?? '0', 10);
+      const linesAdded = parseInt(match[2] ?? '0', 10);
+      const linesRemoved = parseInt(match[3] ?? '0', 10);
+      res.json({ success: true, data: { linesAdded, linesRemoved, filesChanged } });
+    } catch (e: unknown) {
+      if (isDiffExecError(e)) {
+        const errMsg = e instanceof Error && 'killed' in e && (e as NodeJS.ErrnoException & { killed?: boolean }).killed
+          ? 'Diff timed out: repository too large or slow'
+          : `Diff failed: git unavailable or invalid SHAs`;
+        res.status(503).json({ success: false, error: errMsg });
+        return;
+      }
+      // Programmer error -- re-throw
+      throw e;
+    }
   });
 
   // Workflow catalog endpoints. Only mounted when a workflowService is provided.

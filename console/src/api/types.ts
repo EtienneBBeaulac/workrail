@@ -211,6 +211,17 @@ export interface ConsoleSessionDetail {
   readonly sessionTitle: string | null;
   readonly health: ConsoleSessionHealth;
   readonly runs: readonly ConsoleDagRun[];
+  /**
+   * Structured outcome metrics for the session's first completed run.
+   * Null for sessions still in progress or sessions that predate the run_completed feature.
+   * Mirror of ConsoleSessionDetail.metrics in src/v2/usecases/console-types.ts.
+   */
+  readonly metrics: SessionMetricsV2 | null;
+  /**
+   * Absolute filesystem path to the repo root. Used by the diff-summary endpoint.
+   * Mirror of ConsoleSessionDetail.repoRoot in src/v2/usecases/console-types.ts.
+   */
+  readonly repoRoot: string | null;
 }
 
 // ---------------------------------------------------------------------------
