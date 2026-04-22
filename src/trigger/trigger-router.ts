@@ -406,6 +406,10 @@ async function maybeRunDelivery(
     // is intentional and semantically correct (the session is still completing).
     if (result.sessionId !== undefined) {
       await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${result.sessionId}.json`)).catch(() => {});
+      // WHY: conversation file must be cleaned up here alongside the sidecar for worktree sessions.
+      // workflow-runner.ts only deletes it for non-worktree (direct) sessions; worktree sessions
+      // defer both sidecar and conversation file deletion to this point after delivery completes.
+      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${result.sessionId}-conversation.jsonl`)).catch(() => {});
       console.log(
         `[TriggerRouter] Session sidecar removed: triggerId=${triggerId} sessionId=${result.sessionId}`,
       );
