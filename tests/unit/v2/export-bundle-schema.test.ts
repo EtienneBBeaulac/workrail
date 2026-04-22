@@ -57,6 +57,7 @@ function createMinimalEvent(overrides: Partial<any> = {}): any {
     dedupeKey: 'dedupe_001',
     data: {},
     ...overrides,
+    timestampMs: Date.now(),
   };
 }
 

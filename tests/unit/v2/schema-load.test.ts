@@ -73,6 +73,7 @@ describe('v2 schema load safety', () => {
       sessionId: 'test-session',
       dedupeKey: 'test-dedupe-1',
       data: {},
+      timestampMs: Date.now(),
     };
 
     expect(() => DomainEventV1Schema.parse(validEvent)).not.toThrow();

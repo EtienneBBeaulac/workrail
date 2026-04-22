@@ -43,6 +43,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           outputChannel: 'recap' as const,
           payload: { payloadKind: 'notes' as const, notesMarkdown: huge },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -65,6 +66,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           outputChannel: 'recap' as const,
           payload: { payloadKind: 'notes' as const, notesMarkdown: exact },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -93,6 +95,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           outputChannel: 'recap' as const,
           payload: { payloadKind: 'notes' as const, notesMarkdown: huge },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -116,6 +119,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
         dedupeKey: 'decision_trace_appended:sess_1:trace_1',
         scope: { runId: 'run_1', nodeId: 'node_1' },
         data: { traceId: 'trace_1', entries: tooMany },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -137,6 +141,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
         dedupeKey: 'decision_trace_appended:sess_1:trace_1',
         scope: { runId: 'run_1', nodeId: 'node_1' },
         data: { traceId: 'trace_1', entries: exact },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -158,6 +163,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           traceId: 'trace_1',
           entries: [{ kind: 'selected_next_step' as const, summary: huge }],
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -179,6 +185,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           traceId: 'trace_1',
           entries: [{ kind: 'selected_next_step' as const, summary: exactly }],
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -207,6 +214,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           traceId: 'trace_1',
           entries: [{ kind: 'selected_next_step' as const, summary: hugeSummary }],
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -236,6 +244,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           traceId: 'trace_1',
           entries,
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -265,6 +274,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           traceId: 'trace_1',
           entries,
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -297,6 +307,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
           traceId: 'trace_1',
           entries: [{ kind: 'selected_next_step' as const, summary: summaryWithEmoji }],
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -332,6 +343,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -365,6 +377,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -399,6 +412,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -433,6 +447,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -472,6 +487,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -512,6 +528,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -549,6 +566,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);
@@ -587,6 +605,7 @@ describe('v2 budget enforcement (worst-case scenarios)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const parsed = DomainEventV1Schema.safeParse(event);

@@ -56,6 +56,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'session_created',
       dedupeKey: 'sk_0',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const event1: DomainEventV1 = {
@@ -66,6 +67,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'run_started',
       dedupeKey: 'sk_1',
       data: { runId: 'run_1' },
+      timestampMs: Date.now(),
     };
 
     // Use gate to acquire lock
@@ -95,6 +97,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'session_created',
       dedupeKey: 'sk_0',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const badEvent: DomainEventV1 = {
@@ -105,6 +108,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'run_started',
       dedupeKey: 'sk_bad',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const appendResult = await gate.withHealthySessionLock(sessionId, (lock) =>
@@ -127,6 +131,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'session_created',
       dedupeKey: 'sk_0',
       data: {},
+      timestampMs: Date.now(),
     };
 
     // First append
@@ -157,6 +162,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'session_created',
       dedupeKey: 'sk_0',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const event1: DomainEventV1 = {
@@ -167,6 +173,7 @@ describe('InMemorySessionEventLogStore', () => {
       kind: 'run_started',
       dedupeKey: 'sk_1',
       data: {},
+      timestampMs: Date.now(),
     };
 
     // Append event0 only
@@ -198,6 +205,7 @@ describe('InMemorySnapshotStore', () => {
       v: 1 as const,
       kind: 'execution_snapshot' as const,
       executionState: {},
+      timestampMs: Date.now(),
     };
 
     const refResult = await store.putExecutionSnapshotV1(snapshot);
