@@ -772,7 +772,7 @@ describe('buildMetricsSection', () => {
     const result = buildMetricsSection('research', true, false);
     expect(result).toContain('METRICS (System)');
     expect(result).toContain('metrics_outcome');
-    expect(result).toContain('final step of a research workflow');
+    expect(result).toContain('final step');
     expect(result).not.toContain('metrics_commit_shas');
     expect(result).not.toContain('metrics_pr_numbers');
   });
@@ -781,6 +781,30 @@ describe('buildMetricsSection', () => {
     const result = buildMetricsSection('research', true, true);
     expect(result).toContain('metrics_outcome');
     expect(result).not.toContain('METRICS (System)');
+    expect(result).not.toContain('metrics_commit_shas');
+    expect(result).not.toContain('metrics_pr_numbers');
+  });
+
+  // ── design profile ───────────────────────────────────────────────────────
+  it('design non-final: returns empty string', () => {
+    expect(buildMetricsSection('design', false, false)).toBe('');
+  });
+  it('design final: injects outcome-only footer (same as research)', () => {
+    const result = buildMetricsSection('design', true, false);
+    expect(result).toContain('METRICS (System)');
+    expect(result).toContain('metrics_outcome');
+    expect(result).not.toContain('metrics_commit_shas');
+    expect(result).not.toContain('metrics_pr_numbers');
+  });
+
+  // ── ticket profile ────────────────────────────────────────────────────────
+  it('ticket non-final: returns empty string', () => {
+    expect(buildMetricsSection('ticket', false, false)).toBe('');
+  });
+  it('ticket final: injects outcome-only footer (same as research)', () => {
+    const result = buildMetricsSection('ticket', true, false);
+    expect(result).toContain('METRICS (System)');
+    expect(result).toContain('metrics_outcome');
     expect(result).not.toContain('metrics_commit_shas');
     expect(result).not.toContain('metrics_pr_numbers');
   });

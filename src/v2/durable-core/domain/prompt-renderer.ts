@@ -364,7 +364,7 @@ function formatAssessmentRequirements(
  * @param cleanFormat - True when cleanResponseFormat is active (compact one-liners)
  */
 export function buildMetricsSection(
-  profile: 'coding' | 'review' | 'research' | 'none' | undefined,
+  profile: 'coding' | 'review' | 'research' | 'design' | 'ticket' | 'none' | undefined,
   isLastStep: boolean,
   cleanFormat: boolean,
 ): string {
@@ -387,11 +387,17 @@ export function buildMetricsSection(
         ? '\n\nMetrics (final): set metrics_pr_numbers (integer array) and metrics_outcome in context.'
         : '\n\n**METRICS (System):** This is the final step of a review workflow. Report:\n- `metrics_pr_numbers`: array of integer PR numbers reviewed (not URLs)\n- `metrics_outcome`: `"success"` | `"partial"` | `"abandoned"` | `"error"`\n\nCall `continue_workflow` with `context: { metrics_pr_numbers: [123], metrics_outcome: "success" }`.';
     }
-    case 'research': {
+    // WHY research/design/ticket share footer text: all three produce non-code deliverables
+    // with no commit SHA attribution. The semantic distinction is preserved in the enum for
+    // future divergence (e.g. 'ticket' could one day inject metrics_ticket_ids), but today
+    // they all inject outcome-only on the final step.
+    case 'research':
+    case 'design':
+    case 'ticket': {
       if (!isLastStep) return '';
       return cleanFormat
         ? '\n\nMetrics (final): set metrics_outcome in context.'
-        : '\n\n**METRICS (System):** This is the final step of a research workflow. Report:\n- `metrics_outcome`: `"success"` | `"partial"` | `"abandoned"` | `"error"`\n\nCall `continue_workflow` with `context: { metrics_outcome: "success" }`.';
+        : '\n\n**METRICS (System):** This is the final step. Report:\n- `metrics_outcome`: `"success"` | `"partial"` | `"abandoned"` | `"error"`\n\nCall `continue_workflow` with `context: { metrics_outcome: "success" }`.';
     }
   }
 }
