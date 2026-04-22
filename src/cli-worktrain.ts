@@ -682,7 +682,7 @@ program
   .action(async (options: { follow?: boolean; session?: string }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
-    // WHY constants: queue-poll and stderr are permanent files that never rotate.
+    // WHY constants: queue-poll uses size-based rotation (not date-based); stderr does not rotate.
     // Only the daemon event file uses todayFilePath() to handle midnight rotation.
     const queuePollPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
     const stderrPath = path.join(os.homedir(), '.workrail', 'logs', 'daemon.stderr.log');
@@ -889,8 +889,8 @@ program
     }
 
     // Poll every 500ms for new lines from all three sources.
-    // WHY midnight rotation only on daemon file: queue-poll.jsonl and daemon.stderr.log
-    // are permanent files -- they do not rotate at midnight.
+    // WHY midnight rotation only on daemon file: queue-poll.jsonl uses size-based rotation
+    // (handled below with shrink detection); daemon.stderr.log does not rotate.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       await new Promise<void>((resolve) => setTimeout(resolve, 500));
@@ -911,7 +911,18 @@ program
         offset = daemonPoll.newOffset;
       }
 
-      // Queue poll file (permanent path, no rotation).
+      // Queue poll file: size-based rotation. Detect shrinkage (file was rotated)
+      // and reset offset to read from the beginning of the new file. Without this,
+      // the stale offset causes readNewLines to see size <= offset and permanently
+      // stop yielding new events after a rotation.
+      try {
+        const queueStat = fs.statSync(queuePollPath);
+        if (queueStat.size < queuePollOffset) {
+          queuePollOffset = 0; // File was rotated; read from the new file's start.
+        }
+      } catch {
+        // File does not exist yet -- nothing to reset.
+      }
       const queuePoll = readNewLines(queuePollPath, queuePollOffset);
       if (queuePoll !== null && queuePoll.lines.length > 0) {
         printQueuePollLines(queuePoll.lines);

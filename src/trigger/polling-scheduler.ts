@@ -875,9 +875,30 @@ async function countActiveSessions(sessionsDir: string): Promise<number> {
   }
 }
 
+/**
+ * Maximum size of queue-poll.jsonl before rotation.
+ * When the file reaches this size, it is renamed to queue-poll.jsonl.1
+ * (overwriting any existing backup) and a fresh log file is started.
+ * WHY 10 MB: conservative cap holding ~5 weeks of history at 5-minute polling intervals.
+ */
+const MAX_QUEUE_POLL_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
 async function appendQueuePollLog(entry: Record<string, unknown>): Promise<void> {
   const logPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
   try {
+    try {
+      const stat = await fs.stat(logPath);
+      if (stat.size >= MAX_QUEUE_POLL_FILE_SIZE) {
+        // Rotate: rename current log to .1 (overwrites any existing backup),
+        // then let the appendFile below create a fresh log file.
+        await fs.rename(logPath, logPath + '.1');
+      }
+    } catch {
+      // File does not exist yet or stat/rename failed -- proceed to append.
+      // On ENOENT: appendFile will create the file. On other errors: log entry
+      // will still be written to the existing (potentially oversized) file,
+      // and console.warn is emitted by the outer catch if appendFile itself fails.
+    }
     await fs.appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
   } catch (e) {
     console.warn(`[QueuePoll] Failed to write queue-poll.jsonl: ${e instanceof Error ? e.message : String(e)}`);
