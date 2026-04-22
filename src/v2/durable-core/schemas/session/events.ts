@@ -50,6 +50,11 @@ export const DomainEventEnvelopeV1Schema = z.object({
     })
     .optional(),
   data: JsonValueSchema,
+  // Wall-clock timestamp (ms since Unix epoch) at event construction time.
+  // Required: all events carry a timestamp after the backfill migration (scripts/backfill-timestamps.ts).
+  // Used for session duration computation: durationMs = lastEvent.timestampMs - firstEvent.timestampMs.
+  // NOTE: Run scripts/backfill-timestamps.ts BEFORE deploying this version to avoid session load failures.
+  timestampMs: z.number().int().positive(),
 });
 
 /**

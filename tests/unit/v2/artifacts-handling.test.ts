@@ -40,6 +40,7 @@ describe('artifact handling (Layer 3 Phase 1)', () => {
             // No content field - backward compat
           },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -66,6 +67,7 @@ describe('artifact handling (Layer 3 Phase 1)', () => {
             content: { kind: 'wr.loop_control', loopId: 'plan-iteration', decision: 'continue' },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -102,6 +104,7 @@ describe('artifact handling (Layer 3 Phase 1)', () => {
             },
           },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);
@@ -128,6 +131,7 @@ describe('artifact handling (Layer 3 Phase 1)', () => {
             content: null, // Explicit null is valid JSON
           },
         },
+        timestampMs: Date.now(),
       };
 
       const result = DomainEventV1Schema.safeParse(event);

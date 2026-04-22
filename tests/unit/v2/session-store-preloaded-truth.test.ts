@@ -42,6 +42,7 @@ function makeSessionCreatedEvent(sessionId: ReturnType<typeof asSessionId>, even
     kind: 'session_created',
     dedupeKey: `session_created:${String(sessionId)}:${eventIndex}`,
     data: {},
+    timestampMs: Date.now(),
   };
 }
 

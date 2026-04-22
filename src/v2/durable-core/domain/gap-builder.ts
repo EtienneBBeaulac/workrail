@@ -43,6 +43,7 @@ export function buildGapRecordedEventV1(args: {
     eventId: args.eventId,
     eventIndex: args.eventIndex,
     sessionId: args.sessionId,
+    timestampMs: Date.now(),
     kind: EVENT_KIND.GAP_RECORDED,
     dedupeKey: `gap_recorded:${args.sessionId}:${args.gapId}`,
     scope: { runId: args.runId, nodeId: args.nodeId },

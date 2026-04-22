@@ -49,7 +49,7 @@ export function buildBlockedOutcome(args: {
   }
 
   const validationId = validation ? `validation_${String(attemptId)}` : undefined;
-  const extraEventsToAppend: Array<Omit<DomainEventV1, 'eventIndex' | 'sessionId'>> = [];
+  const extraEventsToAppend: Array<Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>> = [];
   if (validation && outputRequirement.kind !== 'not_required' && outputRequirement.kind !== 'satisfied') {
     const validationEventRes = buildValidationPerformedEvent({
       sessionId: String(sessionId),
