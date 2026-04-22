@@ -10,7 +10,9 @@
  * - For each session: reads manifest.jsonl to find segment file paths
  * - Skips sessions with an active .lock file (prints a warning)
  * - For each segment: reads events, stamps any event lacking timestampMs with
- *   the segment file's mtime (accurate to within one session step boundary)
+ *   the segment file's mtime (accurate to within one session step boundary;
+ *   NOTE: mtime is only accurate if session files have not been copied, moved,
+ *   or restored from backup since the events were written)
  * - Re-serializes using toJsonlLineBytes (same function as the store) for SHA-256 consistency
  * - Rewrites each affected segment as a tmp file then renames it atomically
  * - Backs up manifest.jsonl to manifest.jsonl.bak before any writes
@@ -240,19 +242,41 @@ async function backfillSession(
   }
 
   if (allAlreadyStamped) {
-    // Count events for stats
+    // All events have timestampMs -- but verify SHA-256 consistency to detect a
+    // crash-recovery scenario: if the process crashed after renaming a segment file
+    // but before rewriting the manifest, the manifest SHA is stale even though all
+    // events are already stamped. Fall through to full backfill if any SHA mismatches.
+    //
+    // WHY this check is necessary: the early return here was added for performance
+    // (skip sessions that are already complete). Without the SHA check, a crash
+    // between segment rename and manifest rename permanently corrupts the session --
+    // re-running the script returns early, leaving the manifest with a stale SHA
+    // that will cause SESSION_STORE_CORRUPTION_DETECTED on every load.
+    let allShasMatch = true;
     for (const seg of segmentClosedRecords) {
       const segPath = path.join(sessionDir, seg.segmentRelPath);
       try {
-        const segText = await fs.readFile(segPath, 'utf-8');
-        const events = parseJsonlLines(segText);
-        stats.eventsAlreadyStamped += events.length;
+        const segBytes = await fs.readFile(segPath);
+        const actualSha = sha256Hex(segBytes);
+        if (actualSha !== seg.sha256) {
+          allShasMatch = false;
+          break;
+        }
+        // Count events for stats while we have the bytes
+        const segText = Buffer.from(segBytes).toString('utf-8');
+        stats.eventsAlreadyStamped += parseJsonlLines(segText).length;
       } catch {
-        // ignore read errors for stats
+        // Read error -- fall through to full backfill
+        allShasMatch = false;
+        break;
       }
     }
-    stats.sessionsAlreadyStamped++;
-    return;
+    if (allShasMatch) {
+      stats.sessionsAlreadyStamped++;
+      return;
+    }
+    // SHA mismatch detected -- fall through to full backfill to repair the manifest.
+    console.warn(`  [WARN] Session ${sessionId}: SHA mismatch detected (probable crash mid-migration). Re-running full backfill to repair manifest.`);
   }
 
   // Backup manifest.jsonl before any writes
