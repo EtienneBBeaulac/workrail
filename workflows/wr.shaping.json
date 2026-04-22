@@ -2,6 +2,7 @@
   "id": "wr.shaping",
   "name": "Shaping Workflow",
   "version": "1.0.0",
+  "metricsProfile": "design",
   "description": "Faithful Shape Up product shaping. Converts a fuzzy problem into a bounded, implementation-ready pitch (pitch.md). Tech-agnostic -- works for any language, platform, framework, or non-software work. Produces a product-level pitch, not an engineering spec.",
   "about": "## Shaping Workflow\n\nTakes a fuzzy problem and produces a shaped pitch: a specific problem story, a fixed appetite, a fat-marker solution sketch, rabbit holes patched at the product level, and explicit no-gos.\n\n### What this is\n\nFaithful Shape Up shaping. The output is a **product-level pitch** -- it describes what the feature does and what it explicitly does not do, at a level a human engineering team or an AI pipeline can execute against.\n\nThis is not an engineering spec. It does not contain file paths, function signatures, test commands, or implementation plans. Those belong in the engineering phase that follows.\n\n### Tech-agnostic\n\nThis workflow works for any context: web, mobile, backend, data, embedded, or non-software product work. There are no references to specific tools, languages, frameworks, or platforms.\n\n### What it produces\n\n- `pitch.md` at `.workrail/current-pitch.md` -- the shaped pitch\n\n### Two mandatory human gates\n\n1. **Frame gate (Step 2):** confirm the problem statement and appetite before design work begins -- a wrong frame wastes everything downstream\n2. **Approval gate (Step 8):** review the complete pitch before implementation starts\n\nBoth gates self-resolve with low-confidence defaults when running autonomously.\n\n### When to use this\n\n- After `wr.discovery` when you have a direction and need to translate it into a bounded task\n- Before `coding-task-workflow-agentic` when a task is fuzzy, could sprawl, or needs appetite-setting\n- When multiple people need to agree on what is being built before engineering starts\n- Any time you want the Shape Up circuit breaker: fixed time, variable scope, kill if it doesn't fit\n\n### When to skip this\n\n- The task is small, concrete, and clearly scoped -- go straight to Coding\n- Discovery already produced a bounded, implementable direction\n- You have a pre-written ticket or spec",
   "examples": [
@@ -21,7 +22,10 @@
         {
           "id": "frame_soundness",
           "purpose": "Problem names a specific person/role, describes a specific situation, states what they need, and states what fails today.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     },
@@ -32,7 +36,10 @@
         {
           "id": "solution_roughness",
           "purpose": "Elements describe user-visible surfaces, flows, and behavioral constraints -- not function signatures, data models, or implementation patterns.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     }
@@ -65,10 +72,14 @@
         "not_equals": true
       },
       "prompt": "Present the extracted problem framings and confirm the frame before any design work begins.\n\nShow:\n1. The candidate problem framings from Step 1\n2. Suggested appetite: xs (hours), s (1-2 days), m (3-7 days), l (1-2 weeks), xl (3-4 weeks)\n3. Open questions that need resolution\n\nAsk the user to:\n- Select or rewrite the problem statement as a specific story\n- Confirm the appetite\n- Answer critical open questions\n\n**Structural validation for frame_soundness=high:** the problem statement must name a specific person or role, describe a specific situation, state what they need, AND state what fails today. Abstract statements ('users want better X') are always frame_soundness=low.\n\nDo NOT proceed until the user confirms a specific-story problem statement.\n\n**If running autonomously with no user available:** pick the most specific candidate framing, set appetite to 's' as a safe default, record both in assumptionsLog with confidence 0.4, and advance. Flag for human review.\n\nCapture:\n- `problemStatement` (confirmed specific story)\n- `appetite` (object: {sizingBucket: 'xs'|'s'|'m'|'l'|'xl'} -- xs=hours, s=1-2 days, m=3-7 days, l=1-2 weeks, xl=3-4 weeks)\n- `resolvedQuestions`",
-      "assessmentRefs": ["frame-soundness"],
+      "assessmentRefs": [
+        "frame-soundness"
+      ],
       "assessmentConsequences": [
         {
-          "when": {"anyEqualsLevel": "low"},
+          "when": {
+            "anyEqualsLevel": "low"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "The problem statement is still abstract or solution-framed. It must name a specific person/role in a specific situation with a specific failure. Do not advance until confirmed."
@@ -105,10 +116,14 @@
         "not_equals": true
       },
       "prompt": "Expand the chosen shape into a breadboard and element list. Stay at the product level throughout.\n\n**Breadboard (words only):**\n- **Places** -- screens, dialogs, states, endpoints (from the user's perspective)\n- **Affordances** -- buttons, fields, actions -- listed under their place\n- **Connections** -- 'Place A → Place B when [user action]'\n\nNo visual layout. No code. No system internals. Words and arrows only.\n\n**Element list:**\nFor each element, one sentence classified as:\n- **Interface** -- something the user sees or interacts with (a surface, a flow, a visible state)\n- **Invariant** -- a behavioral constraint (a policy, a rule, what must always be true)\n- **Exclusion** -- functionality explicitly NOT included\n\nReject any element that:\n- Describes HOW to build something (implementation detail)\n- Uses vague modifiers without a concrete noun ('improve', 'better', 'scalable')\n\n**Structural validation for solution_roughness=high:** every element must be Interface, Invariant, or Exclusion describing product behavior -- not code structure, not technical implementation.\n\nCapture:\n- `breadboardMd` (breadboard in markdown)\n- `elements` (array: {name, description, classification: 'interface'|'invariant'|'exclusion'})",
-      "assessmentRefs": ["solution-roughness"],
+      "assessmentRefs": [
+        "solution-roughness"
+      ],
       "assessmentConsequences": [
         {
-          "when": {"anyEqualsLevel": "low"},
+          "when": {
+            "anyEqualsLevel": "low"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "One or more elements describe implementation details or contain vague modifiers. Rewrite: every element must describe what the feature does (Interface, Invariant, or Exclusion), not how it is built."
