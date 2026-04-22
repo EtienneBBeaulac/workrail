@@ -883,6 +883,8 @@ async function countActiveSessions(sessionsDir: string): Promise<number> {
  */
 const MAX_QUEUE_POLL_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+// NOTE: rotation path not covered by unit tests -- mocking os.homedir() requires
+// test infrastructure changes not currently in place.
 async function appendQueuePollLog(entry: Record<string, unknown>): Promise<void> {
   const logPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
   try {
