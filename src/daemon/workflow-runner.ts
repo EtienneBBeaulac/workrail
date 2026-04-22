@@ -32,7 +32,7 @@ import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import { AgentLoop } from "./agent-loop.js";
-import type { AgentTool, AgentToolResult, AgentEvent, AgentLoopCallbacks } from "./agent-loop.js";
+import type { AgentTool, AgentToolResult, AgentEvent, AgentLoopCallbacks, AgentInternalMessage } from "./agent-loop.js";
 import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
@@ -724,6 +724,31 @@ async function persistTokens(
   const tmp = `${sessionPath}.tmp`;
   await fs.writeFile(tmp, state, 'utf8');
   await fs.rename(tmp, sessionPath);
+}
+
+/**
+ * Append a batch of AgentInternalMessage values to a per-session conversation JSONL file.
+ *
+ * WHY fire-and-forget: conversation history is observability/crash-recovery data. A write
+ * failure must never affect the agent loop. Callers invoke this as void + .catch(() => {}).
+ *
+ * WHY JSONL (one JSON object per line): enables incremental delta appends, crash-tolerant
+ * reads (discard the last line if it is not valid JSON), and direct jq inspection.
+ *
+ * WHY append-only: preserves the valid prefix even if the daemon crashes mid-write. Phase B
+ * crash recovery uses loadValidatedPrefix semantics (discard invalid last line).
+ *
+ * @param filePath - Absolute path to the .jsonl file (created on first call if absent).
+ * @param messages - New messages since the last flush (the delta for this turn).
+ */
+async function appendConversationMessages(
+  filePath: string,
+  messages: ReadonlyArray<AgentInternalMessage>,
+): Promise<void> {
+  if (messages.length === 0) return;
+  const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n';
+  await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+  await fs.appendFile(filePath, lines, 'utf8');
 }
 
 /**
@@ -3820,6 +3845,15 @@ export async function runWorkflow(
   // Incremented on each turn_end event (one complete LLM response turn).
   let turnCount = 0;
 
+  // ---- Conversation history persistence ----
+  // Per-session JSONL file written incrementally after each turn_end and flushed
+  // in the finally block. Each line is a JSON.stringify(AgentInternalMessage).
+  // WHY initialized to 0: the first turn_end flush includes the initial user message
+  // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
+  // WHY fire-and-forget: write failures must never affect the agent loop.
+  const conversationPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}-conversation.jsonl`);
+  let lastFlushedMessageCount = 0;
+
   // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
   // Using steer() NOT followUp(): steer fires after each tool batch inside the
   // inner loop; followUp fires only when the agent would otherwise stop
@@ -3954,6 +3988,16 @@ export async function runWorkflow(
       });
     }
 
+    // ---- Conversation history: delta-append after each turn ----
+    // Flush any new messages since the last turn_end. Delta append (not full rewrite)
+    // keeps total I/O linear in turn count. Fire-and-forget: a write failure must never
+    // affect the session. lastFlushedMessageCount is updated synchronously so no
+    // second turn_end can double-flush the same messages.
+    const currentMessages = agent.state.messages;
+    const newMessages = currentMessages.slice(lastFlushedMessageCount);
+    lastFlushedMessageCount = currentMessages.length;
+    void appendConversationMessages(conversationPath, newMessages).catch(() => {});
+
     // If step-advance parts are queued and workflow is not yet complete, inject them.
     // WHY join with \n\n: each part is a full step prompt or context block. A blank
     // line between them gives the LLM a clear visual separation without merging content.
@@ -4018,6 +4062,13 @@ export async function runWorkflow(
     stopReason = 'error';
   } finally {
     unsubscribe();
+    // ---- Conversation history: final flush ----
+    // Catch any remaining messages not covered by the last turn_end (e.g. error
+    // messages appended by _appendErrorMessage() after an API error or abort).
+    // Fire-and-forget: write failures in finally must never propagate.
+    const remainingMessages = agent.state.messages.slice(lastFlushedMessageCount);
+    void appendConversationMessages(conversationPath, remainingMessages).catch(() => {});
+
     // Cancel the wall-clock timer so it does not fire after successful completion
     // and mutate the closed-over timeoutReason variable. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
@@ -4160,6 +4211,10 @@ export async function runWorkflow(
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
       // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
     });
+    // Delete conversation history on clean completion -- no debug value after success.
+    // WHY co-located with sidecar deletion: same lifecycle, same worktree guard.
+    // Crashes and errors leave the file intact for post-hoc inspection and Phase B.
+    await fs.unlink(conversationPath).catch(() => {});
   }
 
   emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...withWorkrailSession(workrailSessionId) });
