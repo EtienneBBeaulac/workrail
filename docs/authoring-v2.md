@@ -217,6 +217,57 @@ Important implementation detail:
 - The default durable output is a short recap in `output.notesMarkdown` (recorded by the agent when advancing or checkpointing).
 - Structured artifacts are **optional** and must never be required for a workflow to be usable.
 
+### Session analytics context keys (`metrics_*`)
+
+The `projectSessionMetricsV2` projection reads a set of `metrics_*` context keys to build session attribution data. These keys are not validated by the engine -- nothing will fail if they are absent or malformed. But absent or wrong data produces permanently incorrect analytics with no error or warning.
+
+Set these keys in your step's `Capture:` footer.
+
+**SHA accumulation rule (critical)**
+
+`context_set` uses shallow merge: each key is replaced, not merged. If you set `metrics_commit_shas: ["abc123"]` at step 5 and then set `metrics_commit_shas: ["def456"]` at step 9, the value at step 9 is `["def456"]` -- `abc123` is permanently gone.
+
+Every step that adds commits must send the **full accumulated list** -- read the current value from context, append new SHAs, and send the complete list.
+
+```
+Example (correct): metrics_commit_shas: ["abc123", "def456", "ghi789"]
+Example (wrong):   metrics_commit_shas: ["ghi789"]  -- loses abc123 and def456
+```
+
+**Commit step `Capture:` footer** (copy this into every step that creates commits):
+
+```
+Capture (every time you commit code):
+- `metrics_commit_shas`: full accumulated list of ALL commit SHAs this session (read
+  current value from context, append new SHAs, send complete list)
+
+  WARNING: context uses shallow merge -- sending only the new SHAs will overwrite and
+  permanently lose earlier ones. Always send the full accumulated list.
+
+  Example (correct): metrics_commit_shas: ["abc123", "def456", "ghi789"]
+  Example (wrong):   metrics_commit_shas: ["ghi789"]  -- loses abc123 and def456
+```
+
+**Final handoff `Capture:` footer** (copy this into your final step):
+
+```
+Capture (at final handoff only):
+- `metrics_outcome`: one of 'success' | 'partial' | 'abandoned' | 'error'
+  - success: all acceptance criteria met, PR opened or merged
+  - partial: some criteria met but scope was reduced or items deferred
+  - abandoned: session stopped before meaningful completion
+  - error: session failed due to an unrecoverable error
+- `metrics_pr_numbers`: array of integer PR numbers created or updated (e.g. [123, 456])
+  - Must be integers, not URLs or strings
+- `metrics_files_changed`: integer count of files modified across all commits
+- `metrics_lines_added`: integer count of lines added across all commits
+- `metrics_lines_removed`: integer count of lines removed across all commits
+- `metrics_commit_shas`: final complete accumulated list of ALL commit SHAs this session
+  (same accumulation rule as commit steps -- full list, not just final-step SHAs)
+```
+
+Note: adding these keys to existing workflow JSON files (`coding-task-workflow-agentic.json` and others) is a separate follow-on PR. The templates above let you add them to new or custom workflows now.
+
 ### Assessment-gate authoring (v1)
 
 Assessment gates are now a shipped authoring/runtime feature, but the first slice is intentionally narrow.

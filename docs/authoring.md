@@ -710,6 +710,28 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Saying a workflow is valid because the file parses even though registry resolution or runtime compilation can still fail
 
 
+## Context key conventions
+### metrics-context-accumulation
+- **Level**: recommended
+- **Status**: active
+- **Scope**: step.context-capture
+- **Rule**: When a step captures metrics_commit_shas, send the FULL accumulated SHA list every time -- not just the SHAs from the current step. context_set uses shallow merge: each key is replaced, not merged. Sending a partial list silently loses earlier SHAs.
+- **Why**: mergeContext uses shallow merge: metrics_commit_shas: ['abc'] at step 5 followed by ['def'] at step 9 permanently loses 'abc'. Flat keys require accumulation discipline to produce correct analytics attribution.
+- **Enforced by**: advisory
+
+**Checks**
+- Any step that adds new commits must first read the current metrics_commit_shas from context, append the new SHAs, and send the complete accumulated list.
+- metrics_outcome must be set only at final handoff steps, not at intermediate commit steps.
+- metrics_pr_numbers must be an array of integers (PR numbers), not URLs or strings.
+- Use flat top-level keys (metrics_commit_shas, not context.metrics.commit_shas) to exploit per-key merge semantics.
+- When starting to track mid-session, capture what you have and accumulate forward from that point.
+
+**Anti-patterns**
+- Sending only the current step's commits: metrics_commit_shas: ['def456'] when 'abc123' was set at an earlier step
+- Using a nested key context.metrics.commit_shas instead of the flat key metrics_commit_shas
+- Setting metrics_outcome at intermediate steps before the session outcome is known
+
+
 ## Artifacts and planning surfaces
 ### artifact-canonicality
 - **Level**: recommended
