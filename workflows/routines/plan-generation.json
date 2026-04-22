@@ -2,6 +2,7 @@
   "id": "routine-plan-generation",
   "name": "Plan Generation Routine",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "description": "Generates a complete candidate implementation plan from a neutral fact packet. Designed for parallel use across multiple perspectives so the main agent can compare or synthesize plans.",
   "clarificationPrompts": [
     "What problem should this plan solve?",

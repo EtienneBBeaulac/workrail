@@ -2,6 +2,7 @@
   "id": "routine-hypothesis-challenge",
   "name": "Hypothesis Challenge Routine",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "description": "Lean adversarial review of a hypothesis, recommendation, or diagnosis. Produces the strongest counter-argument, exposes weak assumptions and evidence gaps, identifies likely failure modes, and defines the critical tests needed to keep, revise, or reject the current claim.",
   "clarificationPrompts": [
     "What hypothesis, recommendation, or diagnosis should I challenge?",
@@ -49,9 +50,18 @@
       "title": "Step 4: Generate Alternative Explanations and Critical Tests",
       "runCondition": {
         "or": [
-          { "var": "depth", "equals": "THOROUGH" },
-          { "var": "rigorMode", "equals": "THOROUGH" },
-          { "var": "rigor", "gte": 5 }
+          {
+            "var": "depth",
+            "equals": "THOROUGH"
+          },
+          {
+            "var": "rigorMode",
+            "equals": "THOROUGH"
+          },
+          {
+            "var": "rigor",
+            "gte": 5
+          }
         ]
       },
       "prompt": "For THOROUGH review, go beyond the primary counter-argument into alternatives and discrimination strategy.\n\nProduce:\n- the 1-2 strongest alternative explanations or competing hypotheses\n- why each might beat the current claim\n- the critical tests, observations, or traces that would discriminate between them\n- what result would cause you to keep, revise, or reject the current claim\n\nThis step exists to make THOROUGH meaningfully deeper than STANDARD, not just wordier.",

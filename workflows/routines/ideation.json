@@ -2,6 +2,7 @@
   "id": "routine-ideation",
   "name": "Ideation Routine",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "description": "Systematic idea generation routine for exploring solution spaces and generating diverse approaches to problems. Supports different perspectives (simplicity, performance, maintainability, etc.) for parallel ideation. Expected inputs: problem, constraints, context, perspective (optional), quantity, deliverable name.",
   "steps": [
     {
@@ -70,4 +71,3 @@
     }
   ]
 }
-

@@ -2,6 +2,7 @@
   "id": "routine-context-gathering",
   "name": "Context Gathering Routine",
   "version": "2.1.0",
+  "metricsProfile": "none",
   "description": "Systematic codebase exploration using an Ideate -> Plan -> Execute strategy. Configurable depth levels (0-4) allow for progressively deeper understanding.",
   "clarificationPrompts": [
     "What specific area or files should I investigate?",

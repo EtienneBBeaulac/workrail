@@ -2,6 +2,7 @@
   "id": "routine-plan-analysis",
   "name": "Plan Analysis Routine",
   "version": "1.1.0",
+  "metricsProfile": "none",
   "description": "Validates implementation plans using an Ideate -> Plan -> Execute strategy. Checks for completeness, pattern adherence, and risk. Designed for delegation to Plan Analyzer subagent.",
   "clarificationPrompts": [
     "What plan file should I analyze? (e.g., implementation-plan.md)",
