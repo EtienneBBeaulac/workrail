@@ -281,13 +281,11 @@ describe('runDelivery', () => {
 
   describe('commit + PR (autoOpenPR: true)', () => {
     it('runs git add, git commit, then gh pr create with --body-file and returns pr_opened', async () => {
-      // 5 calls: git add, git commit, gh pr create, gh label create, gh pr edit
+      // 3 calls: git add, git commit, gh pr create
       const exec = vi.fn()
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
         .mockResolvedValueOnce({ stdout: '[main abc5678] feat(mcp): auto-commit\n 2 files changed', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/42\n', stderr: '' }) // gh pr create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // gh label create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) as ExecFn; // gh pr edit
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/42\n', stderr: '' }) as ExecFn; // gh pr create
 
       const result = await runDelivery(
         makeArtifact(),
@@ -300,7 +298,7 @@ describe('runDelivery', () => {
         expect(result.url).toBe('https://github.com/owner/repo/pull/42');
       }
 
-      expect(exec).toHaveBeenCalledTimes(5);
+      expect(exec).toHaveBeenCalledTimes(3);
 
       const [prFile, prArgs] = (exec as ReturnType<typeof vi.fn>).mock.calls[2] as [string, string[]];
       expect(prFile).toBe('gh');
@@ -343,9 +341,7 @@ describe('runDelivery', () => {
       const exec = vi.fn()
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
         .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): auto-commit', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) // gh pr create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // gh label create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) as ExecFn; // gh pr edit
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) as ExecFn; // gh pr create
 
       await runDelivery(
         makeArtifact({ prTitle: 'feat(mcp): add auto-commit support' }),
@@ -362,9 +358,7 @@ describe('runDelivery', () => {
       const exec = vi.fn()
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
         .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): auto-commit', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) // gh pr create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // gh label create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) as ExecFn; // gh pr edit
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) as ExecFn; // gh pr create
 
       await runDelivery(
         makeArtifact({ prTitle: '[WT] feat(mcp): add auto-commit support' }),
@@ -425,73 +419,6 @@ describe('runDelivery', () => {
     });
   });
 
-  describe('gh pr edit --add-label called after PR creation', () => {
-    it('calls gh label create then gh pr edit with the PR URL after successful pr create', async () => {
-      const prUrl = 'https://github.com/owner/repo/pull/99';
-      const exec = vi.fn()
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
-        .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): auto-commit', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: `${prUrl}\n`, stderr: '' }) // gh pr create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // gh label create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) as ExecFn; // gh pr edit
-
-      await runDelivery(
-        makeArtifact(),
-        '/workspace',
-        makeFlags({ autoCommit: true, autoOpenPR: true }),
-        exec,
-      );
-
-      const [labelFile, labelArgs] = (exec as ReturnType<typeof vi.fn>).mock.calls[3] as [string, string[]];
-      expect(labelFile).toBe('gh');
-      expect(labelArgs[0]).toBe('label');
-      expect(labelArgs[1]).toBe('create');
-      expect(labelArgs[2]).toBe('worktrain:generated');
-
-      const [editFile, editArgs] = (exec as ReturnType<typeof vi.fn>).mock.calls[4] as [string, string[]];
-      expect(editFile).toBe('gh');
-      expect(editArgs[0]).toBe('pr');
-      expect(editArgs[1]).toBe('edit');
-      expect(editArgs[2]).toBe(prUrl);
-      expect(editArgs[3]).toBe('--add-label');
-      expect(editArgs[4]).toBe('worktrain:generated');
-    });
-
-    it('does not call gh pr edit when prUrl is empty', async () => {
-      const exec = vi.fn()
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
-        .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): auto-commit', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) as ExecFn; // gh pr create (empty output)
-
-      await runDelivery(
-        makeArtifact(),
-        '/workspace',
-        makeFlags({ autoCommit: true, autoOpenPR: true }),
-        exec,
-      );
-
-      expect(exec).toHaveBeenCalledTimes(3);
-    });
-
-    it('label failure is non-fatal -- still returns pr_opened', async () => {
-      const exec = vi.fn()
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
-        .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): auto-commit', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) // gh pr create
-        .mockRejectedValueOnce(new Error('gh: label already exists')) // gh label create (fails)
-        .mockRejectedValueOnce(new Error('gh: permission denied')) as ExecFn; // gh pr edit (fails)
-
-      const result = await runDelivery(
-        makeArtifact(),
-        '/workspace',
-        makeFlags({ autoCommit: true, autoOpenPR: true }),
-        exec,
-      );
-
-      expect(result._tag).toBe('pr_opened');
-    });
-  });
-
   describe('per-command identity (botIdentity)', () => {
     it('passes -c user.name and -c user.email flags to git commit when botIdentity is set', async () => {
       const exec = vi.fn()
@@ -545,9 +472,7 @@ describe('runDelivery', () => {
       const exec = vi.fn()
         .mockResolvedValueOnce({ stdout: '', stderr: '' }) // git add
         .mockResolvedValueOnce({ stdout: '[main abc1234] feat(mcp): auto-commit', stderr: '' }) // git commit
-        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) // gh pr create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) // gh label create
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }) as ExecFn; // gh pr edit
+        .mockResolvedValueOnce({ stdout: 'https://github.com/owner/repo/pull/1\n', stderr: '' }) as ExecFn; // gh pr create
 
       await runDelivery(
         makeArtifact(),

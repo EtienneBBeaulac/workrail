@@ -503,12 +503,6 @@ export class PollingScheduler {
       const excludedLabel = queueConfig.excludeLabels.find((el) => issueLabels.includes(el));
       if (excludedLabel) { skipped.push({ issue, reason: `excluded_label: ${excludedLabel}` }); continue; }
 
-      // H3: worktrain:in-progress label (active/skip -- not a maturity level)
-      if (issueLabels.includes('worktrain:in-progress')) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
-
-      // H3: session ID pattern in body (active/skip)
-      if (/sess_[a-z0-9]+/.test(issue.body)) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
-
       // Fast in-memory idempotency check (I3: runs before sidecar scan).
       // Guards against duplicate dispatch within a single process lifetime for issues
       // whose dispatchAdaptivePipeline() Promise is still in flight.
@@ -620,9 +614,6 @@ export class PollingScheduler {
 
     // Capture the Promise without awaiting it (fire-and-forget semantics preserved).
     // I2: Cleanup in BOTH .then() and .catch() -- unconditional regardless of outcome.
-    // WHY Promise<PipelineOutcome> (not Promise<unknown>): the outcome is inspected
-    // to apply worktrain:in-progress label on escalation/dry_run, preventing re-selection.
-    // Without this type, the outcome is silently discarded (discovery-loop-fix, RC2).
     const dispatchP = (this.router as {
       dispatchAdaptivePipeline: (
         goal: string,
@@ -636,15 +627,9 @@ export class PollingScheduler {
     );
     const issueNumber = top.issue.number;
     void dispatchP
-      .then((outcome: PipelineOutcome) => {
+      .then(() => {
         this.dispatchingIssues.delete(issueNumber);
         console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=completed`);
-        // Apply worktrain:in-progress label on escalation or dry_run to prevent re-selection.
-        // WHY worktrain:in-progress (not a new label): already in excludeLabels (line 505).
-        // A new label has zero effect unless the user also adds it to queueConfig.excludeLabels.
-        if (outcome.kind === 'escalated' || outcome.kind === 'dry_run') {
-          void this.applyGitHubLabel(issueNumber, 'worktrain:in-progress', queueConfig.token, source.repo);
-        }
         // Delete sidecar on completion (pipeline resolved).
         void fs.unlink(sidecarPath).catch(() => {});
       })
@@ -667,45 +652,6 @@ export class PollingScheduler {
     await appendQueuePollLog({ event: 'poll_cycle_complete', selected: 1, skipped: skipped.length + candidates.length - 1, elapsed, ts: new Date().toISOString() });
   }
 
-  /**
-   * Apply a label to a GitHub issue via the GitHub API.
-   *
-   * Non-fatal: logs warn and returns on any error. Does not throw.
-   * WHY non-fatal: label application is a best-effort operation. The primary loop-prevention
-   * mechanism is the in-memory dispatchingIssues set and the existing excludeLabels check.
-   * A label failure should not disrupt the poll cycle or lose the pipeline outcome.
-   *
-   * Uses the injected fetchFn if available (for testing), falls back to globalThis.fetch.
-   */
-  private async applyGitHubLabel(
-    issueNumber: number,
-    label: string,
-    token: string,
-    repo: string,
-  ): Promise<void> {
-    const fetchFn = (this.fetchFn as QueueFetchFn | undefined) ?? globalThis.fetch;
-    const url = `https://api.github.com/repos/${repo}/issues/${issueNumber}/labels`;
-    try {
-      const response = await fetchFn(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github+json',
-          'Content-Type': 'application/json',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
-        body: JSON.stringify({ labels: [label] }),
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        console.warn(`[QueuePoll] Failed to apply label '${label}' to issue #${issueNumber}: HTTP ${response.status} ${text.slice(0, 200)}`);
-      } else {
-        console.log(`[QueuePoll] Applied label '${label}' to issue #${issueNumber}`);
-      }
-    } catch (e: unknown) {
-      console.warn(`[QueuePoll] Failed to apply label '${label}' to issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------

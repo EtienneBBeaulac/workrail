@@ -3,8 +3,7 @@
  *
  * Covers:
  * - Fix 1: spawnSession forwards agentConfig.maxSessionMinutes to routerRef.dispatch()
- * - Fix 2: On PipelineOutcome.kind === 'escalated', applyGitHubLabel is called with worktrain:in-progress
- * - Fix 2: On PipelineOutcome.kind === 'merged', no label is applied
+ * - Fix 2: No GitHub label is applied regardless of PipelineOutcome kind (label writes removed)
  * - Fix 3: Issue-ownership sidecar is written before dispatch and deleted on completion
  * - Fix 3: Expired sidecar returns 'clear' from checkIdempotency
  */
@@ -181,10 +180,10 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
 });
 
 // ---------------------------------------------------------------------------
-// Fix 2: PipelineOutcome inspection and label application
+// Fix 2: No label writes on any PipelineOutcome
 // ---------------------------------------------------------------------------
 
-describe('Fix 2: applyGitHubLabel called on escalated/dry_run outcome', () => {
+describe('Fix 2: no GitHub label is applied for any pipeline outcome', () => {
   beforeEach(async () => {
     // Clean up any sidecar files that may have been written to the real sessions dir
     // by a previous test (sidecar is written to ~/.workrail/daemon-sessions/).
@@ -201,11 +200,11 @@ describe('Fix 2: applyGitHubLabel called on escalated/dry_run outcome', () => {
     vi.clearAllMocks();
   });
 
-  it('applies worktrain:in-progress label when outcome is escalated', async () => {
+  it('does NOT apply any label when outcome is escalated', async () => {
     const tmpDir = await makeTmpDir();
     const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
 
-    // Capture label API calls
+    // Capture any label API calls (there should be none)
     const labelCalls: Array<{ url: string; body: string }> = [];
     const fetchFn: QueueFetchFn = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
       if (typeof url === 'string' && url.includes('/labels')) {
@@ -231,20 +230,16 @@ describe('Fix 2: applyGitHubLabel called on escalated/dry_run outcome', () => {
 
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
 
-    // Drain microtasks so .then() handler fires (which calls applyGitHubLabel)
+    // Drain microtasks so .then() handler fires
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-
-    // Wait a tick for the label API call to complete
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    expect(labelCalls).toHaveLength(1);
-    expect(labelCalls[0]?.url).toContain('/repos/acme/my-project/issues/393/labels');
-    expect(labelCalls[0]?.body).toContain('worktrain:in-progress');
+    expect(labelCalls).toHaveLength(0);
   });
 
-  it('applies worktrain:in-progress label when outcome is dry_run', async () => {
+  it('does NOT apply any label when outcome is dry_run', async () => {
     const tmpDir = await makeTmpDir();
     const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
 
@@ -273,11 +268,10 @@ describe('Fix 2: applyGitHubLabel called on escalated/dry_run outcome', () => {
     await Promise.resolve();
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    expect(labelCalls).toHaveLength(1);
-    expect(labelCalls[0]?.body).toContain('worktrain:in-progress');
+    expect(labelCalls).toHaveLength(0);
   });
 
-  it('does NOT apply label when outcome is merged', async () => {
+  it('does NOT apply any label when outcome is merged', async () => {
     const tmpDir = await makeTmpDir();
     const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
 
@@ -306,9 +300,7 @@ describe('Fix 2: applyGitHubLabel called on escalated/dry_run outcome', () => {
     await Promise.resolve();
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // No label calls for merged outcome
-    const labelApiCalls = labelCalls.filter(c => c.url.includes('/labels'));
-    expect(labelApiCalls).toHaveLength(0);
+    expect(labelCalls).toHaveLength(0);
   });
 });
 
