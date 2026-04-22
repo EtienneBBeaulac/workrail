@@ -1,4 +1,5 @@
 // Mirror of console-types.ts from the backend (Console DTOs)
+// Keep in sync with src/v2/usecases/console-types.ts and src/v2/projections/session-metrics.ts
 
 /** Status of an individual run within a session (execution-level). */
 export type ConsoleRunStatus = 'in_progress' | 'complete' | 'complete_with_gaps' | 'blocked';
@@ -76,6 +77,27 @@ export interface ConsoleWorktreeListResponse {
 }
 export type ConsoleSessionHealth = 'healthy' | 'corrupt';
 
+/**
+ * Structured outcome metrics for a completed session run.
+ * Mirror of SessionMetricsV2 in src/v2/projections/session-metrics.ts.
+ * Keep in sync with the backend definition.
+ */
+export interface SessionMetricsV2 {
+  // From run_completed event (engine-authoritative)
+  readonly startGitSha: string | null;
+  readonly endGitSha: string | null;
+  readonly gitBranch: string | null;
+  readonly agentCommitShas: readonly string[];
+  readonly captureConfidence: 'high' | 'medium' | 'none';
+  readonly durationMs: number | undefined;
+  // From context_set metrics_* keys (agent-reported, each independently nullable)
+  readonly outcome: 'success' | 'partial' | 'abandoned' | 'error' | null;
+  readonly prNumbers: readonly number[];
+  readonly filesChanged: number | null;
+  readonly linesAdded: number | null;
+  readonly linesRemoved: number | null;
+}
+
 export interface ConsoleSessionSummary {
   readonly sessionId: string;
   readonly sessionTitle: string | null;
@@ -102,6 +124,9 @@ export interface ConsoleSessionSummary {
   readonly isLive: boolean;
   /** Session ID of the parent coordinator session. null for root sessions. */
   readonly parentSessionId: string | null;
+  /** Structured outcome metrics for the session's first completed run.
+   * Null for sessions still in progress or sessions that predate the run_completed feature. */
+  readonly metrics: SessionMetricsV2 | null;
 }
 
 export interface ConsoleSessionListResponse {
