@@ -202,6 +202,7 @@ describe('loadSegmentsRecursive - parallel reads preserve event order', () => {
         kind: 'session_created',
         dedupeKey: `session_created:${sessionId}:${i}`,
         data: {},
+        timestampMs: Date.now(),
       };
 
       // Write segment file
@@ -288,6 +289,7 @@ describe('appendManifestRecords - single write when snapshot pins are present', 
         workflowHash: 'sha256:5947229239ac2966c1099d6d74f4448c064e54ae25959eaebfd89cec073bdc11',
         snapshotRef,
       },
+      timestampMs: Date.now(),
     };
 
     const res = await gate.withHealthySessionLock(sessionId, (w) =>
@@ -335,6 +337,7 @@ describe('appendManifestRecords - single write when snapshot pins are present', 
       kind: 'session_created',
       dedupeKey: `session_created:${sessionId}`,
       data: {},
+      timestampMs: Date.now(),
     };
 
     const res = await gate.withHealthySessionLock(sessionId, (w) =>
@@ -386,6 +389,7 @@ describe('mkdirp caching - called at most once per session events dir', () => {
       kind: 'session_created',
       dedupeKey: `session_created:${sessionId}`,
       data: {},
+      timestampMs: Date.now(),
     };
     const res1 = await gate.withHealthySessionLock(sessionId, (w) =>
       store.append(w, { events: [evt0], snapshotPins: [] })
@@ -407,6 +411,7 @@ describe('mkdirp caching - called at most once per session events dir', () => {
         workflowSourceKind: 'project',
         workflowSourceRef: 'test-wf',
       },
+      timestampMs: Date.now(),
     };
     const res2 = await gate.withHealthySessionLock(sessionId, (w) =>
       store.append(w, { events: [evt1], snapshotPins: [] })

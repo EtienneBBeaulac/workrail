@@ -56,6 +56,7 @@ describe('Session store idempotency (all-or-nothing)', () => {
         kind: 'session_created',
         dedupeKey: 'session_created:sess_partial_test',
         data: {},
+        timestampMs: Date.now(),
       };
 
       const event2: DomainEventV1 = {
@@ -72,6 +73,7 @@ describe('Session store idempotency (all-or-nothing)', () => {
           workflowSourceKind: 'project',
           workflowSourceRef: 'test',
         },
+        timestampMs: Date.now(),
       };
 
       const res1 = await gate.withHealthySessionLock(sessionId, (lock) =>
@@ -94,6 +96,7 @@ describe('Session store idempotency (all-or-nothing)', () => {
           value: { type: 'short_string', value: 'main' },
           confidence: 'high',
         },
+        timestampMs: Date.now(),
       };
 
       const res2 = await gate.withHealthySessionLock(sessionId, (lock) =>
@@ -136,6 +139,7 @@ describe('Session store idempotency (all-or-nothing)', () => {
           kind: 'session_created',
           dedupeKey: 'session_created:sess_full_test',
           data: {},
+          timestampMs: Date.now(),
         },
       ];
 
