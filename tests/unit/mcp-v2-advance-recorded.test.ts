@@ -169,6 +169,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
                 kind: 'session_created',
                 dedupeKey: `session_created:${sessionId}`,
                 data: {},
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -179,6 +180,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'bug-investigation', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/bug.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -189,6 +191,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],
@@ -303,6 +306,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
                 kind: 'session_created',
                 dedupeKey: `session_created:${sessionId}`,
                 data: {},
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -313,6 +317,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'bug-investigation', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/bug.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -323,6 +328,7 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],

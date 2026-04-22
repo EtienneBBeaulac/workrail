@@ -35,6 +35,7 @@ function minimalEvent(index: number) {
     kind: 'session_created',
     dedupeKey: `session_created:sess_001:${String(index)}`,
     data: {},
+    timestampMs: Date.now(),
   };
 }
 
@@ -237,6 +238,7 @@ describe('validateBundle: Phase 4 — References', () => {
         workflowHash,
         snapshotRef,
       },
+      timestampMs: Date.now(),
     };
 
     // Build without the snapshot — should fail reference check
@@ -274,6 +276,7 @@ describe('validateBundle: Phase 4 — References', () => {
         workflowSourceKind: 'user',
         workflowSourceRef: '/path/to/workflow.json',
       },
+      timestampMs: Date.now(),
     };
 
     // Build with the run_started event but include the workflow
@@ -313,6 +316,7 @@ describe('validateBundle: Phase 4 — References', () => {
         workflowHash,
         snapshotRef,
       },
+      timestampMs: Date.now(),
     };
 
     const bundle = buildValidBundle({

@@ -94,6 +94,7 @@ function minimalEvent(index: number) {
     kind: 'session_created',
     dedupeKey: `session_created:sess_export_001:${String(index)}`,
     data: {},
+    timestampMs: Date.now(),
   };
 }
 

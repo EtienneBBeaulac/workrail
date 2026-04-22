@@ -173,7 +173,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
         .withHealthySessionLock(sessionId as any, (witness) =>
           store.append(witness, {
             events: [
-              { v: 1, eventId: 'evt_0', eventIndex: 0, sessionId, kind: 'session_created', dedupeKey: `session_created:${sessionId}`, data: {} },
+              { v: 1, eventId: 'evt_0', eventIndex: 0, sessionId, kind: 'session_created', dedupeKey: `session_created:${sessionId}`, data: {}, timestampMs: Date.now() },
               {
                 v: 1,
                 eventId: 'evt_1',
@@ -183,6 +183,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'test-wf', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/test.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -193,6 +194,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -203,6 +205,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `advance_recorded:${sessionId}:${nodeId}:${attemptId}`,
                 scope: { runId, nodeId },
                 data: { attemptId, intent: 'ack_pending', outcome: { kind: 'advanced', toNodeId: 'node_missing' } },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [{ snapshotRef, eventIndex: 2, createdByEventId: 'evt_2' }],
@@ -300,7 +303,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
         .withHealthySessionLock(sessionId as any, (witness) =>
           store.append(witness, {
             events: [
-              { v: 1, eventId: 'evt_0', eventIndex: 0, sessionId, kind: 'session_created', dedupeKey: `session_created:${sessionId}`, data: {} },
+              { v: 1, eventId: 'evt_0', eventIndex: 0, sessionId, kind: 'session_created', dedupeKey: `session_created:${sessionId}`, data: {}, timestampMs: Date.now() },
               {
                 v: 1,
                 eventId: 'evt_1',
@@ -310,6 +313,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `run_started:${sessionId}:${runId}`,
                 scope: { runId },
                 data: { workflowId: 'test-wf', workflowHash, workflowSourceKind: 'project', workflowSourceRef: 'workflows/test.json' },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -320,6 +324,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId}`,
                 scope: { runId, nodeId },
                 data: { nodeKind: 'step', parentNodeId: null, workflowHash, snapshotRef: snapshotRef1 },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -330,6 +335,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `node_created:${sessionId}:${runId}:${nodeId2}`,
                 scope: { runId, nodeId: nodeId2 },
                 data: { nodeKind: 'step', parentNodeId: nodeId, workflowHash, snapshotRef: snapshotRef2 },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -340,6 +346,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `edge_created:${sessionId}:${runId}:${nodeId}:${nodeId2}`,
                 scope: { runId, nodeId },
                 data: { edgeKind: 'acked_step', fromNodeId: nodeId, toNodeId: nodeId2, cause: { kind: 'idempotent_replay', eventId: 'evt_5' } },
+                timestampMs: Date.now(),
               },
               {
                 v: 1,
@@ -350,6 +357,7 @@ describe('v2 replay is fact-returning and fail-closed (Phase 3)', () => {
                 dedupeKey: `advance_recorded:${sessionId}:${nodeId}:${attemptId}`,
                 scope: { runId, nodeId },
                 data: { attemptId, intent: 'ack_pending', outcome: { kind: 'advanced', toNodeId: nodeId2 } },
+                timestampMs: Date.now(),
               },
             ] as any,
             snapshotPins: [
