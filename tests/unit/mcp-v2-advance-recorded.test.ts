@@ -225,6 +225,8 @@ describe('v2 continue_workflow (ack path) records advance_recorded idempotently'
       expect(truth.events.filter((e) => e.kind === 'edge_created').length).toBe(1);
       // root node + advanced node
       expect(truth.events.filter((e) => e.kind === 'node_created').length).toBe(2);
+      // run_completed emitted on session completion
+      expect(truth.events.filter((e) => e.kind === 'run_completed').length).toBe(1);
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
     }

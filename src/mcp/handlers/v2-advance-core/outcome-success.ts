@@ -6,37 +6,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
-
-const execFileAsync = promisify(execFile);
-
-/**
- * Read a string observation value from the session event log.
- * Returns null if no matching observation_recorded event is found.
- */
-function readObservation(events: readonly import('../../../v2/durable-core/schemas/session/index.js').DomainEventV1[], key: string): string | null {
-  for (const e of events) {
-    if (e.kind !== 'observation_recorded') continue;
-    const d = e.data as Record<string, unknown>;
-    if (d['key'] !== key) continue;
-    const val = d['value'] as Record<string, unknown> | undefined;
-    if (val && typeof val['value'] === 'string') return val['value'];
-  }
-  return null;
-}
-
-/**
- * Resolve endGitSha by running `git rev-parse HEAD` in repoRoot.
- * Best-effort: returns null on any failure (git not found, not a git repo, timeout).
- */
-async function resolveEndGitSha(repoRoot: string | null): Promise<string | null> {
-  if (!repoRoot) return null;
-  try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, timeout: 5000 });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-}
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
@@ -67,6 +36,41 @@ import type { AdvanceMode, AdvanceContext, ComputedAdvanceResults, AdvanceCorePo
 import type { ValidatedAdvanceInputs } from './input-validation.js';
 import { buildAndAppendPlan, buildNotesOutputs, buildArtifactOutputs } from './event-builders.js';
 import { buildAssessmentRecordedEvent } from '../../../v2/durable-core/domain/assessment-recorded-event-builder.js';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Read a string observation value from the session event log.
+ * Returns null if no matching observation_recorded event is found.
+ *
+ * WHY direct field access (no cast): after `e.kind === 'observation_recorded'` narrows
+ * the union, `e.data` is typed as the observation_recorded data shape. All four value
+ * types (`short_string`, `git_sha1`, `sha256`, `path`) have `.value: string`.
+ */
+function readObservation(events: readonly DomainEventV1[], key: string): string | null {
+  for (const e of events) {
+    if (e.kind !== 'observation_recorded') continue;
+    if (e.data.key !== key) continue;
+    return e.data.value.value;
+  }
+  return null;
+}
+
+/**
+ * Resolve endGitSha by running `git rev-parse HEAD` in repoRoot.
+ * Best-effort: returns null on any failure (git not found, not a git repo, timeout).
+ * WHY 2000ms timeout: sessions complete in the MCP response path; a slow git call
+ * should not add more than 2s of latency to session completion.
+ */
+async function resolveEndGitSha(repoRoot: string | null): Promise<string | null> {
+  if (!repoRoot) return null;
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, timeout: 2000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
