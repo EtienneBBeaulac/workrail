@@ -50,6 +50,10 @@ export const DomainEventEnvelopeV1Schema = z.object({
     })
     .optional(),
   data: JsonValueSchema,
+  // Wall-clock timestamp (ms since Unix epoch) at event construction time.
+  // Optional during the sub-step (a) transition window; required after backfill (sub-step b).
+  // Used for session duration computation: durationMs = lastEvent.timestampMs - firstEvent.timestampMs.
+  timestampMs: z.number().int().positive().optional(),
 });
 
 /**

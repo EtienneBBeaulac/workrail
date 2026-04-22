@@ -34,7 +34,7 @@ import type { ValidatedAdvanceInputs } from './input-validation.js';
 import { buildAndAppendPlan, buildNotesOutputs, buildArtifactOutputs } from './event-builders.js';
 import { buildAssessmentRecordedEvent } from '../../../v2/durable-core/domain/assessment-recorded-event-builder.js';
 
-type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 /** The toNodeKind to use when the advance succeeds (not blocked). */
 function successNodeKind(mode: AdvanceMode): 'step' | undefined {

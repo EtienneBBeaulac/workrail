@@ -34,7 +34,7 @@ type BuildAppendPlanArgs = {
   readonly currentNodeId: NodeId;
   readonly attemptId: AttemptId;
   readonly workflowHash: WorkflowHash;
-  readonly extraEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId'>[];
+  readonly extraEventsToAppend: readonly Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>[];
   readonly sessionStore: import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2;
   readonly idFactory: AdvanceCorePorts['idFactory'];
   readonly lock: WithHealthySessionLock;

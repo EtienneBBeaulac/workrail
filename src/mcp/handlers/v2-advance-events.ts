@@ -24,7 +24,7 @@ import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 /** Type-safe constructor for partial events — avoids `as` casts at call sites. */
 function partialEvent(fields: PartialEvent): PartialEvent {
