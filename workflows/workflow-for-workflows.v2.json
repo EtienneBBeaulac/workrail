@@ -671,6 +671,31 @@
       "requireConfirmation": false
     },
     {
+      "id": "phase-7b-declare-metrics-profile",
+      "title": "Phase 7b: Declare metricsProfile",
+      "promptBlocks": {
+        "goal": "Declare the metricsProfile field in the authored workflow JSON, or explicitly justify omitting it. The metricsProfile field enables engine-injected metrics instrumentation footers in step prompts. When set, the engine injects context key accumulation reminders into every step prompt -- guiding compliant agents to report outcome, commit SHAs, PR numbers, and diff stats at session completion. Without this field, captureConfidence is always 'none' and no session metrics are collected.",
+        "procedure": [
+          "Choose the correct profile based on what the workflow produces:",
+          "  - 'coding': the workflow produces code commits. Use for implementation, refactoring, bug-fix, and migration workflows.",
+          "  - 'review': the workflow produces a review decision on a PR or MR. Use for code review, audit, and change validation workflows.",
+          "  - 'research': the workflow produces a finding or recommendation but no code commits. Use for investigation, diagnosis, and analysis workflows.",
+          "  - 'none' or omit: the workflow is a meta-workflow, authoring tool, utility, or otherwise produces no measurable outcome. Explicitly document the reason in your notes.",
+          "Add `\"metricsProfile\": \"<profile>\"` as a top-level field in the workflow JSON, after `recommendedPreferences` if that field exists.",
+          "If omitting the field, record the justification in your notes so the decision is auditable."
+        ],
+        "constraints": [
+          "Do not invent a new profile value. The closed set is: 'coding', 'review', 'research', 'none'.",
+          "The engine does NOT derive the profile from tags automatically. You must set it explicitly.",
+          "workflow-for-workflows itself is a meta-workflow -- it produces a workflow JSON, not commits or review decisions. Set 'none' or omit."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "State the chosen metricsProfile and a one-line justification. If omitting, explain why."
+        }
+      },
+      "requireConfirmation": false
+    },
+    {
       "id": "phase-7-final-trust-handoff",
       "title": "Phase 7: Final Trust Handoff",
       "promptBlocks": {

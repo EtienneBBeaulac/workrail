@@ -219,22 +219,47 @@ Important implementation detail:
 
 ### Session analytics context keys (`metrics_*`)
 
-The `projectSessionMetricsV2` projection (planned -- not yet implemented) reads a set of `metrics_*` context keys to build session attribution data. These keys are not validated by the engine -- nothing will fail if they are absent or malformed. But absent or wrong data produces permanently incorrect analytics with no error or warning.
+The engine reads `metrics_*` context keys from the final `continue_workflow` call to build session attribution data for the `run_completed` event. These keys feed `captureConfidence`, `agentCommitShas`, and related fields.
 
-Set these keys in your step's `Capture:` footer.
+**Recommended approach: set `metricsProfile` at workflow level**
+
+The simplest way to instrument a workflow is to declare `metricsProfile` as a top-level field in the workflow JSON. The engine then injects the appropriate footer instructions into step prompts automatically -- no per-step `Capture:` text needed.
+
+```json
+{
+  "metricsProfile": "coding"
+}
+```
+
+Profile selection guide:
+
+| Profile | When to use | What the engine injects |
+|---|---|---|
+| `"coding"` | Workflow produces git commits (implementation, refactoring, bug-fix) | SHA accumulation reminder on every step; outcome/PR/diff reminder on final step |
+| `"review"` | Workflow produces a review decision on a PR or MR | PR numbers + outcome reminder on final step only |
+| `"research"` | Workflow produces a finding or recommendation but no commits | Outcome-only reminder on final step only |
+| `"none"` or absent | Meta-workflows, utilities, authoring tools | No injection -- existing behavior unchanged |
+
+The engine does NOT derive the profile from tags automatically. Authors must set this field explicitly. When using `workflow-for-workflows` to author or modernize a workflow, the `phase-7b` step will prompt you for this decision.
+
+**Final step detection**: The engine injects the final-step footer on the last top-level step, or on the exit step of a loop that is the last top-level step. A loop in a non-terminal position does not trigger the final-step footer on its exit step.
 
 **SHA accumulation rule (critical)**
 
 `context_set` uses shallow merge: each key is replaced, not merged. If you set `metrics_commit_shas: ["abc123"]` at step 5 and then set `metrics_commit_shas: ["def456"]` at step 9, the value at step 9 is `["def456"]` -- `abc123` is permanently gone.
 
-Every step that adds commits must send the **full accumulated list** -- read the current value from context, append new SHAs, and send the complete list.
+Every step that adds commits must send the **full accumulated list** -- read the current value from context, append new SHAs, and send the complete list. The engine-injected footer includes an explicit reminder of this rule.
 
 ```
 Example (correct): metrics_commit_shas: ["abc123", "def456", "ghi789"]
 Example (wrong):   metrics_commit_shas: ["ghi789"]  -- loses abc123 and def456
 ```
 
-**Commit step `Capture:` footer** (copy this into every step that creates commits):
+**Manual `Capture:` footers (if you cannot use `metricsProfile`)**
+
+If `metricsProfile` is not appropriate for your workflow, add these footers manually.
+
+Commit step `Capture:` footer (copy into every step that creates commits):
 
 ```
 Capture (every time you commit code):
@@ -248,7 +273,7 @@ Capture (every time you commit code):
   Example (wrong):   metrics_commit_shas: ["ghi789"]  -- loses abc123 and def456
 ```
 
-**Final handoff `Capture:` footer** (copy this into your final step):
+Final handoff `Capture:` footer (copy into your final step):
 
 ```
 Capture (at final handoff only):
@@ -265,8 +290,6 @@ Capture (at final handoff only):
 - `metrics_commit_shas`: final complete accumulated list of ALL commit SHAs this session
   (same accumulation rule as commit steps -- full list, not just final-step SHAs)
 ```
-
-Note: adding these keys to existing workflow JSON files (`coding-task-workflow-agentic.json` and others) is a separate follow-on PR. The templates above let you add them to new or custom workflows now.
 
 ### Assessment-gate authoring (v1)
 

@@ -1,20 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { renderPendingPrompt } from '../../../src/v2/durable-core/domain/prompt-renderer.js';
+import { renderPendingPrompt, buildMetricsSection } from '../../../src/v2/durable-core/domain/prompt-renderer.js';
 import { createWorkflow } from '../../../src/types/workflow.js';
 import { createBundledSource } from '../../../src/types/workflow-source.js';
 import { LOOP_CONTROL_CONTRACT_REF } from '../../../src/v2/durable-core/schemas/artifacts/index.js';
 
+// Shared fixture: simple single-step workflow with no metricsProfile
+const simpleWorkflow = createWorkflow(
+  {
+    id: 'test',
+    name: 'Test',
+    description: 'Test',
+    version: '1.0.0',
+    steps: [{ id: 'step1', title: 'Step 1', prompt: 'Do step 1', requireConfirmation: false }],
+  } as any,
+  createBundledSource()
+);
+
 describe('renderPendingPrompt', () => {
-  const simpleWorkflow = createWorkflow(
-    {
-      id: 'test',
-      name: 'Test',
-      description: 'Test',
-      version: '1.0.0',
-      steps: [{ id: 'step1', title: 'Step 1', prompt: 'Do step 1', requireConfirmation: false }],
-    } as any,
-    createBundledSource()
-  );
 
   describe('base behavior (no recovery)', () => {
     it('returns base prompt when rehydrateOnly=false', () => {
@@ -664,5 +666,261 @@ describe('renderPendingPrompt', () => {
         expect(result.value.prompt).not.toContain('Progress');
       }
     });
+  });
+});
+
+// =============================================================================
+// buildMetricsSection tests
+// =============================================================================
+
+describe('buildMetricsSection', () => {
+  // ── absent / none ──────────────────────────────────────────────────────────
+
+  it('returns empty string when profile is undefined', () => {
+    expect(buildMetricsSection(undefined, false, false)).toBe('');
+    expect(buildMetricsSection(undefined, true, false)).toBe('');
+  });
+
+  it('returns empty string when profile is none', () => {
+    expect(buildMetricsSection('none', false, false)).toBe('');
+    expect(buildMetricsSection('none', true, false)).toBe('');
+    expect(buildMetricsSection('none', false, true)).toBe('');
+    expect(buildMetricsSection('none', true, true)).toBe('');
+  });
+
+  // ── coding profile, non-final ─────────────────────────────────────────────
+
+  it('coding non-final: injects SHA accumulation footer', () => {
+    const result = buildMetricsSection('coding', false, false);
+    expect(result).toContain('METRICS (System)');
+    expect(result).toContain('metrics_commit_shas');
+    expect(result).toContain('FULL accumulated list');
+    expect(result).toContain('shallow merge');
+    expect(result).not.toContain('metrics_outcome');
+    expect(result).not.toContain('final step');
+  });
+
+  it('coding non-final cleanFormat: injects compact one-liner', () => {
+    const result = buildMetricsSection('coding', false, true);
+    expect(result).toContain('metrics_commit_shas');
+    expect(result).toContain('FULL accumulated SHA list');
+    expect(result).toContain('shallow merge');
+    expect(result).not.toContain('METRICS (System)');
+    expect(result).not.toContain('metrics_outcome');
+  });
+
+  // ── coding profile, final ─────────────────────────────────────────────────
+
+  it('coding final: injects both SHA footer and outcome/PR footer', () => {
+    const result = buildMetricsSection('coding', true, false);
+    expect(result).toContain('FULL accumulated list');
+    expect(result).toContain('metrics_commit_shas');
+    expect(result).toContain('metrics_outcome');
+    expect(result).toContain('metrics_pr_numbers');
+    expect(result).toContain('metrics_files_changed');
+    expect(result).toContain('metrics_lines_added');
+    expect(result).toContain('metrics_lines_removed');
+    expect(result).toContain('final step');
+    // Both footers concatenated: SHA section appears before final section
+    const shaPos = result.indexOf('FULL accumulated list');
+    const finalPos = result.indexOf('final step');
+    expect(shaPos).toBeLessThan(finalPos);
+  });
+
+  it('coding final cleanFormat: injects both compact one-liners', () => {
+    const result = buildMetricsSection('coding', true, true);
+    expect(result).toContain('metrics_commit_shas');
+    expect(result).toContain('FULL accumulated SHA list');
+    expect(result).toContain('metrics_outcome');
+    expect(result).toContain('metrics_pr_numbers');
+    expect(result).toContain('metrics_files_changed');
+    expect(result).not.toContain('METRICS (System)');
+  });
+
+  // ── review profile ────────────────────────────────────────────────────────
+
+  it('review non-final: returns empty string', () => {
+    expect(buildMetricsSection('review', false, false)).toBe('');
+    expect(buildMetricsSection('review', false, true)).toBe('');
+  });
+
+  it('review final: injects PR/outcome footer', () => {
+    const result = buildMetricsSection('review', true, false);
+    expect(result).toContain('METRICS (System)');
+    expect(result).toContain('metrics_pr_numbers');
+    expect(result).toContain('metrics_outcome');
+    expect(result).toContain('final step of a review workflow');
+    expect(result).not.toContain('metrics_commit_shas');
+  });
+
+  it('review final cleanFormat: injects compact one-liner', () => {
+    const result = buildMetricsSection('review', true, true);
+    expect(result).toContain('metrics_pr_numbers');
+    expect(result).toContain('metrics_outcome');
+    expect(result).not.toContain('METRICS (System)');
+    expect(result).not.toContain('metrics_commit_shas');
+  });
+
+  // ── research profile ──────────────────────────────────────────────────────
+
+  it('research non-final: returns empty string', () => {
+    expect(buildMetricsSection('research', false, false)).toBe('');
+    expect(buildMetricsSection('research', false, true)).toBe('');
+  });
+
+  it('research final: injects outcome-only footer', () => {
+    const result = buildMetricsSection('research', true, false);
+    expect(result).toContain('METRICS (System)');
+    expect(result).toContain('metrics_outcome');
+    expect(result).toContain('final step of a research workflow');
+    expect(result).not.toContain('metrics_commit_shas');
+    expect(result).not.toContain('metrics_pr_numbers');
+  });
+
+  it('research final cleanFormat: injects compact one-liner', () => {
+    const result = buildMetricsSection('research', true, true);
+    expect(result).toContain('metrics_outcome');
+    expect(result).not.toContain('METRICS (System)');
+    expect(result).not.toContain('metrics_commit_shas');
+    expect(result).not.toContain('metrics_pr_numbers');
+  });
+
+  // ── integration via renderPendingPrompt ───────────────────────────────────
+
+  it('renderPendingPrompt: coding workflow single step gets SHA footer', () => {
+    const codingWorkflow = createWorkflow(
+      {
+        id: 'coding-test',
+        name: 'Coding Test',
+        description: 'Test coding metrics profile',
+        version: '1.0.0',
+        metricsProfile: 'coding',
+        steps: [{ id: 'step1', title: 'Step 1', prompt: 'Do step 1', notesOptional: true }],
+      } as any,
+      createBundledSource()
+    );
+
+    const result = renderPendingPrompt({
+      workflow: codingWorkflow,
+      stepId: 'step1',
+      loopPath: [],
+      truth: { events: [], manifest: [] },
+      runId: 'run_1',
+      nodeId: 'node_1',
+      rehydrateOnly: false,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // step1 IS the only/last step -- gets both SHA and final footer
+      expect(result.value.prompt).toContain('metrics_commit_shas');
+      expect(result.value.prompt).toContain('metrics_outcome');
+    }
+  });
+
+  it('renderPendingPrompt: no metricsProfile -- existing workflows unaffected', () => {
+    const result = renderPendingPrompt({
+      workflow: simpleWorkflow, // no metricsProfile field
+      stepId: 'step1',
+      loopPath: [],
+      truth: { events: [], manifest: [] },
+      runId: 'run_1',
+      nodeId: 'node_1',
+      rehydrateOnly: false,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.prompt).not.toContain('METRICS (System)');
+      expect(result.value.prompt).not.toContain('metrics_commit_shas');
+      expect(result.value.prompt).not.toContain('metrics_outcome');
+    }
+  });
+
+  it('renderPendingPrompt: coding workflow first of two steps gets SHA footer only (not final)', () => {
+    const codingTwoStepWorkflow = createWorkflow(
+      {
+        id: 'coding-two-steps',
+        name: 'Coding Two Steps',
+        description: 'Test coding metrics profile with two steps',
+        version: '1.0.0',
+        metricsProfile: 'coding',
+        steps: [
+          { id: 'step1', title: 'Step 1', prompt: 'Do step 1', notesOptional: true },
+          { id: 'step2', title: 'Step 2', prompt: 'Do step 2', notesOptional: true },
+        ],
+      } as any,
+      createBundledSource()
+    );
+
+    const result = renderPendingPrompt({
+      workflow: codingTwoStepWorkflow,
+      stepId: 'step1', // NOT the last step
+      loopPath: [],
+      truth: { events: [], manifest: [] },
+      runId: 'run_1',
+      nodeId: 'node_1',
+      rehydrateOnly: false,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.prompt).toContain('metrics_commit_shas');
+      expect(result.value.prompt).not.toContain('metrics_outcome'); // non-final: no outcome footer
+    }
+  });
+
+  it('renderPendingPrompt: exit step of non-terminal loop does NOT get final-step footer', () => {
+    // Workflow: loop(body=[regular-step, exit-step]) then final-step
+    // The exit-step's parent loop is NOT the last top-level step -> should NOT get outcome footer
+    const workflowWithNonTerminalLoop = createWorkflow(
+      {
+        id: 'non-terminal-loop',
+        name: 'Non-terminal Loop',
+        description: 'Test non-terminal loop exit step',
+        version: '1.0.0',
+        metricsProfile: 'coding',
+        steps: [
+          {
+            id: 'loop1',
+            type: 'loop',
+            title: 'Loop 1',
+            loop: { type: 'while', maxIterations: 3 },
+            body: [
+              { id: 'loop1-body', title: 'Body', prompt: 'Body step', notesOptional: true },
+              {
+                id: 'loop1-exit',
+                title: 'Exit',
+                prompt: 'Exit step',
+                notesOptional: true,
+                outputContract: { contractRef: LOOP_CONTROL_CONTRACT_REF },
+              },
+            ],
+          },
+          { id: 'final-step', title: 'Final Step', prompt: 'Final', notesOptional: true },
+        ],
+      } as any,
+      createBundledSource()
+    );
+
+    const result = renderPendingPrompt({
+      workflow: workflowWithNonTerminalLoop,
+      stepId: 'loop1-exit', // exit step of a NON-terminal loop
+      loopPath: [{ loopStepId: 'loop1', iteration: 0 }],
+      truth: { events: [], manifest: [] },
+      runId: 'run_1',
+      nodeId: 'node_1',
+      rehydrateOnly: false,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // Should get SHA footer (coding non-final) but NOT the outcome/PR footer
+      // Note: exit steps have outputContract so notesSection is skipped,
+      // and the exit step IS a coding profile step -> SHA accumulation applies
+      // BUT it is NOT the final step -> no outcome footer
+      expect(result.value.prompt).not.toContain('metrics_outcome');
+      expect(result.value.prompt).not.toContain('final step');
+    }
   });
 });
