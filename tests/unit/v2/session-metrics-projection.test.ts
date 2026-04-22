@@ -341,4 +341,32 @@ describe('projectSessionMetricsV2', () => {
     // Context from run_1 applied
     expect(result.outcome).toBe('success');
   });
+
+  it('degrades gracefully when run_completed.data has unexpected shape', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(),
+      // run_completed with malformed data -- all engine fields should degrade to null/empty
+      {
+        v: 1,
+        eventId: 'evt_1',
+        eventIndex: 1,
+        sessionId: 'sess_1',
+        kind: 'run_completed',
+        dedupeKey: 'run_completed:sess_1:run_1',
+        scope: { runId: 'run_1' },
+        data: { unexpectedField: 'foo', anotherField: 42 },
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    expect(result.startGitSha).toBeNull();
+    expect(result.endGitSha).toBeNull();
+    expect(result.gitBranch).toBeNull();
+    expect(result.agentCommitShas).toEqual([]);
+    expect(result.captureConfidence).toBe('none');
+    expect(result.durationMs).toBeUndefined();
+  });
 });

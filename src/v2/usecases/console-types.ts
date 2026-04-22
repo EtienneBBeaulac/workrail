@@ -170,6 +170,11 @@ export interface ConsoleSessionDetail {
    * Returns [] when live but no tool events recorded yet.
    */
   readonly liveActivity?: readonly ConsoleToolActivity[] | null;
+  /**
+   * TODO(step-5): Add `metrics: SessionMetricsV2 | null` here and wire it in
+   * `getSessionDetail()` in console-service.ts so the session detail view can
+   * display structured outcome metrics. Blocked on step-5 console display PR.
+   */
 }
 
 // ---------------------------------------------------------------------------

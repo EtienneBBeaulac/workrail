@@ -111,6 +111,9 @@ export function projectSessionMetricsV2(
   for (const e of events) {
     if (e.kind !== EVENT_KIND.CONTEXT_SET) continue;
     // Only process context_set events for the run that completed.
+    // WHY null check: if run_completed had no scope.runId, disable the filter so
+    // all context_set events contribute. context_set enforces non-empty runId in schema
+    // so this path only occurs with legacy or manually-constructed events.
     if (runCompletedRunId !== null && e.scope?.runId !== runCompletedRunId) continue;
 
     const ctx = e.data.context;
