@@ -3,7 +3,40 @@
  * Handles the path when an advance succeeds (not blocked).
  */
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Read a string observation value from the session event log.
+ * Returns null if no matching observation_recorded event is found.
+ */
+function readObservation(events: readonly import('../../../v2/durable-core/schemas/session/index.js').DomainEventV1[], key: string): string | null {
+  for (const e of events) {
+    if (e.kind !== 'observation_recorded') continue;
+    const d = e.data as Record<string, unknown>;
+    if (d['key'] !== key) continue;
+    const val = d['value'] as Record<string, unknown> | undefined;
+    if (val && typeof val['value'] === 'string') return val['value'];
+  }
+  return null;
+}
+
+/**
+ * Resolve endGitSha by running `git rev-parse HEAD` in repoRoot.
+ * Best-effort: returns null on any failure (git not found, not a git repo, timeout).
+ */
+async function resolveEndGitSha(repoRoot: string | null): Promise<string | null> {
+  if (!repoRoot) return null;
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, timeout: 5000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
@@ -28,6 +61,7 @@ import {
   buildContextSetEvent,
   buildSuccessValidationEvent,
   buildDecisionTraceEvent,
+  buildRunCompletedEvent,
 } from '../v2-advance-events.js';
 import type { AdvanceMode, AdvanceContext, ComputedAdvanceResults, AdvanceCorePorts } from './index.js';
 import type { ValidatedAdvanceInputs } from './input-validation.js';
@@ -225,6 +259,59 @@ export function buildSuccessOutcome(args: {
     }
 
     const outputsToAppend = [...notesOutputs, ...artifactOutputsRes.value];
+
+    // Emit run_completed when the session finishes successfully.
+    // WHY here (inside andThen): newEngineState is available, and async git I/O is
+    // safe inside a ResultAsync chain. resolveEndGitSha is best-effort (never throws).
+    if (newEngineState.kind === 'complete') {
+      const repoRoot = readObservation(truth.events, 'repo_root');
+      const startGitSha = readObservation(truth.events, 'git_head_sha');
+      const gitBranch = readObservation(truth.events, 'git_branch');
+
+      // Extract agent-reported commit SHAs from the last context_set with metrics_commit_shas.
+      // WHY last: agents accumulate the full list on each step; the last value is authoritative.
+      let agentCommitShas: string[] = [];
+      for (const e of truth.events) {
+        if (e.kind !== 'context_set') continue;
+        const ctx = (e.data as Record<string, unknown>)['context'];
+        if (ctx && typeof ctx === 'object' && !Array.isArray(ctx)) {
+          const shas = (ctx as Record<string, unknown>)['metrics_commit_shas'];
+          if (Array.isArray(shas) && shas.every(s => typeof s === 'string')) {
+            agentCommitShas = shas as string[];
+          }
+        }
+      }
+
+      // durationMs: first event timestampMs to last event timestampMs.
+      const firstTs = truth.events[0]?.timestampMs;
+      const lastTs = truth.events[truth.events.length - 1]?.timestampMs;
+      const durationMs = (firstTs !== undefined && lastTs !== undefined) ? (lastTs - firstTs) : undefined;
+
+      return RA.fromPromise(
+        resolveEndGitSha(repoRoot),
+        (e) => ({ kind: 'advance_apply_failed' as const, message: String(e) }),
+      ).andThen((endGitSha) => {
+        const captureConfidence: 'high' | 'none' = agentCommitShas.length > 0 ? 'high' : 'none';
+        extraEventsToAppend.push(buildRunCompletedEvent({
+          sessionId: String(sessionId),
+          runId: String(runId),
+          startGitSha,
+          endGitSha,
+          gitBranch,
+          agentCommitShas,
+          captureConfidence,
+          durationMs,
+          idFactory,
+        }));
+        return buildAndAppendPlan({
+          kind: 'advanced',
+          truth, lockedIndex: args.lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash,
+          extraEventsToAppend, toNodeKind: successNodeKind(mode),
+          snapshotRef: newSnapshotRef, outputsToAppend,
+          sessionStore, idFactory, lock,
+        });
+      });
+    }
 
     return buildAndAppendPlan({
       kind: 'advanced',
