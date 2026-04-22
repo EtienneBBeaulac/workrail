@@ -9,7 +9,7 @@ import { EVENT_KIND, EDGE_KIND, ADVANCE_INTENT } from '../constants.js';
 // The Zod schema retains the deprecated 'blocked' variant for deserializing old events.
 type AdvanceOutcomeWriteV1 = { readonly kind: 'advanced'; readonly toNodeId: string };
 
-type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 /**
  * Build an advance_recorded event.
@@ -24,12 +24,13 @@ function buildAdvanceRecordedEvent(args: {
   outcome: AdvanceOutcomeWriteV1;
 }): DomainEventV1 {
   const advanceDedupeKey = `advance_recorded:${args.sessionId}:${args.fromNodeId}:${args.attemptId}`;
-  
+
   return {
     v: 1,
     eventId: args.eventId,
     eventIndex: args.eventIndex,
     sessionId: args.sessionId,
+    timestampMs: Date.now(),
     kind: EVENT_KIND.ADVANCE_RECORDED,
     dedupeKey: advanceDedupeKey,
     scope: { runId: args.runId, nodeId: args.fromNodeId },
@@ -60,6 +61,7 @@ function buildNodeCreatedEvent(args: {
     eventId: args.eventId,
     eventIndex: args.eventIndex,
     sessionId: args.sessionId,
+    timestampMs: Date.now(),
     kind: EVENT_KIND.NODE_CREATED,
     dedupeKey: `node_created:${args.sessionId}:${args.runId}:${args.toNodeId}`,
     scope: { runId: args.runId, nodeId: args.toNodeId },
@@ -90,6 +92,7 @@ function buildEdgeCreatedEvent(args: {
     eventId: args.eventId,
     eventIndex: args.eventIndex,
     sessionId: args.sessionId,
+    timestampMs: Date.now(),
     kind: EVENT_KIND.EDGE_CREATED,
     dedupeKey: `edge_created:${args.sessionId}:${args.runId}:${args.fromNodeId}->${args.toNodeId}:acked_step`,
     scope: { runId: args.runId },
@@ -128,6 +131,7 @@ function buildOutputEvents(args: {
       eventId: args.outputEventIds[idx]!,
       eventIndex: args.startEventIndex + idx,
       sessionId: args.sessionId,
+      timestampMs: Date.now(),
       kind: EVENT_KIND.NODE_OUTPUT_APPENDED,
       dedupeKey: `node_output_appended:${args.sessionId}:${o.outputId}`,
       scope: { runId: args.runId, nodeId: args.fromNodeId },
@@ -164,15 +168,21 @@ function processExtraEvents(
     for (let i = 0; i < extraEventsToAppend.length; i++) {
       const raw = extraEventsToAppend[i]! as unknown as Record<string, unknown>;
       if ('eventIndex' in raw) {
-        return err({ 
-          code: 'INVARIANT_VIOLATION', 
-          message: 'extraEventsToAppend must not include eventIndex (assigned by append plan builder)' 
+        return err({
+          code: 'INVARIANT_VIOLATION',
+          message: 'extraEventsToAppend must not include eventIndex (assigned by append plan builder)',
         });
       }
       if ('sessionId' in raw) {
-        return err({ 
-          code: 'INVARIANT_VIOLATION', 
-          message: 'extraEventsToAppend must not include sessionId (assigned by append plan builder)' 
+        return err({
+          code: 'INVARIANT_VIOLATION',
+          message: 'extraEventsToAppend must not include sessionId (assigned by append plan builder)',
+        });
+      }
+      if ('timestampMs' in raw) {
+        return err({
+          code: 'INVARIANT_VIOLATION',
+          message: 'extraEventsToAppend must not include timestampMs (assigned by append plan builder)',
         });
       }
 
@@ -180,6 +190,7 @@ function processExtraEvents(
         ...(extraEventsToAppend[i]! as unknown as DomainEventV1),
         sessionId,
         eventIndex: startEventIndex + i,
+        timestampMs: Date.now(),
       });
     }
   }

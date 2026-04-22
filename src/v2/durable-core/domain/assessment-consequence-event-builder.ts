@@ -2,7 +2,7 @@ import { err, ok, type Result } from 'neverthrow';
 import type { DomainEventV1 } from '../schemas/session/index.js';
 import { EVENT_KIND } from '../constants.js';
 
-type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 export type AssessmentConsequenceEventError =
   | { readonly code: 'ASSESSMENT_CONSEQUENCE_EVENT_INVARIANT_VIOLATION'; readonly message: string };
