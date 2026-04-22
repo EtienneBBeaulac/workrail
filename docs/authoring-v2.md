@@ -219,7 +219,7 @@ Important implementation detail:
 
 ### Session analytics context keys (`metrics_*`)
 
-The `projectSessionMetricsV2` projection reads a set of `metrics_*` context keys to build session attribution data. These keys are not validated by the engine -- nothing will fail if they are absent or malformed. But absent or wrong data produces permanently incorrect analytics with no error or warning.
+The `projectSessionMetricsV2` projection (planned -- not yet implemented) reads a set of `metrics_*` context keys to build session attribution data. These keys are not validated by the engine -- nothing will fail if they are absent or malformed. But absent or wrong data produces permanently incorrect analytics with no error or warning.
 
 Set these keys in your step's `Capture:` footer.
 
