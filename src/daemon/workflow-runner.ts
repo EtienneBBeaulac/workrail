@@ -4212,7 +4212,10 @@ export async function runWorkflow(
       // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
     });
     // Delete conversation history on clean completion -- no debug value after success.
-    // WHY co-located with sidecar deletion: same lifecycle, same worktree guard.
+    // WHY only for non-worktree sessions: worktree sessions defer conversation file
+    // deletion to trigger-router.ts maybeRunDelivery() alongside the sidecar, after
+    // delivery completes. The branchStrategy guard above ensures we only reach this
+    // line for non-worktree sessions.
     // Crashes and errors leave the file intact for post-hoc inspection and Phase B.
     await fs.unlink(conversationPath).catch(() => {});
   }
