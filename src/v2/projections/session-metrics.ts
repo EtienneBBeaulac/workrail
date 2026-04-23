@@ -39,28 +39,6 @@ export interface SessionMetricsV2 {
 }
 
 // ---------------------------------------------------------------------------
-// Internal defensive cast interface
-// ---------------------------------------------------------------------------
-
-/**
- * Internal contract for run_completed.data fields.
- *
- * STEP 2 CLEANUP: when run_completed is added to DomainEventV1Schema,
- * replace the defensive cast below with proper TS type narrowing and delete
- * this interface. The cleanup is a single localized change -- replace the cast,
- * verify these 6 field names match: startGitSha, endGitSha, gitBranch,
- * agentCommitShas, captureConfidence, durationMs. No other changes.
- */
-interface RunCompletedDataExpected {
-  readonly startGitSha?: unknown;
-  readonly endGitSha?: unknown;
-  readonly gitBranch?: unknown;
-  readonly agentCommitShas?: unknown;
-  readonly captureConfidence?: unknown;
-  readonly durationMs?: unknown;
-}
-
-// ---------------------------------------------------------------------------
 // Projection
 // ---------------------------------------------------------------------------
 
@@ -82,26 +60,20 @@ export function projectSessionMetricsV2(
   events: readonly DomainEventV1[],
 ): SessionMetricsV2 | null {
   // Find the first run_completed event by event order.
-  // run_completed is not yet in DomainEventV1Schema (step 2), so we use a
-  // defensive cast via RunCompletedDataExpected.
-  let runCompletedData: RunCompletedDataExpected | null = null;
-  let runCompletedRunId: string | null = null;
+  let runCompleted: Extract<DomainEventV1, { kind: 'run_completed' }> | null = null;
 
   for (const e of events) {
-    // run_completed is not yet in DomainEventV1Schema (step 2 adds it).
-    // Cast to unknown first to bypass the discriminated union exhaustiveness check.
-    const asUnknown = e as unknown as { kind: string; data: RunCompletedDataExpected; scope?: { runId?: string } };
-    if (asUnknown.kind === 'run_completed') {
-      runCompletedData = asUnknown.data;
-      // run_completed follows the same scope pattern as run_started: { runId }
-      runCompletedRunId = asUnknown.scope?.runId ?? null;
+    if (e.kind === 'run_completed') {
+      runCompleted = e;
       break; // first run_completed by event order wins
     }
   }
 
-  if (runCompletedData === null) {
+  if (runCompleted === null) {
     return null;
   }
+
+  const runCompletedRunId = runCompleted.scope.runId;
 
   // Collect the last context_set metrics_* values for the matching runId.
   // Each context_set is a full snapshot, not a delta -- the last event for a
@@ -110,11 +82,7 @@ export function projectSessionMetricsV2(
 
   for (const e of events) {
     if (e.kind !== EVENT_KIND.CONTEXT_SET) continue;
-    // Only process context_set events for the run that completed.
-    // WHY null check: if run_completed had no scope.runId, disable the filter so
-    // all context_set events contribute. context_set enforces non-empty runId in schema
-    // so this path only occurs with legacy or manually-constructed events.
-    if (runCompletedRunId !== null && e.scope?.runId !== runCompletedRunId) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
 
     const ctx = e.data.context;
     if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) continue;
@@ -128,32 +96,25 @@ export function projectSessionMetricsV2(
     }
   }
 
-  // Extract engine fields from run_completed.data.
-  const d = runCompletedData;
+  // Extract engine fields from run_completed.data -- fully typed via DomainEventV1Schema.
+  const d = runCompleted.data;
 
+  // Coerce nullable string fields to null when absent -- defensive against schema-bypassing
+  // casts (e.g. test fixtures using `as unknown as DomainEventV1`).
   const startGitSha = typeof d.startGitSha === 'string' ? d.startGitSha : null;
   const endGitSha = typeof d.endGitSha === 'string' ? d.endGitSha : null;
   const gitBranch = typeof d.gitBranch === 'string' ? d.gitBranch : null;
-
-  const agentCommitShas: string[] = [];
-  if (Array.isArray(d.agentCommitShas)) {
-    for (const sha of d.agentCommitShas) {
-      if (typeof sha === 'string') {
-        agentCommitShas.push(sha);
-      }
-    }
-  }
-
-  const captureConfidenceRaw = d.captureConfidence;
-  const captureConfidence: 'high' | 'medium' | 'none' =
-    captureConfidenceRaw === 'high' || captureConfidenceRaw === 'medium' || captureConfidenceRaw === 'none'
-      ? captureConfidenceRaw
-      : 'none';
-
+  const agentCommitShas = Array.isArray(d.agentCommitShas)
+    ? d.agentCommitShas.filter((s): s is string => typeof s === 'string')
+    : [];
   const durationMs =
-    typeof d.durationMs === 'number' && Number.isFinite(d.durationMs)
-      ? d.durationMs
-      : undefined;
+    typeof d.durationMs === 'number' && Number.isFinite(d.durationMs) ? d.durationMs : undefined;
+
+  // Schema emits 'high' | 'none'; 'medium' is reserved in SessionMetricsV2 for future use.
+  // Widen to string before the guard so this compiles when the schema union expands.
+  const captureConfidenceRaw: string = d.captureConfidence ?? '';
+  const captureConfidence: 'high' | 'medium' | 'none' =
+    captureConfidenceRaw === 'high' || captureConfidenceRaw === 'medium' ? captureConfidenceRaw : 'none';
 
   // Extract agent-reported fields from metricsContext.
   const outcomeRaw = metricsContext['metrics_outcome'];
@@ -172,36 +133,28 @@ export function projectSessionMetricsV2(
     }
   }
 
+  // Use agent-reported metrics_commit_shas as override when present;
+  // otherwise fall back to what run_completed.data.agentCommitShas provided.
   const commitShasRaw = metricsContext['metrics_commit_shas'];
   const metricCommitShas: string[] = [];
   if (Array.isArray(commitShasRaw)) {
     for (const sha of commitShasRaw) {
-      if (typeof sha === 'string') {
-        metricCommitShas.push(sha);
-      }
+      if (typeof sha === 'string') metricCommitShas.push(sha);
     }
   }
-  // Use agent-reported commit shas (metrics_commit_shas) as agentCommitShas override
-  // when present; otherwise fall back to what run_completed.data.agentCommitShas provided.
   const finalAgentCommitShas = metricCommitShas.length > 0 ? metricCommitShas : agentCommitShas;
 
   const filesChangedRaw = metricsContext['metrics_files_changed'];
   const filesChanged =
-    typeof filesChangedRaw === 'number' && Number.isFinite(filesChangedRaw)
-      ? filesChangedRaw
-      : null;
+    typeof filesChangedRaw === 'number' && Number.isFinite(filesChangedRaw) ? filesChangedRaw : null;
 
   const linesAddedRaw = metricsContext['metrics_lines_added'];
   const linesAdded =
-    typeof linesAddedRaw === 'number' && Number.isFinite(linesAddedRaw)
-      ? linesAddedRaw
-      : null;
+    typeof linesAddedRaw === 'number' && Number.isFinite(linesAddedRaw) ? linesAddedRaw : null;
 
   const linesRemovedRaw = metricsContext['metrics_lines_removed'];
   const linesRemoved =
-    typeof linesRemovedRaw === 'number' && Number.isFinite(linesRemovedRaw)
-      ? linesRemovedRaw
-      : null;
+    typeof linesRemovedRaw === 'number' && Number.isFinite(linesRemovedRaw) ? linesRemovedRaw : null;
 
   return {
     startGitSha,
