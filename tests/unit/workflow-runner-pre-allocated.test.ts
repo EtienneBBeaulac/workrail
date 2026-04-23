@@ -93,7 +93,7 @@ describe('runWorkflow() with _preAllocatedStartResponse', () => {
 
   it('skips executeStartWorkflow() and returns success when _preAllocatedStartResponse.isComplete is true', async () => {
     const trigger: WorkflowTrigger = {
-      workflowId: 'coding-task-workflow-agentic',
+      workflowId: 'wr.coding-task',
       goal: 'test goal',
       workspacePath: tmpPath('test-workspace'),
       _preAllocatedStartResponse: makePreAllocatedResponse({ isComplete: true }),

@@ -8,7 +8,7 @@
 
 ## 1. Problem Statement
 
-When a user writes an incorrect `workflowId` in `triggers.yml` (e.g., `coding-task-workflow-agentic.lean.v2` instead of `coding-task-workflow-agentic`), the daemon starts successfully, accepts webhooks, but every dispatch silently fails with `workflow_not_found`. The error only appears in logs during actual webhook events -- not at startup. This is a silent-failure bug.
+When a user writes an incorrect `workflowId` in `triggers.yml` (e.g., `wr.coding-task.lean.v2` instead of `wr.coding-task`), the daemon starts successfully, accepts webhooks, but every dispatch silently fails with `workflow_not_found`. The error only appears in logs during actual webhook events -- not at startup. This is a silent-failure bug.
 
 ---
 
@@ -135,7 +135,7 @@ Production default (not on the option -- called inline): `async (id) => (await c
 
 **Fixtures needed:**
 - A minimal `triggers.yml` with two triggers: one with valid workflowId, one with invalid
-- `getWorkflowByIdFn` stub: `vi.fn().mockImplementation(async (id: string) => id === 'coding-task-workflow-agentic')`
+- `getWorkflowByIdFn` stub: `vi.fn().mockImplementation(async (id: string) => id === 'wr.coding-task')`
 
 **Note:** Tests write real `triggers.yml` files to `tmpPath()` directories (pattern established in existing tests). Check how existing `startTriggerListener` tests set up workspace directories.
 

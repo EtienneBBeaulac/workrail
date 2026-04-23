@@ -296,7 +296,7 @@ C2 is more structurally correct -- a mandatory separate step enforces that goal 
 
 ### Next actions
 
-These findings are the input to Phase 2: the `workflow-for-workflows` workflow will design the implementation based on this diagnosis.
+These findings are the input to Phase 2: the `wr.workflow-for-workflows` workflow will design the implementation based on this diagnosis.
 
 1. The wfw workflow should receive: the full diagnosis (Phase 0 is the root cause), the specific changes needed (5 changes listed above), the priority order (Phase 0 goalType classification is highest priority), and the decision to implement the C1+C3 hybrid, not C2.
 2. After wfw produces the improved workflow, write it to `workflows/wr.discovery.json`.

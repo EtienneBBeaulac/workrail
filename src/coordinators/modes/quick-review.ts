@@ -8,7 +8,7 @@
  * WHY delegation with goal prefix (not a separate workflow):
  * runPrReviewCoordinator() accepts a custom review goal. By prefixing with
  * [DEP BUMP], the reviewer gets explicit context about what to focus on.
- * No new workflow needed; the existing mr-review-workflow-agentic handles it.
+ * No new workflow needed; the existing wr.mr-review handles it.
  * (Pitch invariant 10: QUICK_REVIEW delegates to runPrReviewCoordinator().)
  *
  * Goal prefix format: "[DEP BUMP] Review PR #${prNumber}: ${prTitle}

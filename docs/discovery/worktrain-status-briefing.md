@@ -301,7 +301,7 @@ ACTIVE (2 sessions)
     Discovery: what data exists today that a 'worktrain status' plain-English briefing command could use
     Step: phase-3-synthesize   Running 22 min
   
-  ● coding-task-workflow-agentic
+  ● wr.coding-task
     Implement GitHub polling adapter for Issues/PRs without requiring webhooks
     Step: phase-2-implement   Running 8 min   ⚠ no activity for 18 min
 

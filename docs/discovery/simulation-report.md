@@ -51,7 +51,7 @@ Pass 3: passCount=2 -> review: 'minor' -> passCount becomes 3 -> CHECK: 3 >= 3 -
 **Trace:**
 ```
 discoverPort() -> no lock files -> falls back to 3456
-spawnSession('mr-review-workflow-agentic', 'Review PR #419...', '/workspace')
+spawnSession('wr.mr-review', 'Review PR #419...', '/workspace')
   POST http://127.0.0.1:3456/api/v2/auto/dispatch
   -> fetch throws Error: ECONNREFUSED 127.0.0.1:3456
   -> spawnSession catches -> returns err('Could not connect to WorkTrain daemon on port 3456')

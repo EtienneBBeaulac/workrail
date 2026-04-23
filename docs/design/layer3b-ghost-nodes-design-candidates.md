@@ -16,7 +16,7 @@ The console's session detail view shows a DAG of workflow execution nodes via `R
 
 ### Core Tensions
 
-1. **Labels vs simplicity**: Step labels (human-readable titles like "Phase 0: Triage and classify") are what make ghost nodes useful. But resolving them requires the compiled workflow, which is a backend I/O operation. Skipping labels is simpler but produces raw step IDs (`routine-context-gathering-depth`) that users can't parse.
+1. **Labels vs simplicity**: Step labels (human-readable titles like "Phase 0: Triage and classify") are what make ghost nodes useful. But resolving them requires the compiled workflow, which is a backend I/O operation. Skipping labels is simpler but produces raw step IDs (`wr.routine-context-gathering-depth`) that users can't parse.
 
 2. **Type safety vs ease**: Adding `isGhost: boolean` to `ConsoleDagNode` is one line but violates "make illegal states unrepresentable" -- ghost steps have no `hasRecap`, `hasFailedValidations`, `isTip`, `parentNodeId`, `createdAtEventIndex`, etc. A separate `ConsoleGhostStep` interface is correct but requires touching both mirrored type files.
 
@@ -91,7 +91,7 @@ The `buildLineageDagModel` signature does NOT need to change -- ghost positionin
 **Summary**: Extract skipped step IDs from `evaluated_condition` SKIP trace items on the frontend; render ghost nodes without step labels (show raw step ID).
 
 **Tensions resolved**: Zero backend changes. No mirrored type file sync needed.
-**Tensions accepted**: No step labels. Ghost nodes show raw IDs like `routine-context-gathering-depth`.
+**Tensions accepted**: No step labels. Ghost nodes show raw IDs like `wr.routine-context-gathering-depth`.
 
 **Boundary**: `session-detail-use-cases.ts` -- new pure function `getSkippedStepsFromTrace(items: readonly ConsoleExecutionTraceItem[]): readonly string[]` returning step IDs. `RunLineageDag.tsx` -- new sub-feature D `useMemo` computes ghost positions from active lineage model, renders absolute-positioned `GhostNodeOverlay` components.
 

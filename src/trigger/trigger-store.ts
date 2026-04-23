@@ -9,7 +9,7 @@
  *   triggers:
  *     - id: my-trigger
  *       provider: generic
- *       workflowId: coding-task-workflow-agentic
+ *       workflowId: wr.coding-task
  *       workspacePath: /path/to/repo
  *       goal: "Review this MR"
  *       hmacSecret: $MY_HMAC_SECRET   # optional, resolved from env

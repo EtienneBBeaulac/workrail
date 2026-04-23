@@ -4,11 +4,11 @@
  * Executes the coding + PR review pipeline for tasks with a pre-existing pitch.
  *
  * Step sequence:
- * 1. [UX Gate] If goal contains UI-touching signals, dispatch ui-ux-design-workflow first
+ * 1. [UX Gate] If goal contains UI-touching signals, dispatch wr.ui-ux-design first
  *    - If FULL complexity and touchesUI: require human outbox ack before coding starts
- * 2. Spawn coding-task-workflow-agentic with pitchPath in context
+ * 2. Spawn wr.coding-task with pitchPath in context
  * 3. Poll for PR (gh pr list --head worktrain/<sessionId>) -- up to 5 minutes
- * 4. Dispatch mr-review-workflow-agentic for the created PR
+ * 4. Dispatch wr.mr-review for the created PR
  * 5. Route verdict:
  *    - clean: merge
  *    - minor: fix loop (max 2 iterations)
@@ -20,7 +20,7 @@
  *   "After the coding session ends (success or failure)" -- explicit in spec.
  * - Fix loop is capped at exactly 2 iterations (pitch invariant 15).
  * - findingCategory is NOT in the verdict schema (rabbit hole #5):
- *   all Critical findings dispatch production-readiness-audit (safe default).
+ *   all Critical findings dispatch wr.production-readiness-audit (safe default).
  *   TODO(follow-up): add findingCategory to ReviewVerdictArtifactV1 schema.
  * - COORDINATOR_SPAWN_CUTOFF_MS is checked before every spawn via checkSpawnCutoff().
  */
@@ -45,7 +45,7 @@ const PR_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * UI-touching keyword signals (case-insensitive).
- * If the goal contains any of these, dispatch ui-ux-design-workflow first.
+ * If the goal contains any of these, dispatch wr.ui-ux-design first.
  * (Pitch invariant 16.)
  */
 const UI_KEYWORDS = [
@@ -124,12 +124,12 @@ async function runImplementCore(
 
   // ── Stage 1: UX Gate ─────────────────────────────────────────────────
   if (touchesUI(opts.goal)) {
-    deps.stderr(`[implement] UX signals detected in goal, dispatching ui-ux-design-workflow`);
+    deps.stderr(`[implement] UX signals detected in goal, dispatching wr.ui-ux-design`);
 
     const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'ux-gate');
     if (cutoffCheck) return cutoffCheck;
 
-    const uxSpawnResult = await deps.spawnSession('ui-ux-design-workflow', opts.goal, opts.workspace, {
+    const uxSpawnResult = await deps.spawnSession('wr.ui-ux-design', opts.goal, opts.workspace, {
       pitchPath,
     });
 
@@ -173,10 +173,10 @@ async function runImplementCore(
   const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'coding');
   if (cutoffCheck) return cutoffCheck;
 
-  deps.stderr(`[implement] Spawning coding-task-workflow-agentic`);
+  deps.stderr(`[implement] Spawning wr.coding-task`);
 
   const codingSpawnResult = await deps.spawnSession(
-    'coding-task-workflow-agentic',
+    'wr.coding-task',
     opts.goal,
     opts.workspace,
     {

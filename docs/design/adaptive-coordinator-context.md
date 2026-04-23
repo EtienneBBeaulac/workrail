@@ -73,7 +73,7 @@ WorkTrain sessions are fully isolated. Each spawned session starts from the work
 
 **1. File-based handoff (wr.shaping -> coding):**
 - `wr.shaping` Step 9 writes `.workrail/current-pitch.md` at the workspace path
-- `coding-task-workflow-agentic` Phase 0.5 actively searches for upstream docs via repo search, WebFetch, MCP integrations
+- `wr.coding-task` Phase 0.5 actively searches for upstream docs via repo search, WebFetch, MCP integrations
 - Phase 0.5 would find `.workrail/current-pitch.md` automatically
 - **Status: effectively already works** -- no coordinator intervention needed for Shaping->Coding
 

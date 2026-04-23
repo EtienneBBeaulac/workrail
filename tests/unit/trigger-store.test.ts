@@ -26,7 +26,7 @@ const MINIMAL_TRIGGER_YAML = `
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Review this MR
 `;
@@ -45,7 +45,7 @@ const WITH_CONTEXT_MAPPING_YAML = `
 triggers:
   - id: mr-trigger
     provider: generic
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review this MR
     contextMapping:
@@ -146,7 +146,7 @@ describe('loadTriggerConfig', () => {
       const t = result.value.triggers[0];
       expect(t?.id).toBe('my-trigger');
       expect(t?.provider).toBe('generic');
-      expect(t?.workflowId).toBe('coding-task-workflow-agentic');
+      expect(t?.workflowId).toBe('wr.coding-task');
       expect(t?.workspacePath).toBe('/path/to/repo');
       expect(t?.goal).toBe('Review this MR');
       expect(t?.hmacSecret).toBeUndefined();
@@ -465,7 +465,7 @@ describe('goalTemplate and referenceUrls field parsing', () => {
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goal: Review this MR
     goalTemplate: "Review MR: {{$.pull_request.title}}"
@@ -481,7 +481,7 @@ triggers:
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goal: Review this MR
     referenceUrls: "https://doc1.example.com https://doc2.example.com"
@@ -500,7 +500,7 @@ triggers:
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goal: Review this MR
 `;
@@ -515,7 +515,7 @@ triggers:
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goal: Review this MR
     referenceUrls: "file:///etc/passwd"
@@ -543,7 +543,7 @@ describe('workspace namespacing (Phase 1)', () => {
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: my-project
     goal: Review this MR
 `;
@@ -562,7 +562,7 @@ triggers:
 triggers:
   - id: soul-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: with-soul
     goal: Review this MR
 `;
@@ -578,7 +578,7 @@ triggers:
 triggers:
   - id: override-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: with-soul
     soulFile: /custom/soul.md
     goal: Review this MR
@@ -595,7 +595,7 @@ triggers:
 triggers:
   - id: soul-only-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     soulFile: /my/soul.md
     goal: Review this MR
@@ -614,12 +614,12 @@ triggers:
 triggers:
   - id: bad-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: nonexistent
     goal: Review this MR
   - id: good-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Review this MR
 `;
@@ -636,7 +636,7 @@ triggers:
 triggers:
   - id: conflict-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: my-project
     workspacePath: /some/other/path
     goal: Review this MR
@@ -654,7 +654,7 @@ triggers:
 triggers:
   - id: bad-name-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: my/project
     goal: Review this MR
 `;
@@ -673,7 +673,7 @@ triggers:
 triggers:
   - id: relative-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: relative
     goal: Review this MR
 `;
@@ -689,7 +689,7 @@ triggers:
 triggers:
   - id: existing-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /existing/path
     goal: Review this MR
 `;
@@ -706,7 +706,7 @@ triggers:
 triggers:
   - id: compat-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /compat/path
     goal: Review this MR
 `;
@@ -728,7 +728,7 @@ triggers:
 triggers:
   - id: tilde-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     soulFile: ~/foo/daemon-soul.md
     goal: Review this MR
@@ -752,7 +752,7 @@ triggers:
 triggers:
   - id: tilde-ws-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: tilde-workspace
     goal: Review this MR
 `;
@@ -769,7 +769,7 @@ triggers:
 triggers:
   - id: abs-soul-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     soulFile: /absolute/soul.md
     goal: Review this MR
@@ -791,7 +791,7 @@ triggers:
 triggers:
   - id: relative-soul-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     soulFile: relative/soul.md
     goal: Review this MR
@@ -811,7 +811,7 @@ triggers:
 triggers:
   - id: relative-soul-ws-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspaceName: relative-soul-ws
     goal: Review this MR
 `;
@@ -832,7 +832,7 @@ describe('gitlab_poll provider parsing', () => {
 triggers:
   - id: new-mrs
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: "Review MR"
     goalTemplate: "Review MR !{{$.iid}}: {{$.title}}"
@@ -879,7 +879,7 @@ triggers:
 triggers:
   - id: new-mrs
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review MR
     source:
@@ -899,7 +899,7 @@ triggers:
 triggers:
   - id: new-mrs
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review MR
 `;
@@ -914,7 +914,7 @@ triggers:
 triggers:
   - id: new-mrs
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review MR
     source:
@@ -933,7 +933,7 @@ triggers:
 triggers:
   - id: new-mrs
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review MR
     source:
@@ -953,7 +953,7 @@ triggers:
 triggers:
   - id: new-mrs
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review MR
     source:
@@ -974,7 +974,7 @@ triggers:
 triggers:
   - id: my-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Review this MR
 `;
@@ -989,7 +989,7 @@ triggers:
 triggers:
   - id: mr-close-trigger
     provider: gitlab_poll
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /workspace
     goal: Review MR
     source:
@@ -1286,7 +1286,7 @@ describe('late-bound goals', () => {
 triggers:
   - id: late-bound
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
 `;
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -1308,7 +1308,7 @@ triggers:
 triggers:
   - id: template-only
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goalTemplate: "Review PR: {{$.pull_request.title}}"
 `;
@@ -1328,7 +1328,7 @@ triggers:
 triggers:
   - id: static-goal
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goal: Review this MR
 `;

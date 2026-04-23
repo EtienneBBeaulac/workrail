@@ -117,7 +117,7 @@ Structured migration workflow for moving code between platforms (Android to iOS,
 
 Since you've created workflows yourself, these changes are directly relevant.
 
-### `workflow-for-workflows.v2.json` was rebuilt
+### `wr.workflow-for-workflows.v2.json` was rebuilt
 
 The workflow used to create or modernize other workflows was significantly redesigned. The full phase structure now includes:
 
@@ -179,12 +179,12 @@ A visual catalog of every available workflow. Eight category filter pills. Click
 WorkRail can now detect when a workflow hasn't been reviewed against the current authoring spec. Three signal levels:
 
 - `none` -- validated against the current spec (has a version stamp and it's current)
-- `possible` -- no version stamp (was never run through `workflow-for-workflows`)
+- `possible` -- no version stamp (was never run through `wr.workflow-for-workflows`)
 - `likely` -- has a stamp, but the spec has been updated since the workflow was last reviewed
 
 This shows up in `list_workflows` output (agents see it) and in the CI registry validation check. It's shown only for non-built-in workflows -- built-in workflows ship with their own quality process and don't show staleness signals.
 
-**What this means for your team:** Your team's existing workflows will show as `possible` (no stamp) until they're run through `workflow-for-workflows.v2.json`. That's expected -- it's not an error, just a signal that they haven't been through the new quality gate. Over time, as you modernize them, they'll show `none`.
+**What this means for your team:** Your team's existing workflows will show as `possible` (no stamp) until they're run through `wr.workflow-for-workflows.v2.json`. That's expected -- it's not an error, just a signal that they haven't been through the new quality gate. Over time, as you modernize them, they'll show `none`.
 
 ---
 

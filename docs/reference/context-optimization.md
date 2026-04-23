@@ -17,7 +17,7 @@ The MCP server is **completely stateless**. This means:
 ### Before Optimization
 ```json
 {
-      "workflowId": "coding-task-workflow-agentic",
+      "workflowId": "wr.coding-task",
   "completedSteps": ["phase-1", "phase-2"],
   "context": {
     // 17KB of accumulated state including:
@@ -35,7 +35,7 @@ The MCP server is **completely stateless**. This means:
 ### After Optimization
 ```json
 {
-      "workflowId": "coding-task-workflow-agentic",
+      "workflowId": "wr.coding-task",
   "completedSteps": ["phase-1", "phase-2", "phase-3"],
   "context": {
     // Only what's needed for the next step:

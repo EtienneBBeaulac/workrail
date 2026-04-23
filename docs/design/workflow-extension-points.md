@@ -175,12 +175,12 @@ The parent workflow declares extension points as a top-level field alongside `st
 
 ```json
 {
-  "id": "coding-task-workflow-agentic",
+  "id": "wr.coding-task",
   "version": "2.2.0",
   "extensionPoints": {
     "design_review": {
       "purpose": "Review a selected design for tradeoff quality, failure modes, simpler alternatives, and philosophy alignment.",
-      "defaultBinding": "routine-design-review",
+      "defaultBinding": "wr.routine-design-review",
       "acceptedKinds": ["routine", "workflow"],
       "inputContract": {
         "requiredContext": ["selectedApproach", "acceptedTradeoffs", "identifiedFailureModes"],
@@ -192,7 +192,7 @@ The parent workflow declares extension points as a top-level field alongside `st
     },
     "plan_audit": {
       "purpose": "Audit implementation plan for completeness, risk, and philosophy alignment.",
-      "defaultBinding": "routine-plan-analysis",
+      "defaultBinding": "wr.routine-plan-analysis",
       "acceptedKinds": ["routine", "workflow"],
       "inputContract": {
         "requiredContext": ["implementationPlan", "slices", "invariants"],
@@ -204,7 +204,7 @@ The parent workflow declares extension points as a top-level field alongside `st
     },
     "final_verification": {
       "purpose": "Verify implementation against acceptance criteria, invariants, and philosophy.",
-      "defaultBinding": "routine-final-verification",
+      "defaultBinding": "wr.routine-final-verification",
       "acceptedKinds": ["routine", "workflow"],
       "inputContract": {
         "requiredContext": ["implementationPlan", "acceptanceCriteria", "invariants"],
@@ -293,7 +293,7 @@ Use extension points only when the seam is intentionally delegated and the deleg
 
 ### What is rebindable
 
-Only routines/workflows listed in `extensionPoints` are rebindable. All other routine references (e.g., `routine-context-gathering`, `routine-execution-simulation`) remain hardcoded. The distinction between extension points and utility delegations must be explicit.
+Only routines/workflows listed in `extensionPoints` are rebindable. All other routine references (e.g., `wr.routine-context-gathering`, `wr.routine-execution-simulation`) remain hardcoded. The distinction between extension points and utility delegations must be explicit.
 
 ## Implementation kinds
 
@@ -306,9 +306,9 @@ Best for:
 
 Examples:
 
-- `routine-design-review`
-- `routine-final-verification`
-- `routine-tension-driven-design`
+- `wr.routine-design-review`
+- `wr.routine-final-verification`
+- `wr.routine-tension-driven-design`
 
 ### 2. Workflow implementation
 
@@ -414,7 +414,7 @@ The compiled workflow should include a **binding manifest**:
       "hash": "sha256:abc123..."
     },
     "plan_audit": {
-      "resolvedTo": "routine-plan-analysis",
+      "resolvedTo": "wr.routine-plan-analysis",
       "source": "default",
       "kind": "routine",
       "hash": "sha256:def456..."
@@ -450,7 +450,7 @@ Without this, debugging becomes too opaque.
 
 The user experience should feel like:
 
-- "Use `coding-task-workflow-agentic`"
+- "Use `wr.coding-task`"
 - "For `design_review`, use `my-team-security-review`"
 
 Not:
@@ -470,7 +470,7 @@ Project-level overrides live in `.workrail/bindings.json`:
 
 ```json
 {
-  "coding-task-workflow-agentic": {
+  "wr.coding-task": {
     "design_review": "my-team-security-review",
     "final_verification": "workflow-release-readiness-review"
   }
@@ -480,7 +480,7 @@ Project-level overrides live in `.workrail/bindings.json`:
 Per-run overrides via CLI:
 
 ```bash
-workrail start coding-task-workflow-agentic \
+workrail start wr.coding-task \
   --bind design_review=my-team-security-review
 ```
 
@@ -551,7 +551,7 @@ In the parent workflow JSON:
   "extensionPoints": {
     "final_verification": {
       "purpose": "Verify implementation against acceptance criteria, invariants, and philosophy.",
-      "defaultBinding": "routine-final-verification",
+      "defaultBinding": "wr.routine-final-verification",
       "acceptedKinds": ["routine", "workflow"],
       "inputContract": {
         "requiredContext": ["implementationPlan", "acceptanceCriteria", "invariants"]
@@ -591,7 +591,7 @@ In `.workrail/bindings.json`:
 
 ```json
 {
-  "coding-task-workflow-agentic": {
+  "wr.coding-task": {
     "final_verification": "workflow-release-readiness-review"
   }
 }
@@ -682,6 +682,6 @@ The bounded phase implementation framing leads to a better system design.
 4. Add `.workrail/bindings.json` loading and resolution chain (CLI > project > default)
 5. Include binding manifest in compiled workflow hash and session snapshot
 6. Add `workrail inspect --extension-points` command
-7. Convert `coding-task-workflow-agentic` prompt text to use `{{wr.bindings.*}}` refs for the initial 3 slots
+7. Convert `wr.coding-task` prompt text to use `{{wr.bindings.*}}` refs for the initial 3 slots
 8. Add slot compatibility metadata to routines/workflows
 9. Implement contract validation (required inputs available, required outputs produced)

@@ -75,7 +75,7 @@ Users should be able to use WorkRail at any level without understanding the leve
 
 - Create a workflow from scratch for a recurring task.
 - Full access to all features (loops, fragments, references, delegation).
-- Use the workflow-for-workflows or author manually.
+- Use the wr.workflow-for-workflows or author manually.
 - **Requirement**: strong authoring spec, good examples, validation tooling.
 
 ### Level 4: Distribute workflows
@@ -124,7 +124,7 @@ Available Workflows:
 
 ## WorkRail Built-in
 - coding-task-agentic: Lean Coding Task
-- workflow-for-workflows: Workflow Authoring
+- wr.workflow-for-workflows: Workflow Authoring
 
 ## monorepo (repo-level)
 - ci-release: CI Release Flow
@@ -261,7 +261,7 @@ Package-bundled references (schema, authoring spec, setup guide) are also expose
 
 ### Now: JSON + agent-assisted
 
-JSON remains the engine format. The workflow-for-workflows helps authors create workflows through structured agent guidance. The authoring spec and schema define correctness.
+JSON remains the engine format. The wr.workflow-for-workflows helps authors create workflows through structured agent guidance. The authoring spec and schema define correctness.
 
 ### Next: Markdown authoring
 

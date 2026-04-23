@@ -475,7 +475,7 @@ describe('Real-world agent error scenarios', () => {
   it('handles snake_case parameter naming (most common error)', () => {
     // Simulating agent passing snake_case instead of camelCase
     const badArgs = {
-      workflow_id: 'relocation-workflow-us',
+      workflow_id: 'wr.relocation-us',
       user_input: 'I want to relocate...',
     };
     

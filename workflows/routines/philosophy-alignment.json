@@ -1,5 +1,5 @@
 {
-  "id": "routine-philosophy-alignment",
+  "id": "wr.routine-philosophy-alignment",
   "name": "Philosophy Alignment Routine",
   "version": "1.0.0",
   "metricsProfile": "none",
@@ -27,7 +27,7 @@
     {
       "id": "step-discover-philosophy",
       "title": "Step 1: Discover the Dev's Philosophy",
-      "prompt": "Discover the dev's coding philosophy and preferences. Check `philosophySources` context variable first — if it contains pointers to rules, Memory entries, or repo files, go read those sources directly.\n\nIf `philosophySources` is empty or unavailable, discover from scratch using this fallback chain:\n1. Memory MCP (if available): call `mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall` to retrieve learned preferences\n2. Active session rules / Firebender rules: read any rules or philosophy documents in context\n3. Repo patterns: infer preferences from how the codebase works — error handling, mutability, test style, naming, architecture\n\nAlso check `philosophyConflicts` — if stated rules conflict with repo patterns, note which apply to this review.\n\nWorking notes:\n- Philosophy sources consulted\n- Key principles discovered\n- Conflicts between stated and practiced philosophy",
+      "prompt": "Discover the dev's coding philosophy and preferences. Check `philosophySources` context variable first \u2014 if it contains pointers to rules, Memory entries, or repo files, go read those sources directly.\n\nIf `philosophySources` is empty or unavailable, discover from scratch using this fallback chain:\n1. Memory MCP (if available): call `mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall` to retrieve learned preferences\n2. Active session rules / Firebender rules: read any rules or philosophy documents in context\n3. Repo patterns: infer preferences from how the codebase works \u2014 error handling, mutability, test style, naming, architecture\n\nAlso check `philosophyConflicts` \u2014 if stated rules conflict with repo patterns, note which apply to this review.\n\nWorking notes:\n- Philosophy sources consulted\n- Key principles discovered\n- Conflicts between stated and practiced philosophy",
       "agentRole": "You are discovering what the dev actually cares about before judging their code against it.",
       "requireConfirmation": false
     },

@@ -78,9 +78,9 @@ Nearby contracts that must stay consistent:
 
 **Routing table (exhaustive):**
 ```
-maturity=idea | rough    =>  wr.discovery -> wr.shaping -> coding-task-workflow-agentic
-maturity=specced         =>  wr.discovery -> coding-task-workflow-agentic
-maturity=ready           =>  coding-task-workflow-agentic (Phase 0.5 searches for upstream spec at runtime)
+maturity=idea | rough    =>  wr.discovery -> wr.shaping -> wr.coding-task
+maturity=specced         =>  wr.discovery -> wr.coding-task
+maturity=ready           =>  wr.coding-task (Phase 0.5 searches for upstream spec at runtime)
 ```
 
 Type refines within the coding workflow (bug => skip hypothesis, chore => skip design phases) but does not change pipeline selection.
@@ -121,7 +121,7 @@ upstream_spec: https://docs.example.com/pitch-feature-x
 affected_files: src/foo.ts src/bar.ts
 ```
 
-**Routing mechanism:** Identical to A -- coordinator uses labels only. Body section is not read at routing time. Downstream workflows (coding-task-workflow-agentic Phase 0.5, wr.shaping) call GitHub API to fetch body and parse the `## WorkTrain` section when they need enrichment.
+**Routing mechanism:** Identical to A -- coordinator uses labels only. Body section is not read at routing time. Downstream workflows (wr.coding-task Phase 0.5, wr.shaping) call GitHub API to fetch body and parse the `## WorkTrain` section when they need enrichment.
 
 **Tensions resolved:** T1, T2, T3 (two-layer schema: labels for routing, body for enrichment), T4
 **Tensions accepted:** None materially -- the body section is optional and gracefully absent
@@ -192,7 +192,7 @@ affected_files:
 **Summary:** Instead of a coordinator that routes, create three triggers with different `labelFilter` values -- one per pipeline path. Routing is implicit in which trigger fires.
 
 **Proposed triggers:**
-- `worktrain-coding` trigger: labelFilter=`worktrain:maturity:ready` => `coding-task-workflow-agentic`
+- `worktrain-coding` trigger: labelFilter=`worktrain:maturity:ready` => `wr.coding-task`
 - `worktrain-discovery` trigger: labelFilter=`worktrain:maturity:specced` => `wr.discovery`
 - `worktrain-full` trigger: labelFilter=`worktrain:maturity:idea` => `wr.discovery` (with full-pipeline flag)
 

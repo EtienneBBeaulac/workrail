@@ -1,6 +1,6 @@
 # Implementation Plan: Context Assembly Layer v1
 
-*Authored during coding-task-workflow-agentic session | 2026-04-19*
+*Authored during wr.coding-task session | 2026-04-19*
 
 ---
 

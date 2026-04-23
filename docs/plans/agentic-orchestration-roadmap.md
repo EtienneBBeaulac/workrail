@@ -22,7 +22,7 @@ The rollout is structured in **3 Phased Tiers**, gated by feature flags, ensurin
     *   Creation of `bug-investigation.agentic.json` with manual delegation instructions.
     *   Implementation of the "Delegate or Proxy" prompt pattern directly in the JSON.
 3.  **The Diagnostic Suite:**
-    *   `workflow-diagnose-environment.json`: Agent-driven wizard to probe capabilities and generate config.
+    *   `wr.diagnose-environment.json`: Agent-driven wizard to probe capabilities and generate config.
     *   `docs/integrations/firebender.md`: Documentation on tool whitelisting constraints.
 
 **User Experience:**
@@ -83,7 +83,7 @@ The rollout is structured in **3 Phased Tiers**, gated by feature flags, ensurin
 **Why it matters:**
 *   Keeps the primary step prompt user-voiced while still allowing start/resume-only guidance.
 *   Makes current runtime-owned supplement behavior explicit and eventually authorable.
-*   Gives workflow-for-workflows and future linting a real schema surface instead of relying on hidden server policy.
+*   Gives wr.workflow-for-workflows and future linting a real schema surface instead of relying on hidden server policy.
 
 **Constraints:**
 *   Should be a **narrow, typed feature**, not arbitrary extra prompt sludge.

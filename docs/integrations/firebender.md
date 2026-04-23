@@ -101,7 +101,7 @@ Run the diagnostic workflow to test your configuration:
 
 ```bash
 # In Firebender, ask the main agent:
-"Run the workflow-diagnose-environment workflow"
+"Run the wr.diagnose-environment workflow"
 ```
 
 This will:

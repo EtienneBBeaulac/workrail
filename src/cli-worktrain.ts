@@ -1194,7 +1194,7 @@ function runHealthSummary(sessionId: string, raw: string): void {
 /**
  * worktrain run pr-review
  *
- * Autonomous PR review coordinator. Dispatches mr-review-workflow-agentic sessions
+ * Autonomous PR review coordinator. Dispatches wr.mr-review sessions
  * for open PRs, waits for results, and routes by severity: clean -> merge,
  * minor -> fix-agent loop, blocking/unknown -> escalate.
  *

@@ -144,7 +144,7 @@ agent = Agent(
     subagent_type="workrail-executor",
     description="Execute context gathering",
     prompt="""
-    Start the routine-context-gathering workflow.
+    Start the wr.routine-context-gathering workflow.
 
     Workspace: /path/to/project
     Focus: COMPLETENESS
@@ -156,7 +156,7 @@ agent = Agent(
 Or from the main agent in Claude Code:
 
 ```
-Please use the workrail-executor agent to run the bug-investigation-agentic workflow
+Please use the workrail-executor agent to run the wr.bug-investigation workflow
 ```
 
 ---
@@ -273,15 +273,15 @@ Later repositories override earlier ones with the same workflow ID.
 ### Running a workflow directly
 
 ```
-> Use the bug-investigation-agentic workflow to investigate the cache expiration issue
+> Use the wr.bug-investigation workflow to investigate the cache expiration issue
 ```
 
 ### Delegating to workrail-executor
 
 ```
 > Spawn two workrail-executor agents in parallel:
-> 1. One running routine-context-gathering with focus=COMPLETENESS
-> 2. One running routine-context-gathering with focus=DEPTH
+> 1. One running wr.routine-context-gathering with focus=COMPLETENESS
+> 2. One running wr.routine-context-gathering with focus=DEPTH
 ```
 
 ### Resuming a checkpointed workflow

@@ -120,13 +120,21 @@ function substituteArgs(
 
 /**
  * Convert a routine's ID to its template registry key.
- * Strips the "routine-" prefix if present.
+ * Strips the "wr.routine-" or legacy "routine-" prefix if present.
  *
+ * wr.routine-tension-driven-design -> wr.templates.routine.tension-driven-design
  * routine-tension-driven-design -> wr.templates.routine.tension-driven-design
  * context-gathering -> wr.templates.routine.context-gathering
  */
 export function routineIdToTemplateId(routineId: string): string {
-  const name = routineId.startsWith('routine-') ? routineId.slice('routine-'.length) : routineId;
+  let name: string;
+  if (routineId.startsWith('wr.routine-')) {
+    name = routineId.slice('wr.routine-'.length);
+  } else if (routineId.startsWith('routine-')) {
+    name = routineId.slice('routine-'.length);
+  } else {
+    name = routineId;
+  }
   return `wr.templates.routine.${name}`;
 }
 

@@ -96,7 +96,7 @@ etc.) to call its MCP tools over a transport (stdio or HTTP). The process entry 
 | **Team lead** | Get consistent, enforced process on every MR without training reviewers | Reviews are ad-hoc; agents drift and skip steps |
 | **Platform/infra engineer** | Deploy WorkRail as a service on cloud infrastructure | WorkRail is a local tool that exits when the terminal closes |
 | **Workflow author** | Write a workflow once, have it run identically in both manual and autonomous mode | Today: manual mode only; would need to rewrite for autonomous mode if it existed separately |
-| **WorkRail itself (self-improvement)** | Run `workflow-for-workflows` to author new workflows autonomously | Cannot initiate its own workflows; must be driven by a human |
+| **WorkRail itself (self-improvement)** | Run `wr.workflow-for-workflows` to author new workflows autonomously | Cannot initiate its own workflows; must be driven by a human |
 
 ### Core tension
 

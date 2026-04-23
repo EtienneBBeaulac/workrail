@@ -159,4 +159,4 @@ The scope is correct: 3 new files, clear boundaries, no speculative abstractions
 
 3. Should the coordinator write a full report file (`coordinator-pr-review-YYYY-MM-DD.md`)? Yes, per UX spec. This is a simple file write via CoordinatorDeps.
 
-4. Is `coding-task-workflow-agentic` the correct fix-agent workflow? Yes -- it handles "implement/fix" tasks. The goal string `Fix review findings in PR #N: [finding summaries]` is the goal format.
+4. Is `wr.coding-task` the correct fix-agent workflow? Yes -- it handles "implement/fix" tasks. The goal string `Fix review findings in PR #N: [finding summaries]` is the goal format.

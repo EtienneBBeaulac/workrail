@@ -64,7 +64,7 @@ export const ReviewVerdictArtifactV1Schema = z
           /**
            * Category of the finding. Used by coordinators to route audit chains.
            * Optional for backward compatibility with sessions that do not emit this field.
-           * architecture -> architecture-scalability-audit; all others -> production-readiness-audit.
+           * architecture -> wr.architecture-scalability-audit; all others -> wr.production-readiness-audit.
            */
           findingCategory: z
             .enum([

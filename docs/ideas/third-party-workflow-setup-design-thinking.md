@@ -1460,7 +1460,7 @@
 Available Workflows
 
 ## workrail (built-in)
-- coding-task-workflow-agentic
+- wr.coding-task
 
 ## personal/workrail (repo root)
 - team-code-review

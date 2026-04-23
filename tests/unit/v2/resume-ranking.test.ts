@@ -606,13 +606,13 @@ describe('assignTier - fuzzy matching integration', () => {
     expect(tier.kind === 'matched_notes' || tier.kind === 'matched_notes_partial').toBe(true);
   });
 
-  it('matches workflow ID via fuzzy partial (coding task -> coding-task-workflow-agentic)', () => {
+  it('matches workflow ID via fuzzy partial (coding task -> wr.coding-task)', () => {
     const summary = mkSummary({
       sessionId: 'sess_1',
       runId: 'run_1',
       workflow: {
         kind: 'identified',
-        workflowId: asWorkflowId('coding-task-workflow-agentic'),
+        workflowId: asWorkflowId('wr.coding-task'),
         workflowHash: asWorkflowHash(asSha256Digest('sha256:' + 'b'.repeat(64))),
       },
     });

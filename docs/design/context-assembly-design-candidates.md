@@ -1,6 +1,6 @@
 # Design Candidates: Context Assembly Layer v1
 
-*Generated during coding-task-workflow-agentic session | 2026-04-19*
+*Generated during wr.coding-task session | 2026-04-19*
 
 ---
 

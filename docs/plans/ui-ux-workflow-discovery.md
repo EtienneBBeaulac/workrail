@@ -49,7 +49,7 @@ See `docs/plans/ui-ux-workflow-design-candidates.md` for full candidate analysis
 **Recommendation: Two composing workflows**
 
 ### Workflow B: UI/UX Design Creation Workflow
-For designing UI/UX from scratch. Adapted from `production-readiness-audit.json`.
+For designing UI/UX from scratch. Adapted from `wr.production-readiness-audit.json`.
 
 **Phase structure:**
 - Phase 0: Problem framing, user goals, constraints, existing design context (requireConfirmation always)
@@ -62,7 +62,7 @@ For designing UI/UX from scratch. Adapted from `production-readiness-audit.json`
 **Complexity branching**: Simple (single component, no new flows) skips Phases 1-3.
 
 ### Workflow D: UI/UX Design Audit Workflow
-For reviewing an existing design description/spec before implementation. Adapted from `architecture-scalability-audit.json`.
+For reviewing an existing design description/spec before implementation. Adapted from `wr.architecture-scalability-audit.json`.
 
 User provides design description; agent audits against declared dimensions: information architecture, Hick/Miller/Jakob/Fitts laws, accessibility (WCAG), edge cases (empty/error/loading/first-use), content/microcopy, visual hierarchy.
 

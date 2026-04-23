@@ -58,7 +58,7 @@
 - **Tensions resolved**: all 6 failure categories; forces alternatives at hypothesis stage; evidence-based per-dimension findings
 - **Tensions accepted**: inherent visual limitations; spec not mockup
 - **Failure mode**: reviewer families produce generic UX advice not tied to actual design context
-- **Repo pattern**: directly adapts `production-readiness-audit.json` structure; auditComplexity branching from `adaptive-ticket-creation.json`
+- **Repo pattern**: directly adapts `wr.production-readiness-audit.json` structure; auditComplexity branching from `wr.adaptive-ticket-creation.json`
 - **Gains**: comprehensive, structured freedom, all failure categories covered
 - **Losses**: heavier than minimal for simple tasks (mitigated by Simple fast path)
 - **Scope**: best-fit for feature-level and screen-level design work
@@ -73,7 +73,7 @@
 - **Tensions resolved**: single-solution anchoring; forces genuine exploration
 - **Tensions accepted**: UX laws/accessibility not explicitly enforced
 - **Failure mode**: 3 directions are superficially different (same IA, different metaphors)
-- **Repo pattern**: adapts `architecture-scalability-audit.json` dimension-declaration
+- **Repo pattern**: adapts `wr.architecture-scalability-audit.json` dimension-declaration
 - **Gains**: best for exploring solution space; documents tradeoffs
 - **Losses**: lighter on UX law enforcement; accessibility second-class
 - **Scope**: best as a mechanism within B rather than a standalone workflow
@@ -90,11 +90,11 @@
 - **Tensions resolved**: turns agent UX knowledge into structured application; fully evidence-based
 - **Tensions accepted**: doesn't help with design-from-scratch; requires existing design as input
 - **Failure mode**: agent audits what's in the spec but misses implicit design assumptions not stated
-- **Repo pattern**: directly adapts `architecture-scalability-audit.json`
+- **Repo pattern**: directly adapts `wr.architecture-scalability-audit.json`
 - **Gains**: actionable per-dimension findings with references; complements B
 - **Losses**: review only, not creation
 - **Scope**: best-fit as standalone for design review; or used after B to audit the output
-- **Philosophy**: all principles satisfied; mirrors architecture-scalability-audit exactly
+- **Philosophy**: all principles satisfied; mirrors wr.architecture-scalability-audit exactly
 
 ## Comparison and Recommendation
 

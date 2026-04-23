@@ -34,7 +34,12 @@ function makeRoutineDefinition(overrides: Partial<WorkflowDefinition> = {}): Wor
 // ---------------------------------------------------------------------------
 
 describe('routineIdToTemplateId', () => {
-  it('strips routine- prefix and adds wr.templates.routine. prefix', () => {
+  it('strips wr.routine- prefix and adds wr.templates.routine. prefix', () => {
+    expect(routineIdToTemplateId('wr.routine-tension-driven-design'))
+      .toBe('wr.templates.routine.tension-driven-design');
+  });
+
+  it('still handles legacy routine- prefix for backward compatibility', () => {
     expect(routineIdToTemplateId('routine-tension-driven-design'))
       .toBe('wr.templates.routine.tension-driven-design');
   });

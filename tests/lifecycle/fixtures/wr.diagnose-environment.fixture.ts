@@ -1,15 +1,15 @@
 import type { WorkflowFixture } from '../lifecycle-harness.js';
 
 /**
- * Fixture for workflow-diagnose-environment workflow.
+ * Fixture for wr.diagnose-environment workflow.
  *
  * 2 steps with requireConfirmation variation.
  * Tests that interpreter handles confirmation fields correctly (doesn't block execution).
  */
 export const workflowDiagnoseEnvironmentFixture: WorkflowFixture = {
-  workflowId: 'workflow-diagnose-environment',
+  workflowId: 'wr.diagnose-environment',
   definition: {
-    id: 'workflow-diagnose-environment',
+    id: 'wr.diagnose-environment',
     name: 'Diagnostic: Environment & Subagents',
     version: '1.0.0',
     metricsProfile: 'none',

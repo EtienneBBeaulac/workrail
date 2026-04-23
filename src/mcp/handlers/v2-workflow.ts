@@ -204,7 +204,7 @@ export function computeWorkflowStaleness(
   if (stamp === undefined) {
     return {
       level: 'possible',
-      reason: 'This workflow has not been validated against the authoring spec via workflow-for-workflows.',
+      reason: 'This workflow has not been validated against the authoring spec via wr.workflow-for-workflows.',
     };
   }
   if (stamp === currentVersion) {
