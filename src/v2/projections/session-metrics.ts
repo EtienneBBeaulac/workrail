@@ -23,7 +23,7 @@ export interface SessionMetricsV2 {
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
-  readonly captureConfidence: 'high' | 'medium' | 'none';
+  readonly captureConfidence: 'high' | 'none';
   /**
    * Wall-clock duration of the run in milliseconds.
    * undefined (not null) when either timestamp is unavailable -- consistent
@@ -110,11 +110,8 @@ export function projectSessionMetricsV2(
   const durationMs =
     typeof d.durationMs === 'number' && Number.isFinite(d.durationMs) ? d.durationMs : undefined;
 
-  // Schema emits 'high' | 'none'; 'medium' is reserved in SessionMetricsV2 for future use.
-  // Widen to string before the guard so this compiles when the schema union expands.
-  const captureConfidenceRaw: string = d.captureConfidence ?? '';
-  const captureConfidence: 'high' | 'medium' | 'none' =
-    captureConfidenceRaw === 'high' || captureConfidenceRaw === 'medium' ? captureConfidenceRaw : 'none';
+  const captureConfidence: 'high' | 'none' =
+    d.captureConfidence === 'high' ? 'high' : 'none';
 
   // Extract agent-reported fields from metricsContext.
   const outcomeRaw = metricsContext['metrics_outcome'];
