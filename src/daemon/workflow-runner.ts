@@ -1354,7 +1354,7 @@ export async function loadWorkspaceContext(workspacePath: string): Promise<strin
  *   extract the sessionId via the alias store, without schema changes).
  * @param ctx - V2ToolContext providing tokenCodecPorts, tokenAliasStore, sessionStore.
  */
-async function loadSessionNotes(
+export async function loadSessionNotes(
   continueToken: string,
   ctx: V2ToolContext,
 ): Promise<readonly string[]> {
