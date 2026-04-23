@@ -404,6 +404,72 @@ describe('v2 workflow source catalog output', () => {
     expect(data.warnings!.some((w) => w.includes('MANAGED_SOURCE_IO_ERROR'))).toBe(true);
   });
 
+  describe('validationWarnings', () => {
+    it('surfaces validation warnings in response when a non-bundled workflow fails schema validation', async () => {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-validation-warnings-'));
+      const workspace = path.join(tempRoot, 'workspace');
+      const workflowsDir = path.join(workspace, 'workflows');
+      fs.mkdirSync(workflowsDir, { recursive: true });
+
+      // Write an invalid workflow file (missing required 'steps' field)
+      fs.writeFileSync(
+        path.join(workflowsDir, 'bad-workflow.v2.json'),
+        JSON.stringify({ id: 'bad-workflow', name: 'Bad Workflow', description: 'desc', version: '0.0.1' }),
+        'utf8',
+      );
+      // Write a valid workflow to confirm valid ones still appear
+      writeWorkflow(workflowsDir, 'good-workflow', 'Good Workflow');
+
+      // Use includeSources to get full workflow list (bypasses tag-first filter so all
+      // project workflows appear directly in the response, not just tag-matched ones)
+      const result = await handleV2ListWorkflows(
+        { workspacePath: workspace, includeSources: true },
+        buildCtx(rememberedRootsStore()),
+      );
+
+      expect(result.type).toBe('success');
+      if (result.type !== 'success') return;
+
+      const data = result.data as {
+        workflows: Array<{ workflowId: string }>;
+        validationWarnings?: Array<{ workflowId: string; sourceKind: string; errors: string[] }>;
+        _nextStep?: string;
+      };
+
+      // Valid workflow is still present
+      expect(data.workflows.some((w) => w.workflowId === 'good-workflow')).toBe(true);
+
+      // Invalid workflow is absent from the list
+      expect(data.workflows.some((w) => w.workflowId === 'bad-workflow')).toBe(false);
+
+      // validationWarnings is present with the correct structure
+      expect(Array.isArray(data.validationWarnings)).toBe(true);
+      expect(data.validationWarnings!).toHaveLength(1);
+      expect(data.validationWarnings![0]!.workflowId).toBe('bad-workflow');
+      expect(data.validationWarnings![0]!.sourceKind).toBe('project');
+      expect(data.validationWarnings![0]!.errors).toHaveLength(1);
+      expect(data.validationWarnings![0]!.errors[0]).toBeTruthy();
+    });
+
+    it('omits validationWarnings when all workflows pass validation', async () => {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-validation-clean-'));
+      const workspace = path.join(tempRoot, 'workspace');
+      const workflowsDir = path.join(workspace, 'workflows');
+      writeWorkflow(workflowsDir, 'clean-workflow', 'Clean Workflow');
+
+      const result = await handleV2ListWorkflows(
+        { workspacePath: workspace, includeSources: true },
+        buildCtx(rememberedRootsStore()),
+      );
+
+      expect(result.type).toBe('success');
+      if (result.type !== 'success') return;
+
+      const data = result.data as Record<string, unknown>;
+      expect(data.validationWarnings).toBeUndefined();
+    });
+  });
+
   it('does not create duplicate catalog entry when managed source path matches WORKFLOW_STORAGE_PATH', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-v2-source-catalog-env-dedup-'));
     const workspace = path.join(tempRoot, 'workspace');

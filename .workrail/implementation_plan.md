@@ -416,3 +416,274 @@ Title: `fix(coordinator): queue poll tasks route to FULL/IMPLEMENT not REVIEW_ON
 `planConfidenceBand`: High
 `estimatedPRCount`: 1
 `followUpTickets`: [type-level enforcement: split AdaptivePipelineOpts into QueueDispatchOpts/TriggerDispatchOpts discriminated union]
+
+---
+---
+
+# Implementation Plan: Workflow Validation Regression Test
+
+*Generated: 2026-04-23 | Workflow: coding-task-workflow-agentic*
+
+---
+
+## 1. Problem Statement
+
+No test documents that unknown top-level fields in workflow JSON files are rejected by `validate:registry`. The invariant is correct in production (Ajv enforces `additionalProperties: false`), but invisible. A future refactor could remove the enforcement without any test catching it.
+
+## 2. Acceptance Criteria
+
+- `tests/unit/validate-workflow-registry.test.ts` contains a test that passes a `ParsedRawWorkflowFile` with an unknown top-level field through `validateRegistry` using real `validateWorkflowSchema`
+- Test asserts: `report.isValid === false`, `report.tier1FailedRawFiles === 1`, `report.rawFileResults[0].tier1Outcome.kind === 'schema_failed'`
+- Test includes a comment explaining it uses real `validateWorkflowSchema` to verify the Tier 1 enforcement path
+- `strict: false` removed from Ajv constructor in `src/application/validation.ts`
+- `npx tsc --noEmit` passes
+- `npx vitest run tests/unit/validate-workflow-registry.test.ts` passes with the new test included
+
+## 3. Non-Goals
+
+- Do NOT add schema validation to any new code path
+- Do NOT change `spec/workflow.schema.json`
+- Do NOT add a custom Ajv plugin, format, or keyword handler
+- Do NOT change `additionalProperties` settings anywhere in the schema
+- Do NOT address deployment sequencing or binary/schema versioning
+- Do NOT add tests for any other validation invariants
+
+## 4. Philosophy-Driven Constraints
+
+- Prefer fakes over mocks: use real `validateWorkflowSchema` (already the default in `fakePipelineDeps()`)
+- Document why not what: test must include explanatory comment
+- YAGNI: exactly two files, nothing more
+
+## 5. Invariants
+
+- I1: `validateRegistry` must call `deps.schemaValidate` for each raw file via `validateRawFileTier1`
+- I2: `additionalProperties: false` in `spec/workflow.schema.json` must cause `schemaValidate` to return `err()`
+- I3: The Ajv constructor must not carry settings that imply intentional relaxation of validation without documented reason
+
+## 6. Selected Approach
+
+Direct `fakeSnapshot` injection with real `validateWorkflowSchema`. Construct a `ParsedRawWorkflowFile` with an extra field, inject into `fakeSnapshot({ rawFiles: [...] })`, call `validateRegistry` with default `fakePipelineDeps()`, assert `schema_failed`.
+
+Runner-up: none (all candidates converge).
+
+## 7. Vertical Slices
+
+### Slice 1: Add regression test
+
+**File**: `tests/unit/validate-workflow-registry.test.ts`
+
+Add a new describe block "Schema Enforcement (Tier 1 Regression)" after the existing section 12 (File Discovery). Test case:
+- Construct definition with `unknownFieldForTesting: true` as `unknown as WorkflowDefinition`
+- Wrap in `ParsedRawWorkflowFile` with `kind: 'parsed'`, `filePath: 'test.json'`, `relativeFilePath: 'test.json'`, `variantKind: 'standard'`
+- `fakeSnapshot({ rawFiles: [rawFile] })` + `fakePipelineDeps()` (no overrides -- real validateWorkflowSchema)
+- Assert `report.isValid === false`, `report.tier1FailedRawFiles === 1`, `report.rawFileResults[0]!.tier1Outcome.kind === 'schema_failed'`
+- Comment: "Uses real validateWorkflowSchema (not a mock) to verify the Tier 1 enforcement path calls schema validation. This test ensures additionalProperties: false in workflow.schema.json is enforced at the raw-file validation boundary. If this test fails, the schema enforcement layer has been broken."
+
+**Done when**: Test passes.
+
+### Slice 2: Remove misleading Ajv option
+
+**File**: `src/application/validation.ts`
+
+Change `new Ajv({ allErrors: true, strict: false })` to `new Ajv({ allErrors: true })`.
+
+**Done when**: `npx tsc --noEmit` passes, `npx vitest run` passes.
+
+## 8. Test Design
+
+See Slice 1. No new test file -- add to existing `validate-workflow-registry.test.ts`.
+
+## 9. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Ajv strict removal causes schema compile error | Very Low | Low | Empirically verified: tsc clean before changes |
+| Unknown field stripped before Ajv | None | N/A | createWorkflow does not serialize/deserialize |
+
+## 10. PR Packaging Strategy
+
+Single PR. Branch: `fix/etienneb/workflow-validation-regression-test`. One commit.
+Commit: `test(validation): add regression test for unknown workflow field rejection`
+
+## 11. Philosophy Alignment
+
+| Slice | Principle | Status |
+|-------|-----------|--------|
+| 1 (Test) | Prefer fakes over mocks | Satisfied -- real validateWorkflowSchema |
+| 1 (Test) | Document why not what | Satisfied -- explanatory comment |
+| 1 (Test) | Errors are data | Satisfied -- Result type used throughout |
+| 2 (Ajv) | YAGNI with discipline | Satisfied -- 1-line removal, no new abstractions |
+| All | Architectural fixes over patches | Satisfied -- documents correct invariant, not a patch |
+
+---
+`unresolvedUnknownCount`: 0
+`planConfidenceBand`: High
+`estimatedPRCount`: 1
+`followUpTickets`: []
+
+---
+---
+
+# Implementation Plan: list_workflows Validation Warnings
+
+*Generated: 2026-04-23 | Workflow: coding-task-workflow-agentic*
+
+---
+
+## 1. Problem Statement
+
+When a non-bundled workflow file fails JSON schema validation, `SchemaValidatingWorkflowStorage` and `SchemaValidatingCompositeWorkflowStorage` silently discard the workflow (logging to stderr only). Users calling `list_workflows` see no signal: their workflow is simply absent with no explanation. This turns a trivial typo fix into a multi-minute debugging session.
+
+## 2. Acceptance Criteria
+
+1. `list_workflows` response includes `validationWarnings` array when any non-bundled workflow fails JSON schema validation.
+2. Each warning entry has `workflowId: string`, `sourceKind: string`, `errors: string[]`.
+3. Bundled workflow failures (unexpected) are NOT included in `validationWarnings` -- they log to stderr as before.
+4. Valid workflows still appear in `workflows[]` unchanged.
+5. `IWorkflowStorage` interface is unchanged.
+6. `validationWarnings` is absent (not `[]`) when all workflows pass validation.
+7. Call-scoped: no instance-level state, no state leak between calls.
+8. `ctx.workflowService` singleton fallback path (no workspace signal) returns no `validationWarnings` (field absent).
+9. All three `handleV2ListWorkflows` payload assembly sites include `validationWarnings`.
+10. `npm run build` exits 0.
+11. `npx vitest run` exits 0 with no regressions.
+12. Unit tests for `loadAllWorkflowsWithWarnings()` on both classes.
+13. Handler integration test verifying `validationWarnings` appears in response.
+
+## 3. Non-Goals
+
+- Do NOT change `IWorkflowStorage` interface.
+- Do NOT surface bundled workflow failures in `validationWarnings`.
+- Do NOT add a `validate_workflow` MCP tool.
+- Do NOT change `inspect_workflow` NOT_FOUND behavior.
+- Do NOT add `validationWarnings` to any response other than `list_workflows`.
+
+## 4. Philosophy-Driven Constraints
+
+- **Errors are data:** `loadAllWorkflowsWithWarnings()` returns `{ workflows, warnings }` -- not thrown, not a side effect.
+- **Immutability by default:** `readonly ValidationWarning[]` in all return types.
+- **Explicit domain types:** `ValidationWarning` struct (`workflowId`, `sourceKind`, `errors[]`), not flat strings.
+- **Functional/declarative over imperative:** Paired return method, not callback injection.
+- **YAGNI with discipline:** Add only what is needed -- `IWorkflowStorage` stays untouched.
+- **Type safety as first line of defense:** `HasValidationWarnings` named interface for compile-time safety.
+- **Validate at boundaries, trust inside:** Bundled exclusion at storage method level.
+
+## 5. Invariants
+
+- I1: `IWorkflowStorage` interface signature is unchanged.
+- I2: Existing `loadAllWorkflows()` behavior is unchanged -- valid workflows still filter identically.
+- I3: `validationWarnings` absent (not present with empty array) when no failures.
+- I4: `source.kind !== 'bundled'` guard in `loadAllWorkflowsWithWarnings()` prevents bundled failures from appearing.
+- I5: `reportValidationFailure()` (stderr logging) still called for every filtered workflow -- no monitoring regression.
+- I6: Call-scoped: method creates a fresh `warnings` array per call; no instance state.
+
+## 6. Selected Approach + Rationale
+
+**Candidate A: Paired return method with `HasValidationWarnings` interface**
+
+Add `loadAllWorkflowsWithWarnings()` to both `SchemaValidatingWorkflowStorage` and `SchemaValidatingCompositeWorkflowStorage`, returning `{ workflows: readonly Workflow[]; warnings: readonly ValidationWarning[] }`. Export `HasValidationWarnings` TypeScript interface. In `handleV2ListWorkflows`, type-narrow to `HasValidationWarnings` and call the new method; thread `validationWarnings` into all 3 payload sites.
+
+**Runner-up:** Candidate B (optional callback) -- rejected because imperative callbacks conflict with the repo's functional style.
+
+**Architecture rationale:** Resolves interface stability (IWorkflowStorage untouched), call-scoped safety (no instance state), and signal completeness (bundled excluded at the boundary). Follows the `managedStoreError` side-channel precedent.
+
+## 7. Vertical Slices
+
+### Slice 1: Storage layer -- `ValidationWarning` type + `HasValidationWarnings` interface + `loadAllWorkflowsWithWarnings()` method
+
+**File:** `src/infrastructure/storage/schema-validating-workflow-storage.ts`
+
+Changes:
+1. Export `ValidationWarning` interface: `{ readonly workflowId: string; readonly sourceKind: string; readonly errors: string[] }`
+2. Export `HasValidationWarnings` interface: `{ loadAllWorkflowsWithWarnings(): Promise<{ workflows: readonly Workflow[]; warnings: readonly ValidationWarning[] }> }`
+3. Add `loadAllWorkflowsWithWarnings()` to `SchemaValidatingWorkflowStorage` -- same loop as `loadAllWorkflows()` but collects `ValidationWarning` entries for non-bundled failures.
+4. Add `loadAllWorkflowsWithWarnings()` to `SchemaValidatingCompositeWorkflowStorage` -- same.
+5. Both methods still call `reportValidationFailure()` (invariant I5).
+
+**Done when:** Build clean. Method exists on both classes, returns correct type, still calls `reportValidationFailure`.
+
+### Slice 2: Output schema -- `V2ValidationWarningSchema` + optional `validationWarnings` field
+
+**File:** `src/mcp/output-schemas.ts`
+
+Changes:
+1. Add `export const V2ValidationWarningSchema = z.object({ workflowId: z.string().min(1), sourceKind: z.string().min(1), errors: z.array(z.string().min(1)).min(1) })`
+2. Add `validationWarnings: z.array(V2ValidationWarningSchema).optional().describe(...)` to `V2WorkflowListOutputSchema`.
+
+**Done when:** Build clean. New schema type exported.
+
+### Slice 3: Handler -- type-narrow + call new method + thread to all 3 payload sites
+
+**File:** `src/mcp/handlers/v2-workflow.ts`
+
+Changes:
+1. Import `HasValidationWarnings`, `ValidationWarning` from storage module.
+2. Replace `withTimeout(workflowReader.loadAllWorkflows(), ...)` with: type-narrow to `HasValidationWarnings`; if available call `loadAllWorkflowsWithWarnings()` (wrapped in same `withTimeout`); extract `allWorkflows` and `validationWarnings` (absent if no failures); else fall through to `loadAllWorkflows()` with `validationWarnings = undefined`.
+3. Add `...(validationWarnings ? { validationWarnings } : {})` to all 3 payload assembly sites.
+4. Update `_nextStep` hint: when `validationWarnings` is non-empty (and no `tagSummaryEntry`), include a hint telling the agent to fix errors and retry `list_workflows`.
+
+**Done when:** Build clean. All 3 payload sites include `validationWarnings` spread. Handler integration test passes.
+
+### Slice 4: Tests
+
+**Files:**
+- `tests/unit/schema-validating-composite-workflow-storage.test.ts` (extend existing)
+- `tests/unit/mcp/v2-workflow-source-catalog-output.test.ts` (extend or new file for handler test)
+
+Tests required:
+1. `loadAllWorkflowsWithWarnings()` returns warning entry for non-bundled workflow with bad schema.
+2. `loadAllWorkflowsWithWarnings()` does NOT include bundled workflow failures.
+3. `loadAllWorkflowsWithWarnings()` returns empty `warnings` array (not absent) when all pass -- `validationWarnings` field absent in handler response.
+4. Handler integration test: create temp dir with one invalid workflow JSON, call `handleV2ListWorkflows`, verify `validationWarnings` present with correct structure.
+
+**Done when:** All new tests pass. `npx vitest run` exits 0.
+
+## 8. Test Design
+
+Storage unit tests (extend `schema-validating-composite-workflow-storage.test.ts`):
+- Use `InMemoryWorkflowStorage` with a workflow definition that will fail schema validation (add unknown top-level field or remove required field like `steps`).
+- Call `loadAllWorkflowsWithWarnings()` on `SchemaValidatingCompositeWorkflowStorage`.
+- Assert: `warnings` has one entry, `workflowId` matches, `sourceKind` matches, `errors` non-empty.
+- For bundled test: use `createBundledSource()` for the invalid workflow -- assert `warnings` is empty.
+
+Handler integration test (extend `v2-workflow-source-catalog-output.test.ts` or new file):
+- Write an invalid workflow JSON to a temp directory (missing required field).
+- Call `handleV2ListWorkflows` with `workspacePath` pointing at temp dir.
+- Assert response includes `validationWarnings` with correct structure.
+- Assert valid workflows still present in `workflows[]`.
+
+## 9. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Missing one of 3 payload sites | Low | Medium | All 3 sites updated in Slice 3; verified by test exercising primary path + code review |
+| `withTimeout` not applied to new method | Very Low | Low | Wrap in same `withTimeout(workflowReader.loadAllWorkflowsWithWarnings(), TIMEOUT_MS, ...)` |
+| Rename of `loadAllWorkflowsWithWarnings` breaks handler | Very Low | Low | `HasValidationWarnings` interface -- TypeScript compile catches rename |
+| Bundled failures appear in `validationWarnings` | None | N/A | `source.kind !== 'bundled'` guard at collection level + dedicated test |
+| `reportValidationFailure` no longer called | Very Low | Low | Both methods explicitly call it (invariant I5) |
+
+## 10. PR Packaging Strategy
+
+**Single PR.** Branch: `feat/etienneb/list-workflows-validation-warnings`. One commit.
+Commit: `feat(mcp): surface workflow validation failures in list_workflows response`
+
+## 11. Philosophy Alignment per Slice
+
+| Slice | Principle | Status |
+|-------|-----------|--------|
+| 1 (Storage) | Errors are data | Satisfied -- ValidationWarning returned as value |
+| 1 (Storage) | Immutability by default | Satisfied -- readonly return types |
+| 1 (Storage) | Explicit domain types | Satisfied -- ValidationWarning struct, not flat string |
+| 1 (Storage) | Functional/declarative | Satisfied -- paired return, no callback/mutation |
+| 1 (Storage) | YAGNI | Satisfied -- IWorkflowStorage untouched |
+| 2 (Schema) | Explicit domain types | Satisfied -- V2ValidationWarningSchema |
+| 3 (Handler) | Type safety as first line | Satisfied -- HasValidationWarnings interface |
+| 3 (Handler) | Validate at boundaries | Satisfied -- bundled check in storage, handler trusts result |
+| 4 (Tests) | Prefer fakes over mocks | Satisfied -- InMemoryWorkflowStorage, real handler |
+| All | Document why not what | Satisfied -- comments explain bundled exclusion, call-scoped invariant |
+
+---
+`unresolvedUnknownCount`: 0
+`planConfidenceBand`: High
+`estimatedPRCount`: 1
+`followUpTickets`: ["inspect_workflow validation surface (broken workflows still NOT_FOUND, separate pitch)"]

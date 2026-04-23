@@ -15,6 +15,7 @@ import type { CryptoPortV2 } from '../../v2/durable-core/canonical/hashing.js';
 import type { PinnedWorkflowStorePortV2 } from '../../v2/ports/pinned-workflow-store.port.js';
 import type { Workflow } from '../../types/workflow.js';
 import type { IWorkflowReader, ICompositeWorkflowStorage } from '../../types/storage.js';
+import type { HasValidationWarnings, ValidationWarning } from '../../infrastructure/storage/schema-validating-workflow-storage.js';
 
 import { compileV1WorkflowToV2PreviewSnapshot } from '../../v2/read-only/v1-to-v2-shim.js';
 import { workflowHashForCompiledSnapshot } from '../../v2/durable-core/canonical/hashing.js';
@@ -282,11 +283,28 @@ export async function handleV2ListWorkflows(
     ? [`Managed workflow source store was temporarily unavailable (${managedStoreError}). Managed sources were not loaded.`]
     : undefined;
 
+  // Type-narrow to HasValidationWarnings to collect structured diagnostics for workflows
+  // that failed schema validation. When the reader supports it (i.e. it is one of the
+  // validating wrapper classes), we call loadAllWorkflowsWithWarnings() to get both the
+  // valid workflows and the failure diagnostics in one pass. When the reader is the
+  // ctx.workflowService singleton fallback (no workspace signal), it does not implement
+  // HasValidationWarnings -- we fall through to loadAllWorkflows() and omit the field.
+  const hasValidationWarnings = (r: unknown): r is HasValidationWarnings =>
+    typeof (r as Record<string, unknown>).loadAllWorkflowsWithWarnings === 'function';
+
   // Load all workflows in a single pass and build a Map for O(1) access.
   // Previously this called listWorkflowSummaries() then fanned out to N
   // individual getWorkflowById() calls -- one per workflow (N+1 pattern).
+  let capturedValidationWarnings: readonly ValidationWarning[] | undefined;
   return ResultAsync.fromPromise(
-    withTimeout(workflowReader.loadAllWorkflows(), TIMEOUT_MS, 'list_workflows'),
+    hasValidationWarnings(workflowReader)
+      ? withTimeout(workflowReader.loadAllWorkflowsWithWarnings(), TIMEOUT_MS, 'list_workflows').then(
+          ({ workflows, warnings }) => {
+            capturedValidationWarnings = warnings.length > 0 ? warnings : undefined;
+            return workflows;
+          }
+        )
+      : withTimeout(workflowReader.loadAllWorkflows(), TIMEOUT_MS, 'list_workflows'),
     (err) => mapUnknownErrorToToolError(err)
   )
     .andThen((allWorkflows) => {
@@ -339,14 +357,22 @@ export async function handleV2ListWorkflows(
         return buildTagSummary(WORKFLOW_TAGS, sortedIds);
       })();
 
-      // _nextStep: guide the agent when tagSummary is returned (no tags filter).
+      // _nextStep: guide the agent when tagSummary is returned (no tags filter),
+      // or when validationWarnings are present (tell the agent to fix the errors).
       // staleRoots: maintenance signal — only surface in source catalog mode (includeSources).
       // In tag-discovery mode it is noise: the agent cannot act on stale source paths.
-      const nextStepHint = tagSummaryEntry
-        ? 'Pick a tag from tagSummary that fits the user\'s goal, then call list_workflows with tags=["<tagId>"]. ' +
-          'If a workflow ID in examples[] already matches, call start_workflow directly — no second list call needed. ' +
-          'If multiple tags could apply, pick the most specific one.'
-        : undefined;
+      const nextStepHint = (() => {
+        if (tagSummaryEntry) {
+          return 'Pick a tag from tagSummary that fits the user\'s goal, then call list_workflows with tags=["<tagId>"]. ' +
+            'If a workflow ID in examples[] already matches, call start_workflow directly — no second list call needed. ' +
+            'If multiple tags could apply, pick the most specific one.';
+        }
+        if (capturedValidationWarnings) {
+          return 'One or more workflow files failed validation and were excluded from the workflows list. ' +
+            'Fix the errors listed in validationWarnings in the workflow file(s) and retry list_workflows to confirm.';
+        }
+        return undefined;
+      })();
 
       if (!input.includeSources) {
         // staleRoots is suppressed when tagSummary is present (compact first-call mode):
@@ -359,6 +385,7 @@ export async function handleV2ListWorkflows(
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(includeStaleRoots ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
+          ...(capturedValidationWarnings ? { validationWarnings: [...capturedValidationWarnings] } : {}),
         };
         return okAsync(success(payload) as ToolResult<unknown>);
       }
@@ -375,6 +402,7 @@ export async function handleV2ListWorkflows(
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
+          ...(capturedValidationWarnings ? { validationWarnings: [...capturedValidationWarnings] } : {}),
           sources: [],
         };
         return okAsync(success(payload) as ToolResult<unknown>);
@@ -389,6 +417,7 @@ export async function handleV2ListWorkflows(
           ...(nextStepHint ? { _nextStep: nextStepHint } : {}),
           ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
           ...(warnings ? { warnings } : {}),
+          ...(capturedValidationWarnings ? { validationWarnings: [...capturedValidationWarnings] } : {}),
           sources: [...sources] as z.infer<typeof V2WorkflowListOutputSchema>['sources'],
         };
         return success(payload) as ToolResult<unknown>;
