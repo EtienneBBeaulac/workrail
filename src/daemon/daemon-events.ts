@@ -251,6 +251,31 @@ export interface DaemonStoppedEvent {
   readonly ts: number;
 }
 
+/**
+ * A workflow session was aborted because the daemon was stopped before the session completed.
+ *
+ * WHY: When the daemon receives SIGTERM/SIGINT, in-flight sessions are killed without
+ * completing. Without this event, the JSONL event log shows them as RUNNING forever,
+ * making `worktrain health` and `worktrain status` untrustworthy after a restart.
+ * Emitting this event at shutdown gives consumers a definitive terminal state.
+ *
+ * WHY reason is a closed union: make illegal states unrepresentable. 'daemon_shutdown'
+ * is graceful termination (SIGTERM/SIGINT); 'daemon_killed' is reserved for forceful
+ * termination (SIGKILL or OOM). Only 'daemon_shutdown' is emitted today.
+ *
+ * WHY sessionId = workrailSessionId: at shutdown time, the only available in-process
+ * session identifier is the workrailSessionId from the steerRegistry. The process-local
+ * UUID is not accessible at this boundary. Log consumers filter by either field, so this
+ * does not affect filtering correctness.
+ */
+export interface DaemonSessionAbortedEvent {
+  readonly kind: 'session_aborted';
+  readonly sessionId: string;
+  readonly workrailSessionId?: string;
+  readonly reason: 'daemon_shutdown' | 'daemon_killed';
+  readonly ts: number;
+}
+
 /** Periodic heartbeat confirming the daemon is still alive. */
 export interface DaemonHeartbeatEvent {
   readonly kind: 'daemon_heartbeat';
@@ -340,6 +365,7 @@ export type DaemonEvent =
   | ToolErrorEvent
   | StepAdvancedEvent
   | SessionCompletedEvent
+  | DaemonSessionAbortedEvent
   | DeliveryAttemptedEvent
   | IssueReportedEvent
   | LlmTurnStartedEvent

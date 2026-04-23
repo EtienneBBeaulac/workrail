@@ -2,6 +2,7 @@
   "id": "routine-tension-driven-design",
   "name": "Tension-Driven Design Generation",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "description": "Generates design candidates by deeply understanding a problem, identifying real tensions and constraints (including the dev's philosophy), and producing candidates that resolve those tensions differently. Each candidate includes explicit tradeoffs, failure modes, and philosophy alignment. Replaces perspective-based generation with constraint-driven generation for higher-quality, genuinely diverse candidates.",
   "clarificationPrompts": [
     "What problem should this design solve?",

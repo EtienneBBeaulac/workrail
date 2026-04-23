@@ -6853,3 +6853,727 @@ Medium -- essential before WorkTrain manages more than 2-3 repos. Single file is
 - Does `extends` merge deeply (arrays concatenated) or shallowly (top-level keys override)?
 - How does `worktrain trigger validate` handle templates -- validate the template in isolation, or only validate instantiated triggers?
 - Where do trigger templates live: `config.json` (structured), a separate `trigger-defaults.yml`, or inline in `triggers.yml` as a `defaults:` section?
+
+---
+
+## MR/PR template support (Apr 20, 2026)
+
+**The problem:** WorkTrain opens PRs using a generic body format hardcoded in `delivery-action.ts`. Teams maintain `.github/PULL_REQUEST_TEMPLATE.md` (GitHub), `.gitlab/merge_request_templates/` (GitLab), or custom templates -- WorkTrain ignores all of them. PRs opened by WorkTrain look structurally different from human-authored PRs and skip required fields (checklists, reviewer guidelines, linked issue fields).
+
+### What needs to happen
+
+Before `gh pr create`, `delivery-action.ts` should:
+1. Check for a PR/MR template in standard locations:
+   - `.github/PULL_REQUEST_TEMPLATE.md` (GitHub default)
+   - `.github/pull_request_template.md` (case variant)
+   - `.github/PULL_REQUEST_TEMPLATE/*.md` (multiple templates -- pick default or first)
+   - `.gitlab/merge_request_templates/Default.md` (GitLab)
+   - `.gitlab/merge_request_templates/*.md` (GitLab named templates)
+2. If a template exists: merge the agent's `HandoffArtifact.prBody` into the template structure rather than replacing it. Strategy: fill in template sections that match (Summary, Description, Changes) and mark template checkboxes as checked/unchecked based on what the agent actually did.
+3. If no template: current behavior (use `prBody` directly).
+
+### The merge challenge
+
+Template merging is non-trivial. A template may have:
+- Checklists: `- [ ] Tests added` -- agent should check based on what it did
+- Required sections: `## Description` -- agent fills in
+- Guidelines/instructions: `<!-- Please describe your changes -->` -- strip before submitting
+- Linked issue refs: `Closes #N` -- agent knows the issue number from `taskCandidate`
+
+**Recommended approach:** Pass the template to the agent's final step as additional context. The final step (phase-7-final-verification or phase-5-small-task-fast-path) already produces the `HandoffArtifact.prBody`. Inject the template there so the agent fills it out correctly rather than trying to merge post-hoc.
+
+Alternatively: post-hoc mechanical merge -- fill `## Summary` and `## Changes` sections with the agent's content, auto-check boxes where the agent produced evidence (test files changed = check "Tests added"), leave the rest empty/unchecked.
+
+### GitLab MR description templates
+
+Same concept for GitLab MRs. WorkTrain uses `gh pr create` for GitHub and `glab mr create` (or the GitLab API) for GitLab. Both have template support.
+
+### Priority
+
+Medium. Teams with strict PR templates will notice WorkTrain's PRs immediately. Not a blocker for solo repos. Should land before WorkTrain is used in team repos.
+
+---
+
+## Coordinator as comment router: right agent for each review comment (Apr 20, 2026)
+
+**The principle:** When a reviewer comments on a PR, the MR lifecycle coordinator shouldn't handle it in one monolithic agent. Instead, it routes each comment to the agent best positioned to respond.
+
+### Routing table
+
+| Comment type | Who handles it | Why |
+|---|---|---|
+| "Why did you use X pattern?" | Original implementing agent (resumed with notes) | It wrote the code and has the design decisions in its session notes |
+| "Please change this to Y" | New fix session seeded with implementing agent's notes + the comment | Targeted change, needs implementation context |
+| "This has a security concern" | Review agent (spawned with the specific finding) | Security judgment is a review-domain skill |
+| "This violates our architecture" | Discovery/design agent | Needs architectural perspective, may require rethinking the approach |
+| "Nit: rename this variable" | Coordinator directly | No agent needed -- just apply the change programmatically |
+| "LGTM" / "Approved" | Coordinator tracks approval state | No comment response needed |
+
+### The session notes advantage
+
+The original implementing agent has institutional knowledge in its session notes: why it chose approach A over B, what alternatives it considered, what edge cases it intentionally deferred. Today that knowledge dies when the session ends.
+
+With coordinator routing:
+1. Coordinator looks up the original implementing session for the PR
+2. Reads its `lastStepNotes` and any `report_issue` summaries
+3. Seeds the response session with that context bundle
+4. The response agent can say "I chose X because Y (from the original design decision)" rather than re-inferring from the code alone
+
+This is the first concrete use case for the cross-session prior notes system (`ContextAssembler.listRecentSessions`).
+
+### What the coordinator does (not the agent)
+
+- Classifies each comment by type (question, change request, concern, nit, approval)
+- Routes to the right handler
+- Collects the response (text reply, code fix, or architectural recommendation)
+- Posts the reply to GitHub/GitLab via API
+- Marks threads as resolved when the response is accepted
+- Aggregates all comment outcomes before deciding to re-request review
+
+The MR management agent (if there is one) becomes thin: it's the interface for complex judgment calls that don't fit the routing table. The coordinator handles the mechanical parts.
+
+### Dependency
+
+Requires the event-driven coordination architecture (coordinator as event bus) -- so the coordinator knows when new comments arrive rather than the agent polling for them.
+
+---
+
+## Phase-scoped context files: rules targeted at specific pipeline phases (Apr 20, 2026)
+
+**The idea:** Instead of injecting all rules into every session, let teams define context files scoped to specific pipeline phases. A rule about "how we write commit messages" only matters at delivery time. A rule about "what makes a blocking finding" only matters during MR review. Injecting everything into every session wastes tokens and dilutes relevance.
+
+### Proposed convention
+
+**Phase-scoped files under `.worktrain/rules/`:**
+
+```
+.worktrain/rules/
+  discovery.md       -- injected into wr.discovery sessions only
+  shaping.md         -- injected into wr.shaping sessions only
+  implementation.md  -- injected into coding-task-workflow-agentic sessions
+  review.md          -- injected into mr-review-workflow-agentic sessions
+  delivery.md        -- injected at commit/push/PR-creation time (delivery-action.ts)
+  pr-management.md   -- injected into sessions that manage the MR lifecycle:
+                        answering review comments, applying requested changes,
+                        resolving conversations, updating PR description
+  all.md             -- injected into every session (same as today's AGENTS.md)
+```
+
+**Examples of what goes in each:**
+
+- `delivery.md`: "Commit messages must reference the Jira ticket. PR title must start with ticket number. Always request review from @team-lead."
+- `review.md`: "A blocking finding requires reproducible evidence. Performance findings are major only if the regression exceeds 10%. Security findings are always blocking."
+- `implementation.md`: "Never use `any`. Always write tests before implementation. Follow the Result/Either pattern, no thrown exceptions."
+- `pr-management.md`: "When a reviewer requests changes: acknowledge in a comment, create a fixup commit per finding, re-request review when done. Never resolve review threads yourself."
+
+### Relationship to existing AGENTS.md / CLAUDE.md
+
+Phase-scoped files are additive, not a replacement. The existing `AGENTS.md` / `CLAUDE.md` continue to apply to all sessions. Phase-scoped files are additional context loaded on top.
+
+**Load order (most specific wins if conflict):**
+1. `AGENTS.md` / `CLAUDE.md` (base, all sessions)
+2. `.worktrain/rules/all.md` (WorkTrain-specific base)
+3. Phase-specific file (e.g. `.worktrain/rules/review.md` for review sessions)
+
+### Implementation notes
+
+- The workflow runner already has `WORKSPACE_CONTEXT_CANDIDATE_PATHS`. Phase-scoped files add a second lookup: at session spawn time, the coordinator or trigger knows which workflow is being run and can pass an additional `phaseContextPath` to inject.
+- `delivery.md` is special -- it's injected into `delivery-action.ts`'s git commit message construction, not into a session prompt. The delivery action would read it and pass it as additional context to the `HandoffArtifact` construction.
+- The `pr-management.md` concept implies a new pipeline phase that doesn't exist yet: an autonomous PR management agent that monitors review comments and responds. This is a substantial new feature -- the rules file is ahead of the implementation.
+
+### Priority
+
+Medium. Phase-scoped rules make WorkTrain's autonomous actions more consistent with team conventions without requiring custom workflows per team. Design alongside multi-workspace support and trigger templates (they share the "per-workspace configuration" concern).
+
+---
+
+## MR lifecycle manager: autonomous coordinator from branch to merged (Apr 20, 2026)
+
+**The gap:** WorkTrain currently creates a PR and dispatches an MR review session. If the review returns minor findings, a fix loop runs. But everything between "PR created" and "PR merged" that isn't covered by the review verdict is invisible to WorkTrain: CI failures, reviewer comments, requested changes, label requirements, required approvals, merge conflicts. A human has to watch and intervene.
+
+**The vision:** A `runMRLifecycleManager()` coordinator that takes ownership of the MR from creation to merge and handles everything autonomously.
+
+### Responsibilities
+
+**1. MR creation (already partially done, needs hardening)**
+- Apply PR template (`.github/PULL_REQUEST_TEMPLATE.md` or GitLab equivalent) -- see PR template backlog entry
+- Set correct title format per team convention (from `delivery.md` phase rules)
+- Apply correct labels (from `worktrain:generated` + workflow-specific labels)
+- Set milestone, assignee, reviewers per team convention
+- Link to the originating ticket (Jira issue number, GitHub issue number) in description
+
+**2. CI pipeline monitoring**
+- Poll CI status after PR creation
+- On failure: parse the failed job, determine if it's a flaky test (retry) or a real failure (spawn a fix session with the failing job log as context)
+- On persistent failure (N retries): escalate to Human Outbox with structured summary
+- On success: proceed to review phase
+
+**3. Review comment triage**
+- Poll for new review comments/threads after reviewer activity
+- For each comment/thread: classify as:
+  - `actionable`: code change requested -- feed to fix loop as a finding
+  - `question`: reviewer is asking for clarification -- generate a reply explaining the decision
+  - `nit`: style suggestion -- optionally apply or reply "acknowledged, will address in follow-up"
+  - `approval`: positive review, no action needed
+  - `blocker`: security/architecture concern -- escalate to Human Outbox
+- Reply to questions and nits autonomously (following `pr-management.md` rules)
+- Never resolve threads on behalf of the reviewer (that's their action)
+
+**4. Approval tracking**
+- Track required approvals (from branch protection rules or CODEOWNERS)
+- When approved: check all CI green + all required approvals → trigger merge
+- When changes requested: run targeted fix loop, re-push, re-request review
+
+**5. Merge conflict resolution**
+- Detect merge conflicts (target branch moved while PR was open)
+- Rebase or merge main into the branch
+- If conflicts are in files the agent touched: attempt auto-resolution
+- If conflicts are complex: escalate to Human Outbox
+
+**6. Merge execution**
+- When all gates pass: merge with correct strategy (squash/rebase/merge per team convention)
+- Delete the source branch
+- Update the originating ticket (Jira: move to "Done", GitHub: close issue)
+- Notify via outbox: "PR #N merged. Ticket ACEI-1234 updated."
+
+### Architecture
+
+This is a coordinator script (`src/coordinators/mr-lifecycle.ts`), not a workflow session. It loops with polling, spawning fix sessions as needed. The MR review workflow (`mr-review-workflow-agentic`) becomes one of the tools it calls, not the full pipeline.
+
+The adaptive coordinator's IMPLEMENT and FULL modes would call `runMRLifecycleManager()` instead of `runPrReviewCoordinator()` after the coding session completes. `runPrReviewCoordinator()` becomes a thin wrapper around the lifecycle manager for the standalone `worktrain run pr-review` use case.
+
+### Phase-scoped rules integration
+
+`pr-management.md` in `.worktrain/rules/` defines team-specific behavior:
+- Which comment types to auto-reply vs escalate
+- Whether to rebase or merge for conflict resolution
+- How many CI retry attempts before escalating
+- Whether to request specific reviewers
+- Auto-merge policy (clean + approved = merge, or always wait for human)
+
+### Priority
+
+High -- this is the most visible gap in the autonomous pipeline. Without it, every PR needs human monitoring. With it, WorkTrain can own an MR from first commit to merge with zero human involvement for clean cases.
+
+**Dependency:** PR template support (needed for step 1). Phase-scoped rules (needed for step 3). `dispatchCondition` webhook filter (needed for GitLab MR event triggers).
+
+---
+
+## Event-driven agent coordination: coordinator as event bus (Apr 20, 2026)
+
+**The principle:** Agents should be event-driven, not poll-driven. An agent managing an MR should not repeatedly call `gh pr view --comments` to check for new activity. That wastes turns, burns tokens, and puts timing logic in the wrong place. Instead, the coordinator registers for events and steers the agent when something relevant happens.
+
+**The current infrastructure (already built):**
+- `steerRegistry` + `POST /sessions/:id/steer` -- coordinator can inject a message into a running agent's next turn
+- `signal_coordinator` tool -- agent can surface structured findings to the coordinator without advancing the workflow step
+- `DaemonEventEmitter` -- structured lifecycle events for observability
+
+**What's missing:**
+
+### 1. Coordinator-side event sources
+
+The coordinator needs to listen for MR/PR lifecycle events from external systems:
+
+**GitHub webhooks** (if the repo is reachable):
+- `pull_request_review` -- reviewer approved, requested changes, or dismissed
+- `pull_request_review_comment` -- inline comment added
+- `check_suite` / `check_run` -- CI status changed (pass, fail, queued)
+- `issue_comment` -- general PR comment
+- `pull_request` -- PR labeled, unlabeled, merged, closed
+
+**Polling fallback** (for systems without webhook delivery):
+- Poll `gh pr view`, `gh pr checks`, `gh pr review` on a schedule
+- Diff against last-known state to detect new events
+- Same interface as webhooks, different source
+
+### 2. Event-to-steer mapping
+
+When an event arrives, the coordinator translates it into a structured steer message and injects it into the running MR management agent session:
+
+```typescript
+// CI failure → steer
+steer(sessionId, `[CI_FAILURE] Job: build-and-test (Node 20, ubuntu)
+Status: failed
+Error: 3 tests failed in tests/unit/workflow-runner.test.ts
+Failing tests: loadSessionNotes failure paths (3 cases)
+Log tail: ${logExcerpt}
+Action: fix the failing tests and push a new commit to this branch.`);
+
+// Review comment → steer
+steer(sessionId, `[REVIEW_COMMENT] @kenton-acei commented on src/daemon/workflow-runner.ts:568:
+"This function should export a type alias for the return value"
+Thread ID: thread_abc123
+Action: decide whether to address this comment (reply, fix, or acknowledge as out-of-scope).`);
+
+// Approval → steer
+steer(sessionId, `[REVIEW_APPROVED] @etienneb approved the PR.
+Required approvals: 1/1 met. CI: all green.
+Action: the PR is ready to merge. Execute merge now unless any open threads need resolution.`);
+```
+
+### 3. Agent waits; coordinator drives
+
+The MR management agent's session prompt should explicitly say:
+- "Do not poll for PR status, CI results, or review comments. Wait for the coordinator to deliver events via injected messages."
+- "When you receive a `[CI_FAILURE]` message, fix it. When you receive a `[REVIEW_COMMENT]` message, triage it. When you receive a `[REVIEW_APPROVED]` message, execute merge."
+- "Use `signal_coordinator` to surface anything the coordinator needs to know (blocker found, question for reviewer, etc.)."
+
+This is the `pr-management.md` phase rules file in action -- it defines how the agent should respond to each event type.
+
+### 4. Session lifecycle alignment
+
+A MR management session is inherently long-lived -- it exists for the full lifetime of the PR (hours to days). Today's session model assumes sessions complete in under 2 hours. Long-lived sessions need:
+- Checkpoint/resume support (already exists via `checkpointToken`)
+- Heartbeat-based liveness (already exists via `daemon_heartbeat`)
+- Coordinator-driven wakeup (the steer mechanism is exactly this)
+
+The coordinator parks the session (no pending turns), registers for events, and wakes the session when something happens. No busy-waiting, no polling from the agent side.
+
+### Implementation order
+
+1. **Coordinator event listener** -- `src/coordinators/mr-event-listener.ts`. Registers GitHub webhook handlers OR runs a polling loop. Normalizes events to a common `MREvent` type.
+2. **Event-to-steer bridge** -- maps `MREvent` to structured steer message text, calls `steerRegistry` callback.
+3. **MR management session prompt** -- defines agent behavior for each event type (from `pr-management.md` phase rules).
+4. **Session parking** -- coordinator marks session as "waiting" when no events are pending; wakes it when an event arrives.
+
+### Priority
+
+High -- required for the MR lifecycle manager to work correctly. Without event-driven coordination, the MR management agent burns all its turns polling and times out before the PR is merged. This is the missing architectural piece that makes long-running coordinator sessions viable.
+
+---
+
+## Session as a living append-only record: richer checkpoints and post-completion phases (Apr 21, 2026)
+
+### complete ≠ terminal
+
+A `session_completed` event means the original workflow is done -- not that the session can never receive new events. The event log is append-only: we just keep appending. A post-completion interaction adds a `session_resumed` event, then new turns, then a new `session_completed`. The DAG advances; nothing is rewritten. The append-only invariant holds.
+
+This is already how mid-run resume works (`resume_session` + `continue_workflow`). The same mechanism extends naturally to post-completion: rehydrate the completed state, append a new lightweight phase, run it, complete again.
+
+### Richer automatic checkpoints
+
+Checkpoints are currently sparse -- mostly the automated one before the agent loop starts, plus manual `checkpoint_workflow` calls. A checkpoint is a durable queryable snapshot. Many session events should trigger one automatically:
+
+| Event | Why checkpoint |
+|---|---|
+| `step_advanced` | Already essentially a checkpoint -- make it explicit |
+| `signal_coordinator` fired | Agent surfaced meaningful mid-step state |
+| Worktree commit pushed | Code state is now durable on remote |
+| Coordinator steers the session | Notable injection worth marking |
+| Long `worktrain await` starts | Session about to be idle; preserve state before the wait |
+| Post-completion question asked | Marks the start of a resurrection phase |
+| `spawn_agent` child completes | Parent session has new information |
+
+Making checkpoints richer turns the session history from a raw event stream into a series of meaningful state snapshots -- queryable by the console, readable by the coordinator, resumable by future sessions.
+
+### How post-completion interaction works (engine view)
+
+1. Completed session has a final checkpoint at completion
+2. `worktrain session ask <id> "question"` appends `session_resumed` event
+3. Agent loop starts from the completion checkpoint context (notes, artifacts, DAG state)
+4. Agent answers the question, appends turn events to the same session log
+5. `session_completed` appended again -- now the session has two completion events
+6. The console session tree shows both phases; the lineage is intact
+
+No new session ID. No parentSessionId link needed (it's the same session). The history is continuous.
+
+### How "continue the work" works
+
+Same as above, but instead of a free-form question, the continuation appends a new workflow phase:
+- Coordinator injects new context: "new constraint X emerged"
+- A new workflow step (or a mini-workflow) runs on top of the completed session
+- Step output appended to the same log
+- The worktree (if still alive) gets new commits on the same branch
+
+The session's worktree and branch become the persistent workspace for the full lifetime of the task, not just the original coding session.
+
+### Priority
+
+Medium-high for basic `worktrain session ask`. The engine checkpoint enrichment is a longer-term investment that pays dividends across observability, coordinator coordination, and session quality.
+
+---
+
+## Session continuation: just keep talking (Apr 21, 2026)
+
+A completed session is not dead. It's paused. The conversation is still there -- all the LLM turns, all the tool calls, all the responses, in the event log. To continue it, you just send the next message.
+
+**The only thing blocking this:** the engine rejects messages to sessions in `complete` state. Remove that gate.
+
+**That's the entire change.** No rehydration. No resumption protocol. No special context injection. The LLM receives the full conversation history (it's already stored) and continues as if it never stopped. Because it didn't.
+
+**`worktrain session continue <sessionId> "<message>"`** -- sends a message to a completed session. New events appended to the same log. Same session ID. The agent has full context of everything it ever did.
+
+Context window overflow (very long sessions) is a separate optimization problem -- truncate oldest turns while keeping step notes. Don't solve it now.
+
+---
+
+## Rules preprocessing: normalize and categorize workspace rules before injection (Apr 21, 2026)
+
+**The problem with direct injection:** WorkTrain currently injects all rules files raw into every agent's system prompt. A workspace with `.cursorrules`, `CLAUDE.md`, `.windsurf/rules/*.md`, and `AGENTS.md` might inject 10KB of rules into a discovery session that only needs 2KB of it. Rules from different tools that say the same thing get repeated. The agent gets everything, not what's relevant.
+
+**The better approach: preprocess once, inject targeted**
+
+A `worktrain rules build` command (or automatic first-run) that:
+1. Reads all IDE rules files from the workspace (the full set from `WORKSPACE_CONTEXT_CANDIDATE_PATHS`)
+2. Deduplicates overlapping rules (same constraint stated multiple ways)
+3. Categorizes by phase: implementation, review, delivery, discovery, all
+4. Resolves conflicts between tools (precedence: `.worktrain/rules/` > `CLAUDE.md` > `.cursorrules` > tool-specific)
+5. Writes to `.worktrain/rules/`:
+   - `implementation.md` -- coding conventions, patterns, what to avoid
+   - `review.md` -- what makes a finding, severity criteria, blocking vs non-blocking
+   - `delivery.md` -- commit message format, PR title format, required labels
+   - `discovery.md` -- what to investigate, what to ignore, architecture invariants
+   - `all.md` -- cross-cutting rules for every session
+   - `manifest.json` -- which files exist, when they were last generated, source files used
+
+At session time: WorkTrain injects only the phase-relevant file, not all files.
+
+**What runs the preprocessing**
+
+Option A (LLM): A lightweight `wr.rules-build` workflow session that reads the source files and writes the categorized output. Better categorization, costs a few turns.
+
+Option B (heuristic): Pattern matching on section headers, keywords, file origins. Zero LLM cost, runs on every `worktrain init` or `rules build` call.
+
+Option C (hybrid): Heuristic pass first, LLM for anything ambiguous or conflicting.
+
+**Automatic rebuild triggers:**
+- `worktrain rules build` manual command
+- Automatic on first session if `.worktrain/rules/` doesn't exist
+- On a schedule (weekly) to pick up new rules added to the repo
+- When any source rules file changes (file watcher)
+
+**The manifest enables smart injection:**
+- Each pipeline phase knows which rule file to request
+- If a phase-specific file doesn't exist, fall back to `all.md`
+- The manifest records which source files were used -- if sources change, mark rules as stale
+
+**Relationship to phase-scoped rules files (.worktrain/rules/)**
+This IS the implementation of that feature. The manually-authored `.worktrain/rules/*.md` files are the canonical output. The preprocessing is how you get there automatically without having to write them by hand.
+
+**Priority:** Medium. Useful for any workspace with multiple tools. Essential for team repos where Cursor rules, AGENTS.md, and custom conventions might conflict. Build the categorized injection path (phase-scoped rules) first; add the automated preprocessing as a follow-up.
+
+---
+
+## True session status for WorkTrain: live agent state, not activity inference (Apr 21, 2026)
+
+**The problem:** The console currently infers session status from last event timestamp. A session with no events for >1 hour becomes "dormant." For the WorkRail MCP server this is unavoidable -- it doesn't have access to the agent loop state. But WorkTrain does. It should show true status.
+
+### What WorkTrain knows that the MCP server doesn't
+
+WorkTrain has direct access to:
+- `DaemonRegistry` -- tracks every active session by workrailSessionId in memory. If a session is in the registry, it's running. If not, it's not.
+- `DaemonEventEmitter` -- structured events fired synchronously by the agent loop
+- `daemon_heartbeat` -- fires every 30s. If last heartbeat >90s ago, daemon is down.
+- Turn-level events -- `llm_turn_started/completed`, `tool_call_started/completed` -- know exactly what the agent is doing RIGHT NOW
+- `agent_stuck` -- stuck heuristic fired, session may be stalled
+- `session_aborted` -- daemon killed mid-session (now emitted on SIGTERM)
+
+### True session status taxonomy
+
+| Status | Meaning | Detection |
+|---|---|---|
+| `active:thinking` | LLM API call in progress | `llm_turn_started` without `llm_turn_completed` |
+| `active:tool` | Tool executing | `tool_call_started` without `tool_call_completed`, name=Bash/Read/etc. |
+| `active:idle` | Between turns | Last event was `llm_turn_completed`, session in DaemonRegistry |
+| `stuck` | Stuck heuristic fired | `agent_stuck` event, session still in DaemonRegistry |
+| `completed:success` | Done successfully | `session_completed` outcome=success |
+| `completed:timeout` | Hit wall-clock limit | `session_completed` outcome=timeout |
+| `completed:stuck` | Aborted by stuck policy | `session_completed` outcome=stuck |
+| `completed:max_turns` | Hit turn limit | `session_completed` outcome=timeout detail=max_turns |
+| `aborted` | Daemon killed mid-run | `session_aborted` event |
+| `daemon:down` | No recent heartbeat | Last `daemon_heartbeat` >90s ago |
+
+### Where to surface this
+
+1. **`worktrain status`** -- already shows session overview. Replace activity-inferred "RUNNING" with true status labels.
+2. **`worktrain health <sessionId>`** -- already shows per-session summary. Add "Current state: active:tool (Bash, 23s)" line.
+3. **Console workspace view** -- each session row should show true status badge, not just "live" vs "dormant."
+4. **`worktrain logs --follow`** -- prefix each event with the derived session state so the log stream is self-explanatory.
+
+### Implementation
+
+The status is derivable from the event log in O(N) where N is events for this session -- scan from the end, find the most recent relevant event. For live sessions, also check DaemonRegistry membership.
+
+The daemon heartbeat + DaemonRegistry membership is the key insight: if the session's workrailSessionId is in DaemonRegistry AND the daemon is alive (recent heartbeat), the session is definitely running. If it's not in DaemonRegistry, the session is done regardless of what the event log says.
+
+### Priority
+
+Medium-high. True session status makes WorkTrain trustworthy as an autonomous system -- operators can see exactly what's happening without guessing. Especially important as session durations get longer (55-minute discovery sessions, 120-minute pipeline runs).
+
+---
+
+## Workflows tab: incorrect source attribution for bundled workflows (Apr 21, 2026)
+
+**The bug:** The Workflows tab in the console shows bundled workflows (e.g. `coding-task-workflow-agentic`, `workflow-for-workflows`) as coming from "User Library" instead of "WorkRail Built-in". This is a WorkRail MCP server issue, not a WorkTrain issue.
+
+**Likely cause:** The source attribution logic reads from the workflow's loaded source (the `WorkflowSource` type). When a workflow exists in both the bundled set AND a user's managed sources or remembered roots, the source returned is the one that "wins" in the storage layer -- which may be the user path rather than the bundled path. Or the `source.kind` field is incorrectly set to `'personal'` for workflows that were loaded from the bundled workflows directory.
+
+**Where to look:**
+- `src/infrastructure/storage/schema-validating-workflow-storage.ts` -- source kind propagation
+- `src/mcp/handlers/shared/workflow-source-visibility.ts` -- how source is mapped to display label in `list_workflows`
+- `src/infrastructure/storage/file-workflow-storage.ts` -- how `source.kind` is assigned when loading from disk
+
+**Expected behavior:** Workflows in the `workflows/` directory of the workrail package should always display as "WorkRail Built-in" regardless of whether the user also has a managed source that happens to include the same directory.
+
+**Priority:** Low for WorkTrain (doesn't affect functionality). Medium for WorkRail MCP (misleading UI, users may think they accidentally modified bundled workflows).
+
+---
+
+## Coordinator-managed git state and agent crash recovery (Apr 21, 2026)
+
+### Git state management (coordinator's job)
+
+Before dispatching any WorkTrain session that does git work:
+1. Check for `.git/index.lock` -- if present, verify the owning PID is dead (via `lsof` on macOS), then remove it
+2. Abort any in-progress git operations: `git rebase --abort; git merge --abort`
+3. Verify the workspace is in a clean state before handing off to the agent
+
+Every session that touches files gets a worktree (already implemented). The coordinator ensures worktrees are created cleanly and removed after session completion. The orphan TTL cleanup (24h) handles crash cases.
+
+### Agent crash recovery (coordinator's job)
+
+An agent can die from: stream watchdog timeout (600s no progress), OOM kill, or SIGKILL. In all cases the session event log is intact -- the full conversation history is preserved.
+
+**The coordinator should detect and recover automatically:**
+
+1. Monitor child sessions via `worktrain await`
+2. If a session returns `_tag: 'aborted'` or `_tag: 'timeout'` mid-pipeline:
+   - Check if the session made meaningful progress (step advances > 0, or notes written)
+   - If yes: resume the session -- same session ID, same context, agent picks up at last checkpoint
+   - If no (zero progress): retry from scratch with a fresh session, same context bundle
+3. Retry up to N times (configurable, default 2) before escalating to Human Outbox
+4. Track which phase failed and inject a hint on retry: "Previous attempt failed at this step. Retry with fresh approach."
+
+**This is session continuation applied to crash recovery.** The agent's conversation history is fully preserved. Resuming puts it back exactly where it was. The 600s watchdog timeout (the most common failure) almost always means a hung LLM call or a tool timeout -- resuming naturally retries the step.
+
+**Implementation:** `runFullPipeline` and `runImplementPipeline` already have per-phase error handling. Extend each `awaitSessions` call: on non-success outcome, attempt resume before returning escalated. The resume logic is `worktrain session continue <sessionId>` (once that command exists) or `dispatchAdaptivePipeline` with the existing session's context.
+
+### Priority
+
+High. Agent crash recovery makes the overnight-autonomous bar achievable. Without it, any hung LLM call or tool timeout fails the entire pipeline silently. With it, transient failures are automatically retried and the pipeline continues.
+
+---
+
+## Workflow execution time tracking and prediction (Apr 21, 2026)
+
+**The problem:** WorkTrain has no data on how long workflows actually take. Timeouts are set by intuition (55 min for discovery, 35 for shaping, 65 for coding). We just discovered that discovery on a real workrail task takes ~16 minutes. The 55-minute timeout is 3x the actual time -- but we didn't know that until we ran a benchmark manually.
+
+### What to track
+
+For every completed session, record:
+- Workflow ID
+- Total wall-clock duration
+- Number of turns
+- Number of step advances
+- Outcome (success / timeout / stuck / error)
+- Task complexity signals (codebase size, number of files read, task type from context)
+
+Store in `~/.workrail/data/execution-stats.jsonl` -- one line per completed session, append-only.
+
+### What to do with it
+
+**Immediate use: calibrate timeouts automatically**
+
+Instead of hardcoded `DISCOVERY_TIMEOUT_MS = 55 * 60 * 1000`, read the p95 completion time from execution stats and set the timeout to `p95 * 1.5`. Start with the hardcoded values as seeds; refine after 10+ samples.
+
+**Medium-term use: predict duration before dispatch**
+
+Given: task description + workflow ID + codebase characteristics → predicted duration range.
+
+The coordinator could use this to:
+- Warn when a task is likely to exceed session limits before starting
+- Adjust timeout budgets per-dispatch based on predicted complexity
+- Surface "this type of task usually takes 45 minutes" in `worktrain trigger test` output
+
+**Longer-term use: quality/efficiency metrics**
+
+Track step-advance rate (steps per turn) as a proxy for workflow efficiency. A session with 50 turns and 2 step advances is spending too many turns between steps. This feeds into the workflow improvement loop.
+
+### Implementation notes
+
+- Append to `execution-stats.jsonl` in `runWorkflow()`'s finally block, same pattern as the daemon event log
+- Keep it simple: flat JSONL, no database, no schema migration
+- `worktrain status` can show recent timing stats: "Last 10 wr.discovery sessions: avg 18min, p95 31min"
+- `worktrain trigger validate` can warn if configured timeouts are well below historical p95
+
+### Priority
+
+Medium. The data collection is small (~5 lines in `runWorkflow()`). The prediction and calibration are more involved. Ship collection first, calibration second.
+
+---
+
+## WorkRail MCP server self-cleanup (Apr 21, 2026)
+
+**The problem:** The WorkRail MCP server accumulates stale state that never cleans itself up: old workflow copies in `~/.workrail/workflows/`, dead managed sources, git repo caches that can't pull, 500+ sessions in the store, stale remembered roots. None of it has a TTL or cleanup mechanism. Every server startup loads everything and logs validation errors for stale state.
+
+### Sources of stale state
+
+1. **`~/.workrail/workflows/`** -- manually copied or `worktrain init`-placed workflows that go stale when the repo updates. MCP server loads both repo copy and user copy; older one fails validation silently or noisily.
+
+2. **Managed sources** (`~/.workrail/data/managed-sources/`) -- paths that no longer exist stay registered. Server tries to load them on every startup.
+
+3. **Git workflow cache** (`~/.workrail/cache/git-*`) -- cloned repos whose remotes have changed, been deleted, or whose auth has expired. `git pull` fails; errors logged on every startup.
+
+4. **Session store** (`~/.workrail/data/sessions/`) -- sessions accumulate forever. No TTL, no archival. Console loads all 500+ on every `/api/v2/sessions` request (partially mitigated by mtime cache).
+
+5. **Remembered roots** (`~/.workrail/data/managed-sources/remembered-roots.json`) -- workspace paths from past sessions that no longer exist.
+
+### Fix: two layers
+
+**Layer 1: Defensive loading (mostly already done)**
+Every loader should already handle missing/broken sources gracefully. Audit: are all managed source failures caught and logged as warnings rather than errors? Are git cache failures non-fatal?
+
+**Layer 2: `workrail cleanup` command**
+```
+workrail cleanup [--yes] [--sessions --older-than <age>] [--sources] [--cache] [--roots]
+```
+- `--sources`: remove managed sources where path doesn't exist on disk
+- `--cache`: remove git caches where `git pull` fails (remote gone or auth expired)  
+- `--sessions --older-than 30d`: archive or delete sessions older than N days
+- `--roots`: remove remembered roots where path doesn't exist
+- Without `--yes`: show what would be removed and ask for confirmation
+- With `--yes`: remove without prompting (for CI / worktrain init)
+
+**Layer 3: Automatic startup cleanup (light)**
+On MCP server startup, silently remove managed sources where the filesystem path doesn't exist (non-destructive -- the path is already gone). Log a single "removed N stale sources" line. Do not auto-remove sessions or caches -- those require explicit user intent.
+
+**Layer 4: User workflow directory sync**
+`~/.workrail/workflows/` should not be a place users copy workflows to manually. It should either:
+- Be deprecated entirely (use managed sources / workspace roots instead)
+- Have a `workrail sync` command that updates it from the canonical sources
+- Auto-detect when a user workflow is an older version of a bundled workflow and skip loading it
+
+### Priority
+
+Medium for the cleanup command (quality of life, stops log noise). High for startup auto-cleanup of dead managed sources (prevents the `Invalid workflow` errors that have been confusing throughout this session). Low for session TTL/archival (the mtime cache handles the performance concern).
+
+---
+
+## Worktree orphan leak on delivery failure (Apr 21, 2026, from Audit 4)
+
+**The bug:** In `src/trigger/trigger-router.ts`, `maybeRunDelivery()` on the success path deletes the session sidecar file before attempting worktree removal. If worktree removal fails (network error, git command failure), the sidecar is already gone. `runStartupRecovery()` scans sidecar files to find orphan worktrees -- so the orphaned worktree is invisible and accumulates indefinitely.
+
+**Fix:** In the success path cleanup, delete the sidecar AFTER worktree removal, not before. Or better: always attempt worktree removal in a `try/finally` that deletes the sidecar regardless of whether removal succeeded.
+
+**File:** `src/trigger/trigger-router.ts`, `maybeRunDelivery()` success path.
+
+**Priority:** Medium. Worktrees are small, but the leak is permanent across daemon restarts.
+
+---
+
+## queue-poll.jsonl never rotated (Apr 21, 2026, from Audit 5)
+
+**The bug:** `~/.workrail/queue-poll.jsonl` grows indefinitely. `appendFile`-only, no rotation. At 5-minute poll intervals with 2-3 events per cycle, this is ~8-87 MB/month depending on activity. Disk exhaustion risk on long-running daemons.
+
+**Fix:** Add a size check before appending in `appendQueuePollLog()`. If file exceeds 10 MB, rotate it: rename to `queue-poll.jsonl.1`, start fresh. Keep at most 2 rotated files.
+
+**File:** `src/trigger/polling-scheduler.ts`, `appendQueuePollLog()` function.
+
+**Priority:** Medium. Not urgent but a production correctness issue.
+
+---
+
+## ReviewSeverity missing assertNever + stderr bypassing injected dep (Apr 21, 2026, from Audit 2)
+
+**Bug 1 (Major):** In `src/coordinators/modes/implement-shared.ts`, the `switch(findings.severity)` over `ReviewSeverity` has no `default: assertNever(findings.severity)`. Widening `ReviewSeverity` with a new variant compiles cleanly and falls through silently.
+
+**Fix:** Add `default: assertNever(findings.severity)` to the switch.
+
+**Bug 2 (Major):** In `src/coordinators/pr-review.ts`, `readVerdictArtifact()` calls `process.stderr.write(...)` directly instead of using the injected `deps.stderr`. Tests that inject a fake dep will miss this log.
+
+**Fix:** Replace `process.stderr.write(...)` with `deps.stderr(...)`.
+
+**Files:** `src/coordinators/modes/implement-shared.ts`, `src/coordinators/pr-review.ts`.
+
+**Priority:** Medium. Correctness issues that won't crash in production but make future refactors unsafe.
+
+---
+
+## Current state update (Apr 21, 2026)
+
+**npm version: v3.59.6** | Daemon PID: 54113 | Status: Running, pipeline active
+
+### What shipped in this session (Apr 19-21, 2026)
+
+**All five autonomous pipeline items (previously recorded) plus:**
+
+- ✅ **Discovery loop fix** (#748) -- three coupled fixes: thread `maxSessionMinutes` through `spawnSession` (sessions now get 55/35/65 min instead of 30 min default), inspect `PipelineOutcome` in polling-scheduler and apply `worktrain:in-progress` label on escalation, write issue-ownership sidecar for cross-restart idempotency
+- ✅ **In-process `awaitSessions` and `getAgentResult`** (#741) -- replaced HTTP calls to the daemon's own console with direct `ConsoleService` access
+- ✅ **Try/catch on all coordinator I/O** (#740) -- `getAgentResult`, `pollForPR`, `postToOutbox` all wrapped; coordinator no longer crashes on I/O failure
+- ✅ **Dispatch dedup prealloc bypass** (#744) -- `dispatch()` now bypasses dedup for pre-allocated sessions, fixing the zombie session bug that prevented discovery from starting
+- ✅ **Promise.race crash fix** (#733) -- worktrees scan timeout no longer crashes the daemon via unhandled rejection
+- ✅ **Trigger validator** (#690) -- `worktrain trigger validate` command, `validateTriggerStrict()` pure function
+- ✅ **`worktrain trigger poll`** (#697) -- force immediate poll cycle on any queue trigger
+- ✅ **`worktrain trigger test`** (#656) -- dry-run showing what would dispatch
+- ✅ **Auto-load ~/.workrail/.env** (#673) -- daemon reads secrets from .env automatically
+- ✅ **Daemon lifecycle events** (#674) -- `session_aborted` on SIGTERM, `daemon_heartbeat` every 30s
+- ✅ **Attribution signals** (#658) -- `[WT]` PR title prefix, `Co-authored-by: WorkTrain` commit trailers, `worktrain:generated` label
+- ✅ **Secret scan before push** (#660) -- pattern-based scan blocks commits with leaked credentials
+- ✅ **Unified logs stream** (#680) -- `worktrain logs` now merges daemon events, queue-poll.jsonl, and filtered stderr
+- ✅ **Stale lock file handling** (#705) -- validates lock file PID before trusting port discovery
+- ✅ **5 architectural audits** (docs/design/) -- coordinator access, error handling, testability, type bloat, memory management
+- ✅ **Stale user workflow cleanup** -- removed old copies from `~/.workrail/workflows/` that were causing ValidationError noise
+
+### Current pipeline state (live)
+
+Discovery session `ecf359d7` running: 77 turns, 11 step advances (active, making real progress on issue #393). Session `b7df0c8b` also running (just started). First clean run after all pipeline fixes landed.
+
+### Accurate limitations (v3.59.6)
+
+1. **Ghost sessions in event log** -- sessions killed by daemon crashes don't get `session_aborted` events from old daemon instances. New daemons emit it on shutdown, but historical sessions show as RUNNING.
+2. **Worktree orphan leak** -- if `maybeRunDelivery()` worktree removal fails after sidecar deletion, orphan is invisible to `runStartupRecovery`. See backlog.
+3. **`queue-poll.jsonl` never rotated** -- disk exhaustion risk on long-running daemons. See backlog.
+4. **`ReviewSeverity` missing `assertNever`** -- future variants silently fall through. See backlog.
+5. **`process.stderr.write` in `readVerdictArtifact`** -- bypasses injected dep, invisible to test fakes. See backlog.
+6. **WorkRail MCP stale state** -- `workrail cleanup` command doesn't exist yet. Manual cleanup needed for dead managed sources, old session accumulation.
+7. **Trigger validation static/runtime gap** -- some runtime checks not in static validator. See trigger-validation-gap-audit.md.
+8. **WorkflowTrigger type bloat** -- mixes trigger config, session runtime state, delivery config. See workflow-trigger-lifecycle-audit.md.
+9. **Conversation history not persisted** -- LLM conversation history is in-memory only. On crash, context is lost. See backlog.
+
+### Next priorities (groomed Apr 21)
+
+1. **Watch the current pipeline run** -- discovery `ecf359d7` is active at 77 turns/11 steps. If it completes, shaping and coding should fire automatically. First end-to-end validation.
+2. **Execution time tracking** -- add session timing to `execution-stats.jsonl` for timeout calibration. Small change in `runWorkflow()` finally block.
+3. **Three audit findings from above** -- worktree orphan leak, queue-poll rotation, assertNever fixes. All small, targeted.
+4. **`workrail cleanup` command** -- removes dead managed sources, rotates old session files, clears stale git caches. Stops ValidationError noise in MCP server logs.
+5. **Conversation history persistence** -- `conversation.jsonl` per session, append-only. Prerequisite for true crash recovery.
+6. **Autonomous crash recovery and interrupted-session resume** -- see full entry below (Apr 21).
+
+---
+
+## Autonomous crash recovery and interrupted-session resume (Apr 21, 2026)
+
+**The problem we hit today:** A daemon crash loop (console `worktrees scan` unhandled rejection) killed all in-flight sessions. The queue correctly detected the sidecar and skipped re-dispatch for 56 min (TTL), but when the sidecar expired the session was re-dispatched from scratch with zero context from the previous attempt. The agent had already spent ~10 min in Phase 0, read codebase files, and formed a plan -- all of that work was lost.
+
+**What we want:** WorkTrain should be able to detect orphaned sessions on startup and make an autonomous decision: resume if the session had meaningful progress, discard and re-dispatch from scratch if it was too early to be worth resuming.
+
+**Resumability decision criteria (heuristics):**
+- Session had >= 1 `continue_workflow` call (at least one step advance): worth resuming -- the agent made real progress.
+- Session is at step 0 with 0 advances but > 5 LLM turns: borderline -- context was accumulated but no checkpoint written. Resume is risky (stale context), discard is safer. Could surface to console for human decision.
+- Session is at step 0, < 5 turns, < 2 min: discard -- nothing was lost.
+- Session's worktree is missing or corrupted: discard -- can't resume cleanly.
+- Session is on a coding workflow and has uncommitted changes in the worktree: pause for human review before discarding (could have partial work).
+
+**Implementation sketch:**
+
+1. **On daemon startup**, `runStartupRecovery()` already scans `daemon-sessions/` for orphaned token files. Extend it to also inspect the session event log for each orphan:
+   - Count `continue_workflow` calls and LLM turns from `~/.workrail/events/<sessionId>.jsonl`
+   - Apply decision criteria above
+   - For resume candidates: call `continue_workflow` with the checkpoint token and a synthesized re-entry prompt: "You are resuming a session that was interrupted by a daemon crash. Your last known step was [stepLabel]. Continue from where you left off."
+   - For discard candidates: emit `session_aborted` event, delete the sidecar, re-add the issue to the queue (or just let the TTL expire and the queue re-select naturally)
+
+2. **Conversation history prerequisite**: Resume is only useful if the agent can reconstruct its context. Today, conversation history is in-memory only -- it is lost on crash. The `conversation.jsonl` per-session persistence (backlog item #5 above) is a prerequisite for high-quality resume. Without it, resume starts from the workflow system prompt plus the current step recap only. This is enough for mid-pipeline phases (shaping, coding) since they read artifacts from disk. It may be insufficient for early discovery phases.
+
+3. **`worktrain session resume <sessionId>` CLI** -- manual override for human-initiated resume. Useful when the daemon's automatic heuristic chose to discard but the user sees partial work worth keeping.
+
+4. **Queue sidecar TTL for resume vs. discard**: Today the sidecar TTL prevents re-dispatch during the entire pipeline window (56 min). With autonomous resume, the TTL for a discarded session should be much shorter (5 min) so the queue can quickly re-select. For a resumed session, keep the full TTL and extend it by the time already spent.
+
+**Files to change:**
+- `src/daemon/workflow-runner.ts` -- `runStartupRecovery()`: add event log inspection and conditional resume
+- `src/trigger/polling-scheduler.ts` -- `doPollGitHubQueue()`: accept a `ttlOverride` param so discard path uses short TTL
+- `src/trigger/adapters/github-queue-poller.ts` -- `checkIdempotency()`: handle expired sidecars with `ttlOverride`
+- New: `src/daemon/session-recovery-policy.ts` -- pure function `evaluateRecovery(orphan, eventLog) -> 'resume' | 'discard' | 'human_review'`
+
+**Priority:** High. Every daemon crash currently wastes all in-flight work and waits up to 56 min before retrying. With even basic resume (step > 0 → resume, step = 0 → discard + fast re-dispatch), we'd recover most of the lost work and reduce retry latency from 56 min to < 5 min.
+
+**Depends on:** Conversation history persistence (for high-quality resume context).

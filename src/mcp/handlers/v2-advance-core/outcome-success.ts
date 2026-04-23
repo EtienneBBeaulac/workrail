@@ -3,6 +3,8 @@
  * Handles the path when an advance succeeds (not blocked).
  */
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
@@ -28,13 +30,49 @@ import {
   buildContextSetEvent,
   buildSuccessValidationEvent,
   buildDecisionTraceEvent,
+  buildRunCompletedEvent,
 } from '../v2-advance-events.js';
 import type { AdvanceMode, AdvanceContext, ComputedAdvanceResults, AdvanceCorePorts } from './index.js';
 import type { ValidatedAdvanceInputs } from './input-validation.js';
 import { buildAndAppendPlan, buildNotesOutputs, buildArtifactOutputs } from './event-builders.js';
 import { buildAssessmentRecordedEvent } from '../../../v2/durable-core/domain/assessment-recorded-event-builder.js';
 
-type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+const execFileAsync = promisify(execFile);
+
+/**
+ * Read a string observation value from the session event log.
+ * Returns null if no matching observation_recorded event is found.
+ *
+ * WHY direct field access (no cast): after `e.kind === 'observation_recorded'` narrows
+ * the union, `e.data` is typed as the observation_recorded data shape. All four value
+ * types (`short_string`, `git_sha1`, `sha256`, `path`) have `.value: string`.
+ */
+function readObservation(events: readonly DomainEventV1[], key: string): string | null {
+  for (const e of events) {
+    if (e.kind !== 'observation_recorded') continue;
+    if (e.data.key !== key) continue;
+    return e.data.value.value;
+  }
+  return null;
+}
+
+/**
+ * Resolve endGitSha by running `git rev-parse HEAD` in repoRoot.
+ * Best-effort: returns null on any failure (git not found, not a git repo, timeout).
+ * WHY 2000ms timeout: sessions complete in the MCP response path; a slow git call
+ * should not add more than 2s of latency to session completion.
+ */
+async function resolveEndGitSha(repoRoot: string | null): Promise<string | null> {
+  if (!repoRoot) return null;
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, timeout: 2000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 /** The toNodeKind to use when the advance succeeds (not blocked). */
 function successNodeKind(mode: AdvanceMode): 'step' | undefined {
@@ -225,6 +263,59 @@ export function buildSuccessOutcome(args: {
     }
 
     const outputsToAppend = [...notesOutputs, ...artifactOutputsRes.value];
+
+    // Emit run_completed when the session finishes successfully.
+    // WHY here (inside andThen): newEngineState is available, and async git I/O is
+    // safe inside a ResultAsync chain. resolveEndGitSha is best-effort (never throws).
+    if (newEngineState.kind === 'complete') {
+      const repoRoot = readObservation(truth.events, 'repo_root');
+      const startGitSha = readObservation(truth.events, 'git_head_sha');
+      const gitBranch = readObservation(truth.events, 'git_branch');
+
+      // Extract agent-reported commit SHAs from the last context_set with metrics_commit_shas.
+      // WHY last: agents accumulate the full list on each step; the last value is authoritative.
+      let agentCommitShas: string[] = [];
+      for (const e of truth.events) {
+        if (e.kind !== 'context_set') continue;
+        const ctx = (e.data as Record<string, unknown>)['context'];
+        if (ctx && typeof ctx === 'object' && !Array.isArray(ctx)) {
+          const shas = (ctx as Record<string, unknown>)['metrics_commit_shas'];
+          if (Array.isArray(shas) && shas.every(s => typeof s === 'string')) {
+            agentCommitShas = shas as string[];
+          }
+        }
+      }
+
+      // durationMs: first event timestampMs to last event timestampMs.
+      const firstTs = truth.events[0]?.timestampMs;
+      const lastTs = truth.events[truth.events.length - 1]?.timestampMs;
+      const durationMs = (firstTs !== undefined && lastTs !== undefined) ? (lastTs - firstTs) : undefined;
+
+      return RA.fromPromise(
+        resolveEndGitSha(repoRoot),
+        (e) => ({ kind: 'advance_apply_failed' as const, message: String(e) }),
+      ).andThen((endGitSha) => {
+        const captureConfidence: 'high' | 'none' = agentCommitShas.length > 0 ? 'high' : 'none';
+        extraEventsToAppend.push(buildRunCompletedEvent({
+          sessionId: String(sessionId),
+          runId: String(runId),
+          startGitSha,
+          endGitSha,
+          gitBranch,
+          agentCommitShas,
+          captureConfidence,
+          durationMs,
+          idFactory,
+        }));
+        return buildAndAppendPlan({
+          kind: 'advanced',
+          truth, lockedIndex: args.lockedIndex, sessionId, runId, currentNodeId, attemptId, workflowHash,
+          extraEventsToAppend, toNodeKind: successNodeKind(mode),
+          snapshotRef: newSnapshotRef, outputsToAppend,
+          sessionStore, idFactory, lock,
+        });
+      });
+    }
 
     return buildAndAppendPlan({
       kind: 'advanced',

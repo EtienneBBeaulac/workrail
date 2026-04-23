@@ -541,11 +541,18 @@ async function runBackgroundEnrichment(
   repoRootsKey: string,
 ): Promise<void> {
   try {
+    // WHY clearTimeout pattern: cancels the timeout timer as soon as the work
+    // finishes so the setTimeout callback never fires. This prevents the timeout
+    // promise from rejecting after the race has already settled, which in some
+    // Node.js versions can surface as an unhandledRejection if the void-called
+    // runBackgroundEnrichment's internal race settles before the catch is attached.
+    let bgTimeoutId: ReturnType<typeof setTimeout> | undefined;
+    const bgTimeoutPromise = new Promise<never>((_, reject) => {
+      bgTimeoutId = setTimeout(() => reject(new Error('background enrichment timeout')), BACKGROUND_ENRICHMENT_TIMEOUT_MS);
+    });
     const enriched = await Promise.race([
-      scanRepos(repoRoots),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('background enrichment timeout')), BACKGROUND_ENRICHMENT_TIMEOUT_MS)
-      ),
+      scanRepos(repoRoots).finally(() => clearTimeout(bgTimeoutId)),
+      bgTimeoutPromise,
     ]);
     // Only write to cache if the repo roots haven't changed since the scan started.
     // If the user opened a new workspace during enrichment, the stale result is

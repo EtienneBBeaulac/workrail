@@ -4,7 +4,7 @@ import type { DomainEventV1 } from '../schemas/session/index.js';
 import { EVENT_KIND, MAX_VALIDATION_ISSUES_BYTES, MAX_VALIDATION_SUGGESTIONS_BYTES } from '../constants.js';
 import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
 
-type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 export type ValidationEventError =
   | { readonly code: 'VALIDATION_EVENT_INVARIANT_VIOLATION'; readonly message: string }

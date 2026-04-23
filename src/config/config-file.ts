@@ -80,6 +80,11 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
   // "WORKTRAIN_NOTIFY_WEBHOOK": "https://hooks.example.com/worktrain"  -- generic webhook POST
   'WORKTRAIN_NOTIFY_MACOS',
   'WORKTRAIN_NOTIFY_WEBHOOK',
+
+  // stats summary config -- reserved for future use; no-op in v1.
+  // Future: opt-in period filter so stats-summary.json aggregates only the last N days.
+  // Example: "WORKRAIL_STATS_PERIOD_DAYS": "30"
+  'WORKRAIL_STATS_PERIOD_DAYS',
 ]);
 
 // =============================================================================

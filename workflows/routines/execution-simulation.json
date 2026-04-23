@@ -2,6 +2,7 @@
   "id": "routine-execution-simulation",
   "name": "Execution Simulation Routine",
   "version": "1.1.0",
+  "metricsProfile": "none",
   "description": "Simulates code execution step-by-step through mental tracing and state tracking. Uses an Ideate -> Plan -> Execute strategy to identify the best simulation paths before tracing.",
   "clarificationPrompts": [
     "What function should I simulate? (function name, file, line)",

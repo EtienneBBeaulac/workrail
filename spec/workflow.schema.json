@@ -200,6 +200,11 @@
       "minItems": 1,
       "maxItems": 6,
       "uniqueItems": true
+    },
+    "metricsProfile": {
+      "type": "string",
+      "enum": ["coding", "review", "research", "design", "ticket", "none"],
+      "description": "Metrics instrumentation profile for this workflow. When set, the engine injects a footer into step prompts instructing the agent to accumulate and report metrics context keys (metrics_commit_shas, metrics_outcome, etc.). 'coding' injects SHA accumulation on every step and outcome/PR reporting on the final step. 'review' injects PR numbers + outcome on the final step. 'research', 'design', and 'ticket' inject outcome-only on the final step (identical behavior today, distinct semantics). 'none' or absent field disables injection entirely."
     }
   },
   "required": [

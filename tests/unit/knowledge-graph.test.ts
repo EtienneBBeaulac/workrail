@@ -105,7 +105,7 @@ describe.skipIf(SKIP_ON_WINDOWS)('query 1: what imports trigger-router.ts?', () 
     expect(ids).toContain('trigger/trigger-listener.ts');
   });
 
-  it('returns console-routes.ts as an importer', async () => {
+  it('returns exactly 1 importer (no false positives)', async () => {
     const result = await queryImporters(
       db,
       SRC_DIR,
@@ -116,24 +116,10 @@ describe.skipIf(SKIP_ON_WINDOWS)('query 1: what imports trigger-router.ts?', () 
     if (!result.ok) return;
 
     const ids = result.value;
-    expect(ids).toContain('v2/usecases/console-routes.ts');
-  });
-
-  it('returns exactly 2 importers (no false positives)', async () => {
-    const result = await queryImporters(
-      db,
-      SRC_DIR,
-      path.join(SRC_DIR, 'trigger', 'trigger-router.ts'),
-    );
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-
-    const ids = result.value;
-    // Use toContain instead of toHaveLength so this test stays correct when new importers
-    // are added (e.g. polling-scheduler.ts from feat/polling-triggers).
+    // console-routes.ts was removed as an importer when the dead steer/poll endpoints
+    // were deleted (fix/remove-dead-steer-poll-endpoints). Only trigger-listener.ts remains.
     expect(ids).toContain('trigger/trigger-listener.ts');
-    expect(ids).toContain('v2/usecases/console-routes.ts');
+    expect(ids).not.toContain('v2/usecases/console-routes.ts');
   });
 });
 

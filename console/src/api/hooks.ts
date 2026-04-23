@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse, TriggerListResponse, AutoDispatchRequest, AutoDispatchResponse } from './types';
+import type { ApiResponse, ConsoleSessionListResponse, ConsoleSessionDetail, ConsoleNodeDetail, ConsoleWorktreeListResponse, ConsoleWorkflowListResponse, ConsoleWorkflowDetail, PerfToolCallsResponse, TriggerListResponse, AutoDispatchRequest, AutoDispatchResponse, DiffSummaryResponse } from './types';
 import { mapPerfQueryToResult } from './perf-state';
+
+export type { DiffSummaryResponse };
 
 // Typed HTTP error so callers can check status without brittle string parsing.
 export class HttpError extends Error {
@@ -44,6 +46,28 @@ export function useNodeDetail(sessionId: string, nodeId: string | null) {
     queryKey: ['node', sessionId, nodeId],
     queryFn: () => fetchApi<ConsoleNodeDetail>(`/api/v2/sessions/${sessionId}/nodes/${nodeId}`),
     enabled: !!nodeId,
+  });
+}
+
+/**
+ * On-demand hook for fetching git diff statistics for a session.
+ *
+ * WHY enabled=false by default: the diff-summary endpoint runs a git subprocess
+ * and must never be called automatically on page load. Users must explicitly click
+ * 'Load diff' to trigger the fetch. Callers call `query.refetch()` in the click handler.
+ *
+ * enabled param: passed by the caller to control whether refetch is allowed.
+ * Prevents the query from firing until explicitly requested.
+ */
+export function useDiffSummary(sessionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['diff-summary', sessionId],
+    queryFn: () => fetchApi<DiffSummaryResponse>(`/api/v2/sessions/${sessionId}/diff-summary`),
+    enabled,
+    staleTime: Infinity,   // diff results don't change -- SHAs are fixed
+    refetchInterval: false, // never auto-refetch
+    refetchOnWindowFocus: false,
+    retry: false,           // don't retry on error -- user can click again if needed
   });
 }
 

@@ -14,6 +14,7 @@
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
+  "metricsProfile": "review",
   "features": [
     "wr.features.subagent_guidance"
   ],

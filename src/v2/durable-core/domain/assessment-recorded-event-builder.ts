@@ -3,7 +3,7 @@ import type { DomainEventV1 } from '../schemas/session/index.js';
 import { EVENT_KIND } from '../constants.js';
 import type { RecordedAssessmentV1 } from './assessment-record.js';
 
-type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 export type AssessmentRecordedEventError =
   | { readonly code: 'ASSESSMENT_EVENT_INVARIANT_VIOLATION'; readonly message: string };

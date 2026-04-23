@@ -14,6 +14,7 @@
     "recommendedAutonomy": "guided",
     "recommendedRiskPolicy": "conservative"
   },
+  "metricsProfile": "research",
   "preconditions": [
     "User has a specific bug report, failing test, or unexpected behavior to investigate.",
     "Agent has codebase access and can run tests, commands, or other deterministic evidence-gathering steps.",

@@ -14,6 +14,7 @@ export const testSessionPersistenceFixture: WorkflowFixture = {
     description:
       'Purpose-built workflow for testing v2 session persistence, cross-chat resume, and checkpoint mechanics. Has 5 simple steps that agents can complete quickly with unique marker outputs.',
     version: '1.0.0',
+    metricsProfile: 'none',
     steps: [
       {
         id: 'step-1-alpha',

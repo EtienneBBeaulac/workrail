@@ -2,6 +2,7 @@
   "id": "routine-design-review",
   "name": "Design Review Routine",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "description": "Reviews a selected design using explicit tradeoffs, failure modes, simpler-alternative checks, runner-up comparison, and philosophy alignment. Produces a reusable design-review findings artifact.",
   "clarificationPrompts": [
     "What design artifact or summary should I review?",

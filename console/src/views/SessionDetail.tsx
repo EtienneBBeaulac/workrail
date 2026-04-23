@@ -5,8 +5,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import { HealthBadge } from '../components/HealthBadge';
 import { NodeDetailSection } from '../components/NodeDetailSection';
 import { CutCornerBox } from '../components/CutCornerBox';
-import type { ConsoleSessionDetail, ConsoleDagRun } from '../api/types';
+import type { ConsoleSessionDetail, ConsoleDagRun, SessionMetricsV2 } from '../api/types';
 import type { UseSessionDetailViewModelResult } from '../hooks/useSessionDetailViewModel';
+import { useDiffSummary } from '../api/hooks';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -80,6 +81,220 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
 }
 
 // ---------------------------------------------------------------------------
+// SessionMetricsSection
+// ---------------------------------------------------------------------------
+
+/** Diff loading state machine. Linear transitions: idle -> loading -> loaded | error. */
+type DiffState =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'loaded'; readonly linesAdded: number; readonly linesRemoved: number; readonly filesChanged: number }
+  | { readonly kind: 'error'; readonly message: string };
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+/**
+ * SessionMetricsSection -- shows structured outcome metrics for a completed session run.
+ *
+ * Inline sub-panel (console/CLAUDE.md: inline sub-panel exception applies -- co-located
+ * with SessionDetail, ViewModel lifetime matches section visibility).
+ *
+ * Invariants:
+ * - Only rendered when metrics !== null (caller is responsible for the null check)
+ * - Agent-reported values always labeled "(agent-reported)" -- never omitted
+ * - Diff never auto-fetched -- user must click Load diff
+ * - Load diff button hidden when startGitSha or endGitSha is null
+ */
+function SessionMetricsSection({ sessionId, metrics }: { sessionId: string; metrics: SessionMetricsV2 }) {
+  const [diffState, setDiffState] = useState<DiffState>({ kind: 'idle' });
+  const diffQuery = useDiffSummary(sessionId, false); // enabled=false: never auto-fetch
+
+  const canLoadDiff = metrics.startGitSha !== null && metrics.endGitSha !== null;
+
+  const handleLoadDiff = async () => {
+    setDiffState({ kind: 'loading' });
+    try {
+      const result = await diffQuery.refetch();
+      if (result.isSuccess && result.data) {
+        setDiffState({
+          kind: 'loaded',
+          linesAdded: result.data.linesAdded,
+          linesRemoved: result.data.linesRemoved,
+          filesChanged: result.data.filesChanged,
+        });
+      } else {
+        const errorMsg = result.error instanceof Error
+          ? result.error.message
+          : 'Diff computation failed';
+        setDiffState({ kind: 'error', message: errorMsg });
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Diff computation failed';
+      setDiffState({ kind: 'error', message: errorMsg });
+    }
+  };
+
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4 corner-brackets space-y-4" style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+      {/* Section header */}
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
+          Session Metrics
+        </span>
+        <span className="font-mono text-[10px] text-[var(--text-muted)]">
+          Session-level totals across all runs.
+        </span>
+      </div>
+
+      {/* Chip row: compact summary of most important non-null values */}
+      <div className="flex flex-wrap gap-2">
+        {metrics.outcome !== null && (
+          <span className="px-2 py-1 text-xs font-mono border border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)]">
+            {metrics.outcome}
+          </span>
+        )}
+        {metrics.durationMs !== undefined && (
+          <span className="px-2 py-1 text-xs font-mono border border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)]">
+            {formatDuration(metrics.durationMs)}
+          </span>
+        )}
+        {metrics.filesChanged !== null && (
+          <span className="px-2 py-1 text-xs font-mono border border-[var(--border)] text-[var(--text-secondary)] bg-[var(--bg-card)]">
+            {metrics.filesChanged} file{metrics.filesChanged !== 1 ? 's' : ''} changed
+          </span>
+        )}
+        {metrics.captureConfidence !== 'none' && (
+          <span className="px-2 py-1 text-xs font-mono border border-[var(--border)] text-[var(--text-muted)] bg-[var(--bg-card)]">
+            {metrics.captureConfidence} confidence
+          </span>
+        )}
+      </div>
+
+      {/* Detail grid: all available metrics fields */}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-8 gap-y-2">
+        {/* Engine-authoritative fields (from run_completed event) */}
+        {metrics.gitBranch !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Git Branch</dt>
+            <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">{metrics.gitBranch}</dd>
+          </>
+        )}
+        {metrics.startGitSha !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Start SHA</dt>
+            <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">{metrics.startGitSha.slice(0, 12)}</dd>
+          </>
+        )}
+        {metrics.endGitSha !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">End SHA</dt>
+            <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">{metrics.endGitSha.slice(0, 12)}</dd>
+          </>
+        )}
+        {metrics.durationMs !== undefined && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Duration</dt>
+            <dd className="font-mono text-xs text-[var(--text-secondary)] self-center">{formatDuration(metrics.durationMs)}</dd>
+          </>
+        )}
+        {metrics.agentCommitShas.length > 0 && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-start">Commits</dt>
+            <dd className="font-mono text-xs text-[var(--text-secondary)]">
+              {metrics.agentCommitShas.map((sha) => (
+                <div key={sha}>{sha.slice(0, 12)}</div>
+              ))}
+            </dd>
+          </>
+        )}
+
+        {/* Agent-reported fields (from metrics_* context_set keys) -- labeled accordingly */}
+        {metrics.outcome !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Outcome</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">{metrics.outcome} <span className="text-[var(--text-muted)]">(agent-reported)</span></dd>
+          </>
+        )}
+        {metrics.filesChanged !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Files Changed</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">{metrics.filesChanged} <span className="text-[var(--text-muted)]">(agent-reported)</span></dd>
+          </>
+        )}
+        {metrics.linesAdded !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Lines Added</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">{metrics.linesAdded} <span className="text-[var(--text-muted)]">(agent-reported)</span></dd>
+          </>
+        )}
+        {metrics.linesRemoved !== null && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">Lines Removed</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">{metrics.linesRemoved} <span className="text-[var(--text-muted)]">(agent-reported)</span></dd>
+          </>
+        )}
+        {metrics.prNumbers.length > 0 && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">PRs</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">
+              {metrics.prNumbers.join(', ')} <span className="text-[var(--text-muted)]">(agent-reported)</span>
+            </dd>
+          </>
+        )}
+
+        {/* Diff-computed LOC rows -- replace Load diff button when loaded */}
+        {diffState.kind === 'loaded' && (
+          <>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">LOC Added</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">{diffState.linesAdded} <span className="text-[var(--text-muted)]">(git diff)</span></dd>
+            <dt className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] self-center">LOC Removed</dt>
+            <dd className="text-xs text-[var(--text-secondary)] self-center">{diffState.linesRemoved} <span className="text-[var(--text-muted)]">(git diff)</span></dd>
+          </>
+        )}
+      </dl>
+
+      {/* Diff action area: Load diff button (idle), spinner (loading), or error (error state) */}
+      {canLoadDiff && diffState.kind !== 'loaded' && (
+        <div className="flex items-center gap-3 pt-1">
+          {diffState.kind === 'idle' && (
+            <button
+              type="button"
+              onClick={() => { void handleLoadDiff(); }}
+              className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] px-3 py-1.5 transition-colors"
+            >
+              Load diff
+            </button>
+          )}
+          {diffState.kind === 'loading' && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-[var(--text-muted)]">
+              Computing...
+            </span>
+          )}
+          {diffState.kind === 'error' && (
+            <span className="text-xs text-[var(--error)]">
+              {diffState.message}
+              {' '}
+              <button
+                type="button"
+                onClick={() => { void handleLoadDiff(); }}
+                className="underline text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                Retry
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // HintBanner
 // ---------------------------------------------------------------------------
 
@@ -131,6 +346,12 @@ export function SessionDetail({ viewModel }: Props) {
     <>
       <div className="space-y-4">
         <SessionMetaCard data={data} />
+
+        {/* SessionMetricsSection: only rendered when metrics is non-null.
+            Completely absent (no empty card, no placeholder) when metrics === null. */}
+        {data.metrics !== null && (
+          <SessionMetricsSection sessionId={sessionId} metrics={data.metrics} />
+        )}
 
         {data.runs.length === 0 ? (
           <div className="text-center py-16 text-[var(--text-secondary)]">

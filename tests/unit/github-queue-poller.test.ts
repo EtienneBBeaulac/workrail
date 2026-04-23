@@ -15,7 +15,7 @@
  * - Maturity H2: checklist items -> 'specced'
  * - Maturity H2: acceptance criteria heading -> 'specced'
  * - Maturity default: plain body -> 'idea'
- * - H3 exclusion: worktrain:in-progress label (in scheduler, not inferMaturity)
+ * - H3 exclusion: worktrain:in-progress label check removed (PR #765)
  * - Rate limit skip: X-RateLimit-Remaining < 100 -> ok([])
  */
 

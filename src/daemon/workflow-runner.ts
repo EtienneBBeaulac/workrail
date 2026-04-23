@@ -32,17 +32,23 @@ import { randomUUID } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import { AgentLoop } from "./agent-loop.js";
-import type { AgentTool, AgentToolResult, AgentEvent, AgentLoopCallbacks } from "./agent-loop.js";
+import type { AgentTool, AgentToolResult, AgentEvent, AgentLoopCallbacks, AgentInternalMessage } from "./agent-loop.js";
 import type { V2ToolContext } from '../mcp/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
 import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
+import type { ContinueTokenResolved } from '../mcp/handlers/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
+import type { SessionEventLogReadonlyStorePortV2, LoadedValidatedPrefixV2, SessionEventLogStoreError } from '../v2/ports/session-event-log-store.port.js';
+import type { ToolFailure } from '../mcp/handlers/v2-execution-helpers.js';
+import type { ResultAsync } from 'neverthrow';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
+import { evaluateRecovery } from './session-recovery-policy.js';
+import { writeStatsSummary } from './stats-summary.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -89,10 +95,12 @@ const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
  * Per-trigger overrides are set via triggers.yml agentConfig.maxTurns.
  * WHY: prevents infinite retry loops when the LLM keeps calling continue_workflow
  * with a broken token -- without a cap, each isError tool_result is visible to the
- * LLM and it will simply retry, looping forever. 50 turns is generous enough for
- * long coding tasks while still being a hard safety net.
+ * LLM and it will simply retry, looping forever. 200 turns provides a generous
+ * safety net for complex autonomous workflows (e.g. wr.discovery deep codebase
+ * exploration) without being the bottleneck -- wall-clock maxSessionMinutes is
+ * the primary cap for runaway sessions.
  */
-const DEFAULT_MAX_TURNS = 50;
+const DEFAULT_MAX_TURNS = 200;
 
 /**
  * Conditionally spreads workrailSessionId into a daemon event object.
@@ -172,16 +180,84 @@ const WORKSPACE_CONTEXT_MAX_BYTES = 32 * 1024;
 const MAX_ASSEMBLED_CONTEXT_BYTES = 8192;
 
 /**
- * Candidate workspace context files in priority order.
- * WHY: Higher-priority files (repo-specific Claude config) are included first.
- * If the combined size exceeds WORKSPACE_CONTEXT_MAX_BYTES, lower-priority files
- * are truncated or dropped so the most relevant context always fits.
+ * A literal path entry: a single file at a known relative path.
+ * WHY: Claude Code and AGENTS.md paths are stable single-file conventions.
  */
-const WORKSPACE_CONTEXT_CANDIDATE_PATHS = [
-  '.claude/CLAUDE.md',
-  'CLAUDE.md',
-  'AGENTS.md',
-  '.github/AGENTS.md',
+type LiteralCandidatePath = {
+  readonly kind: 'literal';
+  readonly relativePath: string;
+};
+
+/**
+ * A glob pattern entry: zero or more files matching a pattern in a directory.
+ * WHY: Cursor, Windsurf, and Firebender all use directory-based conventions
+ * where teams add multiple rule files. A glob pattern discovers them all.
+ */
+type GlobCandidatePath = {
+  readonly kind: 'glob';
+  /** Relative to workspacePath, e.g. '.cursor/rules/*.mdc' */
+  readonly pattern: string;
+  /**
+   * WHY: .mdc (Cursor/Firebender) and .windsurf/rules/*.md files have YAML
+   * frontmatter with metadata (alwaysApply, description, etc.) not meant for
+   * LLM consumption. Must be stripped before injection.
+   */
+  readonly stripFrontmatter: boolean;
+  /**
+   * WHY: tinyglobby order is filesystem-dependent. Alpha sort ensures the same
+   * workspace produces the same context on every WorkTrain session.
+   */
+  readonly sort: 'alpha';
+};
+
+type WorkspaceContextCandidate = LiteralCandidatePath | GlobCandidatePath;
+
+/**
+ * Maximum files to read per glob pattern.
+ * WHY: Prevents I/O cost and context budget waste in repos where .cursor/rules/
+ * or similar directories contain many files (generated artifacts, etc.).
+ */
+const MAX_GLOB_FILES_PER_PATTERN = 20;
+
+/**
+ * Candidate workspace context files in priority order.
+ * WHY: More specific (tool-specific, project-specific) before more general.
+ * User-written Claude Code config takes top priority. Glob formats (newer) come
+ * before legacy single-file formats (older) for each tool to reduce duplicate
+ * injection when both coexist.
+ *
+ * Sources:
+ *   Claude Code: https://code.claude.com/docs/en/memory (April 2026)
+ *   Cursor .cursorrules: empirical (zillow-android-2/.cursorrules)
+ *   Cursor .cursor/rules/*.mdc: empirical (zillow-android-2/.cursor/rules/)
+ *   Windsurf .windsurf/rules/*.md: https://docs.windsurf.com/windsurf/cascade/memories (April 2026)
+ *   Firebender .firebender/rules/*.mdc: empirical (zillow-android-2/.firebender/rules/)
+ *   Firebender AGENTS.md: docs/integrations/firebender.md + empirical
+ *   GitHub Copilot: https://docs.github.com/en/copilot/customizing-copilot (April 2026)
+ *   Continue.dev: https://docs.continue.dev/customize/deep-dives/rules (April 2026)
+ *
+ * NOTE: .windsurfrules does NOT exist -- Windsurf uses .windsurf/rules/ directory.
+ * NOTE: alwaysApply: false rules in .mdc files are injected unconditionally in
+ *   Phase 1. Phase 2 will add filtering based on the alwaysApply frontmatter field.
+ */
+const WORKSPACE_CONTEXT_CANDIDATE_PATHS: readonly WorkspaceContextCandidate[] = [
+  { kind: 'literal', relativePath: '.claude/CLAUDE.md' },
+  { kind: 'literal', relativePath: 'CLAUDE.md' },
+  { kind: 'literal', relativePath: 'CLAUDE.local.md' },
+  { kind: 'literal', relativePath: 'AGENTS.md' },
+  { kind: 'literal', relativePath: '.github/AGENTS.md' },
+  // Cursor: newer directory format before legacy single-file format
+  { kind: 'glob', pattern: '.cursor/rules/*.mdc', stripFrontmatter: true, sort: 'alpha' },
+  { kind: 'literal', relativePath: '.cursorrules' },
+  // Windsurf: directory format only (.windsurfrules does NOT exist per official docs)
+  { kind: 'glob', pattern: '.windsurf/rules/*.md', stripFrontmatter: true, sort: 'alpha' },
+  // Firebender: both rules directory and AGENTS.md convention
+  { kind: 'glob', pattern: '.firebender/rules/*.mdc', stripFrontmatter: true, sort: 'alpha' },
+  { kind: 'literal', relativePath: '.firebender/AGENTS.md' },
+  // GitHub Copilot
+  { kind: 'literal', relativePath: '.github/copilot-instructions.md' },
+  // Continue.dev
+  { kind: 'glob', pattern: '.continue/rules/*.md', stripFrontmatter: false, sort: 'alpha' },
 ] as const;
 
 // WHY: Soul content is defined in soul-template.ts (zero imports) so the CLI
@@ -652,6 +728,31 @@ async function persistTokens(
 }
 
 /**
+ * Append a batch of AgentInternalMessage values to a per-session conversation JSONL file.
+ *
+ * WHY fire-and-forget: conversation history is observability/crash-recovery data. A write
+ * failure must never affect the agent loop. Callers invoke this as void + .catch(() => {}).
+ *
+ * WHY JSONL (one JSON object per line): enables incremental delta appends, crash-tolerant
+ * reads (discard the last line if it is not valid JSON), and direct jq inspection.
+ *
+ * WHY append-only: preserves the valid prefix even if the daemon crashes mid-write. Phase B
+ * crash recovery uses loadValidatedPrefix semantics (discard invalid last line).
+ *
+ * @param filePath - Absolute path to the .jsonl file (created on first call if absent).
+ * @param messages - New messages since the last flush (the delta for this turn).
+ */
+async function appendConversationMessages(
+  filePath: string,
+  messages: ReadonlyArray<AgentInternalMessage>,
+): Promise<void> {
+  if (messages.length === 0) return;
+  const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n';
+  await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+  await fs.appendFile(filePath, lines, 'utf8');
+}
+
+/**
  * Read a previously persisted session state from ~/.workrail/daemon-sessions/<sessionId>.json.
  *
  * Returns null if the file does not exist (first run, or already cleaned up after success).
@@ -713,7 +814,8 @@ export async function readAllDaemonSessions(
     // Only consider complete session files. Temp files are named <sessionId>.json.tmp
     // (i.e. they end with .tmp, not .json) -- the endsWith('.json') check already
     // excludes them. The belt-and-suspenders check keeps this robust to naming changes.
-    if (!entry.endsWith('.json')) continue;
+    // queue-issue-*.json sidecars live in the same directory; skip them here.
+    if (!entry.endsWith('.json') || entry.startsWith('queue-issue-')) continue;
 
     const sessionId = entry.slice(0, -5); // strip .json
     const filePath = path.join(sessionsDir, entry);
@@ -752,22 +854,25 @@ export async function readAllDaemonSessions(
 }
 
 /**
- * Scan DAEMON_SESSIONS_DIR for orphaned session files and clear them.
+ * Scan DAEMON_SESSIONS_DIR for orphaned session files and handle them.
  *
  * Called once during daemon startup, before the HTTP server begins accepting
- * webhook requests. This ensures no new workflow triggers arrive while recovery
- * is in progress.
+ * webhook requests. Two recovery behaviors fire unconditionally:
  *
- * WHY this function and not a rehydrate call: clearing orphans satisfies the
- * crash recovery invariant (abandoned sessions do not persist indefinitely).
- * Calling executeContinueWorkflow({ intent: 'rehydrate' }) would only add a
- * 'token valid vs. expired' log distinction while requiring a V2ToolContext
- * dependency and risking transient engine startup errors. Clear-regardless-of-result
- * is the correct MVP behavior.
+ * Phase A: Delete all queue-issue-*.json sidecars so blocked GitHub issues
+ *   become eligible for re-dispatch within one poll cycle (~5 min).
  *
- * KNOWN LIMITATION: a planned deployment restart clears in-flight sessions just as
- * a crash does. Distinguishing crash from planned restart requires out-of-band
- * state (e.g. a shutdown token written on clean stop). Not implemented at MVP.
+ * Phase B (requires ctx): For each orphaned session, decode the continueToken,
+ *   count advance_recorded events in the WorkRail session event log, and apply
+ *   the binary evaluateRecovery() policy:
+ *   - stepAdvances >= 1 -> preserve sidecar (log and skip deletion; Phase B full restart not yet implemented)
+ *   - stepAdvances === 0 -> discard (sidecar deleted; issue re-dispatched)
+ *   When ctx is absent, all sessions fall to discard (backward-compatible behavior).
+ *
+ * WHY preserve instead of restart for stepAdvances >= 1: full agent loop restart
+ *   requires reconstructing the trigger context from session state, which is non-trivial.
+ *   The sidecar is kept so a future Phase B implementation can pick it up.
+ *   Tracked in backlog as "autonomous crash recovery -- Phase B".
  *
  * Non-fatal: any error during recovery is caught and logged. The daemon starts
  * regardless of whether recovery succeeds.
@@ -776,14 +881,25 @@ export async function readAllDaemonSessions(
  *   DAEMON_SESSIONS_DIR. Pass a temp dir in tests to avoid touching real state.
  * @param execFn - Injectable exec function for git worktree removal.
  *   Defaults to execFileAsync. Override in tests to avoid real git calls.
- *   WHY injectable: runStartupRecovery runs git commands (git worktree remove --force)
- *   that require a real git repo. Tests cannot create real repos easily; an injectable
- *   execFn lets tests verify the removal is attempted without running actual git.
+ * @param ctx - Optional V2ToolContext for phase B logic. When provided,
+ *   sessions with step advances are preserved rather than discarded.
+ * @param _countStepAdvancesFn - Injectable step-count implementation for testing.
+ *   Defaults to the real countOrphanStepAdvances() implementation.
+ * @param _executeContinueWorkflowFn - Injectable continue-workflow implementation
+ *   (retained for signature backward-compatibility; not currently called in the resume path).
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
   execFn: (file: string, args: string[]) => Promise<{ stdout: string; stderr: string }> = execFileAsync,
+  ctx?: V2ToolContext,
+  _countStepAdvancesFn: typeof countOrphanStepAdvances = countOrphanStepAdvances,
+  _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
 ): Promise<void> {
+  // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
+  // WHY first: queue-issue cleanup is independent of session state and must
+  // always run, even if session recovery fails or ctx is absent.
+  await clearQueueIssueSidecars(sessionsDir);
+
   // Read all parseable session files.
   const sessions = await readAllDaemonSessions(sessionsDir);
 
@@ -797,16 +913,12 @@ export async function runStartupRecovery(
 
   const now = Date.now();
   let cleared = 0;
+  let preserved = 0;
 
   for (const session of sessions) {
     const ageMs = now - session.ts;
     const isStale = ageMs > MAX_ORPHAN_AGE_MS;
     const ageSec = Math.round(ageMs / 1000);
-
-    const label = isStale ? 'stale orphaned session' : 'orphaned session';
-    console.log(
-      `[WorkflowRunner] Clearing ${label}: sessionId=${session.sessionId} age=${ageSec}s`,
-    );
 
     // Orphan worktree cleanup: if this session created a worktree and the worktree
     // has been orphaned long enough (24h), remove it.
@@ -844,6 +956,55 @@ export async function runStartupRecovery(
       );
     }
 
+    // Phase B: Resume-or-discard decision when ctx is available.
+    // When ctx is absent, fall through to discard (same as previous behavior).
+    if (ctx !== undefined) {
+      let stepAdvances = 0;
+      try {
+        stepAdvances = await _countStepAdvancesFn(session.continueToken, ctx);
+      } catch (err: unknown) {
+        // Non-fatal: if step count fails, fall through to discard.
+        console.warn(
+          `[WorkflowRunner] Could not count step advances for orphaned session ${session.sessionId}: ` +
+          `${err instanceof Error ? err.message : String(err)} -- falling back to discard`,
+        );
+      }
+
+      const action = evaluateRecovery({ stepAdvances, ageMs });
+
+      // Exhaustive switch: assertNever prevents silent fall-through if
+      // RecoveryAction gains new variants in the future.
+      switch (action) {
+        case 'resume':
+          console.log(
+            `[WorkflowRunner] Startup recovery: preserving sidecar for session with ${stepAdvances} step advance(s): ` +
+            `sessionId=${session.sessionId} age=${ageSec}s -- full agent restart not yet implemented; ` +
+            `sidecar retained for future resumption. Skipping sidecar deletion.`,
+          );
+          // WHY: sidecar is preserved so a future resumption implementation can pick it up.
+          // Full agent loop restart requires reconstructing the trigger context from session state,
+          // which is non-trivial. Tracked in backlog as "autonomous crash recovery -- Phase B".
+          preserved++;
+          continue;
+        case 'discard': {
+          const label = isStale ? 'stale orphaned session' : 'orphaned session';
+          console.log(
+            `[WorkflowRunner] Discarding ${label}: sessionId=${session.sessionId} ` +
+            `stepAdvances=${stepAdvances} age=${ageSec}s`,
+          );
+          break;
+        }
+        default:
+          assertNever(action);
+      }
+    } else {
+      // No ctx: log discard as before (backward-compatible behavior).
+      const label = isStale ? 'stale orphaned session' : 'orphaned session';
+      console.log(
+        `[WorkflowRunner] Clearing ${label}: sessionId=${session.sessionId} age=${ageSec}s`,
+      );
+    }
+
     try {
       await fs.unlink(path.join(sessionsDir, `${session.sessionId}.json`));
       cleared++;
@@ -861,7 +1022,121 @@ export async function runStartupRecovery(
   // Also clear any stray .tmp files left from a crash mid-write.
   await clearStrayTmpFiles(sessionsDir);
 
-  console.log(`[WorkflowRunner] Startup recovery complete: cleared ${cleared}/${sessions.length} orphaned session(s).`);
+  if (ctx !== undefined) {
+    console.log(
+      `[WorkflowRunner] Startup recovery complete: preserved=${preserved} discarded=${cleared}/${sessions.length} orphaned session(s).`,
+    );
+  } else {
+    console.log(`[WorkflowRunner] Startup recovery complete: cleared ${cleared}/${sessions.length} orphaned session(s).`);
+  }
+}
+
+/**
+ * Count the number of step advances (advance_recorded events) in a WorkRail session
+ * event log for an orphaned session.
+ *
+ * WHY exported: testable in isolation via injectable _parseFn and _loadFn params --
+ * callers can supply fakes without a real V2ToolContext.
+ *
+ * The injectable params are pre-bound: _parseFn takes only the raw token string, and
+ * _loadFn takes only the sessionId. This keeps the function testable without requiring
+ * real tokenCodecPorts or sessionStore instances in tests.
+ *
+ * Uses loadValidatedPrefix() instead of load() to handle truncated JSONL event logs
+ * from a crash during append. Both 'complete' and 'truncated' kinds expose .truth.events.
+ *
+ * Returns 0 on any error (safe: caller falls back to discard).
+ *
+ * @param _parseFn - Injectable token parser. Receives the raw continueToken string and
+ *   returns a ResultAsync<ContinueTokenResolved, ToolFailure>. Defaults to calling
+ *   parseContinueTokenOrFail with ctx.v2.tokenCodecPorts and ctx.v2.tokenAliasStore.
+ * @param _loadFn - Injectable session loader. Receives the WorkRail SessionId and
+ *   returns a ResultAsync<LoadedValidatedPrefixV2, SessionEventLogStoreError>. Defaults to
+ *   ctx.v2.sessionStore.loadValidatedPrefix.
+ */
+export async function countOrphanStepAdvances(
+  continueToken: string,
+  ctx: V2ToolContext,
+  _parseFn: ((raw: string) => ResultAsync<ContinueTokenResolved, ToolFailure>) | undefined = undefined,
+  _loadFn: SessionEventLogReadonlyStorePortV2['loadValidatedPrefix'] | undefined = undefined,
+): Promise<number> {
+  const parseFn = _parseFn ?? ((raw: string) =>
+    parseContinueTokenOrFail(raw, ctx.v2.tokenCodecPorts, ctx.v2.tokenAliasStore)
+  );
+  const loadFn = _loadFn ?? ctx.v2.sessionStore.loadValidatedPrefix.bind(ctx.v2.sessionStore);
+
+  // Decode the continueToken to extract the WorkRail sessionId.
+  const resolvedResult = await parseFn(continueToken);
+
+  if (resolvedResult.isErr()) {
+    console.warn(
+      `[WorkflowRunner] Could not decode continueToken for orphaned session: ${resolvedResult.error.message}`,
+    );
+    return 0;
+  }
+
+  const sessionId = asSessionId(resolvedResult.value.sessionId);
+
+  // Use loadValidatedPrefix to handle crash-truncated JSONL gracefully.
+  // Both 'complete' and 'truncated' kinds expose .truth.events with the valid prefix.
+  const loadResult = await loadFn(sessionId);
+
+  if (loadResult.isErr()) {
+    console.warn(
+      `[WorkflowRunner] Could not load session event log for orphaned session: ${loadResult.error.code} -- ${loadResult.error.message}`,
+    );
+    return 0;
+  }
+
+  const events = loadResult.value.truth.events;
+  return events.filter((e) => e.kind === 'advance_recorded').length;
+}
+
+/**
+ * Best-effort cleanup of queue-issue idempotency sidecars in the sessions directory.
+ *
+ * WHY these files exist: polling-scheduler.ts writes `queue-issue-<N>.json` BEFORE
+ * dispatching a GitHub issue to prevent duplicate dispatch within a 56-minute window
+ * (DISCOVERY_TIMEOUT_MS + 60s). On clean completion or error, the sidecar is deleted.
+ * On daemon crash, it is NOT deleted -- it has a different JSON shape
+ * ({ issueNumber, dispatchedAt, ttlMs }) than session sidecars ({ continueToken, ts })
+ * and is silently skipped by readAllDaemonSessions().
+ *
+ * WHY unconditional: there is no link from OrphanedSession to the queue-issue sidecar
+ * (OrphanedSession does not store the issue number). We must scan ALL queue-issue-*.json
+ * files and delete them all.
+ *
+ * After deletion, the affected issue becomes eligible for re-dispatch in the next poll
+ * cycle (~5 minutes).
+ *
+ * Non-fatal: any error (ENOENT, permissions) is caught per-file and logged. Never throws.
+ *
+ * WHY exported: called by runStartupRecovery() and testable in isolation.
+ */
+export async function clearQueueIssueSidecars(sessionsDir: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(sessionsDir);
+  } catch {
+    return; // ENOENT or permission error -- nothing to clean up
+  }
+
+  for (const entry of entries) {
+    if (!entry.startsWith('queue-issue-') || !entry.endsWith('.json')) continue;
+    try {
+      await fs.unlink(path.join(sessionsDir, entry));
+      // Extract issue number from filename for log clarity.
+      const issueNum = entry.slice('queue-issue-'.length, -'.json'.length);
+      console.log(`[WorkflowRunner] Cleared queue-issue sidecar: issue=${issueNum}`);
+    } catch (err: unknown) {
+      const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+      if (!isEnoent) {
+        console.warn(
+          `[WorkflowRunner] Could not clear queue-issue sidecar ${entry}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -939,7 +1214,26 @@ async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
 }
 
 /**
- * Scan the workspace for CLAUDE.md / AGENTS.md context files and combine them
+ * Strip YAML frontmatter from file content before injection into the system prompt.
+ *
+ * WHY: .mdc files (Cursor, Firebender) and .windsurf/rules/*.md files include
+ * YAML metadata (alwaysApply, description, trigger) that is tool-specific and
+ * not meaningful in a WorkTrain system prompt context.
+ *
+ * Safety: Only strips if the file starts with '---\n' or '---\r\n' (YAML frontmatter
+ * is always at the start of the file). Returns original content unchanged if:
+ * - File does not start with '---' (no frontmatter present -- safe no-op)
+ * - No closing '---' delimiter found (malformed frontmatter -- preserve as-is)
+ */
+export function stripFrontmatter(content: string): string {
+  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) return content;
+  const endIdx = content.indexOf('\n---', 4);
+  if (endIdx === -1) return content;
+  return content.slice(endIdx + 4).trimStart();
+}
+
+/**
+ * Scan the workspace for convention files across 7 AI tools and combine them
  * into a single string for injection into the system prompt.
  *
  * Files are read in priority order (WORKSPACE_CONTEXT_CANDIDATE_PATHS). Combined
@@ -952,39 +1246,78 @@ async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
  * skipped (or logged at warn level for non-ENOENT errors). The agent can still run
  * without workspace context.
  */
-async function loadWorkspaceContext(workspacePath: string): Promise<string | null> {
+export async function loadWorkspaceContext(workspacePath: string): Promise<string | null> {
   const parts: string[] = [];
+  const injectedPaths: string[] = [];
   let combinedBytes = 0;
   let truncated = false;
 
-  for (const relativePath of WORKSPACE_CONTEXT_CANDIDATE_PATHS) {
-    if (truncated) break;
-
-    const fullPath = path.join(workspacePath, relativePath);
-    let content: string;
-    try {
-      content = await fs.readFile(fullPath, 'utf8');
-    } catch (err: unknown) {
-      const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
-      if (!isEnoent) {
-        // Unexpected error (permissions, etc.) -- log and skip.
-        console.warn(
-          `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      continue;
-    }
-
+  /**
+   * Accumulates a single file's content into parts[], respecting the byte budget.
+   * WHY extracted as inner helper: the same accumulation logic is needed for both
+   * literal and glob candidates.
+   */
+  function accumulateFile(relativePath: string, content: string): void {
     const contentBytes = Buffer.byteLength(content, 'utf8');
     if (combinedBytes + contentBytes > WORKSPACE_CONTEXT_MAX_BYTES) {
       // Fit as much of this file as will fill the remaining budget.
       const remaining = WORKSPACE_CONTEXT_MAX_BYTES - combinedBytes;
       const truncatedContent = content.slice(0, remaining);
       parts.push(`### ${relativePath}\n${truncatedContent}`);
+      injectedPaths.push(relativePath);
       truncated = true;
     } else {
       parts.push(`### ${relativePath}\n${content}`);
+      injectedPaths.push(relativePath);
       combinedBytes += contentBytes;
+    }
+  }
+
+  for (const entry of WORKSPACE_CONTEXT_CANDIDATE_PATHS) {
+    if (truncated) break;
+
+    if (entry.kind === 'literal') {
+      const fullPath = path.join(workspacePath, entry.relativePath);
+      let content: string;
+      try {
+        content = await fs.readFile(fullPath, 'utf8');
+      } catch (err: unknown) {
+        const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+        if (!isEnoent) {
+          // Unexpected error (permissions, etc.) -- log and skip.
+          console.warn(
+            `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        continue;
+      }
+      accumulateFile(entry.relativePath, content);
+    } else {
+      // kind === 'glob': expand pattern, sort, cap, read each file.
+      const matches = await tinyGlob(entry.pattern, { cwd: workspacePath, absolute: false });
+      const sorted = [...matches].sort(); // alpha sort for determinism
+      if (sorted.length > MAX_GLOB_FILES_PER_PATTERN) {
+        console.warn(
+          `[WorkflowRunner] ${entry.pattern}: ${sorted.length} files found, capped at ${MAX_GLOB_FILES_PER_PATTERN}`,
+        );
+      }
+      for (const relativePath of sorted.slice(0, MAX_GLOB_FILES_PER_PATTERN)) {
+        if (truncated) break;
+        const fullPath = path.join(workspacePath, relativePath);
+        let content: string;
+        try {
+          content = await fs.readFile(fullPath, 'utf8');
+        } catch (err: unknown) {
+          const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+          if (!isEnoent) {
+            console.warn(
+              `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+          continue;
+        }
+        accumulateFile(relativePath, entry.stripFrontmatter ? stripFrontmatter(content) : content);
+      }
     }
   }
 
@@ -996,9 +1329,7 @@ async function loadWorkspaceContext(workspacePath: string): Promise<string | nul
   }
 
   console.log(
-    `[WorkflowRunner] Injecting workspace context from: ${WORKSPACE_CONTEXT_CANDIDATE_PATHS.filter(
-      (p) => parts.some((part) => part.startsWith(`### ${p}`)),
-    ).join(', ')}`,
+    `[WorkflowRunner] Injecting workspace context from: ${injectedPaths.join(', ')}`,
   );
 
   return combined;
@@ -2909,6 +3240,24 @@ export async function runWorkflow(
   emitter?: DaemonEventEmitter,
   steerRegistry?: SteerRegistry,
 ): Promise<WorkflowRunResult> {
+  // ---- Execution timing (for calibration of session timeouts) ----
+  // WHY at entry: captures the true start before any early-exit paths (model validation,
+  // start_workflow failure, worktree creation failure). A startMs captured after these
+  // paths would miss their duration entirely.
+  // WHY fire-and-forget write (in finally block): this is for timeout calibration, not
+  // crash recovery. A write failure must never affect the session.
+  // If adding a new result path, update sessionOutcome before the new return statement.
+  const startMs = Date.now();
+  // sessionOutcome is updated before each return path and read in the finally block.
+  // Default 'unknown' is a valid data point (not silent data loss) if a future return
+  // path is added without updating this variable.
+  //
+  // CLOSURE NOTE: the finally block's async stats write reads sessionOutcome via closure
+  // reference inside a Promise .then() microtask. Microtasks fire after the synchronous
+  // return completes, so the .then() always sees the final value assigned before the return.
+  // This is standard JS closure + microtask sequencing -- it is correct, just subtle.
+  let sessionOutcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown' = 'unknown';
+
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
   // state file in DAEMON_SESSIONS_DIR. This UUID is NOT the WorkRail server
@@ -2954,6 +3303,7 @@ export async function runWorkflow(
     const slashIdx = trigger.agentConfig.model.indexOf('/');
     if (slashIdx === -1) {
       // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
+      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3070,6 +3420,7 @@ export async function runWorkflow(
 
     if (startResult.isErr()) {
       // Registration has not happened yet (happens after token decode below).
+      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3219,6 +3570,7 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3247,9 +3599,20 @@ export async function runWorkflow(
     // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
     // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
     // finishes. trigger-router.ts maybeRunDelivery() is the sole success-path removal.
-    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    //
+    // WHY conditional sidecar deletion: for worktree sessions, the sidecar must outlive
+    // this return so maybeRunDelivery() in trigger-router.ts can remove the worktree and
+    // then delete the sidecar. Deleting here would leave the worktree invisible to
+    // runStartupRecovery() if the daemon crashes before maybeRunDelivery() runs.
+    // Non-worktree sessions have no delivery cleanup gap and can delete immediately.
+    // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
+    // the active count during delivery (seconds). This is semantically correct.
+    if (trigger.branchStrategy !== 'worktree') {
+      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
+    // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
     return {
       _tag: 'success',
       workflowId: trigger.workflowId,
@@ -3466,13 +3829,6 @@ export async function runWorkflow(
     (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
   const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
 
-  // ---- Session start timestamp ----
-  // WHY: reserved for Signal 5 (wall-clock at 80% with < 2 advances) in a future shape.
-  // Set here -- before the agent loop begins -- so it measures total session time,
-  // not time from first turn.
-  const sessionStartMs = Date.now();
-  void sessionStartMs; // suppress unused-variable lint until Signal 5 is wired
-
   // ---- Timeout reason flag ----
   // Tracks which limit fired first. Set synchronously before agent.abort() so the
   // catch block can read it on the next microtask tick. JS single-thread guarantees
@@ -3489,6 +3845,15 @@ export async function runWorkflow(
   // ---- Turn counter ----
   // Incremented on each turn_end event (one complete LLM response turn).
   let turnCount = 0;
+
+  // ---- Conversation history persistence ----
+  // Per-session JSONL file written incrementally after each turn_end and flushed
+  // in the finally block. Each line is a JSON.stringify(AgentInternalMessage).
+  // WHY initialized to 0: the first turn_end flush includes the initial user message
+  // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
+  // WHY fire-and-forget: write failures must never affect the agent loop.
+  const conversationPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}-conversation.jsonl`);
+  let lastFlushedMessageCount = 0;
 
   // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
   // Using steer() NOT followUp(): steer fires after each tool batch inside the
@@ -3624,6 +3989,16 @@ export async function runWorkflow(
       });
     }
 
+    // ---- Conversation history: delta-append after each turn ----
+    // Flush any new messages since the last turn_end. Delta append (not full rewrite)
+    // keeps total I/O linear in turn count. Fire-and-forget: a write failure must never
+    // affect the session. lastFlushedMessageCount is updated synchronously so no
+    // second turn_end can double-flush the same messages.
+    const currentMessages = agent.state.messages;
+    const newMessages = currentMessages.slice(lastFlushedMessageCount);
+    lastFlushedMessageCount = currentMessages.length;
+    void appendConversationMessages(conversationPath, newMessages).catch(() => {});
+
     // If step-advance parts are queued and workflow is not yet complete, inject them.
     // WHY join with \n\n: each part is a full step prompt or context block. A blank
     // line between them gives the LLM a clear visual separation without merging content.
@@ -3688,6 +4063,13 @@ export async function runWorkflow(
     stopReason = 'error';
   } finally {
     unsubscribe();
+    // ---- Conversation history: final flush ----
+    // Catch any remaining messages not covered by the last turn_end (e.g. error
+    // messages appended by _appendErrorMessage() after an API error or abort).
+    // Fire-and-forget: write failures in finally must never propagate.
+    const remainingMessages = agent.state.messages.slice(lastFlushedMessageCount);
+    void appendConversationMessages(conversationPath, remainingMessages).catch(() => {});
+
     // Cancel the wall-clock timer so it does not fire after successful completion
     // and mutate the closed-over timeoutReason variable. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
@@ -3699,6 +4081,37 @@ export async function runWorkflow(
       steerRegistry?.delete(workrailSessionId);
     }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
+
+    // ---- Execution stats (for timeout calibration) ----
+    // WHY fire-and-forget: a stats write failure must never crash the session or
+    // block the return path. This is observability data, not crash recovery state.
+    // WHY finally block (not per-path): a single write site ensures every outcome is
+    // recorded regardless of which return path fires. See startMs/sessionOutcome above.
+    // If adding a new result path, update sessionOutcome before the new return statement.
+    const endMs = Date.now();
+    const statsDir = path.join(os.homedir(), '.workrail', 'data');
+    const statsPath = path.join(statsDir, 'execution-stats.jsonl');
+    fs.mkdir(statsDir, { recursive: true })
+      .then(() => fs.appendFile(
+        statsPath,
+        JSON.stringify({
+          sessionId,
+          workflowId: trigger.workflowId,
+          startMs,
+          endMs,
+          durationMs: endMs - startMs,
+          outcome: sessionOutcome,
+          stepCount: stepAdvanceCount,
+          ts: new Date().toISOString(),
+        }) + '\n',
+        'utf8',
+      ))
+      // WHY chained after appendFile (not called independently): writeStatsSummary reads
+      // execution-stats.jsonl and must include the record just appended above. Chaining in
+      // .then() ensures the append completes before the read starts. Calling in parallel
+      // would cause a race where the just-completed session is absent from the summary.
+      .then(() => { writeStatsSummary(statsDir).catch(() => {}); })
+      .catch(() => {}); // best-effort -- never propagate
   }
 
   // ---- Stuck result (repeated_tool_call or no_progress abort) ----
@@ -3716,6 +4129,7 @@ export async function runWorkflow(
       ...withWorkrailSession(workrailSessionId),
     });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+    sessionOutcome = 'stuck'; // timing written in finally block
     return {
       _tag: 'stuck',
       workflowId: trigger.workflowId,
@@ -3739,6 +4153,7 @@ export async function runWorkflow(
     // WHY: a timed-out session is no longer in-flight. Leaving the file causes
     // countActiveSessions() to permanently inflate until daemon restart.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    sessionOutcome = 'timeout'; // timing written in finally block
     return {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
@@ -3772,6 +4187,7 @@ export async function runWorkflow(
     // WHY: an errored session is no longer in-flight. Leaving the file causes
     // countActiveSessions() to permanently inflate until daemon restart.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+    sessionOutcome = 'error'; // timing written in finally block
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
@@ -3789,13 +4205,31 @@ export async function runWorkflow(
   // ---- Clean up state file on success ----
   // The state file is evidence of an in-flight session. Delete it on clean completion
   // so the CLI crash-recovery scan only surfaces genuinely orphaned sessions.
-  await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
-    // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
-  });
+  //
+  // WHY conditional sidecar deletion: for worktree sessions, the sidecar must outlive
+  // this return so maybeRunDelivery() in trigger-router.ts can remove the worktree and
+  // then delete the sidecar. Deleting here would leave the worktree invisible to
+  // runStartupRecovery() if the daemon crashes before maybeRunDelivery() runs.
+  // Non-worktree sessions have no delivery cleanup gap and can delete immediately.
+  // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
+  // the active count during delivery (seconds). This is semantically correct.
+  if (trigger.branchStrategy !== 'worktree') {
+    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
+      // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
+    });
+    // Delete conversation history on clean completion -- no debug value after success.
+    // WHY only for non-worktree sessions: worktree sessions defer conversation file
+    // deletion to trigger-router.ts maybeRunDelivery() alongside the sidecar, after
+    // delivery completes. The branchStrategy guard above ensures we only reach this
+    // line for non-worktree sessions.
+    // Crashes and errors leave the file intact for post-hoc inspection and Phase B.
+    await fs.unlink(conversationPath).catch(() => {});
+  }
 
   emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...withWorkrailSession(workrailSessionId) });
   if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
 
+  sessionOutcome = 'success'; // timing written in finally block
   return {
     _tag: 'success',
     workflowId: trigger.workflowId,

@@ -710,6 +710,56 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Saying a workflow is valid because the file parses even though registry resolution or runtime compilation can still fail
 
 
+## Context key conventions
+### metrics-context-accumulation
+- **Level**: recommended
+- **Status**: active
+- **Scope**: step.context-capture
+- **Rule**: When a step captures metrics_commit_shas, send the FULL accumulated SHA list every time -- not just the SHAs from the current step. context_set uses shallow merge: each key is replaced, not merged. Sending a partial list silently loses earlier SHAs.
+- **Why**: mergeContext uses shallow merge: metrics_commit_shas: ['abc'] at step 5 followed by ['def'] at step 9 permanently loses 'abc'. Flat keys require accumulation discipline to produce correct analytics attribution.
+- **Enforced by**: advisory
+
+**Checks**
+- Any step that adds new commits must first read the current metrics_commit_shas from context, append the new SHAs, and send the complete accumulated list.
+- metrics_outcome must be set only at final handoff steps, not at intermediate commit steps.
+- metrics_pr_numbers must be an array of integers (PR numbers), not URLs or strings.
+- Use flat top-level keys (metrics_commit_shas, not context.metrics.commit_shas) to exploit per-key merge semantics.
+- When starting to track mid-session, capture what you have and accumulate forward from that point.
+
+**Anti-patterns**
+- Sending only the current step's commits: metrics_commit_shas: ['def456'] when 'abc123' was set at an earlier step
+- Using a nested key context.metrics.commit_shas instead of the flat key metrics_commit_shas
+- Setting metrics_outcome at intermediate steps before the session outcome is known
+
+### metrics-profile-declaration
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.definition, step.context-capture
+- **Rule**: Declare metricsProfile at workflow level to enable engine-injected metrics instrumentation footers. Use 'coding' for implementation workflows, 'review' for code review workflows, 'research' for investigation workflows, 'design' for design/planning artifacts, 'ticket' for work-item creation. Omit or use 'none' for meta-workflows and utilities.
+- **Why**: Without metricsProfile, captureConfidence is always 'none' and run_completed events carry no usable attribution data. The engine cannot auto-derive the profile from tags -- authors must set it explicitly.
+- **Enforced by**: advisory
+
+**Checks**
+- Select 'coding' when the workflow produces git commits (implementation, refactoring, bug-fix, migration, documentation updates).
+- Select 'review' when the workflow produces a review decision on a PR or MR.
+- Select 'research' when the workflow produces a finding or recommendation but no commits (investigation, audit, analysis).
+- Select 'design' when the workflow produces a design artifact (pitch, spec, ADR, architecture doc) but no commits.
+- Select 'ticket' when the workflow creates or updates work items in an external system (Jira, GitHub Issues, Linear).
+- Omit or use 'none' for authoring tools, meta-workflows, or workflows with no measurable outcome.
+- Do not invent new profile values -- the closed set is: 'coding', 'review', 'research', 'design', 'ticket', 'none'.
+- The engine does NOT derive the profile from spec/workflow-tags.json at runtime. Set the field explicitly.
+- When using workflow-for-workflows to author or modernize a workflow, the phase-7b step will prompt for this decision.
+
+**Anti-patterns**
+- Leaving metricsProfile absent from a coding or review workflow and expecting automatic instrumentation
+- Using metricsProfile 'coding' on a workflow that produces no commits (e.g., a documentation or planning workflow)
+- Assuming the engine reads tags and derives the profile automatically
+
+**Source refs**
+- `src/v2/durable-core/domain/prompt-renderer.ts` (runtime) — buildMetricsSection() implements render-time footer injection based on metricsProfile.
+- `spec/workflow.schema.json` (schema) — metricsProfile optional enum field definition.
+
+
 ## Artifacts and planning surfaces
 ### artifact-canonicality
 - **Level**: recommended

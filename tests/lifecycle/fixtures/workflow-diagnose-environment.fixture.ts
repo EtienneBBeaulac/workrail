@@ -12,6 +12,7 @@ export const workflowDiagnoseEnvironmentFixture: WorkflowFixture = {
     id: 'workflow-diagnose-environment',
     name: 'Diagnostic: Environment & Subagents',
     version: '1.0.0',
+    metricsProfile: 'none',
     description:
       'Use this to diagnose MCP server, tool availability, or environment configuration issues. Probes for subagent access and generates a local configuration file.',
     about:

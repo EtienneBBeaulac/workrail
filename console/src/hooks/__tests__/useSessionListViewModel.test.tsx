@@ -34,6 +34,7 @@ function makeSession(overrides: Partial<ConsoleSessionSummary> = {}): ConsoleSes
     isAutonomous: false,
     isLive: false,
     parentSessionId: null,
+    metrics: null,
     ...overrides,
   };
 }

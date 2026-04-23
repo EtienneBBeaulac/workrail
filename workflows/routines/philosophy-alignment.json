@@ -2,6 +2,7 @@
   "id": "routine-philosophy-alignment",
   "name": "Philosophy Alignment Routine",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "description": "Independently evaluates a plan or implementation artifact against the user's coding philosophy. Produces findings by principle name and distinguishes blocking violations from acceptable tensions.",
   "clarificationPrompts": [
     "What artifact should I review? (plan, architecture summary, implementation diff, files)",

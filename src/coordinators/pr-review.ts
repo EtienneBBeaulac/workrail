@@ -26,6 +26,7 @@
 
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
+import { assertNever } from '../runtime/assert-never.js';
 import type { AwaitResult, SessionResult } from '../cli/commands/worktrain-await.js';
 import {
   ReviewVerdictArtifactV1Schema,
@@ -141,6 +142,7 @@ export interface CoordinatorDeps {
     goal: string,
     workspace: string,
     context?: Readonly<Record<string, unknown>>,
+    agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
   ) => Promise<Result<string, string>>;
 
   /**
@@ -206,8 +208,8 @@ export interface CoordinatorDeps {
   /** Return the current wall-clock time in milliseconds. */
   readonly now: () => number;
 
-  /** Resolved console HTTP server port (after lock file discovery). */
-  readonly port: number;
+  /** Resolved console HTTP server port (after lock file discovery). Optional in in-process contexts. */
+  readonly port?: number;
 
   /**
    * Read file contents as UTF-8 string.
@@ -1401,6 +1403,10 @@ async function runFixAgentLoop(
         passCount,
         sessionHandles,
       };
+    } else if (reSeverity !== 'minor') {
+      // Compile-time exhaustiveness guard: if ReviewSeverity gains a new variant,
+      // this will fail to compile, forcing the developer to handle the new case here.
+      assertNever(reSeverity);
     }
 
     // Still minor -- continue loop

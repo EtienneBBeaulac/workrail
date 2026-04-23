@@ -24,7 +24,7 @@ import { EVENT_KIND } from '../../v2/durable-core/constants.js';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId'>;
+type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 /** Type-safe constructor for partial events — avoids `as` casts at call sites. */
 function partialEvent(fields: PartialEvent): PartialEvent {
@@ -254,4 +254,33 @@ export function buildDecisionTraceEvent(args: {
       data: traceDataRes.value as any,
     })
   );
+}
+
+export function buildRunCompletedEvent(args: {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly startGitSha: string | null;
+  readonly endGitSha: string | null;
+  readonly gitBranch: string | null;
+  readonly agentCommitShas: string[];
+  readonly captureConfidence: 'high' | 'none';
+  readonly durationMs: number | undefined;
+  readonly idFactory: AdvanceCorePorts['idFactory'];
+}): PartialEvent {
+  const { sessionId, runId, startGitSha, endGitSha, gitBranch, agentCommitShas, captureConfidence, durationMs, idFactory } = args;
+  return partialEvent({
+    v: 1 as const,
+    eventId: idFactory.mintEventId(),
+    kind: EVENT_KIND.RUN_COMPLETED,
+    dedupeKey: `run-completed:${sessionId}:${runId}`,
+    scope: { runId },
+    data: {
+      startGitSha,
+      endGitSha,
+      gitBranch,
+      agentCommitShas,
+      captureConfidence,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    },
+  });
 }

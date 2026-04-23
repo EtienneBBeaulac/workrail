@@ -84,7 +84,17 @@ export async function runReviewAndVerdictCycle(
     };
   }
 
-  const agentResult = await deps.getAgentResult(reviewHandle);
+  let agentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
+  try {
+    agentResult = await deps.getAgentResult(reviewHandle);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] getAgentResult failed: ${msg}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'review', reason: `getAgentResult threw: ${msg}` },
+    };
+  }
   const verdictFromArtifact = readVerdictArtifact(agentResult.artifacts, reviewHandle);
   const findingsResult = verdictFromArtifact !== null
     ? { kind: 'ok' as const, value: verdictFromArtifact }
@@ -115,10 +125,15 @@ export async function runReviewAndVerdictCycle(
     case 'minor': {
       if (iteration >= MAX_FIX_ITERATIONS) {
         deps.stderr(`[review-cycle] ${MAX_FIX_ITERATIONS} fix iterations exhausted -- escalating`);
-        await deps.postToOutbox(
-          `Adaptive pipeline escalated: fix loop exhausted after ${MAX_FIX_ITERATIONS} iterations`,
-          { prUrl, phase: 'fix-loop', reason: 'max iterations reached', findingSummaries: findings.findingSummaries },
-        );
+        try {
+          await deps.postToOutbox(
+            `Adaptive pipeline escalated: fix loop exhausted after ${MAX_FIX_ITERATIONS} iterations`,
+            { prUrl, phase: 'fix-loop', reason: 'max iterations reached', findingSummaries: findings.findingSummaries },
+          );
+        } catch (e) {
+          // postToOutbox write failure is non-fatal -- escalation still returns below
+          deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
         return {
           kind: 'escalated',
           escalationReason: { phase: 'fix-loop', reason: `${MAX_FIX_ITERATIONS} fix iterations exhausted` },
@@ -220,10 +235,15 @@ export async function runAuditChain(
   );
 
   if (auditSpawnResult.kind === 'err') {
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: audit workflow failed to spawn`,
-      { prUrl, phase: 'audit', reason: auditSpawnResult.error, severity },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: audit workflow failed to spawn`,
+        { prUrl, phase: 'audit', reason: auditSpawnResult.error, severity },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: { phase: 'audit', reason: `audit spawn failed: ${auditSpawnResult.error}` },
@@ -232,10 +252,15 @@ export async function runAuditChain(
 
   const auditHandle = auditSpawnResult.value;
   if (!auditHandle) {
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: audit returned empty handle`,
-      { prUrl, phase: 'audit', severity },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: audit returned empty handle`,
+        { prUrl, phase: 'audit', severity },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: { phase: 'audit', reason: 'audit returned empty handle' },
@@ -247,10 +272,15 @@ export async function runAuditChain(
 
   if (!auditResult || auditResult.outcome !== 'success') {
     const outcome = auditResult?.outcome ?? 'not_found';
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: audit session ${outcome}`,
-      { prUrl, phase: 'audit', auditOutcome: outcome, severity },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: audit session ${outcome}`,
+        { prUrl, phase: 'audit', auditOutcome: outcome, severity },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: { phase: 'audit', reason: `audit session ${outcome}` },
@@ -271,10 +301,15 @@ export async function runAuditChain(
   );
 
   if (reReviewSpawnResult.kind === 'err') {
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: re-review after audit failed to spawn`,
-      { prUrl, phase: 're-review-after-audit', reason: reReviewSpawnResult.error },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: re-review after audit failed to spawn`,
+        { prUrl, phase: 're-review-after-audit', reason: reReviewSpawnResult.error },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: {
@@ -286,10 +321,15 @@ export async function runAuditChain(
 
   const reReviewHandle = reReviewSpawnResult.value;
   if (!reReviewHandle) {
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: re-review after audit returned empty handle`,
-      { prUrl, phase: 're-review-after-audit' },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: re-review after audit returned empty handle`,
+        { prUrl, phase: 're-review-after-audit' },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: { phase: 're-review-after-audit', reason: 're-review returned empty handle' },
@@ -301,27 +341,47 @@ export async function runAuditChain(
 
   if (!reReviewResult || reReviewResult.outcome !== 'success') {
     const outcome = reReviewResult?.outcome ?? 'not_found';
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: re-review after audit session ${outcome}`,
-      { prUrl, phase: 're-review-after-audit', reReviewOutcome: outcome },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: re-review after audit session ${outcome}`,
+        { prUrl, phase: 're-review-after-audit', reReviewOutcome: outcome },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: { phase: 're-review-after-audit', reason: `re-review session ${outcome}` },
     };
   }
 
-  const reAgentResult = await deps.getAgentResult(reReviewHandle);
+  let reAgentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
+  try {
+    reAgentResult = await deps.getAgentResult(reReviewHandle);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] getAgentResult failed: ${msg}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'review', reason: `getAgentResult threw: ${msg}` },
+    };
+  }
   const reVerdictFromArtifact = readVerdictArtifact(reAgentResult.artifacts, reReviewHandle);
   const reFindingsResult = reVerdictFromArtifact !== null
     ? { kind: 'ok' as const, value: reVerdictFromArtifact }
     : parseFindingsFromNotes(reAgentResult.recapMarkdown);
 
   if (reFindingsResult.kind === 'err') {
-    await deps.postToOutbox(
-      `Adaptive pipeline escalated: re-review verdict unparseable after audit`,
-      { prUrl, phase: 're-review-after-audit' },
-    );
+    try {
+      await deps.postToOutbox(
+        `Adaptive pipeline escalated: re-review verdict unparseable after audit`,
+        { prUrl, phase: 're-review-after-audit' },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- escalation still returns below
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
       kind: 'escalated',
       escalationReason: { phase: 're-review-after-audit', reason: `re-review verdict parse failed` },
@@ -338,16 +398,21 @@ export async function runAuditChain(
 
   // Still blocking/critical after audit: post to Human Outbox, do NOT auto-merge
   deps.stderr(`[audit-chain] Post-audit verdict still ${reFindings.severity} -- escalating to Human Outbox`);
-  await deps.postToOutbox(
-    `PR requires human review: still ${reFindings.severity} after production-readiness audit`,
-    {
-      prUrl,
-      phase: 'audit-chain-complete',
-      severity: reFindings.severity,
-      findingSummaries: reFindings.findingSummaries,
-      note: 'Do NOT auto-merge. Human review required.',
-    },
-  );
+  try {
+    await deps.postToOutbox(
+      `PR requires human review: still ${reFindings.severity} after production-readiness audit`,
+      {
+        prUrl,
+        phase: 'audit-chain-complete',
+        severity: reFindings.severity,
+        findingSummaries: reFindings.findingSummaries,
+        note: 'Do NOT auto-merge. Human review required.',
+      },
+    );
+  } catch (e) {
+    // postToOutbox write failure is non-fatal -- escalation still returns below
+    deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   return {
     kind: 'escalated',

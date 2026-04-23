@@ -78,10 +78,14 @@ export interface TriggerListenerHandle {
   readonly router: TriggerRouter;
   /**
    * The steer registry shared with TriggerRouter.
-   * Pass to startDaemonConsole() so POST /sessions/:id/steer can dispatch steers
-   * to sessions running inside TriggerRouter's dispatch queue.
+   * Used during daemon shutdown to abort in-flight sessions gracefully.
    */
   readonly steerRegistry: SteerRegistry;
+  /**
+   * The PollingScheduler instance created by this listener.
+   * Used to manage the polling loop lifecycle (start/stop).
+   */
+  readonly scheduler: PollingScheduler;
   stop(): Promise<void>;
 }
 
@@ -308,6 +312,12 @@ export async function startTriggerListener(
     // WHY two passes: do not mutate the Map while iterating it.
     const unknownTriggerIds: string[] = [];
     for (const [triggerId, trigger] of triggerIndex) {
+      // github_queue_poll triggers have no workflowId -- the adaptive coordinator
+      // decides the pipeline based on task content. Skip workflowId validation for
+      // these triggers; the sentinel '' would always fail the resolver lookup.
+      if (trigger.provider === 'github_queue_poll') {
+        continue;
+      }
       let found: boolean;
       try {
         found = await getWorkflowByIdFn(trigger.workflowId);
@@ -367,7 +377,7 @@ export async function startTriggerListener(
 
   // Create the steer registry for coordinator injection via POST /sessions/:id/steer.
   // WHY created here (not in TriggerRouter): trigger-listener.ts is the composition root
-  // that wires TriggerRouter and DaemonConsole together. Both need the SAME registry instance
+  // that wires TriggerRouter and the console route layer together. Both need the SAME registry instance
   // so the HTTP endpoint dispatches to callbacks registered by TriggerRouter's sessions.
   const steerRegistry: SteerRegistry = new Map();
 
@@ -379,16 +389,39 @@ export async function startTriggerListener(
   // fs/exec/HTTP implementations. This pattern mirrors the pr-review command in
   // cli-worktrain.ts (lines 958-1244), which uses the same deps interface.
   //
-  // WHY port=3456 (DAEMON_CONSOLE_PORT): still used by awaitSessions and getAgentResult
-  // which poll the console HTTP API. This constant is kept for those paths.
-  //
   // WHY let routerRef (forward reference): coordinatorDeps must be constructed before
   // TriggerRouter (it is a constructor argument). spawnSession needs the router to
   // call router.dispatch() in-process. The forward-ref is assigned exactly once,
   // immediately after new TriggerRouter(), and never mutated again.
   // ---------------------------------------------------------------------------
-  const DAEMON_CONSOLE_PORT = 3456;
   const execFileAsync = promisify(execFile);
+
+  // WHY in-process ConsoleService (not HTTP): awaitSessions and getAgentResult previously
+  // made HTTP calls to http://127.0.0.1:3456 (the daemon's own console API) from inside
+  // the daemon process. This caused silent all-failed returns on ECONNREFUSED and a
+  // race condition where sessions created in-process by spawnSession() were not yet
+  // visible via HTTP when the first poll fired. ConsoleService provides the same data
+  // via direct store access, eliminating both failure modes.
+  //
+  // A second ConsoleService instance has no correctness issue -- the summary cache
+  // is instance-scoped and mtime-invalidated. The instance is cheap to construct.
+  //
+  // WHY lazy import: avoids circular dependency at module load time.
+  const { ConsoleService } = await import('../v2/usecases/console-service.js');
+  let consoleService: InstanceType<typeof ConsoleService> | null = null;
+  if (!ctx.v2?.dataDir || !ctx.v2?.directoryListing) {
+    process.stderr.write(
+      '[CRITICAL trigger-listener:reason=consoleService_unavailable] ctx.v2.dataDir or ctx.v2.directoryListing not available -- awaitSessions and getAgentResult will degrade to all-failed / empty results\n',
+    );
+  } else {
+    consoleService = new ConsoleService({
+      directoryListing: ctx.v2.directoryListing,
+      dataDir: ctx.v2.dataDir,
+      sessionStore: ctx.v2.sessionStore,
+      snapshotStore: ctx.v2.snapshotStore,
+      pinnedWorkflowStore: ctx.v2.pinnedStore,
+    });
+  }
 
   // Forward reference for in-process dispatch. Assigned after router construction.
   // WHY let (not const): construction order requires coordinatorDeps before router.
@@ -401,6 +434,7 @@ export async function startTriggerListener(
       goal: string,
       workspace: string,
       context?: Readonly<Record<string, unknown>>,
+      agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
     ) => {
       // WHY in-process (not HTTP): the coordinator runs inside the daemon process.
       // POSTing to /api/v2/auto/dispatch would go out-of-process to itself, hitting
@@ -452,11 +486,15 @@ export async function startTriggerListener(
 
       // Step 3: Enqueue the agent loop via TriggerRouter's queue and semaphore.
       // Pass _preAllocatedStartResponse so runWorkflow() skips executeStartWorkflow().
+      // WHY agentConfig forwarded: coordinator sets per-phase timeouts (e.g. 55m for discovery)
+      // that exceed DEFAULT_SESSION_TIMEOUT_MINUTES=30. Without forwarding, sessions die at 30m
+      // and the coordinator's phase budget is never consumed (discovery-loop-fix, RC1).
       routerRef.dispatch({
         workflowId,
         goal,
         workspacePath: workspace,
         context,
+        ...(agentConfig !== undefined ? { agentConfig } : {}),
         _preAllocatedStartResponse: startResult.value.response,
       });
 
@@ -484,108 +522,117 @@ export async function startTriggerListener(
       nowIso: () => new Date().toISOString(),
     }),
 
+    // WHY in-process polling (not HTTP): see ConsoleService construction comment above.
+    // SESSION_LOAD_FAILED on getSessionDetail() is treated as "not ready yet" (retry),
+    // not as failure. This handles the race where spawnSession() creates a session
+    // in-process but the event log is not yet complete enough to project.
     awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
-      const { executeWorktrainAwaitCommand } = await import('../cli/commands/worktrain-await.js');
-      let resolvedResult: import('../cli/commands/worktrain-await.js').AwaitResult | null = null;
+      const POLL_INTERVAL_MS = 3_000;
 
-      await executeWorktrainAwaitCommand(
-        {
-          fetch: (url: string) => globalThis.fetch(url),
-          readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-          stdout: (line: string) => {
-            try {
-              resolvedResult = JSON.parse(line) as import('../cli/commands/worktrain-await.js').AwaitResult;
-            } catch { /* ignore */ }
-          },
-          stderr: (line: string) => process.stderr.write(line + '\n'),
-          homedir: os.homedir,
-          joinPath: path.join,
-          sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-          now: () => Date.now(),
-        },
-        {
-          sessions: [...handles].join(','),
-          mode: 'all',
-          timeout: `${Math.round(timeoutMs / 1000)}s`,
-          port: DAEMON_CONSOLE_PORT,
-        },
-      );
-
-      if (resolvedResult === null) {
+      if (consoleService === null) {
         process.stderr.write(
-          `[WARN coord:reason=await_failed] awaitSessions: could not get session results -- daemon may be unreachable or timed out. Returning all ${handles.length} session(s) as failed.\n`,
+          `[WARN coord:reason=await_degraded] awaitSessions: ConsoleService unavailable -- returning all ${handles.length} session(s) as failed.\n`,
         );
+        return {
+          results: [...handles].map((h) => ({
+            handle: h,
+            outcome: 'failed' as const,
+            status: null,
+            durationMs: 0,
+          })),
+          allSucceeded: false,
+        };
       }
-      return resolvedResult ?? {
-        results: [...handles].map((h) => ({
-          handle: h,
-          outcome: 'failed' as const,
-          status: null,
-          durationMs: 0,
-        })),
-        allSucceeded: false,
+
+      const startMs = Date.now();
+      const pending = new Set(handles);
+      const results = new Map<string, { handle: string; outcome: 'success' | 'failed' | 'timeout'; status: string | null; durationMs: number }>();
+
+      while (pending.size > 0) {
+        const elapsed = Date.now() - startMs;
+        if (elapsed >= timeoutMs) {
+          break;
+        }
+
+        for (const handle of [...pending]) {
+          try {
+            const detail = await consoleService.getSessionDetail(handle);
+            if (detail.isErr()) {
+              // SESSION_LOAD_FAILED or NODE_NOT_FOUND: session not yet visible or corrupt.
+              // Retry on next poll cycle -- do not mark as failed.
+              continue;
+            }
+            const run = detail.value.runs[0];
+            if (!run) continue; // session started but no run yet
+
+            const status = run.status;
+            if (status === 'complete' || status === 'complete_with_gaps') {
+              results.set(handle, { handle, outcome: 'success', status, durationMs: Date.now() - startMs });
+              pending.delete(handle);
+            } else if (status === 'blocked') {
+              results.set(handle, { handle, outcome: 'failed', status, durationMs: Date.now() - startMs });
+              pending.delete(handle);
+            }
+            // in_progress: still running -- stay in pending
+          } catch {
+            // Unexpected throw (should not happen with ResultAsync, but defensive)
+            results.set(handle, { handle, outcome: 'failed', status: null, durationMs: Date.now() - startMs });
+            pending.delete(handle);
+          }
+        }
+
+        if (pending.size > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
+      }
+
+      // Any remaining pending handles hit the timeout
+      for (const handle of pending) {
+        results.set(handle, { handle, outcome: 'timeout', status: null, durationMs: timeoutMs });
+      }
+
+      const resultsArray = [...results.values()];
+      return {
+        results: resultsArray,
+        allSucceeded: resultsArray.every((r) => r.outcome === 'success'),
       };
     },
 
     getAgentResult: async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
       const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
-      try {
-        const sessionUrl = `http://127.0.0.1:${DAEMON_CONSOLE_PORT}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
-        const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-        if (!sessionRes.ok) {
-          process.stderr.write(`[WARN coord:reason=http_error status=${sessionRes.status} handle=${sessionHandle.slice(0, 16)}] getAgentResult: session fetch returned HTTP ${sessionRes.status}\n`);
-          return emptyResult;
-        }
-        const sessionBody = await sessionRes.json() as Record<string, unknown>;
-        if (sessionBody['success'] !== true) {
-          return emptyResult;
-        }
-        const data = sessionBody['data'] as Record<string, unknown> | undefined;
-        if (!data) return emptyResult;
-        const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
-        if (!Array.isArray(runs) || runs.length === 0) return emptyResult;
 
-        const firstRun = runs[0] as Record<string, unknown>;
-        const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string'
-          ? firstRun['preferredTipNodeId']
-          : null;
+      if (consoleService === null) {
+        return emptyResult;
+      }
+
+      try {
+        const detailResult = await consoleService.getSessionDetail(sessionHandle);
+        if (detailResult.isErr()) return emptyResult;
+
+        const run = detailResult.value.runs[0];
+        if (!run) return emptyResult;
+
+        const tipNodeId = run.preferredTipNodeId;
         if (!tipNodeId) return emptyResult;
 
-        const allNodes = Array.isArray(firstRun['nodes'])
-          ? (firstRun['nodes'] as Array<Record<string, unknown>>)
-          : [];
-        const allNodeIds = allNodes
-          .map((n) => (typeof n['nodeId'] === 'string' ? n['nodeId'] : null))
-          .filter((id): id is string => id !== null);
+        const allNodeIds = run.nodes.map((n) => n.nodeId).filter((id): id is string => typeof id === 'string' && id !== '');
         const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
 
-        const baseNodeUrl = `http://127.0.0.1:${DAEMON_CONSOLE_PORT}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/`;
         let recap: string | null = null;
         const collectedArtifacts: unknown[] = [];
 
         for (const nodeId of nodeIdsToFetch) {
           try {
-            const nodeRes = await globalThis.fetch(
-              baseNodeUrl + encodeURIComponent(nodeId),
-              { signal: AbortSignal.timeout(30_000) },
-            );
-            if (!nodeRes.ok) continue;
-            const nodeBody = await nodeRes.json() as Record<string, unknown>;
-            if (nodeBody['success'] !== true) continue;
-            const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
-            if (!nodeData) continue;
+            const nodeResult = await consoleService.getNodeDetail(sessionHandle, nodeId);
+            if (nodeResult.isErr()) continue;
 
             if (nodeId === tipNodeId) {
-              recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
+              recap = nodeResult.value.recapMarkdown;
             }
-            const nodeArtifacts = nodeData['artifacts'];
-            if (Array.isArray(nodeArtifacts) && nodeArtifacts.length > 0) {
-              collectedArtifacts.push(...nodeArtifacts);
+            if (nodeResult.value.artifacts.length > 0) {
+              collectedArtifacts.push(...nodeResult.value.artifacts);
             }
-          } catch (nodeErr) {
-            const msg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
-            process.stderr.write(`[WARN coord:reason=node_exception handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: ${msg}\n`);
-          }
+          } catch { continue; }
         }
 
         return { recapMarkdown: recap, artifacts: collectedArtifacts };
@@ -641,7 +688,6 @@ export async function startTriggerListener(
 
     stderr: (line: string) => process.stderr.write(line + '\n'),
     now: () => Date.now(),
-    port: DAEMON_CONSOLE_PORT,
 
     // AdaptiveCoordinatorDeps extensions (beyond CoordinatorDeps)
 
@@ -785,7 +831,9 @@ export async function startTriggerListener(
   // WHY: runStartupRecovery() is non-fatal -- any error is caught internally and the
   // daemon starts regardless. The additional catch here defends against unexpected
   // throws from the function's own error-handling path.
-  await runStartupRecovery().catch((err: unknown) => {
+  // WHY pass ctx: enables resume-path logic (decode token, count step advances,
+  // call executeContinueWorkflow with intent: 'rehydrate' for sessions with progress).
+  await runStartupRecovery(undefined, undefined, ctx).catch((err: unknown) => {
     console.warn(
       '[TriggerListener] Startup recovery encountered an unexpected error:',
       err instanceof Error ? err.message : String(err),
@@ -828,6 +876,7 @@ export async function startTriggerListener(
         port: actualPort,
         router,
         steerRegistry,
+        scheduler: pollingScheduler,
         stop: async () => {
           // Stop polling BEFORE closing the HTTP server to prevent dispatch()
           // calls after the router's queue has been drained.

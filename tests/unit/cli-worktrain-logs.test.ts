@@ -62,6 +62,8 @@ function formatDaemonEventLine(raw: string): string | null {
       }
       return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${outcome ?? '?'}${detail}`;
     }
+    case 'session_aborted':
+      return `${prefix}  reason=${obj['reason'] ?? '?'}`;
     case 'step_advanced':
       return `${prefix}  -> step advanced`;
     case 'issue_reported': {
@@ -306,6 +308,33 @@ describe('formatDaemonEventLine', () => {
     expect(result).not.toBeNull();
     expect(result).toContain('session TIMEOUT');
     expect(result).toContain('(max_turns)');
+  });
+
+  it('formats session_aborted with reason=daemon_shutdown', () => {
+    const line = makeEvent({
+      kind: 'session_aborted',
+      sessionId: 'sess_abc123xyz',
+      workrailSessionId: 'sess_abc123xyz',
+      reason: 'daemon_shutdown',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('session_aborted');
+    expect(result).toContain('reason=daemon_shutdown');
+    // sessionId prefix is sliced to 8 chars: 'sess_abc'
+    expect(result).toContain('[sess_abc]');
+  });
+
+  it('formats session_aborted with reason=daemon_killed', () => {
+    const line = makeEvent({
+      kind: 'session_aborted',
+      sessionId: 'sess_def456xyz',
+      reason: 'daemon_killed',
+    });
+    const result = formatDaemonEventLine(line);
+    expect(result).not.toBeNull();
+    expect(result).toContain('session_aborted');
+    expect(result).toContain('reason=daemon_killed');
   });
 
   it('formats step_advanced with arrow label', () => {

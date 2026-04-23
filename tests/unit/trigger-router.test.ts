@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
+import type { AdaptiveCoordinatorDeps, ModeExecutors, PipelineOutcome } from '../../src/coordinators/adaptive-pipeline.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
 import type { ExecFn } from '../../src/trigger/delivery-action.js';
@@ -329,17 +330,36 @@ describe('TriggerRouter.route', () => {
       };
     }
 
+    /**
+     * Make events with unique goals so the 30s dedup window does not suppress them.
+     * Concurrency tests verify queue serialization/parallelism for distinct tasks --
+     * they are not testing dedup behavior.
+     */
+    function makeUniqueEvents(count: number): ReturnType<typeof makeEvent>[] {
+      return Array.from({ length: count }, (_, i) => {
+        const payload = { pull_request: { html_url: `https://example.com/mr/${i}`, title: `MR ${i}` } };
+        return makeEvent({ payload, rawBody: Buffer.from(JSON.stringify(payload)) });
+      });
+    }
+
     it('serial trigger: second call does not start until first completes (same queue key)', async () => {
       // Proves the serial ternary: queueKey = trigger.id (not trigger.id:UUID).
       // If the ternary were inverted to 'parallel', BOTH calls would be in-flight
       // after the first flush and this test would fail.
-      const trigger = makeTrigger({ concurrencyMode: 'serial' });
+      //
+      // WHY unique goals: the 30s dedup window suppresses duplicate goal+workspace dispatches.
+      // Concurrency tests verify queue serialization for distinct tasks, not dedup behavior.
+      const trigger = makeTrigger({
+        concurrencyMode: 'serial',
+        goalTemplate: '{{$.pull_request.title}}',
+      });
       const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
       const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
 
-      // Fire two events without awaiting -- the queue processes them serially.
-      router.route(makeEvent());
-      router.route(makeEvent());
+      // Fire two events with unique goals -- the queue processes them serially.
+      const [event1, event2] = makeUniqueEvents(2);
+      router.route(event1!);
+      router.route(event2!);
 
       // Drain the microtask queue so KeyedAsyncQueue has had a chance to start
       // the first call (and NOT start the second, since they share the same key).
@@ -363,14 +383,21 @@ describe('TriggerRouter.route', () => {
       // Proves the parallel ternary: queueKey = trigger.id:UUID (unique per fire).
       // If the ternary were inverted to 'serial', only one call would be in-flight
       // after the flush and this test would fail.
-      const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+      //
+      // WHY unique goals: the 30s dedup window suppresses duplicate goal+workspace dispatches.
+      // Concurrency tests verify queue parallelism for distinct tasks, not dedup behavior.
+      const trigger = makeTrigger({
+        concurrencyMode: 'parallel',
+        goalTemplate: '{{$.pull_request.title}}',
+      });
       const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
       const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
 
-      // Fire two events without awaiting -- each gets its own queue key, so both
+      // Fire two events with unique goals -- each gets its own queue key, so both
       // start concurrently without waiting for the other.
-      router.route(makeEvent());
-      router.route(makeEvent());
+      const [event1, event2] = makeUniqueEvents(2);
+      router.route(event1!);
+      router.route(event2!);
 
       // Drain the microtask queue -- both calls should now be in-flight.
       await new Promise<void>((r) => setImmediate(r));
@@ -1091,16 +1118,34 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     };
   }
 
+  /**
+   * Make N events with unique goals for semaphore/concurrency tests.
+   * Each event carries a unique pull_request.title which is used as the goal
+   * via goalTemplate='{{$.pull_request.title}}', so the 30s dedup window treats
+   * them as distinct tasks and does not suppress any of them.
+   */
+  function makeUniqueEvents(count: number): ReturnType<typeof makeEvent>[] {
+    return Array.from({ length: count }, (_, i) => {
+      const payload = { pull_request: { html_url: `https://example.com/mr/${i}`, title: `Semaphore task ${i}` } };
+      return makeEvent({ payload, rawBody: Buffer.from(JSON.stringify(payload)) });
+    });
+  }
+
   it('limits concurrent runWorkflow() calls to maxConcurrentSessions', async () => {
     // Proves the semaphore caps at the configured limit.
     // With cap=2 and 3 fires: first two should start, third should be queued.
-    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    //
+    // WHY unique goals (goalTemplate): the 30s dedup window suppresses duplicate
+    // goal+workspace dispatches. Semaphore tests use distinct tasks -- each event
+    // gets a unique title-based goal so the dedup does not interfere.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel', goalTemplate: '{{$.pull_request.title}}' });
     const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
     const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 2);
 
-    router.route(makeEvent());
-    router.route(makeEvent());
-    router.route(makeEvent());
+    const [e1, e2, e3] = makeUniqueEvents(3);
+    router.route(e1!);
+    router.route(e2!);
+    router.route(e3!);
 
     // Drain: give semaphore time to start the first two (third is blocked, waiting for slot).
     await new Promise<void>((r) => setImmediate(r));
@@ -1121,13 +1166,17 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
 
   it('queue-and-wait: third dispatch proceeds after one of the first two completes', async () => {
     // Proves that queued dispatches are not dropped -- they execute once a slot opens.
-    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    //
+    // WHY unique goals (goalTemplate): dedup window would suppress identical goal+workspace
+    // calls. These tests verify semaphore behavior for distinct tasks.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel', goalTemplate: '{{$.pull_request.title}}' });
     const { fn, inFlight, releaseNext, releaseAll } = makeLatchedRunWorkflow();
     const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 2);
 
-    router.route(makeEvent());
-    router.route(makeEvent());
-    router.route(makeEvent());
+    const [e1, e2, e3] = makeUniqueEvents(3);
+    router.route(e1!);
+    router.route(e2!);
+    router.route(e3!);
 
     await new Promise<void>((r) => setImmediate(r));
     await new Promise<void>((r) => setImmediate(r));
@@ -1153,7 +1202,9 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     // ORANGE-1: proves the finally block releases the slot even when runWorkflowFn
     // returns an error result (workflow failed but slot must still be freed).
     // Without the finally block, a failing workflow would permanently consume a slot.
-    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    //
+    // WHY unique goals (goalTemplate): dedup window would suppress the second call.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel', goalTemplate: '{{$.pull_request.title}}' });
     let firstCallUnblock!: () => void;
     let secondCallResolved = false;
 
@@ -1171,11 +1222,12 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     // cap=1 so second dispatch can only run after first releases the semaphore slot
     const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 1);
 
-    router.route(makeEvent());
+    const [e1, e2] = makeUniqueEvents(2);
+    router.route(e1!);
     await new Promise<void>((r) => setImmediate(r));
 
     // First call is running -- second is queued (cap=1)
-    router.route(makeEvent());
+    router.route(e2!);
     expect(secondCallResolved).toBe(false);
 
     // Unblock the first call (returns error) -- finally MUST release the slot
@@ -1188,18 +1240,22 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
 
   it('defaults to 3 concurrent sessions when maxConcurrentSessions is not specified', async () => {
     // Proves the default is 3, not unlimited.
-    const trigger = makeTrigger({ concurrencyMode: 'parallel' });
+    //
+    // WHY unique goals (goalTemplate): dedup window would suppress calls 2-4 with the
+    // same goal+workspace. Use unique events to test the semaphore cap independently.
+    const trigger = makeTrigger({ concurrencyMode: 'parallel', goalTemplate: '{{$.pull_request.title}}' });
     const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
     // No maxConcurrentSessions argument -- should default to 3
     const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
 
     expect(router.maxConcurrentSessions).toBe(3);
 
-    // Fire 4 dispatches -- only 3 should be in-flight simultaneously
-    router.route(makeEvent());
-    router.route(makeEvent());
-    router.route(makeEvent());
-    router.route(makeEvent());
+    // Fire 4 dispatches with unique goals -- only 3 should be in-flight simultaneously
+    const [e1, e2, e3, e4] = makeUniqueEvents(4);
+    router.route(e1!);
+    router.route(e2!);
+    router.route(e3!);
+    router.route(e4!);
 
     await new Promise<void>((r) => setImmediate(r));
     await new Promise<void>((r) => setImmediate(r));
@@ -1490,5 +1546,486 @@ describe('late-bound goals integration', () => {
     // interpolateGoalTemplate should have warned about the missing token
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("goalTemplate variable '$.goal' not found"));
     warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.route and dispatch: deduplication within 30s window
+//
+// Verifies that rapid-fire webhook events and direct dispatches for the same
+// goal+workspace are deduplicated within the 30-second TTL window, preventing
+// duplicate pipeline sessions from webhook retries.
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.route and dispatch deduplication', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('route(): second dispatch for the same goal+workspace within 30s is blocked', async () => {
+    // WHY: proves that rapid-fire webhook retries for the same trigger do not
+    // spawn duplicate pipeline sessions within the TTL window.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const trigger = makeTrigger();
+    const { fn, calls } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    // First route() call -- should proceed
+    router.route(makeEvent());
+
+    // Advance time by 10s (within 30s window)
+    vi.advanceTimersByTime(10_000);
+
+    // Second route() call -- same goal+workspace, within TTL, should be blocked
+    const secondResult = router.route(makeEvent());
+
+    // Flush the async queue
+    await Promise.resolve();
+
+    // Only the first dispatch should have reached runWorkflowFn
+    expect(calls.length).toBeLessThanOrEqual(1);
+
+    // route() still returns 'enqueued' (silent skip -- 202 was already sent)
+    expect(secondResult._tag).toBe('enqueued');
+
+    // Skip log was emitted for the blocked dispatch
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate route dispatch'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('already dispatched within 30s'),
+    );
+
+    logSpy.mockRestore();
+  });
+
+  it('dispatch(): second dispatch for the same goal+workspace within 30s is blocked', async () => {
+    // WHY: proves the console AUTO dispatch path also deduplicates within the TTL window.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const trigger = makeTrigger();
+    const { fn, calls } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const workflowTrigger = {
+      workflowId: trigger.workflowId,
+      goal: trigger.goal,
+      workspacePath: trigger.workspacePath,
+      context: {},
+    };
+
+    // First dispatch -- should proceed
+    router.dispatch(workflowTrigger);
+
+    // Advance time by 10s (within 30s window)
+    vi.advanceTimersByTime(10_000);
+
+    // Second dispatch -- same goal+workspace, within TTL, should be blocked
+    router.dispatch(workflowTrigger);
+
+    // Flush
+    await Promise.resolve();
+
+    // Only the first dispatch should have reached runWorkflowFn
+    expect(calls.length).toBeLessThanOrEqual(1);
+
+    // Skip log was emitted
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate dispatch'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('already dispatched within 30s'),
+    );
+
+    logSpy.mockRestore();
+  });
+
+  it('different goals on the same workspace within 30s are both dispatched', async () => {
+    // WHY: proves the deduplication key is goal+workspace (not workspace-only).
+    // Different tasks arriving for the same repo within 30s must all dispatch.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const trigger1 = makeTrigger({ id: asTriggerId('trigger-a'), goal: 'review PR #42' });
+    const trigger2 = makeTrigger({ id: asTriggerId('trigger-b'), goal: 'review PR #43' });
+    const { fn: fn1, calls: calls1 } = makeFakeRunWorkflow();
+    const { fn: fn2, calls: calls2 } = makeFakeRunWorkflow();
+    const router1 = new TriggerRouter(makeIndex(trigger1), FAKE_CTX, FAKE_API_KEY, fn1);
+    const router2 = new TriggerRouter(makeIndex(trigger2), FAKE_CTX, FAKE_API_KEY, fn2);
+
+    const event1 = makeEvent({ triggerId: asTriggerId('trigger-a') });
+    const event2 = makeEvent({ triggerId: asTriggerId('trigger-b') });
+
+    router1.route(event1);
+    vi.advanceTimersByTime(5_000);
+    router2.route(event2);
+
+    // Flush: advance fake timers to allow setTimeout(r, 20) inside the queue to resolve
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Both dispatches should have reached runWorkflowFn (different goals = different keys)
+    expect(calls1).toHaveLength(1);
+    expect(calls2).toHaveLength(1);
+
+    // No skip log emitted for either dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate'),
+    );
+
+    logSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.dispatchAdaptivePipeline: deduplication within 30s window
+//
+// Verifies that rapid-fire calls for the same goal+workspace are deduplicated
+// within a 30-second TTL window, preventing duplicate adaptive pipeline sessions
+// from webhook retries or daemon restarts.
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
+  /**
+   * Build a minimal fake AdaptiveCoordinatorDeps that satisfies the type.
+   *
+   * runAdaptivePipeline calls deps.now() and deps.nowIso() BEFORE dispatching
+   * to executors (for timing and log-file naming). Both must be provided.
+   * deps.writeFile and deps.mkdir are needed for the pipeline-run log write
+   * that also happens before executor dispatch. deps.stderr is called for
+   * routing progress messages.
+   *
+   * All other fields are cast to satisfy TypeScript -- they are never reached
+   * because the fake ModeExecutors short-circuit before any other dep call.
+   */
+  const FAKE_DEPS = {
+    now: () => Date.now(),
+    nowIso: () => new Date().toISOString(),
+    writeFile: async () => {},
+    mkdir: async () => undefined,
+    stderr: () => {},
+    port: 0,
+  } as unknown as AdaptiveCoordinatorDeps;
+
+  /**
+   * Build a ModeExecutors fake whose execute function records each call and
+   * resolves immediately. Returns the call-count accessor alongside the fake.
+   *
+   * WHY fake ModeExecutors instead of mocking runAdaptivePipeline directly:
+   * dispatchAdaptivePipeline calls runAdaptivePipeline(deps, opts, executors).
+   * We inject coordinatorDeps + modeExecutors through the constructor, so the
+   * injected executors are what actually gets invoked.
+   */
+  function makeFakeModeExecutors(): { executors: ModeExecutors; callCount: () => number } {
+    let count = 0;
+    const outcome: PipelineOutcome = { kind: 'merged', prUrl: null };
+    const executor = async () => {
+      count++;
+      return outcome;
+    };
+    const executors: ModeExecutors = {
+      runQuickReview: executor,
+      runReviewOnly: executor,
+      runImplement: executor,
+      runFull: executor,
+    };
+    return { executors, callCount: () => count };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('blocks the second dispatch for the same goal+workspace within 30s', async () => {
+    // WHY: proves that rapid-fire webhook retries for the same goal+workspace
+    // do not spawn duplicate adaptive pipeline sessions within the TTL window.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { executors, callCount } = makeFakeModeExecutors();
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined, // execFn
+      undefined, // maxConcurrentSessions
+      undefined, // emitter
+      undefined, // notificationService
+      undefined, // steerRegistry
+      FAKE_DEPS,
+      executors,
+    );
+
+    const goal = 'review PR #42';
+    const workspace = '/workspace';
+
+    // First dispatch: should proceed
+    await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Advance time by 10 seconds (within 30s window)
+    vi.advanceTimersByTime(10_000);
+
+    // Second dispatch: same goal+workspace, within TTL -- should be blocked
+    const secondResult = await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Pipeline called only once (second dispatch was blocked)
+    expect(callCount()).toBe(1);
+
+    // Skip log message emitted for the blocked dispatch
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate adaptive dispatch'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('already dispatched within 30s'),
+    );
+
+    // Blocked dispatch returns escalated outcome
+    expect(secondResult.kind).toBe('escalated');
+
+    logSpy.mockRestore();
+  });
+
+  it('allows the second dispatch for the same goal+workspace after 30s', async () => {
+    // WHY: proves that after the TTL expires, the same goal+workspace can dispatch again.
+    // This covers the legitimate refire case (e.g. a corrective retry after failure).
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { executors, callCount } = makeFakeModeExecutors();
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      FAKE_DEPS,
+      executors,
+    );
+
+    const goal = 'review PR #42';
+    const workspace = '/workspace';
+
+    // First dispatch at t=0
+    await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Advance time by 31 seconds (TTL has expired)
+    vi.advanceTimersByTime(31_000);
+
+    // Second dispatch: same goal+workspace, after TTL -- should proceed
+    const secondResult = await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Both dispatches proceeded
+    expect(callCount()).toBe(2);
+
+    // Skip log NOT emitted for the second dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate adaptive dispatch'),
+    );
+
+    // Second dispatch returned a real pipeline outcome (not escalated-for-skip)
+    expect(secondResult.kind).toBe('merged');
+
+    logSpy.mockRestore();
+  });
+
+  it('does not block dispatches for different goals on the same workspace within 30s', async () => {
+    // WHY: proves the deduplication key is goal+workspace (not workspace-only).
+    // Different tasks arriving for the same repo within 30s must all dispatch.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { executors, callCount } = makeFakeModeExecutors();
+    const trigger = makeTrigger();
+    const { fn } = makeFakeRunWorkflow();
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      FAKE_DEPS,
+      executors,
+    );
+
+    const workspace = '/workspace';
+
+    // Two different goals on the same workspace within 5 seconds
+    await router.dispatchAdaptivePipeline('review PR #42', workspace);
+    vi.advanceTimersByTime(5_000);
+    await router.dispatchAdaptivePipeline('review PR #43', workspace);
+
+    // Both dispatches proceeded (different goals = different deduplication keys)
+    expect(callCount()).toBe(2);
+
+    // Skip log NOT emitted for either dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate adaptive dispatch'),
+    );
+
+    logSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TriggerRouter.dispatch: _preAllocatedStartResponse dedup bypass
+//
+// Verifies that dispatch() with _preAllocatedStartResponse set bypasses the
+// 30s dedup window and calls runWorkflowFn, even when the same goal+workspace
+// was recently dispatched via dispatchAdaptivePipeline().
+//
+// This is the regression guard for the zombie-session bug:
+// dispatchAdaptivePipeline() primes _recentAdaptiveDispatches with the same
+// goal::workspace key. Without the bypass, dispatch() returns early and the
+// pre-allocated session zombies in the store forever.
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
+  /**
+   * Minimal fake AdaptiveCoordinatorDeps for priming the dedup map via
+   * dispatchAdaptivePipeline(). Only the fields called before executor dispatch
+   * need to be present. All others are cast.
+   */
+  const FAKE_DEPS_FOR_BYPASS = {
+    now: () => Date.now(),
+    nowIso: () => new Date().toISOString(),
+    writeFile: async () => {},
+    mkdir: async () => undefined,
+    stderr: () => {},
+    port: 0,
+    // fileExists: required by routeTask() for pitch.md detection (Rule 3).
+    // Returns false so routeTask() falls through to FULL mode.
+    fileExists: () => false,
+  } as unknown as AdaptiveCoordinatorDeps;
+
+  function makeFakeModeExecutorsForBypass(): ModeExecutors {
+    const outcome: PipelineOutcome = { kind: 'merged', prUrl: null };
+    const executor = async () => outcome;
+    return {
+      runQuickReview: executor,
+      runReviewOnly: executor,
+      runImplement: executor,
+      runFull: executor,
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('dispatch() with _preAllocatedStartResponse bypasses dedup and calls runWorkflowFn', async () => {
+    // WHY: proves the fix for the zombie-session bug. The dedup map contains goal::workspace
+    // from a prior dispatch. dispatch() with _preAllocatedStartResponse must bypass the dedup
+    // check and call runWorkflowFn. Without the fix, runWorkflowFn is never called (dedup fires)
+    // and the pre-allocated session zombies in the store.
+    //
+    // Scenario:
+    // 1. First dispatch() (no preAlloc) -- primes _recentAdaptiveDispatches['goal::workspace']
+    // 2. Second dispatch() (with preAlloc) -- must bypass dedup and call runWorkflowFn
+    //
+    // NOTE: We prime the dedup map via dispatch() rather than dispatchAdaptivePipeline()
+    // to avoid async complexity with fake timers. The bug fires whenever the map has the key,
+    // regardless of how it was set. Real timers are used so the queue drains normally.
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const goal = trigger.goal;
+    const workspace = trigger.workspacePath;
+
+    // Step 1: First dispatch (no preAlloc) -- primes the dedup map AND calls runWorkflowFn (1st call)
+    router.dispatch({ workflowId: trigger.workflowId, goal, workspacePath: workspace, context: {} });
+
+    // Step 2: Second dispatch WITH _preAllocatedStartResponse -- must bypass dedup (2nd call)
+    router.dispatch({
+      workflowId: trigger.workflowId,
+      goal,
+      workspacePath: workspace,
+      context: {},
+      _preAllocatedStartResponse: {} as Parameters<typeof router.dispatch>[0]['_preAllocatedStartResponse'],
+    });
+
+    // Wait for the async queue to drain
+    await new Promise<void>((r) => setTimeout(r, 20));
+
+    // Both dispatches must have reached runWorkflowFn:
+    // - dispatch 1 (no preAlloc, first in window): primed map, called runWorkflowFn
+    // - dispatch 2 (with preAlloc): bypassed dedup map, called runWorkflowFn
+    // Total: exactly 2 calls
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.goal).toBe(goal);
+    expect(calls[1]?.goal).toBe(goal);
+  });
+
+  it('dispatch() WITHOUT _preAllocatedStartResponse still deduplicates within 30s after dispatchAdaptivePipeline', async () => {
+    // WHY: regression guard -- proves the dedup check still fires for normal dispatch()
+    // calls (without _preAllocatedStartResponse) after dispatchAdaptivePipeline() primes
+    // the map. This ensures the bypass only applies to pre-allocated sessions.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger();
+    const executors = makeFakeModeExecutorsForBypass();
+
+    const router = new TriggerRouter(
+      makeIndex(trigger),
+      FAKE_CTX,
+      FAKE_API_KEY,
+      fn,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      FAKE_DEPS_FOR_BYPASS,
+      executors,
+    );
+
+    const goal = trigger.goal;
+    const workspace = trigger.workspacePath;
+
+    // Prime the dedup map
+    await router.dispatchAdaptivePipeline(goal, workspace);
+
+    // Advance by 10s (within 30s TTL)
+    vi.advanceTimersByTime(10_000);
+
+    // dispatch() WITHOUT _preAllocatedStartResponse -- dedup must fire
+    router.dispatch({
+      workflowId: trigger.workflowId,
+      goal,
+      workspacePath: workspace,
+      context: {},
+      // no _preAllocatedStartResponse
+    });
+
+    await Promise.resolve();
+
+    // runWorkflowFn must NOT have been called (dedup blocked the dispatch)
+    expect(calls).toHaveLength(0);
+
+    // Skip log must have been emitted
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate dispatch'),
+    );
+
+    logSpy.mockRestore();
   });
 });
