@@ -18,7 +18,7 @@ import { promisify } from 'util';
 import type { ConsoleService } from './console-service.js';
 import { getWorktreeList, buildActiveSessionCounts, resolveRepoRoot, setEnrichmentCompleteCallback } from './worktree-service.js';
 import { toWorkflowSourceInfo } from '../../types/workflow.js';
-import type { WorkflowService } from '../../application/services/workflow-service.js';
+import type { IWorkflowReader } from '../../types/storage.js';
 import type { ToolCallTimingEntry, ToolCallTimingRingBuffer } from '../../mcp/tool-call-timing.js';
 import { isDevMode } from '../../mcp/dev-mode.js';
 import type { V2ToolContext } from '../../mcp/types.js';
@@ -131,7 +131,7 @@ function loadWorkflowTags(): WorkflowTagsFile {
 export function mountConsoleRoutes(
   app: Application,
   consoleService: ConsoleService,
-  workflowService?: WorkflowService,
+  workflowService?: IWorkflowReader,
   timingRingBuffer?: ToolCallTimingRingBuffer,
   toolCallsPerfFile?: string,
   serverVersion?: string,
