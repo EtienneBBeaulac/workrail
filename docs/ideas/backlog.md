@@ -117,7 +117,7 @@ WorkRail Daemon (new entry point -- same core, different driver)
 
 **Why this matters:**
 - No duplicate session logic, no duplicate workflow format, no duplicate enforcement
-- WorkRail can autonomously improve itself -- the daemon runs `wr.workflow-for-workflows` to author new workflows, which then run in both modes
+- WorkRail can autonomously improve itself -- the daemon runs `workflow-for-workflows` to author new workflows, which then run in both modes
 - Users who start with Claude Code MCP get autonomous mode for free -- same config, same workflows, second entry point
 - The enforcement guarantee is identical: whether a human or the daemon is driving, the agent cannot skip steps
 
@@ -424,7 +424,7 @@ WorkRail autonomous sessions can spawn subagents for parallel work:
 - **Status**: idea
 - **Summary**: Instead of authoring full workflow JSON for every use case, users or agents fill out a declarative spec (dimensions, scope, rigor level, etc.) and the WorkRail engine assembles a workflow automatically from a library of pre-validated routines and step templates. The agent is a form-filler, not an architect - the composition logic lives in the engine.
 - **Why this is different from agent-generated workflows**:
-  - Agent-generated workflows have no quality gate - you're trusting the agent's judgment on structure, which is exactly what wr.workflow-for-workflows exists to prevent
+  - Agent-generated workflows have no quality gate - you're trusting the agent's judgment on structure, which is exactly what workflow-for-workflows exists to prevent
   - Engine-composed workflows are assembled from pre-reviewed building blocks using deterministic rules - same spec always produces the same workflow shape
   - Trustworthy because composition logic is owned by WorkRail, not improvised at runtime
 - **How it would work**:
@@ -949,7 +949,7 @@ Research complete on all reference projects. Design docs written to `docs/design
 
 **Knowledge injection:** `inject-knowledge.sh` -- before Claude API call, inject: ancestry recap + `~/.workrail/knowledge/` + repo-specific `.workrail/context.md`. Cap at N lines (200 default). SHORT_NAME matching for repo-relevant selection.
 
-**Skill-as-git-history:** Each skill evolves through atomic commits traceable to session context. WorkRail: session notes improve workflows via `wr.workflow-for-workflows`.
+**Skill-as-git-history:** Each skill evolves through atomic commits traceable to session context. WorkRail: session notes improve workflows via `workflow-for-workflows`.
 
 ---
 
@@ -1400,7 +1400,7 @@ The main agent's context is expensive and degrades as it fills up. The right arc
 
 - **Phase 0 (classify)**: delegate to a cheap subagent. It reads the task description, scans relevant files, and returns: `taskComplexity`, `riskLevel`, `rigorMode`, `candidateFiles`, `invariants`. Main agent reviews and accepts/overrides. Cost: one cheap context instead of part of the main context.
 
-- **Context gathering (phase-1)**: already delegates to `wr.routine-context-gathering` subagents. That's the right model. The question is whether those subagents share results via a persistent layer (knowledge graph) or repeat sweeps every session.
+- **Context gathering (phase-1)**: already delegates to `routine-context-gathering` subagents. That's the right model. The question is whether those subagents share results via a persistent layer (knowledge graph) or repeat sweeps every session.
 
 - **Design review, plan audit, final verification**: already delegate to routine subagents. Good.
 
@@ -1547,7 +1547,7 @@ triggers:
       token: $GITLAB_TOKEN
       events: [merge_request.opened, merge_request.updated]
       pollIntervalSeconds: 60
-    workflowId: wr.mr-review
+    workflowId: mr-review-workflow-agentic
     goalTemplate: "Review MR !{{$.iid}}: {{$.title}}"
     workspacePath: ~/git/my-project
 ```
@@ -1667,7 +1667,7 @@ Raw idea                                                    Fully specced
 | Fully specced + arch decided | coding → review → audit → verify |
 | Code written, needs validation | review → audit → test → verify |
 
-**How wr.classify-task learns maturity:**
+**How classify-task-workflow learns maturity:**
 The classify step doesn't just classify complexity and risk -- it also assesses maturity:
 - `taskMaturity`: idea / rough / specced / ready / code-complete
 - `existingArtifacts`: which of [brd, designs, arch-decision, acceptance-criteria, ticket, implementation] exist
@@ -1789,11 +1789,11 @@ Right now, "has this been reviewed and audited?" is a question that requires rea
 
 Instead of a coordinator *agent* that reads MR review findings and decides what to do, use a **coordinator script** that:
 1. Calls `gh pr list` → list of PRs (script)
-2. For each PR, calls `spawn_session(wr.mr-review)` → session handles (script)
+2. For each PR, calls `spawn_session(mr-review-workflow-agentic)` → session handles (script)
 3. Calls `await_sessions(handles)` → structured findings (script waits)
 4. Parses the findings JSON block from each session's output (script)
 5. Routes: clean → merge queue, minor → spawn fix agent, blocking → escalate (script decision tree)
-6. Calls `spawn_session(wr.coding-task, fix: <finding>)` for each fix needed (script)
+6. Calls `spawn_session(coding-task-workflow-agentic, fix: <finding>)` for each fix needed (script)
 7. Awaits fix agents, re-queues for re-review (script loop)
 8. Executes merge sequence when queue is empty (script)
 
@@ -1838,7 +1838,7 @@ trigger: "implement feature X"
   │     outputs: taskComplexity, riskLevel, hasUI, touchesArchitecture
   │
   ├── [if taskComplexity != Small] discovery
-  │     workflow: wr.routine-context-gathering (COMPLETENESS + DEPTH in parallel)
+  │     workflow: routine-context-gathering (COMPLETENESS + DEPTH in parallel)
   │     outputs: context bundle, candidate files, invariants
   │
   ├── [if hasUI] ux-design
@@ -1846,19 +1846,19 @@ trigger: "implement feature X"
   │     outputs: design-spec.md, component-list
   │
   ├── [if touchesArchitecture] architecture-design
-  │     workflow: wr.coding-task (design phases only)
+  │     workflow: coding-task-workflow-agentic (design phases only)
   │     outputs: design-candidates.md, selected approach
   │     └── arch-review (parallel, 2 auditors)
-  │           workflow: wr.routine-hypothesis-challenge + wr.routine-philosophy-alignment
+  │           workflow: routine-hypothesis-challenge + routine-philosophy-alignment
   │           outputs: findings → revise design if RED/ORANGE
   │
   ├── [always] coding-task
-  │     workflow: wr.coding-task
+  │     workflow: coding-task-workflow-agentic
   │     inputs: context bundle + design spec + arch decision
   │     outputs: implementation + handoff artifact (commitType, prTitle, filesChanged)
   │
   ├── [always] mr-review
-  │     workflow: wr.mr-review
+  │     workflow: mr-review-workflow-agentic
   │     outputs: findings with severity
   │     ├── [if clean] → auto-commit → auto-pr → merge
   │     ├── [if Minor/Nit] → spawn fix agent → re-review (max 3 passes)
@@ -1879,17 +1879,17 @@ trigger: "implement feature X"
 
 | Workflow | Status |
 |----------|--------|
-| `wr.coding-task` | ✅ `wr.coding-task.lean.v2.json` |
-| `wr.mr-review` | ✅ `mr-review-workflow.agentic.v2.json` |
-| `wr.routine-context-gathering` | ✅ `routines/` |
-| `wr.routine-hypothesis-challenge` | ✅ `routines/` |
-| `wr.routine-philosophy-alignment` | ✅ `routines/` |
-| `ux-design-workflow` | ✅ `wr.ui-ux-design.json` |
-| `production-risk-audit-workflow` | ✅ `wr.production-readiness-audit.json` |
-| `architecture-review-workflow` | ✅ `wr.architecture-scalability-audit.json` |
+| `coding-task-workflow-agentic` | ✅ `coding-task-workflow-agentic.lean.v2.json` |
+| `mr-review-workflow-agentic` | ✅ `mr-review-workflow.agentic.v2.json` |
+| `routine-context-gathering` | ✅ `routines/` |
+| `routine-hypothesis-challenge` | ✅ `routines/` |
+| `routine-philosophy-alignment` | ✅ `routines/` |
+| `ux-design-workflow` | ✅ `ui-ux-design-workflow.json` |
+| `production-risk-audit-workflow` | ✅ `production-readiness-audit.json` |
+| `architecture-review-workflow` | ✅ `architecture-scalability-audit.json` |
 | `bug-investigation-workflow` | ✅ `bug-investigation.agentic.v2.json` |
 | `discovery-workflow` | ✅ `wr.discovery.json` |
-| `wr.classify-task` | ❌ needs authoring -- fast, 1-step, outputs taskComplexity/riskLevel/hasUI/touchesArchitecture |
+| `classify-task-workflow` | ❌ needs authoring -- fast, 1-step, outputs taskComplexity/riskLevel/hasUI/touchesArchitecture |
 
 **The classify step is the gate.** A cheap, fast workflow that takes a task description and returns structured vars. This is where the coordinator decides what to run. It's the single most important missing workflow -- without it, the coordinator has to spawn everything for every task, which is wasteful.
 
@@ -1897,10 +1897,10 @@ trigger: "implement feature X"
 ```typescript
 // coordinator-implement-feature.ts
 const { taskComplexity, riskLevel, hasUI, touchesArchitecture } =
-  await runWorkflow('wr.classify-task', { goal: taskDescription });
+  await runWorkflow('classify-task-workflow', { goal: taskDescription });
 
 const contextHandle = taskComplexity !== 'Small'
-  ? spawnSession('wr.routine-context-gathering', { goal: taskDescription })
+  ? spawnSession('routine-context-gathering', { goal: taskDescription })
   : null;
 
 const uxHandle = hasUI
@@ -1951,7 +1951,7 @@ trigger: "groom backlog" (cron: weekly, or manual dispatch)
   │     script: comment "possible duplicate of #X", label as needs-triage
   │
   ├── [for high-priority bugs with no assignee] suggest-fix-approach
-  │     workflow: wr.bug-investigation (surface root cause + candidate fix)
+  │     workflow: bug-investigation-agentic (surface root cause + candidate fix)
   │     outputs: investigation summary posted as issue comment
   │
   └── produce grooming summary
@@ -1967,14 +1967,14 @@ No human needed for any of this. The coordinator classifies, labels, pings stale
 ```
 trigger: new issue labeled "bug" OR incident alert from monitoring
   │
-  ├── wr.bug-investigation
+  ├── bug-investigation-agentic
   │     outputs: root cause hypothesis, affected files, severity, reproduction steps
   │
   ├── [if severity == Critical] page-oncall
   │     script: post to Slack #incidents with investigation summary + session link
   │
   ├── [if severity <= High and hypothesis_confidence >= 0.8] attempt-fix
-  │     workflow: wr.coding-task (targeted fix)
+  │     workflow: coding-task-workflow-agentic (targeted fix)
   │     inputs: investigation findings, affected files, reproduction steps
   │     outputs: implementation + handoff artifact
   │     │
@@ -1995,7 +1995,7 @@ trigger: new issue labeled "bug" OR incident alert from monitoring
 The daemon can go from "bug filed" to "fix merged" with zero human involvement for well-understood bugs with high-confidence hypotheses. Critical bugs and uncertain root causes always escalate to a human -- the investigation is done for them, not by them.
 
 **What makes this work:**
-- `wr.bug-investigation` already exists and produces structured findings
+- `bug-investigation-agentic` already exists and produces structured findings
 - The `hypothesis_confidence` output from the investigation gates the auto-fix attempt
 - The coordinator script decides: high confidence + not critical = try to fix autonomously
 - The circuit breaker (max 3 fix attempts) prevents infinite loops on hard bugs
@@ -2013,7 +2013,7 @@ trigger: monitoring alert (CPU spike, error rate increase, latency P99 > thresho
   │     outputs: isRealIncident, likelyCause, affectedServices
   │
   ├── [if isRealIncident] investigate
-  │     workflow: wr.bug-investigation (logs, traces, recent changes)
+  │     workflow: bug-investigation-agentic (logs, traces, recent changes)
   │     outputs: root cause, blast radius, mitigation options
   │
   ├── [if mitigation is config change or rollback] auto-mitigate
@@ -2070,7 +2070,7 @@ Today this requires a human (Claude Code + a long conversation) to maintain cont
 - "The backlog says knowledge graph should be persistent but the spike uses in-memory DuckDB" (gap between spec and impl)
 - "Three open PRs all modify workflow-runner.ts -- they're going to conflict when merged sequentially"
 - "Issue #393 filed for loadSessionNotes coverage -- this is related to the GAP-2 PR that's open, might as well fix both together"
-- "The wr.classify-task was just authored but it's not referenced in the coordinator spec yet"
+- "The classify-task-workflow was just authored but it's not referenced in the coordinator spec yet"
 
 **Two modes:**
 
@@ -2115,20 +2115,20 @@ triggers:
       provider: anthropic               # or: amazon-bedrock, openai, gemini
 
   - id: classify-task
-    workflowId: wr.classify-task
+    workflowId: classify-task-workflow
     agentConfig:
       model: claude-haiku-4-5           # fast + cheap for classification
       provider: amazon-bedrock
 
   - id: architecture-design
-    workflowId: wr.architecture-scalability-audit
+    workflowId: architecture-scalability-audit
     agentConfig:
       model: claude-opus-4-6            # best available for high-stakes design
       provider: anthropic
 ```
 
 **Model selection in the classifier output:**
-The wr.classify-task can output a `recommendedModel` var alongside the pipeline:
+The classify-task-workflow can output a `recommendedModel` var alongside the pipeline:
 - `Small + Low` → Haiku (fast, cheap)
 - `Medium + Medium` → Sonnet (balanced)
 - `Large + High` or `touchesArchitecture=true` → Opus (best quality)
@@ -2180,7 +2180,7 @@ Starts a child session with a given workflowId + goal. Non-blocking -- returns a
 
 ```typescript
 spawn_session({
-  workflowId: 'wr.mr-review',
+  workflowId: 'mr-review-workflow-agentic',
   goal: `Review PR #${prNumber}: ${prTitle}`,
   workspacePath: '/path/to/repo',
   context: { prNumber, prTitle, prDiff }
@@ -2407,7 +2407,7 @@ The risk of auto-merge is "something bad gets into main." The mitigations are: t
 **The agent zoo:**
 
 **Weekly: Code health scan**
-Runs `wr.architecture-scalability-audit` on modules that haven't been audited in 30 days. Scans for: coupling violations, growing complexity hotspots (files with most churn), missing abstractions that are emerging across multiple recent PRs, performance anti-patterns introduced in the last sprint. Output: `code-health-report.md` + GitHub issues filed for actionable findings.
+Runs `architecture-scalability-audit` on modules that haven't been audited in 30 days. Scans for: coupling violations, growing complexity hotspots (files with most churn), missing abstractions that are emerging across multiple recent PRs, performance anti-patterns introduced in the last sprint. Output: `code-health-report.md` + GitHub issues filed for actionable findings.
 
 **Weekly: Test coverage scan**
 Identifies files modified in the last 30 days with zero or low test coverage. Files with new exported symbols that have no tests. Critical paths (error handling, auth, external API boundaries) with only happy-path tests. Output: files a missing test coverage filed as GitHub issues with suggested test scenarios.
@@ -2435,7 +2435,7 @@ triggers:
   - id: weekly-code-health
     type: cron
     schedule: "0 8 * * 1"   # Monday 8am
-    workflowId: wr.architecture-scalability-audit
+    workflowId: architecture-scalability-audit
     goal: "Weekly code health scan: identify coupling violations, complexity hotspots, missing abstractions"
     workspacePath: ~/git/personal/workrail
     agentConfig:
@@ -2758,7 +2758,7 @@ WorkTrain should be able to determine priority not just from labels, but from de
 - Docs in the repo (`ROADMAP.md`, `docs/milestones.md`, etc.)
 
 **What WorkTrain does with deadlines:**
-The wr.classify-task (or a new `prioritize-queue` workflow) reads the deadline context and produces an adjusted priority score:
+The classify-task-workflow (or a new `prioritize-queue` workflow) reads the deadline context and produces an adjusted priority score:
 
 ```
 base_priority = from label/assignee (low/medium/high)
@@ -3086,9 +3086,9 @@ A workflow that calls another workflow as a step (already possible via `template
 {
   "id": "full-feature-pipeline",
   "steps": [
-    { "workflowCall": { "workflowId": "wr.classify-task" } },
+    { "workflowCall": { "workflowId": "classify-task-workflow" } },
     { "workflowCall": { "workflowId": "wr.discovery", "when": "taskComplexity != Small" } },
-    { "workflowCall": { "workflowId": "wr.coding-task" } },
+    { "workflowCall": { "workflowId": "coding-task-workflow-agentic" } },
     { "workflowCall": { "workflowId": "mr-review-workflow.agentic.v2" } }
   ]
 }
@@ -3155,13 +3155,13 @@ A new `workflow-effectiveness-assessment` workflow (or routine) that:
 4. Proposes concrete changes:
    - "Step `phase-1b-design-quick` was skipped in 87% of sessions because `rigorMode != QUICK`. Consider making this condition more permissive or removing the step."
    - "Step `phase-4-plan-audit` consumed an average of 4,200 tokens per session. The loop runs 1.8 times on average. Consider reducing `maxIterations` from 2 to 1 for QUICK rigor mode."
-   - "3 of the last 8 `wr.coding-task` sessions produced PRs with Critical MR review findings. The workflow's verification step may not be catching these issues."
+   - "3 of the last 8 `coding-task-workflow-agentic` sessions produced PRs with Critical MR review findings. The workflow's verification step may not be catching these issues."
 
 5. Outputs a structured proposal:
 
 ```json
 {
-  "workflowId": "wr.coding-task.lean.v2",
+  "workflowId": "coding-task-workflow-agentic.lean.v2",
   "assessmentPeriod": "last 30 sessions",
   "proposedChanges": [
     {
@@ -3174,7 +3174,7 @@ A new `workflow-effectiveness-assessment` workflow (or routine) that:
     }
   ],
   "overallHealthScore": 0.72,
-  "recommendation": "Run wr.workflow-for-workflows on this workflow with assessment findings attached"
+  "recommendation": "Run workflow-for-workflows on this workflow with assessment findings attached"
 }
 ```
 
@@ -3217,8 +3217,8 @@ WorkTrain runs workflows
 **What makes this different from manual workflow improvement:**
 Humans improve workflows based on intuition and memorable failures. WorkTrain improves workflows based on statistical patterns across hundreds of runs. It finds issues that no human would notice -- like a step that's almost always skipped, or a loop that almost always terminates on the first pass, or a prompt fragment that correlates with lower-quality output.
 
-**Integration with `wr.workflow-for-workflows`:**
-The assessment output is designed to feed directly into `wr.workflow-for-workflows`. Assessment findings become the context for authoring improved workflow versions. WorkTrain literally uses its own meta-workflow to improve its own workflows, informed by real execution data.
+**Integration with `workflow-for-workflows`:**
+The assessment output is designed to feed directly into `workflow-for-workflows`. Assessment findings become the context for authoring improved workflow versions. WorkTrain literally uses its own meta-workflow to improve its own workflows, informed by real execution data.
 
 
 **The problem with polling-only:** the queue is as fresh as the last poll cycle. A critical bug filed in Jira might not appear in the queue for 5 minutes. A deadline that just moved to tomorrow might not re-prioritize for an hour. The work queue should feel live -- changes in external systems should surface in the queue within seconds, not minutes.
@@ -3694,7 +3694,7 @@ Anthropic and Bedrock both have tokens-per-minute limits. 10 concurrent agents e
 Each agent loop runs in-process, consuming RAM and CPU. Node.js is single-threaded but I/O is concurrent -- 10 agents making parallel API calls is fine until they all get responses simultaneously and saturate the JS event loop with JSON parsing and session store writes. The right limit is not "10 sessions" but "N sessions where N is calibrated to the host's memory and the model's response size."
 
 **3. Tiered concurrency by task type**
-Not all sessions are equal. A `wr.discovery` session is cheap (mostly reads, fast). A `wr.coding-task` session is expensive (many tool calls, long responses). Running 10 coding tasks simultaneously is very different from running 10 discovery sessions.
+Not all sessions are equal. A `wr.discovery` session is cheap (mostly reads, fast). A `coding-task-workflow-agentic` session is expensive (many tool calls, long responses). Running 10 coding tasks simultaneously is very different from running 10 discovery sessions.
 
 ```yaml
 workspaces:
@@ -3702,7 +3702,7 @@ workspaces:
     concurrency:
       maxTotal: 6                  # global cap
       perWorkflowType:
-        wr.coding-task: 2    # expensive, cap low
+        coding-task-workflow-agentic: 2    # expensive, cap low
         mr-review-workflow.agentic.v2: 3   # medium cost
         wr.discovery: 5                    # cheap, allow more
         bug-investigation.agentic.v2: 2
@@ -4174,7 +4174,7 @@ workspaces:
 **Depth semantics:**
 - Depth 0: coordinator script (no LLM, pure script)
 - Depth 1: main worker (coding-task, mr-review)
-- Depth 2: subagent from workflow step (wr.routine-context-gathering, etc.)
+- Depth 2: subagent from workflow step (routine-context-gathering, etc.)
 - Depth 3: sub-subagent (rare, deep investigation chains)
 - Depth 4+: almost certainly a bug or runaway loop
 
@@ -4311,9 +4311,9 @@ Every significant daemon action becomes a structured event:
 
 ```jsonl
 {"ts":"2026-04-17T...","kind":"daemon_started","port":3200,"workspacePath":"...","version":"3.31.0"}
-{"ts":"...","kind":"trigger_fired","triggerId":"test-task","workflowId":"wr.coding-task"}
+{"ts":"...","kind":"trigger_fired","triggerId":"test-task","workflowId":"coding-task-workflow-agentic"}
 {"ts":"...","kind":"session_queued","sessionId":"sess_abc","triggerId":"test-task","queueDepth":0}
-{"ts":"...","kind":"session_started","sessionId":"sess_abc","workflowId":"wr.coding-task","modelId":"..."}
+{"ts":"...","kind":"session_started","sessionId":"sess_abc","workflowId":"coding-task-workflow-agentic","modelId":"..."}
 {"ts":"...","kind":"tool_called","sessionId":"sess_abc","tool":"Bash","command":"ls docs/ | grep trigger"}
 {"ts":"...","kind":"tool_error","sessionId":"sess_abc","tool":"Bash","error":"exit 1","isError":true}
 {"ts":"...","kind":"step_advanced","sessionId":"sess_abc","stepId":"phase-0-triage-and-mode","advance":1}
@@ -4369,7 +4369,7 @@ Add explicit guidance to the WorkTrain system prompt: "When spawning a subagent,
 The `worktrain spawn` command (or the `spawn_session` tool) takes a structured work package:
 ```typescript
 spawnSession({
-  workflowId: 'wr.coding-task',
+  workflowId: 'coding-task-workflow-agentic',
   goal: '...',
   context: {
     whyThisApproach: '...',        // what the main agent knows about the decision
@@ -4491,7 +4491,7 @@ interface WorkflowStep {
 }
 ```
 
-**Authoring implication:** The `wr.workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
+**Authoring implication:** The `workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
 
 ---
 
@@ -4578,7 +4578,7 @@ worktrain console --workspace ~/git/myproject  # workspace-scoped view
 
 2. **Console unstable** -- the console port (3456) is contested between daemon and MCP server. Whoever starts first wins. When the MCP server reconnects, it takes the port and the daemon console goes down. Root fix: standalone `worktrain console` binary (spec in backlog).
 
-3. **`workflow_not_found` on first test** -- trigger used `wr.coding-task.lean.v2` (filename) instead of `wr.coding-task` (workflow ID). Fixed in triggers.yml. Symptom of workflow ID vs filename confusion -- worth a validator that catches this at `worktrain daemon` startup.
+3. **`workflow_not_found` on first test** -- trigger used `coding-task-workflow-agentic.lean.v2` (filename) instead of `coding-task-workflow-agentic` (workflow ID). Fixed in triggers.yml. Symptom of workflow ID vs filename confusion -- worth a validator that catches this at `worktrain daemon` startup.
 
 4. **Session advances 0 when daemon crashes** -- if daemon dies mid-Phase-0 (before any `continue_workflow` call), the session is orphaned at `observation_recorded(8)` with 0 advances and no output. No automatic recovery. Crash recovery reads the daemon-session token file but can't resume a session that never advanced. No fix yet.
 
@@ -4622,7 +4622,7 @@ worktrain console --workspace ~/git/myproject  # workspace-scoped view
 - PR-level dedup: before `worktrain spawn` dispatches a coding task, run `gh pr list --search "<issue title keywords>"` and check for matches. If found, add to outbox ("task already in progress as PR #X") and skip.
 - Session-level dedup: the coordinator script checks active session goals before spawning a new one with the same goal text.
 
-**The wr.classify-task role:** when a task is classified, it can also output a `deduplicationKey` (e.g. `fix:trigger-store:error-kind-consistency`) that is stored with the queue item. Queue items with the same key are considered duplicates.
+**The classify-task-workflow role:** when a task is classified, it can also output a `deduplicationKey` (e.g. `fix:trigger-store:error-kind-consistency`) that is stored with the queue item. Queue items with the same key are considered duplicates.
 
 **What makes this hard:** semantic dedup (two tasks described differently but solving the same problem) requires embedding-based similarity, not exact match. For MVP, exact `sourceId` match + approximate PR title search is sufficient. Semantic dedup is a post-knowledge-graph feature.
 
@@ -4819,7 +4819,7 @@ The current tool-call approach works precisely because it's explicit: the agent 
 Before committing to any alternative, these questions need answers:
 
 1. **Does Bedrock support `response_format + tools` simultaneously?** A 10-line test call resolves this. If yes, hybrid structured output is immediately viable for workflow control.
-2. **What does implicit advancement actually look like for a coding task?** Write out the completion criteria for `wr.coding-task` phase-0 (classify). Can a daemon reliably detect "Phase 0 is done" without an explicit signal?
+2. **What does implicit advancement actually look like for a coding task?** Write out the completion criteria for `coding-task-workflow-agentic` phase-0 (classify). Can a daemon reliably detect "Phase 0 is done" without an explicit signal?
 3. **What is the actual failure mode of structured response parsing?** How often does Claude 4.6 Sonnet fail to produce valid JSON when asked to end its turn with a structured summary? Under what conditions?
 4. **What did nexus-core do?** The backlog notes nexus-core as a more advanced system -- how does it handle agent-step transitions?
 
@@ -4838,7 +4838,7 @@ These are prototype questions, not design questions. Build the smallest possible
 ```yaml
 # Template: mr-review
 - id: mr-review
-  workflowId: wr.mr-review
+  workflowId: mr-review-workflow-agentic
   goal: "Review the PR specified in the webhook payload goal field"
   concurrencyMode: parallel
   autoCommit: false
@@ -4846,7 +4846,7 @@ These are prototype questions, not design questions. Build the smallest possible
 
 # Template: coding-task  
 - id: coding-task
-  workflowId: wr.coding-task
+  workflowId: coding-task-workflow-agentic
   concurrencyMode: parallel
   autoCommit: false
   agentConfig: { maxSessionMinutes: 60 }
@@ -4867,7 +4867,7 @@ These are prototype questions, not design questions. Build the smallest possible
 # - id: weekly-health-scan
 #   type: cron
 #   schedule: "0 9 * * 0"
-#   workflowId: wr.architecture-scalability-audit
+#   workflowId: architecture-scalability-audit
 ```
 
 **`worktrain init` flow:**
@@ -4945,7 +4945,7 @@ The current workaround: `goalTemplate: "{{$.goal}}"` with the caller passing `{"
 # Trigger definition -- no goal required
 triggers:
   - id: mr-review
-    workflowId: wr.mr-review
+    workflowId: mr-review-workflow-agentic
     workspacePath: ~/git/myproject
     # No goal here -- goal comes from dispatch context
 ```
@@ -5005,7 +5005,7 @@ The console shows root sessions, each expandable to show the tree of child sessi
 ```
 ● Review PR #559                    [3 sessions, 22 min]
   ├── wr.discovery (context)        [completed, 8 min]
-  ├── wr.mr-review    [completed, 11 min]  
+  ├── mr-review-workflow-agentic    [completed, 11 min]  
   └── coding-task (fix findings)    [running, 3 min...]
 ```
 
@@ -5104,9 +5104,9 @@ The LLM is the orchestrator. It decides when parallelism is needed, what context
   agents:
     - workflow: routine-correctness-review
       contextFrom: [phase-3-output, candidateFiles]
-    - workflow: wr.routine-philosophy-alignment  
+    - workflow: routine-philosophy-alignment  
       contextFrom: [phase-0-output, philosophySources]
-    - workflow: wr.routine-hypothesis-challenge
+    - workflow: routine-hypothesis-challenge
       contextFrom: [phase-2-output, selectedApproach]
   synthesisStep: synthesize-parallel-review
 ```
@@ -5187,7 +5187,7 @@ No LLM orchestration. No token-burning context packaging decisions. No "did I re
 **Two runtimes, one spec:**
 
 ```
-workflows/wr.mr-review.json  ← canonical spec (unchanged)
+workflows/mr-review-workflow-agentic.json  ← canonical spec (unchanged)
          ↓
 WorkflowAdapter.forRuntime('mcp')          ← MCP runtime interpretation
 WorkflowAdapter.forRuntime('daemon')       ← Daemon runtime interpretation
@@ -5225,7 +5225,7 @@ Daemon adapter sees this → actually spawns 3 child sessions automatically
 
 The workflow spec describes the intent. The adapter knows how each runtime fulfills it.
 
-**Key guarantee:** workflow improvements automatically benefit both runtimes. Improving `wr.mr-review`'s philosophy alignment step shows up whether a human runs it through Claude Code or WorkTrain runs it autonomously. No dual maintenance.
+**Key guarantee:** workflow improvements automatically benefit both runtimes. Improving `mr-review-workflow-agentic`'s philosophy alignment step shows up whether a human runs it through Claude Code or WorkTrain runs it autonomously. No dual maintenance.
 
 **Also eliminates "autonomous workflow variants":** the backlog had a separate item for autonomous variants of workflows. With the adapter, the canonical workflow spec is the only version -- the daemon adapter handles what "autonomy: full" means in practice. No parallel workflow files.
 
@@ -5299,7 +5299,7 @@ Long-term (when mobile exists):
 **Timestamp:** 2026-04-18T15:09:49Z  
 **Commit:** `473f4bd0` (main)  
 **npm version:** v3.34.1 (published, installable by anyone)  
-**What happened:** A real MR review workflow (`wr.mr-review`) ran completely autonomously via webhook trigger, advanced through all phases (context gathering, review, synthesis, validation, handoff), self-validated, and produced a structured finding set. 8 step advances, `outcome: success`.
+**What happened:** A real MR review workflow (`mr-review-workflow-agentic`) ran completely autonomously via webhook trigger, advanced through all phases (context gathering, review, synthesis, validation, handoff), self-validated, and produced a structured finding set. 8 step advances, `outcome: success`.
 
 **Trigger:** `POST /webhook/mr-review {"goal": "Review PR #566: fix two minor bugs..."}`  
 **Session:** `sess_3bmjuzf7l2vrqynjtleg5iskm4`  
@@ -5311,7 +5311,7 @@ Long-term (when mobile exists):
 
 - ✅ Daemon accepts webhooks, starts sessions, runs workflows end-to-end
 - ✅ Sessions advance through all workflow phases autonomously
-- ✅ `wr.mr-review` v2.6 runs fully -- context gathering, review phases, synthesis loop, validation, handoff
+- ✅ `mr-review-workflow-agentic` v2.6 runs fully -- context gathering, review phases, synthesis loop, validation, handoff
 - ✅ `wr.discovery` v3.2.0 runs fully -- with new phase-0-reframe (goal reframing before research)
 - ✅ Console shows live sessions via event log (no daemon connection required)
 - ✅ MCP server is stable (bridge removed, EPIPE fixed, v3.34.1 published)
@@ -5327,7 +5327,7 @@ Long-term (when mobile exists):
 
 **Blocking reliable complex workflows:**
 1. **`complete_step` not yet tested in production** -- just merged, daemon still using `continue_workflow` in running sessions. Needs daemon restart to take effect.
-2. **Assessment gates still unreliable** -- `complete_step` fixes the token issue; the `artifacts` field (#557) fixes the submission issue. But `wr.coding-task` phases with quality gates haven't been tested end-to-end yet.
+2. **Assessment gates still unreliable** -- `complete_step` fixes the token issue; the `artifacts` field (#557) fixes the submission issue. But `coding-task-workflow-agentic` phases with quality gates haven't been tested end-to-end yet.
 3. **Native `spawn_agent` not yet merged** -- implementation in progress. Until it lands, all subagent delegation is via `mcp__nested-subagent__Task` (invisible black box).
 4. **No session identity (parentSessionId)** -- multi-phase work appears as unrelated flat sessions in the console.
 
@@ -5415,7 +5415,7 @@ Agents can query artifacts from prior sessions via a new tool:
 read_artifact({ sessionId: 'sess_3bmj...', type: 'review-findings' })
 → { verdict: 'APPROVE', findings: [...], recommendation: '...' }
 
-search_artifacts({ type: 'implementation-plan', workflowId: 'wr.coding-task', since: '7d' })
+search_artifacts({ type: 'implementation-plan', workflowId: 'coding-task-workflow-agentic', since: '7d' })
 → [{ sessionId, summary, createdAt }, ...]
 ```
 
@@ -5494,7 +5494,7 @@ Instead of workflow steps declaring upfront whether an artifact goes to the repo
 ```
 docs(design): add design candidates for MCP simplification
 
-Source: WorkTrain session sess_3bmj... (wr.mr-review)
+Source: WorkTrain session sess_3bmj... (mr-review-workflow-agentic)
 Artifact: design-candidates-stdio-simplification-2026-04-18.md
 ```
 
@@ -5554,8 +5554,8 @@ Tested empirically today. This is what actually works, not what's specced.
 
 **Confirmed working:**
 - Accepts webhook triggers and dispatches workflow sessions autonomously
-- `wr.mr-review` v2.6 runs end-to-end: context gathering, parallel reviewer phases, synthesis loop, validation, structured handoff. **Confirmed today** (sess_3bmj..., APPROVE verdict).
-- `wr.coding-task` (lean v2) runs end-to-end for Small tasks. **Confirmed today** (evidenceFrom field implementation, completed successfully).
+- `mr-review-workflow-agentic` v2.6 runs end-to-end: context gathering, parallel reviewer phases, synthesis loop, validation, structured handoff. **Confirmed today** (sess_3bmj..., APPROVE verdict).
+- `coding-task-workflow-agentic` (lean v2) runs end-to-end for Small tasks. **Confirmed today** (evidenceFrom field implementation, completed successfully).
 - `wr.discovery` v3.2.0 runs with goal reframing. **Confirmed today** (spawn_agent architecture discovery).
 - Sessions advance through 8+ workflow steps autonomously (36 step advances today across 6 sessions).
 - 402 LLM turns + 660 tool calls executed autonomously today.
@@ -5696,7 +5696,7 @@ Tested empirically today. This is what actually works, not what's specced.
 - Benchmarks can be gamed (optimize for the benchmark, not real performance)
 - Need enough volume to be statistically meaningful
 
-**Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `wr.mr-review` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
+**Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `mr-review-workflow-agentic` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
 
 ---
 
@@ -5791,8 +5791,8 @@ PR #569 merged. The daemon holds the continueToken in a closure; LLM calls `comp
 **Decision 3: AgentLoop error handling contract -- FatalToolError (Apr 16)**
 `FatalToolError` subclass selected for distinguishing recoverable from non-recoverable tool failures in the AgentLoop. The contract: user-facing tools (Bash, Read, Write) catch failures and return `isError: true` in the tool_result (loop continues, LLM can retry). Coordination tools with unrecoverable failures (session store corruption, token decode failure) throw `FatalToolError` -- `_executeTools` instanceof-checks this and kills the session rather than surfacing a confusing error to the LLM. This contract is part of the AgentLoop architecture and must be followed by any new tool implementations.
 
-**Decision 4: Use `wr.discovery` for discovery-only tasks, not `wr.coding-task` (Apr 17)**
-Discovered from a broken session: `wr.coding-task` dispatched with "do discovery only, no code" ran 11 step advances then stopped without `run_completed`. The workflow's implementation phases fired even with explicit instructions not to code. Lesson: when a trigger or coordinator wants pure discovery/research, use `wr.discovery` as the workflowId. `wr.coding-task` should only be dispatched when implementation is the actual goal.
+**Decision 4: Use `wr.discovery` for discovery-only tasks, not `coding-task-workflow-agentic` (Apr 17)**
+Discovered from a broken session: `coding-task-workflow-agentic` dispatched with "do discovery only, no code" ran 11 step advances then stopped without `run_completed`. The workflow's implementation phases fired even with explicit instructions not to code. Lesson: when a trigger or coordinator wants pure discovery/research, use `wr.discovery` as the workflowId. `coding-task-workflow-agentic` should only be dispatched when implementation is the actual goal.
 
 **Decision 5: Bug -- MCP server EPIPE crash (Apr 18)**
 Root cause confirmed with 15 production crash log entries: `process.stderr` is missing an `'error'` event handler in `registerFatalHandlers()`. When an MCP client disconnects, Node.js emits `EPIPE` on stderr which crashes the process with an unhandled error. `process.stdout` already has equivalent protection via `wireStdoutShutdown()`. Fix: mirror the stdout protection for stderr. One-line fix being implemented in PR `fix/mcp-stderr-epipe-crash`.
@@ -5935,7 +5935,7 @@ Today the coordinator is external to the workflow -- it orchestrates sessions fr
 The canonical WorkRail workflow pipeline for new features is:
 
 ```
-wr.discovery (optional) → wr.shaping (optional) → wr.coding-task
+wr.discovery (optional) → wr.shaping (optional) → coding-task-workflow-agentic
 ```
 
 Each workflow is independently useful. The pipeline is an optional chain, not a required sequence.
@@ -5946,7 +5946,7 @@ Each workflow is independently useful. The pipeline is an optional chain, not a 
 
 **wr.shaping** produces a bounded pitch -- what specifically to build and explicitly NOT build, at a product level. Output: `.workrail/current-pitch.md`. Faithful Shape Up methodology. Tech-agnostic. No code-level content.
 
-**wr.coding-task** produces running code -- engineering approach, sliced implementation, verification. When pitch.md exists (Phase 0.5), it skips design ideation and translates the pitch directly into an engineering approach. The pitch's no-gos and appetite are binding constraints.
+**coding-task-workflow-agentic** produces running code -- engineering approach, sliced implementation, verification. When pitch.md exists (Phase 0.5), it skips design ideation and translates the pitch directly into an engineering approach. The pitch's no-gos and appetite are binding constraints.
 
 ### No TechSpec workflow needed
 
@@ -5968,7 +5968,7 @@ wr.shaping is tech-agnostic. A pitch for a Kotlin Android app and a pitch for a 
 
 ### Phase 0.5 mechanics
 
-When `wr.coding-task` finds `.workrail/current-pitch.md`:
+When `coding-task-workflow-agentic` finds `.workrail/current-pitch.md`:
 1. Reads all five pitch sections (Problem, Appetite, Solution/Elements, Rabbit Holes, No-Gos)
 2. Sets `shapedInputDetected=true`
 3. Skips phases 1a-1c (hypothesis, design generation, challenge-and-select)
@@ -6016,7 +6016,7 @@ If `optional: true` and no source resolves: `outputVar = null`, workflow continu
 
 ### Relationship to existing work
 
-- Replaces/supersedes Phase 0.5's current local-path check in `wr.coding-task`
+- Replaces/supersedes Phase 0.5's current local-path check in `coding-task-workflow-agentic`
 - Coordinator PR-review flow would inject `shaped-pitch` context before spawning the coding session
 - Any workflow that needs "find the spec/pitch/PRD for this task" uses the same step type
 
@@ -6036,9 +6036,9 @@ If `optional: true` and no source resolves: `outputVar = null`, workflow continu
 
 Created `workflows/wr.shaping.json`. Faithful Shape Up methodology, tech-agnostic, produces `.workrail/current-pitch.md` only. Nine steps: ingest → frame gate → diverge (6 shapes, Verbalized Sampling) → converge → breadboard + elements → rabbit holes + no-gos → draft/critique loop → approval gate → write pitch.md. Two human gates with autonomous fallback. Appetite is calendar-time only (xs/s/m/l/xl). No code-level content -- a pitch for a Kotlin app and a pitch for a Python service look structurally identical.
 
-### wr.coding-task -- Upstream context Phase 0.5
+### coding-task-workflow-agentic -- Upstream context Phase 0.5
 
-Added Phase 0.5 "Locate Upstream Context" to `wr.coding-task.json`. Format-agnostic: the agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, etc.) to find any upstream document -- pitch, PRD, BRD, RFC, design doc, user story, Jira epic, etc. Sets `upstreamSpecDetected` + `solutionFixed` flags. When `solutionFixed=true`, design ideation phases (1a-1c) are skipped and Phase 1d translates upstream constraints directly into an engineering approach. Plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.
+Added Phase 0.5 "Locate Upstream Context" to `coding-task-workflow-agentic.json`. Format-agnostic: the agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, etc.) to find any upstream document -- pitch, PRD, BRD, RFC, design doc, user story, Jira epic, etc. Sets `upstreamSpecDetected` + `solutionFixed` flags. When `solutionFixed=true`, design ideation phases (1a-1c) are skipped and Phase 1d translates upstream constraints directly into an engineering approach. Plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.
 
 Also consolidated from three workflow variants to one canonical file.
 
@@ -6052,7 +6052,7 @@ Also consolidated from three workflow variants to one canonical file.
 ### What shipped since v3.36.0 (Apr 18 -- Apr 19)
 
 - ✅ **`wr.shaping`** -- faithful Shape Up shaping workflow (9 steps, two human gates with autonomous fallback)
-- ✅ **`wr.coding-task` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
+- ✅ **`coding-task-workflow-agentic` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
 - ✅ **Coding workflow consolidated** -- from three variants (lean, full, lean.v2) to one canonical file.
 - ✅ **HttpServer removed from MCP server** (#601) -- pure stdio. MCP server can no longer accidentally start an HTTP server.
 - ✅ **Late-bound goals** (#604) -- `goalTemplate: "{{$.goal}}"` defaults for webhook-driven sessions. Goals can come from the payload, not just the static trigger definition.
@@ -6111,7 +6111,7 @@ Also consolidated from three workflow variants to one canonical file.
 - `docs/design/shaping-workflow-discovery.md` -- WorkRail-internal discovery findings
 - `docs/design/shaping-workflow-external-research.md` -- External research synthesis (Shape Up, LLM failure modes, artifact schema)
 
-**The gap this fills:** WorkRail has `wr.discovery` (divergent) and `wr.coding-task` (convergent). Shaping is the missing middle -- converting messy discovery output into a bounded, implementation-ready spec without mid-implementation rabbit holes.
+**The gap this fills:** WorkRail has `wr.discovery` (divergent) and `coding-task-workflow-agentic` (convergent). Shaping is the missing middle -- converting messy discovery output into a bounded, implementation-ready spec without mid-implementation rabbit holes.
 
 **The 11-step skeleton (see design doc for full detail):**
 1. ingest_and_extract -- extract problem frames, forces, open questions
@@ -6132,7 +6132,7 @@ Also consolidated from three workflow variants to one canonical file.
 
 **Key insight for AI implementers:** LLMs need MORE explicit specs than humans on interfaces/invariants/file boundaries (no tacit knowledge, no scope-shame), but LESS explicit than junior humans on standard patterns. The dominant failure mode is confident architectural divergence -- working code that reinvents an existing utility. Context Pack (Step 7) directly prevents this.
 
-**Next action:** author `wr.shaping` as a WorkRail workflow JSON using wr.workflow-for-workflows, then update `wr.coding-task` Phase 0 to detect and consume `shape.json` when present.
+**Next action:** author `wr.shaping` as a WorkRail workflow JSON using workflow-for-workflows, then update `coding-task-workflow-agentic` Phase 0 to detect and consume `shape.json` when present.
 
 ---
 
@@ -6207,7 +6207,7 @@ triggers:
   - id: weekly-code-health
     provider: schedule
     cron: "0 9 * * 1"          # every Monday at 9am
-    workflowId: wr.architecture-scalability-audit
+    workflowId: architecture-scalability-audit
     workspacePath: /path/to/repo
     goal: "Run weekly code health scan -- identify coupling violations, complexity hotspots, and performance anti-patterns introduced this week"
 
@@ -6221,7 +6221,7 @@ triggers:
   - id: backlog-next-task
     provider: schedule
     cron: "0 8 * * 1-5"        # weekday mornings at 8am
-    workflowId: wr.coding-task
+    workflowId: coding-task-workflow-agentic
     workspacePath: /path/to/repo
     goal: "Pick the highest-priority unstarted task from docs/ideas/backlog.md and implement it"
 ```
@@ -6329,8 +6329,8 @@ This is the long-term autonomous vision. Implement in order:
 
 After a fix round, if the re-review still returns a Critical finding (or the original review does):
 1. **Another full MR review** -- confirm the Critical is real, not a false positive from the reviewer
-2. **Production readiness audit** (`wr.production-readiness-audit` workflow) -- a Critical finding often implies a runtime risk. Check for error handling gaps, security exposure, missing observability.
-3. **Architecture audit** (`wr.architecture-scalability-audit`) -- if the Critical is architectural (wrong abstraction, tight coupling, violates invariants), run a targeted audit on the affected modules.
+2. **Production readiness audit** (`production-readiness-audit` workflow) -- a Critical finding often implies a runtime risk. Check for error handling gaps, security exposure, missing observability.
+3. **Architecture audit** (`architecture-scalability-audit`) -- if the Critical is architectural (wrong abstraction, tight coupling, violates invariants), run a targeted audit on the affected modules.
 
 Not all Criticals warrant all three. The coordinator should route based on the finding's `category` field (from `wr.review_verdict`):
 - `correctness` / `security` → always trigger prod audit
@@ -6356,11 +6356,11 @@ Design this alongside the adaptive pipeline coordinator (#3). The coordinator ne
 
 ## UX/UI impact detection and design workflow integration (Apr 19, 2026)
 
-**The idea:** When the adaptive pipeline coordinator classifies a task, it should detect whether the task touches user-facing surfaces (UI components, user flows, API contracts that clients consume) and automatically insert a `wr.ui-ux-design` run before implementation.
+**The idea:** When the adaptive pipeline coordinator classifies a task, it should detect whether the task touches user-facing surfaces (UI components, user flows, API contracts that clients consume) and automatically insert a `ui-ux-design-workflow` run before implementation.
 
 ### Why this matters
 
-Coding tasks that touch UI get implemented without a design pass today. The agent writes functional code but often produces interfaces that are technically correct but experientially wrong -- wrong information hierarchy, wrong affordances, missing error states, missing loading states, wrong copy. A `wr.ui-ux-design` run before coding forces the "multiple design directions before converging" discipline that prevents the single-solution trap.
+Coding tasks that touch UI get implemented without a design pass today. The agent writes functional code but often produces interfaces that are technically correct but experientially wrong -- wrong information hierarchy, wrong affordances, missing error states, missing loading states, wrong copy. A `ui-ux-design-workflow` run before coding forces the "multiple design directions before converging" discipline that prevents the single-solution trap.
 
 ### Detection signals (what marks a task as UX-impactful)
 
@@ -6377,19 +6377,19 @@ False positives (running design workflow unnecessarily) are cheaper than false n
 When `touchesUI: true`, the `IMPLEMENT` pipeline becomes:
 
 ```
-coding-task-classify → wr.ui-ux-design → wr.coding-task → PR → review → merge
+coding-task-classify → ui-ux-design-workflow → coding-task-workflow-agentic → PR → review → merge
 ```
 
-The `wr.ui-ux-design` output (a design spec with chosen direction, information architecture, component breakdown, error states) feeds into Phase 0.5 of `wr.coding-task` as the upstream spec. The coding agent then implements against a concrete design spec, not ad-hoc intuition.
+The `ui-ux-design-workflow` output (a design spec with chosen direction, information architecture, component breakdown, error states) feeds into Phase 0.5 of `coding-task-workflow-agentic` as the upstream spec. The coding agent then implements against a concrete design spec, not ad-hoc intuition.
 
 ### Relationship to escalating review gates
 
-When a post-implementation MR review finds a UI/UX finding (wrong affordance, missing state, confusing flow), the escalation should include a targeted `wr.ui-ux-design` audit pass, not just a code review. UX regressions need design eyes, not just code eyes.
+When a post-implementation MR review finds a UI/UX finding (wrong affordance, missing state, confusing flow), the escalation should include a targeted `ui-ux-design-workflow` audit pass, not just a code review. UX regressions need design eyes, not just code eyes.
 
 ### Open design questions
 
 - **Who reviews the design spec before coding starts?** If the UX design workflow runs autonomously at 2am and coding starts immediately after, there is no human review of the design direction. This is fine for small UI tweaks; it's wrong for new user flows. The coordinator needs a complexity gate: `complexity: Large AND touchesUI: true` → require human ack on the design spec before coding.
-- **Design spec format:** `wr.ui-ux-design` currently produces a markdown design document. Does the coding workflow reliably consume this as an upstream spec via Phase 0.5? Verify before relying on the automated handoff.
+- **Design spec format:** `ui-ux-design-workflow` currently produces a markdown design document. Does the coding workflow reliably consume this as an upstream spec via Phase 0.5? Verify before relying on the automated handoff.
 - **Console-specific workflows:** WorkRail's console is a React/TypeScript SPA. Consider a `worktrain:console` label or file-path heuristic that routes to a console-specific design workflow variant.
 
 ### Priority
@@ -6456,7 +6456,7 @@ All five top-priority autonomous pipeline items shipped:
 
 1. **`dispatchAdaptivePipeline()` not yet connected** -- `TriggerRouter.dispatchAdaptivePipeline()` exists but `polling-scheduler.ts` still calls `router.dispatch()`. Queue poll sessions run as generic sessions, not routed through the adaptive coordinator. Cross-PR gap documented with TODO.
 
-2. **`findingCategory` not on review-verdict** -- Audit chain always dispatches `wr.production-readiness-audit` for Critical findings regardless of finding type. `findingCategory` field on `findings[]` items needs to be added to `wr.review_verdict` schema as a follow-up so architecture findings can route to `wr.architecture-scalability-audit` correctly.
+2. **`findingCategory` not on review-verdict** -- Audit chain always dispatches `production-readiness-audit` for Critical findings regardless of finding type. `findingCategory` field on `findings[]` items needs to be added to `wr.review_verdict` schema as a follow-up so architecture findings can route to `architecture-scalability-audit` correctly.
 
 3. **Bot account setup required before first queue run** -- `worktrain-etienneb` GitHub account must be created, PAT generated with `repo:read` scope, stored as `WORKTRAIN_BOT_TOKEN`, and added as repo collaborator. Commit identity: `worktrain-etienneb@users.noreply.github.com`. Without this, `github_queue_poll` trigger has no bot identity.
 
@@ -6474,7 +6474,7 @@ All five top-priority autonomous pipeline items shipped:
 
 1. **Connect `dispatchAdaptivePipeline()`** -- Wire `polling-scheduler.ts` to call `TriggerRouter.dispatchAdaptivePipeline()` when `context.taskCandidate` is present. Small change, unlocks the full autonomous queue → pipeline connection.
 
-2. **`findingCategory` on review-verdict schema** -- Add `findingCategory: 'correctness' | 'security' | 'architecture' | 'ux' | 'performance' | 'testing'` to `findings[]` in `ReviewVerdictArtifactV1Schema`. Update `wr.mr-review` final step to emit it. Unlocks correct audit routing.
+2. **`findingCategory` on review-verdict schema** -- Add `findingCategory: 'correctness' | 'security' | 'architecture' | 'ux' | 'performance' | 'testing'` to `findings[]` in `ReviewVerdictArtifactV1Schema`. Update `mr-review-workflow-agentic` final step to emit it. Unlocks correct audit routing.
 
 3. **Bot account setup + `worktrain init` overhaul** -- Create `worktrain-etienneb`, add `worktrain daemon --check` command (API key + git fetch dry run), expose auto-merge policy in `worktrain init`.
 
@@ -6664,7 +6664,7 @@ A `contextCondition` or `dispatchCondition` field on the trigger that gates disp
 ```yaml
 - id: self-improvement-hook
   provider: generic
-  workflowId: wr.coding-task
+  workflowId: coding-task-workflow-agentic
   workspacePath: /path/to/repo
   goalTemplate: "{{$.issue.title}}"
   hmacSecret: $GITHUB_WEBHOOK_SECRET
@@ -6950,8 +6950,8 @@ Requires the event-driven coordination architecture (coordinator as event bus) -
 .worktrain/rules/
   discovery.md       -- injected into wr.discovery sessions only
   shaping.md         -- injected into wr.shaping sessions only
-  implementation.md  -- injected into wr.coding-task sessions
-  review.md          -- injected into wr.mr-review sessions
+  implementation.md  -- injected into coding-task-workflow-agentic sessions
+  review.md          -- injected into mr-review-workflow-agentic sessions
   delivery.md        -- injected at commit/push/PR-creation time (delivery-action.ts)
   pr-management.md   -- injected into sessions that manage the MR lifecycle:
                         answering review comments, applying requested changes,
@@ -7038,7 +7038,7 @@ Medium. Phase-scoped rules make WorkTrain's autonomous actions more consistent w
 
 ### Architecture
 
-This is a coordinator script (`src/coordinators/mr-lifecycle.ts`), not a workflow session. It loops with polling, spawning fix sessions as needed. The MR review workflow (`wr.mr-review`) becomes one of the tools it calls, not the full pipeline.
+This is a coordinator script (`src/coordinators/mr-lifecycle.ts`), not a workflow session. It loops with polling, spawning fix sessions as needed. The MR review workflow (`mr-review-workflow-agentic`) becomes one of the tools it calls, not the full pipeline.
 
 The adaptive coordinator's IMPLEMENT and FULL modes would call `runMRLifecycleManager()` instead of `runPrReviewCoordinator()` after the coding session completes. `runPrReviewCoordinator()` becomes a thin wrapper around the lifecycle manager for the standalone `worktrain run pr-review` use case.
 
@@ -7304,7 +7304,7 @@ Medium-high. True session status makes WorkTrain trustworthy as an autonomous sy
 
 ## Workflows tab: incorrect source attribution for bundled workflows (Apr 21, 2026)
 
-**The bug:** The Workflows tab in the console shows bundled workflows (e.g. `wr.coding-task`, `wr.workflow-for-workflows`) as coming from "User Library" instead of "WorkRail Built-in". This is a WorkRail MCP server issue, not a WorkTrain issue.
+**The bug:** The Workflows tab in the console shows bundled workflows (e.g. `coding-task-workflow-agentic`, `workflow-for-workflows`) as coming from "User Library" instead of "WorkRail Built-in". This is a WorkRail MCP server issue, not a WorkTrain issue.
 
 **Likely cause:** The source attribution logic reads from the workflow's loaded source (the `WorkflowSource` type). When a workflow exists in both the bundled set AND a user's managed sources or remembered roots, the source returned is the one that "wins" in the storage layer -- which may be the user path rather than the bundled path. Or the `source.kind` field is incorrectly set to `'personal'` for workflows that were loaded from the bundled workflows directory.
 
@@ -7580,121 +7580,227 @@ Discovery session `ecf359d7` running: 77 turns, 11 step advances (active, making
 
 ---
 
-## Engine-injected metrics footer via metricsProfile (Apr 22, 2026)
+## Current state update (Apr 23, 2026)
 
-Rather than updating every workflow's step prompts to ask agents to report `metrics_commit_shas`, `metrics_outcome`, etc., the engine should inject a metrics footer automatically based on what kind of workflow is running.
-
-### The problem with unconditional injection
-
-A blanket footer on every step of every workflow is too noisy. Routines, discovery workflows, and MR review workflows don't make commits -- injecting "report your commit SHAs" into those steps is misleading and degrades agent behavior.
-
-### Recommended design: tag-derived profile with explicit override
-
-**Step 1: derive `metricsProfile` from workflow tags at render time.**
-
-| Tags | Derived profile |
-|------|----------------|
-| `coding`, `implementation` | `'coding'` |
-| `review`, `mr-review` | `'review'` |
-| `research`, `discovery`, `analysis` | `'research'` |
-| `routine` | `'none'` |
-| (no match) | `'none'` |
-
-**Step 2: allow explicit override in the workflow definition.**
-
-```json
-{ "metricsProfile": "coding" }
-```
-
-Overrides the tag-derived value. Useful for workflows that don't fit neatly into a tag category, or for opting out with `"none"`.
-
-**Step 3: inject the appropriate footer in `prompt-renderer.ts`.**
-
-Add a `metricsSection` to the `enhancedPrompt` array join (lines 600-608 in current code):
-
-- `'coding'` -- instructs agent to accumulate commit SHAs on every step, report LOC/files on final step, set `metrics_outcome`
-- `'review'` -- instructs agent to set `metrics_pr_numbers` and `metrics_outcome`
-- `'research'` -- instructs agent to set `metrics_outcome` only on final step
-- `'none'` -- no injection
-
-### Why tags as default, not just the flag
-
-Tags are already set on all bundled workflows and cover the common cases with zero new workflow changes. The explicit `metricsProfile` field is an escape hatch only -- most workflows never need it. Risk: tags were designed for discoverability, not behavioral configuration. Mitigated by: the explicit flag always wins, and the tag mapping is documented and tested.
-
-### Files to change
-
-- `src/v2/durable-core/domain/prompt-renderer.ts` -- add `metricsSection` to prompt assembly; derive profile from tags or explicit field
-- `spec/workflow.schema.json` -- add optional `metricsProfile` enum field
-- `spec/authoring-spec.json` -- add rule documenting the field and tag-derivation behavior
-- `docs/authoring-v2.md` -- document when to use `metricsProfile` explicitly
-
-**Priority:** Medium. This is what moves `captureConfidence` from `'none'` to `'high'` for coding workflows without requiring per-workflow prompt changes. Depends on `run_completed` being shipped (PR #773, already merged).
+**npm version: v3.66.0** | Daemon: stopped (intentionally, undergoing MCP reconnect) | MCP: reconnecting to updated binary
 
 ---
 
-## Clean up wr.workflow-for-workflows duplicate file (small, do after metrics-profile-footer PR)
+### What shipped in this session (Apr 22-23, 2026)
 
-`workflows/wr.workflow-for-workflows.json` (v2.4.0) is a stale copy of `workflows/wr.workflow-for-workflows.v2.json` (v2.5.0). Both have `id: "wr.workflow-for-workflows"`. The v2 variant always wins when `v2Tools` is enabled (the default since v0.9.0). The standard variant is dead weight accumulating drift.
+This was a major session covering daemon/console separation, metrics infrastructure, and workflow stability fixes.
 
-**Two-step fix:**
-1. Delete `workflows/wr.workflow-for-workflows.json`
-2. Rename `workflows/wr.workflow-for-workflows.v2.json` → `workflows/wr.workflow-for-workflows.json`
+**Architecture -- daemon/console/MCP separation:**
+- ✅ **Delete daemon-console.ts** (#753) -- daemon no longer bundles an embedded console; `worktrain console` is now the sole console entry point
+- ✅ **Remove dead steer/poll endpoints** (#755) -- deleted `worktrain trigger poll` CLI and the steer/poll HTTP endpoints that were only used by the deleted daemon-console
+- ✅ **Wire workflow catalog into standalone console** (#783, open) -- `worktrain console` Workflows tab now works without the MCP server running; `EnhancedMultiSourceWorkflowStorage` constructed directly in `standalone-console.ts`
 
-After rename, the file no longer needs the `.v2.` variant marker -- it IS the workflow. Update `workflow-tags.json` if the filename is referenced there (check first).
+**Metrics infrastructure (6-step sequence, all merged):**
+- ✅ **timestampMs on events** (#768, #772) -- `DomainEventEnvelopeV1Schema` now has required `timestampMs`; backfill script at `scripts/backfill-timestamps.ts`
+- ✅ **`run_completed` event** (#773) -- emitted on successful session completion with `startGitSha`, `endGitSha`, `agentCommitShas`, `captureConfidence`, `durationMs`
+- ✅ **Authoring docs: metrics_* keys** (#767) -- `metricsProfile` field and SHA accumulation convention documented in `docs/authoring-v2.md`
+- ✅ **`projectSessionMetricsV2` projection** (#771) -- pure projection reading `run_completed` + `context_set metrics_*` keys, wired into `ConsoleSessionSummary`
+- ✅ **Console metrics display** (#777) -- `SessionMetricsSection` in session detail view; `GET /api/v2/sessions/:id/diff-summary` endpoint
+- ✅ **`stats-summary.json` writer** (#769) -- `~/.workrail/data/stats-summary.json` aggregated from `execution-stats.jsonl`, written post-session and every 30s heartbeat
 
-**Priority:** Low. One-line commit after the metrics-profile-footer PR merges.
+**Engine improvements:**
+- ✅ **Execution time tracking** (#756) -- `execution-stats.jsonl` per session in finally block
+- ✅ **Worktree orphan leak fix** (#756) -- sidecar deletion deferred to `maybeRunDelivery()` for worktree sessions
+- ✅ **assertNever for ReviewSeverity** (#756)
+- ✅ **Crash recovery phase A** (#759) -- `clearQueueIssueSidecars()` fixes 56-min re-dispatch block; sidecar preservation for sessions with progress
+- ✅ **Conversation history persistence** (#762) -- `<sessionId>-conversation.jsonl` per daemon session, append-only delta flush at each turn
+- ✅ **queue-poll.jsonl rotation** (#761) -- 10 MB size cap with `.1` backup
+- ✅ **Remove WorkTrain-owned label writes** (#765) -- `worktrain:in-progress`, `worktrain:generated` labels removed; deduplication now purely internal (sidecar + dispatchingIssues + session scan)
+- ✅ **metricsProfile footer injection** (#779) -- engine injects `metrics_*` accumulation footers based on `metricsProfile` workflow field; all 35 bundled workflows assigned profiles
 
----
-
-## workflowId regex: single dot only -- worth extending? (Apr 22, 2026)
-
-Current regex: `/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/` -- allows exactly one dot.
-
-This means `wr.audit.architecture` is invalid; you'd have to use `wr.audit-architecture`. When we rename all bundled workflows to `wr.*`, the sub-namespacing options are limited to hyphens (e.g. `wr.routine-context` not `wr.routine.context`).
-
-**Question to answer before extending:** Is multi-segment namespacing (`wr.routine.context`) actually clearer than flat with hyphens (`wr.routine-context`)? The current `wr.discovery` / `wr.shaping` pattern suggests two-segment is the convention. Adding a third level may just add noise without clarity.
-
-**If extending:** The regex change is one line -- `/^([a-z0-9_-]+|[a-z][a-z0-9_-]+(\.[a-z][a-z0-9_-]+)+)$/`. Small blast radius: validation only, no storage or routing implications.
-
-**Priority:** Low. Only matters if we find a case where sub-namespacing genuinely improves clarity over hyphens.
-
----
-
-## Bug: bundled workflows can be overridden by local legacy_project source (Apr 23, 2026)
-
-**Root cause:** The `legacy_project` source (scans `./workflows/` relative to `workspacePath`) loads with higher precedence than bundled workflows, except for `wr.*` IDs which are explicitly protected. This means a user passing `workspacePath` pointing at the workrail repo itself (or any repo with a `workflows/` dir containing files with matching IDs) can accidentally override bundled workflows with local versions -- including ones with newer schema fields that an older MCP binary doesn't understand.
-
-**Concrete incident:** Global npm was at v3.60.0, local git repo had v3.66.0 workflows with `metricsProfile`. The `legacy_project` source loaded the new workflows into the old server, schema validation failed, all bundled workflows disappeared.
-
-**Fix in progress:** Rename all bundled workflow IDs to `wr.*` namespace -- they all get automatic protection from the existing `wr.*` guard. No code change needed beyond the rename.
-
-**Longer-term fix:** Consider making ALL bundled IDs protected (not just `wr.*`), and/or making `additionalProperties: false` more lenient so forward-compatibility is maintained across versions.
-
-**Priority:** High -- being addressed now via the `wr.*` rename.
+**Workflow namespace:**
+- ✅ **Rename all bundled workflows to `wr.*`** (#782, open) -- `coding-task-workflow-agentic` → `wr.coding-task`, `mr-review-workflow-agentic` → `wr.mr-review`, etc. Prevents local project source from shadowing bundled workflows on version mismatch.
 
 ---
 
-## Bug: continue_workflow rejects output.notesMarkdown as string -- serialization issue (Apr 23, 2026)
+### Open PRs (waiting for WorkRail MCP review before merge)
 
-**Symptom:** The `continue_workflow` tool returns a validation error saying `output.notesMarkdown` is invalid, even though it's being passed as a plain string matching the schema. The error suggests the tool is receiving a JSON-encoded string (e.g. `"\"my notes\""`) rather than the raw string (`"my notes"`).
+| PR | Title | Status |
+|---|---|---|
+| #782 | Rename all bundled workflows to `wr.*` namespace | CI passing, needs `wr.mr-review` |
+| #783 | Wire workflow catalog into standalone console | CI pending, needs `wr.mr-review` |
 
-**Likely cause:** Double-serialization somewhere in the MCP transport layer or the agent's tool call construction. The `output` parameter is an object `{ notesMarkdown: string, artifacts?: [] }` -- if the caller JSON-encodes the entire `output` object and then the transport encodes it again, the inner string arrives double-quoted.
+**Do not merge #782 or #783 without running `wr.mr-review` on each.** The MCP needs to reconnect to the updated 3.66.0 binary first.
+
+---
+
+### Active bugs (investigated, not yet fixed)
+
+1. **`additionalProperties: false` not enforced in Ajv** -- `src/application/validation.ts` uses `strict: false`, making schema's `additionalProperties` advisory only. A workflow with an unknown field passes `validate:registry`. Discovery+shaping in progress (agent running). **High priority -- fix before next release.**
+
+2. **`wr.mr-review` NOT_FOUND from MCP** -- `list_workflows` finds it but `start_workflow` returns NOT_FOUND. Root cause: MCP process is still running old 3.60.0 binary (global npm was stale). Fixed by `npm update -g @exaudeus/workrail` (done). Requires MCP reconnect to take effect.
+
+3. **User's `wr.discovery` VALIDATION_ERROR** -- stale `npx` cache pre-3.11.2. Fix: `npm cache clean --force && npx @exaudeus/workrail`. No code change needed.
+
+---
+
+### Known gaps (not yet started)
+
+- **Phase B crash recovery** -- actual agent loop restart after crash (not just sidecar preservation). Blocked on conversation history being tested end-to-end. See "Autonomous crash recovery" entry above.
+- **`workrail cleanup` command** -- removes dead managed sources, old sessions. Still needed.
+- **console-routes.ts dispatch coupling** -- `POST /api/v2/auto/dispatch` still imports `runWorkflow` from `src/daemon/`. See backlog entry.
+- **`wr.*` list/get inconsistency** -- user-source `wr.*` copies appear in list but execution uses bundled. Low priority.
+
+---
+
+### Current system state (for next engineer picking this up)
+
+**Daemon:** Stopped intentionally. Unload: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
+**To restart daemon:** `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
+**MCP server:** Reconnecting -- run `/mcp` in Claude Code to get fresh 3.66.0 process
+**Global npm:** Updated to 3.66.0 (`npm update -g @exaudeus/workrail`)
+**Local build:** Built from main at 3.66.0 (`npm run build` done)
+**triggers.yml:** Must update `workflowId` values to new `wr.*` IDs after #782 merges (e.g. `coding-task-workflow-agentic` → `wr.coding-task`)
+
+**Immediate next actions:**
+1. Reconnect MCP (`/mcp` in Claude Code)
+2. Run `wr.mr-review` on PR #782 (rename) and PR #783 (console fix)
+3. Merge both PRs
+4. Wait for validation fix shaping to complete, then code and ship it
+5. Update `triggers.yml` with new `wr.*` workflow IDs
+6. Restart daemon and monitor first pipeline run with new IDs
+
+---
+
+## Daemon agent loop stall detection (Apr 23, 2026)
+
+**The problem:** When a subagent (workrail-executor) stalls with no progress for 600s, the stream watchdog kills it with "Agent stalled: no progress for 600s (stream watchdog did not recover)". The daemon has no equivalent mechanism. A daemon session that stops making LLM API calls (e.g. waiting on a hung tool, a network issue with no timeout, or a silent deadlock) will spin until the wall-clock timeout fires -- which can be up to 55-65 minutes. No indication to the operator, no early abort, no event emitted.
+
+**What we want:** The daemon's `AgentLoop` should detect when no LLM turn starts within a configurable window (e.g. 120s) and abort the session with a `'stuck'` result. This is different from the existing `repeated_tool_call` / `no_progress` stuck detection, which watches for behavioral loops. This is a liveness check: if the loop simply isn't making any API calls at all, something is frozen.
+
+**Design sketch:**
+- In `src/daemon/agent-loop.ts`, add a per-turn heartbeat timer that resets each time an LLM call starts
+- If the timer fires (120s with no new turn), call `agent.abort()` and emit `agent_stuck` with `reason: 'no_llm_turn'`
+- Configurable via `agentConfig.stallTimeoutSeconds` in `triggers.yml` (default 120s)
+- Distinct from wall-clock timeout (`maxSessionMinutes`) which covers the full session
 
 **Where to look:**
-- `src/mcp/handlers/v2-execution/index.ts` -- `executeContinueWorkflow` input parsing
-- `src/mcp/v2/tools.ts` -- `V2ContinueWorkflowInput` Zod schema for `output`
-- The MCP transport layer's parameter deserialization
+- `src/daemon/agent-loop.ts` -- `_runLoop()`, where LLM calls are made
+- `src/daemon/workflow-runner.ts` -- existing stuck detection and abort logic
+- `src/daemon/daemon-events.ts` -- `AgentStuckEvent` already has `reason` union (add `'no_llm_turn'`)
 
-**Priority:** High -- this would block agents from advancing workflow steps.
+**Priority:** Medium. The wall-clock timeout provides a safety net, but 55 minutes is a long time to wait for a frozen session. A 2-minute liveness check would dramatically improve operator experience.
 
 ---
 
-## Minor: wr.* list/get inconsistency for user-source copies (Apr 23, 2026)
+## Versioned workflow schema validation (Apr 23, 2026)
 
-**Gap:** `listWorkflowSummaries()` could show a user-source summary for a `wr.*` ID if the user has a copy in `~/.workrail/workflows/` -- the `bundled_protected` rule in `resolveWorkflowCandidates()` only blocks `project`-source shadows, not `user`-source ones. However, `getWorkflowById()` correctly returns the bundled version regardless. So the list and get paths are slightly inconsistent for this edge case.
+### The problem
 
-**Impact:** Low. The user sees their copy in the list but executing it uses the bundled version. Confusing but not harmful.
+WorkRail validates workflow files against the schema bundled in the currently-running MCP binary. This creates a bidirectional version mismatch problem:
 
-**Fix:** Extend the `bundled_protected` rule in `resolveWorkflowCandidates()` to also block `user`-source shadows for `wr.*` IDs.
+**New binary, old workflow:** Binary's schema has tightened validation (new required field, removed enum value) → old workflow fails → silently dropped from registry.
 
-**Priority:** Low.
+**Old binary, new workflow:** Workflow has new fields the old schema doesn't know about → `additionalProperties: false` rejects it → silently dropped from registry.
+
+Both directions cause the same symptom: workflow disappears from `list_workflows` with no explanation. This is what we hit Apr 22-23: local `workflows/` directory (v3.66.0 with `metricsProfile`) was loaded by an old global npm binary (v3.60.0) whose schema didn't know `metricsProfile`, causing the entire registry to appear empty.
+
+The `wr.*` rename solves the specific case of bundled workflows being shadowed by local project files. But the version mismatch problem affects any non-bundled workflow (user, managed source, project) when the binary and the workflow file are at different schema versions.
+
+### The right long-term fix: versioned schema validation (like Android Room migrations)
+
+**Model:** Each workflow declares `"schemaVersion": 2` (integer). The binary ships validator copies for every schema version it supports. When loading a workflow, pick the validator matching the declared version -- not the current one.
+
+```json
+{ "schemaVersion": 2, "id": "my-workflow", ... }
+```
+
+**Load-time logic:**
+1. Read `schemaVersion` from the workflow file (default to 1 if absent -- legacy workflows)
+2. If `schemaVersion === current`: validate against current schema directly
+3. If `schemaVersion < current` (binary newer): validate against the declared schema version (workflow is valid for its era)
+4. If `schemaVersion > current` (binary too old): load leniently with warnings -- binary doesn't know this schema version, so `additionalProperties: false` doesn't apply
+
+This gives you full schema freedom going forward. You can add required fields, tighten enums, rename things -- without breaking workflows written for older schema versions.
+
+### Why NOT migrations (yet)
+
+A migration chain (v1→v2→v3 transform functions like Room) is the logical extension but adds complexity:
+- Migration functions on JSON documents with free-form prose are harder to write correctly than SQL schema migrations
+- The forward direction (binary too old for workflow) can't be migrated -- you'd have to downgrade the workflow, which is lossy
+- Requires process discipline: every schema change must increment the version AND write a migration. Easy to forget.
+- Migration chain length grows over time -- a v1 workflow loading against a v10 binary runs 9 migrations
+
+**Recommended phased approach:**
+- **Phase 1 (ship first):** Schema version dispatch without migrations. Keep old schema files (`spec/workflow.schema.v1.json`, `v2.json`, etc.). Validate each workflow against its declared version. No migration functions yet. Simple, no bugs, covers the backward direction.
+- **Phase 2 (add when needed):** Add migration functions when you actually need to make a breaking schema change that would invalidate old workflows. Not before.
+
+### Gaps and known issues with this approach
+
+1. **Forward direction still requires leniency.** When a workflow declares `schemaVersion: 5` and the binary only knows up to `schemaVersion: 4`, the only option is lenient loading with warnings. This is the `additionalProperties: true` approach, scoped to the mismatch case. This is acceptable -- if the binary is too old, it can still try to run the workflow with unknown fields ignored.
+
+2. **Schema version vs. authoring spec version.** WorkRail already has `validatedAgainstSpecVersion` on workflows (authoring spec -- style/quality). `schemaVersion` is separate (structural validity). Two version numbers with similar names need clear documentation.
+
+3. **External author burden.** When a new schema version ships, teams using managed sources need to know what changed and whether their workflows need updating. A changelog per schema version is required.
+
+4. **Default for legacy workflows.** Workflows without `schemaVersion` should default to `1` (oldest supported), not current. This means they get validated against the oldest schema -- which is lenient and permissive -- rather than the current strict one. Acceptable tradeoff.
+
+5. **`workflow-for-workflows` should stamp `schemaVersion`.** When authoring or modernizing a workflow, `wfw` should set `schemaVersion` to the current version automatically. This keeps the version accurate without requiring manual maintenance.
+
+### What's already in place
+
+- `validatedAgainstSpecVersion` field exists on workflows (authoring spec version, different concept)
+- `workflow.schema.json` has a `$id` with a version string (`v0.3.0`) but it's decorative -- not used at runtime
+- Validation warnings in `list_workflows` (PR #787) give users visibility when their workflow is silently dropped -- this is the interim fix until versioned validation ships
+
+### Files to change (Phase 1)
+
+- `spec/workflow.schema.json` -- add `schemaVersion` as an optional integer field (default 1 if absent)
+- `spec/workflow.schema.v1.json` -- snapshot of the current schema as "v1" (baseline)
+- `src/application/validation.ts` -- version dispatch: load the right schema based on `schemaVersion`
+- `src/types/workflow-definition.ts` -- add `readonly schemaVersion?: number` to `WorkflowDefinition`
+- `workflow-for-workflows.json` -- add step that stamps `schemaVersion` on the authored workflow
+- All bundled workflows -- add `"schemaVersion": 1` (once Phase 1 ships, bump to whatever the current version is)
+
+### Priority
+
+Medium-High. The `wr.*` rename (PR #782) is the immediate fix. This is the permanent architectural solution that prevents the problem for all workflow sources, not just bundled ones. Should ship after the rename stabilizes.
+
+**Implementation note (Apr 23):** Start with v1 = current schema. A git history audit is running to check whether any breaking changes have already been shipped. If none found: all existing workflows are valid against the current schema, v1 = today, no reconstruction needed. If breaking changes are found: snapshot the pre-break schema as v1, declare current as v2 (or higher), and existing workflows without `schemaVersion` default to v1. **Do not ship schema versioning until the audit completes and this determination is made.**
+
+**Audit result (Apr 23):** Exactly one breaking change found -- commit `b3212b45` (Apr 5, 2026) restructured `assessmentConsequenceTrigger` (`dimensionId`/`equalsLevel` → `anyEqualsLevel`). This affected only the `assessmentConsequences` feature which was introduced 4 days earlier (Apr 1). The bundled workflows that used it were migrated atomically in the same commit. No external workflows could have adopted this feature in that 4-day window. All other 14 schema changes in history are additive or loosening -- fully backward compatible.
+
+**Decision: v1 = current schema. No historical reconstruction needed.** The one breaking change was fully contained within the bundled workflow corpus at the time it shipped.
+
+---
+
+## Consider rewriting WorkRail engine in Kotlin (Apr 23, 2026)
+
+### The argument
+
+WorkRail's coding philosophy demands "make illegal states unrepresentable" and "type safety as the first line of defense." TypeScript is structurally at odds with this: the compiler is advisory, not enforcing. `as unknown as`, `any`, and type assertion casts are always one line away. In a codebase where autonomous agents write and merge code without deep human review, the compiler is the reviewer -- and TypeScript's escape hatches make it too easy for an agent to paper over a real design problem with a cast.
+
+Evidence from today's work: the `RunCompletedDataExpected` intermediate interface and the `as unknown as` cast in `session-metrics.ts` both existed for weeks. TypeScript didn't prevent them. A stricter compiler -- one where bypass requires genuine effort -- raises the bar the agent has to clear before code is valid.
+
+### What Kotlin actually buys
+
+- **Sealed classes** -- exhaustive `when` is a compile error, not a runtime `assertNever` pattern that convention must enforce
+- **No easy escape hatch** -- `as` in Kotlin throws at runtime on type mismatch; there's no equivalent of `as unknown as` that silently lies to the compiler
+- **Null safety by default** -- `String` vs `String?` is a language distinction, not a `strict: true` compiler flag that can be turned off
+- **Value classes and data classes** -- less boilerplate for domain types, stronger invariants
+
+### What TypeScript + current tooling already covers
+
+- Zod at boundaries provides runtime validation that Kotlin's type system would provide at compile time -- this gap is smaller than it looks
+- `neverthrow` gives Result types
+- Discriminated unions + `assertNever` give exhaustiveness -- but enforced by convention, not the compiler
+
+### Real costs
+
+- JVM startup latency for an MCP server that starts/stops frequently -- mitigable with GraalVM native image, but adds build complexity
+- Full rewrite of `src/` -- months of work, not weeks
+- Console stays TypeScript/React regardless
+- The Kotlin MCP SDK exists but the ecosystem tooling (npm, Node.js file I/O patterns) needs reimplementation
+
+### The honest tradeoff
+
+Convention drift is a recurring tax. Migration is a one-time cost. In a codebase driven heavily by autonomous agents, the compiler is the last line of defense against accumulated drift. TypeScript's permissiveness means that defense has holes.
+
+This is not urgent -- the current codebase is working well. But if autonomous agent usage grows and human review per-PR decreases further, the compiler enforcement gap becomes more important, not less.
+
+**Priority:** Low / long-term. Worth revisiting when the agent is writing the majority of new code. Requires a concrete spike: rewrite one module (e.g. `src/v2/durable-core/domain/`) in Kotlin and measure the real friction before committing to a full migration.
