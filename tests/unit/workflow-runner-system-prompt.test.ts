@@ -16,7 +16,7 @@ import { buildSystemPrompt, DAEMON_SOUL_DEFAULT } from '../../src/daemon/workflo
 import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
 
 const baseTrigger: WorkflowTrigger = {
-  workflowId: 'coding-task-workflow-agentic',
+  workflowId: 'wr.coding-task',
   goal: 'implement OAuth refresh token rotation',
   workspacePath: '/Users/test/my-project',
 };

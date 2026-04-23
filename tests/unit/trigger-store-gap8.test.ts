@@ -28,7 +28,7 @@ const BASE = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
 `;
@@ -37,7 +37,7 @@ const WITH_MAX_SESSION_MINUTES = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -48,7 +48,7 @@ const WITH_MAX_TURNS = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -59,7 +59,7 @@ const WITH_BOTH = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -72,7 +72,7 @@ const WITH_INVALID_MAX_SESSION_MINUTES_ALPHA = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -83,7 +83,7 @@ const WITH_INVALID_MAX_TURNS_ALPHA = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -94,7 +94,7 @@ const WITH_NEGATIVE_MAX_SESSION_MINUTES = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -105,7 +105,7 @@ const WITH_NEGATIVE_MAX_TURNS = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -116,7 +116,7 @@ const WITH_ZERO_MAX_SESSION_MINUTES = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:
@@ -127,7 +127,7 @@ const WITH_ZERO_MAX_TURNS = `
 triggers:
   - id: test-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /path/to/repo
     goal: Run workflow
     agentConfig:

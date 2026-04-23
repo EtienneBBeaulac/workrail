@@ -1,5 +1,5 @@
 {
-  "id": "presentation-creation",
+  "id": "wr.presentation-creation",
   "name": "Presentation Creation Workflow",
   "version": "1.0.0",
   "metricsProfile": "none",
@@ -64,9 +64,9 @@
       "promptBlocks": {
         "goal": "Define the core message and argument structure that will guide every slide and talking point. Using your audience profile from the previous step, build a content strategy grounded in their specific needs.",
         "constraints": [
-          "Start with one core message — a single, memorable sentence. Everything else should support it.",
+          "Start with one core message \u2014 a single, memorable sentence. Everything else should support it.",
           "Supporting arguments should directly address the audience motivations and pain points you identified.",
-          "The narrative arc should feel natural for this audience in this context — not a generic template unless it actually fits."
+          "The narrative arc should feel natural for this audience in this context \u2014 not a generic template unless it actually fits."
         ],
         "procedure": [
           "State your core message: one clear, memorable sentence that captures the single most important thing you want the audience to take away.",
@@ -93,7 +93,7 @@
         "constraints": [
           "One key idea per slide. If a slide is trying to say two things, split it.",
           "Plan for pacing: balance information-dense slides with breathing room and interaction moments.",
-          "Think about how the slides will work if someone reads them later without you — titles should be informative, not just labels."
+          "Think about how the slides will work if someone reads them later without you \u2014 titles should be informative, not just labels."
         ],
         "procedure": [
           "Opening (1-3 slides): attention-grabbing hook, context framing, and agenda or roadmap.",
@@ -117,7 +117,7 @@
       "id": "content-development",
       "title": "Content Development",
       "promptBlocks": {
-        "goal": "Write the actual presentation content — slide text and speaker notes — following the approved outline. Every piece of content should be grounded in your audience profile and core message.",
+        "goal": "Write the actual presentation content \u2014 slide text and speaker notes \u2014 following the approved outline. Every piece of content should be grounded in your audience profile and core message.",
         "constraints": [
           "Write for the ear, not the eye. Slide text should be sparse; speaker notes should sound natural when spoken aloud.",
           "Use active voice and concrete language. Replace abstractions with specific examples.",

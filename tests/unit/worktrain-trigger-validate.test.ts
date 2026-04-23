@@ -37,7 +37,7 @@ import type { TriggerDefinition, TriggerConfig } from '../../src/trigger/types.j
 const BASE_TRIGGER: TriggerDefinition = {
   id: 'base-trigger' as TriggerDefinition['id'],
   provider: 'generic',
-  workflowId: 'coding-task-workflow-agentic',
+  workflowId: 'wr.coding-task',
   workspacePath: '/workspace',
   goal: 'Review this PR',
   concurrencyMode: 'serial',
@@ -518,7 +518,7 @@ describe('integration: load and validate real YAML fixture', () => {
 triggers:
   - id: clean-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /workspace
     goal: Review this PR
     branchStrategy: worktree

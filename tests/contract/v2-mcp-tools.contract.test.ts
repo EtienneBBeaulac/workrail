@@ -539,7 +539,7 @@ function validResumeCandidate(overrides?: Partial<{
   return {
     sessionId: 'sess_abc123',
     runId: 'run_001',
-    workflowId: 'coding-task-workflow-agentic',
+    workflowId: 'wr.coding-task',
     sessionTitle: 'Task dev for MR ownership',
     gitBranch: 'feature/mr-ownership',
     resumeToken: VALID_STATE_TOKEN,

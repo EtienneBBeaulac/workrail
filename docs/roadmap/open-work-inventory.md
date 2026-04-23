@@ -162,7 +162,7 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - shared `resolveRefsAndBuildEnvelope` helper, parallel resolution, discriminated union types
 - **What remains**:
   - project-attached references via `.workrail/references.json` with drift detection (future)
-  - validate more real bundled workflows with `references`, beyond the newly added `production-readiness-audit.json` rubric reference
+  - validate more real bundled workflows with `references`, beyond the newly added `wr.production-readiness-audit.json` rubric reference
 - **Source doc**: `docs/plans/content-coherence-and-references.md`
 
 ### Authorable response supplements
@@ -201,9 +201,9 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
 
 - **Status**: partial / in progress
 - **Recently shipped**:
-  - `workflows/workflow-for-workflows.v2.json` now supports both creating a new workflow and modernizing an existing one (`#152`, from issue `#151`)
-  - `workflows/workflow-for-workflows.v2.json` has now also been redesigned into a deeper workflow-quality gate with explicit effectiveness targeting, quality architecture, state-economy audit, execution simulation, adversarial review, redesign looping, and final trust handoff
-  - `workflows/production-readiness-audit.json` was added and then tightened into an evidence-driven readiness review with readiness hypothesis, neutral fact packet, reviewer families, contradiction handling, blind-spot confidence capping, and explicit `security_performance` coverage
+  - `workflows/wr.workflow-for-workflows.v2.json` now supports both creating a new workflow and modernizing an existing one (`#152`, from issue `#151`)
+  - `workflows/wr.workflow-for-workflows.v2.json` has now also been redesigned into a deeper workflow-quality gate with explicit effectiveness targeting, quality architecture, state-economy audit, execution simulation, adversarial review, redesign looping, and final trust handoff
+  - `workflows/wr.production-readiness-audit.json` was added and then tightened into an evidence-driven readiness review with readiness hypothesis, neutral fact packet, reviewer families, contradiction handling, blind-spot confidence capping, and explicit `security_performance` coverage
 - **Active focus now**:
   - validate the redesigned quality gate and readiness audit on real tasks, then tune `STANDARD` vs `THOROUGH` depth and ceremony from evidence
   - next highest-value modernization candidate remains `workflows/exploration-workflow.json`
@@ -220,27 +220,27 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - tighter loop-control wording and newer evidence-oriented review / verification structure
 - **Highest-priority bundled workflows to revamp**:
   - `workflows/exploration-workflow.json`
-  - `workflows/adaptive-ticket-creation.json`
+  - `workflows/wr.adaptive-ticket-creation.json`
   - `workflows/mr-review-workflow.json`
   - `workflows/mr-review-workflow.agentic.json`
   - `workflows/bug-investigation.json`
   - `workflows/bug-investigation.agentic.json`
   - `workflows/design-thinking-workflow.json`
   - `workflows/design-thinking-workflow-autonomous.agentic.json`
-  - `workflows/documentation-update-workflow.json`
-  - `workflows/document-creation-workflow.json`
+  - `workflows/wr.documentation-update.json`
+  - `workflows/wr.document-creation.json`
 - **Additional older bundled workflows to review for modernization**:
-  - `workflows/intelligent-test-case-generation.json`
+  - `workflows/wr.intelligent-test-case-generation.json`
   - `workflows/learner-centered-course-workflow.json`
-  - `workflows/presentation-creation.json`
-  - `workflows/personal-learning-materials-creation-branched.json`
-  - `workflows/scoped-documentation-workflow.json`
-  - `workflows/relocation-workflow-us.json`
-  - `workflows/workflow-diagnose-environment.json`
+  - `workflows/wr.presentation-creation.json`
+  - `workflows/wr.personal-learning-materials.json`
+  - `workflows/wr.scoped-documentation.json`
+  - `workflows/wr.relocation-us.json`
+  - `workflows/wr.diagnose-environment.json`
 - **Lower priority / already more modern**:
-  - `workflows/coding-task-workflow-agentic.v2.json` — superseded by the lean v2 variant as the current modern example
-  - `workflows/workflow-for-workflows.json` — older large-form version; `workflow-for-workflows.v2.json` is now the deeper quality-gate path
-  - `workflows/cross-platform-code-conversion.v2.json` — already v2 and already uses several modern authoring features
+  - `workflows/wr.coding-task.v2.json` — superseded by the lean v2 variant as the current modern example
+  - `workflows/wr.workflow-for-workflows.json` — older large-form version; `wr.workflow-for-workflows.v2.json` is now the deeper quality-gate path
+  - `workflows/wr.cross-platform-code-conversion.v2.json` — already v2 and already uses several modern authoring features
   - `workflows/bug-investigation.agentic.v2.json`
   - `workflows/mr-review-workflow.agentic.v2.json`
 - **What “modernization” should mean here**:

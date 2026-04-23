@@ -140,8 +140,8 @@ describe('WorkRail library engine', () => {
 
   it('surfaces agentRole from workflow step definitions', async () => {
     await withEngine(async (engine) => {
-      // workflow-diagnose-environment has agentRole on its steps
-      const startResult = await engine.startWorkflow('workflow-diagnose-environment', 'test engine library workflow diagnosis');
+      // wr.diagnose-environment has agentRole on its steps
+      const startResult = await engine.startWorkflow('wr.diagnose-environment', 'test engine library workflow diagnosis');
       expect(startResult.ok).toBe(true);
       if (!startResult.ok) return;
 

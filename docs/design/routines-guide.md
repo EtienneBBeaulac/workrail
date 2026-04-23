@@ -18,7 +18,7 @@ where the parent agent wants to continue working in parallel.
 
 **Example** (in a workflow step prompt):
 ```
-Spawn ONE WorkRail Executor running `routine-tension-driven-design` with your
+Spawn ONE WorkRail Executor running `wr.routine-tension-driven-design` with your
 tensions, philosophy sources, and problem understanding as input.
 ```
 
@@ -50,7 +50,7 @@ in confirmation gates, and be tracked individually in the session.
 4. `{arg}` placeholders in prompts are substituted; `{{contextVar}}` is preserved for runtime
 
 **Template ID convention**:
-- Routine `routine-tension-driven-design` → template ID `wr.templates.routine.tension-driven-design`
+- Routine `wr.routine-tension-driven-design` → template ID `wr.templates.routine.tension-driven-design`
 - The `routine-` prefix is stripped automatically
 
 **Example** (in workflow JSON):
@@ -170,11 +170,11 @@ This is often a better fit than executor-style delegation for:
 
 The current routine catalog suggests these default uses:
 
-- `routine-context-gathering`: completeness/depth audit or bounded context expansion
-- `routine-hypothesis-challenge`: adversarial challenge against the current leading story
-- `routine-execution-simulation`: bounded runtime/flow reasoning where mental execution adds value
-- `routine-philosophy-alignment`: review against user/repo principles
-- `routine-final-verification`: proof-oriented end-state validation
+- `wr.routine-context-gathering`: completeness/depth audit or bounded context expansion
+- `wr.routine-hypothesis-challenge`: adversarial challenge against the current leading story
+- `wr.routine-execution-simulation`: bounded runtime/flow reasoning where mental execution adds value
+- `wr.routine-philosophy-alignment`: review against user/repo principles
+- `wr.routine-final-verification`: proof-oriented end-state validation
 
 ## Good and bad fits
 

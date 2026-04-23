@@ -206,7 +206,7 @@ describe('runImplementPipeline - pitch archival', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('runImplementPipeline - UX gate', () => {
-  it('dispatches ui-ux-design-workflow when goal contains UI keywords', async () => {
+  it('dispatches wr.ui-ux-design when goal contains UI keywords', async () => {
     const spawnGoals: string[] = [];
     const spawnWorkflows: string[] = [];
 
@@ -224,7 +224,7 @@ describe('runImplementPipeline - UX gate', () => {
 
     await runImplementPipeline(deps, makeOpts('Build the login screen with proper UX'), '/workspace/.workrail/current-pitch.md', Date.now());
 
-    expect(spawnWorkflows).toContain('ui-ux-design-workflow');
+    expect(spawnWorkflows).toContain('wr.ui-ux-design');
   });
 
   it('does NOT dispatch UX workflow for non-UI goal', async () => {
@@ -241,7 +241,7 @@ describe('runImplementPipeline - UX gate', () => {
 
     await runImplementPipeline(deps, makeOpts('Implement OAuth token refresh'), '/workspace/.workrail/current-pitch.md', Date.now());
 
-    expect(spawnWorkflows).not.toContain('ui-ux-design-workflow');
+    expect(spawnWorkflows).not.toContain('wr.ui-ux-design');
   });
 
   it('escalates if UX gate spawn fails', async () => {
@@ -249,7 +249,7 @@ describe('runImplementPipeline - UX gate', () => {
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
         spawnCount++;
-        if (workflowId === 'ui-ux-design-workflow') {
+        if (workflowId === 'wr.ui-ux-design') {
           return err('ui workflow not found');
         }
         return ok(`handle-${spawnCount}`);
@@ -394,7 +394,7 @@ describe('runImplementPipeline - spawn cutoff', () => {
       expect(outcome.escalationReason.reason).toContain('coordinator elapsed');
     }
     // No spawn should have been attempted
-    expect(deps.spawnSession).not.toHaveBeenCalledWith('coding-task-workflow-agentic', expect.any(String), expect.any(String), expect.any(Object));
+    expect(deps.spawnSession).not.toHaveBeenCalledWith('wr.coding-task', expect.any(String), expect.any(String), expect.any(Object));
   });
 });
 
@@ -420,9 +420,9 @@ describe('runImplementPipeline - happy path', () => {
     if (outcome.kind === 'merged') {
       expect(outcome.prUrl).toBeTruthy();
     }
-    // coding-task-workflow-agentic was spawned with pitchPath in context
+    // wr.coding-task was spawned with pitchPath in context
     expect(deps.spawnSession).toHaveBeenCalledWith(
-      'coding-task-workflow-agentic',
+      'wr.coding-task',
       expect.any(String),
       '/workspace',
       expect.objectContaining({ pitchPath: '/workspace/.workrail/current-pitch.md' }),
@@ -435,7 +435,7 @@ describe('runImplementPipeline - happy path', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('runAuditChain', () => {
-  it('dispatches production-readiness-audit when review returns blocking', async () => {
+  it('dispatches wr.production-readiness-audit when review returns blocking', async () => {
     const spawnedWorkflows: string[] = [];
     let spawnCount = 0;
 
@@ -455,10 +455,10 @@ describe('runAuditChain', () => {
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
     await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
 
-    // Must dispatch production-readiness-audit as the audit workflow
-    expect(spawnedWorkflows).toContain('production-readiness-audit');
+    // Must dispatch wr.production-readiness-audit as the audit workflow
+    expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
     expect(deps.spawnSession).toHaveBeenCalledWith(
-      'production-readiness-audit',
+      'wr.production-readiness-audit',
       expect.any(String),
       '/workspace',
       expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42', severity: 'blocking' }),
@@ -526,7 +526,7 @@ describe('runAuditChain', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('runAuditChain - findingCategory routing', () => {
-  it('routes to architecture-scalability-audit when any finding has findingCategory=architecture', async () => {
+  it('routes to wr.architecture-scalability-audit when any finding has findingCategory=architecture', async () => {
     const spawnedWorkflows: string[] = [];
     let spawnCount = 0;
 
@@ -546,11 +546,11 @@ describe('runAuditChain - findingCategory routing', () => {
     const findings = [{ severity: 'critical' as const, summary: 'Tight coupling in auth module', findingCategory: 'architecture' as const }];
     await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
 
-    expect(spawnedWorkflows).toContain('architecture-scalability-audit');
-    expect(spawnedWorkflows).not.toContain('production-readiness-audit');
+    expect(spawnedWorkflows).toContain('wr.architecture-scalability-audit');
+    expect(spawnedWorkflows).not.toContain('wr.production-readiness-audit');
   });
 
-  it('routes to production-readiness-audit when findingCategory is security', async () => {
+  it('routes to wr.production-readiness-audit when findingCategory is security', async () => {
     const spawnedWorkflows: string[] = [];
     let spawnCount = 0;
 
@@ -570,11 +570,11 @@ describe('runAuditChain - findingCategory routing', () => {
     const findings = [{ severity: 'critical' as const, summary: 'SQL injection risk', findingCategory: 'security' as const }];
     await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
 
-    expect(spawnedWorkflows).toContain('production-readiness-audit');
-    expect(spawnedWorkflows).not.toContain('architecture-scalability-audit');
+    expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
+    expect(spawnedWorkflows).not.toContain('wr.architecture-scalability-audit');
   });
 
-  it('routes to production-readiness-audit (safe default) when findingCategory is missing', async () => {
+  it('routes to wr.production-readiness-audit (safe default) when findingCategory is missing', async () => {
     const spawnedWorkflows: string[] = [];
     let spawnCount = 0;
 
@@ -595,8 +595,8 @@ describe('runAuditChain - findingCategory routing', () => {
     const findings = [{ severity: 'critical' as const, summary: 'Some critical finding' }];
     await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
 
-    expect(spawnedWorkflows).toContain('production-readiness-audit');
-    expect(spawnedWorkflows).not.toContain('architecture-scalability-audit');
+    expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
+    expect(spawnedWorkflows).not.toContain('wr.architecture-scalability-audit');
   });
 });
 

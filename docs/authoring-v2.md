@@ -240,7 +240,7 @@ Profile selection guide:
 | `"research"` | Workflow produces a finding or recommendation but no commits | Outcome-only reminder on final step only |
 | `"none"` or absent | Meta-workflows, utilities, authoring tools | No injection -- existing behavior unchanged |
 
-The engine does NOT derive the profile from tags automatically. Authors must set this field explicitly. When using `workflow-for-workflows` to author or modernize a workflow, the `phase-7b` step will prompt you for this decision.
+The engine does NOT derive the profile from tags automatically. Authors must set this field explicitly. When using `wr.workflow-for-workflows` to author or modernize a workflow, the `phase-7b` step will prompt you for this decision.
 
 **Final step detection**: The engine injects the final-step footer on the last top-level step, or on the exit step of a loop that is the last top-level step. A loop in a non-terminal position does not trigger the final-step footer on its exit step.
 
@@ -551,11 +551,11 @@ To keep authoring simple:
 
 Workflows can drift out of sync with the authoring spec they were written against. WorkRail surfaces this as a `staleness` signal in `list_workflows` and `inspect_workflow` output.
 
-**How it works:** Workflows carry an optional `validatedAgainstSpecVersion` field stamped by `workflow-for-workflows` after the quality gate passes. The engine compares this against the current `spec/authoring-spec.json` version at list/inspect time and returns:
+**How it works:** Workflows carry an optional `validatedAgainstSpecVersion` field stamped by `wr.workflow-for-workflows` after the quality gate passes. The engine compares this against the current `spec/authoring-spec.json` version at list/inspect time and returns:
 
 - `none` — workflow was validated against the current spec version
 - `likely` — spec was updated since the workflow was last reviewed
-- `possible` — workflow has never been run through `workflow-for-workflows`
+- `possible` — workflow has never been run through `wr.workflow-for-workflows`
 
 **Stamping a workflow:**
 
@@ -564,7 +564,7 @@ npm run stamp-workflow -- workflows/my-workflow.json
 git add workflows/my-workflow.json && git commit -m "chore: stamp workflow"
 ```
 
-The stamp must be committed to take effect. The `workflow-for-workflows` Phase 7 step includes a reminder to do this.
+The stamp must be committed to take effect. The `wr.workflow-for-workflows` Phase 7 step includes a reminder to do this.
 
 **Visibility:** By default, the staleness signal is only shown for user-owned/imported workflows (`personal`, `rooted_sharing`, `external`). Built-in and legacy_project workflows are excluded. Set `WORKRAIL_DEV=1` to see staleness for all categories (useful for catalog maintenance).
 

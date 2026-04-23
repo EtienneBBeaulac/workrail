@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { workflowDiagnoseEnvironmentFixture } from './fixtures/workflow-diagnose-environment.fixture.js';
+import { workflowDiagnoseEnvironmentFixture } from './fixtures/wr.diagnose-environment.fixture.js';
 import { executeWorkflowLifecycle, type LifecycleHarnessDeps } from './lifecycle-harness.js';
 import { WorkflowCompiler } from '../../src/application/services/workflow-compiler.js';
 import { WorkflowInterpreter } from '../../src/application/services/workflow-interpreter.js';
 
-describe('Lifecycle: workflow-diagnose-environment', () => {
+describe('Lifecycle: wr.diagnose-environment', () => {
   const deps: LifecycleHarnessDeps = {
     compiler: new WorkflowCompiler(),
     interpreter: new WorkflowInterpreter(),

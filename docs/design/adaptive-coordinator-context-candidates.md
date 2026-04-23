@@ -59,7 +59,7 @@ Must stay consistent with:
 - `src/v2/durable-core/schemas/artifacts/` (typed artifact schemas)
 - `workflows/wr.discovery.json` (Phase 7 -- if emitting artifact)
 - `workflows/wr.shaping.json` (Step 1 -- if adding file search)
-- `workflows/coding-task-workflow-agentic.json` (Phase 0.5 -- no changes expected)
+- `workflows/wr.coding-task.json` (Phase 0.5 -- no changes expected)
 
 ---
 

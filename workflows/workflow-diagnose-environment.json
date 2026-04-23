@@ -1,5 +1,5 @@
 {
-  "id": "workflow-diagnose-environment",
+  "id": "wr.diagnose-environment",
   "name": "Diagnostic: Environment & Subagents",
   "version": "1.0.0",
   "metricsProfile": "none",

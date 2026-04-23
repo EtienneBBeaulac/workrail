@@ -28,7 +28,7 @@ import type { GitHubQueueIssue } from '../../src/trigger/adapters/github-queue-p
 const QUEUE_POLL_TRIGGER: TriggerDefinition = {
   id: 'self-improvement' as TriggerDefinition['id'],
   provider: 'github_queue_poll',
-  workflowId: 'coding-task-workflow-agentic',
+  workflowId: 'wr.coding-task',
   workspacePath: '/workspace',
   goal: 'Autonomous task',
   concurrencyMode: 'serial',
@@ -43,7 +43,7 @@ const QUEUE_POLL_TRIGGER: TriggerDefinition = {
 const GENERIC_TRIGGER: TriggerDefinition = {
   id: 'webhook-trigger' as TriggerDefinition['id'],
   provider: 'generic',
-  workflowId: 'coding-task-workflow-agentic',
+  workflowId: 'wr.coding-task',
   workspacePath: '/workspace',
   goal: 'Handle webhook',
   concurrencyMode: 'serial',

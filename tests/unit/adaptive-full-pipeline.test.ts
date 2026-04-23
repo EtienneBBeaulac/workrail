@@ -337,7 +337,7 @@ describe('runFullPipeline - discovery session failure', () => {
     if (outcome.kind === 'escalated') {
       expect(outcome.escalationReason.phase).toBe('shaping');
     }
-    expect(calledWorkflows).not.toContain('coding-task-workflow-agentic');
+    expect(calledWorkflows).not.toContain('wr.coding-task');
   });
 });
 
@@ -436,15 +436,15 @@ describe('runFullPipeline - happy path', () => {
 
     expect(spawned).toContain('wr.discovery');
     expect(spawned).toContain('wr.shaping');
-    expect(spawned).toContain('coding-task-workflow-agentic');
-    expect(spawned).toContain('mr-review-workflow-agentic');
+    expect(spawned).toContain('wr.coding-task');
+    expect(spawned).toContain('wr.mr-review');
     // No UX design workflow for non-UI goal
-    expect(spawned).not.toContain('ui-ux-design-workflow');
+    expect(spawned).not.toContain('wr.ui-ux-design');
     // Verify order: discovery before shaping before coding before review
     const discoveryIdx = spawned.indexOf('wr.discovery');
     const shapingIdx = spawned.indexOf('wr.shaping');
-    const codingIdx = spawned.indexOf('coding-task-workflow-agentic');
-    const reviewIdx = spawned.indexOf('mr-review-workflow-agentic');
+    const codingIdx = spawned.indexOf('wr.coding-task');
+    const reviewIdx = spawned.indexOf('wr.mr-review');
     expect(discoveryIdx).toBeLessThan(shapingIdx);
     expect(shapingIdx).toBeLessThan(codingIdx);
     expect(codingIdx).toBeLessThan(reviewIdx);
@@ -481,7 +481,7 @@ describe('runFullPipeline - pitch archival', () => {
       spawnSession: vi.fn().mockImplementation(async (workflowId: string) => {
         spawnCount++;
         // discovery and shaping succeed; coding fails
-        if (workflowId === 'coding-task-workflow-agentic') {
+        if (workflowId === 'wr.coding-task') {
           return err('daemon not running');
         }
         return ok(nextHandle());

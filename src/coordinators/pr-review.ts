@@ -1,7 +1,7 @@
 /**
  * PR Review Coordinator
  *
- * Autonomously reviews open GitHub PRs by dispatching mr-review-workflow-agentic
+ * Autonomously reviews open GitHub PRs by dispatching wr.mr-review
  * sessions, routing by finding severity, and merging or escalating.
  *
  * Design invariants:
@@ -499,7 +499,7 @@ function extractFindingSummaries(notes: string): string[] {
 /**
  * Build the fix-agent goal string for a given PR and its findings.
  *
- * WHY coding-task-workflow-agentic: it handles implementation tasks
+ * WHY wr.coding-task: it handles implementation tasks
  * ('implement', 'fix', 'refactor') which is exactly what fixing review
  * findings requires.
  */
@@ -964,7 +964,7 @@ export async function runPrReviewCoordinator(
   for (const pr of prs) {
     const goal = `Review PR #${pr.number} "${pr.title}" before merge`;
     if (opts.dryRun) {
-      log(`      PR #${pr.number} [dry-run] would spawn mr-review-workflow-agentic`);
+      log(`      PR #${pr.number} [dry-run] would spawn wr.mr-review`);
       continue;
     }
 
@@ -991,7 +991,7 @@ export async function runPrReviewCoordinator(
     }
 
     const spawnResult = await deps.spawnSession(
-      'mr-review-workflow-agentic',
+      'wr.mr-review',
       goal,
       opts.workspace,
       spawnContext,
@@ -1243,7 +1243,7 @@ async function runFixAgentLoop(
     log(`      PR #${pr.number}  ->  spawning fix agent (pass ${passCount})...`);
 
     const fixSpawnResult = await deps.spawnSession(
-      'coding-task-workflow-agentic',
+      'wr.coding-task',
       fixGoal,
       opts.workspace,
     );
@@ -1309,7 +1309,7 @@ async function runFixAgentLoop(
     const reReviewGoal = `Re-review PR #${pr.number} after fixes (pass ${passCount})`;
     // Forward same context as the initial review spawn (assembled before first spawn).
     const reReviewSpawnResult = await deps.spawnSession(
-      'mr-review-workflow-agentic',
+      'wr.mr-review',
       reReviewGoal,
       opts.workspace,
       reviewSpawnContext,

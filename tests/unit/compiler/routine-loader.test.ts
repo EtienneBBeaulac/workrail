@@ -20,8 +20,8 @@ describe('loadRoutineDefinitions', () => {
     expect(routines.size).toBeGreaterThan(0);
 
     // Verify a known routine is loaded
-    expect(routines.has('routine-tension-driven-design')).toBe(true);
-    const tdd = routines.get('routine-tension-driven-design')!;
+    expect(routines.has('wr.routine-tension-driven-design')).toBe(true);
+    const tdd = routines.get('wr.routine-tension-driven-design')!;
     expect(tdd.name).toBe('Tension-Driven Design Generation');
     expect(tdd.steps.length).toBeGreaterThan(0);
   });
@@ -40,9 +40,9 @@ describe('loadRoutineDefinitions', () => {
 
     const { routines } = result._unsafeUnwrap();
     const expectedIds = [
-      'routine-tension-driven-design',
-      'routine-philosophy-alignment',
-      'routine-context-gathering',
+      'wr.routine-tension-driven-design',
+      'wr.routine-philosophy-alignment',
+      'wr.routine-context-gathering',
     ];
     for (const id of expectedIds) {
       expect(routines.has(id)).toBe(true);

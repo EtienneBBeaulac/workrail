@@ -1,5 +1,5 @@
 {
-  "id": "classify-task-workflow",
+  "id": "wr.classify-task",
   "name": "Classify Task",
   "version": "0.1.0",
   "metricsProfile": "none",

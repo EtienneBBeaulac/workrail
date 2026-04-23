@@ -54,7 +54,7 @@ The Three-Workflow Pipeline and taskMaturity spectrum are already partially defi
 **Routing signals defined in backlog (not yet implemented):**
 - `taskMaturity`: idea / rough / specced / ready / code-complete (backlog Apr 15)
 - `existingArtifacts`: brd / designs / arch-decision / acceptance-criteria / ticket / implementation
-- Three-Workflow Pipeline: `wr.discovery` (optional) -> `wr.shaping` (optional) -> `coding-task-workflow-agentic` (Apr 18)
+- Three-Workflow Pipeline: `wr.discovery` (optional) -> `wr.shaping` (optional) -> `wr.coding-task` (Apr 18)
 
 **TriggerDefinition routing fields:** `workflowId` is static per trigger. To dispatch different workflows from the same trigger, the routing must happen either in a coordinator script (reads issue, decides workflowId) or via multiple triggers with different `labelFilter` values.
 
@@ -395,9 +395,9 @@ The `## WorkTrain` section header is frozen after v1. `upstream_spec` must be a 
 
 | Maturity label | Pipeline |
 |----------------|----------|
-| `worktrain:idea` | `wr.discovery` -> `wr.shaping` -> `coding-task-workflow-agentic` |
-| `worktrain:specced` | `wr.shaping` -> `coding-task-workflow-agentic` |
-| `worktrain:ready` | `coding-task-workflow-agentic` (Phase 0.5 searches for upstream spec at runtime) |
+| `worktrain:idea` | `wr.discovery` -> `wr.shaping` -> `wr.coding-task` |
+| `worktrain:specced` | `wr.shaping` -> `wr.coding-task` |
+| `worktrain:ready` | `wr.coding-task` (Phase 0.5 searches for upstream spec at runtime) |
 | (no maturity label) | Add `worktrain:needs-labels`, skip dispatch, emit structured log entry |
 
 **Multi-label conflict rule:** if multiple maturity labels are present (e.g. both `worktrain:idea` and `worktrain:ready`), the lowest maturity wins (idea > specced > ready). Coordinator logs a warning.

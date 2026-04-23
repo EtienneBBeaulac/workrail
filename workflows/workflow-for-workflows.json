@@ -1,5 +1,5 @@
 {
-  "id": "workflow-for-workflows",
+  "id": "wr.workflow-for-workflows",
   "name": "Workflow Authoring Workflow",
   "version": "2.5.0",
   "metricsProfile": "design",

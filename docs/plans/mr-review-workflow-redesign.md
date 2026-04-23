@@ -299,11 +299,11 @@ The redesign currently references a few routines conceptually, but it should mak
 
 High-value candidates include:
 
-- `routine-context-gathering`
-- `routine-hypothesis-challenge`
-- `routine-execution-simulation`
-- `routine-philosophy-alignment`
-- `routine-final-verification`
+- `wr.routine-context-gathering`
+- `wr.routine-hypothesis-challenge`
+- `wr.routine-execution-simulation`
+- `wr.routine-philosophy-alignment`
+- `wr.routine-final-verification`
 
 These should be treated as current reusable building blocks, not future ideas.
 
@@ -786,9 +786,9 @@ The workflow should further strengthen:
 
 This phase should explicitly consider use of:
 
-- `routine-hypothesis-challenge` for adversarial reviewer challenge
-- `routine-execution-simulation` when runtime behavior or branch-sensitive behavior is material
-- `routine-philosophy-alignment` when policy-context is important enough to affect recommendation quality
+- `wr.routine-hypothesis-challenge` for adversarial reviewer challenge
+- `wr.routine-execution-simulation` when runtime behavior or branch-sensitive behavior is material
+- `wr.routine-philosophy-alignment` when policy-context is important enough to affect recommendation quality
 
 ## Phase 4: Contradiction, Gap, and Boundary Resolution Loop
 
@@ -822,7 +822,7 @@ The current final validation idea remains useful, but it should explicitly valid
 
 Final validation should also ensure the handoff reflects uncertainty honestly instead of over-stating confidence.
 
-The current WorkRail routine catalog suggests the redesign should strongly consider `routine-final-verification` as either:
+The current WorkRail routine catalog suggests the redesign should strongly consider `wr.routine-final-verification` as either:
 
 - a delegated verifier
 - an injected routine template

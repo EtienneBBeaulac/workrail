@@ -292,7 +292,7 @@ export type ReadFileState = { content: string; timestamp: number; isPartialView:
  * The daemon receives this from the trigger system (Step 4) and passes it here.
  */
 export interface WorkflowTrigger {
-  /** ID of the workflow to run (e.g. "coding-task-workflow-agentic"). */
+  /** ID of the workflow to run (e.g. "wr.coding-task"). */
   readonly workflowId: string;
   /** Short description of what the workflow should accomplish. */
   readonly goal: string;

@@ -10,7 +10,7 @@
 
 ### The Bug
 
-A user writes `workflowId: coding-task-workflow-agentic.lean.v2` (filename without extension) instead of `coding-task-workflow-agentic` (the actual workflow ID). The daemon starts fine, accepts webhooks, but every dispatch silently fails with `workflow_not_found`. The error only surfaces in logs, not at startup. The operator has no way to know their trigger is broken until they watch logs during an actual webhook event.
+A user writes `workflowId: wr.coding-task.lean.v2` (filename without extension) instead of `wr.coding-task` (the actual workflow ID). The daemon starts fine, accepts webhooks, but every dispatch silently fails with `workflow_not_found`. The error only surfaces in logs, not at startup. The operator has no way to know their trigger is broken until they watch logs during an actual webhook event.
 
 ### Core Tensions
 

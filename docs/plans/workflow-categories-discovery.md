@@ -66,9 +66,9 @@ The workflow catalog has grown to ~36 items (25 JSON files + routines + bundled)
     { "id": "testing", "displayName": "Testing & Diagnostics" }
   ],
   "workflows": {
-    "mr-review-workflow-agentic": { "category": "review_audit" },
-    "bug-investigation-agentic": { "category": "investigation" },
-    "coding-task-workflow-agentic": { "category": "coding" },
+    "wr.mr-review": { "category": "review_audit" },
+    "wr.bug-investigation": { "category": "investigation" },
+    "wr.coding-task": { "category": "coding" },
     "test-session-persistence": { "category": "testing", "hidden": true },
     ...
   }
@@ -107,4 +107,4 @@ The workflow catalog has grown to ~36 items (25 JSON files + routines + bundled)
 2. Should routines appear in summary or be hidden?  
 3. Should `categorySummary` include a short description per category?
 4. What display name for `review_audit`?
-5. Should workflow-for-workflows Phase 7 prompt for category?
+5. Should wr.workflow-for-workflows Phase 7 prompt for category?

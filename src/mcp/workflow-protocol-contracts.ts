@@ -101,7 +101,7 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Only pass context on later continue_workflow calls if facts changed.',
       ],
       examplePayload: {
-        workflowId: 'coding-task-workflow-agentic',
+        workflowId: 'wr.coding-task',
         workspacePath: '/Users/you/git/my-project',
         goal: 'implement OAuth refresh token rotation',
       },
@@ -118,7 +118,7 @@ export const START_WORKFLOW_PROTOCOL: WorkflowProtocolContract = {
         'Pass goal on every call. A short sentence describing what you are trying to accomplish.',
       ],
       examplePayload: {
-        workflowId: 'coding-task-workflow-agentic',
+        workflowId: 'wr.coding-task',
         workspacePath: '/Users/you/git/my-project',
         goal: 'implement OAuth refresh token rotation',
       },

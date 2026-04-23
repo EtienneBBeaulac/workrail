@@ -199,7 +199,7 @@ describe('stale remembered roots in tool responses', () => {
 
     const result = await handleV2InspectWorkflow(
       // Use a bundled workflow that is always available regardless of project files
-      { workflowId: 'coding-task-workflow-agentic', mode: 'metadata', workspacePath: workspaceRoot },
+      { workflowId: 'wr.coding-task', mode: 'metadata', workspacePath: workspaceRoot },
       ctx,
     );
 
@@ -228,7 +228,7 @@ describe('stale remembered roots in tool responses', () => {
 
     const result = await handleV2StartWorkflow(
       // Use a bundled workflow that is always available regardless of project files
-      { workflowId: 'coding-task-workflow-agentic', workspacePath: workspaceRoot, goal: 'test workflow execution' },
+      { workflowId: 'wr.coding-task', workspacePath: workspaceRoot, goal: 'test workflow execution' },
       ctx,
     );
 

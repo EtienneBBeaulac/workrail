@@ -6,7 +6,7 @@
  * is missing, it returns LOOP_MISSING_CONTEXT → DomainError.MissingContext.
  * This gets mapped through 3 layers to an opaque INTERNAL_ERROR.
  *
- * This test reproduces the exact scenario from the coding-task-workflow-agentic
+ * This test reproduces the exact scenario from the wr.coding-task
  * workflow where `phase-planning-complete-gate` completes but `slices` (the
  * forEach items variable) was never set as a context variable.
  */

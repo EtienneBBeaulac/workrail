@@ -2545,7 +2545,7 @@ Three architectural alternatives if agent friction becomes significant:
 
 ## 19. Agent Delegation Instructions (Workflow-Driven Subagent Execution)
 
-**Issue**: Workflows request subagent delegation (e.g., "Spawn 3 WorkRail Executors SIMULTANEOUSLY using routine-ideation") but agents frequently misinterpret these instructions, leading to:
+**Issue**: Workflows request subagent delegation (e.g., "Spawn 3 WorkRail Executors SIMULTANEOUSLY using wr.routine-ideation") but agents frequently misinterpret these instructions, leading to:
 - Agents starting new workflow runs instead of spawning subagents via the Task tool
 - Sequential execution when parallel delegation is requested
 - Incorrect subagent type selection (using general-purpose instead of workrail-executor)
@@ -2589,7 +2589,7 @@ DO NOT call Task tools sequentially - make all {N} calls in one response block.
 4. **Template consistency**: Standardized format across all workflows reduces learning overhead
 
 **Implementation Requirement**:
-- Update all workflows that use delegation (coding-task-workflow-agentic, mr-review-workflow-agentic, bug-investigation-agentic, etc.) to use this explicit template
+- Update all workflows that use delegation (wr.coding-task, wr.mr-review, wr.bug-investigation, etc.) to use this explicit template
 - Add this guidance to workflow authoring documentation
 
 **Verification**:

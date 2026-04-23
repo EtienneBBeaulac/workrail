@@ -151,6 +151,6 @@ Even though not called at MVP, having the pure function ready preserves the upgr
 
 1. **wr.discovery output standardization**: the routing design assumes wr.discovery notes are injected by the coordinator as `assembledContextSummary` for wr.shaping. But wr.discovery's `designDocPath` output location is not standardized (finding from context-passing agent's doc). The FULL mode executor must parse `lastStepNotes` from the discovery session to build the shaping context -- this is per the context-passing agent's Candidate D (coordinator-injected text). This concern is correctly owned by the context-passing design, not the routing design.
 
-2. **classify-task-workflow format stability**: if `parseRecommendedPipeline()` is written as a pure function now, it has no tests against real classify-task output. The function should include an integration test stub that documents the expected format.
+2. **wr.classify-task format stability**: if `parseRecommendedPipeline()` is written as a pure function now, it has no tests against real classify-task output. The function should include an integration test stub that documents the expected format.
 
 3. **REVIEW_ONLY vs pr-review coordinator**: the existing `worktrain run pr-review` command already provides REVIEW_ONLY+QUICK_REVIEW behavior. The new `worktrain run pipeline --mode review_only` should either (a) delegate to pr-review coordinator, or (b) reimplement the same logic in `modes/review-only.ts`. Recommendation: (a) delegate -- avoid duplicating the fix-agent loop logic. Document this delegation explicitly.

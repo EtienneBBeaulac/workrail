@@ -104,7 +104,7 @@ function buildTriggersYml(workspacePath: string): string {
 triggers:
   - id: my-first-trigger
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: ${workspacePath}
     goal: "Handle incoming coding task"
     # hmacSecret: $WEBHOOK_SECRET   # uncomment and set env var to enable HMAC validation

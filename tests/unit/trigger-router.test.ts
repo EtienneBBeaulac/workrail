@@ -42,7 +42,7 @@ function makeTrigger(overrides: Partial<TriggerDefinition> = {}): TriggerDefinit
   return {
     id: asTriggerId('test-trigger'),
     provider: 'generic',
-    workflowId: 'coding-task-workflow-agentic',
+    workflowId: 'wr.coding-task',
     workspacePath: '/workspace',
     goal: 'Review this MR',
     concurrencyMode: 'serial',
@@ -285,7 +285,7 @@ describe('TriggerRouter.route', () => {
   describe('runWorkflow() arguments', () => {
     it('calls runWorkflow() with correct workflowId, goal, workspacePath', async () => {
       const trigger = makeTrigger({
-        workflowId: 'mr-review-workflow-agentic',
+        workflowId: 'wr.mr-review',
         goal: 'Review this MR carefully',
         workspacePath: '/my/workspace',
       });
@@ -295,7 +295,7 @@ describe('TriggerRouter.route', () => {
       router.route(makeEvent());
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(calls[0]?.workflowId).toBe('mr-review-workflow-agentic');
+      expect(calls[0]?.workflowId).toBe('wr.mr-review');
       expect(calls[0]?.goal).toBe('Review this MR carefully');
       expect(calls[0]?.workspacePath).toBe('/my/workspace');
     });
@@ -655,7 +655,7 @@ describe('startTriggerListener workflowId validation', () => {
   });
 
   it('keeps trigger with valid workflowId', async () => {
-    const wsDir = await writeTriggers(makeTriggerYaml('good-trigger', 'coding-task-workflow-agentic'));
+    const wsDir = await writeTriggers(makeTriggerYaml('good-trigger', 'wr.coding-task'));
     const { fn: runWorkflowFn } = makeFakeRunWorkflow();
 
     // Resolver: this workflow is known
@@ -677,11 +677,11 @@ describe('startTriggerListener workflowId validation', () => {
       return;
     }
 
-    expect(getWorkflowByIdFn).toHaveBeenCalledWith('coding-task-workflow-agentic');
+    expect(getWorkflowByIdFn).toHaveBeenCalledWith('wr.coding-task');
 
     const triggers = result.router.listTriggers();
     expect(triggers).toHaveLength(1);
-    expect(triggers[0]?.workflowId).toBe('coding-task-workflow-agentic');
+    expect(triggers[0]?.workflowId).toBe('wr.coding-task');
 
     await result.stop();
   });
@@ -691,7 +691,7 @@ describe('startTriggerListener workflowId validation', () => {
       'triggers:',
       '  - id: good-trigger',
       '    provider: generic',
-      '    workflowId: coding-task-workflow-agentic',
+      '    workflowId: wr.coding-task',
       '    workspacePath: /workspace',
       '    goal: "Good trigger"',
       '  - id: bad-trigger',
@@ -704,7 +704,7 @@ describe('startTriggerListener workflowId validation', () => {
     const { fn: runWorkflowFn } = makeFakeRunWorkflow();
 
     const getWorkflowByIdFn = vi.fn().mockImplementation(async (id: string) =>
-      id === 'coding-task-workflow-agentic',
+      id === 'wr.coding-task',
     );
 
     const result = await startTriggerListener(FAKE_CTX, {

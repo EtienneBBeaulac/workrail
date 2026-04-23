@@ -25,7 +25,7 @@
 - `V2WorkflowListOutputSchema` (new optional `categorySummary` field)
 - `handleV2ListWorkflows` (response branching logic)
 - `validate-workflows-registry.ts` (new uncategorized workflow warning)
-- `workflow-for-workflows.v2.json` Phase 7 (should stamp category when authoring)
+- `wr.workflow-for-workflows.v2.json` Phase 7 (should stamp category when authoring)
 
 ## Candidates
 
@@ -79,20 +79,20 @@ B covers ~30% of workflows. C adds compiler complexity for a problem A already s
 
 | Category | Count | Examples |
 |---|---|---|
-| coding | 3 | coding-task, cross-platform-code-conversion |
-| review_audit | 3 | mr-review, production-readiness-audit, architecture-scalability-audit |
+| coding | 3 | coding-task, wr.cross-platform-code-conversion |
+| review_audit | 3 | mr-review, wr.production-readiness-audit, wr.architecture-scalability-audit |
 | investigation | 2 | bug-investigation, workflow-diagnose |
 | design | 2 | ui-ux-design, wr.discovery |
 | documentation | 3 | document-creation, scoped-documentation, documentation-update |
-| tickets | 4 | adaptive-ticket-creation, ticket-grooming, intelligent-test-case-generation |
-| learning | 4 | personal-learning-*, presentation-creation, relocation |
+| tickets | 4 | wr.adaptive-ticket-creation, ticket-grooming, wr.intelligent-test-case-generation |
+| learning | 4 | personal-learning-*, wr.presentation-creation, relocation |
 | routines | ~10 | all routine-* |
-| authoring | 1-2 | workflow-for-workflows |
+| authoring | 1-2 | wr.workflow-for-workflows |
 | testing | 3 | test-* (hidden from default summary) |
 
 ## Self-Critique
 
-**Strongest counter-argument**: two-file maintenance burden (workflow JSON + overlay). Mitigated by: validate:registry warning on uncategorized workflows makes omission loud; workflow-for-workflows can be updated to prompt for category at authoring time.
+**Strongest counter-argument**: two-file maintenance burden (workflow JSON + overlay). Mitigated by: validate:registry warning on uncategorized workflows makes omission loud; wr.workflow-for-workflows can be updated to prompt for category at authoring time.
 
 **Pivot condition**: if teams want per-workspace custom categories, A needs extension (workspace-level categories.json overlay). Defer to v2.
 
@@ -102,4 +102,4 @@ B covers ~30% of workflows. C adds compiler complexity for a problem A already s
 2. Should routines be surfaced in summary mode at all, or hidden by default (they're internal, not user-invoked)?
 3. Should the `categorySummary` include a short description per category (e.g., "Review code changes, audit systems") or just names + counts?
 4. What's the right `displayName` for `review_audit`? "Review & Audit"?
-5. Should `workflow-for-workflows` Phase 7 be updated to stamp the category, or is that a separate ticket?
+5. Should `wr.workflow-for-workflows` Phase 7 be updated to stamp the category, or is that a separate ticket?

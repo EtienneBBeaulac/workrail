@@ -1,5 +1,5 @@
 {
-  "id": "production-readiness-audit",
+  "id": "wr.production-readiness-audit",
   "name": "Production Readiness Audit",
   "version": "0.1.0",
   "metricsProfile": "research",

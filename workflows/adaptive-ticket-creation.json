@@ -1,5 +1,5 @@
 {
-  "id": "adaptive-ticket-creation",
+  "id": "wr.adaptive-ticket-creation",
   "name": "Adaptive Ticket Creation Workflow",
   "version": "1.0.0",
   "metricsProfile": "ticket",
@@ -16,9 +16,9 @@
     "Agent has file system access for loading team preferences and persisting rules."
   ],
   "metaGuidance": [
-    "ROLE: expert Product Manager and Mobile Tech Lead. Triage autonomously, write developer-ready tickets with full context, and produce objectively testable acceptance criteria — not user-story paraphrases.",
+    "ROLE: expert Product Manager and Mobile Tech Lead. Triage autonomously, write developer-ready tickets with full context, and produce objectively testable acceptance criteria \u2014 not user-story paraphrases.",
     "EXPLORE FIRST: use tools to gather context before asking the user anything. Ask only for information you genuinely cannot determine with tools or from the request itself.",
-    "TEAM RULES: load and follow ./.workflow_rules/ticket_creation.md when it exists. Preferences there override your defaults. Rules are captured only on the Epic path — complex sessions are where durable conventions emerge and where the investment pays off.",
+    "TEAM RULES: load and follow ./.workflow_rules/ticket_creation.md when it exists. Preferences there override your defaults. Rules are captured only on the Epic path \u2014 complex sessions are where durable conventions emerge and where the investment pays off.",
     "AUTONOMOUS TRIAGE: decide pathComplexity (Simple / Standard / Epic) yourself from the request. Surface your reasoning, then wait for confirmation.",
     "QUALITY FLOOR: every ticket must have a context-rich description, checkbox-style acceptance criteria that are objectively testable, and an effort estimate."
   ],
@@ -29,7 +29,7 @@
       "promptBlocks": {
         "goal": "Analyze the request, gather available context, and select the right complexity path before doing any ticket work.",
         "constraints": [
-          "Decide the path yourself — do not ask the user to choose.",
+          "Decide the path yourself \u2014 do not ask the user to choose.",
           "Load ./.workflow_rules/ticket_creation.md if it exists and let it influence your triage. If the file does not exist, note this explicitly in your output so the user knows team conventions were not applied.",
           "Set pathComplexity to exactly one of: Simple, Standard, or Epic."
         ],
@@ -37,7 +37,7 @@
           "Read any attached documents, linked PRDs, or referenced specs.",
           "Identify complexity signals: scope breadth, number of distinct deliverables, cross-team dependencies, technical unknowns, and estimated ticket count.",
           "Apply the triage rubric: Simple = single ticket, clear requirements, no blocking unknowns, minimal dependencies. Standard = multiple related tickets, moderate scope, some analysis needed. Epic = complex feature requiring decomposition, multiple teams or significant unknowns, likely 6+ tickets.",
-          "Upgrade triggers — escalate to Standard if: request implies more than one clearly separate work item. Escalate to Epic if: multiple teams are involved, architecture decisions are unresolved, or you estimate more than five tickets.",
+          "Upgrade triggers \u2014 escalate to Standard if: request implies more than one clearly separate work item. Escalate to Epic if: multiple teams are involved, architecture decisions are unresolved, or you estimate more than five tickets.",
           "State your selected path and the top three reasons. Capture pathComplexity in context."
         ],
         "outputRequired": {
@@ -61,7 +61,7 @@
       "promptBlocks": {
         "goal": "Generate one complete, developer-ready Jira ticket for this request.",
         "constraints": [
-          "Acceptance criteria must be phrased as observable, testable conditions — not user-story restatements.",
+          "Acceptance criteria must be phrased as observable, testable conditions \u2014 not user-story restatements.",
           "Follow any team conventions from ./.workflow_rules/ticket_creation.md.",
           "Include all fields a developer needs to start work without asking follow-up questions."
         ],
@@ -111,7 +111,7 @@
           "Load ./.workflow_rules/ticket_creation.md and note any relevant team conventions.",
           "Identify: key stakeholders, team dependencies, technical constraints, known risks, and any conflicting requirements.",
           "Classify each gap as: Critical (blocks planning), Important (affects scope), or Nice-to-have (can proceed without it).",
-          "For Critical and Important gaps that tools cannot resolve, ask the user — in a single consolidated question block, not one at a time.",
+          "For Critical and Important gaps that tools cannot resolve, ask the user \u2014 in a single consolidated question block, not one at a time.",
           "After receiving answers, check whether any response reveals scope that would change `pathComplexity` (e.g. the user confirms three teams are involved, or the feature is narrower than initially assessed). If so, state the new classification and reasoning, and ask the user to confirm before continuing to Phase 2."
         ],
         "outputRequired": {
@@ -143,16 +143,16 @@
       "promptBlocks": {
         "goal": "Produce a structured plan that will drive ticket generation. This plan is the source of truth for scope.",
         "constraints": [
-          "Be explicit about scope boundaries — ambiguous scope will produce ambiguous tickets.",
+          "Be explicit about scope boundaries \u2014 ambiguous scope will produce ambiguous tickets.",
           "Success criteria must be measurable, not just descriptive.",
           "For Standard path: this plan feeds directly into batch ticket generation."
         ],
         "procedure": [
           "Write: Project Summary (2-3 sentences, what is being built and why).",
           "Write: Key Deliverables (bulleted list of distinct components or features).",
-          "Write: In-Scope (explicit list — prevents scope creep).",
-          "Write: Out-of-Scope (explicit exclusions — prevents misunderstandings).",
-          "Write: Success Criteria (measurable definition of done — each item verifiable).",
+          "Write: In-Scope (explicit list \u2014 prevents scope creep).",
+          "Write: Out-of-Scope (explicit exclusions \u2014 prevents misunderstandings).",
+          "Write: Success Criteria (measurable definition of done \u2014 each item verifiable).",
           "Write: High-Level Timeline (phases or milestones with rough sizing).",
           "Review: does every deliverable map clearly to implementable work? Is anything in scope that should be out?"
         ],
@@ -178,7 +178,7 @@
         "goal": "Break the approved plan into a logical work hierarchy that development teams can execute.",
         "constraints": [
           "Every item in the plan's In-Scope list must map to at least one work item in the hierarchy.",
-          "Dependencies must be explicit — not implied by ordering alone.",
+          "Dependencies must be explicit \u2014 not implied by ordering alone.",
           "Oversized stories (more than one sprint of work) should be split."
         ],
         "procedure": [
@@ -210,7 +210,7 @@
       "promptBlocks": {
         "goal": "Add effort estimates, risk assessments, and team assignments to each story in the hierarchy.",
         "constraints": [
-          "Conservative estimates are better than optimistic ones — note uncertainty explicitly.",
+          "Conservative estimates are better than optimistic ones \u2014 note uncertainty explicitly.",
           "Justify each estimate with one sentence of reasoning.",
           "Flag stories on the critical path."
         ],
@@ -220,7 +220,7 @@
           "Assign priority: must-have for MVP, should-have, nice-to-have.",
           "Note suggested team or skill area for each story.",
           "Identify critical path: which stories block the most downstream work? Surface these explicitly.",
-          "Flag any stories whose estimates feel uncertain — surface the unknowns rather than hiding them in a range."
+          "Flag any stories whose estimates feel uncertain \u2014 surface the unknowns rather than hiding them in a range."
         ],
         "outputRequired": {
           "notesMarkdown": "Total story point estimate, critical path items, high-risk stories."
@@ -285,7 +285,7 @@
       "promptBlocks": {
         "goal": "Extract actionable team preferences from this session and persist them so future runs use them automatically.",
         "constraints": [
-          "Only write rules that are genuinely reusable across future tickets — skip one-off project specifics.",
+          "Only write rules that are genuinely reusable across future tickets \u2014 skip one-off project specifics.",
           "Keep rules concise and actionable, not narrative.",
           "Append to ./.workflow_rules/ticket_creation.md rather than replacing it."
         ],
@@ -293,7 +293,7 @@
           "Review what conventions, preferences, or requirements emerged during this session.",
           "Identify patterns worth preserving: naming conventions, field usage, AC format preferences, estimation approach, labeling rules.",
           "Draft new rules as short, imperative statements (e.g., 'Use T-shirt sizing not Fibonacci', 'Always include a Figma link in design tickets').",
-          "Check against existing rules — avoid duplicates or contradictions.",
+          "Check against existing rules \u2014 avoid duplicates or contradictions.",
           "Append new rules to ./.workflow_rules/ticket_creation.md, creating the file if it does not exist."
         ],
         "outputRequired": {

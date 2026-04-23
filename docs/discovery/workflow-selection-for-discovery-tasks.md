@@ -10,9 +10,9 @@
 
 ## Context / Ask
 
-A daemon session was dispatched using `coding-task-workflow-agentic` with a goal that said "Discovery only -- Do NOT write any code". The session ran 11 advances, produced good design candidate notes, stopped at event 74 with no `run_completed`, and the later advances had no note output (likely conditional skips).
+A daemon session was dispatched using `wr.coding-task` with a goal that said "Discovery only -- Do NOT write any code". The session ran 11 advances, produced good design candidate notes, stopped at event 74 with no `run_completed`, and the later advances had no note output (likely conditional skips).
 
-The question: for a discovery-only task (no code, just a design document), should we use `coding-task-workflow-agentic` or `wr.discovery`? And can `coding-task-workflow-agentic` be trusted to stay in discovery mode when the goal explicitly says no code?
+The question: for a discovery-only task (no code, just a design document), should we use `wr.coding-task` or `wr.discovery`? And can `wr.coding-task` be trusted to stay in discovery mode when the goal explicitly says no code?
 
 ---
 
@@ -42,11 +42,11 @@ The question: for a discovery-only task (no code, just a design document), shoul
 
 ### Current state summary
 
-`coding-task-workflow-agentic` (lean v2, v1.1.0) is a full implementation lifecycle workflow. Its `about` field says: "Use this to implement a software feature or task." Its preconditions include "A deterministic validation path exists (tests, build, or an explicit verification strategy)." It explicitly describes what it produces: `implementation_plan.md`, `spec.md`, code slices, and a PR-ready handoff with commit JSON.
+`wr.coding-task` (lean v2, v1.1.0) is a full implementation lifecycle workflow. Its `about` field says: "Use this to implement a software feature or task." Its preconditions include "A deterministic validation path exists (tests, build, or an explicit verification strategy)." It explicitly describes what it produces: `implementation_plan.md`, `spec.md`, code slices, and a PR-ready handoff with commit JSON.
 
 `wr.discovery` (v3.1.0) is a structured thinking/design workflow. Its `about` field says: "Use this to explore and think through a problem end-to-end." Its metaGuidance explicitly states: "Boundary: this workflow can end with a recommendation memo, prototype or test plan, or a research-informed direction. It should not implement production code."
 
-### Step structure analysis: coding-task-workflow-agentic
+### Step structure analysis: wr.coding-task
 
 | Step | Condition | Discovery-relevant? |
 |------|-----------|---------------------|
@@ -67,7 +67,7 @@ The question: for a discovery-only task (no code, just a design document), shoul
 
 For Medium/Large tasks, the workflow runs the full design pipeline (phases 0-4) which produces `design-candidates.md` -- but it then continues directly into implementation (phases 6-7). There is no early exit after design.
 
-**Does coding-task-workflow-agentic have a "discovery only" mode?** No. It has no `runCondition` or context variable that would stop before implementation when a goal says "no code". The only escape hatch would be the agent choosing to stop itself based on the goal text -- which is an honor-system trust, not a structural guarantee.
+**Does wr.coding-task have a "discovery only" mode?** No. It has no `runCondition` or context variable that would stop before implementation when a goal says "no code". The only escape hatch would be the agent choosing to stop itself based on the goal text -- which is an honor-system trust, not a structural guarantee.
 
 ### What phases run for Small vs Medium/Large
 
@@ -101,15 +101,15 @@ It explicitly cannot produce production code. It always ends with a design docum
 
 ### Option categories
 
-1. **Use wr.discovery** for discovery tasks, `coding-task-workflow-agentic` for implementation tasks
-2. **Use coding-task-workflow-agentic for everything**, trusting the agent to stop early when goal says "no code"
-3. **Add a discovery-mode flag** to `coding-task-workflow-agentic` via a `runCondition` on phases 6-7
+1. **Use wr.discovery** for discovery tasks, `wr.coding-task` for implementation tasks
+2. **Use wr.coding-task for everything**, trusting the agent to stop early when goal says "no code"
+3. **Add a discovery-mode flag** to `wr.coding-task` via a `runCondition` on phases 6-7
 4. **Use separate triggers** in triggers.yml with different `workflowId` per task type
 
 ### Contradictions / disagreements
 
-- The daemon session with `coding-task-workflow-agentic` produced "good design candidates notes" -- so the workflow does good design work even though it is intended for implementation. The design pipeline (phases 1-4) is legitimate and high quality.
-- The risk is not that `coding-task-workflow-agentic` does bad design work. The risk is that (a) it might not stop before phase-6 reliably, and (b) it carries implementation framing (slices, spec, PR handoff) that pollutes a pure discovery context.
+- The daemon session with `wr.coding-task` produced "good design candidates notes" -- so the workflow does good design work even though it is intended for implementation. The design pipeline (phases 1-4) is legitimate and high quality.
+- The risk is not that `wr.coding-task` does bad design work. The risk is that (a) it might not stop before phase-6 reliably, and (b) it carries implementation framing (slices, spec, PR handoff) that pollutes a pure discovery context.
 
 ### Evidence gaps
 
@@ -131,12 +131,12 @@ It explicitly cannot produce production code. It always ends with a design docum
 
 - Dispatch a session that produces a design document and nothing else
 - Know with certainty that no code will be written, regardless of agent judgment
-- Get a high-quality, structured design output comparable to what coding-task-workflow-agentic's design phases produce
+- Get a high-quality, structured design output comparable to what wr.coding-task's design phases produce
 
 ### Pains / tensions / constraints
 
 - The daemon currently has ONE `workflowId` in triggers.yml -- no per-task routing
-- `coding-task-workflow-agentic` is trusted for design quality but is not structurally bounded to stop before code
+- `wr.coding-task` is trusted for design quality but is not structurally bounded to stop before code
 - `wr.discovery` is structurally bounded to no-code but may produce different design output depth
 
 ### Success criteria
@@ -148,12 +148,12 @@ It explicitly cannot produce production code. It always ends with a design docum
 ### Assumptions
 
 - The daemon reads `workflowId` directly from triggers.yml and cannot dynamically select based on goal text
-- `wr.discovery` produces design candidates comparable in quality to what phases 1-4 of `coding-task-workflow-agentic` produce
+- `wr.discovery` produces design candidates comparable in quality to what phases 1-4 of `wr.coding-task` produce
 - triggers.yml supports multiple trigger entries with different `workflowId` values
 
 ### Reframes / HMW questions
 
-- HMW: How might we route discovery tasks to `wr.discovery` and implementation tasks to `coding-task-workflow-agentic` at the dispatcher level instead of relying on agent judgment?
+- HMW: How might we route discovery tasks to `wr.discovery` and implementation tasks to `wr.coding-task` at the dispatcher level instead of relying on agent judgment?
 - HMW: How might we make "discovery only" a structural guarantee rather than a goal-text instruction?
 
 ### What would make this framing wrong
@@ -183,15 +183,15 @@ Configure a second trigger entry in triggers.yml with `workflowId: wr.discovery`
 
 **Why it fits:** Structural guarantee. `wr.discovery` was explicitly designed for this use case. Its metaGuidance says "should not implement production code."
 
-**Strongest evidence for it:** The session incident shows the risk of relying on honor-system stop behavior in `coding-task-workflow-agentic`. Structural routing removes the risk entirely.
+**Strongest evidence for it:** The session incident shows the risk of relying on honor-system stop behavior in `wr.coding-task`. Structural routing removes the risk entirely.
 
-**Strongest risk against it:** triggers.yml currently supports one trigger per session. If it cannot support multiple triggers with per-task routing, this requires daemon work. Also, `wr.discovery` produces a recommendation memo/design doc, not the same `design-candidates.md` artifact shape that `coding-task-workflow-agentic` phases 1-4 produce.
+**Strongest risk against it:** triggers.yml currently supports one trigger per session. If it cannot support multiple triggers with per-task routing, this requires daemon work. Also, `wr.discovery` produces a recommendation memo/design doc, not the same `design-candidates.md` artifact shape that `wr.coding-task` phases 1-4 produce.
 
 **When it should win:** Always, for any task where the desired output is a design document and there is no intent to implement code in the same session.
 
 ---
 
-### Direction B: Trust coding-task-workflow-agentic with honor-system stop
+### Direction B: Trust wr.coding-task with honor-system stop
 
 Keep triggers.yml as-is. Rely on the goal text ("Discovery only -- Do NOT write any code") to instruct the agent to stop before phase-6.
 
@@ -205,27 +205,27 @@ Keep triggers.yml as-is. Rely on the goal text ("Discovery only -- Do NOT write 
 
 ---
 
-### Direction C: Add discoveryMode flag to coding-task-workflow-agentic
+### Direction C: Add discoveryMode flag to wr.coding-task
 
-Modify `coding-task-workflow-agentic` to support a `discoveryMode` context variable. Add `runCondition: { var: "discoveryMode", not_equals: true }` to phases 6 and 7. Pass `discoveryMode: true` via the goal or a trigger-level context override.
+Modify `wr.coding-task` to support a `discoveryMode` context variable. Add `runCondition: { var: "discoveryMode", not_equals: true }` to phases 6 and 7. Pass `discoveryMode: true` via the goal or a trigger-level context override.
 
-**Why it fits:** Preserves the high-quality design pipeline of `coding-task-workflow-agentic` while adding a structural stop before implementation.
+**Why it fits:** Preserves the high-quality design pipeline of `wr.coding-task` while adding a structural stop before implementation.
 
-**Strongest evidence for it:** The design phases (1-4) of `coding-task-workflow-agentic` are well-designed and familiar. Reusing them avoids duplication.
+**Strongest evidence for it:** The design phases (1-4) of `wr.coding-task` are well-designed and familiar. Reusing them avoids duplication.
 
 **Strongest risk against it:** This requires modifying a core workflow file. It adds complexity to a workflow that was designed for a different purpose. It creates a hybrid that does neither thing cleanly. And triggers.yml still only has one trigger, so the `discoveryMode` value must come from somewhere (goal text parse? trigger-level context?).
 
-**When it should win:** If modifying `wr.discovery` or the daemon is unavailable, and modifying `coding-task-workflow-agentic` is cheap and acceptable.
+**When it should win:** If modifying `wr.discovery` or the daemon is unavailable, and modifying `wr.coding-task` is cheap and acceptable.
 
 ---
 
 ## Challenge Notes
 
-**Against Direction A (wr.discovery):** The design output format differs. `coding-task-workflow-agentic` produces `design-candidates.md` via the `tension-driven-design` routine, followed by a `design-review-findings.md` and a full `implementation_plan.md`. `wr.discovery` produces a design doc with Candidate Directions and a recommendation. For a technical question about workflow architecture, the `wr.discovery` output (a recommendation memo) is actually _more_ appropriate than `implementation_plan.md`. The format difference is not a disadvantage.
+**Against Direction A (wr.discovery):** The design output format differs. `wr.coding-task` produces `design-candidates.md` via the `tension-driven-design` routine, followed by a `design-review-findings.md` and a full `implementation_plan.md`. `wr.discovery` produces a design doc with Candidate Directions and a recommendation. For a technical question about workflow architecture, the `wr.discovery` output (a recommendation memo) is actually _more_ appropriate than `implementation_plan.md`. The format difference is not a disadvantage.
 
 **Against Direction B:** The incident already showed the risk. The session stopped at event 74 with no `run_completed`. We do not know if it stopped intentionally or by timeout/connection drop. If it stopped by timeout, the next session might not stop in the same place. Structural guarantees are always preferred over honor-system constraints when the downside (code written to a wrong branch) is recoverable but costly.
 
-**Against Direction C:** Modifying `coding-task-workflow-agentic` for a use case it was not designed for violates the "make illegal states unrepresentable" principle. It is better to use the right tool than to add a mode switch to the wrong tool.
+**Against Direction C:** Modifying `wr.coding-task` for a use case it was not designed for violates the "make illegal states unrepresentable" principle. It is better to use the right tool than to add a mode switch to the wrong tool.
 
 ---
 
@@ -256,7 +256,7 @@ Modify `coding-task-workflow-agentic` to support a `discoveryMode` context varia
 #### Recommendation
 
 For a discovery-only task (no code, just a design document):
-- **Use `wr.discovery`**, not `coding-task-workflow-agentic`
+- **Use `wr.discovery`**, not `wr.coding-task`
 - Add a second trigger entry to `triggers.yml` with a unique `id` and `workflowId: wr.discovery`
 - The daemon's trigger-store.ts and trigger-router.ts already support multiple triggers with different workflowIds -- no code change required
 
@@ -266,7 +266,7 @@ For a discovery-only task (no code, just a design document):
 triggers:
   - id: test-task
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /Users/etienneb/git/personal/workrail
     goal: "Add the evidenceFrom field to AssessmentDimension..."
     concurrencyMode: parallel
@@ -287,13 +287,13 @@ triggers:
 
 The caller must send the correct `triggerId` (`discovery-task` vs `test-task`) when firing the webhook.
 
-#### Why coding-task-workflow-agentic cannot be trusted in discovery mode
+#### Why wr.coding-task cannot be trusted in discovery mode
 
-`coding-task-workflow-agentic` has no structural stop before phase-6 (Implement Slice-by-Slice). For Small tasks, phase-5 (Small Task Fast Path) explicitly requires writing code. For Medium/Large tasks, the design pipeline (phases 0-4) produces good design work, then phase-6 writes code. The only protection against code-writing is the agent choosing to stop based on goal text -- an honor-system constraint that can fail under context window pressure.
+`wr.coding-task` has no structural stop before phase-6 (Implement Slice-by-Slice). For Small tasks, phase-5 (Small Task Fast Path) explicitly requires writing code. For Medium/Large tasks, the design pipeline (phases 0-4) produces good design work, then phase-6 writes code. The only protection against code-writing is the agent choosing to stop based on goal text -- an honor-system constraint that can fail under context window pressure.
 
 The prior session stopped at event 74 (likely after phase-4, before phase-6) -- but we cannot confirm whether this was agent judgment or a connection drop. With `wr.discovery`, the question is irrelevant: there are no phases 6-7 to reach.
 
-#### What phases coding-task-workflow-agentic skips for Small tasks
+#### What phases wr.coding-task skips for Small tasks
 
 - Skips: phase-1a (hypothesis), phase-1b (design), phase-1c (challenge), phase-2 (design review), phase-3 (plan), phase-3b (spec), phase-4 (plan audit), phase-6 (implementation), phase-7 (verification)
 - Runs: phase-0 (classify) and phase-5 (Small Task Fast Path -- **writes code**)
@@ -302,24 +302,24 @@ For Medium/Large tasks, all phases run in sequence, including phase-6 (implement
 
 #### Would wr.discovery have been a better choice?
 
-Yes, without qualification. `wr.discovery` was designed for exactly this use case. Its metaGuidance states: "should not implement production code." All paths end with a recommendation memo, prototype spec, or research plan. It uses the same `tension-driven-design` routine as `coding-task-workflow-agentic` phases 1b, so design quality is equivalent.
+Yes, without qualification. `wr.discovery` was designed for exactly this use case. Its metaGuidance states: "should not implement production code." All paths end with a recommendation memo, prototype spec, or research plan. It uses the same `tension-driven-design` routine as `wr.coding-task` phases 1b, so design quality is equivalent.
 
 #### How to configure triggers.yml for discovery vs implementation
 
-- **Implementation tasks**: `workflowId: coding-task-workflow-agentic` -- use the existing `test-task` trigger or rename it
+- **Implementation tasks**: `workflowId: wr.coding-task` -- use the existing `test-task` trigger or rename it
 - **Discovery tasks**: `workflowId: wr.discovery` -- add a new trigger entry (e.g., `id: discovery-task`)
 - Route by sending the correct `triggerId` in the webhook
 
 #### Workflow selection strategy when the daemon has ONE workflowId configured
 
-The current `test-task` trigger always dispatches to `coding-task-workflow-agentic`. For discovery tasks, either:
+The current `test-task` trigger always dispatches to `wr.coding-task`. For discovery tasks, either:
 1. Add a second trigger entry (preferred -- structural routing, zero code change)
 2. Temporarily change the trigger's `workflowId` to `wr.discovery` for discovery sessions, then change it back (workable but manual and error-prone)
 3. Use console AUTO dispatch and set `workflowId: wr.discovery` explicitly in the dispatch request (for console-dispatched sessions only)
 
 Option 1 is the right answer.
 
-### Strongest alternative: Direction C (add discoveryMode flag to coding-task-workflow-agentic)
+### Strongest alternative: Direction C (add discoveryMode flag to wr.coding-task)
 
 If the two-trigger routing were unavailable (it is not), adding `runCondition: { var: "discoveryMode", not_equals: true }` to phases 6-7 would also provide structural enforcement. Loses: workflow cleanliness, YAGNI compliance, reversibility. Not recommended when Direction A is available.
 

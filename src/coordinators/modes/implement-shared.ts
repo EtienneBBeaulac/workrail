@@ -52,7 +52,7 @@ export async function runReviewAndVerdictCycle(
   deps.stderr(`[review-cycle] Spawning review session (iteration=${iteration}): ${reviewGoal.slice(0, 80)}`);
 
   const reviewSpawnResult = await deps.spawnSession(
-    'mr-review-workflow-agentic',
+    'wr.mr-review',
     reviewGoal,
     opts.workspace,
     { prUrl },
@@ -147,7 +147,7 @@ export async function runReviewAndVerdictCycle(
 
       const fixGoal = `Fix review findings: ${findings.findingSummaries.slice(0, 3).join('; ')}`;
       const fixSpawnResult = await deps.spawnSession(
-        'coding-task-workflow-agentic',
+        'wr.coding-task',
         fixGoal,
         opts.workspace,
         { prUrl, findings: findings.findingSummaries },
@@ -199,9 +199,9 @@ export async function runReviewAndVerdictCycle(
  *
  * Steps:
  * 1. Dispatch audit workflow -- routes based on findingCategory when available:
- *      - architecture findings -> architecture-scalability-audit
- *      - all others (correctness, security, ux, performance, testing, style, or unknown) -> production-readiness-audit
- * 2. Re-review with mr-review-workflow-agentic
+ *      - architecture findings -> wr.architecture-scalability-audit
+ *      - all others (correctness, security, ux, performance, testing, style, or unknown) -> wr.production-readiness-audit
+ * 2. Re-review with wr.mr-review
  * 3. If still Critical/blocking: post to Human Outbox, do NOT auto-merge
  *
  * @param findings - Raw findings from the verdict artifact, if available.
@@ -221,11 +221,11 @@ export async function runAuditChain(
   if (auditCutoff) return auditCutoff;
 
   // Route to the appropriate audit workflow based on findingCategory.
-  // Architecture findings dispatch architecture-scalability-audit; all others use production-readiness-audit.
-  // When findings is absent (keyword-scan path), safe default production-readiness-audit applies.
+  // Architecture findings dispatch wr.architecture-scalability-audit; all others use wr.production-readiness-audit.
+  // When findings is absent (keyword-scan path), safe default wr.production-readiness-audit applies.
   const auditWorkflow = findings?.some((f) => f.findingCategory === 'architecture')
-    ? 'architecture-scalability-audit'
-    : 'production-readiness-audit';
+    ? 'wr.architecture-scalability-audit'
+    : 'wr.production-readiness-audit';
 
   const auditSpawnResult = await deps.spawnSession(
     auditWorkflow,
@@ -294,7 +294,7 @@ export async function runAuditChain(
   if (reReviewCutoff) return reReviewCutoff;
 
   const reReviewSpawnResult = await deps.spawnSession(
-    'mr-review-workflow-agentic',
+    'wr.mr-review',
     `Re-review after audit: ${prUrl}`,
     opts.workspace,
     { prUrl, auditComplete: true },

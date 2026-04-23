@@ -197,8 +197,8 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
       // Regression: when workrail runs from its own source repo, the project
       // path equals the bundled workflows directory. Both sources register the
       // same workflow files. The resolution layer must keep kind:'bundled'.
-      const bundledWf = wf(def('coding-task-workflow-agentic'), createBundledSource());
-      const projectWf = wf(def('coding-task-workflow-agentic'), createProjectDirectorySource('/path/to/workrail/workflows'));
+      const bundledWf = wf(def('wr.coding-task'), createBundledSource());
+      const projectWf = wf(def('wr.coding-task'), createProjectDirectorySource('/path/to/workrail/workflows'));
 
       const candidates = [
         { sourceRef: 0 as SourceRef, workflows: [bundledWf] },
@@ -1140,16 +1140,29 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
   describe('Fixture-vs-File Drift Detection', () => {
     it('36. Lifecycle fixture definitions match bundled files', async () => {
       const { testSessionPersistenceFixture } = await import('../lifecycle/fixtures/test-session-persistence.fixture.js');
-      const { workflowDiagnoseEnvironmentFixture } = await import('../lifecycle/fixtures/workflow-diagnose-environment.fixture.js');
+      const { workflowDiagnoseEnvironmentFixture } = await import('../lifecycle/fixtures/wr.diagnose-environment.fixture.js');
       const { testArtifactLoopControlFixture } = await import('../lifecycle/fixtures/test-artifact-loop-control.fixture.js');
+
+      const workflowsDir = path.join(__dirname, '../../workflows');
+      const allFiles = await fs.readdir(workflowsDir);
+      const jsonFiles = allFiles.filter((f) => f.endsWith('.json') && !f.startsWith('.'));
+
+      // Build a map from workflow id -> file content (scans all workflow JSON files)
+      const idToContent = new Map<string, unknown>();
+      for (const file of jsonFiles) {
+        const content = JSON.parse(await fs.readFile(path.join(workflowsDir, file), 'utf-8'));
+        if (content.id) {
+          idToContent.set(content.id, content);
+        }
+      }
 
       for (const fixture of [
         testSessionPersistenceFixture,
         workflowDiagnoseEnvironmentFixture,
         testArtifactLoopControlFixture,
       ]) {
-        const filePath = path.join(__dirname, '../../workflows', `${fixture.workflowId}.json`);
-        const fileContent = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+        const fileContent = idToContent.get(fixture.workflowId);
+        expect(fileContent).toBeDefined();
 
         // Deep structural comparison — ignores key ordering and formatting differences
         expect(fixture.definition).toEqual(fileContent);

@@ -30,9 +30,9 @@ const NO_PROJECT_BINDINGS = new Map<string, string>();
 describe('resolveBindingsPass — raw prompt strings', () => {
   it('replaces a single token with the extensionPoint default', () => {
     const steps = [makeStep('s1', { prompt: 'Delegate to {{wr.bindings.design_review}}.' })];
-    const result = resolveBindingsPass(steps, [ep('design_review', 'routine-design-review')], NO_PROJECT_BINDINGS);
+    const result = resolveBindingsPass(steps, [ep('design_review', 'wr.routine-design-review')], NO_PROJECT_BINDINGS);
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap().steps[0].prompt).toBe('Delegate to routine-design-review.');
+    expect(result._unsafeUnwrap().steps[0].prompt).toBe('Delegate to wr.routine-design-review.');
   });
 
   it('replaces multiple tokens in the same prompt', () => {
@@ -48,7 +48,7 @@ describe('resolveBindingsPass — raw prompt strings', () => {
   it('project binding override takes precedence over extensionPoint default', () => {
     const steps = [makeStep('s1', { prompt: 'Delegate to {{wr.bindings.design_review}}.' })];
     const projectBindings = new Map([['design_review', 'my-team-design-review']]);
-    const result = resolveBindingsPass(steps, [ep('design_review', 'routine-design-review')], projectBindings);
+    const result = resolveBindingsPass(steps, [ep('design_review', 'wr.routine-design-review')], projectBindings);
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap().steps[0].prompt).toBe('Delegate to my-team-design-review.');
   });
@@ -69,9 +69,9 @@ describe('resolveBindingsPass — raw prompt strings', () => {
 
   it('captures the resolved slotId in the resolvedBindings manifest', () => {
     const steps = [makeStep('s1', { prompt: 'Delegate to {{wr.bindings.design_review}}.' })];
-    const result = resolveBindingsPass(steps, [ep('design_review', 'routine-design-review')], NO_PROJECT_BINDINGS);
+    const result = resolveBindingsPass(steps, [ep('design_review', 'wr.routine-design-review')], NO_PROJECT_BINDINGS);
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap().resolvedBindings.get('design_review')).toBe('routine-design-review');
+    expect(result._unsafeUnwrap().resolvedBindings.get('design_review')).toBe('wr.routine-design-review');
   });
 });
 
@@ -86,10 +86,10 @@ describe('resolveBindingsPass — promptBlocks string values', () => {
         goal: 'Delegate to {{wr.bindings.design_review}} for the review phase.',
       },
     })];
-    const result = resolveBindingsPass(steps, [ep('design_review', 'routine-design-review')], NO_PROJECT_BINDINGS);
+    const result = resolveBindingsPass(steps, [ep('design_review', 'wr.routine-design-review')], NO_PROJECT_BINDINGS);
     expect(result.isOk()).toBe(true);
     const blocks = result._unsafeUnwrap().steps[0].promptBlocks;
-    expect(blocks?.goal).toBe('Delegate to routine-design-review for the review phase.');
+    expect(blocks?.goal).toBe('Delegate to wr.routine-design-review for the review phase.');
   });
 
   it('replaces token in promptBlocks.constraints string values', () => {
@@ -98,10 +98,10 @@ describe('resolveBindingsPass — promptBlocks string values', () => {
         constraints: ['Use {{wr.bindings.design_review}} for review.', 'No unilateral decisions.'],
       },
     })];
-    const result = resolveBindingsPass(steps, [ep('design_review', 'routine-design-review')], NO_PROJECT_BINDINGS);
+    const result = resolveBindingsPass(steps, [ep('design_review', 'wr.routine-design-review')], NO_PROJECT_BINDINGS);
     expect(result.isOk()).toBe(true);
     const blocks = result._unsafeUnwrap().steps[0].promptBlocks;
-    expect((blocks?.constraints as string[])[0]).toBe('Use routine-design-review for review.');
+    expect((blocks?.constraints as string[])[0]).toBe('Use wr.routine-design-review for review.');
     expect((blocks?.constraints as string[])[1]).toBe('No unilateral decisions.');
   });
 
@@ -111,10 +111,10 @@ describe('resolveBindingsPass — promptBlocks string values', () => {
         outputRequired: { reviewBy: 'Use {{wr.bindings.design_review}}' },
       },
     })];
-    const result = resolveBindingsPass(steps, [ep('design_review', 'routine-design-review')], NO_PROJECT_BINDINGS);
+    const result = resolveBindingsPass(steps, [ep('design_review', 'wr.routine-design-review')], NO_PROJECT_BINDINGS);
     expect(result.isOk()).toBe(true);
     const blocks = result._unsafeUnwrap().steps[0].promptBlocks;
-    expect(blocks?.outputRequired?.['reviewBy']).toBe('Use routine-design-review');
+    expect(blocks?.outputRequired?.['reviewBy']).toBe('Use wr.routine-design-review');
   });
 
   it('leaves PromptPart arrays unchanged (not string PromptValues)', () => {
@@ -152,13 +152,13 @@ describe('resolveBindingsPass — loop body traversal', () => {
 
     const result = resolveBindingsPass(
       [loopStep],
-      [ep('final_verification', 'routine-final-verification')],
+      [ep('final_verification', 'wr.routine-final-verification')],
       NO_PROJECT_BINDINGS,
     );
     expect(result.isOk()).toBe(true);
     const resolvedLoop = result._unsafeUnwrap().steps[0] as LoopStepDefinition;
     const resolvedBody = resolvedLoop.body as WorkflowStepDefinition[];
-    expect(resolvedBody[0].prompt).toBe('Delegate to routine-final-verification.');
+    expect(resolvedBody[0].prompt).toBe('Delegate to wr.routine-final-verification.');
   });
 
   it('string-body loops are not traversed (the referenced step is in the top-level array)', () => {
@@ -175,12 +175,12 @@ describe('resolveBindingsPass — loop body traversal', () => {
 
     const result = resolveBindingsPass(
       [referencedStep, loopStep],
-      [ep('design_review', 'routine-design-review')],
+      [ep('design_review', 'wr.routine-design-review')],
       NO_PROJECT_BINDINGS,
     );
     expect(result.isOk()).toBe(true);
     // The referenced step IS in the top-level array and gets resolved
-    expect(result._unsafeUnwrap().steps[0].prompt).toBe('Delegate to routine-design-review.');
+    expect(result._unsafeUnwrap().steps[0].prompt).toBe('Delegate to wr.routine-design-review.');
   });
 });
 

@@ -41,7 +41,7 @@ function makeSession(
   const defaults: ConsoleSessionSummary = {
     sessionId: overrides.sessionId,
     sessionTitle: null,
-    workflowId: 'coding-task-workflow-agentic',
+    workflowId: 'wr.coding-task',
     workflowName: null,
     workflowHash: null,
     runId: 'run-1',
@@ -362,7 +362,7 @@ describe('executeWorktrainOverviewCommand -- title resolution', () => {
         sessionId: 'sess_t3',
         sessionTitle: null,
         workflowName: null,
-        workflowId: 'coding-task-workflow-agentic',
+        workflowId: 'wr.coding-task',
         status: 'in_progress',
         lastModifiedMs: NOW_MS - 5 * 60_000,
       }),
@@ -370,7 +370,7 @@ describe('executeWorktrainOverviewCommand -- title resolution', () => {
     const { deps, lines } = makeDeps(makeFakeConsoleService(sessions));
     await executeWorktrainOverviewCommand(deps);
 
-    expect(lines.some((l) => l.includes('coding-task-workflow-agentic'))).toBe(true);
+    expect(lines.some((l) => l.includes('wr.coding-task'))).toBe(true);
   });
 
   it('falls back to truncated sessionId when all title fields are null', async () => {

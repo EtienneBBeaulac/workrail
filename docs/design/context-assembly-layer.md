@@ -98,7 +98,7 @@ These are all loaded in parallel (`Promise.all`) before the `Agent` is construct
 ### Current coordinator: what `pr-review.ts` spawns
 
 `runPrReviewCoordinator` -> `spawnSession(workflowId, goal, workspace)` where:
-- `workflowId`: `'mr-review-workflow-agentic'`
+- `workflowId`: `'wr.mr-review'`
 - `goal`: `'Review PR #N "title" before merge'`
 - `workspace`: absolute path
 
@@ -522,7 +522,7 @@ A new `src/context-assembly/` module containing:
    const bundle = deps.contextAssembler
      ? await deps.contextAssembler.assemble({ kind: 'pr_review', prNumber: pr.number, workspacePath: opts.workspace, payloadBody: pr.description })
      : undefined;
-   const spawnResult = await deps.spawnSession('mr-review-workflow-agentic', goal, opts.workspace, bundle);
+   const spawnResult = await deps.spawnSession('wr.mr-review', goal, opts.workspace, bundle);
    ```
 
 #### Why this design was selected

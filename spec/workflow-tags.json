@@ -11,8 +11,8 @@
         "converting code between platforms or languages"
       ],
       "examples": [
-        "coding-task-workflow-agentic",
-        "cross-platform-code-conversion"
+        "wr.coding-task",
+        "wr.cross-platform-code-conversion"
       ]
     },
     {
@@ -24,8 +24,8 @@
         "checking architecture for scalability issues"
       ],
       "examples": [
-        "mr-review-workflow-agentic",
-        "production-readiness-audit"
+        "wr.mr-review",
+        "wr.production-readiness-audit"
       ]
     },
     {
@@ -36,8 +36,8 @@
         "diagnosing tool, environment, or MCP server issues"
       ],
       "examples": [
-        "bug-investigation-agentic",
-        "workflow-diagnose-environment"
+        "wr.bug-investigation",
+        "wr.diagnose-environment"
       ]
     },
     {
@@ -50,7 +50,7 @@
         "shaping a fuzzy problem into a bounded, implementation-ready pitch before coding begins"
       ],
       "examples": [
-        "ui-ux-design-workflow",
+        "wr.ui-ux-design",
         "wr.discovery",
         "wr.shaping"
       ]
@@ -64,8 +64,8 @@
         "writing documentation for a single bounded component or concept"
       ],
       "examples": [
-        "document-creation-workflow",
-        "documentation-update-workflow"
+        "wr.document-creation",
+        "wr.documentation-update"
       ]
     },
     {
@@ -77,7 +77,7 @@
         "generating test cases from ticket requirements"
       ],
       "examples": [
-        "adaptive-ticket-creation",
+        "wr.adaptive-ticket-creation",
         "ticket-grooming"
       ]
     },
@@ -90,8 +90,8 @@
         "making a major personal decision like where to relocate"
       ],
       "examples": [
-        "personal-learning-materials-creation-branched",
-        "presentation-creation"
+        "wr.personal-learning-materials",
+        "wr.presentation-creation"
       ]
     },
     {
@@ -104,8 +104,8 @@
         "running a final verification pass"
       ],
       "examples": [
-        "routine-context-gathering",
-        "routine-hypothesis-challenge"
+        "wr.routine-context-gathering",
+        "wr.routine-hypothesis-challenge"
       ]
     },
     {
@@ -116,144 +116,144 @@
         "modernizing or updating an existing workflow"
       ],
       "examples": [
-        "workflow-for-workflows"
+        "wr.workflow-for-workflows"
       ]
     }
   ],
   "workflows": {
-    "adaptive-ticket-creation": {
+    "wr.adaptive-ticket-creation": {
       "tags": [
         "tickets"
       ]
     },
-    "architecture-scalability-audit": {
+    "wr.architecture-scalability-audit": {
       "tags": [
         "review_audit"
       ]
     },
-    "bug-investigation-agentic": {
+    "wr.bug-investigation": {
       "tags": [
         "investigation"
       ]
     },
-    "coding-task-workflow-agentic": {
+    "wr.coding-task": {
       "tags": [
         "coding"
       ]
     },
-    "cross-platform-code-conversion": {
+    "wr.cross-platform-code-conversion": {
       "tags": [
         "coding"
       ]
     },
-    "document-creation-workflow": {
+    "wr.document-creation": {
       "tags": [
         "documentation"
       ]
     },
-    "documentation-update-workflow": {
+    "wr.documentation-update": {
       "tags": [
         "documentation"
       ]
     },
-    "intelligent-test-case-generation": {
+    "wr.intelligent-test-case-generation": {
       "tags": [
         "tickets",
         "coding"
       ]
     },
-    "mr-review-workflow-agentic": {
+    "wr.mr-review": {
       "tags": [
         "review_audit"
       ]
     },
-    "personal-learning-course-design": {
+    "wr.personal-learning-course-design": {
       "tags": [
         "learning"
       ]
     },
-    "personal-learning-materials-creation-branched": {
+    "wr.personal-learning-materials": {
       "tags": [
         "learning"
       ]
     },
-    "presentation-creation": {
+    "wr.presentation-creation": {
       "tags": [
         "learning"
       ]
     },
-    "production-readiness-audit": {
+    "wr.production-readiness-audit": {
       "tags": [
         "review_audit"
       ]
     },
-    "relocation-workflow-us": {
+    "wr.relocation-us": {
       "tags": [
         "learning"
       ]
     },
-    "routine-context-gathering": {
+    "wr.routine-context-gathering": {
       "tags": [
         "routines"
       ]
     },
-    "routine-design-review": {
+    "wr.routine-design-review": {
       "tags": [
         "routines"
       ]
     },
-    "routine-execution-simulation": {
+    "wr.routine-execution-simulation": {
       "tags": [
         "routines"
       ]
     },
-    "routine-feature-implementation": {
+    "wr.routine-feature-implementation": {
       "tags": [
         "routines",
         "coding"
       ]
     },
-    "routine-final-verification": {
+    "wr.routine-final-verification": {
       "tags": [
         "routines"
       ]
     },
-    "routine-hypothesis-challenge": {
+    "wr.routine-hypothesis-challenge": {
       "tags": [
         "routines"
       ]
     },
-    "routine-ideation": {
+    "wr.routine-ideation": {
       "tags": [
         "routines"
       ]
     },
-    "routine-parallel-work-partitioning": {
+    "wr.routine-parallel-work-partitioning": {
       "tags": [
         "routines"
       ]
     },
-    "routine-philosophy-alignment": {
+    "wr.routine-philosophy-alignment": {
       "tags": [
         "routines"
       ]
     },
-    "routine-plan-analysis": {
+    "wr.routine-plan-analysis": {
       "tags": [
         "routines"
       ]
     },
-    "routine-plan-generation": {
+    "wr.routine-plan-generation": {
       "tags": [
         "routines"
       ]
     },
-    "routine-tension-driven-design": {
+    "wr.routine-tension-driven-design": {
       "tags": [
         "routines"
       ]
     },
-    "scoped-documentation-workflow": {
+    "wr.scoped-documentation": {
       "tags": [
         "documentation"
       ]
@@ -263,17 +263,17 @@
         "tickets"
       ]
     },
-    "ui-ux-design-workflow": {
+    "wr.ui-ux-design": {
       "tags": [
         "design"
       ]
     },
-    "workflow-diagnose-environment": {
+    "wr.diagnose-environment": {
       "tags": [
         "investigation"
       ]
     },
-    "workflow-for-workflows": {
+    "wr.workflow-for-workflows": {
       "tags": [
         "authoring"
       ]
@@ -284,7 +284,7 @@
         "investigation"
       ]
     },
-    "classify-task-workflow": {
+    "wr.classify-task": {
       "tags": [
         "routines",
         "coding"

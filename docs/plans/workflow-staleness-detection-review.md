@@ -4,7 +4,7 @@
 
 | Tradeoff | Verdict | Hidden Assumption | Fails If |
 |---|---|---|---|
-| Bootstrap: existing workflows show `possible` | Acceptable | Teams will eventually run workflow-for-workflows on important workflows | `possible` shown as equally urgent as `likely` |
+| Bootstrap: existing workflows show `possible` | Acceptable | Teams will eventually run wr.workflow-for-workflows on important workflows | `possible` shown as equally urgent as `likely` |
 | External workflows never get stamped | Acceptable | Stamp is optional, no workflow breaks | Same as above |
 | Spec granularity: one update flags all workflows | Acceptable with mitigation | Spec has a changelog per version increment | Spec version bumps silently with no explanation |
 
@@ -15,7 +15,7 @@
 | Failure Mode | Risk | Coverage | Missing Mitigation |
 |---|---|---|---|
 | Spec version not bumped when rules change | **High** | Not in code — process fix needed | Add explicit trigger to `authoring-spec.json` `changeProtocol` |
-| Stamp committed locally but not pushed | Medium | Phase 7 handoff note needed | Note in workflow-for-workflows Phase 7: "stamp must be committed" |
+| Stamp committed locally but not pushed | Medium | Phase 7 handoff note needed | Note in wr.workflow-for-workflows Phase 7: "stamp must be committed" |
 | `possible` becomes wallpaper | Medium | Three-tier design helps | Ensure `possible` and `likely` are visually distinct in console |
 
 **Highest-risk failure mode: spec version not bumped.** This would make the entire system unreliable. Process fix required.
@@ -42,14 +42,14 @@
 **Yellow — No per-version changelog in authoring spec**
 The `reason` string in the staleness output must reference what changed between spec versions for the signal to be actionable. Currently there's no changelog. Must be added when version increments.
 
-**Yellow — workflow-for-workflows Phase 7 doesn't mention the stamp**
+**Yellow — wr.workflow-for-workflows Phase 7 doesn't mention the stamp**
 The Phase 7 handoff step should explicitly tell the agent: "the `validatedAgainstSpecVersion` stamp was written to the workflow file — commit it for the staleness signal to take effect." Without this, teams may miss it.
 
 ## Recommended Revisions
 
 1. Add to `authoring-spec.json` `changeProtocol`: "Increment `version` when any required-level rule is added, removed, or materially changed. Add a `changelog` entry for the new version."
 2. Add `changelog` array to `authoring-spec.json` schema structure — each entry: `{ version, date, summary, affectedRules }`.
-3. Add stamp reminder to workflow-for-workflows Phase 7 handoff step.
+3. Add stamp reminder to wr.workflow-for-workflows Phase 7 handoff step.
 4. Ensure console renders `likely` more prominently than `possible` (not just two shades of the same badge).
 
 ## Residual Concerns

@@ -59,7 +59,7 @@ Rationale: The goal was a solution-statement. The risk is designing the wrong in
 **What spawn/await enable today:**
 `worktrain spawn` prints a session handle to stdout. `worktrain await` blocks until sessions complete and prints structured JSON results. These two commands are the building blocks for a coordinator script.
 
-**The MR review workflow (mr-review-workflow-agentic):**
+**The MR review workflow (wr.mr-review):**
 - 8+ phases: locate/bound/classify, hypothesis, freeze fact packet, reviewer family bundle (parallel), contradiction resolution, adversarial validation, final recommendation, handoff
 - Produces: severity-graded findings (Critical/Major/Minor/Nit), recommendation (approve/request changes/needs discussion), confidence band, coverage ledger, ready-to-post MR comments
 - Output lives in `notesMarkdown` and context variables -- no automatic post to GitHub
@@ -154,7 +154,7 @@ Not every PR review ends cleanly. The coordinator must surface decision points w
 ```
 $ worktrain review 47
 Reviewing PR #47: "feat(engine): add OAuth refresh token rotation"
-Session started: sess_4cd0b579 (mr-review-workflow-agentic)
+Session started: sess_4cd0b579 (wr.mr-review)
 Run 'worktrain logs --follow --session sess_4cd0b579' to watch progress.
 Run 'worktrain inbox' when done.
 ^  Takes ~20-30 min. You can do other things.
@@ -411,7 +411,7 @@ worktrain run pr-review 47
 ```
 PR #47: feat(engine): add OAuth refresh token rotation  (3 files, +142/-18)
 Base: main  merge-base: abc1234
-Session: sess_4cd0b579  (mr-review-workflow-agentic)
+Session: sess_4cd0b579  (wr.mr-review)
 
 Watch raw events: worktrain logs --follow --session sess_4cd0b579
 

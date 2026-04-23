@@ -407,7 +407,7 @@ When `isComplete: true` is returned, summarize all work done across the workflow
 After creating this file, the agent becomes available via the Agent tool:
 
 ```
-Agent(subagent_type="workrail-executor", prompt="Start the bug-investigation-agentic workflow...")
+Agent(subagent_type="workrail-executor", prompt="Start the wr.bug-investigation workflow...")
 ```
 
 ### Cursor

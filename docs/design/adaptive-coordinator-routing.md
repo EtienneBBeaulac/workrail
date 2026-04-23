@@ -22,7 +22,7 @@
 
 **Chosen path:** `design_first`
 
-**Rationale:** The goal was stated as a solution (a coordinator with a routing/classification layer). The risk is designing the wrong routing mechanism. The landscape is well-understood from existing code (`pr-review.ts`, `classify-task-workflow.json`). The dominant risk is not lack of knowledge -- it is solving the wrong subproblem (e.g., treating all routing as LLM classification when static heuristics cover most cases, or treating one monolithic script as the right shape when decomposition into per-mode coordinators may be cleaner).
+**Rationale:** The goal was stated as a solution (a coordinator with a routing/classification layer). The risk is designing the wrong routing mechanism. The landscape is well-understood from existing code (`pr-review.ts`, `wr.classify-task.json`). The dominant risk is not lack of knowledge -- it is solving the wrong subproblem (e.g., treating all routing as LLM classification when static heuristics cover most cases, or treating one monolithic script as the right shape when decomposition into per-mode coordinators may be cleaner).
 
 ---
 
@@ -58,12 +58,12 @@ If a chat rewind occurs: the notes and context variables survive; this file may 
 
 **What exists:**
 - `src/coordinators/pr-review.ts` -- 1462-line hardcoded coordinator for PR review. Establishes the `CoordinatorDeps` injectable interface (16 methods), `spawnSession`/`awaitSessions`/`getAgentResult` pattern, fix-agent loop with escalation-first failure policy.
-- `workflows/classify-task-workflow.json` -- EXISTS as of v3.40.0 (contrary to Apr 15 backlog entry that listed it as missing). Single LLM step, no tools, outputs 7 variables including `recommendedPipeline` (ordered workflow ID array with decision rules already encoded).
+- `workflows/wr.classify-task.json` -- EXISTS as of v3.40.0 (contrary to Apr 15 backlog entry that listed it as missing). Single LLM step, no tools, outputs 7 variables including `recommendedPipeline` (ordered workflow ID array with decision rules already encoded).
 - `src/cli-worktrain.ts` -- wires `worktrain run pr-review` subcommand. No `worktrain run pipeline` or adaptive coordinator command exists yet.
 - `src/trigger/types.ts` -- `TriggerDefinition` has `workflowId`, `goal`, `goalTemplate`, `contextMapping`, `agentConfig`. No `pipelineMode` field.
-- Three-Workflow Pipeline decision (Apr 18): `wr.discovery -> wr.shaping -> coding-task-workflow-agentic`. Phase 0.5 in coding-task detects pitch.md and sets `solutionFixed=true` to skip design phases.
+- Three-Workflow Pipeline decision (Apr 18): `wr.discovery -> wr.shaping -> wr.coding-task`. Phase 0.5 in coding-task detects pitch.md and sets `solutionFixed=true` to skip design phases.
 - `wr.shaping` and `wr.discovery` workflows both exist as of v3.40.0.
-- `coding-task-workflow-agentic` Phase 0.5 detects upstream context (pitch.md, BRD, PRD, etc.).
+- `wr.coding-task` Phase 0.5 detects upstream context (pitch.md, BRD, PRD, etc.).
 
 **The Apr 15 backlog full pipeline DAG** (still relevant design intent):
 ```
@@ -91,13 +91,13 @@ trigger
 
 ### Contradictions and tensions
 
-- **classify-task-workflow is listed as NOT YET BUILT in the Apr 15 backlog** but the file `workflows/classify-task-workflow.json` exists today (v3.40.0, Apr 19). This is resolved: it was built between Apr 15 and Apr 19.
+- **wr.classify-task is listed as NOT YET BUILT in the Apr 15 backlog** but the file `workflows/wr.classify-task.json` exists today (v3.40.0, Apr 19). This is resolved: it was built between Apr 15 and Apr 19.
 - **"Always run classify-task first"** (Apr 15 backlog) vs. **"Static heuristics for well-known cases"** (primary uncertainty). The Apr 15 backlog says "always" but this was written before Phase 0.5 upstream context detection was built. With Phase 0.5, many routing decisions can be made statically.
 - **`recommendedPipeline` from classify-task** includes `wr.discovery` for Medium/Large tasks, but the Three-Workflow Pipeline decision treats `wr.discovery` as optional. The coordinator must decide: use classify-task's `recommendedPipeline` verbatim, or treat it as a hint that can be overridden by static signals (e.g., pitch.md already present = skip discovery even if classify says Medium)?
 
 ### Evidence gaps
 
-1. Does `spawn_agent` (the in-workflow tool) return the `recommendedPipeline` output variable from `classify-task-workflow`? The backlog note says `spawn_agent` currently does NOT return `artifacts` (limitation #5 in v3.40.0 current state). This means the coordinator script cannot use `spawn_agent` to run classify-task and read output -- it must use `spawnSession` + `getAgentResult` + parse the notes, just as `pr-review.ts` does for verdict artifacts.
+1. Does `spawn_agent` (the in-workflow tool) return the `recommendedPipeline` output variable from `wr.classify-task`? The backlog note says `spawn_agent` currently does NOT return `artifacts` (limitation #5 in v3.40.0 current state). This means the coordinator script cannot use `spawn_agent` to run classify-task and read output -- it must use `spawnSession` + `getAgentResult` + parse the notes, just as `pr-review.ts` does for verdict artifacts.
 2. No existing test harness for a multi-mode coordinator. `pr-review.ts` tests exist but only cover the review pipeline.
 3. The `worktrain-spawn.ts` CLI wiring for `spawnSession` is the only proven path to dispatch sessions from a coordinator script. No other dispatch mechanism has been tested.
 
@@ -122,7 +122,7 @@ trigger
 
 3. **Single coordinator file vs per-mode decomposition**: `pr-review.ts` is 1462 lines for one mode. A monolithic adaptive coordinator handling all modes risks becoming unmaintainable. Per-mode coordinator functions (each independently testable) with a thin routing dispatcher is a cleaner architecture -- but introduces coordination between files.
 
-4. **`recommendedPipeline` verbatim vs as a hint**: classify-task-workflow encodes pipeline selection rules. If the coordinator uses these verbatim, it cannot apply static overrides (e.g., pitch.md present -> skip discovery). If it treats them as hints, it re-implements routing logic and classify-task's rules become advisory only.
+4. **`recommendedPipeline` verbatim vs as a hint**: wr.classify-task encodes pipeline selection rules. If the coordinator uses these verbatim, it cannot apply static overrides (e.g., pitch.md present -> skip discovery). If it treats them as hints, it re-implements routing logic and classify-task's rules become advisory only.
 
 5. **Phase 0.5 vs coordinator routing for upstream context**: coding-task already auto-detects pitch.md. So the coordinator's routing decision for "skip wr.shaping?" partially duplicates Phase 0.5's detection. The coordinator should route based on what phases to _spawn_, not what the coding workflow will internally skip -- but these can diverge (coordinator spawns shaping but coding-task's Phase 0.5 would have skipped it anyway).
 
@@ -130,8 +130,8 @@ trigger
 
 - [ ] A `worktrain run pipeline --task "fix the race condition in auth.ts"` command routes to the correct pipeline mode and logs the routing decision before spawning any sessions
 - [ ] A task with `#123` or `PR #123` in the goal routes to REVIEW_ONLY without spawning discovery or shaping sessions
-- [ ] A task with `pitch.md` present in the workspace routes to IMPLEMENT (coding-task-workflow-agentic only)
-- [ ] An ambiguous task (no static signal) routes to classify-task-workflow session, parses `recommendedPipeline`, and executes that pipeline
+- [ ] A task with `pitch.md` present in the workspace routes to IMPLEMENT (wr.coding-task only)
+- [ ] An ambiguous task (no static signal) routes to wr.classify-task session, parses `recommendedPipeline`, and executes that pipeline
 - [ ] A `dep bump` or `chore:` task routes to QUICK_REVIEW (mr-review only, no arch audit) based on goal text heuristics
 - [ ] Any phase failure produces a `PipelineOutcome` with `escalated: true` and a structured `escalationReason` -- no silent substitution
 - [ ] The `CoordinatorDeps` interface for the adaptive coordinator extends or reuses the existing `CoordinatorDeps` pattern from `pr-review.ts`
@@ -139,8 +139,8 @@ trigger
 
 ### Assumptions not yet verified
 
-1. `classify-task-workflow` can be invoked via `spawnSession` + `awaitSessions` + `getAgentResult` with note parsing (same as pr-review reads verdict artifacts) -- this is assumed based on the spawn_agent artifact limitation
-2. The `recommendedPipeline` text can be reliably parsed from classify-task-workflow's note output using a regex or structured block parser
+1. `wr.classify-task` can be invoked via `spawnSession` + `awaitSessions` + `getAgentResult` with note parsing (same as pr-review reads verdict artifacts) -- this is assumed based on the spawn_agent artifact limitation
+2. The `recommendedPipeline` text can be reliably parsed from wr.classify-task's note output using a regex or structured block parser
 3. A new CLI subcommand `worktrain run pipeline` can be added following the same pattern as `worktrain run pr-review` in `src/cli-worktrain.ts`
 4. Pipeline modes can be named and bounded at design time (not open-ended)
 
@@ -151,17 +151,17 @@ trigger
 ### HMW (How Might We) reframes
 
 - HMW make the pipeline mode explicit in the trigger config so routing is never ambiguous, while still supporting dynamic routing for ad-hoc CLI invocations?
-- HMW use classify-task-workflow's `recommendedPipeline` as the default while allowing static overrides to be applied on top, treating classification as advisory rather than authoritative?
+- HMW use wr.classify-task's `recommendedPipeline` as the default while allowing static overrides to be applied on top, treating classification as advisory rather than authoritative?
 
 ### Primary uncertainty (updated)
 
-Can classify-task-workflow's `recommendedPipeline` output be used as the canonical routing source, with static overrides applied on top for well-known signal patterns (PR number, pitch.md, dep-bump keywords) -- rather than choosing between LLM and heuristics as mutually exclusive?
+Can wr.classify-task's `recommendedPipeline` output be used as the canonical routing source, with static overrides applied on top for well-known signal patterns (PR number, pitch.md, dep-bump keywords) -- rather than choosing between LLM and heuristics as mutually exclusive?
 
 ### Known approaches
 
-1. **classify-task-workflow first** -- always spawn a classification session, parse `recommendedPipeline`, then execute the pipeline. LLM-accurate, adds latency and cost per dispatch.
+1. **wr.classify-task first** -- always spawn a classification session, parse `recommendedPipeline`, then execute the pipeline. LLM-accurate, adds latency and cost per dispatch.
 2. **Static heuristics** -- parse goal text and trigger metadata (PR number present, labels, pitch.md present, explicit pipelineMode flag on trigger). Zero LLM cost, covers well-defined cases.
-3. **Hybrid** -- static heuristics handle high-confidence cases; LLM classification handles ambiguous tasks. `classify-task-workflow` is an optional fast path, not always required.
+3. **Hybrid** -- static heuristics handle high-confidence cases; LLM classification handles ambiguous tasks. `wr.classify-task` is an optional fast path, not always required.
 4. **Explicit `pipelineMode` on trigger** -- add a `pipelineMode` field to `TriggerDefinition` (or as a context variable). Users/triggers declare mode explicitly. Removes ambiguity but requires configuration overhead.
 5. **classify-task advisory + static overrides** -- run classify-task first (small cost, accurate), then apply static override rules on top of `recommendedPipeline` to handle well-known signals. Classify sets the baseline; static rules correct known exceptions.
 
@@ -221,8 +221,8 @@ function routeTask(goal: string, workspace: string): PipelineMode
 **Per-mode pipeline sequences:**
 - `REVIEW_ONLY`: `mr-review-workflow.agentic.v2` -> route by verdict (clean: merge, minor: fix-agent-loop, blocking: escalate)
 - `QUICK_REVIEW`: same as REVIEW_ONLY but `agentConfig: { model: 'haiku-light' }`, no arch audit even if touched
-- `IMPLEMENT`: `coding-task-workflow-agentic` (Phase 0.5 finds pitch.md) -> `mr-review-workflow.agentic.v2` -> merge
-- `FULL`: `wr.discovery` -> `wr.shaping` -> `coding-task-workflow-agentic` -> PR -> `mr-review-workflow.agentic.v2` -> merge
+- `IMPLEMENT`: `wr.coding-task` (Phase 0.5 finds pitch.md) -> `mr-review-workflow.agentic.v2` -> merge
+- `FULL`: `wr.discovery` -> `wr.shaping` -> `wr.coding-task` -> PR -> `mr-review-workflow.agentic.v2` -> merge
 
 **Failure handling:** each phase failure returns a `PipelineOutcome` with `escalated: true` and `escalationReason`. No fallback to simpler pipeline. Same pattern as `PrOutcome` in pr-review.ts.
 
@@ -238,14 +238,14 @@ function routeTask(goal: string, workspace: string): PipelineMode
 
 ---
 
-### Candidate B: classify-task-workflow as authoritative source (pure LLM routing)
+### Candidate B: wr.classify-task as authoritative source (pure LLM routing)
 
-**One-sentence summary:** The coordinator always spawns a `classify-task-workflow` session first, parses the `recommendedPipeline` output from step notes, and executes the pipeline that workflow specifies -- the coordinator script is a runner for whatever classify-task returns.
+**One-sentence summary:** The coordinator always spawns a `wr.classify-task` session first, parses the `recommendedPipeline` output from step notes, and executes the pipeline that workflow specifies -- the coordinator script is a runner for whatever classify-task returns.
 
 **Architecture:**
 ```typescript
 async function routeTask(goal, workspace, deps): Promise<Result<readonly string[], string>> {
-  const handle = await deps.spawnSession('classify-task-workflow', goal, workspace);
+  const handle = await deps.spawnSession('wr.classify-task', goal, workspace);
   const result = await deps.awaitSessions([handle], CLASSIFY_TIMEOUT_MS);
   const notes = await deps.getAgentResult(handle);
   return parseRecommendedPipeline(notes.recapMarkdown); // pure function, text block parser
@@ -257,15 +257,15 @@ async function routeTask(goal, workspace, deps): Promise<Result<readonly string[
 
 **Pipeline modes:** not named at the coordinator level -- the pipeline IS whatever classify-task returns. The coordinator just runs the sequence.
 
-**Failure handling:** if `parseRecommendedPipeline` fails (LLM deviated from format), default to `['wr.discovery', 'coding-task-workflow-agentic', 'mr-review-workflow.agentic.v2']`. Any spawned phase failure escalates with structured reason.
+**Failure handling:** if `parseRecommendedPipeline` fails (LLM deviated from format), default to `['wr.discovery', 'wr.coding-task', 'mr-review-workflow.agentic.v2']`. Any spawned phase failure escalates with structured reason.
 
 **Tensions resolved:** intelligent routing for ambiguous tasks; single source of truth for pipeline selection rules (the workflow, not the coordinator).
 **Tensions accepted:** non-deterministic (same task may classify differently); adds 5-15 second LLM latency per dispatch; `recommendedPipeline` is a string array of workflow IDs, not a typed discriminated union.
 **Failure mode to watch:** coordinator runs `wr.discovery` unnecessarily for PR-only tasks if classify-task misclassifies them. Recovery: add static pre-check before spawning classify-task.
-**Follows:** classify-task-workflow's existing decision rules are already correct; this candidate delegates trust to them.
+**Follows:** wr.classify-task's existing decision rules are already correct; this candidate delegates trust to them.
 **Gain:** routing rules live in the workflow, not the coordinator -- can be updated without code changes.
 **Give up:** determinism, routing transparency (routing reason requires parsing LLM output), typed pipeline modes.
-**Impact surface:** classify-task-workflow becomes a critical dependency -- format changes break coordinator.
+**Impact surface:** wr.classify-task becomes a critical dependency -- format changes break coordinator.
 **Scope judgment:** Best-fit for teams that want routing rules to evolve without code deployment.
 **Philosophy:** Honors dependency injection (classify-task as a boundary). Conflicts with determinism-over-cleverness (LLM routing is clever but non-deterministic).
 
@@ -273,7 +273,7 @@ async function routeTask(goal, workspace, deps): Promise<Result<readonly string[
 
 ### Candidate C: static-first with LLM fallback (hybrid, recommended)
 
-**One-sentence summary:** A two-tier `routeTask()` applies static rules first (fast, deterministic, covers 80% of cases), then falls back to classify-task-workflow only for ambiguous tasks where no static signal fires.
+**One-sentence summary:** A two-tier `routeTask()` applies static rules first (fast, deterministic, covers 80% of cases), then falls back to wr.classify-task only for ambiguous tasks where no static signal fires.
 
 **Architecture:**
 ```typescript
@@ -303,7 +303,7 @@ async function routeTask(goal, workspace, deps): Promise<Result<PipelineMode, st
 - `REVIEW_ONLY`: same as Candidate A
 - `QUICK_REVIEW`: same as Candidate A
 - `IMPLEMENT`: same as Candidate A
-- `FULL`: `wr.discovery` -> `wr.shaping` -> `coding-task-workflow-agentic` -> PR -> review -> merge
+- `FULL`: `wr.discovery` -> `wr.shaping` -> `wr.coding-task` -> PR -> review -> merge
 - `CLASSIFY_AND_RUN`: execute phases from classify-task output in order; unknown workflow IDs escalate
 
 **Failure handling:** escalation-first, same as pr-review.ts. The routing failure (classify-task parse failure) produces ESCALATE mode with reason.
@@ -314,7 +314,7 @@ async function routeTask(goal, workspace, deps): Promise<Result<PipelineMode, st
 **Follows:** parseFindingsFromNotes two-tier strategy pattern. CoordinatorDeps injection for the LLM fallback path.
 **Gain:** fast for common cases, intelligent for ambiguous cases, deterministic for all named modes.
 **Give up:** complexity of two tiers; CLASSIFY_AND_RUN mode is not a named type with typed data.
-**Impact surface:** same as Candidate A plus classify-task-workflow dependency.
+**Impact surface:** same as Candidate A plus wr.classify-task dependency.
 **Scope judgment:** Best-fit -- covers all named use cases efficiently. YAGNI risk is low because the LLM fallback adds ~30 lines of code, not a new architecture.
 **Philosophy:** Honors immutability, exhaustiveness (switch on PipelineMode is exhaustive), determinism-over-cleverness (static tier is deterministic, LLM is bounded fallback), errors-as-data.
 
@@ -421,7 +421,7 @@ Each mode coordinator is ~300-600 lines, fully independently testable. No mode-s
 
 ### Recommendation: C + E (Candidate C routing mechanism, Candidate E file architecture)
 
-**The routing mechanism decision (C):** Two-tier routing is the best-fit. Static rules cover the 4 well-defined cases (PR number, dep-bump, pitch.md, vague idea) without LLM cost. `CLASSIFY_AND_RUN` as the 5th mode handles genuinely ambiguous tasks via classify-task-workflow. This follows the `parseFindingsFromNotes` precedent in pr-review.ts (two-tier: structured first, fallback second).
+**The routing mechanism decision (C):** Two-tier routing is the best-fit. Static rules cover the 4 well-defined cases (PR number, dep-bump, pitch.md, vague idea) without LLM cost. `CLASSIFY_AND_RUN` as the 5th mode handles genuinely ambiguous tasks via wr.classify-task. This follows the `parseFindingsFromNotes` precedent in pr-review.ts (two-tier: structured first, fallback second).
 
 **The architecture decision (E):** Per-mode coordinator files with a thin dispatcher is the correct architecture for 5 modes. Each mode file follows pr-review.ts independently. The dispatcher is the only code that changes when a new mode is added. This is how the codebase is already structured (pr-review.ts is one mode file) -- Candidate E just makes the pattern explicit.
 
@@ -447,7 +447,7 @@ Candidate D (pipelineMode in TriggerDefinition) would be justified if trigger op
 
 ### Pivot conditions
 
-- If `classify-task-workflow` note parsing proves unreliable (format drift), pivot to pure static (Candidate A) and accept that ambiguous tasks run FULL
+- If `wr.classify-task` note parsing proves unreliable (format drift), pivot to pure static (Candidate A) and accept that ambiguous tasks run FULL
 - If `TriggerDefinition` change is needed for automated workflows, add Candidate D's pipelineMode field
 - If context-passing agent's design shows that the coordinator must inject structured context at spawn time, the mode coordinator files must include context injection logic -- this is implementation detail, not a routing design change
 
@@ -466,7 +466,7 @@ Candidate D (pipelineMode in TriggerDefinition) would be justified if trigger op
 1. **CLASSIFY_AND_RUN seam crack (genuine weakness, not blocking):** C's CLASSIFY_AND_RUN mode creates a typed/untyped seam in the dispatcher. Mitigation: CLASSIFY_AND_RUN fires only for tasks with no static signal; the dispatcher handles it with a dedicated `runClassifyAndRunPipeline` function that is documented as the "catch-all" path. Alternatively: fold CLASSIFY_AND_RUN into FULL (just run the three-workflow pipeline for all ambiguous tasks) and remove the LLM fallback entirely. This would make C = A for ambiguous tasks, simplifying the design.
    - **Final decision: simplify C by removing CLASSIFY_AND_RUN. Ambiguous tasks (no static signal) default to FULL. This gives Candidate A's simplicity with Candidate C's structure.**
 
-2. **A is sufficient for MVP:** Challenge confirmed that Candidate A covers all 5 stated use cases. C adds value for future Medium tasks. For an MVP, A is correct. The recommended design IS essentially Candidate A + Candidate E architecture. No classify-task-workflow dependency at all for the initial implementation.
+2. **A is sufficient for MVP:** Challenge confirmed that Candidate A covers all 5 stated use cases. C adds value for future Medium tasks. For an MVP, A is correct. The recommended design IS essentially Candidate A + Candidate E architecture. No wr.classify-task dependency at all for the initial implementation.
 
 ### Final simplified design (A + E, not C + E)
 
@@ -489,7 +489,7 @@ Static rules (prioritized):
 3. `.workrail/current-pitch.md` exists -> `IMPLEMENT`
 4. else -> `FULL`
 
-**Why remove CLASSIFY_AND_RUN:** classify-task-workflow adds latency, non-determinism, and format-parsing fragility for no concrete benefit over FULL for the stated use cases. The "YAGNI with discipline" principle wins. If Medium tasks turn out to be wasteful with FULL, add classify-task as a future enhancement with a typed artifact (not text parsing).
+**Why remove CLASSIFY_AND_RUN:** wr.classify-task adds latency, non-determinism, and format-parsing fragility for no concrete benefit over FULL for the stated use cases. The "YAGNI with discipline" principle wins. If Medium tasks turn out to be wasteful with FULL, add classify-task as a future enhancement with a typed artifact (not text parsing).
 
 **Architecture (E as designed):**
 ```
@@ -549,7 +549,7 @@ src/coordinators/
 
 1. **Routing determines spawn order, not context shape.** The routing layer (`routeTask()`) produces a `PipelineMode` variant. It does NOT know what context to pass to each spawned session. Context injection is entirely the responsibility of each mode coordinator (full-pipeline.ts, implement.ts, etc.), not the routing layer.
 
-2. **FULL pipeline phase order is: `wr.discovery` -> `wr.shaping` -> `coding-task-workflow-agentic` -> review -> merge.** If the context-passing agent's design changes this order (e.g., by making shaping optional based on discovery findings), the `runFullPipeline()` function must be updated accordingly. The routing layer itself does not need to change.
+2. **FULL pipeline phase order is: `wr.discovery` -> `wr.shaping` -> `wr.coding-task` -> review -> merge.** If the context-passing agent's design changes this order (e.g., by making shaping optional based on discovery findings), the `runFullPipeline()` function must be updated accordingly. The routing layer itself does not need to change.
 
 3. **pitch.md is the canonical Shaping->Coding handoff.** The `IMPLEMENT` mode routes directly to coding because `current-pitch.md` already exists. The coding-task Phase 0.5 detects it and uses it. If the context-passing agent introduces a different handoff mechanism (e.g., coordinator-injected context instead of a file), the `IMPLEMENT` mode coordinator needs to inject that context at spawn time rather than relying on Phase 0.5 file detection.
 
@@ -582,8 +582,8 @@ The adaptive coordinator uses **pure static routing with per-mode file decomposi
 |------|---------------|
 | `REVIEW_ONLY` | `mr-review-workflow.agentic.v2` → verdict routing (clean: merge, minor: fix-loop, blocking: escalate) |
 | `QUICK_REVIEW` | same as REVIEW_ONLY with lighter model config |
-| `IMPLEMENT` | `coding-task-workflow-agentic` (Phase 0.5 reads pitch.md) → PR → `mr-review-workflow.agentic.v2` → merge |
-| `FULL` | `wr.discovery` → `wr.shaping` → `coding-task-workflow-agentic` → PR → `mr-review-workflow.agentic.v2` → merge |
+| `IMPLEMENT` | `wr.coding-task` (Phase 0.5 reads pitch.md) → PR → `mr-review-workflow.agentic.v2` → merge |
+| `FULL` | `wr.discovery` → `wr.shaping` → `wr.coding-task` → PR → `mr-review-workflow.agentic.v2` → merge |
 
 **File architecture (Candidate E):**
 ```
@@ -633,7 +633,7 @@ const COORDINATOR_MAX_MS = 120 * 60 * 1000;      // 120 min total coordinator wa
 - Routing decision is logged as traceability JSON before any session spawn
 - FULL pipeline: each phase is an independent escalation point (discovery-fail, shaping-fail, coding-fail each escalate independently)
 
-**Why LLM classification (classify-task-workflow) was excluded:**
+**Why LLM classification (wr.classify-task) was excluded:**
 
 After adversarial challenge, CLASSIFY_AND_RUN mode was removed. The LLM classification path adds non-determinism and format-parsing fragility (notes parsing vs typed artifact) for no concrete MVP benefit. All 5 stated use cases are covered by static rules. The upgrade path to add classify-task as a Tier 2 fallback exists when evidence shows >5% misrouting in production.
 

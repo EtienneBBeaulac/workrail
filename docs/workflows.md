@@ -24,14 +24,14 @@ WorkRail includes **20 production workflows** across multiple categories.
 
 Feature implementation and coding workflows
 
-### `coding-task-workflow-agentic`
+### `wr.coding-task`
 
 **Agentic Task Dev Workflow (Lean • Notes-First • WorkRail Executor)** (v1.0.0)
 
 The user guides the agent through understanding the task, selecting an approach, planning in slices, implementing incrementally, and verifying the result through explicit review and validation checkpoints.
 
 - **Steps**: 12
-- **File**: `workflows/coding-task-workflow-agentic.lean.v2.json`
+- **File**: `workflows/wr.coding-task.lean.v2.json`
 
 ## Debugging
 
@@ -46,7 +46,7 @@ A systematic bug investigation workflow that finds the true source of bugs throu
 - **Steps**: 10
 - **File**: `workflows/bug-investigation.json`
 
-### `bug-investigation-agentic`
+### `wr.bug-investigation`
 
 **Bug Investigation (v2 • Notes-First • WorkRail Executor)** (v2.0.0)
 
@@ -68,7 +68,7 @@ An adaptive workflow to guide an AI agent in performing a comprehensive code rev
 - **Steps**: 10
 - **File**: `workflows/mr-review-workflow.json`
 
-### `mr-review-workflow-agentic`
+### `wr.mr-review`
 
 **MR Review Workflow (v2 • Notes-First • Parallel Reviewer Families)** (v2.1.0)
 
@@ -81,45 +81,45 @@ A v2-first MR review workflow that uses a shared fact packet, parallel reviewer 
 
 Creating and maintaining documentation
 
-### `document-creation-workflow`
+### `wr.document-creation`
 
 **Document Creation Workflow** (v0.0.1)
 
-Create BROAD or COMPREHENSIVE documentation spanning multiple components/systems. Perfect for: project READMEs, complete API documentation, user guides covering multiple features, technical specifications for systems. Uses complexity triage (Simple/Standard/Complex) to adapt rigor. For SINGLE, BOUNDED subjects (one class, one integration), use scoped-documentation-workflow instead for better scope discipline.
+Create BROAD or COMPREHENSIVE documentation spanning multiple components/systems. Perfect for: project READMEs, complete API documentation, user guides covering multiple features, technical specifications for systems. Uses complexity triage (Simple/Standard/Complex) to adapt rigor. For SINGLE, BOUNDED subjects (one class, one integration), use wr.scoped-documentation instead for better scope discipline.
 
 - **Steps**: 11
-- **File**: `workflows/document-creation-workflow.json`
+- **File**: `workflows/wr.document-creation.json`
 
-### `documentation-update-workflow`
+### `wr.documentation-update`
 
 **Documentation Update & Maintenance Workflow** (v1.0.0)
 
-UPDATE and MAINTAIN existing documentation. Analyzes Git history to detect staleness, identifies outdated sections, and systematically refreshes docs while preserving valuable content. Perfect for: refreshing docs after code changes, scheduled maintenance, addressing feedback. NOT for creating new docs - use scoped-documentation-workflow or document-creation-workflow for new documentation.
+UPDATE and MAINTAIN existing documentation. Analyzes Git history to detect staleness, identifies outdated sections, and systematically refreshes docs while preserving valuable content. Perfect for: refreshing docs after code changes, scheduled maintenance, addressing feedback. NOT for creating new docs - use wr.scoped-documentation or wr.document-creation for new documentation.
 
 - **Steps**: 15
-- **File**: `workflows/documentation-update-workflow.json`
+- **File**: `workflows/wr.documentation-update.json`
 
-### `scoped-documentation-workflow`
+### `wr.scoped-documentation`
 
 **Scoped Documentation Workflow** (v1.0.0)
 
-Create documentation for a SINGLE, BOUNDED subject with strict scope enforcement. Perfect for: one class/component, one integration point, one mechanism, one architecture decision. Prevents documentation sprawl through continuous boundary validation (9+/10 scope compliance required). NOT for: project READMEs, multi-component systems, or comprehensive guides - use document-creation-workflow for those.
+Create documentation for a SINGLE, BOUNDED subject with strict scope enforcement. Perfect for: one class/component, one integration point, one mechanism, one architecture decision. Prevents documentation sprawl through continuous boundary validation (9+/10 scope compliance required). NOT for: project READMEs, multi-component systems, or comprehensive guides - use wr.document-creation for those.
 
 - **Steps**: 10
-- **File**: `workflows/scoped-documentation-workflow.json`
+- **File**: `workflows/wr.scoped-documentation.json`
 
 ## Exploration & Analysis
 
 Understanding codebases and systems
 
-### `adaptive-ticket-creation`
+### `wr.adaptive-ticket-creation`
 
 **Adaptive Ticket Creation Workflow** (v0.1.0)
 
 An intelligent workflow for creating high-quality Jira tickets. Uses LLM-driven path selection to automatically choose between Simple, Standard, or Epic complexity paths based on request analysis.
 
 - **Steps**: 9
-- **File**: `workflows/adaptive-ticket-creation.json`
+- **File**: `workflows/wr.adaptive-ticket-creation.json`
 
 ### `wr.discovery`
 
@@ -130,20 +130,20 @@ A bundled upstream thinking workflow that merges the old exploration and design-
 - **Steps**: 12
 - **File**: `workflows/wr.discovery.json`
 
-### `intelligent-test-case-generation`
+### `wr.intelligent-test-case-generation`
 
 **Intelligent Test Case Generation from Tickets** (v0.0.1)
 
 Transforms ticket requirements into systematic test cases using evidence-driven analysis, dual-brain processing (NLP + LLM), document discovery, and progressive scenario expansion. Produces integration and end-to-end tests optimized for developer readability and LLM consumption with confidence scoring and validation loops.
 
 - **Steps**: 12
-- **File**: `workflows/intelligent-test-case-generation.json`
+- **File**: `workflows/wr.intelligent-test-case-generation.json`
 
 ## Learning & Education
 
 Course design and learning materials
 
-### `personal-learning-course-design`
+### `wr.personal-learning-course-design`
 
 **Personal Learning Course Design Workflow** (v1.0.0)
 
@@ -152,36 +152,36 @@ A systematic workflow for designing effective personal learning courses with thr
 - **Steps**: 11
 - **File**: `workflows/learner-centered-course-workflow.json`
 
-### `personal-learning-materials-creation-branched`
+### `wr.personal-learning-materials`
 
 **Personal Learning Materials Creation Workflow (Branched)** (v1.0.0)
 
 A systematic workflow for creating high-quality learning materials with three thoroughness paths: Quick Start (essential materials), Balanced (comprehensive system), and Comprehensive (enterprise-grade). Adapts depth and features based on user time constraints and quality goals.
 
 - **Steps**: 6
-- **File**: `workflows/personal-learning-materials-creation-branched.json`
+- **File**: `workflows/wr.personal-learning-materials.json`
 
-### `presentation-creation`
+### `wr.presentation-creation`
 
 **Dynamic Presentation Creation Workflow** (v0.1.0)
 
 A comprehensive workflow for creating dynamic, interesting, and insightful presentations. Guides users through audience analysis, content strategy, visual design, and delivery preparation to create compelling presentations that engage and inform.
 
 - **Steps**: 9
-- **File**: `workflows/presentation-creation.json`
+- **File**: `workflows/wr.presentation-creation.json`
 
 ## Other
 
 Miscellaneous workflows
 
-### `cross-platform-code-conversion`
+### `wr.cross-platform-code-conversion`
 
 **Cross-Platform Code Conversion** (v0.1.0)
 
 Guides an agent through converting code from one platform to another (e.g., Android to iOS, iOS to Web). Triages files by difficulty, delegates easy literal translations to parallel subagents, then the main agent tackles platform-specific code requiring design decisions.
 
 - **Steps**: 9
-- **File**: `workflows/cross-platform-code-conversion.v2.json`
+- **File**: `workflows/wr.cross-platform-code-conversion.v2.json`
 
 ### `design-thinking-workflow`
 
@@ -201,32 +201,32 @@ Autonomous design thinking: minimal human input; doc-first execution; supports A
 - **Steps**: 16
 - **File**: `workflows/design-thinking-workflow-autonomous.agentic.json`
 
-### `relocation-workflow-us`
+### `wr.relocation-us`
 
 **Relocation Decision Workflow (US v1 — AreaSpec • Custom Areas • Dossier • Evidence • Ranking)** (v0.2.0)
 
 A bias-resistant, evidence-driven relocation workflow for the United States. Helps users discover what they care about, generate a broad candidate pool (including optional custom areas), screen it with strict caps, deep-dive shortlisted areas, and produce a master dossier plus per-location profile docs with a transparent, explainable weighted ranking.
 
 - **Steps**: 19
-- **File**: `workflows/relocation-workflow-us.json`
+- **File**: `workflows/wr.relocation-us.json`
 
-### `workflow-diagnose-environment`
+### `wr.diagnose-environment`
 
 **Diagnostic: Environment & Subagents** (v1.0.0)
 
 Automated capability detection for Agentic IDEs. Probes for subagent access and generates a local configuration file.
 
 - **Steps**: 2
-- **File**: `workflows/workflow-diagnose-environment.json`
+- **File**: `workflows/wr.diagnose-environment.json`
 
-### `workflow-for-workflows`
+### `wr.workflow-for-workflows`
 
 **Workflow Authoring Workflow (Lean, References-First)** (v2.0.0)
 
 Guides an agent through creating a new WorkRail workflow: understand the task, choose the shape, draft the JSON, validate with real validators, review the method, and optionally refine.
 
 - **Steps**: 8
-- **File**: `workflows/workflow-for-workflows.v2.json`
+- **File**: `workflows/wr.workflow-for-workflows.v2.json`
 
 ---
 
@@ -236,7 +236,7 @@ Tell your AI agent which workflow to use:
 
 ```
 "Use the bug-investigation workflow to debug this issue"
-"Use the coding-task-workflow-agentic to implement this feature"
+"Use the wr.coding-task to implement this feature"
 ```
 
 Or browse programmatically:

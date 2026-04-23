@@ -60,7 +60,7 @@ function makeBaseDeps(overrides: Partial<WorktrainSpawnCommandDeps> = {}): {
 }
 
 const VALID_OPTS = {
-  workflow: 'coding-task-workflow-agentic',
+  workflow: 'wr.coding-task',
   goal: 'test goal',
   workspace: tmpPath('workspace'),
 };
@@ -77,7 +77,7 @@ describe('executeWorktrainSpawnCommand', () => {
         status: 200,
         json: async () => ({
           success: true,
-          data: { sessionHandle: 'sess_abc123', workflowId: 'coding-task-workflow-agentic' },
+          data: { sessionHandle: 'sess_abc123', workflowId: 'wr.coding-task' },
         }),
       }),
     });

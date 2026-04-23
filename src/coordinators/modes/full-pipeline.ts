@@ -12,11 +12,11 @@
  *    - No artifact AND short notes: proceed with no assembledContextSummary
  * 3. Spawn wr.shaping session with discovery context (35 minute timeout)
  * 4. [UX Gate] If goal contains UI-touching signals AND complexity is Large:
- *    - Dispatch ui-ux-design-workflow
+ *    - Dispatch wr.ui-ux-design
  *    - Require human outbox acknowledgment (poll 24 hours; timeout -> escalate)
- * 5. Spawn coding-task-workflow-agentic with pitchPath in context (65 minute timeout)
+ * 5. Spawn wr.coding-task with pitchPath in context (65 minute timeout)
  * 6. Poll for PR (up to 5 minutes)
- * 7. Dispatch mr-review-workflow-agentic (25 minute timeout)
+ * 7. Dispatch wr.mr-review (25 minute timeout)
  * 8. Route verdict (same as IMPLEMENT mode: clean/minor/blocking)
  *
  * Design invariants:
@@ -336,13 +336,13 @@ async function runFullPipelineCore(
   // In FULL mode, complexity is considered Large because there is no pre-existing pitch.
   // (Pitch invariant 16: if touchesUI AND Large complexity -> require human outbox ack.)
   if (touchesUI(opts.goal)) {
-    deps.stderr(`[full-pipeline] UX signals detected -- dispatching ui-ux-design-workflow`);
+    deps.stderr(`[full-pipeline] UX signals detected -- dispatching wr.ui-ux-design`);
 
     const uxCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'ux-gate');
     if (uxCutoff) return uxCutoff;
 
     const uxSpawnResult = await deps.spawnSession(
-      'ui-ux-design-workflow',
+      'wr.ui-ux-design',
       opts.goal,
       opts.workspace,
       { shapingComplete: true },
@@ -427,10 +427,10 @@ async function runFullPipelineCore(
   const codingCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'coding');
   if (codingCutoff) return codingCutoff;
 
-  deps.stderr(`[full-pipeline] Spawning coding-task-workflow-agentic`);
+  deps.stderr(`[full-pipeline] Spawning wr.coding-task`);
 
   const codingSpawnResult = await deps.spawnSession(
-    'coding-task-workflow-agentic',
+    'wr.coding-task',
     opts.goal,
     opts.workspace,
     {

@@ -1,5 +1,5 @@
 {
-  "id": "routine-context-gathering",
+  "id": "wr.routine-context-gathering",
   "name": "Context Gathering Routine",
   "version": "2.1.0",
   "metricsProfile": "none",

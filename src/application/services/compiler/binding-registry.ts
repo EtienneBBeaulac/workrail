@@ -11,7 +11,7 @@
  *
  * File format (per-workflow overrides keyed by workflow ID):
  * {
- *   "coding-task-workflow-agentic": {
+ *   "wr.coding-task": {
  *     "design_review": "my-team-design-review"
  *   }
  * }

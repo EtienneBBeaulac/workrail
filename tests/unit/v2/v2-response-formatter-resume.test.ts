@@ -34,7 +34,7 @@ function mkCandidate(overrides: Partial<{
   return {
     sessionId: overrides.sessionId ?? 'sess_test1',
     runId: overrides.runId ?? 'run_test1',
-    workflowId: overrides.workflowId ?? 'coding-task-workflow-agentic',
+    workflowId: overrides.workflowId ?? 'wr.coding-task',
     sessionTitle: overrides.sessionTitle ?? null,
     gitBranch: overrides.gitBranch ?? null,
     resumeToken: token,

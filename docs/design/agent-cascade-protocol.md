@@ -46,7 +46,7 @@ WorkRail defines three distinct tiers of execution. The system automatically sel
 How does WorkRail know which tier to use? It uses a **"Verify then Delegate"** pattern (The Probe Protocol).
 
 ### 1. The Boot Check (Diagnostic Phase)
-When a session starts (or via the `workflow-diagnose-environment` workflow), WorkRail guides the Main Agent to probe the environment:
+When a session starts (or via the `wr.diagnose-environment` workflow), WorkRail guides the Main Agent to probe the environment:
 
 1.  **Check for Subagents:** "Do you have a 'Researcher' subagent?"
     *   *No:* **Fallback to Tier 1 (Solo).**
@@ -74,7 +74,7 @@ When executing a workflow step that calls for a specialized routine:
 
 To support this protocol, WorkRail provides:
 
-1.  **The Diagnostic Workflow:** A guided utility (`workflow-diagnose-environment.json`) to help users verify and configure their agents.
+1.  **The Diagnostic Workflow:** A guided utility (`wr.diagnose-environment.json`) to help users verify and configure their agents.
 2.  **The Asset Pack:** Standardized definitions for common roles (Researcher, Architect, Builder, Reviewer) that users can copy-paste into their IDE configs.
     *   Includes System Prompts (for Tiers 1-3).
     *   Includes Tool Whitelists (for enabling Tier 3).

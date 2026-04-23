@@ -126,7 +126,7 @@ describe('executeWorktrainInitCommand', () => {
     expect(triggersContent).toBeDefined();
     expect(triggersContent).toContain('provider: generic');
     expect(triggersContent).toContain('workspacePath: /home/testuser/my-repo');
-    expect(triggersContent).toContain('workflowId: coding-task-workflow-agentic');
+    expect(triggersContent).toContain('workflowId: wr.coding-task');
   });
 
   // ── Credentials section ─────────────────────────────────────────────────
@@ -389,7 +389,7 @@ describe('executeWorktrainInitCommand', () => {
     const content = fsState.files.get(triggersPath)!;
 
     expect(content).toContain('provider: generic');
-    expect(content).toContain('workflowId: coding-task-workflow-agentic');
+    expect(content).toContain('workflowId: wr.coding-task');
     expect(content).toContain('workspacePath: /home/testuser/my-repo');
     expect(content).toContain('goal:');
     expect(content).toContain('id: my-first-trigger');
