@@ -3,7 +3,7 @@ triggers:
   # Use for one-off tasks when you don't want to go through the queue.
   - id: test-task
     provider: generic
-    workflowId: coding-task-workflow-agentic
+    workflowId: wr.coding-task
     workspacePath: /Users/etienneb/git/personal/workrail
     goalTemplate: "{{$.goal}}"
     concurrencyMode: parallel
@@ -19,7 +19,7 @@ triggers:
   # Dispatch manually: POST /webhook/mr-review {"pull_request": {"title": "PR #123: ...", "number": 123}}
   - id: mr-review
     provider: generic
-    workflowId: mr-review-workflow-agentic
+    workflowId: wr.mr-review
     workspacePath: /Users/etienneb/git/personal/workrail
     goalTemplate: "Review PR {{$.pull_request.number}}: {{$.pull_request.title}}"
     concurrencyMode: parallel
