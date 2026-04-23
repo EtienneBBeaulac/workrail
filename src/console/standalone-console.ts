@@ -39,6 +39,8 @@ import { LocalPinnedWorkflowStoreV2 } from '../v2/infra/local/pinned-workflow-st
 import { LocalSessionEventLogStoreV2 } from '../v2/infra/local/session-store/index.js';
 import { ConsoleService } from '../v2/usecases/console-service.js';
 import { mountConsoleRoutes } from '../v2/usecases/console-routes.js';
+import { EnhancedMultiSourceWorkflowStorage } from '../infrastructure/storage/enhanced-multi-source-workflow-storage.js';
+import { EnvironmentFeatureFlagProvider } from '../config/feature-flags.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -152,24 +154,28 @@ export async function startStandaloneConsole(
   // ETag support for efficient browser caching of API responses.
   app.set('etag', 'strong');
 
+  // Construct a workflow reader so the Workflows tab (GET /api/v2/workflows)
+  // works in standalone mode without requiring the daemon or MCP server.
+  // gracefulDegradation defaults to true: if workflow directories don't exist,
+  // the reader returns an empty list rather than throwing.
+  const workflowReader = new EnhancedMultiSourceWorkflowStorage(
+    {},
+    new EnvironmentFeatureFlagProvider(),
+  );
+
   // Mount the console API routes and static file serving.
   // mountConsoleRoutes returns a disposer that closes the FSWatcher.
-  // workflowService and v2ToolContext are intentionally omitted:
-  // - Workflow catalog (GET /api/v2/workflows) requires a WorkflowService.
-  //   The standalone console does not load workflow definitions -- it only
-  //   displays session history. If this feature is needed in the future,
-  //   WorkflowService can be constructed here without daemon coupling.
-  // - AUTO dispatch (POST /api/v2/auto/dispatch) requires a V2ToolContext with
-  //   live session execution infrastructure. The standalone console is read-only;
-  //   dispatching new workflows is out of scope.
+  // v2ToolContext is intentionally omitted: AUTO dispatch (POST /api/v2/auto/dispatch)
+  // requires live session execution infrastructure. The standalone console is
+  // read-only; dispatching new workflows is out of scope.
   const stopWatcher = mountConsoleRoutes(
     app,
     consoleService,
-    undefined,   // workflowService -- not needed for session history view
-    undefined,   // timingRingBuffer -- no in-process tool call tracking
-    undefined,   // toolCallsPerfFile -- same as above
-    undefined,   // serverVersion -- no stamping needed
-    undefined,   // v2ToolContext -- no autonomous dispatch
+    workflowReader, // workflow catalog (GET /api/v2/workflows)
+    undefined,      // timingRingBuffer -- no in-process tool call tracking
+    undefined,      // toolCallsPerfFile -- same as above
+    undefined,      // serverVersion -- no stamping needed
+    undefined,      // v2ToolContext -- no autonomous dispatch
   );
 
   // Redirect / to /console for convenience (must be before 404 catch-all).
