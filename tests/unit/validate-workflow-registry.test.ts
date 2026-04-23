@@ -1100,7 +1100,41 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 13. Fixture-vs-File Drift Detection (deferred to Phase 6)
+  // 13. Schema Enforcement (Tier 1 Regression)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  describe('Schema Enforcement (Tier 1 Regression)', () => {
+    it('36b. Unknown top-level field in raw file → schema_failed (additionalProperties: false regression)', () => {
+      // Uses real validateWorkflowSchema (not a mock) to verify the Tier 1 enforcement
+      // path calls schema validation. This test ensures additionalProperties: false in
+      // workflow.schema.json is enforced at the raw-file validation boundary. If this
+      // test fails, the schema enforcement layer has been broken.
+      const definitionWithUnknownField = {
+        ...def('schema-enforcement-test'),
+        unknownFieldForTesting: true,
+      } as unknown as WorkflowDefinition;
+
+      const rawFile: RawWorkflowFile = {
+        kind: 'parsed',
+        filePath: 'test.json',
+        relativeFilePath: 'test.json',
+        definition: definitionWithUnknownField,
+        variantKind: 'standard',
+      };
+
+      const snapshot = fakeSnapshot({ rawFiles: [rawFile] });
+      const deps = fakePipelineDeps(); // Uses real validateWorkflowSchema by default
+
+      const report = validateRegistry(snapshot, deps);
+
+      expect(report.isValid).toBe(false);
+      expect(report.tier1FailedRawFiles).toBe(1);
+      expect(report.rawFileResults[0]!.tier1Outcome.kind).toBe('schema_failed');
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 14. Fixture-vs-File Drift Detection (deferred to Phase 6)
   // ───────────────────────────────────────────────────────────────────────────
 
   describe('Fixture-vs-File Drift Detection', () => {
