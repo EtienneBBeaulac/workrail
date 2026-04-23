@@ -13,7 +13,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 ## Consumers
 - `docs`
 - `tooling`
-- `wr.workflow-for-workflows`
+- `workflow-for-workflows`
 - `future-linting`
 
 ## Change protocol
@@ -42,7 +42,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 **Source refs**
 - `spec/workflow.schema.json` (schema) — Legal structure and supported fields.
 - `src/application/services/validation-engine.ts` (runtime) — Validator-enforced authoring rules.
-- `workflows/wr.coding-task.json` (example) — Current modern example.
+- `workflows/coding-task-workflow-agentic.json` (example) — Current modern example.
 
 ### validate-early-and-often
 - **Level**: required
@@ -141,7 +141,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Part A / Part B / Rules: ... when the structure adds ceremony rather than clarity
 
 **Example refs**
-- `workflows/wr.coding-task.json` — See the sharpened user-voiced prompts in the current lean coding workflow.
+- `workflows/coding-task-workflow-agentic.json` — See the sharpened user-voiced prompts in the current lean coding workflow.
 
 ### protocol-footers-stay-explicit
 - **Level**: required
@@ -160,10 +160,10 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Replacing exact capture requirements with vague summary prose
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Uses compact Capture footers and explicit loop-control wording.
+- `workflows/coding-task-workflow-agentic.json` — Uses compact Capture footers and explicit loop-control wording.
 
 **Source refs**
-- `workflows/wr.coding-task.json` (example) — Uses explicit capture footers and shape-preserving loop outputs.
+- `workflows/coding-task-workflow-agentic.json` (example) — Uses explicit capture footers and shape-preserving loop outputs.
 
 
 ## Prompt composition
@@ -185,11 +185,11 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Encoding runtime logic in prose when promptFragments or templates are the right mechanism
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Uses prompt fragments and context templates to keep prompts slimmer at render time.
+- `workflows/coding-task-workflow-agentic.json` — Uses prompt fragments and context templates to keep prompts slimmer at render time.
 
 **Source refs**
 - `docs/authoring.md` (documentation) — Documents context templates and prompt fragments.
-- `workflows/wr.coding-task.json` (example) — Uses prompt fragments to slim mode-specific prompt branches.
+- `workflows/coding-task-workflow-agentic.json` (example) — Uses prompt fragments to slim mode-specific prompt branches.
 
 ### templates-are-for-simple-substitution
 - **Level**: recommended
@@ -405,11 +405,11 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Prompt text says to stop, but the example output only permits continue
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Current loop decision steps show shape-only output examples.
+- `workflows/coding-task-workflow-agentic.json` — Current loop decision steps show shape-only output examples.
 
 **Source refs**
 - `scripts/validate-workflows-registry.ts` (validator) — Registry validation should preserve semantically correct discoverable workflows.
-- `workflows/wr.coding-task.json` (example) — Current loop decision prompts show shape-only output examples.
+- `workflows/coding-task-workflow-agentic.json` (example) — Current loop decision prompts show shape-only output examples.
 
 ### loops-need-real-exit-rules
 - **Level**: required
@@ -445,7 +445,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `contextAuditNeeded = true|false` without an explicit rubric
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag.
+- `workflows/coding-task-workflow-agentic.json` — Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag.
 
 
 ## Confirmation discipline
@@ -466,7 +466,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Using requireConfirmation as a substitute for clear loop or rigor policy
 
 **Source refs**
-- `workflows/wr.coding-task.json` (example) — Uses confirmation for real review barriers like MultiPR checkpoints.
+- `workflows/coding-task-workflow-agentic.json` (example) — Uses confirmation for real review barriers like MultiPR checkpoints.
 
 
 ## Assessment gates
@@ -544,7 +544,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Treating named builder or researcher roles as alternate owners
 
 **Source refs**
-- `workflows/wr.coding-task.json` (example) — Delegation checkpoints keep the main agent as the synthesizer and decision-maker.
+- `workflows/coding-task-workflow-agentic.json` (example) — Delegation checkpoints keep the main agent as the synthesizer and decision-maker.
 
 ### batched-checkpoints-over-ad-hoc-optionality
 - **Level**: recommended
@@ -563,7 +563,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Optional challenge wording at high-value decision points
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Uses explicit challenge, audit, and verification barriers.
+- `workflows/coding-task-workflow-agentic.json` — Uses explicit challenge, audit, and verification barriers.
 
 
 ## Subagent synthesis and claim adoption
@@ -601,10 +601,10 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Using delegated findings as blockers or green lights without verification
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Major synthesis checkpoints use Confirmed / Plausible / Rejected for decision-driving findings.
+- `workflows/coding-task-workflow-agentic.json` — Major synthesis checkpoints use Confirmed / Plausible / Rejected for decision-driving findings.
 
 **Source refs**
-- `workflows/wr.coding-task.json` (example) — Major synthesis checkpoints use Confirmed / Plausible / Rejected for adopted claims.
+- `workflows/coding-task-workflow-agentic.json` (example) — Major synthesis checkpoints use Confirmed / Plausible / Rejected for adopted claims.
 
 
 ## Discouraged legacy patterns
@@ -670,7 +670,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Keeping a canonical example ref after the workflow has drifted into a legacy style
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Current example of modern prompt composition, delegation barriers, and loop semantics.
+- `workflows/coding-task-workflow-agentic.json` — Current example of modern prompt composition, delegation barriers, and loop semantics.
 
 
 ## Validation
@@ -748,7 +748,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Omit or use 'none' for authoring tools, meta-workflows, or workflows with no measurable outcome.
 - Do not invent new profile values -- the closed set is: 'coding', 'review', 'research', 'design', 'ticket', 'none'.
 - The engine does NOT derive the profile from spec/workflow-tags.json at runtime. Set the field explicitly.
-- When using wr.workflow-for-workflows to author or modernize a workflow, the phase-7b step will prompt for this decision.
+- When using workflow-for-workflows to author or modernize a workflow, the phase-7b step will prompt for this decision.
 
 **Anti-patterns**
 - Leaving metricsProfile absent from a coding or review workflow and expecting automatic instrumentation
@@ -778,7 +778,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - Verification steps check one artifact while planning updates a different one
 
 **Example refs**
-- `workflows/wr.coding-task.json` — Uses explicit spec vs implementation-plan ownership.
+- `workflows/coding-task-workflow-agentic.json` — Uses explicit spec vs implementation-plan ownership.
 
 
 ## Planned guidance
@@ -905,7 +905,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `synthesis.final-verification`: Final verification synthesis after delegated review
 - `synthesis.claim-adoption`: Rules for adopting or rejecting subagent claims
 - `workflow.authoring`: General workflow authoring behavior
-- `tooling.workflow-authoring`: Authoring helpers, generation tools, or wr.workflow-for-workflows logic
+- `tooling.workflow-authoring`: Authoring helpers, generation tools, or workflow-for-workflows logic
 - `documentation.authoring`: Human-facing authoring documentation
 - `documentation.validation`: Validation-focused documentation
 - `validator.implementation`: Workflow validator implementation and behavior
