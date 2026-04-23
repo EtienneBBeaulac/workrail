@@ -404,3 +404,25 @@ export const AUTONOMY_MODE = {
 } as const;
 
 export type AutonomyModeV1 = typeof AUTONOMY_MODE[keyof typeof AUTONOMY_MODE];
+
+// =============================================================================
+// Session Metrics: metrics_outcome enum
+// =============================================================================
+
+/**
+ * Closed set of valid values for the agent-reported `context.metrics_outcome` key.
+ *
+ * Why a named constant here: this enum is referenced in three places --
+ * `checkContextBudget` (validation), `projectSessionMetricsV2` (projection),
+ * and `buildMetricsSection` (prompt injection as inline text). Centralising the
+ * array here ensures all validation and projection code stays in sync when the
+ * enum evolves. The prompt renderer uses string literals and must be updated
+ * manually if a new value is added.
+ *
+ * Why these four values: they mirror the standard outcome vocabulary used in
+ * software delivery (success / partial / abandoned / error) and are injected
+ * into every final-step prompt via `buildMetricsSection`.
+ */
+export const VALID_METRICS_OUTCOME = ['success', 'partial', 'abandoned', 'error'] as const;
+
+export type MetricsOutcome = (typeof VALID_METRICS_OUTCOME)[number];

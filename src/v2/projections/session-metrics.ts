@@ -1,5 +1,6 @@
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
-import { EVENT_KIND } from '../durable-core/constants.js';
+import { EVENT_KIND, VALID_METRICS_OUTCOME } from '../durable-core/constants.js';
+import type { MetricsOutcome } from '../durable-core/constants.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -114,10 +115,14 @@ export function projectSessionMetricsV2(
     d.captureConfidence === 'high' ? 'high' : 'none';
 
   // Extract agent-reported fields from metricsContext.
+  // WHY: VALID_METRICS_OUTCOME is the single source of truth for the enum.
+  // checkContextBudget validates against it at the tool boundary; this projection
+  // still coerces invalid values to null as defense-in-depth for events already
+  // stored before the validation check was added.
   const outcomeRaw = metricsContext['metrics_outcome'];
-  const outcome: 'success' | 'partial' | 'abandoned' | 'error' | null =
-    outcomeRaw === 'success' || outcomeRaw === 'partial' || outcomeRaw === 'abandoned' || outcomeRaw === 'error'
-      ? outcomeRaw
+  const outcome: MetricsOutcome | null =
+    (VALID_METRICS_OUTCOME as readonly unknown[]).includes(outcomeRaw)
+      ? (outcomeRaw as MetricsOutcome)
       : null;
 
   const prNumbers: number[] = [];

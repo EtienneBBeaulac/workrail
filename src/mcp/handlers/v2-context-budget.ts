@@ -19,6 +19,7 @@ import {
   PAYLOAD_KIND,
   MAX_CONTEXT_BYTES,
   MAX_CONTEXT_DEPTH,
+  VALID_METRICS_OUTCOME,
 } from '../../v2/durable-core/constants.js';
 import { normalizeTokenErrorMessage } from './v2-error-mapping.js';
 import type { ToolFailure } from './v2-execution-helpers.js';
@@ -44,7 +45,8 @@ type ContextValidationDetails =
   | { readonly kind: 'context_circular_reference'; readonly tool: ContextToolNameV2; readonly path: string }
   | { readonly kind: 'context_too_deep'; readonly tool: ContextToolNameV2; readonly path: string; readonly maxDepth: number }
   | { readonly kind: 'context_not_canonical_json'; readonly tool: ContextToolNameV2; readonly measuredAs: 'jcs_utf8_bytes'; readonly code: string; readonly message: string }
-  | { readonly kind: 'context_budget_exceeded'; readonly tool: ContextToolNameV2; readonly measuredBytes: number; readonly maxBytes: number; readonly measuredAs: 'jcs_utf8_bytes' };
+  | { readonly kind: 'context_budget_exceeded'; readonly tool: ContextToolNameV2; readonly measuredBytes: number; readonly maxBytes: number; readonly measuredAs: 'jcs_utf8_bytes' }
+  | { readonly kind: 'context_invalid_metrics_outcome'; readonly tool: ContextToolNameV2; readonly invalidValue: string; readonly validValues: readonly string[] };
 
 export type ContextBudgetCheck = { readonly ok: true } | { readonly ok: false; readonly error: ToolFailure };
 
@@ -223,6 +225,43 @@ export function checkContextBudget(args: { readonly tool: ContextToolNameV2; rea
         }
       ) as ToolFailure,
     };
+  }
+
+  // ── Semantic key validation ───────────────────────────────────────────
+  // WHY this check lives here (not in validateAdvanceInputs or the Zod schema):
+  // checkContextBudget is the canonical context validation gate -- all context
+  // rejections flow through here with the VALIDATION_ERROR + errNotRetryable
+  // error shape. This ensures the agent receives an immediate, actionable error
+  // before any session I/O occurs. validateAdvanceInputs would use
+  // 'invariant_violation' (opaque to the agent); the Zod schema would require
+  // mixing semantic business rules into the structural schema layer.
+  //
+  // NOTE: if full metrics_* namespace validation (metrics_files_changed, etc.)
+  // is added in the future, extract this block into a separate
+  // validateMetricsContext() function to keep checkContextBudget focused.
+
+  const rawMetricsOutcome = (contextObj as Record<string, unknown>)['metrics_outcome'];
+  if (rawMetricsOutcome !== undefined && rawMetricsOutcome !== null) {
+    if (!(VALID_METRICS_OUTCOME as readonly unknown[]).includes(rawMetricsOutcome)) {
+      const details = {
+        kind: 'context_invalid_metrics_outcome',
+        tool: args.tool,
+        invalidValue: String(rawMetricsOutcome),
+        validValues: [...VALID_METRICS_OUTCOME],
+      } satisfies ContextValidationDetails & JsonObject;
+
+      return {
+        ok: false,
+        error: errNotRetryable(
+          'VALIDATION_ERROR',
+          `context.metrics_outcome has invalid value "${String(rawMetricsOutcome)}" for ${args.tool}. Valid values: ${VALID_METRICS_OUTCOME.map(v => `"${v}"`).join(', ')}.`,
+          {
+            suggestion: 'Set metrics_outcome to one of the valid enum values listed in validValues.',
+            details: details as unknown as JsonValue,
+          }
+        ) as ToolFailure,
+      };
+    }
   }
 
   return { ok: true };
