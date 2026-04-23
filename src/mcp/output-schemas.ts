@@ -155,6 +155,12 @@ export const TagSummaryItemSchema = z.object({
   examples: z.array(z.string()).describe('Representative workflow IDs for this tag.'),
 });
 
+export const V2ValidationWarningSchema = z.object({
+  workflowId: z.string().min(1),
+  sourceKind: z.string().min(1),
+  errors: z.array(z.string().min(1)).min(1),
+});
+
 export const V2WorkflowListOutputSchema = z.object({
   workflows: z.array(V2WorkflowListItemSchema),
   tagSummary: z.array(TagSummaryItemSchema).optional().describe(
@@ -177,6 +183,13 @@ export const V2WorkflowListOutputSchema = z.object({
   sources: z.array(V2WorkflowSourceCatalogEntrySchema).optional().describe(
     'Source catalog for this workspace. Only present when includeSources was true in the request. ' +
     'Shows where workflows come from with effective and shadowed counts per source.'
+  ),
+  validationWarnings: z.array(V2ValidationWarningSchema).optional().describe(
+    'Structured validation errors for non-bundled workflow files that failed JSON schema validation ' +
+    'and were excluded from the workflows list. Each entry identifies which workflow failed ' +
+    '(workflowId), which source it came from (sourceKind), and the specific validation errors (errors[]). ' +
+    'Absent when all workflows pass validation. Fix the listed errors in the workflow file and retry ' +
+    'list_workflows to confirm. Bundled (built-in) workflow failures are never included here.'
   ),
 });
 
