@@ -16,6 +16,8 @@ const FAKE_SESSION: ConsoleSessionDetail = {
   sessionId: 'sess-001',
   sessionTitle: 'Fix auth bug',
   health: 'healthy',
+  metrics: null,
+  repoRoot: null,
   runs: [
     {
       runId: 'run-001',

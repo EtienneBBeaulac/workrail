@@ -59,6 +59,7 @@ const FAKE_REPO_READY = {
       isAutonomous: false,
       isLive: false,
       parentSessionId: null,
+      metrics: null,
     },
   ],
   worktreeRepos: [

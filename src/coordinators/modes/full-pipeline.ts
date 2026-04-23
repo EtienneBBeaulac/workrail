@@ -207,6 +207,8 @@ async function runFullPipelineCore(
     'wr.discovery',
     opts.goal,
     opts.workspace,
+    undefined,
+    { maxSessionMinutes: Math.ceil(DISCOVERY_TIMEOUT_MS / 60_000) },
   );
 
   if (discoverySpawnResult.kind === 'err') {
@@ -244,7 +246,17 @@ async function runFullPipelineCore(
   // Read discovery handoff artifact and build shaping context.
   // (Pitch invariant 12: try artifact first; fallback to lastStepNotes if length > 50)
 
-  const discoveryAgentResult = await deps.getAgentResult(discoveryHandle);
+  let discoveryAgentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
+  try {
+    discoveryAgentResult = await deps.getAgentResult(discoveryHandle);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] getAgentResult failed: ${msg}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'review', reason: `getAgentResult threw: ${msg}` },
+    };
+  }
   const handoffArtifact = readDiscoveryHandoffArtifact(
     discoveryAgentResult.artifacts,
     discoveryHandle,
@@ -286,6 +298,7 @@ async function runFullPipelineCore(
     opts.goal,
     opts.workspace,
     shapingContext,
+    { maxSessionMinutes: Math.ceil(SHAPING_TIMEOUT_MS / 60_000) },
   );
 
   if (shapingSpawnResult.kind === 'err') {
@@ -333,6 +346,7 @@ async function runFullPipelineCore(
       opts.goal,
       opts.workspace,
       { shapingComplete: true },
+      { maxSessionMinutes: Math.ceil(REVIEW_TIMEOUT_MS / 60_000) },
     );
 
     if (uxSpawnResult.kind === 'err') {
@@ -369,24 +383,34 @@ async function runFullPipelineCore(
     // FULL mode (Large complexity) + touchesUI: require human outbox ack
     // before coding starts. Poll for 24 hours; timeout -> escalate.
     const ackRequestId = deps.generateId();
-    await deps.postToOutbox(
-      `UX design complete for "${opts.goal}" -- please review and acknowledge before coding starts`,
-      {
-        requestId: ackRequestId,
-        goal: opts.goal,
-        workspace: opts.workspace,
-        phase: 'ux-gate',
-        uxSessionHandle: uxHandle,
-        note: 'Acknowledge this message to allow coding to begin. No response in 24h = escalation.',
-      },
-    );
+    try {
+      await deps.postToOutbox(
+        `UX design complete for "${opts.goal}" -- please review and acknowledge before coding starts`,
+        {
+          requestId: ackRequestId,
+          goal: opts.goal,
+          workspace: opts.workspace,
+          phase: 'ux-gate',
+          uxSessionHandle: uxHandle,
+          note: 'Acknowledge this message to allow coding to begin. No response in 24h = escalation.',
+        },
+      );
+    } catch (e) {
+      // postToOutbox write failure is non-fatal -- UX gate ack poll still proceeds
+      deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
 
     const ackResult = await deps.pollOutboxAck(ackRequestId, UX_GATE_ACK_TIMEOUT_MS);
     if (ackResult === 'timeout') {
-      await deps.postToOutbox(
-        `UX gate timed out: no acknowledgment received within 24 hours for "${opts.goal}"`,
-        { requestId: ackRequestId, goal: opts.goal, phase: 'ux-gate-timeout' },
-      );
+      try {
+        await deps.postToOutbox(
+          `UX gate timed out: no acknowledgment received within 24 hours for "${opts.goal}"`,
+          { requestId: ackRequestId, goal: opts.goal, phase: 'ux-gate-timeout' },
+        );
+      } catch (e) {
+        // postToOutbox write failure is non-fatal -- escalation still returns below
+        deps.stderr(`[WARN coordinator] postToOutbox failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
       return {
         kind: 'escalated',
         escalationReason: {
@@ -414,6 +438,7 @@ async function runFullPipelineCore(
       // The shaping session should have created current-pitch.md
       pitchPath: opts.workspace + '/.workrail/current-pitch.md',
     },
+    { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
   );
 
   if (codingSpawnResult.kind === 'err') {
@@ -451,7 +476,17 @@ async function runFullPipelineCore(
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
   deps.stderr(`[full-pipeline] Polling for PR on branch pattern: ${branchPattern}`);
 
-  const prUrl = await deps.pollForPR(branchPattern, PR_POLL_TIMEOUT_MS);
+  let prUrl: string | null;
+  try {
+    prUrl = await deps.pollForPR(branchPattern, PR_POLL_TIMEOUT_MS);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'pr-detection', reason: `pollForPR threw: ${msg}` },
+    };
+  }
   if (!prUrl) {
     return {
       kind: 'escalated',

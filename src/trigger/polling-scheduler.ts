@@ -33,6 +33,8 @@ import { pollGitHubIssues, pollGitHubPRs, type GitHubIssue, type GitHubPR } from
 import { pollGitHubQueueIssues, inferMaturity, checkIdempotency, type GitHubQueueIssue, type FetchFn as QueueFetchFn } from './adapters/github-queue-poller.js';
 import { loadQueueConfig } from './github-queue-config.js';
 import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
+import type { PipelineOutcome } from '../coordinators/adaptive-pipeline.js';
+import { DISCOVERY_TIMEOUT_MS } from '../coordinators/adaptive-pipeline.js';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -54,6 +56,19 @@ type PollingTriggerDefinition = TriggerDefinition & {
 function isPollingTrigger(trigger: TriggerDefinition): trigger is PollingTriggerDefinition {
   return trigger.pollingSource !== undefined;
 }
+
+/**
+ * Result type for PollingScheduler.forcePoll().
+ *
+ * ok: Poll cycle was attempted. cycleRan=true if a new cycle was started;
+ *     cycleRan=false if the skip-cycle guard fired (previous cycle still running).
+ * not_found: No trigger with the given ID exists in the scheduler.
+ * wrong_provider: Trigger exists but is not a github_queue_poll trigger.
+ */
+export type ForcePollResult =
+  | { readonly kind: 'ok'; readonly cycleRan: boolean }
+  | { readonly kind: 'not_found' }
+  | { readonly kind: 'wrong_provider'; readonly provider: string };
 
 // ---------------------------------------------------------------------------
 // PollingScheduler class
@@ -168,6 +183,53 @@ export class PollingScheduler {
       this.intervals.delete(id);
     }
     console.log('[PollingScheduler] All polling loops stopped.');
+  }
+
+  // ---------------------------------------------------------------------------
+  // forcePoll: fire one immediate poll cycle (bypasses interval timer)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Force an immediate poll cycle for the named trigger, bypassing the interval timer.
+   *
+   * WHY this exists: the scheduled poll interval can be minutes. This method lets operators
+   * trigger an immediate cycle from the CLI (via POST /api/v2/triggers/:triggerId/poll)
+   * without restarting the daemon.
+   *
+   * Behavior:
+   * - Returns not_found if no trigger with this ID exists in the scheduler's trigger list.
+   * - Returns wrong_provider if the trigger exists but is not a github_queue_poll trigger.
+   *   (Only queue poll triggers support manual polling.)
+   * - Runs one poll cycle via runPollCycle(). Returns ok with cycleRan=true if the cycle
+   *   was actually started, cycleRan=false if the skip-cycle guard fired (previous cycle
+   *   still running).
+   *
+   * WHY cycleRan is determined BEFORE runPollCycle: runPollCycle checks this.polling.get(triggerId)
+   * internally and returns early if true. Reading the flag here lets us tell the caller whether
+   * a new cycle was actually initiated without exposing runPollCycle's internals.
+   */
+  async forcePoll(triggerId: string): Promise<ForcePollResult> {
+    const trigger = this.triggers.find((t) => t.id === triggerId);
+    if (!trigger) {
+      return { kind: 'not_found' };
+    }
+
+    if (trigger.provider !== 'github_queue_poll' || !trigger.pollingSource) {
+      return { kind: 'wrong_provider', provider: trigger.provider };
+    }
+
+    // WHY read before runPollCycle: the skip-cycle guard inside runPollCycle checks
+    // this.polling.get(triggerId) and returns early if true. By reading here first,
+    // we can surface cycleRan to the caller without needing to change runPollCycle.
+    const pollInFlight = this.polling.get(triggerId) === true;
+    const cycleRan = !pollInFlight;
+
+    // runPollCycle handles the skip-cycle guard, error logging, and finally cleanup.
+    // We await it so the HTTP response is sent only after the cycle completes.
+    const pollingTrigger = trigger as PollingTriggerDefinition;
+    await this.runPollCycle(pollingTrigger);
+
+    return { kind: 'ok', cycleRan };
   }
 
   // ---------------------------------------------------------------------------
@@ -441,12 +503,6 @@ export class PollingScheduler {
       const excludedLabel = queueConfig.excludeLabels.find((el) => issueLabels.includes(el));
       if (excludedLabel) { skipped.push({ issue, reason: `excluded_label: ${excludedLabel}` }); continue; }
 
-      // H3: worktrain:in-progress label (active/skip -- not a maturity level)
-      if (issueLabels.includes('worktrain:in-progress')) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
-
-      // H3: session ID pattern in body (active/skip)
-      if (/sess_[a-z0-9]+/.test(issue.body)) { skipped.push({ issue, reason: 'active_session_or_in_progress' }); continue; }
-
       // Fast in-memory idempotency check (I3: runs before sidecar scan).
       // Guards against duplicate dispatch within a single process lifetime for issues
       // whose dispatchAdaptivePipeline() Promise is still in flight.
@@ -540,6 +596,22 @@ export class PollingScheduler {
     this.dispatchingIssues.add(top.issue.number);
     console.log(`[QueuePoll] in-flight-add #${top.issue.number}`);
 
+    // Write cross-restart ownership sidecar BEFORE dispatch.
+    // WHY: in-memory dispatchingIssues is cleared on daemon restart. The sidecar persists
+    // across restarts so checkIdempotency() can detect active queue sessions even after crash.
+    // TTL = DISCOVERY_TIMEOUT_MS + 60s: if the daemon crashes mid-run, the sidecar expires
+    // naturally after this window and the issue becomes eligible for re-dispatch (RC3 fix).
+    const sidecarPath = path.join(sessionsDir, `queue-issue-${top.issue.number}.json`);
+    const sidecarContent = JSON.stringify({
+      issueNumber: top.issue.number,
+      triggerId,
+      dispatchedAt: Date.now(),
+      ttlMs: DISCOVERY_TIMEOUT_MS + 60_000,
+    }, null, 2);
+    void fs.writeFile(sidecarPath, sidecarContent, 'utf8').catch((e: unknown) => {
+      console.warn(`[QueuePoll] Failed to write sidecar for issue #${top.issue.number}: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
     // Capture the Promise without awaiting it (fire-and-forget semantics preserved).
     // I2: Cleanup in BOTH .then() and .catch() -- unconditional regardless of outcome.
     const dispatchP = (this.router as {
@@ -547,20 +619,25 @@ export class PollingScheduler {
         goal: string,
         workspace: string,
         context?: Readonly<Record<string, unknown>>,
-      ) => Promise<unknown>
+      ) => Promise<PipelineOutcome>
     }).dispatchAdaptivePipeline(
       workflowTrigger.goal,
       workflowTrigger.workspacePath,
       workflowTrigger.context,
     );
+    const issueNumber = top.issue.number;
     void dispatchP
       .then(() => {
-        this.dispatchingIssues.delete(top.issue.number);
-        console.log(`[QueuePoll] in-flight-clear #${top.issue.number} reason=completed`);
+        this.dispatchingIssues.delete(issueNumber);
+        console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=completed`);
+        // Delete sidecar on completion (pipeline resolved).
+        void fs.unlink(sidecarPath).catch(() => {});
       })
       .catch(() => {
-        this.dispatchingIssues.delete(top.issue.number);
-        console.log(`[QueuePoll] in-flight-clear #${top.issue.number} reason=error`);
+        this.dispatchingIssues.delete(issueNumber);
+        console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=error`);
+        // Delete sidecar on error (pipeline rejected).
+        void fs.unlink(sidecarPath).catch(() => {});
       });
     console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
 
@@ -574,6 +651,7 @@ export class PollingScheduler {
     console.log(`[QueuePoll] cycle complete selected=1 skipped=${skipped.length + candidates.length - 1} elapsed=${elapsed}ms`);
     await appendQueuePollLog({ event: 'poll_cycle_complete', selected: 1, skipped: skipped.length + candidates.length - 1, elapsed, ts: new Date().toISOString() });
   }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -731,15 +809,44 @@ function extractDotPath(obj: Record<string, unknown>, rawPath: string): unknown 
 async function countActiveSessions(sessionsDir: string): Promise<number> {
   try {
     const files = await fs.readdir(sessionsDir);
-    return files.filter((f) => f.endsWith('.json')).length;
+    // TODO(Phase B): sessions preserved by runStartupRecovery() (Phase B honest deferral)
+    // also land in this directory with the same filename pattern as live session sidecars.
+    // They cannot be distinguished here, so preserved sidecars count toward
+    // maxConcurrentSessions and may suppress new dispatches unnecessarily.
+    // Fix in Phase B: use a distinguishable filename (e.g. preserved-<sessionId>.json)
+    // or a marker field inside the sidecar so countActiveSessions can exclude them.
+    return files.filter((f) => f.endsWith('.json') && !f.startsWith('queue-issue-')).length;
   } catch {
     return 0;
   }
 }
 
+/**
+ * Maximum size of queue-poll.jsonl before rotation.
+ * When the file reaches this size, it is renamed to queue-poll.jsonl.1
+ * (overwriting any existing backup) and a fresh log file is started.
+ * WHY 10 MB: conservative cap holding ~5 weeks of history at 5-minute polling intervals.
+ */
+const MAX_QUEUE_POLL_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+// NOTE: rotation path not covered by unit tests -- mocking os.homedir() requires
+// test infrastructure changes not currently in place.
 async function appendQueuePollLog(entry: Record<string, unknown>): Promise<void> {
   const logPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
   try {
+    try {
+      const stat = await fs.stat(logPath);
+      if (stat.size >= MAX_QUEUE_POLL_FILE_SIZE) {
+        // Rotate: rename current log to .1 (overwrites any existing backup),
+        // then let the appendFile below create a fresh log file.
+        await fs.rename(logPath, logPath + '.1');
+      }
+    } catch {
+      // File does not exist yet or stat/rename failed -- proceed to append.
+      // On ENOENT: appendFile will create the file. On other errors: log entry
+      // will still be written to the existing (potentially oversized) file,
+      // and console.warn is emitted by the outer catch if appendFile itself fails.
+    }
     await fs.appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
   } catch (e) {
     console.warn(`[QueuePoll] Failed to write queue-poll.jsonl: ${e instanceof Error ? e.message : String(e)}`);

@@ -13,6 +13,7 @@ export const testArtifactLoopControlFixture: WorkflowFixture = {
     name: 'Test Artifact Loop Control',
     description: 'Test workflow demonstrating typed artifact loop control (Phase 3 migration pattern)',
     version: '1.0.0',
+    metricsProfile: 'none',
     assessments: [
       {
         id: 'readiness_gate',

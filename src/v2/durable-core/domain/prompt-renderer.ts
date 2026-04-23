@@ -349,6 +349,60 @@ function formatAssessmentRequirements(
 }
 
 /**
+ * Build the metrics instrumentation footer for a step prompt.
+ *
+ * Injected at render time based on the workflow-level `metricsProfile` field.
+ * This is NOT a compile-time feature -- it has no feature registry entry.
+ * Absent field or 'none' = empty string, leaving all existing workflows unaffected.
+ *
+ * Why the accumulation reminder must mention FULL list: context uses shallow merge.
+ * metrics_commit_shas: ['def'] at step 9 permanently loses 'abc' from step 5.
+ * The agent must read and re-send the full accumulated list on every advance.
+ *
+ * @param profile - The workflow's metricsProfile field value (or undefined if absent)
+ * @param isLastStep - True when this is the terminal step of the workflow
+ * @param cleanFormat - True when cleanResponseFormat is active (compact one-liners)
+ */
+export function buildMetricsSection(
+  profile: 'coding' | 'review' | 'research' | 'design' | 'ticket' | 'none' | undefined,
+  isLastStep: boolean,
+  cleanFormat: boolean,
+): string {
+  if (!profile || profile === 'none') return '';
+
+  switch (profile) {
+    case 'coding': {
+      const shaFooter = cleanFormat
+        ? '\n\nMetrics: update context.metrics_commit_shas with the FULL accumulated SHA list (shallow merge -- partial lists lose earlier commits).'
+        : '\n\n**METRICS (System):** This is a coding workflow. After each commit, update `context.metrics_commit_shas` with the FULL accumulated list of commit SHAs from this session -- not just the current step\'s commits. Context uses shallow merge: sending only new SHAs permanently loses earlier ones.\n\nCall `continue_workflow` with:\n- `context: { metrics_commit_shas: ["<sha1>", "<sha2>", ...] }` -- full list, every step that has commits';
+      if (!isLastStep) return shaFooter;
+      const finalFooter = cleanFormat
+        ? '\n\nMetrics (final): also set metrics_outcome, metrics_pr_numbers, metrics_files_changed, metrics_lines_added, metrics_lines_removed in context.'
+        : '\n\n**METRICS (System):** This is the final step. Also report:\n- `metrics_outcome`: `"success"` | `"partial"` | `"abandoned"` | `"error"`\n- `metrics_pr_numbers`: array of integer PR numbers (not URLs)\n- `metrics_files_changed`: integer count\n- `metrics_lines_added`: integer count\n- `metrics_lines_removed`: integer count\n\nCall `continue_workflow` with all of the above in `context: { metrics_commit_shas: [...], metrics_outcome: "success", ... }`.';
+      return shaFooter + finalFooter;
+    }
+    case 'review': {
+      if (!isLastStep) return '';
+      return cleanFormat
+        ? '\n\nMetrics (final): set metrics_pr_numbers (integer array) and metrics_outcome in context.'
+        : '\n\n**METRICS (System):** This is the final step of a review workflow. Report:\n- `metrics_pr_numbers`: array of integer PR numbers reviewed (not URLs)\n- `metrics_outcome`: `"success"` | `"partial"` | `"abandoned"` | `"error"`\n\nCall `continue_workflow` with `context: { metrics_pr_numbers: [123], metrics_outcome: "success" }`.';
+    }
+    // WHY research/design/ticket share footer text: all three produce non-code deliverables
+    // with no commit SHA attribution. The semantic distinction is preserved in the enum for
+    // future divergence (e.g. 'ticket' could one day inject metrics_ticket_ids), but today
+    // they all inject outcome-only on the final step.
+    case 'research':
+    case 'design':
+    case 'ticket': {
+      if (!isLastStep) return '';
+      return cleanFormat
+        ? '\n\nMetrics (final): set metrics_outcome in context.'
+        : '\n\n**METRICS (System):** This is the final step. Report:\n- `metrics_outcome`: `"success"` | `"partial"` | `"abandoned"` | `"error"`\n\nCall `continue_workflow` with `context: { metrics_outcome: "success" }`.';
+    }
+  }
+}
+
+/**
  * Assemble fragment texts whose `when` conditions match the given context.
  *
  * Pure function: evaluates each fragment's condition against `context` and
@@ -596,7 +650,19 @@ export function renderPendingPrompt(args: {
     ? assembleFragmentedPrompt(promptFragments, renderContext)
     : '';
 
-  // Array join avoids 5 intermediate string allocations from the + chain.
+  // Metrics instrumentation footer -- render-time injection based on metricsProfile.
+  // Placed after fragmentSuffix so system instructions trail all authored content
+  // (most actionable position: last thing the agent reads before advancing).
+  //
+  // isLastStep = last top-level step OR exit step of the last top-level loop.
+  // The parentLoopByStepId index covers exit steps (all loop body steps are indexed).
+  const lastTopLevelStepId = args.workflow.definition.steps.at(-1)?.id;
+  const isLastTopLevelStep = args.stepId === lastTopLevelStepId;
+  const isLastExitStep = isExitStep && resolveParentLoopStep(args.workflow, args.stepId)?.id === lastTopLevelStepId;
+  const isLastStep = isLastTopLevelStep || isLastExitStep;
+  const metricsSection = buildMetricsSection(args.workflow.definition.metricsProfile, isLastStep, cleanResponseFormat);
+
+  // Array join avoids intermediate string allocations from the + chain.
   const enhancedPrompt = [
     loopBanner,
     basePrompt,
@@ -605,6 +671,7 @@ export function renderPendingPrompt(args: {
     assessmentSection,
     notesSection,
     fragmentSuffix ? '\n\n' + fragmentSuffix : '',
+    metricsSection,
   ].join('');
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)

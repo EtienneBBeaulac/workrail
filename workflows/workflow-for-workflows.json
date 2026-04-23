@@ -1,7 +1,8 @@
 {
   "id": "workflow-for-workflows",
   "name": "Workflow Authoring Workflow",
-  "version": "2.4.0",
+  "version": "2.5.0",
+  "metricsProfile": "design",
   "description": "Use this to author or modernize a WorkRail workflow. Guides through understanding the task, defining effectiveness targets, designing architecture and quality gates, drafting, validating, assigning tags, and handing off.",
   "about": "## Workflow Authoring Workflow\n\nThis is the standard WorkRail workflow for creating a new workflow from scratch or modernizing an existing one. It is the trust gate for all other workflows: a workflow is not considered production-ready until it has passed through here.\n\n**What it does:**\nThe workflow walks through the full authoring lifecycle: understanding the task, choosing the right baseline and archetype, designing the phase and quality-gate architecture, drafting the workflow JSON, running structural validators, auditing state fields for bloat, simulating execution against real scenarios, running an adversarial quality review, and producing a final trust handoff. For modernization tasks it builds a value inventory first to ensure enforcement mechanisms, domain knowledge, and behavioral rules are preserved or equivalently replaced.\n\n**When to use it:**\n- You want to author a new WorkRail workflow for a recurring task or problem\n- You have an existing workflow that is outdated, uses legacy patterns (pseudo-DSL, regex validation, satisfaction-score loops), or produces shallow results\n- You want a workflow that will pass the WorkRail quality bar and be trusted to run in production\n\n**What it produces:**\nA validated, tagged workflow JSON file with a `validatedAgainstSpecVersion` stamp. A final trust handoff with readiness verdict, known failure modes, residual weaknesses, and testing guidance.\n\n**How to get good results:**\nDescribe the recurring task the workflow should solve, who will run it, and what a satisfying result looks like. For modernization, point to the existing workflow file. The workflow reads the schema and authoring spec itself  -- you do not need to know the JSON format in advance.",
   "examples": [
@@ -210,10 +211,8 @@
         ],
         "procedure": [
           "Decide the phase list, one-line goal for each phase, and overall ordering.",
-          "Identify meaningful input classifications that require different workflow paths. For each variant dimension, decide the branching mechanism: `runCondition` on separate steps (diverging paths), `promptFragments` (additive behavior on a shared base), or a separate workflow entirely. For each captured variable that drives branching, define its closed set of valid values — unexpected values are a common source of silent misbehavior.",
           "Design loops with explicit exit rules, bounded maxIterations, and real reasons for another pass.",
-          "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance.",
-          "If the authored workflow encodes domain knowledge tied to a specific version of an external system or codebase, decide how to handle staleness: prefer reading the codebase at runtime over hardcoding patterns, or explicitly document versioned assumptions so they surface as maintenance debt."
+          "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance."
         ],
         "outputRequired": {
           "notesMarkdown": "Structured workflow outline, loop design, confirmation design, delegation design, artifact plan, and modernization mapping.",
@@ -266,7 +265,7 @@
         "procedure": [
           "Decide whether the authored workflow needs a hypothesis step, neutral fact packet, reviewer or validator families, contradiction loop, final validation bundle, or explicit blind-spot handling.",
           "Design the confidence model, blind-spot model, and state economy plan.",
-          "Decide the hard-gate dimensions that would make the authored workflow unsafe or unsatisfying if they fail. Choose the right enforcement mechanism for each gate: `assessments` + `assessmentRefs` + `assessmentConsequences` for bounded confidence judgments (each dimension captures a distinct orthogonal failure mode — see `mr-review-workflow.agentic.v2.json` and `bug-investigation.agentic.v2.json`); `validationCriteria` with context-aware conditions for completion-gating on structured checklists or required output content (the engine enforces that required content appears in the response before the step can complete, without a loop — conditions on individual rules can match the workflow's branching context); a re-verification loop for fix-and-verify cycles where the agent must act then prove the action worked. Do not default to a loop when `validationCriteria` is the right tool, or to `requireConfirmation` when a hard gate is needed.",
+          "Decide the hard-gate dimensions that would make the authored workflow unsafe or unsatisfying if they fail. If hard gates exist, implement them using the native `assessments` + `assessmentRefs` + `assessmentConsequences` schema fields rather than informal notes or `requireConfirmation` alone. Each dimension should capture a distinct orthogonal failure mode -- not restate the workflow's existing confidence band. See `mr-review-workflow.agentic.v2.json` and `bug-investigation.agentic.v2.json` as exemplars.",
           "Write the redesign triggers that should force architectural revision rather than cosmetic refinement."
         ],
         "outputRequired": {
@@ -555,84 +554,14 @@
               "text": "For modernize_existing: add a heritage_reviewer to the adversarial bundle. Its job is to check each valueInventory item and find what was lost or weakened  -- it ignores format improvements. It must answer: which enforcement mechanisms are now prose-only? Which domain knowledge items are absent? Which behavioral rules were removed without equivalent replacement? Heritage_reviewer findings drive enforcementStrength and modernizationDiscipline scores."
             }
           ],
-          "hasValidation": true,
+          "requireConfirmation": false,
           "validationCriteria": [
-            {
-              "type": "contains",
-              "value": "voiceClarity",
-              "message": "Review must score voiceClarity"
-            },
-            {
-              "type": "contains",
-              "value": "ceremonyLevel",
-              "message": "Review must score ceremonyLevel"
-            },
-            {
-              "type": "contains",
-              "value": "loopSoundness",
-              "message": "Review must score loopSoundness"
-            },
-            {
-              "type": "contains",
-              "value": "delegationBoundedness",
-              "message": "Review must score delegationBoundedness"
-            },
-            {
-              "type": "contains",
-              "value": "artifactClarity",
-              "message": "Review must score artifactClarity"
-            },
-            {
-              "type": "contains",
-              "value": "taskEffectiveness",
-              "message": "Review must score taskEffectiveness"
-            },
-            {
-              "type": "contains",
-              "value": "falseConfidenceResistance",
-              "message": "Review must score falseConfidenceResistance"
-            },
-            {
-              "type": "contains",
-              "value": "stateMinimality",
-              "message": "Review must score stateMinimality"
-            },
-            {
-              "type": "contains",
-              "value": "coverageSharpness",
-              "message": "Review must score coverageSharpness"
-            },
-            {
-              "type": "contains",
-              "value": "domainFit",
-              "message": "Review must score domainFit"
-            },
-            {
-              "type": "contains",
-              "value": "handoffUtility",
-              "message": "Review must score handoffUtility"
-            },
             {
               "type": "contains",
               "value": "complexityScaling",
               "message": "Review must score complexityScaling"
-            },
-            {
-              "type": "contains",
-              "value": "enforcementStrength",
-              "message": "Review must score enforcementStrength"
-            },
-            {
-              "type": "contains",
-              "value": "modernizationDiscipline",
-              "condition": {
-                "var": "authoringMode",
-                "equals": "modernize_existing"
-              },
-              "message": "Modernization reviews must score modernizationDiscipline"
             }
           ],
-          "requireConfirmation": false,
           "assessmentRefs": [
             "authoring-integrity-gate",
             "outcome-effectiveness-gate"
@@ -738,6 +667,33 @@
         ],
         "outputRequired": {
           "notesMarkdown": "List the assigned tags with a one-line justification for each. Confirm about and examples were written."
+        }
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-7b-declare-metrics-profile",
+      "title": "Phase 7b: Declare metricsProfile",
+      "promptBlocks": {
+        "goal": "Declare the metricsProfile field in the authored workflow JSON, or explicitly justify omitting it. The metricsProfile field enables engine-injected metrics instrumentation footers in step prompts. When set, the engine injects context key accumulation reminders into every step prompt -- guiding compliant agents to report outcome, commit SHAs, PR numbers, and diff stats at session completion. Without this field, captureConfidence is always 'none' and no session metrics are collected.",
+        "procedure": [
+          "Choose the correct profile based on what the workflow produces:",
+          "  - 'coding': produces code commits. Use for implementation, refactoring, bug-fix, migration, and documentation-writing workflows.",
+          "  - 'review': produces a review decision on a PR or MR. Use for code review, audit, and change validation workflows.",
+          "  - 'research': produces a finding or recommendation but no commits. Use for investigation, diagnosis, and analysis workflows.",
+          "  - 'design': produces a design artifact (pitch, spec, ADR, architecture doc) but no commits.",
+          "  - 'ticket': creates or updates work items in an external system (Jira, GitHub Issues, Linear).",
+          "  - 'none': meta-workflow, authoring tool, utility routine, or no measurable outcome. Set explicitly and document the reason.",
+          "Add `\"metricsProfile\": \"<profile>\"` as a top-level field in the workflow JSON, after `recommendedPreferences` if that field exists.",
+          "If choosing 'none', record the justification in your notes so the decision is auditable."
+        ],
+        "constraints": [
+          "Do not invent a new profile value. The closed set is: 'coding', 'review', 'research', 'design', 'ticket', 'none'.",
+          "The engine does NOT derive the profile from tags automatically. You must set it explicitly.",
+          "workflow-for-workflows itself produces a workflow JSON artifact (a design output) -- use 'design'. It does not commit code."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "State the chosen metricsProfile and a one-line justification. If omitting, explain why."
         }
       },
       "requireConfirmation": false

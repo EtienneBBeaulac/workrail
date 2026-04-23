@@ -12,6 +12,10 @@
  * - WorkflowTrigger context contains expected MR fields
  * - goalTemplate interpolation from MR fields
  * - goalTemplate falls back to static goal on missing token
+ * - forcePoll: returns not_found for unknown triggers
+ * - forcePoll: returns wrong_provider for non-queue triggers
+ * - forcePoll: runs one cycle and returns cycleRan=true when no poll in flight
+ * - forcePoll: returns cycleRan=false when skip-cycle guard fires
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -652,5 +656,84 @@ describe('doPollGitHubQueue adaptive routing', () => {
     // Cleanup
     resolveDispatch();
     await deferredDispatch;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// forcePoll
+// ---------------------------------------------------------------------------
+
+describe('PollingScheduler.forcePoll', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns not_found for an unknown triggerId', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router } = makeRouter();
+
+    const scheduler = new PollingScheduler([makeQueuePollTrigger()], router, store, makeQueueFetch());
+    const result = await scheduler.forcePoll('nonexistent-trigger');
+
+    expect(result.kind).toBe('not_found');
+  });
+
+  it('returns wrong_provider for a non-queue-poll trigger', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router } = makeRouter();
+    const trigger = makePollingTrigger(); // gitlab_poll trigger
+
+    const scheduler = new PollingScheduler([trigger], router, store, makeMRResponse([]));
+    const result = await scheduler.forcePoll(trigger.id);
+
+    expect(result.kind).toBe('wrong_provider');
+    if (result.kind === 'wrong_provider') {
+      expect(result.provider).toBe('gitlab_poll');
+    }
+  });
+
+  it('runs one poll cycle and returns cycleRan=true when no poll is in flight', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router, adaptiveDispatched } = makeRouter();
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+
+    const result = await scheduler.forcePoll(trigger.id);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.cycleRan).toBe(true);
+    }
+    // The cycle ran: adaptive dispatch was called
+    expect(adaptiveDispatched).toHaveLength(1);
+  });
+
+  it('returns cycleRan=false when skip-cycle guard fires (poll already in flight)', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router } = makeRouter();
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+
+    // Manually set the polling flag to simulate an in-progress poll
+    (scheduler as unknown as { polling: Map<string, boolean> }).polling.set(trigger.id, true);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await scheduler.forcePoll(trigger.id);
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.cycleRan).toBe(false);
+    }
+    // The skip-cycle guard fired -- runPollCycle was called but skipped
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Skipping poll cycle'));
+
+    warnSpy.mockRestore();
   });
 });

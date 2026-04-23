@@ -2,6 +2,7 @@
   "id": "routine-parallel-work-partitioning",
   "name": "Parallel Work Partitioning Routine",
   "version": "0.1.0",
+  "metricsProfile": "none",
   "description": "Analyzes a set of work items and their dependencies, partitions them into independent batches that can be safely parallelized across subagents, and produces a sorted execution plan. Flags items with cross-dependencies for sequential handling by the main agent.",
   "metaGuidance": [
     "INDEPENDENCE IS THE PRIORITY: a batch is only parallel-safe if no item in it depends on any other item in any concurrent batch.",

@@ -46,5 +46,4 @@ triggers:
       pollIntervalSeconds: 3600
     agentConfig:
       maxSessionMinutes: 120
-      maxTurns: 60
       stuckAbortPolicy: abort

@@ -44,6 +44,7 @@ describe('Session store idempotency with fakes (all-or-nothing)', () => {
       kind: 'session_created',
       dedupeKey: 'session_created:sess_partial_test_fake',
       data: {},
+      timestampMs: Date.now(),
     };
 
     const event2: DomainEventV1 = {
@@ -60,6 +61,7 @@ describe('Session store idempotency with fakes (all-or-nothing)', () => {
         workflowSourceKind: 'project',
         workflowSourceRef: 'test',
       },
+      timestampMs: Date.now(),
     };
 
     // First append: events [1, 2]
@@ -83,6 +85,7 @@ describe('Session store idempotency with fakes (all-or-nothing)', () => {
         value: { type: 'short_string', value: 'main' },
         confidence: 'high',
       },
+      timestampMs: Date.now(),
     };
 
     // Second append: events [1, 3] (event1 exists, event3 doesn't)
@@ -150,6 +153,7 @@ describe('Session store idempotency with fakes (all-or-nothing)', () => {
       kind: 'session_created',
       dedupeKey: 'sk_0',
       data: {},
+      timestampMs: Date.now(),
     };
 
     // Try to append event with non-contiguous index (skip to index 5)
@@ -167,6 +171,7 @@ describe('Session store idempotency with fakes (all-or-nothing)', () => {
         workflowSourceKind: 'project',
         workflowSourceRef: 'test',
       },
+      timestampMs: Date.now(),
     };
 
     const result = await gate.withHealthySessionLock(sessionId, (lock) =>
@@ -193,6 +198,7 @@ describe('Session store idempotency with fakes (all-or-nothing)', () => {
       kind: 'session_created',
       dedupeKey: 'sk_0',
       data: {},
+      timestampMs: Date.now(),
     };
 
     // First append

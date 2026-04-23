@@ -151,16 +151,16 @@ describe('validateTriggerStrict', () => {
   });
 
   describe('rule: parallel-without-worktree (warning)', () => {
-    it('fires when concurrencyMode is parallel and branchStrategy is absent', () => {
-      const trigger = makeTrigger({ concurrencyMode: 'parallel', branchStrategy: undefined });
+    it('fires when concurrencyMode is parallel, branchStrategy is absent, and trigger writes (autoCommit)', () => {
+      const trigger = makeTrigger({ concurrencyMode: 'parallel', branchStrategy: undefined, autoCommit: true });
       const issues = validateTriggerStrict(trigger);
       const rule = issues.find((i) => i.rule === 'parallel-without-worktree');
       expect(rule).toBeDefined();
       expect(rule?.severity).toBe('warning');
     });
 
-    it('fires when concurrencyMode is parallel and branchStrategy is none', () => {
-      const trigger = makeTrigger({ concurrencyMode: 'parallel', branchStrategy: 'none' });
+    it('fires when concurrencyMode is parallel, branchStrategy is none, and trigger writes (autoCommit)', () => {
+      const trigger = makeTrigger({ concurrencyMode: 'parallel', branchStrategy: 'none', autoCommit: true });
       const issues = validateTriggerStrict(trigger);
       const rule = issues.find((i) => i.rule === 'parallel-without-worktree');
       expect(rule).toBeDefined();
@@ -175,6 +175,17 @@ describe('validateTriggerStrict', () => {
 
     it('does not fire when concurrencyMode is serial', () => {
       const trigger = makeTrigger({ concurrencyMode: 'serial', branchStrategy: 'none' });
+      const issues = validateTriggerStrict(trigger);
+      expect(issues.find((i) => i.rule === 'parallel-without-worktree')).toBeUndefined();
+    });
+
+    it('does not fire when concurrencyMode is parallel but trigger is read-only (no autoCommit, no autoOpenPR)', () => {
+      const trigger = makeTrigger({
+        concurrencyMode: 'parallel',
+        branchStrategy: undefined,
+        autoCommit: undefined,
+        autoOpenPR: undefined,
+      });
       const issues = validateTriggerStrict(trigger);
       expect(issues.find((i) => i.rule === 'parallel-without-worktree')).toBeUndefined();
     });

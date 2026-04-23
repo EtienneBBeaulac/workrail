@@ -3,6 +3,7 @@
   "name": "Test Artifact Loop Control",
   "description": "Test workflow demonstrating typed artifact loop control (Phase 3 migration pattern)",
   "version": "1.0.0",
+  "metricsProfile": "none",
   "metaGuidance": [
     "This workflow demonstrates the new artifact-based loop control pattern.",
     "Instead of prose validation (checking for 'continuePlanning = true' in text),",
@@ -55,7 +56,9 @@
       "title": "Complete",
       "prompt": "The iteration loop has completed. Assess whether the loop result is ready to publish.\n\nProvide an assessment artifact for readiness.",
       "requireConfirmation": false,
-      "assessmentRefs": ["readiness_gate"],
+      "assessmentRefs": [
+        "readiness_gate"
+      ],
       "assessmentConsequences": [
         {
           "when": {
@@ -77,7 +80,10 @@
         {
           "id": "confidence",
           "purpose": "How confident the agent is that the loop result is complete and correct.",
-          "levels": ["low", "high"]
+          "levels": [
+            "low",
+            "high"
+          ]
         }
       ]
     }

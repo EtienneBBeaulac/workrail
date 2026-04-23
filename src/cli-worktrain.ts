@@ -42,6 +42,7 @@ import {
   buildConsoleServiceFromDataDir,
   type Priority,
 } from './cli/commands/index.js';
+import { writeStatsSummary } from './daemon/stats-summary.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -366,10 +367,8 @@ program
           // This is the launchd entry point: `worktrain daemon` with no flags.
           // Run the same startup logic as `workrail daemon`.
           const { startTriggerListener } = await import('./trigger/trigger-listener.js');
-          const { startDaemonConsole } = await import('./trigger/daemon-console.js');
           const { DaemonEventEmitter } = await import('./daemon/daemon-events.js');
-          const { initializeContainer, container } = await import('./di/container.js');
-          const { DI } = await import('./di/tokens.js');
+          const { initializeContainer } = await import('./di/container.js');
 
           await initializeContainer({ runtimeMode: { kind: 'cli' } });
           const { createToolContext } = await import('./mcp/server.js');
@@ -419,32 +418,7 @@ program
           console.log(`WorkRail daemon running on port ${handle.port}`);
           console.log(`Workspace: ${workspacePath}`);
           console.log('Waiting for webhook triggers...');
-
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const pkg = require('../package.json') as { version: string };
-
-          // Resolve workflowService from the DI container.
-          type WorkflowService = import('./application/services/workflow-service.js').WorkflowService;
-          const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
-
-          const consoleResult = await startDaemonConsole(ctx, {
-            triggerRouter: handle.router,
-            serverVersion: pkg.version,
-            workflowService,
-            steerRegistry: handle.steerRegistry,
-          });
-
-          let consoleHandle: import('./trigger/daemon-console.js').DaemonConsoleHandle | null = null;
-          if (consoleResult.kind === 'ok') {
-            consoleHandle = consoleResult.value;
-          } else if (consoleResult.error.kind === 'port_conflict') {
-            console.warn(
-              `[DaemonConsole] Port ${consoleResult.error.port} is already held. ` +
-              `The daemon is running but the console is unavailable.`,
-            );
-          } else {
-            console.warn(`[DaemonConsole] Could not start console: ${consoleResult.error.message}`);
-          }
+          console.log("[Daemon] Run 'worktrain console' to start the dashboard");
 
           // Keep alive until SIGINT/SIGTERM.
           await new Promise<void>((resolve) => {
@@ -454,6 +428,7 @@ program
             // cheap enough to not impact I/O (fire-and-forget JSONL append).
             const heartbeatInterval = setInterval(() => {
               const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+              const statsDir = path.join(os.homedir(), '.workrail', 'data');
               // Count active sessions from the daemon-sessions dir. Best-effort:
               // if the dir is unavailable, activeSessions defaults to 0.
               fs.promises.readdir(sessionsDir)
@@ -462,6 +437,9 @@ program
                 .then((activeSessions) => {
                   emitter.emit({ kind: 'daemon_heartbeat', activeSessions, ts: Date.now() });
                 });
+              // Update stats-summary.json as a safety net. Covers sessions whose post-session
+              // write failed (e.g. daemon restart mid-write). Fire-and-forget.
+              writeStatsSummary(statsDir).catch(() => {});
             }, 30_000);
 
             // Best-effort crash event. Emitted when an uncaught exception reaches
@@ -483,10 +461,22 @@ program
               // Clear heartbeat before stopping -- prevents timer from firing after
               // the process is in teardown state.
               clearInterval(heartbeatInterval);
-              emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
-              if (consoleHandle) {
-                await consoleHandle.stop();
+              // WHY emit session_aborted before handle.stop(): in-flight sessions have
+              // their agent loops killed by handle.stop() but never emit session_completed.
+              // Without these events the JSONL log shows them as RUNNING forever, making
+              // `worktrain health` and `worktrain status` untrustworthy after restart.
+              // steerRegistry keys are workrailSessionIds of sessions currently in the
+              // agent loop. Emit before handle.stop() while I/O is still active.
+              for (const workrailSessionId of handle.steerRegistry.keys()) {
+                emitter.emit({
+                  kind: 'session_aborted',
+                  sessionId: workrailSessionId,
+                  workrailSessionId,
+                  reason: 'daemon_shutdown',
+                  ts: Date.now(),
+                });
               }
+              emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
               await handle.stop();
               resolve();
             };
@@ -565,6 +555,8 @@ function formatDaemonEventLine(raw: string): string | null {
       }
       return `${prefix}  workflow=${obj['workflowId'] ?? '?'} outcome=${outcome ?? '?'}${detail}`;
     }
+    case 'session_aborted':
+      return `${prefix}  reason=${obj['reason'] ?? '?'}`;
     case 'step_advanced':
       return `${prefix}  -> step advanced`;
     case 'issue_reported': {
@@ -695,7 +687,7 @@ program
   .action(async (options: { follow?: boolean; session?: string }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
-    // WHY constants: queue-poll and stderr are permanent files that never rotate.
+    // WHY constants: queue-poll uses size-based rotation (not date-based); stderr does not rotate.
     // Only the daemon event file uses todayFilePath() to handle midnight rotation.
     const queuePollPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
     const stderrPath = path.join(os.homedir(), '.workrail', 'logs', 'daemon.stderr.log');
@@ -902,8 +894,8 @@ program
     }
 
     // Poll every 500ms for new lines from all three sources.
-    // WHY midnight rotation only on daemon file: queue-poll.jsonl and daemon.stderr.log
-    // are permanent files -- they do not rotate at midnight.
+    // WHY midnight rotation only on daemon file: queue-poll.jsonl uses size-based rotation
+    // (handled below with shrink detection); daemon.stderr.log does not rotate.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       await new Promise<void>((resolve) => setTimeout(resolve, 500));
@@ -924,7 +916,18 @@ program
         offset = daemonPoll.newOffset;
       }
 
-      // Queue poll file (permanent path, no rotation).
+      // Queue poll file: size-based rotation. Detect shrinkage (file was rotated)
+      // and reset offset to read from the beginning of the new file. Without this,
+      // the stale offset causes readNewLines to see size <= offset and permanently
+      // stop yielding new events after a rotation.
+      try {
+        const queueStat = fs.statSync(queuePollPath);
+        if (queueStat.size < queuePollOffset) {
+          queuePollOffset = 0; // File was rotated; read from the new file's start.
+        }
+      } catch {
+        // File does not exist yet -- nothing to reset.
+      }
       const queuePoll = readNewLines(queuePollPath, queuePollOffset);
       if (queuePoll !== null && queuePoll.lines.length > 0) {
         printQueuePollLines(queuePoll.lines);
@@ -1123,6 +1126,13 @@ function runHealthSummary(sessionId: string, raw: string): void {
         break;
       case 'session_completed':
         sessionOutcome = typeof obj['outcome'] === 'string' ? obj['outcome'] : null;
+        isLive = false;
+        break;
+      case 'session_aborted':
+        // WHY treat session_aborted as a terminal state: the daemon was stopped before
+        // the session completed. This is not a failure, but the session is definitively
+        // no longer running. Show ABORTED in the status line rather than RUNNING.
+        sessionOutcome = 'aborted';
         isLive = false;
         break;
     }

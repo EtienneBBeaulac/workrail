@@ -252,6 +252,9 @@ export class FileWorkflowStorage implements IWorkflowStorage {
   }
 
   public async getWorkflowById(id: string): Promise<Workflow | null> {
+    if (!id || id.trim() === '') {
+      return null; // Empty ID is not a valid workflow reference
+    }
     const safeId = sanitizeId(id);
 
     // Try cache first

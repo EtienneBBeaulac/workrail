@@ -8,6 +8,9 @@
  * until a shared codegen solution exists.
  */
 
+import type { SessionMetricsV2 } from '../projections/session-metrics.js';
+export type { SessionMetricsV2 };
+
 // ---------------------------------------------------------------------------
 // Session List
 // ---------------------------------------------------------------------------
@@ -50,6 +53,9 @@ export interface ConsoleSessionSummary {
    * False on any read error (safe default). */
   readonly isLive: boolean;
   readonly parentSessionId: string | null;
+  /** Structured outcome metrics for the session's first completed run.
+   * Null for sessions still in progress or sessions that predate the run_completed feature. */
+  readonly metrics: SessionMetricsV2 | null;
 }
 
 export interface ConsoleSessionListResponse {
@@ -164,6 +170,19 @@ export interface ConsoleSessionDetail {
    * Returns [] when live but no tool events recorded yet.
    */
   readonly liveActivity?: readonly ConsoleToolActivity[] | null;
+  /**
+   * Structured outcome metrics for the session's first completed run.
+   * Null for sessions still in progress or sessions that predate the run_completed feature.
+   * Engine-authoritative fields are directly from run_completed event.
+   * Agent-reported fields come from metrics_* context_set keys.
+   */
+  readonly metrics: SessionMetricsV2 | null;
+  /**
+   * Absolute filesystem path to the repo root.
+   * Derived from repo_root observation event or workspacePath context_set fallback.
+   * Used by the diff-summary endpoint to run git diff in the correct directory.
+   */
+  readonly repoRoot: string | null;
 }
 
 // ---------------------------------------------------------------------------

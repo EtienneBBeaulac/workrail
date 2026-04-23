@@ -142,6 +142,12 @@ async function runImplementCore(
     }
 
     const uxHandle = uxSpawnResult.value;
+    if (!uxHandle || uxHandle.trim() === '') {
+      return {
+        kind: 'escalated',
+        escalationReason: { phase: 'ux-gate', reason: 'UX design session returned empty handle' },
+      };
+    }
     const uxAwait = await deps.awaitSessions([uxHandle], REVIEW_TIMEOUT_MS);
     const uxResult = uxAwait.results[0];
 
@@ -211,7 +217,17 @@ async function runImplementCore(
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
   deps.stderr(`[implement] Polling for PR on branch pattern: ${branchPattern}`);
 
-  const prUrl = await deps.pollForPR(branchPattern, PR_POLL_TIMEOUT_MS);
+  let prUrl: string | null;
+  try {
+    prUrl = await deps.pollForPR(branchPattern, PR_POLL_TIMEOUT_MS);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'pr-detection', reason: `pollForPR threw: ${msg}` },
+    };
+  }
   if (!prUrl) {
     return {
       kind: 'escalated',

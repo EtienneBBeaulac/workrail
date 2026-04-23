@@ -281,23 +281,30 @@ export function inferMaturity(body: string): 'idea' | 'specced' | 'ready' {
 /**
  * Check if an issue already has an active session.
  *
- * Scans all JSON files in sessionsDir. For each file:
- *   - Parse the file as JSON
- *   - Check if context.taskCandidate.issueNumber === issueNumber
- *   - If match: return 'active'
- *   - If file has no context or no taskCandidate: return 'clear'
- *     WHY: real session files written by persistTokens() contain only
- *     { continueToken, checkpointToken, ts } -- no context field. A file
- *     without taskCandidate cannot claim ownership of any issue.
- *   - On any read/parse error: return 'active' (conservative)
- *     WHY: if we cannot read the file we cannot trust its content is safe.
- *     Double-dispatch is worse than a missed dispatch.
+ * Checks two sources:
  *
- * Returns 'clear' if no session file explicitly claims this issue number.
+ * 1. Queue-issue sidecar file (`queue-issue-<issueNumber>.json`):
+ *    Written by polling-scheduler.ts before dispatch; deleted on pipeline completion.
+ *    Provides cross-restart idempotency for the dispatch window (RC3 fix).
+ *    Sidecar format: `{ issueNumber, triggerId, dispatchedAt, ttlMs }`.
+ *    If found and `dispatchedAt + ttlMs > Date.now()`: return 'active' (not expired).
+ *    If found and expired: return 'clear' (pipeline window elapsed; eligible for re-dispatch).
+ *    On any read/parse error for the sidecar: return 'active' (conservative).
  *
- * INVARIANT: 'active' ONLY when (a) the file is unreadable/unparseable, OR
- * (b) context.taskCandidate.issueNumber === issueNumber.
- * 'clear' when the file exists but has no context/taskCandidate field.
+ * 2. Regular session files (all other `*.json` files):
+ *    Written by persistTokens() -- contain `{ continueToken, checkpointToken, ts }`.
+ *    Checks `context.taskCandidate.issueNumber === issueNumber`.
+ *    Note: persistTokens() does not write the `context` field, so these files always
+ *    return 'clear' for the session scan. This path is kept for forward-compat in case
+ *    a future persistTokens() change adds `context`.
+ *    - If file has no context or no taskCandidate: 'clear' for this file.
+ *    - On any read/parse error: 'active' (conservative).
+ *
+ * Returns 'clear' if no source claims this issue number as active.
+ *
+ * INVARIANT: 'active' ONLY when (a) a file is unreadable/unparseable, OR
+ * (b) sidecar exists and is not expired, OR
+ * (c) context.taskCandidate.issueNumber === issueNumber.
  *
  * @param issueNumber - The GitHub issue number to check
  * @param sessionsDir - Path to daemon-sessions directory (injectable for testing)
@@ -306,6 +313,39 @@ export async function checkIdempotency(
   issueNumber: number,
   sessionsDir: string = DEFAULT_SESSIONS_DIR,
 ): Promise<'clear' | 'active'> {
+  // Step 1: Check for queue-issue sidecar file (cross-restart idempotency, RC3 fix).
+  // The sidecar filename is deterministic, so we check it directly rather than scanning all files.
+  const sidecarFilename = `queue-issue-${issueNumber}.json`;
+  const sidecarFilePath = path.join(sessionsDir, sidecarFilename);
+  try {
+    const sidecarContent = await fs.readFile(sidecarFilePath, 'utf8');
+    const sidecarParsed: unknown = JSON.parse(sidecarContent);
+    if (typeof sidecarParsed !== 'object' || sidecarParsed === null) {
+      // Malformed sidecar -- conservative: treat as active
+      return 'active';
+    }
+    const sidecar = sidecarParsed as Record<string, unknown>;
+    const dispatchedAt = sidecar['dispatchedAt'];
+    const ttlMs = sidecar['ttlMs'];
+    if (typeof dispatchedAt === 'number' && typeof ttlMs === 'number') {
+      // Check TTL: if not expired, issue is actively being dispatched
+      if (dispatchedAt + ttlMs > Date.now()) {
+        return 'active';
+      }
+      // Expired sidecar -- pipeline window elapsed; treat as clear
+      return 'clear';
+    }
+    // Sidecar exists but missing required fields -- conservative: treat as active
+    return 'active';
+  } catch (e: unknown) {
+    // ENOENT: sidecar does not exist -- continue to session file scan
+    // Other errors (permissions, etc.) -- conservative: treat as active
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      return 'active';
+    }
+  }
+
+  // Step 2: Scan regular session files for context.taskCandidate.issueNumber match.
   let files: string[];
   try {
     files = await fs.readdir(sessionsDir);
@@ -314,7 +354,8 @@ export async function checkIdempotency(
     return 'clear';
   }
 
-  const jsonFiles = files.filter(f => f.endsWith('.json'));
+  // Skip the sidecar file itself in the regular scan (already handled above)
+  const jsonFiles = files.filter(f => f.endsWith('.json') && f !== sidecarFilename);
 
   for (const filename of jsonFiles) {
     try {

@@ -35,6 +35,7 @@ import { projectNodeOutputsV2 } from '../projections/node-outputs.js';
 import { projectAdvanceOutcomesV2 } from '../projections/advance-outcomes.js';
 import { projectArtifactsV2 } from '../projections/artifacts.js';
 import { projectRunContextV2 } from '../projections/run-context.js';
+import { projectSessionMetricsV2 } from '../projections/session-metrics.js';
 import { asSortedEventLog, type SortedEventLog } from '../durable-core/sorted-event-log.js';
 import { projectRunExecutionTraceV2 } from '../projections/run-execution-trace.js';
 import { OUTPUT_CHANNEL, PAYLOAD_KIND, EVENT_KIND } from '../durable-core/constants.js';
@@ -370,12 +371,22 @@ export class ConsoleService {
         message: `Failed to load session ${sessionIdStr}: ${storeErr.message}`,
       }))
       .andThen((truth) => {
+        // Compute session-level aggregates from events BEFORE the dagErr fork.
+        // WHY before fork: these are session-level projections that apply regardless of DAG health.
+        // Both the dagErr early-return path and the normal path need metrics and repoRoot.
+        const metrics = projectSessionMetricsV2(truth.events);
+        const repoRoot = extractRepoRoot(truth.events);
+
         const dagRes = projectRunDagV2(truth.events);
 
         const detailRA = (() => {
           if (dagRes.isErr()) {
             return resolveRunCompletion(truth.events, this.ports.snapshotStore)
-              .map((completionMap) => projectSessionDetail(sessionId, truth, completionMap, {}, {}));
+              .map((completionMap) => ({
+                ...projectSessionDetail(sessionId, truth, completionMap, {}, {}),
+                metrics,
+                repoRoot,
+              }));
           }
           const dag = dagRes.value;
 
@@ -383,9 +394,11 @@ export class ConsoleService {
             resolveRunCompletion(truth.events, this.ports.snapshotStore),
             resolveStepLabels(dag, this.ports.snapshotStore, this.ports.pinnedWorkflowStore),
             resolveWorkflowNames(dag, this.ports.pinnedWorkflowStore),
-          ] as const).map(([completionMap, stepLabels, workflowNames]) =>
-            projectSessionDetail(sessionId, truth, completionMap, stepLabels, workflowNames)
-          );
+          ] as const).map(([completionMap, stepLabels, workflowNames]) => ({
+            ...projectSessionDetail(sessionId, truth, completionMap, stepLabels, workflowNames),
+            metrics,
+            repoRoot,
+          }));
         })();
 
         // Attach liveActivity when the session is currently live.
@@ -1029,6 +1042,8 @@ function projectSessionSummary(
     );
   })();
 
+  const metrics = projectSessionMetricsV2(events);
+
   const runs = Object.values(dag.runsById);
   const run = runs[0];
   if (!run) {
@@ -1054,6 +1069,7 @@ function projectSessionSummary(
       isAutonomous,
       isLive,
       parentSessionId,
+      metrics,
     };
   }
 
@@ -1110,6 +1126,7 @@ function projectSessionSummary(
     isAutonomous,
     isLive,
     parentSessionId,
+    metrics,
   };
 }
 
@@ -1133,7 +1150,9 @@ function projectSessionDetail(
 
   const dagRes = projectRunDagV2(events);
   if (dagRes.isErr()) {
-    return { sessionId, sessionTitle, health: sessionHealth, runs: [] };
+    // metrics and repoRoot are null here as placeholders; the caller (getSessionDetail)
+    // always overrides these with the actual computed values via spread.
+    return { sessionId, sessionTitle, health: sessionHealth, runs: [], metrics: null, repoRoot: null };
   }
 
   const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
@@ -1220,7 +1239,9 @@ function projectSessionDetail(
     };
   });
 
-  return { sessionId, sessionTitle, health: sessionHealth, runs };
+  // metrics and repoRoot are null here as placeholders; the caller (getSessionDetail)
+  // always overrides these with the actual computed values via spread.
+  return { sessionId, sessionTitle, health: sessionHealth, runs, metrics: null, repoRoot: null };
 }
 
 /**

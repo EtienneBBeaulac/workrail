@@ -458,6 +458,31 @@ export interface WorkflowDefinition {
    * right workflow.
    */
   readonly examples?: readonly string[];
+  /**
+   * Metrics instrumentation profile for this workflow.
+   *
+   * When set, the engine injects a footer into every step prompt instructing
+   * the agent to accumulate and report metrics context keys. The injection is
+   * render-time only -- no compile-time footprint, no feature registry entry.
+   *
+   * - 'coding': SHA accumulation footer on every step; outcome/PR/diff footer
+   *   added on the final step.
+   * - 'review': PR numbers + outcome footer on the final step only.
+   * - 'research': Investigation/analysis output; outcome-only footer on final step.
+   * - 'design': Produces a design artifact (pitch, spec, ADR); outcome-only footer on final step.
+   * - 'ticket': Creates/updates work items (Jira, GitHub Issues); outcome-only footer on final step.
+   * - 'none' or absent: no injection -- existing workflows are completely unaffected.
+   *
+   * 'research', 'design', and 'ticket' inject identical footer text today (outcome only).
+   * The distinction is semantic -- it signals intent and allows future divergence.
+   *
+   * The 'final step' is the last top-level step, or the exit step of a loop
+   * that is the last top-level step.
+   *
+   * Authors must set this field explicitly. The engine does NOT derive the
+   * profile from workflow tags automatically.
+   */
+  readonly metricsProfile?: 'coding' | 'review' | 'research' | 'design' | 'ticket' | 'none';
 }
 
 // =============================================================================

@@ -50,6 +50,11 @@ export const DomainEventEnvelopeV1Schema = z.object({
     })
     .optional(),
   data: JsonValueSchema,
+  // Wall-clock timestamp (ms since Unix epoch) at event construction time.
+  // Required: all events carry a timestamp after the backfill migration (scripts/backfill-timestamps.ts).
+  // Used for session duration computation: durationMs = lastEvent.timestampMs - firstEvent.timestampMs.
+  // NOTE: Run scripts/backfill-timestamps.ts BEFORE deploying this version to avoid session load failures.
+  timestampMs: z.number().int().positive(),
 });
 
 /**
@@ -312,6 +317,22 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
         },
         { message: `Decision trace total bytes exceeds ${MAX_DECISION_TRACE_TOTAL_BYTES}` }
       ),
+  }),
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('run_completed'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      startGitSha: z.string().nullable(),
+      endGitSha: z.string().nullable(),
+      gitBranch: z.string().nullable(),
+      agentCommitShas: z.array(z.string()),
+      captureConfidence: z.enum(['high', 'none']),
+      durationMs: z.number().optional(),
+    }).superRefine((d, ctx) => {
+      if (d.captureConfidence === 'high' && d.agentCommitShas.length === 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "captureConfidence 'high' requires at least one agentCommitSha" });
+      }
+    }),
   }),
 ]);
 
