@@ -122,7 +122,6 @@ Open PRs are the work queue. Do not start work that duplicates an open PR.
 
 - Before attributing a test failure to your changes, verify it was not already failing on main
 - Run `git stash && npx vitest run <failing-test> && git stash pop` to confirm pre-existence
-- **Never use `gh pr merge --admin`**. Admin bypass has been removed from the branch ruleset and will fail. If CI is failing, fix the failures first. No exceptions, no shortcuts.
 
 ### PR review adversarial mode
 
