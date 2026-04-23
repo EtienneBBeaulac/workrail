@@ -88,7 +88,7 @@ export interface SessionMetricsV2 {
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
-  readonly captureConfidence: 'high' | 'medium' | 'none';
+  readonly captureConfidence: 'high' | 'none';
   readonly durationMs: number | undefined;
   // From context_set metrics_* keys (agent-reported, each independently nullable)
   readonly outcome: 'success' | 'partial' | 'abandoned' | 'error' | null;

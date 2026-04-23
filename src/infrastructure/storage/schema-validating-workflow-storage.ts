@@ -46,19 +46,49 @@ function reportValidationFailure(workflowId: string, sourceKind: string, error: 
   console.error(`${VALIDATION_ERROR_PREFIX} ${sourceKind}/${workflowId}: ${error}`);
 }
 
+// ---------------------------------------------------------------------------
+// Validation warning types
+//
+// These are exposed for consumers that want structured error data from
+// loadAllWorkflowsWithWarnings(). The HasValidationWarnings interface enables
+// compile-time-safe duck-typing in the handler without touching IWorkflowStorage.
+// ---------------------------------------------------------------------------
+
+/** A structured record of a workflow that failed schema validation during loading. */
+export interface ValidationWarning {
+  readonly workflowId: string;
+  readonly sourceKind: string;
+  readonly errors: string[];
+}
+
+/**
+ * Compile-time-safe interface for type-narrowing in callers that want validation
+ * diagnostics alongside the loaded workflows.
+ *
+ * Only the concrete validating wrappers implement this -- IWorkflowStorage does not.
+ * The handler type-narrows to this interface so the duck-typing check has a named,
+ * stable contract rather than an inline property-access string.
+ */
+export interface HasValidationWarnings {
+  loadAllWorkflowsWithWarnings(): Promise<{
+    readonly workflows: readonly Workflow[];
+    readonly warnings: readonly ValidationWarning[];
+  }>;
+}
+
 /**
  * Decorator that validates workflows against the JSON schema.
- * 
+ *
  * Validates the definition portion of workflows on load.
  * Invalid workflows are reported via structured logging and filtered out (graceful degradation).
- * 
+ *
  * Phase 4 (Option B — temporary containment):
  * - Runtime still filters invalid workflows for safety
  * - Every filter action is reported with workflow ID, source kind, and error
  * - listWorkflowSummaries() validates through loadAllWorkflows() (no bypass)
  * - The CI gate (Phases 2-3) is the hard failure path; runtime remains soft
  */
-export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
+export class SchemaValidatingWorkflowStorage implements IWorkflowStorage, HasValidationWarnings {
   public readonly kind = 'single' as const;
   // Use the module-level singleton to avoid recompiling the schema per instance.
   private readonly validator: ValidateFunction = MODULE_WORKFLOW_VALIDATOR;
@@ -84,9 +114,9 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
 
   async loadAllWorkflows(): Promise<readonly Workflow[]> {
     const workflows = await this.inner.loadAllWorkflows();
-    
+
     const validWorkflows: Workflow[] = [];
-    
+
     for (const workflow of workflows) {
       try {
         if (this.validateDefinition(workflow.definition, workflow.source.kind)) {
@@ -100,8 +130,48 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
         );
       }
     }
-    
+
     return validWorkflows;
+  }
+
+  /**
+   * Load all workflows, returning valid ones alongside structured diagnostics for failures.
+   *
+   * Call-scoped: each call creates a fresh warnings array -- no instance-level state.
+   * Bundled workflow failures are excluded from `warnings` (pre-validated by CI; should never
+   * fail). All failures still log to stderr via reportValidationFailure() so monitoring is not
+   * regressed.
+   */
+  async loadAllWorkflowsWithWarnings(): Promise<{
+    readonly workflows: readonly Workflow[];
+    readonly warnings: readonly ValidationWarning[];
+  }> {
+    const workflows = await this.inner.loadAllWorkflows();
+    const validWorkflows: Workflow[] = [];
+    const warnings: ValidationWarning[] = [];
+
+    for (const workflow of workflows) {
+      try {
+        if (this.validateDefinition(workflow.definition, workflow.source.kind)) {
+          validWorkflows.push(workflow);
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        reportValidationFailure(workflow.definition.id, workflow.source.kind, errorMessage);
+        // Bundled workflows are pre-validated by CI and should never fail at runtime.
+        // If they do, log to stderr (above) but do not surface to the caller -- bundled
+        // failures indicate a product bug, not a user-fixable authoring error.
+        if (workflow.source.kind !== 'bundled') {
+          warnings.push({
+            workflowId: workflow.definition.id,
+            sourceKind: workflow.source.kind,
+            errors: [errorMessage],
+          });
+        }
+      }
+    }
+
+    return { workflows: validWorkflows, warnings };
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
@@ -146,7 +216,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage {
  * Schema validator for composite storage.
  * Same Phase 4 improvements as SchemaValidatingWorkflowStorage.
  */
-export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkflowStorage {
+export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkflowStorage, HasValidationWarnings {
   public readonly kind = 'composite' as const;
   // Use the module-level singleton to avoid recompiling the schema per instance.
   private readonly validator: ValidateFunction = MODULE_WORKFLOW_VALIDATOR;
@@ -175,7 +245,7 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
 
   async loadAllWorkflows(): Promise<readonly Workflow[]> {
     const workflows = await this.inner.loadAllWorkflows();
-    
+
     const validWorkflows: Workflow[] = [];
     for (const workflow of workflows) {
       try {
@@ -190,13 +260,53 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
         );
       }
     }
-    
+
     return validWorkflows;
+  }
+
+  /**
+   * Load all workflows, returning valid ones alongside structured diagnostics for failures.
+   *
+   * Call-scoped: each call creates a fresh warnings array -- no instance-level state.
+   * Bundled workflow failures are excluded from `warnings` (pre-validated by CI; should never
+   * fail). All failures still log to stderr via reportValidationFailure() so monitoring is not
+   * regressed.
+   */
+  async loadAllWorkflowsWithWarnings(): Promise<{
+    readonly workflows: readonly Workflow[];
+    readonly warnings: readonly ValidationWarning[];
+  }> {
+    const workflows = await this.inner.loadAllWorkflows();
+    const validWorkflows: Workflow[] = [];
+    const warnings: ValidationWarning[] = [];
+
+    for (const workflow of workflows) {
+      try {
+        if (this.validateDefinition(workflow.definition, workflow.source.kind)) {
+          validWorkflows.push(workflow);
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        reportValidationFailure(workflow.definition.id, workflow.source.kind, errorMessage);
+        // Bundled workflows are pre-validated by CI and should never fail at runtime.
+        // If they do, log to stderr (above) but do not surface to the caller -- bundled
+        // failures indicate a product bug, not a user-fixable authoring error.
+        if (workflow.source.kind !== 'bundled') {
+          warnings.push({
+            workflowId: workflow.definition.id,
+            sourceKind: workflow.source.kind,
+            errors: [errorMessage],
+          });
+        }
+      }
+    }
+
+    return { workflows: validWorkflows, warnings };
   }
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
     const workflow = await this.inner.getWorkflowById(id);
-    
+
     if (!workflow) return null;
     
     try {

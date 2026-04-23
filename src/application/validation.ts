@@ -8,7 +8,7 @@ import { ok, err, type Result } from 'neverthrow';
 
 const schemaPath = path.resolve(__dirname, '../../spec/workflow.schema.json');
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
-const ajv = new Ajv({ allErrors: true, strict: false });
+const ajv = new Ajv({ allErrors: true });
 const validate = ajv.compile(schema);
 
 export interface WorkflowValidationResult {

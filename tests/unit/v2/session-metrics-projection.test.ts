@@ -47,7 +47,7 @@ function makeRunCompletedEvent(args: {
   endGitSha?: string | null;
   gitBranch?: string | null;
   agentCommitShas?: string[];
-  captureConfidence?: 'high' | 'medium' | 'none';
+  captureConfidence?: 'high' | 'none';
   durationMs?: number;
 }): DomainEventV1 {
   return {
@@ -55,8 +55,7 @@ function makeRunCompletedEvent(args: {
     eventId: `evt_${args.eventIndex}`,
     eventIndex: args.eventIndex,
     sessionId: 'sess_1',
-    // run_completed is not yet in DomainEventV1Schema -- cast to bypass TS checks
-    kind: 'run_completed' as unknown as DomainEventV1['kind'],
+    kind: 'run_completed',
     dedupeKey: `run_completed:sess_1:${args.runId}`,
     scope: { runId: args.runId },
     data: {
@@ -67,7 +66,7 @@ function makeRunCompletedEvent(args: {
       captureConfidence: args.captureConfidence ?? 'none',
       durationMs: args.durationMs,
     },
-  } as unknown as DomainEventV1;
+  };
 }
 
 function makeContextSetEvent(args: {
@@ -312,7 +311,7 @@ describe('projectSessionMetricsV2', () => {
         startGitSha: 'run2-start',
         endGitSha: 'run2-end',
         gitBranch: 'branch-run2',
-        captureConfidence: 'medium',
+        captureConfidence: 'none',
         durationMs: 2000,
       }),
       // context_set for run_1 (the winning run)
