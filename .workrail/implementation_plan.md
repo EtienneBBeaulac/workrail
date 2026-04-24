@@ -848,162 +848,139 @@ Commit: `fix(daemon): abort in-flight agent loops on SIGTERM with 5s drain windo
 ---
 ---
 
-# Implementation Plan: Crash Recovery Phase B -- Autonomous Session Resumption
+# Implementation Plan: runWorkflow() Functional Core / Imperative Shell Refactor
 
-*Generated: 2026-04-23 | Workflow: wr.coding-task | Branch: fix/etienneb/crash-recovery-phase-b*
+*Generated: 2026-04-23 | Workflow: wr.coding-task | Branch: refactor/etienneb/runworkflow-functional-core*
 
 ---
 
 ## 1. Problem Statement
 
-When the WorkTrain daemon restarts after a crash and finds an orphaned session sidecar with `stepAdvances >= 1`, the `case 'resume'` branch in `runStartupRecovery()` currently does nothing -- logs a TODO and moves on. The in-progress session is permanently stuck: sidecar accumulates on disk, the workflow never completes, and downstream triggers are silently blocked.
+`runWorkflow()` in `src/daemon/workflow-runner.ts` is ~1046 lines and mixes pure logic (model selection, stuck detection, result classification) with imperative I/O (stats file writes, sidecar deletion, event emission, registry operations). This makes it hard to test pure logic in isolation and results in duplicated cleanup code across 4 result paths. Additionally, the `stuck` exit path has a pre-existing bug: it does not delete the session sidecar file, violating invariants doc section 2.2.
 
 ## 2. Acceptance Criteria
 
-1. A session with `stepAdvances >= 1` and new sidecar fields is resumed on daemon restart.
-2. A session with `stepAdvances >= 1` but old sidecar format (no `workflowId`) is discarded gracefully with a log message.
-3. `persistTokens()` writes `workflowId`, `goal`, `workspacePath` on the first call in `runWorkflow()`.
-4. `npm run build` passes.
-5. `npx vitest run` passes (5 pre-existing `polling-scheduler` failures are unrelated).
+1. `npm run build` exits 0
+2. `npx vitest run` exits 0 -- ALL existing tests pass
+3. `tagToStatsOutcome()` is exported and has a unit test using the truth table from the invariants doc
+4. `buildAgentClient()` is exported and has unit tests: valid model override, Bedrock from env, direct API fallback
+5. `evaluateStuckSignals()` is exported and has unit tests: signal 1, signal 2, signal 3, notify_only policy
+6. The outcome invariant tests use injected `_statsDir` to verify actual stats file content
+7. `runWorkflow()` result paths each become ~3-5 lines (not 15-20)
 
 ## 3. Non-Goals
 
-- No changes to `src/mcp/`, `src/v2/`, `src/trigger/trigger-listener.ts`, or session event log schema.
-- No restoration of `agentConfig`, `soulFile`, or LLM conversation history.
-- No new WorkRail event kinds.
-- No retry loop for failed reconstruction -- one attempt per orphan.
-- No worktree re-creation on recovery.
+- Tool factory function signatures -- unchanged
+- `AgentLoop` (`src/daemon/agent-loop.ts`) -- do not touch
+- WorkRail MCP server (`src/mcp/`) -- do not touch
+- `runStartupRecovery()`, `readAllDaemonSessions()`, `persistTokens()` -- leave as-is
+- All exported public types -- unchanged
+- No new files -- all extractions stay in `workflow-runner.ts`
 
 ## 4. Philosophy-Driven Constraints
 
-- **Errors are data**: all failure paths use ResultAsync `.isErr()` checks, not try/catch as control flow (except for unexpected throws).
-- **Validate at boundaries**: all context checks happen at the recovery entry point; `runWorkflow` is trusted once trigger is constructed.
-- **YAGNI**: only 3 sidecar fields -- no agentConfig, no soulFile.
-- **Prefer fakes over mocks**: injectable `_executeContinueWorkflowFn` + real fs in tests.
-- **Immutability**: `recoveryContext` is `readonly` struct.
+- `tagToStatsOutcome` must use `assertNever` (import at line 49)
+- Pure functions have no I/O; all I/O stays in shell
+- `buildAgentClient` validates model format, throws before any I/O
+- `_statsDir`, `_sessionsDir` injectable for tests
+- `SessionState` interface makes mutation explicit (not hidden in closures)
+- Extract exactly what the spec asks for, nothing more
 
 ## 5. Invariants
 
-- I1: Old-format sidecars (no `workflowId`) fall to discard -- never crash.
-- I2: Rehydrate failure falls to discard -- never crash.
-- I3: Resumed sessions are fire-and-forget -- `runStartupRecovery` does not await them.
-- I4: Sidecar NOT deleted at resume time -- `runWorkflow()` manages its own lifecycle via `continue`.
-- I5: No new event kinds, no MCP changes.
-- I6: Worktree directory gone -> discard (no re-creation).
-- I7: Already-complete session (`isComplete=true`) -> discard.
+- I1: All 4 result paths call `finalizeSession` with correct data
+- I2: `stuck` path deletes sidecar (fixes pre-existing bug; invariants doc section 2.2)
+- I3: `success` worktree path does NOT delete sidecar (delivery cleanup gap)
+- I4: SteerRegistry and AbortRegistry still deregistered in `finally` block (not in `finalizeSession`)
+- I5: DaemonRegistry.unregister() still called per-result-path via `finalizeSession`
+- I6: `workrailSessionId` starts null, populated after token decode; mutation visible via `state` reference
+- I7: Early-exit paths still clean up registries explicitly
+- I8: `tagToStatsOutcome` exhaustive via `assertNever` -- new `_tag` fails to compile
 
 ## 6. Selected Approach + Rationale
 
-**Candidate A: Hybrid sidecar context fields + rehydrate call.**
+**Candidate A: Minimal mechanical extraction in same file**
 
-Add `workflowId`, `goal`, `workspacePath` to sidecar at session start. At recovery: read fields, call `_executeContinueWorkflowFn` with `intent: 'rehydrate'`, build `WorkflowTrigger` with `_preAllocatedStartResponse` adapter, call `void runWorkflow(...)` fire-and-forget.
+Extract 6 pieces as module-level functions/interfaces in `workflow-runner.ts`. No new files. Fix pre-existing stuck sidecar bug in `finalizeSession`.
 
-Reuses `_preAllocatedStartResponse` (spawn_agent pattern) and injectable `_executeContinueWorkflowFn` (established startup recovery pattern). Zero new infrastructure.
-
-**Runner-up**: None viable (Candidate B violated no-gos; Candidate C too complex per pitch).
+**Runner-up:** Candidate B (separate files) -- rejected because YAGNI.
 
 ## 7. Vertical Slices
 
-### Slice 1: Extend `persistTokens()` and `OrphanedSession`
+### Slice 1: `tagToStatsOutcome(tag)` -- pure, exhaustive mapping
 
-**File**: `src/daemon/workflow-runner.ts`
+Export above `runWorkflow()`. Switch on `WorkflowRunResult['_tag']`, return stats outcome string, `default: assertNever(tag)`.
 
-Changes:
-1. Add optional `recoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string }` param to `persistTokens()`
-2. Include fields in sidecar JSON when `recoveryContext` is provided
-3. Add `workflowId?: string`, `goal?: string`, `workspacePath?: string` to `OrphanedSession` interface (all `readonly`)
+**Done when:** Exported, build clean.
 
-**Done when**: Build clean. `persistTokens` signature updated. `OrphanedSession` has new optional fields.
+### Slice 2: `buildAgentClient(trigger, apiKey, env)` -- pure model selection
 
-### Slice 2: Update `readAllDaemonSessions()` to read new fields
+Extract lines ~3382-3410. Throws on invalid format. No I/O. Replace inline model selection in `runWorkflow()` with call to `buildAgentClient()`, wrapping in try/catch returning `_tag: 'error'`.
 
-**File**: `src/daemon/workflow-runner.ts`
+**Done when:** Exported, build clean, model validation tests pass.
 
-Changes:
-1. Extend the `parsed` type hint to include `workflowId?: unknown`, `goal?: unknown`, `workspacePath?: unknown`
-2. Spread new fields when they are strings: `...(typeof parsed.workflowId === 'string' ? { workflowId: parsed.workflowId } : {})`
-3. Same pattern for `goal` and `workspacePath`
+### Slice 3: `SessionState` interface + `createSessionState(initialToken)`
 
-**Done when**: Build clean. `readAllDaemonSessions` returns new optional fields when present.
+Extract all 13 `let` declarations into named interface and factory. Remove `let` declarations from `runWorkflow()`. Replace with `const state = createSessionState(startContinueToken)`. Update all mutation/read sites to `state.field`.
 
-### Slice 3: Pass `recoveryContext` in `runWorkflow()` `persistTokens` calls
+**Key:** `onAdvance`/`onComplete`/`onTokenUpdate` callbacks mutate `state.field = value`. Tool factories pass callbacks as before.
 
-**File**: `src/daemon/workflow-runner.ts`
+**Done when:** Build clean. All existing tests pass.
 
-Changes:
-1. First call (line ~3617): pass `recoveryContext: { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath }`
-2. Second call (line ~3671, after worktree): also pass `recoveryContext` (same values)
+### Slice 4: `evaluateStuckSignals(state, config)` -- pure stuck detection
 
-**Done when**: Build clean. Both calls include `recoveryContext`.
+Extract stuck heuristics from turn_end subscriber. Returns `StuckSignal | null`. Turn_end subscriber calls this, handles effects per signal kind using explicit if-blocks with comments.
 
-### Slice 4: Implement resume path in `runStartupRecovery()` + add `_runWorkflowFn` injectable
+**Done when:** Exported, build clean, stuck detection tests pass.
 
-**File**: `src/daemon/workflow-runner.ts`
+### Slice 5: `finalizeSession` + injectable dirs
 
-Changes:
-1. Add `_runWorkflowFn: typeof runWorkflow = runWorkflow` as 6th injectable param to `runStartupRecovery()`
-2. Replace `case 'resume': { preserved++; continue; }` with full implementation:
-   - `hasContext` check (workflowId + workspacePath are strings)
-   - `isStale` guard
-   - Worktree directory existence check (`fs.access` on `session.worktreePath` if set)
-   - Try/catch `_executeContinueWorkflowFn` rehydrate call
-   - `.isErr()` check
-   - `isComplete` / `!pending` guard
-   - `WorkflowTrigger` construction with `_preAllocatedStartResponse` adapter
-   - `void _runWorkflowFn(trigger, ctx, ...).then(...).catch(...)`
-   - `preserved++; continue`
+Add `_statsDir?`, `_sessionsDir?` to `runWorkflow()`. Add `finalizeSession(result, context)` async helper. Consolidate 4 cleanup sites into single `await finalizeSession(result, ctx); return result;` pattern. **Add sidecar deletion for stuck path (fixes pre-existing bug) with WHY comment.**
 
-**Done when**: Build clean. Case 'resume' calls `_runWorkflowFn` fire-and-forget when all checks pass.
+**Done when:** Build clean. All existing tests pass. Stuck path deletes sidecar.
 
-### Slice 5: Tests
+### Slice 6: New unit tests
 
-**File**: `tests/unit/workflow-runner-crash-recovery.test.ts`
+- `tagToStatsOutcome` truth table (5 cases)
+- `buildAgentClient` unit tests (4 cases with vi.stubEnv)
+- `evaluateStuckSignals` unit tests (4 cases)
+- Update `workflow-runner-outcome-invariants.test.ts` to pass `_statsDir` and verify stats file content
 
-Changes:
-1. Update 4 existing tests (lines 347-471) to match Phase B behavior
-2. Add tests for new `readAllDaemonSessions` fields
-3. Add tests for `persistTokens` recovery context
-4. Add tests for resume path (happy path, `hasContext` false, rehydrate fails)
-
-**Done when**: All new and updated tests pass. `npx vitest run` exits 0.
+**Done when:** All new tests pass. `npx vitest run` exits 0.
 
 ## 8. Test Design
 
-**Injectable 6th param**: `_runWorkflowFn: typeof runWorkflow = runWorkflow` enables direct verification that `runWorkflow` is called with the correct trigger shape.
-
-**Key test cases for resume path**:
-- Happy path: `hasContext=true`, rehydrate returns ok with `isComplete=false` and `pending!=null` -> `_runWorkflowFn` called with trigger containing `_preAllocatedStartResponse`; sidecar NOT deleted
-- `hasContext=false`: falls to discard; `_runWorkflowFn` not called; sidecar deleted
-- Rehydrate throws: falls to discard; sidecar deleted
-- Rehydrate returns `isErr()`: falls to discard; sidecar deleted
-- `isComplete=true` from rehydrate: falls to discard; sidecar deleted
+- `tagToStatsOutcome`: direct unit tests, one per truth table row
+- `buildAgentClient`: `vi.stubEnv` for env, assert constructor type and modelId
+- `evaluateStuckSignals`: construct `SessionState` via `createSessionState()`, set state for each signal, assert returned signal
+- Stats file content: pass temp dir as `_statsDir`, run `runWorkflow()`, read `execution-stats.jsonl`, assert `outcome` field
 
 ## 9. Risk Register
 
 | Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Schema drift: `_preAllocatedStartResponse` cast breaks | Low | Medium | Explicit field-by-field construction; TypeScript catches at build |
-| Existing tests assert old behavior | Certain | Low | Update 4 specific tests at lines 347-471 |
-| Fire-and-forget retry loop on repeated crash | Low | Low | 2-hour stale threshold discards stuck sessions |
-| Worktree directory missing | Medium | Low | `fs.access` check before using worktreePath |
+|---|---|---|---|
+| Missing let variable in SessionState | Low | Medium | TypeScript compiler catches at build |
+| TDZ with abortRegistry + agent | Low | Low | finalizeSession called only after finally block |
+| evaluateStuckSignals subscriber missing signal kind | Medium | Low | Explicit per-kind if-blocks with comments |
+| Stuck sidecar deletion breaks a test | Very Low | Low | No test asserts sidecar persists on stuck |
 
 ## 10. PR Packaging Strategy
 
-Single PR. Branch: `fix/etienneb/crash-recovery-phase-b`. One commit.
-Commit: `fix(daemon): resume orphaned daemon sessions on startup after crash`
+Single PR. Branch: `refactor/etienneb/runworkflow-functional-core`.
+Commit: `refactor(engine): extract functional core from runWorkflow() for testability`
 
 ## 11. Philosophy Alignment per Slice
 
 | Slice | Principle | Status |
 |---|---|---|
-| 1 (persistTokens) | YAGNI | Satisfied -- 3 fields only |
-| 1 (persistTokens) | Immutability | Satisfied -- `readonly` struct |
-| 2 (readAllDaemonSessions) | Validate at boundaries | Satisfied -- type checks on parsed fields |
-| 4 (resume path) | Errors are data | Satisfied -- ResultAsync pattern |
-| 4 (resume path) | Validate at boundaries | Satisfied -- all checks before trigger construction |
-| 4 (resume path) | Non-fatal recovery | Satisfied -- every failure path uses `break` to discard |
-| 5 (Tests) | Prefer fakes over mocks | Satisfied -- injectable fns + real fs |
-| All | YAGNI | Satisfied -- no agentConfig, no history, no new event kinds |
+| 1 (tagToStatsOutcome) | Exhaustiveness everywhere | Satisfied -- assertNever |
+| 2 (buildAgentClient) | Validate at boundaries | Satisfied -- model validated before I/O |
+| 3 (SessionState) | Explicit mutable state | Satisfied -- named interface not hidden closure |
+| 4 (evaluateStuckSignals) | Functional/declarative | Satisfied -- pure decision function |
+| 5 (finalizeSession) | Architectural fix over patch | Satisfied -- consolidates 4 scattered sites |
+| 5 (injectable dirs) | Dependency injection | Satisfied -- injectable for tests |
+| 6 (Tests) | Prefer fakes over mocks | Satisfied -- real temp dirs, stubEnv |
+| All | YAGNI with discipline | Satisfied -- no new files, no speculation |
 
 ---
 `unresolvedUnknownCount`: 0

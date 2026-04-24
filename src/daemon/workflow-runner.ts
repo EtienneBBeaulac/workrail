@@ -3437,6 +3437,278 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
 // Execution stats helper
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Pure functions: functional core
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a WorkflowRunResult._tag to the stats outcome string recorded in execution-stats.jsonl.
+ *
+ * WHY pure function with assertNever: the compiler enforces exhaustiveness.
+ * Adding a new _tag variant to WorkflowRunResult without updating this function
+ * produces a TypeScript compile error -- silent omissions are impossible.
+ *
+ * WHY delivery_failed -> 'success': the workflow ran to completion; only the
+ * HTTP callback POST failed. The stats should reflect that the work was done.
+ * See WorkflowDeliveryFailed and invariants doc section 1.3.
+ */
+export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | 'error' | 'timeout' | 'stuck' {
+  switch (tag) {
+    case 'success': return 'success';
+    case 'error': return 'error';
+    case 'timeout': return 'timeout';
+    case 'stuck': return 'stuck';
+    case 'delivery_failed': return 'success'; // workflow succeeded; only POST failed
+    default: return assertNever(tag);
+  }
+}
+
+/**
+ * Build the Anthropic (or AnthropicBedrock) client and resolve the model ID.
+ *
+ * Pure: no I/O. Reads only the trigger config and process.env.
+ * Throws with a clear message on invalid model format -- the caller wraps
+ * in a try/catch that returns _tag: 'error'.
+ *
+ * WHY pure: model selection is a pure computation from trigger + env. Extracting
+ * it makes the logic testable without real API keys or a running daemon session.
+ *
+ * Model format: "provider/model-id" (e.g. "amazon-bedrock/claude-sonnet-4-6").
+ * When absent, detects AWS credentials in env (Bedrock) vs. direct API key.
+ *
+ * @param trigger - WorkflowTrigger carrying optional agentConfig.model override.
+ * @param apiKey - Anthropic API key (used only when not using Bedrock).
+ * @param env - Process environment variables (for AWS credential detection).
+ */
+export function buildAgentClient(
+  trigger: WorkflowTrigger,
+  apiKey: string,
+  env: NodeJS.ProcessEnv,
+): { agentClient: Anthropic | AnthropicBedrock; modelId: string } {
+  if (trigger.agentConfig?.model) {
+    // Parse "provider/model-id" -- split on the first slash only.
+    const slashIdx = trigger.agentConfig.model.indexOf('/');
+    if (slashIdx === -1) {
+      throw new Error(
+        `agentConfig.model must be in "provider/model-id" format, got: "${trigger.agentConfig.model}"`,
+      );
+    }
+    const provider = trigger.agentConfig.model.slice(0, slashIdx);
+    const modelId = trigger.agentConfig.model.slice(slashIdx + 1);
+    const agentClient: Anthropic | AnthropicBedrock =
+      provider === 'amazon-bedrock' ? new AnthropicBedrock() : new Anthropic({ apiKey });
+    return { agentClient, modelId };
+  }
+
+  // Default: use Bedrock when AWS credentials are present, direct API otherwise.
+  // WHY: avoids personal API key charges when AWS credentials are available.
+  const usesBedrock = !!env['AWS_PROFILE'] || !!env['AWS_ACCESS_KEY_ID'];
+  if (usesBedrock) {
+    return {
+      agentClient: new AnthropicBedrock(),
+      modelId: 'us.anthropic.claude-sonnet-4-6',
+    };
+  }
+  return {
+    agentClient: new Anthropic({ apiKey }),
+    modelId: 'claude-sonnet-4-6',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Session state: explicit mutable record
+// ---------------------------------------------------------------------------
+
+/**
+ * All mutable state for a single runWorkflow() call.
+ *
+ * WHY a named interface (not 13 separate let declarations): makes the mutation
+ * surface explicit and auditable. Every field that changes during a session is
+ * visible here, not scattered across a 1000-line function body. The object is
+ * passed by reference so closures (onAdvance, onComplete, onTokenUpdate, the
+ * steer callback) capture `state` once and see all mutations.
+ *
+ * WHY mutable (not readonly): the callback pattern inherently mutates shared
+ * state. Making it explicitly mutable is better than hiding mutation in closures.
+ *
+ * INVARIANT: workrailSessionId starts null and is populated asynchronously
+ * after parseContinueTokenOrFail() succeeds. All closures that need it capture
+ * `state` by reference -- they see the correct value when they execute (after
+ * assignment), because JavaScript object mutation is visible through all references.
+ */
+export interface SessionState {
+  /** Set to true by onComplete when the workflow's final step is advanced. */
+  isComplete: boolean;
+  /** Notes from the agent's final continue_workflow/complete_step call. */
+  lastStepNotes: string | undefined;
+  /** Artifacts from the agent's final continue_workflow/complete_step call. */
+  lastStepArtifacts: readonly unknown[] | undefined;
+  /**
+   * The current session token injected by complete_step.
+   * Updated by onAdvance (successful step) and onTokenUpdate (blocked retry).
+   * INVARIANT: always updated AFTER persistTokens() is called.
+   */
+  currentContinueToken: string;
+  /**
+   * The WorkRail sess_* ID decoded from the continueToken after executeStartWorkflow.
+   * Starts null; populated by parseContinueTokenOrFail(). Used to key DaemonRegistry,
+   * SteerRegistry, AbortRegistry, and event emission.
+   */
+  workrailSessionId: string | null;
+  /**
+   * Number of times onAdvance() was called (workflow step advances in the agent loop).
+   * Used for stuck detection Signal 2 and recorded in execution stats as stepCount.
+   */
+  stepAdvanceCount: number;
+  /**
+   * Ring buffer of the last STUCK_REPEAT_THRESHOLD tool calls.
+   * Used by stuck detection Signal 1 (repeated tool + same args).
+   */
+  lastNToolCalls: Array<{ toolName: string; argsSummary: string }>;
+  /** Issue summaries from report_issue calls; included in WORKTRAIN_STUCK marker. */
+  issueSummaries: string[];
+  /**
+   * Pending text parts to inject via agent.steer() on the next turn_end.
+   * Populated by onAdvance (step text) and the steer callback (coordinator injection).
+   */
+  pendingSteerParts: string[];
+  /**
+   * Which stuck heuristic fired first, or null if none has fired.
+   * Set synchronously before agent.abort() so the result path can read it.
+   * First writer wins -- subsequent signals are ignored.
+   */
+  stuckReason: 'repeated_tool_call' | 'no_progress' | null;
+  /**
+   * Which timeout limit fired first, or null if none has fired.
+   * Set synchronously before agent.abort() so the result path can read it.
+   * First writer wins -- subsequent triggers are ignored.
+   */
+  timeoutReason: 'wall_clock' | 'max_turns' | null;
+  /** Number of complete LLM response turns since the agent loop started. */
+  turnCount: number;
+}
+
+/**
+ * Create a fresh SessionState for a new runWorkflow() call.
+ *
+ * @param initialToken - The continueToken from executeStartWorkflow. This is
+ *   the first token complete_step will inject for the first workflow step.
+ */
+export function createSessionState(initialToken: string): SessionState {
+  return {
+    isComplete: false,
+    lastStepNotes: undefined,
+    lastStepArtifacts: undefined,
+    currentContinueToken: initialToken,
+    workrailSessionId: null,
+    stepAdvanceCount: 0,
+    lastNToolCalls: [],
+    issueSummaries: [],
+    pendingSteerParts: [],
+    stuckReason: null,
+    timeoutReason: null,
+    turnCount: 0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Pure: stuck signal evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for stuck detection heuristics.
+ *
+ * WHY separated from SessionState: these are read-only inputs (trigger config +
+ * constants). They do not change during the session and do not belong in the
+ * mutable SessionState record.
+ */
+export interface StuckConfig {
+  /** Configured max LLM turns for this session (DEFAULT_MAX_TURNS if not set). */
+  maxTurns: number;
+  /** 'abort' (default) or 'notify_only' -- controls whether abort fires on stuck. */
+  stuckAbortPolicy: 'abort' | 'notify_only';
+  /** When true, Signal 2 (no_progress) participates in abort. Default: false. */
+  noProgressAbortEnabled: boolean;
+  /** How many consecutive identical tool calls trigger Signal 1. Currently 3. */
+  stuckRepeatThreshold: number;
+}
+
+/**
+ * A stuck signal returned by evaluateStuckSignals(). Each kind maps to a
+ * specific stuck detection heuristic.
+ *
+ * WHY discriminated union: forces the subscriber to handle each kind explicitly.
+ * The subscriber is inherently imperative (calls agent.abort(), emitter.emit(),
+ * writes outbox), but the decision of WHICH signal fired is pure.
+ */
+export type StuckSignal =
+  | { kind: 'repeated_tool_call'; toolName: string; argsSummary: string }
+  | { kind: 'no_progress'; turnCount: number; maxTurns: number }
+  | { kind: 'max_turns_exceeded' }
+  | { kind: 'timeout_imminent'; timeoutReason: 'wall_clock' | 'max_turns' };
+
+/**
+ * Evaluate all stuck detection signals for the current turn and return the
+ * first applicable one, or null if none fires.
+ *
+ * Pure: reads `state` and `config`, no I/O, no side effects.
+ * The caller (turn_end subscriber) handles all effects (abort, emit, outbox).
+ *
+ * WHY check max_turns_exceeded before repeated_tool_call: the max_turns path
+ * in the subscriber returns early (skipping steer injection), so it must be
+ * evaluated first. If we returned a repeated_tool_call signal when max_turns
+ * also fired, the subscriber would handle the wrong signal.
+ *
+ * WHY check timeout_imminent last: it is purely observational (the abort was
+ * already triggered by the wall-clock timeout). It does not cause a new abort.
+ *
+ * @param state - Current session state (read-only view).
+ * @param config - Stuck detection configuration from the trigger.
+ */
+export function evaluateStuckSignals(state: Readonly<SessionState>, config: StuckConfig): StuckSignal | null {
+  // Signal: max_turns exceeded -- this turn is the termination turn.
+  // WHY evaluated first: the subscriber returns early on this signal (no steer injection).
+  if (config.maxTurns > 0 && state.turnCount >= config.maxTurns && state.timeoutReason === null) {
+    return { kind: 'max_turns_exceeded' };
+  }
+
+  // Signal 1: same tool + same args called stuckRepeatThreshold times in a row.
+  // WHY argsSummary comparison: same tool with different args is not stuck.
+  if (
+    state.lastNToolCalls.length === config.stuckRepeatThreshold &&
+    state.lastNToolCalls.every(
+      (c) => c.toolName === state.lastNToolCalls[0]?.toolName && c.argsSummary === state.lastNToolCalls[0]?.argsSummary,
+    )
+  ) {
+    return {
+      kind: 'repeated_tool_call',
+      toolName: state.lastNToolCalls[0]?.toolName ?? 'unknown',
+      argsSummary: state.lastNToolCalls[0]?.argsSummary ?? '',
+    };
+  }
+
+  // Signal 2: 80%+ of turns used with 0 step advances.
+  // WHY 0.8: conservative -- avoids false positives on research workflows.
+  // Returns regardless of noProgressAbortEnabled -- the subscriber checks the flag
+  // before deciding whether to abort.
+  if (
+    config.maxTurns > 0 &&
+    state.turnCount >= Math.floor(config.maxTurns * 0.8) &&
+    state.stepAdvanceCount === 0
+  ) {
+    return { kind: 'no_progress', turnCount: state.turnCount, maxTurns: config.maxTurns };
+  }
+
+  // Signal 3: wall-clock timeout already firing (session is aborting).
+  // WHY observational: the abort was triggered by the timeout Promise rejection,
+  // not by this signal. Signal 3 is a last-chance notification, not a new abort.
+  if (state.timeoutReason !== null) {
+    return { kind: 'timeout_imminent', timeoutReason: state.timeoutReason };
+  }
+
+  return null;
+}
+
 /**
  * Write a single execution-stats entry and regenerate the stats summary.
  *
@@ -3482,6 +3754,105 @@ function writeExecutionStats(
 }
 
 // ---------------------------------------------------------------------------
+// Imperative shell helper: session finalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Context for finalizing a completed runWorkflow() session.
+ * Passed from runWorkflow() to finalizeSession() after the agent loop exits.
+ */
+export interface FinalizationContext {
+  readonly sessionId: string;
+  readonly workrailSessionId: string | null;
+  readonly startMs: number;
+  readonly stepAdvanceCount: number;
+  readonly branchStrategy: 'worktree' | 'none' | undefined;
+  readonly statsDir: string;
+  readonly sessionsDir: string;
+  readonly conversationPath: string;
+  readonly emitter: DaemonEventEmitter | undefined;
+  readonly daemonRegistry: DaemonRegistry | undefined;
+  readonly workflowId: string;
+}
+
+/**
+ * Consolidate all session cleanup I/O for a completed runWorkflow() call.
+ *
+ * Handles:
+ * 1. emitter?.emit({ kind: 'session_completed', ... }) with the correct outcome
+ * 2. daemonRegistry?.unregister() with the correct status ('completed' or 'failed')
+ * 3. writeExecutionStats() using tagToStatsOutcome() for exhaustive outcome mapping
+ * 4. Sidecar file deletion (all paths except success+worktree)
+ * 5. Conversation file deletion (success+non-worktree only)
+ *
+ * WHY consolidated here (not inline at each result path): each result path previously
+ * had ~15-20 lines of identical cleanup code. A single function guarantees consistent
+ * behavior across all paths and makes adding a new result path safer.
+ *
+ * WHY sidecar deletion for stuck: the pre-existing stuck path did NOT delete the sidecar.
+ * This function fixes that bug. See worktrain-daemon-invariants.md section 2.2.
+ *
+ * WHY NOT called on early-exit paths (model validation, start_workflow failure, worktree
+ * creation failure): those paths clean up inline because the agent loop never started
+ * and this function assumes post-agent-loop state (conversationPath, stepAdvanceCount).
+ */
+export async function finalizeSession(
+  result: WorkflowRunResult,
+  ctx: FinalizationContext,
+): Promise<void> {
+  // ---- 1. Emit session_completed event ----
+  const outcome = tagToStatsOutcome(result._tag);
+  const detail = result._tag === 'stuck' ? result.reason
+    : result._tag === 'timeout' ? result.reason
+    : result._tag === 'error' ? result.message.slice(0, 200)
+    : result._tag === 'delivery_failed' ? result.deliveryError.slice(0, 200)
+    : result.stopReason;
+  ctx.emitter?.emit({
+    kind: 'session_completed',
+    sessionId: ctx.sessionId,
+    workflowId: ctx.workflowId,
+    outcome,
+    detail,
+    ...withWorkrailSession(ctx.workrailSessionId),
+  });
+
+  // ---- 2. DaemonRegistry unregister ----
+  // WHY NOT in finally block: the completion status ('completed' vs 'failed') differs
+  // by result path. The finally block handles steer/abort registry cleanup (always safe).
+  if (ctx.workrailSessionId !== null) {
+    ctx.daemonRegistry?.unregister(
+      ctx.workrailSessionId,
+      result._tag === 'success' || result._tag === 'delivery_failed' ? 'completed' : 'failed',
+    );
+  }
+
+  // ---- 3. Execution stats ----
+  writeExecutionStats(ctx.statsDir, ctx.sessionId, ctx.workflowId, ctx.startMs, outcome, ctx.stepAdvanceCount);
+
+  // ---- 4. Sidecar deletion ----
+  // Rules (invariants doc section 2.2):
+  // - success + worktree: do NOT delete (TriggerRouter.maybeRunDelivery handles it after delivery)
+  // - success + non-worktree: delete
+  // - error: delete
+  // - timeout: delete
+  // - stuck: delete (FIX: pre-existing bug -- stuck path previously did not delete the sidecar)
+  // - delivery_failed: runWorkflow() never produces this, but handled for exhaustiveness
+  const isWorktreeSuccess = result._tag === 'success' && ctx.branchStrategy === 'worktree';
+  if (!isWorktreeSuccess) {
+    await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+  }
+
+  // ---- 5. Conversation file deletion ----
+  // Delete on clean success (non-worktree only): no debug value after success.
+  // WHY only non-worktree: worktree sessions defer conversation file deletion to
+  // TriggerRouter.maybeRunDelivery() alongside the sidecar, after delivery completes.
+  // Errors and crashes leave the file intact for post-hoc inspection and Phase B.
+  if (result._tag === 'success' && ctx.branchStrategy !== 'worktree') {
+    await fs.unlink(ctx.conversationPath).catch(() => {});
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -3512,33 +3883,27 @@ export async function runWorkflow(
   emitter?: DaemonEventEmitter,
   steerRegistry?: SteerRegistry,
   abortRegistry?: AbortRegistry,
+  // Injectable for testing -- defaults to DAEMON_STATS_DIR and DAEMON_SESSIONS_DIR.
+  // WHY: enables unit tests to verify stats file content and sidecar lifecycle
+  // without touching real ~/.workrail/data or ~/.workrail/daemon-sessions directories.
+  _statsDir?: string,
+  _sessionsDir?: string,
 ): Promise<WorkflowRunResult> {
+  // ---- Resolved dirs (injectable for tests) ----
+  const statsDir = _statsDir ?? DAEMON_STATS_DIR;
+  const sessionsDir = _sessionsDir ?? DAEMON_SESSIONS_DIR;
+
   // ---- Execution timing (for calibration of session timeouts) ----
   // WHY at entry: captures the true start before any early-exit paths (model validation,
   // start_workflow failure, worktree creation failure). A startMs captured after these
   // paths would miss their duration entirely.
-  // WHY fire-and-forget write (in finally block): this is for timeout calibration, not
-  // crash recovery. A write failure must never affect the session.
-  // If adding a new result path, update sessionOutcome before the new return statement.
   const startMs = Date.now();
-  // sessionOutcome is updated before each return path and read in the finally block.
-  // Default 'unknown' is a valid data point (not silent data loss) if a future return
-  // path is added without updating this variable.
-  //
-  // sessionOutcome is set at each result path and written to execution-stats.jsonl
-  // via writeExecutionStats() at that path's return site. The finally block does NOT
-  // write stats for the agent-loop paths -- only for pre-agent-loop early exits.
-  // WHY: writeExecutionStats() takes outcome by value. Calling it in finally with
-  // sessionOutcome would always capture 'unknown' because the outcome assignments
-  // happen after the finally block exits. Each result path calls writeExecutionStats()
-  // directly with the correct outcome, mirroring the pre-agent-loop early exit pattern.
-  let sessionOutcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown' = 'unknown';
 
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
-  // state file in DAEMON_SESSIONS_DIR. This UUID is NOT the WorkRail server
-  // session ID -- it is a process-local identifier. The server continueToken
-  // is stored as a value inside the file, so crash-resume can retrieve it.
+  // state file in sessionsDir. This UUID is NOT the WorkRail server session ID --
+  // it is a process-local identifier. The server continueToken is stored as a value
+  // inside the file, so crash-resume can retrieve it.
   const sessionId = randomUUID();
   console.log(`[WorkflowRunner] Session started: sessionId=${sessionId} workflowId=${trigger.workflowId}`);
 
@@ -3553,123 +3918,69 @@ export async function runWorkflow(
     workspacePath: trigger.workspacePath,
   });
 
-  // ---- WorkRail session ID (decoded from continueToken after executeStartWorkflow) ----
-  // WHY: DaemonRegistry is keyed by WorkRail session ID (not the process-local UUID).
-  // ConsoleService.loadSessionSummary() looks up the registry by WorkRail session ID,
-  // so registering with the process UUID was a bug -- isLive was always false.
-  // This let variable is set below after executeStartWorkflow returns and the continueToken
-  // is decoded. All closures that need the WorkRail session ID capture this variable by
-  // reference -- they see the correct value when they run (after it has been assigned).
-  let workrailSessionId: string | null = null;
-
   // ---- Client and model setup ----
-  // Priority: agentConfig.model (trigger-specific override) > env-based detection.
-  // agentConfig.model format: "provider/model-id" (e.g. "amazon-bedrock/claude-sonnet-4-6").
-  // WHY: per-trigger model overrides allow using different model tiers for different
-  // workload types (e.g. a faster/cheaper model for simple automation tasks).
-  //
-  // WHY @anthropic-ai/sdk + @anthropic-ai/bedrock-sdk: both provide the identical
-  // .messages.create() API, so AgentLoop works with either without any format conversion.
-  // Bedrock uses AWS credentials from env (AWS_PROFILE, AWS_ACCESS_KEY_ID) automatically.
+  // Use pure buildAgentClient() to select model and construct the API client.
+  // Throws on invalid model format; we catch and return _tag: 'error'.
+  // WHY try/catch here (not Result type): buildAgentClient is specified to throw
+  // for simplicity. The outer catch converts to the errors-as-data boundary.
   let agentClient: Anthropic | AnthropicBedrock;
   let modelId: string;
 
-  if (trigger.agentConfig?.model) {
-    // Parse "provider/model-id" -- split on the first slash only
-    const slashIdx = trigger.agentConfig.model.indexOf('/');
-    if (slashIdx === -1) {
-      // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
-      writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
-      return {
-        _tag: 'error',
-        workflowId: trigger.workflowId,
-        message: `agentConfig.model must be in "provider/model-id" format, got: "${trigger.agentConfig.model}"`,
-        stopReason: 'error',
-      };
-    }
-    const provider = trigger.agentConfig.model.slice(0, slashIdx);
-    modelId = trigger.agentConfig.model.slice(slashIdx + 1);
-    agentClient = provider === 'amazon-bedrock' ? new AnthropicBedrock() : new Anthropic({ apiKey });
-  } else {
-    // Default: use Bedrock when AWS credentials are present (avoids personal API key charges).
-    const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
-    if (usesBedrock) {
-      agentClient = new AnthropicBedrock();
-      modelId = 'us.anthropic.claude-sonnet-4-6';
-      console.log(`[WorkflowRunner] Model: ${modelId} (amazon-bedrock, detected from AWS env)`);
+  try {
+    ({ agentClient, modelId } = buildAgentClient(trigger, apiKey, process.env));
+    if (trigger.agentConfig?.model) {
+      // Log the model override for observability (same log pattern as before).
+      console.log(`[WorkflowRunner] Model: ${modelId} (override from agentConfig.model)`);
     } else {
-      agentClient = new Anthropic({ apiKey });
-      modelId = 'claude-sonnet-4-6';
-      console.log(`[WorkflowRunner] Model: ${modelId} (anthropic direct). Set agentConfig.model or AWS env vars to use Bedrock.`);
+      const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+      if (usesBedrock) {
+        console.log(`[WorkflowRunner] Model: ${modelId} (amazon-bedrock, detected from AWS env)`);
+      } else {
+        console.log(`[WorkflowRunner] Model: ${modelId} (anthropic direct). Set agentConfig.model or AWS env vars to use Bedrock.`);
+      }
     }
+  } catch (err: unknown) {
+    // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
+    const message = err instanceof Error ? err.message : String(err);
+    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
+    return {
+      _tag: 'error',
+      workflowId: trigger.workflowId,
+      message,
+      stopReason: 'error',
+    };
   }
 
-  // ---- Completion bridge ----
-  // isComplete is written by continue_workflow tool's execute() when isComplete=true.
-  // pendingSteerParts is written by the tool after a successful step advance.
-  // Both are read only in the turn_end subscriber -- no race condition since
-  // tool execution is sequential (toolExecution: 'sequential').
+  // ---- Session state ----
+  // All mutable session variables are collected into a single SessionState object.
+  // Closures (onAdvance, onComplete, steer callback, turn_end subscriber) capture `state`
+  // by reference and mutate it. See SessionState interface for field documentation.
   //
-  // WHY pendingSteerParts (array) instead of pendingSteerText (single string):
-  // Multiple complete_step/continue_workflow calls can fire in the same tool batch
-  // (though unusual). Using a push queue ensures no steer text is silently
-  // overwritten -- all parts are joined and injected together. This is also the
-  // correct shape for signal_coordinator to append coordinator context into the
-  // same steer window without clobbering the step-advance text.
-  let isComplete = false;
-  const pendingSteerParts: string[] = [];
-  // lastStepNotes is populated by onComplete when the agent's final continue_workflow
-  // call includes output.notesMarkdown. Used by the trigger layer for delivery (git commit/PR).
-  let lastStepNotes: string | undefined;
-  // lastStepArtifacts is populated by onComplete when the agent's final complete_step or
-  // continue_workflow call includes artifacts[]. Surfaces typed artifacts through the result
-  // type chain for coordinator consumption. See WorkflowRunSuccess.lastStepArtifacts.
-  let lastStepArtifacts: readonly unknown[] | undefined;
+  // WHY createSessionState with empty token: startContinueToken is not yet known
+  // (executeStartWorkflow has not been called). The token is set on state via
+  // state.currentContinueToken = startContinueToken after executeStartWorkflow returns.
+  const state = createSessionState('');
 
-  // ---- Stuck detection state ----
-  // WHY these variables: the turn_end subscriber needs them to check for stuck signals.
-  // All are closure-scoped to this runWorkflow() call -- no cross-session contamination.
-  //
-  // stepAdvanceCount: incremented in onAdvance() every time continue_workflow advances.
-  // Used by signal 2 (no_progress: N turns with 0 advances).
-  let stepAdvanceCount = 0;
-  //
-  // lastNToolCalls: ring buffer of the last 3 tool_call_started events.
-  // Populated in the onToolCallStarted callback before each tool execution.
-  // Used by signal 1 (repeated_tool_call: same tool+args 3 times).
-  // WHY max 3: conservative threshold avoids false positives on legitimate retries.
-  // WHY argsSummary: same tool with different args is not stuck (e.g. grep on different files).
-  const lastNToolCalls: Array<{ toolName: string; argsSummary: string }> = [];
-  const STUCK_REPEAT_THRESHOLD = 3;
-  //
-  // issueSummaries: push-only array populated by the onIssueSummary callback on report_issue.
-  // Included in the WORKTRAIN_STUCK marker so coordinator scripts can categorize failures.
-  // WHY cap at 10: bounds memory on pathological sessions with many issue_reported calls.
-  const issueSummaries: string[] = [];
   const MAX_ISSUE_SUMMARIES = 10;
+  const STUCK_REPEAT_THRESHOLD = 3;
 
   const onAdvance = (stepText: string, continueToken: string): void => {
-    pendingSteerParts.push(stepText);
-    stepAdvanceCount++;
-    // WHY update currentContinueToken here: complete_step injects the token from
+    state.pendingSteerParts.push(stepText);
+    state.stepAdvanceCount++;
+    // WHY update state.currentContinueToken here: complete_step injects the token from
     // this closure variable. After each successful advance, the engine returns a new
-    // continueToken for the next step. Updating here ensures the next complete_step
-    // call injects the correct token. The second parameter was previously unused
-    // (continue_workflow relied on the LLM round-tripping the token instead).
-    currentContinueToken = continueToken;
+    // continueToken for the next step.
+    state.currentContinueToken = continueToken;
     // Heartbeat on each step advance -- the session is alive and making progress.
-    // WHY workrailSessionId: DaemonRegistry is keyed by WorkRail session ID (not process UUID).
-    // workrailSessionId is populated after executeStartWorkflow + continueToken decode.
-    // The closure captures it by reference -- correct value is available when onAdvance fires.
-    if (workrailSessionId !== null) daemonRegistry?.heartbeat(workrailSessionId);
+    if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
     // Emit step_advanced event with workrailSessionId for liveActivity correlation.
-    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(workrailSessionId) });
+    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
   };
 
   const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
-    isComplete = true;
-    lastStepNotes = notes;
-    lastStepArtifacts = artifacts;
+    state.isComplete = true;
+    state.lastStepNotes = notes;
+    state.lastStepArtifacts = artifacts;
   };
 
   // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
@@ -3698,7 +4009,7 @@ export async function runWorkflow(
 
     if (startResult.isErr()) {
       // Registration has not happened yet (happens after token decode below).
-      writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
+      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3712,17 +4023,12 @@ export async function runWorkflow(
   const startContinueToken = firstStep.continueToken ?? '';
   const startCheckpointToken = firstStep.checkpointToken ?? null;
 
-  // ---- Current continue token (for complete_step daemon tool) ----
-  // WHY a mutable variable: complete_step injects the continueToken internally so
-  // the LLM never needs to round-trip it. This variable starts with the initial
-  // session token and is updated by onAdvance after each step advance.
-  // WHY let (not const): the value changes on every successful step advance and on
-  // blocked-retry responses. Mutation is confined to onAdvance and the onTokenUpdate
-  // callback passed to makeCompleteStepTool.
-  // INVARIANT: this variable is always updated AFTER persistTokens() is called,
-  // so a crash between advance and the next complete_step call can still recover
-  // the correct token from the persisted state file.
-  let currentContinueToken = startContinueToken;
+  // ---- Initialize session state with the start token ----
+  // Now that we have the start token, set it on the state object.
+  // onAdvance will update state.currentContinueToken on each step advance.
+  // INVARIANT: state.currentContinueToken is always updated AFTER persistTokens()
+  // is called, so a crash can recover the correct token from the persisted state file.
+  state.currentContinueToken = startContinueToken;
 
   // ---- Decode WorkRail session ID from the continueToken ----
   // WHY: daemonRegistry.register() and daemon event emitter both need the WorkRail
@@ -3734,9 +4040,9 @@ export async function runWorkflow(
   // The session still runs correctly; isLive and liveActivity just won't work for
   // this session (an unusual internal error since the token just came from executeStartWorkflow).
   //
-  // WHY assigned to the outer `workrailSessionId` let (declared before onAdvance):
-  // The onAdvance closure captures workrailSessionId by reference. By the time the
-  // agent loop calls onAdvance, this variable is already populated.
+  // WHY assigned to state.workrailSessionId (not a local let): all closures (onAdvance,
+  // steer callback, tool factories) capture `state` by reference. By the time the agent
+  // loop calls them, state.workrailSessionId is already populated.
   if (startContinueToken) {
     const decoded = await parseContinueTokenOrFail(
       startContinueToken,
@@ -3744,7 +4050,7 @@ export async function runWorkflow(
       ctx.v2.tokenAliasStore,
     );
     if (decoded.isOk()) {
-      workrailSessionId = decoded.value.sessionId;
+      state.workrailSessionId = decoded.value.sessionId;
     } else {
       console.error(
         `[WorkflowRunner] Error: could not decode WorkRail session ID from continueToken -- isLive and liveActivity will not work for this session. Reason: ${decoded.error.message}`,
@@ -3757,23 +4063,23 @@ export async function runWorkflow(
   // (not the process-local UUID). Using the WorkRail session ID here ensures isLive works.
   // INVARIANT: register() is called at most once per runWorkflow() call. The early-exit
   // paths above (model validation failure, start_workflow failure) happen before this point.
-  if (workrailSessionId !== null) {
-    daemonRegistry?.register(workrailSessionId, trigger.workflowId);
+  if (state.workrailSessionId !== null) {
+    daemonRegistry?.register(state.workrailSessionId, trigger.workflowId);
   }
 
   // ---- SteerRegistry: register steer callback for coordinator injection ----
-  // The steer callback pushes text onto pendingSteerParts; it is drained by the
+  // The steer callback pushes text onto state.pendingSteerParts; it is drained by the
   // turn_end subscriber and delivered to the agent via agent.steer().
   //
-  // WHY registered here (not at top of function): workrailSessionId is the registry key.
+  // WHY registered here (not at top of function): state.workrailSessionId is the registry key.
   // It is only available after parseContinueTokenOrFail() succeeds above.
   //
   // Registration gap: there is a ~50ms window between session creation
   // (executeStartWorkflow()) and this registration call. A coordinator that calls
   // POST /api/v2/sessions/:sessionId/steer in that window receives 404. Coordinators
   // should retry once on 404 during session start-up.
-  if (workrailSessionId !== null) {
-    steerRegistry?.set(workrailSessionId, (text: string) => { pendingSteerParts.push(text); });
+  if (state.workrailSessionId !== null) {
+    steerRegistry?.set(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
   }
 
   // ---- AbortRegistry: register abort callback for graceful shutdown ----
@@ -3781,7 +4087,7 @@ export async function runWorkflow(
   // and signals the agent loop to exit. Called by the daemon shutdown handler on
   // SIGTERM/SIGINT to abort all in-flight sessions simultaneously.
   //
-  // WHY registered here (not at top of function): same as SteerRegistry -- workrailSessionId
+  // WHY registered here (not at top of function): same as SteerRegistry -- state.workrailSessionId
   // is the registry key and is only available after parseContinueTokenOrFail() succeeds.
   //
   // WHY registered BEFORE AgentLoop construction: ensures the registry entry exists if SIGTERM
@@ -3801,8 +4107,8 @@ export async function runWorkflow(
   //
   // Registration gap: same ~50ms window as SteerRegistry. A session started in this window
   // will not receive abort() from the shutdown handler. Acceptable -- same accepted tradeoff.
-  if (workrailSessionId !== null) {
-    abortRegistry?.set(workrailSessionId, () => { agent.abort(); });
+  if (state.workrailSessionId !== null) {
+    abortRegistry?.set(state.workrailSessionId, () => { agent.abort(); });
   }
 
   // Crash safety: persist tokens before starting the agent loop. A crash between
@@ -3871,7 +4177,7 @@ export async function runWorkflow(
       // is acceptable -- startup recovery clears malformed sidecars regardless of token value.
       // WHY recoveryContext repeated: the sidecar is fully rewritten on each persistTokens() call
       // (atomic temp-rename). All fields must be present on every write.
-      await persistTokens(sessionId, startContinueToken ?? currentContinueToken, startCheckpointToken, sessionWorktreePath, {
+      await persistTokens(sessionId, startContinueToken ?? state.currentContinueToken, startCheckpointToken, sessionWorktreePath, {
         workflowId: trigger.workflowId,
         goal: trigger.goal,
         workspacePath: trigger.workspacePath,
@@ -3888,16 +4194,16 @@ export async function runWorkflow(
       // no worktree is registered with git.
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
-      emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
-      if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+      emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(state.workrailSessionId) });
+      if (state.workrailSessionId !== null) daemonRegistry?.unregister(state.workrailSessionId, 'failed');
       // Clean up registry entries: agent was never constructed, so these callbacks are stale.
       // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
       // ReferenceError because `agent` is declared later in this function scope.
-      if (workrailSessionId !== null) {
-        steerRegistry?.delete(workrailSessionId);
-        abortRegistry?.delete(workrailSessionId);
+      if (state.workrailSessionId !== null) {
+        steerRegistry?.delete(state.workrailSessionId);
+        abortRegistry?.delete(state.workrailSessionId);
       }
-      writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
+      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3935,18 +4241,18 @@ export async function runWorkflow(
     // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
     // the active count during delivery (seconds). This is semantically correct.
     if (trigger.branchStrategy !== 'worktree') {
-      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
+      await fs.unlink(path.join(sessionsDir, `${sessionId}.json`)).catch(() => {});
     }
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
-    if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(state.workrailSessionId) });
+    if (state.workrailSessionId !== null) daemonRegistry?.unregister(state.workrailSessionId, 'completed');
     // Clean up registry entries: agent was never constructed, so these callbacks are stale.
     // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
     // ReferenceError because `agent` is declared later in this function scope.
-    if (workrailSessionId !== null) {
-      steerRegistry?.delete(workrailSessionId);
-      abortRegistry?.delete(workrailSessionId);
+    if (state.workrailSessionId !== null) {
+      steerRegistry?.delete(state.workrailSessionId);
+      abortRegistry?.delete(state.workrailSessionId);
     }
-    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
+    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
     return {
       _tag: 'success',
       workflowId: trigger.workflowId,
@@ -3995,49 +4301,49 @@ export async function runWorkflow(
     makeCompleteStepTool(
       sessionId,
       ctx,
-      () => currentContinueToken,
+      () => state.currentContinueToken,
       onAdvance,
       onComplete,
       // WHY onTokenUpdate: on a blocked response, the engine returns a retryContinueToken.
-      // This callback updates currentContinueToken so the next complete_step call
+      // This callback updates state.currentContinueToken so the next complete_step call
       // injects the correct retry token. This is the second (and only other) write
       // path for currentContinueToken alongside onAdvance above.
-      (t: string) => { currentContinueToken = t; },
+      (t: string) => { state.currentContinueToken = t; },
       schemas,
       executeContinueWorkflow,
       emitter,
-      workrailSessionId,
+      state.workrailSessionId,
     ),
-    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSessionId),
+    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, state.workrailSessionId),
     // WHY sessionWorkspacePath (not trigger.workspacePath): when branchStrategy === 'worktree',
     // all agent file operations must target the isolated worktree, not the main checkout.
     // For 'none' strategy, sessionWorkspacePath === trigger.workspacePath (no difference).
-    makeBashTool(sessionWorkspacePath, schemas, sessionId, emitter, workrailSessionId),
-    makeReadTool(readFileState, schemas, sessionId, emitter, workrailSessionId),
-    makeWriteTool(readFileState, schemas, sessionId, emitter, workrailSessionId),
-    makeGlobTool(sessionWorkspacePath, schemas, sessionId, emitter, workrailSessionId),
-    makeGrepTool(sessionWorkspacePath, schemas, sessionId, emitter, workrailSessionId),
-    makeEditTool(sessionWorkspacePath, readFileState, schemas, sessionId, emitter, workrailSessionId),
-    makeReportIssueTool(sessionId, emitter, workrailSessionId, undefined, (summary: string) => {
+    makeBashTool(sessionWorkspacePath, schemas, sessionId, emitter, state.workrailSessionId),
+    makeReadTool(readFileState, schemas, sessionId, emitter, state.workrailSessionId),
+    makeWriteTool(readFileState, schemas, sessionId, emitter, state.workrailSessionId),
+    makeGlobTool(sessionWorkspacePath, schemas, sessionId, emitter, state.workrailSessionId),
+    makeGrepTool(sessionWorkspacePath, schemas, sessionId, emitter, state.workrailSessionId),
+    makeEditTool(sessionWorkspacePath, readFileState, schemas, sessionId, emitter, state.workrailSessionId),
+    makeReportIssueTool(sessionId, emitter, state.workrailSessionId, undefined, (summary: string) => {
       // Accumulate issue summaries for WORKTRAIN_STUCK marker.
       // WHY cap: bounds memory on pathological sessions.
-      if (issueSummaries.length < MAX_ISSUE_SUMMARIES) {
-        issueSummaries.push(summary);
+      if (state.issueSummaries.length < MAX_ISSUE_SUMMARIES) {
+        state.issueSummaries.push(summary);
       }
     }),
     // WHY spawn_agent: enables native WorkRail child session delegation from workflow steps.
     // The tool is always available in the tool list; the depth check inside execute() is the
     // enforcement boundary. workrailSessionId is the parent -- it becomes parentSessionId in
     // the child session's event log.
-    // WHY fallback to empty string when workrailSessionId is null: a null workrailSessionId means
-    // the token decode failed earlier (unusual internal error). The child will still be created,
+    // WHY fallback to empty string when state.workrailSessionId is null: a null workrailSessionId
+    // means the token decode failed earlier (unusual internal error). The child will still be created,
     // but parentSessionId in the event log will be ''. This is acceptable -- the session runs
     // correctly; only the parent-child link in the DAG view will be missing.
     makeSpawnAgentTool(
       sessionId,
       ctx,
       apiKey,
-      workrailSessionId ?? '',
+      state.workrailSessionId ?? '',
       spawnCurrentDepth,
       spawnMaxDepth,
       runWorkflow,
@@ -4050,7 +4356,7 @@ export async function runWorkflow(
     // the LLM reaches for complete_step / Bash / Read / Write before considering
     // coordinator signals. The depth limit inside spawn_agent is a stricter
     // enforcement boundary; signal_coordinator has no such guard.
-    makeSignalCoordinatorTool(sessionId, emitter, workrailSessionId),
+    makeSignalCoordinatorTool(sessionId, emitter, state.workrailSessionId),
   ];
 
   // ---- Context loading (soul + workspace + session notes) ----
@@ -4107,7 +4413,7 @@ export async function runWorkflow(
         sessionId,
         messageCount,
         modelId,
-        ...withWorkrailSession(workrailSessionId),
+        ...withWorkrailSession(state.workrailSessionId),
       });
     },
     onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
@@ -4118,25 +4424,25 @@ export async function runWorkflow(
         outputTokens,
         inputTokens,
         toolNamesRequested,
-        ...withWorkrailSession(workrailSessionId),
+        ...withWorkrailSession(state.workrailSessionId),
       });
     },
     onToolCallStarted: ({ toolName, argsSummary }) => {
-      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(workrailSessionId) });
+      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(state.workrailSessionId) });
       // Update the stuck-detection ring buffer.
       // WHY here: this callback fires synchronously before tool.execute() so the
       // ring buffer always reflects the most recent tool calls at turn_end check time.
       // WHY bounded by STUCK_REPEAT_THRESHOLD: O(1) space, no history accumulation.
-      lastNToolCalls.push({ toolName, argsSummary });
-      if (lastNToolCalls.length > STUCK_REPEAT_THRESHOLD) {
-        lastNToolCalls.shift();
+      state.lastNToolCalls.push({ toolName, argsSummary });
+      if (state.lastNToolCalls.length > STUCK_REPEAT_THRESHOLD) {
+        state.lastNToolCalls.shift();
       }
     },
     onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
-      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(workrailSessionId) });
+      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(state.workrailSessionId) });
     },
     onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
-      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(workrailSessionId) });
+      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(state.workrailSessionId) });
     },
   };
 
@@ -4170,22 +4476,15 @@ export async function runWorkflow(
     (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
   const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
 
-  // ---- Timeout reason flag ----
-  // Tracks which limit fired first. Set synchronously before agent.abort() so the
-  // catch block can read it on the next microtask tick. JS single-thread guarantees
-  // no race condition. Guard: first writer wins -- ignore if already set.
-  let timeoutReason: 'wall_clock' | 'max_turns' | null = null;
-
-  // ---- Stuck reason flag ----
-  // Parallel to timeoutReason. Set synchronously before agent.abort() in the
-  // turn_end subscriber. Checked in the return path BEFORE timeoutReason so that
-  // a stuck abort takes priority over a wall-clock timeout that fired on the same turn.
-  // Guard: first writer wins (same pattern as timeoutReason).
-  let stuckReason: 'repeated_tool_call' | 'no_progress' | null = null;
-
-  // ---- Turn counter ----
-  // Incremented on each turn_end event (one complete LLM response turn).
-  let turnCount = 0;
+  // ---- Stuck detection configuration ----
+  // WHY resolved here: these are read-only trigger config values. They do not change
+  // during the session and should not be re-computed on every turn_end invocation.
+  const stuckConfig: StuckConfig = {
+    maxTurns,
+    stuckAbortPolicy: trigger.agentConfig?.stuckAbortPolicy ?? 'abort',
+    noProgressAbortEnabled: trigger.agentConfig?.noProgressAbortEnabled ?? false,
+    stuckRepeatThreshold: STUCK_REPEAT_THRESHOLD,
+  };
 
   // ---- Conversation history persistence ----
   // Per-session JSONL file written incrementally after each turn_end and flushed
@@ -4193,7 +4492,7 @@ export async function runWorkflow(
   // WHY initialized to 0: the first turn_end flush includes the initial user message
   // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
   // WHY fire-and-forget: write failures must never affect the agent loop.
-  const conversationPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}-conversation.jsonl`);
+  const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
   let lastFlushedMessageCount = 0;
 
   // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
@@ -4207,127 +4506,99 @@ export async function runWorkflow(
     for (const toolResult of event.toolResults) {
       if (toolResult.isError) {
         const errorText = toolResult.result?.content[0]?.text ?? 'tool error';
-        emitter?.emit({ kind: 'tool_error', sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
+        emitter?.emit({ kind: 'tool_error', sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200), ...withWorkrailSession(state.workrailSessionId) });
       }
     }
 
-    // Track turns for the max-turn limit.
-    turnCount++;
+    // Track turns for stuck detection.
+    state.turnCount++;
 
-    // Max-turn limit: abort if the turn count reaches the configured limit.
-    // Guard: skip if wall-clock timeout already fired.
-    if (maxTurns > 0 && turnCount >= maxTurns && timeoutReason === null) {
-      timeoutReason = 'max_turns';
-      // WHY emit here rather than relying on Signal 3 below: the `return` at the end
-      // of this block exits this subscriber invocation before Signal 3 can run.
-      // For wall_clock, timeoutReason is set in a setTimeout callback and Signal 3
-      // fires on the NEXT turn_end invocation; for max_turns, the abort happens on
-      // THIS turn -- there is no next turn.
-      emitter?.emit({
-        kind: 'agent_stuck',
-        sessionId,
-        reason: 'timeout_imminent',
-        detail: 'Max-turn limit reached',
-        ...withWorkrailSession(workrailSessionId),
-      });
-      agent.abort();
-      return; // Do not inject the next step -- we are aborting.
-    }
+    // ---- Stuck detection: evaluate signals via pure function ----
+    // evaluateStuckSignals() is pure -- it reads state and config, no I/O.
+    // The subscriber handles all effects (abort, emit, outbox) based on the signal.
+    const signal = evaluateStuckSignals(state, stuckConfig);
 
-    // ---- Stuck detection heuristics ----
-    // WHY here: the turn_end subscriber is the canonical post-turn hook. All state
-    // variables (turnCount, stepAdvanceCount, lastNToolCalls, timeoutReason) are
-    // available here. Detection is advisory-only: emitter?.emit() is fire-and-forget
-    // and never aborts the session.
-    //
-    // Signal 1: same tool + same args called STUCK_REPEAT_THRESHOLD times in a row.
-    // WHY argsSummary comparison: same tool with different args is not stuck
-    // (e.g. grep on different files). argsSummary is JSON-serialized params truncated
-    // to 200 chars -- the truncation boundary is an accepted near-zero false positive.
-    if (
-      lastNToolCalls.length === STUCK_REPEAT_THRESHOLD &&
-      lastNToolCalls.every(
-        (c) => c.toolName === lastNToolCalls[0]?.toolName && c.argsSummary === lastNToolCalls[0]?.argsSummary,
-      )
-    ) {
-      emitter?.emit({
-        kind: 'agent_stuck',
-        sessionId,
-        reason: 'repeated_tool_call',
-        detail: `Same tool+args called ${STUCK_REPEAT_THRESHOLD} times: ${lastNToolCalls[0]?.toolName ?? 'unknown'}`,
-        toolName: lastNToolCalls[0]?.toolName,
-        argsSummary: lastNToolCalls[0]?.argsSummary,
-        ...withWorkrailSession(workrailSessionId),
-      });
-
-      // Outbox notification: fires regardless of abort policy (notify_only still notifies).
-      // WHY: the notification and the abort are independent effects.
-      void writeStuckOutboxEntry({
-        workflowId: trigger.workflowId,
-        reason: 'repeated_tool_call',
-        ...(issueSummaries.length > 0 ? { issueSummaries: [...issueSummaries] } : {}),
-      });
-
-      // Abort: only when policy allows AND no prior abort has fired.
-      // NOTE: if max_turns fired on this same turn, it returned early above, so we
-      // never reach here in that case -- stuck takes a clean signal.
-      const stuckPolicy = trigger.agentConfig?.stuckAbortPolicy ?? 'abort';
-      if (stuckPolicy !== 'notify_only' && stuckReason === null && timeoutReason === null) {
-        stuckReason = 'repeated_tool_call';
+    if (signal !== null) {
+      // kind: 'max_turns_exceeded' -- this turn is the termination turn.
+      // WHY return early: no steer injection on this turn (aborting).
+      if (signal.kind === 'max_turns_exceeded') {
+        state.timeoutReason = 'max_turns';
+        emitter?.emit({
+          kind: 'agent_stuck',
+          sessionId,
+          reason: 'timeout_imminent',
+          detail: 'Max-turn limit reached',
+          ...withWorkrailSession(state.workrailSessionId),
+        });
         agent.abort();
-        return; // Do not inject next step -- session is aborting.
+        return;
       }
-    }
 
-    // Signal 2: 80%+ of turns used with 0 step advances.
-    // WHY 0.8 threshold: conservative -- 80% of turns gone with nothing to show is
-    // a strong stuck signal. The agent may legitimately spend many turns researching
-    // before advancing; the threshold must be high enough to avoid false positives.
-    if (
-      maxTurns > 0 &&
-      turnCount >= Math.floor(maxTurns * 0.8) &&
-      stepAdvanceCount === 0
-    ) {
-      emitter?.emit({
-        kind: 'agent_stuck',
-        sessionId,
-        reason: 'no_progress',
-        detail: `${turnCount} turns used, 0 step advances (${maxTurns} turn limit)`,
-        ...withWorkrailSession(workrailSessionId),
-      });
-
-      // no_progress abort is off by default (false-positive risk on research workflows).
-      const noProgressAbortEnabled = trigger.agentConfig?.noProgressAbortEnabled ?? false;
-      if (noProgressAbortEnabled) {
+      // kind: 'repeated_tool_call' -- Signal 1.
+      else if (signal.kind === 'repeated_tool_call') {
+        emitter?.emit({
+          kind: 'agent_stuck',
+          sessionId,
+          reason: 'repeated_tool_call',
+          detail: `Same tool+args called ${STUCK_REPEAT_THRESHOLD} times: ${signal.toolName}`,
+          toolName: signal.toolName,
+          argsSummary: signal.argsSummary,
+          ...withWorkrailSession(state.workrailSessionId),
+        });
+        // Outbox notification fires regardless of abort policy.
         void writeStuckOutboxEntry({
           workflowId: trigger.workflowId,
-          reason: 'no_progress',
-          ...(issueSummaries.length > 0 ? { issueSummaries: [...issueSummaries] } : {}),
+          reason: 'repeated_tool_call',
+          ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
         });
-
-        const noProgressPolicy = trigger.agentConfig?.stuckAbortPolicy ?? 'abort';
-        if (noProgressPolicy !== 'notify_only' && stuckReason === null && timeoutReason === null) {
-          stuckReason = 'no_progress';
+        if (stuckConfig.stuckAbortPolicy !== 'notify_only' && state.stuckReason === null && state.timeoutReason === null) {
+          state.stuckReason = 'repeated_tool_call';
           agent.abort();
           return;
         }
       }
-    }
 
-    // Signal 3: wall-clock timeout is already firing (session is aborting).
-    // WHY emit here: the wall-clock abort fires in the timeout Promise rejection path,
-    // which does not go through turn_end. Emitting here gives a clear last-chance
-    // signal before the abort propagates.
-    // NOTE: the max_turns path emits timeout_imminent inline above (before its
-    // early return) and does not reach this check.
-    if (timeoutReason !== null) {
-      emitter?.emit({
-        kind: 'agent_stuck',
-        sessionId,
-        reason: 'timeout_imminent',
-        detail: `${timeoutReason === 'wall_clock' ? 'Wall-clock timeout' : 'Max-turn limit'} reached`,
-        ...withWorkrailSession(workrailSessionId),
-      });
+      // kind: 'no_progress' -- Signal 2.
+      else if (signal.kind === 'no_progress') {
+        emitter?.emit({
+          kind: 'agent_stuck',
+          sessionId,
+          reason: 'no_progress',
+          detail: `${signal.turnCount} turns used, 0 step advances (${signal.maxTurns} turn limit)`,
+          ...withWorkrailSession(state.workrailSessionId),
+        });
+        if (stuckConfig.noProgressAbortEnabled) {
+          void writeStuckOutboxEntry({
+            workflowId: trigger.workflowId,
+            reason: 'no_progress',
+            ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
+          });
+          if (stuckConfig.stuckAbortPolicy !== 'notify_only' && state.stuckReason === null && state.timeoutReason === null) {
+            state.stuckReason = 'no_progress';
+            agent.abort();
+            return;
+          }
+        }
+      }
+
+      // kind: 'timeout_imminent' -- Signal 3.
+      // WHY observational: the abort was triggered by the wall-clock timeout Promise;
+      // Signal 3 is a last-chance notification, not a new abort.
+      else if (signal.kind === 'timeout_imminent') {
+        emitter?.emit({
+          kind: 'agent_stuck',
+          sessionId,
+          reason: 'timeout_imminent',
+          detail: `${signal.timeoutReason === 'wall_clock' ? 'Wall-clock timeout' : 'Max-turn limit'} reached`,
+          ...withWorkrailSession(state.workrailSessionId),
+        });
+      }
+
+      // Exhaustiveness guard: adding a new StuckSignal kind without handling it here
+      // will cause a TypeScript compile error.
+      else {
+        assertNever(signal);
+      }
     }
 
     // ---- Conversation history: delta-append after each turn ----
@@ -4347,9 +4618,9 @@ export async function runWorkflow(
     // steer() prevents a second turn_end (fired after steer injects a message) from
     // re-injecting stale parts if a concurrent tool were somehow to add to the array --
     // though sequential tool execution makes this a theoretical concern only.
-    if (pendingSteerParts.length > 0 && !isComplete) {
-      const joined = pendingSteerParts.join('\n\n');
-      pendingSteerParts.length = 0;
+    if (state.pendingSteerParts.length > 0 && !state.isComplete) {
+      const joined = state.pendingSteerParts.join('\n\n');
+      state.pendingSteerParts.length = 0;
       agent.steer(buildUserMessage(joined));
     }
     // If isComplete, do not call steer() -- agent exits naturally on next turn
@@ -4372,8 +4643,8 @@ export async function runWorkflow(
     // agent.abort() is idempotent -- AgentLoop sets activeRun to null after abort.
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
-        if (timeoutReason === null) {
-          timeoutReason = 'wall_clock';
+        if (state.timeoutReason === null) {
+          state.timeoutReason = 'wall_clock';
         }
         reject(new Error('Workflow timed out'));
       }, sessionTimeoutMs);
@@ -4418,153 +4689,115 @@ export async function runWorkflow(
     // Deregister steer callback so the HTTP endpoint returns 404 for completed sessions.
     // WHY in finally: must run even on error or abort -- stale registry entries would make
     // the endpoint return 200 (calling the closed-over callback) on a dead session.
-    if (workrailSessionId !== null) {
-      steerRegistry?.delete(workrailSessionId);
+    if (state.workrailSessionId !== null) {
+      steerRegistry?.delete(state.workrailSessionId);
     }
     // Deregister abort callback so the shutdown handler does not call abort() on a session
     // that has already exited. WHY synchronous / WHY in finally: same rationale as steerRegistry
     // above. The drain window in the shutdown handler polls abortRegistry.size to determine
     // when all sessions have completed cleanup -- this delete is the signal that cleanup is done.
-    if (workrailSessionId !== null) {
-      abortRegistry?.delete(workrailSessionId);
+    if (state.workrailSessionId !== null) {
+      abortRegistry?.delete(state.workrailSessionId);
     }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
 
   }
 
+  // ---- Build finalization context (shared across all result paths) ----
+  const finalizationCtx: FinalizationContext = {
+    sessionId,
+    workrailSessionId: state.workrailSessionId,
+    startMs,
+    stepAdvanceCount: state.stepAdvanceCount,
+    branchStrategy: trigger.branchStrategy,
+    statsDir,
+    sessionsDir,
+    conversationPath,
+    emitter,
+    daemonRegistry,
+    workflowId: trigger.workflowId,
+  };
+
   // ---- Stuck result (repeated_tool_call or no_progress abort) ----
   // Checked before timeoutReason: if both somehow fired (same-turn race), stuck
   // is the more specific signal and takes priority over the generic wall-clock timeout.
-  // In practice, the max_turns path returns early (before stuck checks run) so the
-  // race only applies to wall_clock -- stuck fires before the limit, which fires later.
-  if (stuckReason !== null) {
-    emitter?.emit({
-      kind: 'session_completed',
-      sessionId,
-      workflowId: trigger.workflowId,
-      outcome: 'stuck',
-      detail: stuckReason,
-      ...withWorkrailSession(workrailSessionId),
-    });
-    if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
-    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'stuck', stepAdvanceCount);
-    return {
+  // In practice, the max_turns path sets timeoutReason = 'max_turns' and returns early
+  // (before stuck checks run) so the race only applies to wall_clock.
+  if (state.stuckReason !== null) {
+    const result: WorkflowRunResult = {
       _tag: 'stuck',
       workflowId: trigger.workflowId,
-      reason: stuckReason,
-      message: `Session aborted: stuck heuristic fired (${stuckReason})`,
+      reason: state.stuckReason,
+      message: `Session aborted: stuck heuristic fired (${state.stuckReason})`,
       stopReason: 'aborted',
-      ...(issueSummaries.length > 0 ? { issueSummaries: [...issueSummaries] } : {}),
+      ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
     };
+    await finalizeSession(result, finalizationCtx);
+    return result;
   }
 
   // ---- Timeout result (wall-clock or max-turn limit) ----
-  // timeoutReason is set before agent.abort() in both abort paths; by the time we
-  // reach here the catch has completed and it is safe to read synchronously.
-  if (timeoutReason !== null) {
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'timeout', detail: timeoutReason, ...withWorkrailSession(workrailSessionId) });
-    if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
-    const limitDescription = timeoutReason === 'wall_clock'
+  if (state.timeoutReason !== null) {
+    const limitDescription = state.timeoutReason === 'wall_clock'
       ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
       : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
-    // Clean up session file on timeout -- same pattern as success path.
-    // WHY: a timed-out session is no longer in-flight. Leaving the file causes
-    // countActiveSessions() to permanently inflate until daemon restart.
-    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
-    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'timeout', stepAdvanceCount);
-    return {
+    const result: WorkflowRunResult = {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
-      reason: timeoutReason,
-      message: `Workflow ${timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
+      reason: state.timeoutReason,
+      message: `Workflow ${state.timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
       stopReason: 'aborted',
     };
+    await finalizeSession(result, finalizationCtx);
+    return result;
   }
 
+  // ---- Error result ----
   if (stopReason === 'error' || errorMessage) {
     const errMsg = errorMessage ?? 'Agent stopped with error reason';
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
-    if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
     // Append a structured stuck marker so coordinator scripts can detect and act on it.
     // WHY: parseable by worktrain coordinator scripts without LLM involvement --
     // scripts-over-agent for routing decisions.
-    // WHY these fields: coordinator scripts need enough context to categorize the
-    // failure without reading the full daemon event log.
-    const lastToolCalled = lastNToolCalls.length > 0 ? lastNToolCalls[lastNToolCalls.length - 1] : null;
+    const lastToolCalled = state.lastNToolCalls.length > 0 ? state.lastNToolCalls[state.lastNToolCalls.length - 1] : null;
     const stuckMarker = `\n\nWORKTRAIN_STUCK: ${JSON.stringify({
       reason: 'session_error',
       error: errMsg.slice(0, 500),
       workflowId: trigger.workflowId,
       sessionId,
-      turnCount,
-      stepAdvanceCount,
+      turnCount: state.turnCount,
+      stepAdvanceCount: state.stepAdvanceCount,
       ...(lastToolCalled !== null && { lastToolCalled }),
-      ...(issueSummaries.length > 0 && { issueSummaries }),
+      ...(state.issueSummaries.length > 0 && { issueSummaries: state.issueSummaries }),
     })}`;
-    // Clean up session file on error -- same pattern as success path.
-    // WHY: an errored session is no longer in-flight. Leaving the file causes
-    // countActiveSessions() to permanently inflate until daemon restart.
-    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
-    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', stepAdvanceCount);
-    return {
+    const result: WorkflowRunResult = {
       _tag: 'error',
       workflowId: trigger.workflowId,
       message: errMsg,
       stopReason,
       lastStepNotes: stuckMarker,
     };
+    await finalizeSession(result, finalizationCtx);
+    return result;
   }
 
+  // ---- Success result ----
   // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
   // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
-  // finishes. trigger-router.ts maybeRunDelivery() is the sole success-path removal.
-  // Failure/timeout path cleanup above is intentionally kept -- those paths never reach delivery.
-
-  // ---- Clean up state file on success ----
-  // The state file is evidence of an in-flight session. Delete it on clean completion
-  // so the CLI crash-recovery scan only surfaces genuinely orphaned sessions.
-  //
-  // WHY conditional sidecar deletion: for worktree sessions, the sidecar must outlive
-  // this return so maybeRunDelivery() in trigger-router.ts can remove the worktree and
-  // then delete the sidecar. Deleting here would leave the worktree invisible to
-  // runStartupRecovery() if the daemon crashes before maybeRunDelivery() runs.
-  // Non-worktree sessions have no delivery cleanup gap and can delete immediately.
-  // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
-  // the active count during delivery (seconds). This is semantically correct.
-  if (trigger.branchStrategy !== 'worktree') {
-    await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {
-      // Best-effort: ignore ENOENT (session never persisted tokens) and other errors.
-    });
-    // Delete conversation history on clean completion -- no debug value after success.
-    // WHY only for non-worktree sessions: worktree sessions defer conversation file
-    // deletion to trigger-router.ts maybeRunDelivery() alongside the sidecar, after
-    // delivery completes. The branchStrategy guard above ensures we only reach this
-    // line for non-worktree sessions.
-    // Crashes and errors leave the file intact for post-hoc inspection and Phase B.
-    await fs.unlink(conversationPath).catch(() => {});
-  }
-
-  emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...withWorkrailSession(workrailSessionId) });
-  if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
-  writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'success', stepAdvanceCount);
-  return {
+  // finishes. TriggerRouter.maybeRunDelivery() is the sole success-path worktree removal.
+  const result: WorkflowRunResult = {
     _tag: 'success',
     workflowId: trigger.workflowId,
     stopReason,
-    ...(lastStepNotes !== undefined ? { lastStepNotes } : {}),
-    ...(lastStepArtifacts !== undefined ? { lastStepArtifacts } : {}),
+    ...(state.lastStepNotes !== undefined ? { lastStepNotes: state.lastStepNotes } : {}),
+    ...(state.lastStepArtifacts !== undefined ? { lastStepArtifacts: state.lastStepArtifacts } : {}),
     // WHY sessionWorkspacePath: trigger-router.ts reads this to use the correct working
-    // directory for delivery (git add, commit, push, gh pr create). The delivery must
-    // run inside the worktree where the agent's changes live, not in the main checkout.
-    // Absent for 'none' strategy (no worktree was created; trigger.workspacePath is used).
+    // directory for delivery (git add, commit, push, gh pr create).
     ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
-    // WHY sessionId: trigger-router.ts reads this for branch assertion before git push
-    // (verifying HEAD matches branchPrefix + sessionId). Threading it here avoids fragile
-    // path-parsing (.split('/').at(-1)) that couples branch naming convention to the caller.
+    // WHY sessionId: trigger-router.ts reads this for branch assertion before git push.
     ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
-    // WHY botIdentity: trigger-router.ts passes this to delivery-action.ts for per-command
-    // git identity (-c user.name/email flags on git commit). Threading here avoids writing
-    // to the shared .git/config which is shared across all worktrees.
+    // WHY botIdentity: trigger-router.ts passes this to delivery-action.ts for per-command git identity.
     ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
   };
+  await finalizeSession(result, finalizationCtx);
+  return result;
 }
