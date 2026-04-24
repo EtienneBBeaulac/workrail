@@ -1158,7 +1158,7 @@ export async function runStartupRecovery(
             isComplete: rehydrated.isComplete,
             pending: rehydrated.pending,
             preferences: rehydrated.preferences,
-            nextIntent: rehydrated.nextIntent,
+            nextIntent: rehydrated.nextIntent, // 'rehydrate_only' from rehydrate call; runWorkflow() does not read this field
             nextCall: rehydrated.nextCall,
           };
 
@@ -1183,6 +1183,11 @@ export async function runStartupRecovery(
 
           // Fire-and-forget: run the resumed session without blocking startup.
           // The sidecar is NOT deleted here -- runWorkflow() manages its own lifecycle.
+          //
+          // WHY bypass TriggerRouter semaphore: recovery sessions are rare and bounded by the
+          // number of orphaned sidecars (typically 0-2). Routing through TriggerRouter.dispatch()
+          // would require a triggerId and blocks on the semaphore -- neither is appropriate here.
+          // Same tradeoff as spawn_agent (see makeSpawnAgentTool WHY comment).
           void _runWorkflowFn(
             recoveredTrigger,
             ctx!,

@@ -637,6 +637,73 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     await expect(fs.access(sidecarPath)).rejects.toThrow();
   });
 
+  it('resumes session when worktreePath is set and the directory exists on disk', async () => {
+    // F1: worktree path is set AND the directory exists -- session should be resumed.
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    // Create a real directory to serve as the worktree path.
+    const fakeWorktreePath = path.join(tmpDir, 'fake-worktree');
+    await fs.mkdir(fakeWorktreePath);
+
+    await writeSession(tmpDir, sessionId, {
+      ...sessionDataWithContext('ct_worktree_exists'),
+      worktreePath: fakeWorktreePath,
+    });
+
+    const runWorkflowTriggers: import('../../src/daemon/workflow-runner.js').WorkflowTrigger[] = [];
+    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger) => {
+      runWorkflowTriggers.push(trigger);
+      return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
+    };
+
+    await runStartupRecovery(
+      tmpDir,
+      noopExecFn,
+      stubCtx,
+      async () => 1, // stepAdvances = 1 -> resume attempted
+      async () => fakeRehydrateOk(),
+      fakeRunWorkflow as Parameters<typeof runStartupRecovery>[5],
+    );
+
+    // Worktree exists -> _runWorkflowFn IS called
+    expect(runWorkflowTriggers).toHaveLength(1);
+    // effectiveWorkspacePath should be the worktree path, not the original workspacePath
+    expect(runWorkflowTriggers[0]!.workspacePath).toBe(fakeWorktreePath);
+    expect(runWorkflowTriggers[0]!.branchStrategy).toBe('none');
+
+    // Sidecar is NOT deleted (runWorkflow manages its own lifecycle)
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
+  });
+
+  it('discards session when worktreePath is set but the directory is missing (ENOENT)', async () => {
+    // F1: worktree path is set BUT the directory does NOT exist -- must discard, not resume.
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    const missingWorktreePath = path.join(tmpDir, 'does-not-exist-worktree');
+    // Do NOT create the directory -- it must be absent on disk.
+
+    await writeSession(tmpDir, sessionId, {
+      ...sessionDataWithContext('ct_worktree_missing'),
+      worktreePath: missingWorktreePath,
+    });
+
+    const runWorkflowCalls: unknown[] = [];
+    await runStartupRecovery(
+      tmpDir,
+      noopExecFn,
+      stubCtx,
+      async () => 1, // stepAdvances = 1 -> resume attempted
+      async () => fakeRehydrateOk(),
+      async (trigger) => {
+        runWorkflowCalls.push(trigger);
+        return { _tag: 'success', workflowId: 'wr.test', stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
+      },
+    );
+
+    // Worktree is missing -> falls to discard: _runWorkflowFn NOT called
+    expect(runWorkflowCalls).toHaveLength(0);
+    // Sidecar IS deleted on discard
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+  });
+
   it('resumes multiple sessions with step advances (both get runWorkflow called)', async () => {
     const id1 = 'aaaaaaaa-0000-0000-0000-000000000001';
     const id2 = 'aaaaaaaa-0000-0000-0000-000000000002';
