@@ -2106,11 +2106,13 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
       context: {},
     });
 
-    // Flush
+    // Flush: advance fake timers to allow the internal queue's setTimeout to resolve
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
     await Promise.resolve();
 
     // At most one dispatch should have reached runWorkflowFn (dedup blocked the second)
-    expect(calls.length).toBeLessThanOrEqual(1);
+    expect(calls).toHaveLength(1);
 
     // Skip log must have been emitted
     expect(logSpy).toHaveBeenCalledWith(

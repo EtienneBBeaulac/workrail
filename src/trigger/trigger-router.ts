@@ -499,7 +499,14 @@ export class TriggerRouter {
   private readonly _modeExecutors: ModeExecutors | undefined;
 
   /**
-   * Recent adaptive dispatch timestamps keyed by `${goal}::${workspace}`.
+   * Recent adaptive dispatch timestamps keyed by a path-specific dedup key.
+   *
+   * Key format differs by dispatch path:
+   * - route() and dispatch(): `${workflowId}::${goal}::${workspace}`
+   * - dispatchAdaptivePipeline(): `${goal}::${workspace}`
+   *
+   * Cross-path suppression only applies when both paths produce the same key
+   * (i.e. when workflowId is absent from one path's key).
    *
    * WHY Map<string, number> (not a Set): we need the timestamp to implement
    * a TTL-based sliding window. A Set can only answer "was this dispatched?",
@@ -508,8 +515,8 @@ export class TriggerRouter {
    * WHY cleanup-on-entry (not a background timer): a timer would introduce
    * async state that conflicts with the determinism principle and complicates
    * testing. Cleanup-on-entry is O(n) per dispatch call, bounded by the
-   * number of unique goal+workspace pairs dispatched in the last 30s -- always
-   * a small number in practice.
+   * number of unique keys dispatched in the last 30s -- always a small number
+   * in practice.
    *
    * IMPORTANT: This map is shared across route(), dispatch(), and
    * dispatchAdaptivePipeline(). Any new dispatch path added to this class
@@ -711,8 +718,10 @@ export class TriggerRouter {
     // - The goal must be fully resolved (goalTemplate interpolation happens above).
     // - No trigger_fired event is emitted for deduped dispatches -- consistent with
     //   the dispatchCondition guard which also returns before the emitter call.
-    // WHY shared map (_recentAdaptiveDispatches): cross-path dedup is intentional --
-    // a dispatch via any path (route, dispatch, dispatchAdaptivePipeline) sets the key.
+    // WHY shared map (_recentAdaptiveDispatches): prevents duplicate dispatches within
+    // the same 30s window. Key format differs by path: route/dispatch use
+    // workflowId::goal::workspace; dispatchAdaptivePipeline uses goal::workspace.
+    // Cross-path suppression only applies when both paths produce the same key.
     {
       const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
       const now = Date.now();
@@ -874,8 +883,10 @@ export class TriggerRouter {
     // explicitly intends to start this session. Skip the dedup block entirely.
     if (workflowTrigger._preAllocatedStartResponse === undefined) {
       // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
-      // WHY same map and pattern as route() and dispatchAdaptivePipeline():
-      // cross-path dedup is intentional -- a dispatch via any path sets the key.
+      // WHY shared map (_recentAdaptiveDispatches): prevents duplicate dispatches within
+      // the same 30s window. Key format differs by path: route/dispatch use
+      // workflowId::goal::workspace; dispatchAdaptivePipeline uses goal::workspace.
+      // Cross-path suppression only applies when both paths produce the same key.
       const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
       const now = Date.now();
       // Cleanup-on-entry: purge stale entries before checking/inserting.
