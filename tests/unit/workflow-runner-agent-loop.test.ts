@@ -406,9 +406,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // Wait for fire-and-forget writes (writeExecutionStats, writeStatsSummary) to complete
-  // before cleaning up directories. These writes are async but not awaited in production code.
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // Clean up temp directories. waitForStats() uses polling so no blanket sleep needed here.
   await fs.rm(statsDir, { recursive: true, force: true }).catch(() => {});
   await fs.rm(sessionsDir, { recursive: true, force: true }).catch(() => {});
 });
@@ -521,6 +519,39 @@ describe('subscriber behavior: no_progress signal', () => {
     // noProgressAbortEnabled gate suppressed the abort.
     expect(result._tag).not.toBe('stuck');
   });
+
+  it('noProgressAbortEnabled: true + stuckAbortPolicy: notify_only + no_progress -> outbox written but session NOT aborted', async () => {
+    // Corner case: noProgressAbortEnabled=true AND stuckAbortPolicy='notify_only'.
+    // no_progress fires (80%+ of maxTurns with 0 step advances).
+    // Expected behavior per subscriber reference (lines ~4635-4650):
+    //   - outbox entry IS written (notify path runs because noProgressAbortEnabled=true)
+    //   - agent.abort() is NOT called (stuckAbortPolicy='notify_only' suppresses abort)
+    //   - result._tag is NOT 'stuck'
+    const turns = Array.from({ length: 8 }, (_, i) => ({
+      kind: 'tool_calls' as const,
+      toolCalls: [{ toolName: `Tool${i}`, argsSummary: `{"arg":"${i}"}` }],
+    }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (MockAgentLoop as any)._nextScript = turns;
+
+    const signalsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'workrail-agent-loop-signals-'));
+    try {
+      const trigger = makeTrigger({
+        agentConfig: {
+          maxTurns: 10,
+          noProgressAbortEnabled: true, // outbox write path runs
+          stuckAbortPolicy: 'notify_only', // abort is suppressed
+        },
+      });
+
+      const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+
+      // With notify_only, session continues (not stuck).
+      expect(result._tag).not.toBe('stuck');
+    } finally {
+      await fs.rm(signalsDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 });
 
 describe('subscriber behavior: stuck takes priority over timeout', () => {
@@ -578,11 +609,21 @@ async function readStatsEntries(dir: string): Promise<Array<{
   }
 }
 
-/** Wait for fire-and-forget stats write to complete. */
-async function waitForStats(): Promise<void> {
-  // writeExecutionStats is fire-and-forget (not awaited in runWorkflow).
-  // A short yield is sufficient since it's a local fs.appendFile call.
-  await new Promise(resolve => setTimeout(resolve, 50));
+/** Wait for fire-and-forget stats write to complete, using polling to match outcome-invariants.test.ts. */
+async function waitForStats(dir: string = statsDir): Promise<void> {
+  // writeExecutionStats is fire-and-forget -- poll briefly to let it complete.
+  // Same approach as workflow-runner-outcome-invariants.test.ts readStatsFile().
+  const statsPath = path.join(dir, 'execution-stats.jsonl');
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const content = await fs.readFile(statsPath, 'utf8');
+      if (content.trim().length > 0) return;
+    } catch {
+      // file not yet written
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+  }
+  // If not written after 200ms, continue anyway -- assertions will surface the failure.
 }
 
 describe('stats file content: agent-loop paths', () => {

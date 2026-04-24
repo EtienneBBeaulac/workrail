@@ -40,6 +40,7 @@ import type {
   WorkflowRunSuccess,
   WorkflowRunError,
   WorkflowRunTimeout,
+  WorkflowRunStuck,
 } from '../../src/daemon/workflow-runner.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 
@@ -269,6 +270,68 @@ describe('makeSpawnAgentTool() result mapping', () => {
     expect(parsed.childSessionId).toBeNull();
     expect(parsed.notes).toContain('Failed to start child workflow');
     expect(runWorkflowStub).not.toHaveBeenCalled();
+  });
+
+  it('maps stuck result to outcome: stuck with message and issueSummaries', async () => {
+    // Verifies that the stuck branch in makeSpawnAgentTool produces the correct
+    // result shape: outcome='stuck', notes from message, and issueSummaries forwarded.
+    // The stuck branch is exercised when a child session is aborted by the stuck heuristic.
+    const stuckResult: WorkflowRunStuck = {
+      _tag: 'stuck',
+      workflowId: 'test-workflow',
+      reason: 'repeated_tool_call',
+      message: 'Child session stuck: repeated_tool_call after 3 identical Bash calls',
+      stopReason: 'aborted',
+      issueSummaries: ['npm run build failed with exit 1', 'Could not find expected file'],
+    };
+
+    const tool = makeSpawnAgentTool(
+      'sess-1',
+      FAKE_CTX,
+      FAKE_API_KEY,
+      'parent-session-id',
+      0,
+      3,
+      makeRunWorkflowStub(stuckResult),
+      FAKE_SCHEMAS,
+    );
+
+    const result = await tool.execute('call-1', FAKE_PARAMS);
+    const parsed = JSON.parse(result.content[0]!.text as string);
+
+    expect(parsed.outcome).toBe('stuck');
+    expect(parsed.notes).toBe('Child session stuck: repeated_tool_call after 3 identical Bash calls');
+    expect(parsed.childSessionId).toBeNull();
+    expect(parsed.issueSummaries).toEqual(['npm run build failed with exit 1', 'Could not find expected file']);
+  });
+
+  it('omits issueSummaries from stuck result when child session had no report_issue calls', async () => {
+    const stuckResult: WorkflowRunStuck = {
+      _tag: 'stuck',
+      workflowId: 'test-workflow',
+      reason: 'no_progress',
+      message: 'Child session stuck: no_progress after 8/10 turns with 0 step advances',
+      stopReason: 'aborted',
+      // issueSummaries intentionally absent
+    };
+
+    const tool = makeSpawnAgentTool(
+      'sess-1',
+      FAKE_CTX,
+      FAKE_API_KEY,
+      'parent-session-id',
+      0,
+      3,
+      makeRunWorkflowStub(stuckResult),
+      FAKE_SCHEMAS,
+    );
+
+    const result = await tool.execute('call-1', FAKE_PARAMS);
+    const parsed = JSON.parse(result.content[0]!.text as string);
+
+    expect(parsed.outcome).toBe('stuck');
+    // issueSummaries must be absent (not null, not undefined) when child had none.
+    expect(parsed).not.toHaveProperty('issueSummaries');
   });
 
   it('throws via assertNever when runWorkflow returns delivery_failed -- regression: old code silently mapped this to success', async () => {

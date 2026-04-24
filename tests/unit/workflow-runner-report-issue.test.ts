@@ -241,6 +241,65 @@ describe('makeReportIssueTool()', () => {
     });
   });
 
+  describe('onIssueSummary callback', () => {
+    it('invokes onIssueSummary synchronously with the truncated summary after execute()', async () => {
+      // This is the injection point that runWorkflow() uses to accumulate issue summaries
+      // for the WORKTRAIN_STUCK marker (state.issueSummaries) without async file I/O.
+      // WHY synchronous: execute() is called from the agent loop turn; the push must
+      // complete before the turn_end subscriber reads state.issueSummaries.
+      const collected: string[] = [];
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir, (s) => collected.push(s));
+
+      await tool.execute('call-1', {
+        kind: 'tool_failure',
+        severity: 'error',
+        summary: 'npm run build failed with exit 1',
+      });
+
+      expect(collected).toHaveLength(1);
+      expect(collected[0]).toBe('npm run build failed with exit 1');
+    });
+
+    it('invokes onIssueSummary with the 200-char truncated form when summary is long', async () => {
+      const longSummary = 'x'.repeat(250);
+      const collected: string[] = [];
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir, (s) => collected.push(s));
+
+      await tool.execute('call-1', {
+        kind: 'unexpected_behavior',
+        severity: 'warn',
+        summary: longSummary,
+      });
+
+      // Summary is truncated to 200 chars before the callback is invoked.
+      expect(collected).toHaveLength(1);
+      expect(collected[0]).toBe('x'.repeat(200));
+    });
+
+    it('accumulates multiple summaries into the caller-provided list', async () => {
+      // This mirrors how runWorkflow() uses onIssueSummary to build state.issueSummaries.
+      // When a stuck signal fires, state.issueSummaries is forwarded to writeStuckOutboxEntry
+      // and included in the WorkflowRunStuck result.
+      const collected: string[] = [];
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir, (s) => collected.push(s));
+
+      await tool.execute('call-1', { kind: 'blocked', severity: 'warn', summary: 'First issue' });
+      await tool.execute('call-2', { kind: 'tool_failure', severity: 'error', summary: 'Second issue' });
+      await tool.execute('call-3', { kind: 'self_correction', severity: 'info', summary: 'Third issue' });
+
+      expect(collected).toEqual(['First issue', 'Second issue', 'Third issue']);
+    });
+
+    it('does not invoke onIssueSummary when not provided', async () => {
+      // Defensive: no callback means no push, no error.
+      const tool = makeReportIssueTool('sess-abc', undefined, undefined, tmpDir);
+
+      await expect(
+        tool.execute('call-1', { kind: 'blocked', severity: 'info', summary: 'Nothing to collect' }),
+      ).resolves.toBeDefined();
+    });
+  });
+
   describe('event emission', () => {
     it('emits an issue_reported event via the emitter', async () => {
       const emitter = new DaemonEventEmitter(tmpDir);
