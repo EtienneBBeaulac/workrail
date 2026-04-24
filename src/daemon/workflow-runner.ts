@@ -3210,6 +3210,54 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
 }
 
 // ---------------------------------------------------------------------------
+// Execution stats helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Write a single execution-stats entry and regenerate the stats summary.
+ *
+ * Fire-and-forget: returns void, never throws, never awaited. A stats write
+ * failure must never affect the session result -- this is observability data,
+ * not crash recovery state.
+ *
+ * WHY module-level (not inline): the same logic is needed at 4 early-exit
+ * paths (before the try block) and in the finally block. A single helper
+ * eliminates duplication and guarantees all paths write the same schema.
+ *
+ * WHY chained .then() for writeStatsSummary: writeStatsSummary reads
+ * execution-stats.jsonl and must include the record just appended above.
+ * Chaining ensures the append completes before the read starts.
+ */
+function writeExecutionStats(
+  statsDir: string,
+  sessionId: string,
+  workflowId: string,
+  startMs: number,
+  outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown',
+  stepCount: number,
+): void {
+  const endMs = Date.now();
+  const statsPath = path.join(statsDir, 'execution-stats.jsonl');
+  fs.mkdir(statsDir, { recursive: true })
+    .then(() => fs.appendFile(
+      statsPath,
+      JSON.stringify({
+        sessionId,
+        workflowId,
+        startMs,
+        endMs,
+        durationMs: endMs - startMs,
+        outcome,
+        stepCount,
+        ts: new Date().toISOString(),
+      }) + '\n',
+      'utf8',
+    ))
+    .then(() => { writeStatsSummary(statsDir).catch(() => {}); })
+    .catch(() => {}); // best-effort -- never propagate
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -3303,7 +3351,7 @@ export async function runWorkflow(
     const slashIdx = trigger.agentConfig.model.indexOf('/');
     if (slashIdx === -1) {
       // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
-      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
+      writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3420,7 +3468,7 @@ export async function runWorkflow(
 
     if (startResult.isErr()) {
       // Registration has not happened yet (happens after token decode below).
-      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
+      writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3570,7 +3618,7 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
-      // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
+      writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3612,7 +3660,7 @@ export async function runWorkflow(
     }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
-    // NOTE: pre-try exit -- execution-stats.jsonl not written for this path
+    writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'success', 0);
     return {
       _tag: 'success',
       workflowId: trigger.workflowId,
@@ -4088,30 +4136,7 @@ export async function runWorkflow(
     // WHY finally block (not per-path): a single write site ensures every outcome is
     // recorded regardless of which return path fires. See startMs/sessionOutcome above.
     // If adding a new result path, update sessionOutcome before the new return statement.
-    const endMs = Date.now();
-    const statsDir = path.join(os.homedir(), '.workrail', 'data');
-    const statsPath = path.join(statsDir, 'execution-stats.jsonl');
-    fs.mkdir(statsDir, { recursive: true })
-      .then(() => fs.appendFile(
-        statsPath,
-        JSON.stringify({
-          sessionId,
-          workflowId: trigger.workflowId,
-          startMs,
-          endMs,
-          durationMs: endMs - startMs,
-          outcome: sessionOutcome,
-          stepCount: stepAdvanceCount,
-          ts: new Date().toISOString(),
-        }) + '\n',
-        'utf8',
-      ))
-      // WHY chained after appendFile (not called independently): writeStatsSummary reads
-      // execution-stats.jsonl and must include the record just appended above. Chaining in
-      // .then() ensures the append completes before the read starts. Calling in parallel
-      // would cause a race where the just-completed session is absent from the summary.
-      .then(() => { writeStatsSummary(statsDir).catch(() => {}); })
-      .catch(() => {}); // best-effort -- never propagate
+    writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, sessionOutcome, stepAdvanceCount);
   }
 
   // ---- Stuck result (repeated_tool_call or no_progress abort) ----
