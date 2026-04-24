@@ -32,7 +32,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js';
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
-import type { SteerRegistry } from '../daemon/workflow-runner.js';
+import type { SteerRegistry, AbortRegistry } from '../daemon/workflow-runner.js';
 import { loadWorkrailConfigFile, loadWorkspacesFromConfigFile } from '../config/config-file.js';
 import { NotificationService } from './notification-service.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
@@ -78,9 +78,16 @@ export interface TriggerListenerHandle {
   readonly router: TriggerRouter;
   /**
    * The steer registry shared with TriggerRouter.
-   * Used during daemon shutdown to abort in-flight sessions gracefully.
+   * Used during daemon shutdown to emit session_aborted events for in-flight sessions.
    */
   readonly steerRegistry: SteerRegistry;
+  /**
+   * The abort registry shared with TriggerRouter.
+   * Call each value to abort the corresponding in-flight AgentLoop.
+   * Used during daemon shutdown to stop all sessions immediately.
+   * Poll size to 0 to detect when all sessions have completed cleanup.
+   */
+  readonly abortRegistry: AbortRegistry;
   /**
    * The PollingScheduler instance created by this listener.
    * Used to manage the polling loop lifecycle (start/stop).
@@ -380,6 +387,12 @@ export async function startTriggerListener(
   // that wires TriggerRouter and the console route layer together. Both need the SAME registry instance
   // so the HTTP endpoint dispatches to callbacks registered by TriggerRouter's sessions.
   const steerRegistry: SteerRegistry = new Map();
+
+  // Create the abort registry for graceful shutdown on SIGTERM/SIGINT.
+  // WHY created here (not in TriggerRouter): same composition-root rationale as steerRegistry.
+  // The shutdown handler in cli-worktrain.ts reads handle.abortRegistry and calls each
+  // abort callback to stop all in-flight AgentLoop instances simultaneously.
+  const abortRegistry: AbortRegistry = new Map();
 
   // ---------------------------------------------------------------------------
   // Adaptive coordinator deps: wire real implementations for dispatchAdaptivePipeline.
@@ -798,7 +811,7 @@ export async function startTriggerListener(
 
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry, coordinatorDeps, modeExecutors);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry, abortRegistry, coordinatorDeps, modeExecutors);
   // Populate the forward reference so spawnSession can dispatch in-process.
   // WHY here (not before construction): routerRef is a forward-ref needed because
   // coordinatorDeps must be constructed before TriggerRouter (it's a constructor arg).
@@ -876,6 +889,7 @@ export async function startTriggerListener(
         port: actualPort,
         router,
         steerRegistry,
+        abortRegistry,
         scheduler: pollingScheduler,
         stop: async () => {
           // Stop polling BEFORE closing the HTTP server to prevent dispatch()

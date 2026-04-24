@@ -678,6 +678,22 @@ export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Wor
 export type SteerRegistry = Map<string, (text: string) => void>;
 
 /**
+ * Registry mapping WorkRail session IDs to abort callbacks.
+ * Each runWorkflow() call registers () => agent.abort() on session start
+ * and deregisters on completion. The shutdown handler calls all callbacks
+ * to abort every in-flight AgentLoop simultaneously.
+ *
+ * WHY alongside SteerRegistry: mirrors the same composition-root injection
+ * pattern. Both are constructed in trigger-listener.ts (the composition root),
+ * injected through TriggerRouter -> runWorkflow(), and returned on
+ * TriggerListenerHandle so the shutdown handler can drain them.
+ *
+ * Daemon-only: only populated by daemon sessions. MCP-mode sessions do not
+ * register callbacks.
+ */
+export type AbortRegistry = Map<string, () => void>;
+
+/**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
  *
  * Each active runWorkflow() call writes a per-session file to DAEMON_SESSIONS_DIR.
@@ -2488,6 +2504,7 @@ export function makeSpawnAgentTool(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   emitter?: DaemonEventEmitter,
+  abortRegistry?: AbortRegistry,
 ): AgentTool {
   return {
     name: 'spawn_agent',
@@ -2608,6 +2625,8 @@ export function makeSpawnAgentTool(
         apiKey,
         undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
         emitter,
+        undefined, // steerRegistry: child sessions are not steerable by coordinator
+        abortRegistry, // WHY: thread abort registry so child sessions are abortable on SIGTERM
       ) as ChildWorkflowRunResult;
       // WHY cast to ChildWorkflowRunResult: runWorkflow() returns WorkflowRunResult (4 variants)
       // for TriggerRouter compatibility, but structurally only produces success/error/timeout.
@@ -3301,6 +3320,7 @@ export async function runWorkflow(
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
   steerRegistry?: SteerRegistry,
+  abortRegistry?: AbortRegistry,
 ): Promise<WorkflowRunResult> {
   // ---- Execution timing (for calibration of session timeouts) ----
   // WHY at entry: captures the true start before any early-exit paths (model validation,
@@ -3560,6 +3580,35 @@ export async function runWorkflow(
     steerRegistry?.set(workrailSessionId, (text: string) => { pendingSteerParts.push(text); });
   }
 
+  // ---- AbortRegistry: register abort callback for graceful shutdown ----
+  // The abort callback calls agent.abort(), which cancels any in-flight LLM API call
+  // and signals the agent loop to exit. Called by the daemon shutdown handler on
+  // SIGTERM/SIGINT to abort all in-flight sessions simultaneously.
+  //
+  // WHY registered here (not at top of function): same as SteerRegistry -- workrailSessionId
+  // is the registry key and is only available after parseContinueTokenOrFail() succeeds.
+  //
+  // WHY registered BEFORE AgentLoop construction: ensures the registry entry exists if SIGTERM
+  // fires during the context-loading phase (soul + workspace + session notes) between this point
+  // and the `const agent = new AgentLoop(...)` call below. The shutdown handler can safely call
+  // the callback at any point after registration.
+  //
+  // IMPORTANT: Any early-return path between this registration and `const agent = new AgentLoop`
+  // below MUST explicitly delete both steerRegistry and abortRegistry entries. Failing to do so
+  // leaves stale callbacks that will throw a TDZ ReferenceError when the shutdown handler fires
+  // (because `agent` is declared with `const` later in this scope and is never initialized on
+  // those paths).
+  //
+  // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
+  // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
+  // agent directly.
+  //
+  // Registration gap: same ~50ms window as SteerRegistry. A session started in this window
+  // will not receive abort() from the shutdown handler. Acceptable -- same accepted tradeoff.
+  if (workrailSessionId !== null) {
+    abortRegistry?.set(workrailSessionId, () => { agent.abort(); });
+  }
+
   // Crash safety: persist tokens before starting the agent loop. A crash between
   // this point and the first continue_workflow call leaves a recoverable state file.
   if (startContinueToken) {
@@ -3632,6 +3681,13 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+      // Clean up registry entries: agent was never constructed, so these callbacks are stale.
+      // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
+      // ReferenceError because `agent` is declared later in this function scope.
+      if (workrailSessionId !== null) {
+        steerRegistry?.delete(workrailSessionId);
+        abortRegistry?.delete(workrailSessionId);
+      }
       writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
@@ -3674,6 +3730,13 @@ export async function runWorkflow(
     }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
+    // Clean up registry entries: agent was never constructed, so these callbacks are stale.
+    // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
+    // ReferenceError because `agent` is declared later in this function scope.
+    if (workrailSessionId !== null) {
+      steerRegistry?.delete(workrailSessionId);
+      abortRegistry?.delete(workrailSessionId);
+    }
     writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
     return {
       _tag: 'success',
@@ -3771,6 +3834,7 @@ export async function runWorkflow(
       runWorkflow,
       schemas,
       emitter,
+      abortRegistry, // WHY: thread abort registry so child sessions are abortable on SIGTERM
     ),
     // WHY signal_coordinator is listed last: it is a mid-step observability tool,
     // not a control-flow tool. Placing it after the primary workflow tools ensures
@@ -4147,6 +4211,13 @@ export async function runWorkflow(
     // the endpoint return 200 (calling the closed-over callback) on a dead session.
     if (workrailSessionId !== null) {
       steerRegistry?.delete(workrailSessionId);
+    }
+    // Deregister abort callback so the shutdown handler does not call abort() on a session
+    // that has already exited. WHY synchronous / WHY in finally: same rationale as steerRegistry
+    // above. The drain window in the shutdown handler polls abortRegistry.size to determine
+    // when all sessions have completed cleanup -- this delete is the signal that cleanup is done.
+    if (workrailSessionId !== null) {
+      abortRegistry?.delete(workrailSessionId);
     }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
 

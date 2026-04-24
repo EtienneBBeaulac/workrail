@@ -1759,6 +1759,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       undefined, // emitter
       undefined, // notificationService
       undefined, // steerRegistry
+      undefined, // abortRegistry
       FAKE_DEPS,
       executors,
     );
@@ -1810,7 +1811,8 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
+      undefined, // steerRegistry
+      undefined, // abortRegistry
       FAKE_DEPS,
       executors,
     );
@@ -1859,7 +1861,8 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
+      undefined, // steerRegistry
+      undefined, // abortRegistry
       FAKE_DEPS,
       executors,
     );
@@ -1993,7 +1996,8 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
+      undefined, // steerRegistry
+      undefined, // abortRegistry
       FAKE_DEPS_FOR_BYPASS,
       executors,
     );
