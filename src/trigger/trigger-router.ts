@@ -714,7 +714,7 @@ export class TriggerRouter {
     // WHY shared map (_recentAdaptiveDispatches): cross-path dedup is intentional --
     // a dispatch via any path (route, dispatch, dispatchAdaptivePipeline) sets the key.
     {
-      const dedupeKey = `${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
+      const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
       const now = Date.now();
       // Cleanup-on-entry: purge stale entries before checking/inserting.
       for (const [key, ts] of this._recentAdaptiveDispatches) {
@@ -724,7 +724,7 @@ export class TriggerRouter {
       }
       const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
       if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
-        console.log(`[TriggerRouter] Skipping duplicate route dispatch: goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
+        console.log(`[TriggerRouter] Skipping duplicate route dispatch: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
         return { _tag: 'enqueued', triggerId: trigger.id };
       }
       this._recentAdaptiveDispatches.set(dedupeKey, now);
@@ -876,7 +876,7 @@ export class TriggerRouter {
       // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
       // WHY same map and pattern as route() and dispatchAdaptivePipeline():
       // cross-path dedup is intentional -- a dispatch via any path sets the key.
-      const dedupeKey = `${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
+      const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
       const now = Date.now();
       // Cleanup-on-entry: purge stale entries before checking/inserting.
       for (const [key, ts] of this._recentAdaptiveDispatches) {
@@ -886,7 +886,7 @@ export class TriggerRouter {
       }
       const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
       if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
-        console.log(`[TriggerRouter] Skipping duplicate dispatch: goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
+        console.log(`[TriggerRouter] Skipping duplicate dispatch: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
         return workflowTrigger.workflowId;
       }
       this._recentAdaptiveDispatches.set(dedupeKey, now);

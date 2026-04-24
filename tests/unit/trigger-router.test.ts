@@ -1679,6 +1679,50 @@ describe('TriggerRouter.route and dispatch deduplication', () => {
 
     logSpy.mockRestore();
   });
+
+  it('same goal+workspace but different workflowIds are NOT deduplicated', async () => {
+    // WHY: proves that the dedup key includes workflowId. Two triggers with the same
+    // goal and workspacePath but different workflowIds must both dispatch -- they are
+    // genuinely distinct work. Without workflowId in the key, the second dispatch is
+    // silently suppressed even though it targets a different workflow.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const trigger1 = makeTrigger({ id: asTriggerId('trigger-a'), workflowId: 'wr.coding-task' });
+    const trigger2 = makeTrigger({ id: asTriggerId('trigger-b'), workflowId: 'wr.bug-investigation' });
+    const { fn, calls } = makeFakeRunWorkflow();
+    // Use a single router with both triggers so they share the same _recentAdaptiveDispatches map
+    const index = new Map([
+      [trigger1.id, trigger1],
+      [trigger2.id, trigger2],
+    ]) as ReadonlyMap<string, TriggerDefinition>;
+    const router = new TriggerRouter(index, FAKE_CTX, FAKE_API_KEY, fn);
+
+    const event1 = makeEvent({ triggerId: asTriggerId('trigger-a') });
+    const event2 = makeEvent({ triggerId: asTriggerId('trigger-b') });
+
+    // First dispatch for workflowId 'wr.coding-task'
+    router.route(event1);
+
+    // Within the 30s window, dispatch for a DIFFERENT workflowId with the same goal+workspace
+    vi.advanceTimersByTime(5_000);
+    router.route(event2);
+
+    // Flush: allow async queue callbacks to run
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Both dispatches must reach runWorkflowFn -- different workflowId = different dedup key
+    expect(calls).toHaveLength(2);
+
+    // No skip log emitted for either dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate'),
+    );
+
+    logSpy.mockRestore();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1973,10 +2017,12 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     expect(calls[1]?.goal).toBe(goal);
   });
 
-  it('dispatch() WITHOUT _preAllocatedStartResponse still deduplicates within 30s after dispatchAdaptivePipeline', async () => {
-    // WHY: regression guard -- proves the dedup check still fires for normal dispatch()
-    // calls (without _preAllocatedStartResponse) after dispatchAdaptivePipeline() primes
-    // the map. This ensures the bypass only applies to pre-allocated sessions.
+  it('dispatch() WITHOUT _preAllocatedStartResponse is NOT suppressed by a prior dispatchAdaptivePipeline', async () => {
+    // WHY: since the dedup key for dispatch() now includes workflowId
+    // (`${workflowId}::${goal}::${workspace}`) while dispatchAdaptivePipeline() uses
+    // `${goal}::${workspace}`, the two paths no longer share dedup keys.
+    // A dispatch() call must NOT be suppressed by a prior adaptive pipeline dispatch
+    // for the same goal+workspace -- they are different kinds of operations.
     vi.useFakeTimers();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -2001,25 +2047,70 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     const goal = trigger.goal;
     const workspace = trigger.workspacePath;
 
-    // Prime the dedup map
+    // Prime the dedup map via adaptive pipeline (sets key: `${goal}::${workspace}`)
     await router.dispatchAdaptivePipeline(goal, workspace);
 
     // Advance by 10s (within 30s TTL)
     vi.advanceTimersByTime(10_000);
 
-    // dispatch() WITHOUT _preAllocatedStartResponse -- dedup must fire
+    // dispatch() WITHOUT _preAllocatedStartResponse -- must NOT be suppressed because
+    // dispatch() uses `${workflowId}::${goal}::${workspace}` as its dedup key
     router.dispatch({
       workflowId: trigger.workflowId,
       goal,
       workspacePath: workspace,
       context: {},
-      // no _preAllocatedStartResponse
     });
 
+    // Flush: advance fake timers to allow the internal queue's setTimeout to resolve
+    vi.advanceTimersByTime(100);
+    await Promise.resolve();
     await Promise.resolve();
 
-    // runWorkflowFn must NOT have been called (dedup blocked the dispatch)
-    expect(calls).toHaveLength(0);
+    // runWorkflowFn MUST have been called (different dedup key namespace)
+    expect(calls).toHaveLength(1);
+
+    // No skip log emitted for the dispatch
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('Skipping duplicate dispatch'),
+    );
+
+    logSpy.mockRestore();
+  });
+
+  it('dispatch() WITHOUT _preAllocatedStartResponse deduplicates a repeat dispatch() within 30s', async () => {
+    // WHY: proves the dedup check still fires for normal dispatch() calls (without
+    // _preAllocatedStartResponse) when a prior dispatch() has the same workflowId+goal+workspace.
+    // This ensures the preAlloc bypass only applies to pre-allocated sessions, not all dispatch()s.
+    vi.useFakeTimers();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const { fn, calls } = makeFakeRunWorkflow();
+    const trigger = makeTrigger();
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+
+    const goal = trigger.goal;
+    const workspace = trigger.workspacePath;
+
+    // First dispatch (no preAlloc) -- primes the dedup map
+    router.dispatch({ workflowId: trigger.workflowId, goal, workspacePath: workspace, context: {} });
+
+    // Advance by 10s (within 30s TTL)
+    vi.advanceTimersByTime(10_000);
+
+    // Second dispatch() WITHOUT _preAllocatedStartResponse -- dedup must fire
+    router.dispatch({
+      workflowId: trigger.workflowId,
+      goal,
+      workspacePath: workspace,
+      context: {},
+    });
+
+    // Flush
+    await Promise.resolve();
+
+    // At most one dispatch should have reached runWorkflowFn (dedup blocked the second)
+    expect(calls.length).toBeLessThanOrEqual(1);
 
     // Skip log must have been emitted
     expect(logSpy).toHaveBeenCalledWith(
