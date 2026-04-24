@@ -157,20 +157,34 @@ afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
-// ── Stats invariants: _tag → statsOutcome contract ───────────────────────────
+// ── Stats invariants: _tag → statsOutcome contract (now with file verification) ────────────────
 //
-// WHY _tag not file content: DAEMON_STATS_DIR is a hardcoded module-level constant.
-// Verifying the actual file requires the functional-core/imperative-shell refactor
-// that makes statsDir injectable. These tests document the _tag contract that the
-// refactored tagToStatsOutcome() pure function must satisfy.
+// Now that statsDir is injectable via the _statsDir parameter on runWorkflow(),
+// we can verify the actual stats file content, not just the _tag.
 //
-// The writeExecutionStats() function itself IS injectable (takes statsDir param)
-// and is covered by stats-summary.test.ts for its write behavior.
-// What's tested here: runWorkflow() produces the right _tag, which is the input
-// to tagToStatsOutcome(). Once extracted, tagToStatsOutcome() gets direct unit tests.
+// Each test passes tmpDir as _statsDir and reads execution-stats.jsonl after runWorkflow()
+// completes to assert the outcome field matches the expected value.
+//
+// writeExecutionStats() is fire-and-forget (it uses .then()/.catch() chains), so we poll
+// with a small retry to ensure the file is written before asserting.
+
+async function readStatsFile(statsDir: string): Promise<Array<{ outcome: string; stepCount: number }>> {
+  const statsPath = path.join(statsDir, 'execution-stats.jsonl');
+  // writeExecutionStats is fire-and-forget -- poll briefly to let it complete.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const raw = await fs.readFile(statsPath, 'utf8');
+      const lines = raw.trim().split('\n').filter(Boolean);
+      return lines.map((line) => JSON.parse(line) as { outcome: string; stepCount: number });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error(`Stats file not written after 200ms: ${statsPath}`);
+}
 
 describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
-  it('instant completion produces _tag=success → statsOutcome=success', async () => {
+  it('instant completion produces _tag=success → statsOutcome=success (file verified)', async () => {
     const trigger = makeTrigger({
       _preAllocatedStartResponse: {
         isComplete: true,
@@ -183,30 +197,44 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
       } as never,
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, tmpDir, tmpDir);
     expect(result._tag).toBe('success');
-    // tagToStatsOutcome('success') === 'success' -- documented in mapping tests below
+
+    // Verify actual stats file content.
+    const entries = await readStatsFile(tmpDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.outcome).toBe('success');
+    expect(entries[0]!.stepCount).toBe(0); // agent loop never ran
   });
 
-  it('start_workflow failure produces _tag=error → statsOutcome=error', async () => {
+  it('start_workflow failure produces _tag=error → statsOutcome=error (file verified)', async () => {
     mockExecuteStartWorkflow.mockResolvedValue({
       isOk: () => false,
       isErr: () => true,
       error: { kind: 'workflow_not_found', message: 'workflow not found' },
     });
 
-    const result = await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY);
+    const result = await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, tmpDir, tmpDir);
     expect(result._tag).toBe('error');
-    // tagToStatsOutcome('error') === 'error' -- documented in mapping tests below
+
+    const entries = await readStatsFile(tmpDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.outcome).toBe('error');
+    expect(entries[0]!.stepCount).toBe(0);
   });
 
-  it('invalid model format produces _tag=error → statsOutcome=error', async () => {
+  it('invalid model format produces _tag=error → statsOutcome=error (file verified)', async () => {
     const result = await runWorkflow(
       makeTrigger({ agentConfig: { model: 'badformat' } }),
       FAKE_CTX,
       FAKE_API_KEY,
+      undefined, undefined, undefined, undefined, tmpDir, tmpDir,
     );
     expect(result._tag).toBe('error');
+
+    const entries = await readStatsFile(tmpDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.outcome).toBe('error');
   });
 });
 
