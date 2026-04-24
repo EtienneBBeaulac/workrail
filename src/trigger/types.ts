@@ -742,9 +742,7 @@ export type TriggerValidationRule =
   /** autoCommit: true AND branchStrategy: 'none' explicit -- latent danger in serial mode */
   | 'autocommit-on-main-checkout'
   /** serial trigger has no maxQueueDepth -- using default of 10 */
-  | 'missing-max-queue-depth'
-  /** maxQueueDepth < 1 -- value is invalid (hard error) */
-  | 'invalid-max-queue-depth';
+  | 'missing-max-queue-depth';
 
 // ---------------------------------------------------------------------------
 // TriggerValidationIssue: a single named validation issue for a trigger.
