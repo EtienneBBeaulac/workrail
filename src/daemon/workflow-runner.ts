@@ -3853,6 +3853,100 @@ export async function finalizeSession(
 }
 
 // ---------------------------------------------------------------------------
+// buildSessionContext -- pure session configuration
+// ---------------------------------------------------------------------------
+
+/**
+ * Pre-loaded I/O results passed into buildSessionContext().
+ * Each field is the result of a specific I/O operation that the shell performs
+ * before calling buildSessionContext(). Keeping these separate makes the I/O
+ * boundary explicit and the pure function testable without any I/O setup.
+ */
+export interface SessionContextInputs {
+  /** Result of loadDaemonSoul() */
+  readonly soulContent: string;
+  /** Result of loadWorkspaceContext() -- null if no context files found */
+  readonly workspaceContext: string | null;
+  /** Result of loadSessionNotes() -- empty array if none */
+  readonly sessionNotes: readonly string[];
+  /** The first step's pending prompt from executeStartWorkflow / _preAllocatedStartResponse */
+  readonly firstStepPrompt: string;
+  /** Optional assembled context summary from trigger.context.assembledContextSummary */
+  readonly assembledContextSummary?: string;
+  /** Optional reference URLs from trigger.referenceUrls */
+  readonly referenceUrls?: readonly string[];
+  /** Trigger context for injection into the initial prompt */
+  readonly triggerContext?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Everything the agent loop needs, produced by buildSessionContext().
+ * Pure value -- no I/O, no closures, no mutable state.
+ */
+export interface SessionContext {
+  readonly systemPrompt: string;
+  readonly initialPrompt: string;
+  readonly sessionTimeoutMs: number;
+  readonly maxTurns: number;
+}
+
+/**
+ * Build the session configuration from pre-loaded I/O results.
+ *
+ * This function is intentionally synchronous and pure -- all I/O (soul file,
+ * workspace context, session notes) is resolved by the caller before invoking
+ * this function. WHY: keeps the function unit-testable by passing pre-loaded
+ * strings directly, without requiring any I/O or mocking in tests.
+ *
+ * @param trigger - The workflow trigger (provides agentConfig limits and context).
+ * @param inputs - Pre-loaded I/O results (soul content, workspace context, etc.).
+ * @returns SessionContext containing systemPrompt, initialPrompt, and session limits.
+ */
+export function buildSessionContext(
+  trigger: WorkflowTrigger,
+  inputs: SessionContextInputs,
+): SessionContext {
+  // ---- System prompt ----
+  // buildSystemPrompt() is synchronous and pure. It reads assembledContextSummary
+  // and referenceUrls from trigger.context and trigger.referenceUrls directly,
+  // so the SessionContextInputs fields for those are supplementary documentation
+  // of what the trigger carries; the authoritative values flow through trigger.
+  const sessionState = buildSessionRecap(inputs.sessionNotes);
+  const systemPrompt = buildSystemPrompt(trigger, sessionState, inputs.soulContent, inputs.workspaceContext);
+
+  // ---- Initial prompt ----
+  // WHY no continueToken in the initial prompt: the daemon uses complete_step which
+  // manages the token internally. Including the token would invite the LLM to store
+  // it and call continue_workflow (deprecated) instead of complete_step, defeating
+  // the purpose of the new tool.
+  // WHY closing directive: an explicit imperative at the end of the initial prompt
+  // directs the agent to complete the step work before calling complete_step. Without
+  // this, the agent may produce a "thinking aloud" turn before the first tool call,
+  // which wastes tokens and delays step execution.
+  // WHY triggerContext (not inputs.triggerContext): both refer to the same data.
+  // The inputs field documents the I/O boundary; trigger.context is the authoritative
+  // source. Using trigger.context directly keeps the shape consistent with buildSystemPrompt.
+  const contextJson = trigger.context
+    ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
+    : '';
+
+  const initialPrompt =
+    inputs.firstStepPrompt +
+    contextJson +
+    '\n\nComplete all step work, then call complete_step with your notes to advance.';
+
+  // ---- Session limits ----
+  // Resolved from trigger.agentConfig with hardcoded defaults as fallback.
+  // WHY: per-trigger configurability lets operators tune limits per workflow type
+  // (e.g. a fast code-review trigger vs. a slow coding-task trigger).
+  const sessionTimeoutMs =
+    (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
+  const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
+
+  return { systemPrompt, initialPrompt, sessionTimeoutMs, maxTurns };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -4359,7 +4453,7 @@ export async function runWorkflow(
     makeSignalCoordinatorTool(sessionId, emitter, state.workrailSessionId),
   ];
 
-  // ---- Context loading (soul + workspace + session notes) ----
+  // ---- I/O phase: load context (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init
   // time and is not mutable after. All loads are best-effort; errors are
   // logged but never abort the session.
@@ -4373,33 +4467,31 @@ export async function runWorkflow(
   // pre-step-1 injection point.
   // trigger.soulFile is already cascade-resolved by trigger-store.ts:
   //   trigger soulFile -> workspace soulFile -> undefined (global fallback in loadDaemonSoul)
+  // NOTE: use trigger.workspacePath (not sessionWorkspacePath) for context loading.
+  // For worktree sessions, the context files (CLAUDE.md / AGENTS.md) live in the
+  // main checkout, not the isolated worktree. The worktree only contains the agent's
+  // working changes.
   const [soulContent, workspaceContext, sessionNotes] = await Promise.all([
     loadDaemonSoul(trigger.soulFile),
     loadWorkspaceContext(trigger.workspacePath),
     startContinueToken ? loadSessionNotes(startContinueToken, ctx) : Promise.resolve([] as readonly string[]),
   ]);
 
-  const sessionState = buildSessionRecap(sessionNotes);
-
-  // ---- Initial prompt: first step content from start_workflow ----
-  // The daemon has already called executeStartWorkflow() and has the first step.
-  // Pass the step content directly -- the LLM starts working on step 1 immediately.
-  // WHY no continueToken in the initial prompt: the daemon uses complete_step which
-  // manages the token internally. Including the token would invite the LLM to store
-  // it and call continue_workflow (deprecated) instead of complete_step, defeating
-  // the purpose of the new tool.
-  // WHY closing directive: an explicit imperative at the end of the initial prompt
-  // directs the agent to complete the step work before calling complete_step. Without
-  // this, the agent may produce a "thinking aloud" turn before the first tool call,
-  // which wastes tokens and delays step execution.
-  const contextJson = trigger.context
-    ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
-    : '';
-
-  const initialPrompt =
-    (firstStep.pending?.prompt ?? 'No step content available') +
-    contextJson +
-    '\n\nComplete all step work, then call complete_step with your notes to advance.';
+  // ---- Pure phase: build session configuration from pre-loaded I/O ----
+  // buildSessionContext() is synchronous and pure -- it assembles the system
+  // prompt, initial prompt, and session limits from the loaded data and trigger config.
+  // WHY separated from I/O: makes prompt assembly testable without any fs or LLM mocking.
+  const sessionCtx = buildSessionContext(trigger, {
+    soulContent,
+    workspaceContext,
+    sessionNotes,
+    firstStepPrompt: firstStep.pending?.prompt ?? 'No step content available',
+    assembledContextSummary: typeof trigger.context?.['assembledContextSummary'] === 'string'
+      ? trigger.context['assembledContextSummary'] as string
+      : undefined,
+    referenceUrls: trigger.referenceUrls,
+    triggerContext: trigger.context,
+  });
 
   // ---- Observability callbacks for AgentLoop ----
   // Wire structured event emission for LLM turns and tool calls.
@@ -4452,7 +4544,7 @@ export async function runWorkflow(
   // package dependency. The client (Anthropic or AnthropicBedrock) is injected --
   // AgentLoop has no knowledge of API keys or AWS credentials.
   const agent = new AgentLoop({
-    systemPrompt: buildSystemPrompt(trigger, sessionState, soulContent, workspaceContext),
+    systemPrompt: sessionCtx.systemPrompt,
     modelId,
     tools,
     client: agentClient,
@@ -4469,12 +4561,9 @@ export async function runWorkflow(
   });
 
   // ---- Session limits (wall-clock timeout + max-turn limit) ----
-  // Resolved from trigger.agentConfig with hardcoded defaults as fallback.
-  // WHY: per-trigger configurability lets operators tune limits per workflow type
-  // (e.g. a fast code-review trigger vs. a slow coding-task trigger).
-  const sessionTimeoutMs =
-    (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
-  const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
+  // Provided by buildSessionContext() -- resolved from trigger.agentConfig with
+  // hardcoded defaults as fallback. Destructured here for clarity.
+  const { sessionTimeoutMs, maxTurns } = sessionCtx;
 
   // ---- Stuck detection configuration ----
   // WHY resolved here: these are read-only trigger config values. They do not change
@@ -4650,7 +4739,7 @@ export async function runWorkflow(
       }, sessionTimeoutMs);
     });
     console.log(`[WorkflowRunner] Agent loop started: sessionId=${sessionId} workflowId=${trigger.workflowId} modelId=${modelId}`);
-    await Promise.race([agent.prompt(buildUserMessage(initialPrompt)), timeoutPromise])
+    await Promise.race([agent.prompt(buildUserMessage(sessionCtx.initialPrompt)), timeoutPromise])
       .catch((err: unknown) => {
         agent.abort();
         throw err;
