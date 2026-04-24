@@ -146,12 +146,19 @@ export interface WorktrainDaemonCommandDeps {
 }
 
 export interface WorktrainDaemonCommandOpts {
-  /** Create and load the launchd service. Mutually exclusive with uninstall/status. */
+  /** Create and load the launchd service. Mutually exclusive with other flags. */
   readonly install?: boolean;
-  /** Unload and remove the launchd service. Mutually exclusive with install/status. */
+  /** Unload and remove the launchd service. Mutually exclusive with other flags. */
   readonly uninstall?: boolean;
-  /** Report the current service status. Mutually exclusive with install/uninstall. */
+  /** Report the current service status. Mutually exclusive with other flags. */
   readonly status?: boolean;
+  /**
+   * Start the daemon via launchctl (service must be installed first).
+   * Does NOT auto-start on login -- operator must explicitly call this.
+   */
+  readonly start?: boolean;
+  /** Stop the running daemon via launchctl. Does not uninstall the service. */
+  readonly stop?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -161,9 +168,15 @@ export interface WorktrainDaemonCommandOpts {
 /**
  * Build the launchd plist XML for the WorkTrain daemon.
  *
- * WHY RunAtLoad + KeepAlive: RunAtLoad starts the daemon immediately when
- * launchctl loads the plist. KeepAlive restarts it automatically if it exits
- * unexpectedly, providing crash recovery without manual intervention.
+ * WHY no RunAtLoad or KeepAlive: the daemon must be started explicitly by the
+ * operator (`worktrain daemon --start`). Auto-starting at login and auto-restarting
+ * on crash means WorkTrain autonomously works in your repos without any deliberate
+ * operator action -- which is unsafe, especially when the daemon has bugs or the
+ * operator hasn't reviewed what triggers are configured. The operator decides when
+ * WorkTrain runs; launchd just provides the process management scaffolding.
+ *
+ * To start the daemon: `worktrain daemon --start`
+ * To stop the daemon:  `worktrain daemon --stop`
  *
  * WHY WorkingDirectory is set to homedir: without it launchd sets cwd to '/'.
  * The daemon falls back to process.cwd() when WORKRAIL_DEFAULT_WORKSPACE is
@@ -217,20 +230,16 @@ ${envEntries}
   <key>StandardErrorPath</key>
   <string>${escapeXml(stderrLog)}</string>
 
-  <key>RunAtLoad</key>
-  <true/>
-
-  <key>KeepAlive</key>
-  <true/>
-
   <!--
-    ThrottleInterval: minimum seconds between launchd restarts.
-    WHY 30s: prevents launchd from spinning in a tight restart loop if the daemon
-    exits immediately (e.g., missing credentials or invalid workspace path).
-    Without this, a misconfigured service consumes CPU and spams logs.
+    No RunAtLoad or KeepAlive: the daemon must be started explicitly with
+    'worktrain daemon --start'. Auto-starting at login and auto-restarting
+    on crash is unsafe -- WorkTrain acts autonomously in your repos and the
+    operator must decide when it runs.
+
+    To start:  worktrain daemon --start
+    To stop:   worktrain daemon --stop
+    To status: worktrain daemon --status
   -->
-  <key>ThrottleInterval</key>
-  <integer>30</integer>
 </dict>
 </plist>
 `;
@@ -504,6 +513,72 @@ async function runStatus(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// START / STOP
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function runStart(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
+  if (deps.platform !== 'darwin') {
+    return failure('--start is only supported on macOS (launchd).');
+  }
+  const home = deps.homedir();
+  const plistPath = deps.joinPath(home, 'Library', 'LaunchAgents', PLIST_FILENAME);
+  const logDir = deps.joinPath(home, '.workrail', 'logs');
+
+  if (!(await deps.exists(plistPath))) {
+    return failure(
+      'WorkTrain daemon is not installed. Run: worktrain daemon --install',
+      { suggestions: ['worktrain daemon --install'] },
+    );
+  }
+
+  const result = await deps.exec('launchctl', ['start', LAUNCHD_LABEL]);
+  if (result.exitCode !== 0) {
+    return failure(
+      `launchctl start failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`,
+      { suggestions: [`View logs: tail -f ${logDir}/daemon.stderr.log`] },
+    );
+  }
+
+  // Brief wait then verify
+  await deps.sleep(1000);
+  const listResult = await deps.exec('launchctl', ['list', LAUNCHD_LABEL]);
+  const status = parseLaunchctlList(listResult.stdout, listResult.exitCode);
+
+  if (status.running) {
+    deps.print(`WorkTrain daemon started (PID ${status.pid}).`);
+    deps.print(`Logs: ${logDir}/daemon.stdout.log`);
+    return success({ message: `WorkTrain daemon started (PID ${status.pid})` });
+  }
+
+  return failure(
+    'launchctl start returned 0 but daemon does not appear to be running.',
+    { suggestions: [`View logs: tail -f ${logDir}/daemon.stderr.log`] },
+  );
+}
+
+async function runStop(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
+  if (deps.platform !== 'darwin') {
+    return failure('--stop is only supported on macOS (launchd).');
+  }
+
+  const result = await deps.exec('launchctl', ['stop', LAUNCHD_LABEL]);
+  if (result.exitCode !== 0) {
+    // launchctl stop exits non-zero if the service is already stopped -- not fatal
+    const msg = result.stderr.trim() || result.stdout.trim();
+    if (msg.toLowerCase().includes('not running') || msg.toLowerCase().includes('no such process')) {
+      deps.print('WorkTrain daemon is not running.');
+      return success({ message: 'WorkTrain daemon is not running.' });
+    }
+    return failure(
+      `launchctl stop failed (exit ${result.exitCode}): ${msg}`,
+    );
+  }
+
+  deps.print('WorkTrain daemon stopped.');
+  return success({ message: 'WorkTrain daemon stopped.' });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MAIN COMMAND
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -522,7 +597,7 @@ export async function executeWorktrainDaemonCommand(
   deps: WorktrainDaemonCommandDeps,
   opts: WorktrainDaemonCommandOpts,
 ): Promise<CliResult> {
-  const flagCount = [opts.install, opts.uninstall, opts.status].filter(Boolean).length;
+  const flagCount = [opts.install, opts.uninstall, opts.status, opts.start, opts.stop].filter(Boolean).length;
 
   // No flags: this is the launchd entry point. Start the daemon process.
   if (flagCount === 0) {
@@ -533,23 +608,30 @@ export async function executeWorktrainDaemonCommand(
       return success({ message: 'WorkTrain daemon stopped.' });
     }
     return misuse(
-      'Specify one of: --install, --uninstall, or --status',
+      'Specify one of: --install, --uninstall, --start, --stop, or --status',
       [
-        'worktrain daemon --install    Install and start as a launchd service',
-        'worktrain daemon --uninstall  Stop and remove the launchd service',
+        'worktrain daemon --install    Register as a launchd service (does not auto-start)',
+        'worktrain daemon --start      Start the daemon',
+        'worktrain daemon --stop       Stop the daemon',
         'worktrain daemon --status     Show service status',
+        'worktrain daemon --uninstall  Remove the launchd service registration',
       ],
     );
   }
 
   if (flagCount > 1) {
-    return misuse('--install, --uninstall, and --status are mutually exclusive. Specify only one.');
+    return misuse('--install, --uninstall, --start, --stop, and --status are mutually exclusive. Specify only one.');
   }
 
-  // Platform guard: launchd management is macOS-only.
+  // --start and --stop are routed before the platform guard since they
+  // provide their own platform check inside.
+  if (opts.start) return runStart(deps);
+  if (opts.stop) return runStop(deps);
+
+  // Platform guard: launchd management (install/uninstall/status) is macOS-only.
   if (deps.platform !== 'darwin') {
     return failure(
-      `worktrain daemon --install requires macOS (launchd). ` +
+      `worktrain daemon --install/--uninstall/--status requires macOS (launchd). ` +
       `Current platform: ${deps.platform}.`,
       {
         suggestions: [

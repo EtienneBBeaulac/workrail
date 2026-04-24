@@ -224,13 +224,16 @@ describe('worktrain daemon --install', () => {
     expect(plist).toContain('WORKRAIL_TRIGGERS_ENABLED');
   });
 
-  it('plist contains RunAtLoad and KeepAlive', async () => {
+  it('plist does NOT contain RunAtLoad or KeepAlive (operator must start explicitly)', async () => {
     const deps = buildFakeDeps();
     await executeWorktrainDaemonCommand(deps, { install: true });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
-    expect(plist).toContain('<key>RunAtLoad</key>');
-    expect(plist).toContain('<key>KeepAlive</key>');
+    // WHY: auto-start at login and auto-restart on crash means WorkTrain acts
+    // autonomously in repos without deliberate operator action. The operator
+    // must explicitly run `worktrain daemon --start` to begin autonomous work.
+    expect(plist).not.toContain('<key>RunAtLoad</key>');
+    expect(plist).not.toContain('<key>KeepAlive</key>');
   });
 
   it('calls launchctl load with the plist path', async () => {

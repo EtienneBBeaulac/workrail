@@ -310,10 +310,12 @@ program
 program
   .command('daemon')
   .description('Start the WorkTrain daemon, or manage it as a macOS launchd service')
-  .option('--install', 'Create the launchd plist and start the daemon service')
-  .option('--uninstall', 'Stop the daemon service and remove the launchd plist')
+  .option('--install', 'Register the daemon as a launchd service (does not auto-start)')
+  .option('--uninstall', 'Unregister the daemon from launchd and remove the plist')
+  .option('--start', 'Start the daemon via launchctl (must be installed first)')
+  .option('--stop', 'Stop the running daemon via launchctl')
   .option('--status', 'Show the current status of the daemon service')
-  .action(async (options: { install?: boolean; uninstall?: boolean; status?: boolean }) => {
+  .action(async (options: { install?: boolean; uninstall?: boolean; start?: boolean; stop?: boolean; status?: boolean }) => {
     // Load ~/.workrail/.env before anything else so secrets are available both
     // for daemon startup (startDaemon path) and for plist construction (--install path).
     await loadDaemonEnv();
@@ -527,6 +529,8 @@ program
       {
         install: options.install,
         uninstall: options.uninstall,
+        start: options.start,
+        stop: options.stop,
         status: options.status,
       },
     );
