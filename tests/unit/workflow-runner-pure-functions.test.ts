@@ -26,6 +26,7 @@ import {
 } from '../../src/daemon/workflow-runner.js';
 import type { SessionState, StuckConfig } from '../../src/daemon/workflow-runner.js';
 import type { WorkflowRunResult, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import { tmpPath } from '../helpers/platform.js';
 
 // ── tagToStatsOutcome ─────────────────────────────────────────────────────────
 //
@@ -65,7 +66,7 @@ describe('buildAgentClient', () => {
     return {
       workflowId: 'wr.coding-task',
       goal: 'test',
-      workspacePath: '/tmp/test-workspace',
+      workspacePath: tmpPath('test-workspace'),
       ...overrides,
     };
   }
