@@ -27,7 +27,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SteerRegistry } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SteerRegistry, AbortRegistry } from '../daemon/workflow-runner.js';
 import { DAEMON_SESSIONS_DIR } from '../daemon/workflow-runner.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
@@ -78,6 +78,7 @@ export type RunWorkflowFn = (
   daemonRegistry?: import('../v2/infra/in-memory/daemon-registry/index.js').DaemonRegistry,
   emitter?: DaemonEventEmitter,
   steerRegistry?: SteerRegistry,
+  abortRegistry?: AbortRegistry,
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------
@@ -495,6 +496,7 @@ export class TriggerRouter {
   private readonly emitter: DaemonEventEmitter | undefined;
   private readonly notificationService: NotificationService | undefined;
   private readonly steerRegistry: SteerRegistry | undefined;
+  private readonly abortRegistry: AbortRegistry | undefined;
   private readonly _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
 
@@ -568,6 +570,14 @@ export class TriggerRouter {
      */
     steerRegistry?: SteerRegistry,
     /**
+     * Optional abort registry for graceful daemon shutdown.
+     * When provided, daemon sessions register an abort callback on start and deregister
+     * on completion. The shutdown handler calls all registered callbacks to abort every
+     * in-flight AgentLoop simultaneously, then waits for sessions to finish cleanup.
+     * When absent, SIGTERM does not abort in-flight sessions (they run to completion).
+     */
+    abortRegistry?: AbortRegistry,
+    /**
      * Optional adaptive coordinator dependencies for in-process pipeline dispatch.
      * When provided, dispatchAdaptivePipeline() uses these as default deps.
      * When absent, dispatchAdaptivePipeline() logs a warning and returns an escalated outcome.
@@ -593,6 +603,7 @@ export class TriggerRouter {
     this.emitter = emitter;
     this.notificationService = notificationService;
     this.steerRegistry = steerRegistry;
+    this.abortRegistry = abortRegistry;
     this._coordinatorDeps = coordinatorDeps;
     this._modeExecutors = modeExecutors;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
@@ -762,7 +773,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry, this.abortRegistry);
       } finally {
         this.semaphore.release();
       }
@@ -907,7 +918,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry, this.abortRegistry);
       } finally {
         this.semaphore.release();
       }

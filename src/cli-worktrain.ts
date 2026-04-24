@@ -461,12 +461,15 @@ program
               // Clear heartbeat before stopping -- prevents timer from firing after
               // the process is in teardown state.
               clearInterval(heartbeatInterval);
-              // WHY emit session_aborted before handle.stop(): in-flight sessions have
-              // their agent loops killed by handle.stop() but never emit session_completed.
-              // Without these events the JSONL log shows them as RUNNING forever, making
-              // `worktrain health` and `worktrain status` untrustworthy after restart.
-              // steerRegistry keys are workrailSessionIds of sessions currently in the
-              // agent loop. Emit before handle.stop() while I/O is still active.
+
+              // 1. Emit session_aborted for all in-flight sessions.
+              // WHY emit before abort(): in-flight sessions have their agent loops cancelled
+              // by abort() but never emit session_completed. Without these events the JSONL
+              // log shows them as RUNNING forever, making `worktrain health` and
+              // `worktrain status` untrustworthy after restart.
+              // WHY use steerRegistry keys: steerRegistry keys are workrailSessionIds of
+              // sessions currently in the agent loop. Emit before any abort() while I/O is
+              // still active.
               for (const workrailSessionId of handle.steerRegistry.keys()) {
                 emitter.emit({
                   kind: 'session_aborted',
@@ -477,6 +480,42 @@ program
                 });
               }
               emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
+
+              // 2. Abort all in-flight AgentLoop instances simultaneously.
+              // WHY simultaneous (not sequential): all sessions should start aborting at
+              // the same time so the drain window is not wasted waiting for session N to
+              // abort before starting session N+1.
+              for (const abort of handle.abortRegistry.values()) {
+                abort();
+              }
+
+              // 3. Drain window: give sessions up to 5s to finish cleanup after abort.
+              // WHY 5 seconds: bounded wait for sessions' finally blocks (token persistence,
+              // stats write, steerRegistry.delete, abortRegistry.delete). Fire-and-forget
+              // writes are not awaited so cleanup is near-instantaneous in practice.
+              // WHY Promise.race: exits immediately when all sessions have deleted their
+              // abortRegistry entries (registry empty = all cleanup done), or after 5s cap
+              // whichever is first. Never blocks longer than 5s.
+              if (handle.abortRegistry.size > 0) {
+                await Promise.race([
+                  new Promise<void>(resolve => setTimeout(resolve, 5000)),
+                  // Sessions deregister from abortRegistry in their finally blocks;
+                  // when the registry is empty all sessions have exited.
+                  new Promise<void>(resolve => {
+                    const check = setInterval(() => {
+                      if (handle.abortRegistry.size === 0) {
+                        clearInterval(check);
+                        resolve();
+                      }
+                    }, 100);
+                  }),
+                ]);
+              }
+
+              // 4. Stop HTTP server and polling loop.
+              // WHY after abort+drain: ensures abort() is called before the HTTP server
+              // closes. If handle.stop() were called first, active sessions would have
+              // no way to complete their final continue_workflow calls.
               await handle.stop();
               resolve();
             };

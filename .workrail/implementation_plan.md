@@ -687,3 +687,160 @@ Commit: `feat(mcp): surface workflow validation failures in list_workflows respo
 `planConfidenceBand`: High
 `estimatedPRCount`: 1
 `followUpTickets`: ["inspect_workflow validation surface (broken workflows still NOT_FOUND, separate pitch)"]
+
+---
+---
+
+# Implementation Plan: Graceful Shutdown via AbortRegistry
+
+*Generated: 2026-04-23 | Workflow: wr.coding-task | Branch: fix/etienneb/graceful-shutdown*
+
+---
+
+## 1. Problem Statement
+
+SIGTERM/SIGINT does not abort in-flight `AgentLoop` instances in the WorkTrain daemon. `handle.stop()` closes the HTTP server and polling, but live `AgentLoop` instances keep making LLM API calls for up to 30 minutes. This breaks container orchestrators (Kubernetes, ECS), systemd, and rolling restarts.
+
+## 2. Acceptance Criteria
+
+1. SIGTERM causes all in-flight `AgentLoop` instances to receive `abort()` immediately.
+2. Process exits within ~5 seconds of SIGTERM rather than up to 30 minutes.
+3. `session_aborted` events are emitted before `abort()` (ordering preserved).
+4. `npm run build` exits 0.
+5. `npx vitest run` exits 0 (5 pre-existing `polling-scheduler` failures are unrelated).
+
+## 3. Non-Goals
+
+- No new HTTP endpoint for per-session abort.
+- No changes to the WorkRail MCP server (`src/mcp/`) or its shutdown path.
+- No mid-step graceful save -- sessions are hard-aborted; crash recovery handles the interrupted token.
+- No changes to `src/v2/durable-core/`.
+- No configurable drain window -- 5s is fixed.
+
+## 4. Philosophy-Driven Constraints
+
+- **YAGNI**: add exactly what the pitch specifies, no more.
+- **Dependency injection**: `abortRegistry` injected from composition root (`trigger-listener.ts`), not created inside `runWorkflow()` or `TriggerRouter`.
+- **Immutability under tension**: `Map` is mutable -- same accepted compromise as `SteerRegistry`.
+- **Document why**: WHY comments matching the `SteerRegistry` block pattern.
+
+## 5. Invariants
+
+- I1: `session_aborted` events emitted BEFORE any `abort()` call (ordering preserved).
+- I2: `abort()` called BEFORE `handle.stop()` closes the HTTP server.
+- I3: `handle.stop()` called BEFORE `resolve()` exits the shutdown promise.
+- I4: Drain window caps at exactly 5 seconds, regardless of session count.
+- I5: `abortRegistry.delete()` placed synchronously in `finally` alongside `steerRegistry.delete()`.
+- I6: `makeSpawnAgentTool()` does NOT pass `abortRegistry` to child sessions (consistent with `steerRegistry` treatment).
+
+## 6. Selected Approach + Rationale
+
+**Candidate A: Mirror SteerRegistry pattern exactly.**
+
+`AbortRegistry = Map<string, () => void>` -- maps workrailSessionId to abort callback. Threaded as optional 7th param through `runWorkflow()`, `RunWorkflowFn`, `TriggerRouter`, `TriggerListenerHandle`. Drain window: `Promise.race([5s timeout, registry-empty poll every 100ms])`.
+
+- Resolves: abort-fast + cleanup budget tensions.
+- Accepts: Map mutation at boundary (same as SteerRegistry).
+- Follows existing pattern exactly -- zero new abstractions.
+
+**Runner-up**: AbortController Map -- rejected because it requires `agent-loop.ts` changes excluded by pitch no-go.
+
+## 7. Vertical Slices
+
+### Slice 1: Add `AbortRegistry` type to `src/daemon/workflow-runner.ts`
+
+Export `AbortRegistry = Map<string, () => void>` alongside `SteerRegistry` (after line 665).
+
+**Done when**: `AbortRegistry` type is exported from `workflow-runner.ts`. Build clean.
+
+### Slice 2: Wire `AbortRegistry` through `runWorkflow()`
+
+Add `abortRegistry?: AbortRegistry` as optional 7th param to `runWorkflow()`.
+
+After `steerRegistry?.set()` at line 3498:
+```typescript
+if (workrailSessionId !== null) {
+  abortRegistry?.set(workrailSessionId, () => agent.abort());
+}
+```
+
+In `finally` block at line 4081, after `steerRegistry?.delete()`:
+```typescript
+if (workrailSessionId !== null) {
+  abortRegistry?.delete(workrailSessionId);
+}
+```
+
+**Done when**: `runWorkflow()` accepts and uses `abortRegistry`. Build clean.
+
+### Slice 3: Update `RunWorkflowFn` type and `TriggerRouter` in `src/trigger/trigger-router.ts`
+
+1. Add `abortRegistry?: AbortRegistry` as 7th param to `RunWorkflowFn` type.
+2. Add `private readonly abortRegistry: AbortRegistry | undefined` field to `TriggerRouter`.
+3. Add `abortRegistry?: AbortRegistry` to `TriggerRouter` constructor (after `steerRegistry`).
+4. Assign `this.abortRegistry = abortRegistry` in constructor body.
+5. Pass `this.abortRegistry` at both `runWorkflowFn` call sites (lines 765, 910).
+
+**Done when**: Both call sites pass `abortRegistry`. Build clean.
+
+### Slice 4: Expose `abortRegistry` from `TriggerListenerHandle` in `src/trigger/trigger-listener.ts`
+
+1. Import `AbortRegistry` from `workflow-runner.ts`.
+2. Add `readonly abortRegistry: AbortRegistry` to `TriggerListenerHandle` interface.
+3. Construct `const abortRegistry: AbortRegistry = new Map()` alongside `steerRegistry`.
+4. Pass `abortRegistry` to `TriggerRouter` constructor (after `steerRegistry`).
+5. Return `abortRegistry` on the handle object.
+
+**Done when**: `TriggerListenerHandle.abortRegistry` is typed, constructed, and returned. Build clean.
+
+### Slice 5: Update shutdown handler in `src/cli-worktrain.ts`
+
+Replace the shutdown sequence (lines 459-482) with:
+1. Emit `session_aborted` for each active session (unchanged from current).
+2. Emit `daemon_stopped` (unchanged from current).
+3. Call `abort()` for all `handle.abortRegistry.values()`.
+4. Drain window: `Promise.race([5s timeout, registry-empty poll every 100ms])`.
+5. Call `await handle.stop()`.
+6. Call `resolve()`.
+
+**Done when**: Shutdown handler drains correctly. Build and tests clean.
+
+## 8. Test Design
+
+No new unit tests for this change. The implementation is structural wiring (new optional param, registration/deregistration), not new logic. Verification:
+
+- `npm run build`: TypeScript catches any signature mismatches at all call sites.
+- `npx vitest run`: Existing tests exercise `runWorkflow()`, `TriggerRouter`, and `trigger-listener.ts` with the new optional param absent (which is valid).
+- Manual verification: SIGTERM behavior requires a running daemon -- not testable via unit tests without significant new test infrastructure (out of scope per pitch).
+
+## 9. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Session registers in abortRegistry after abort-all fires | Very low | Low | Same ~50ms gap as steerRegistry; accepted |
+| Session finally block takes >5s | Very low | Low | Crash recovery handles incomplete sidecars |
+| TypeScript build error at call site | Low | Low | Build catches immediately |
+
+## 10. PR Packaging Strategy
+
+Single PR. Branch: `fix/etienneb/graceful-shutdown`. One commit.
+Commit: `fix(daemon): abort in-flight agent loops on SIGTERM with 5s drain window`
+
+## 11. Philosophy Alignment per Slice
+
+| Slice | Principle | Status |
+|---|---|---|
+| 1 (AbortRegistry type) | Explicit domain types | Satisfied -- named export, not inline |
+| 2 (runWorkflow) | Dependency injection | Satisfied -- injected from caller, not created inside |
+| 2 (runWorkflow) | Immutability under tension | Accepted -- Map mutation required for registry |
+| 3 (TriggerRouter) | YAGNI | Satisfied -- mirrors steerRegistry exactly |
+| 4 (TriggerListenerHandle) | Dependency injection | Satisfied -- composition root constructs registry |
+| 5 (Shutdown) | Document why | Satisfied -- WHY comments in drain window |
+| 5 (Shutdown) | Determinism | Satisfied -- 5s cap is fixed, not configurable |
+| All | Architectural fix | Satisfied -- registry pattern solves root cause, not a workaround |
+
+---
+`unresolvedUnknownCount`: 0
+`planConfidenceBand`: High
+`estimatedPRCount`: 1
+`followUpTickets`: []
