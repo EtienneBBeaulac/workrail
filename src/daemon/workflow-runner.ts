@@ -3689,7 +3689,8 @@ export function evaluateStuckSignals(state: Readonly<SessionState>, config: Stuc
 
   // Signal 2: 80%+ of turns used with 0 step advances.
   // WHY 0.8: conservative -- avoids false positives on research workflows.
-  // Only fires when noProgressAbortEnabled is true (default false).
+  // Returns regardless of noProgressAbortEnabled -- the subscriber checks the flag
+  // before deciding whether to abort.
   if (
     config.maxTurns > 0 &&
     state.turnCount >= Math.floor(config.maxTurns * 0.8) &&
@@ -3760,7 +3761,7 @@ function writeExecutionStats(
  * Context for finalizing a completed runWorkflow() session.
  * Passed from runWorkflow() to finalizeSession() after the agent loop exits.
  */
-interface FinalizationContext {
+export interface FinalizationContext {
   readonly sessionId: string;
   readonly workrailSessionId: string | null;
   readonly startMs: number;
@@ -3795,7 +3796,7 @@ interface FinalizationContext {
  * creation failure): those paths clean up inline because the agent loop never started
  * and this function assumes post-agent-loop state (conversationPath, stepAdvanceCount).
  */
-async function finalizeSession(
+export async function finalizeSession(
   result: WorkflowRunResult,
   ctx: FinalizationContext,
 ): Promise<void> {
@@ -4534,7 +4535,7 @@ export async function runWorkflow(
       }
 
       // kind: 'repeated_tool_call' -- Signal 1.
-      if (signal.kind === 'repeated_tool_call') {
+      else if (signal.kind === 'repeated_tool_call') {
         emitter?.emit({
           kind: 'agent_stuck',
           sessionId,
@@ -4558,7 +4559,7 @@ export async function runWorkflow(
       }
 
       // kind: 'no_progress' -- Signal 2.
-      if (signal.kind === 'no_progress') {
+      else if (signal.kind === 'no_progress') {
         emitter?.emit({
           kind: 'agent_stuck',
           sessionId,
@@ -4583,7 +4584,7 @@ export async function runWorkflow(
       // kind: 'timeout_imminent' -- Signal 3.
       // WHY observational: the abort was triggered by the wall-clock timeout Promise;
       // Signal 3 is a last-chance notification, not a new abort.
-      if (signal.kind === 'timeout_imminent') {
+      else if (signal.kind === 'timeout_imminent') {
         emitter?.emit({
           kind: 'agent_stuck',
           sessionId,
@@ -4591,6 +4592,12 @@ export async function runWorkflow(
           detail: `${signal.timeoutReason === 'wall_clock' ? 'Wall-clock timeout' : 'Max-turn limit'} reached`,
           ...withWorkrailSession(state.workrailSessionId),
         });
+      }
+
+      // Exhaustiveness guard: adding a new StuckSignal kind without handling it here
+      // will cause a TypeScript compile error.
+      else {
+        assertNever(signal);
       }
     }
 

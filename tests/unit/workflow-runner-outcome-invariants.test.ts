@@ -84,7 +84,7 @@ vi.mock('../../src/v2/projections/node-outputs.js', () => ({
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-import { runWorkflow, type WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import { runWorkflow, finalizeSession, type WorkflowTrigger, type FinalizationContext } from '../../src/daemon/workflow-runner.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -471,5 +471,172 @@ describe('stepCount in stats', () => {
     expect(result._tag).toBe('success');
     // stepCount=0 is correct and intentional for instant completion
     // (the workflow was already done; no agent steps were needed)
+  });
+});
+
+// ── finalizeSession: sidecar deletion regression tests ───────────────────────
+//
+// Regression tests for the pre-existing bug where the stuck exit path did NOT
+// delete the session sidecar file. finalizeSession() is now exported so we can
+// test it directly without running the full agent loop.
+//
+// Invariants (from worktrain-daemon-invariants.md section 2.2):
+// - stuck → sidecar MUST be deleted
+// - success + worktree → sidecar MUST NOT be deleted (trigger-router handles it)
+// - success + non-worktree → sidecar is deleted
+// - error → sidecar is deleted
+// - timeout → sidecar is deleted
+
+/**
+ * Create a FinalizationContext for finalizeSession tests.
+ * Uses a dedicated sessions subdirectory so the sidecar file can be checked
+ * independently of the stats files written by writeExecutionStats (fire-and-forget).
+ */
+function makeFinalizationContext(sessionId: string, sessionsDir: string, overrides: Partial<FinalizationContext> = {}): FinalizationContext {
+  return {
+    sessionId,
+    workrailSessionId: null,
+    startMs: Date.now() - 1000,
+    stepAdvanceCount: 0,
+    branchStrategy: undefined,
+    statsDir: tmpDir,
+    sessionsDir,
+    conversationPath: path.join(sessionsDir, `${sessionId}-conversation.jsonl`),
+    emitter: undefined,
+    daemonRegistry: undefined,
+    workflowId: 'wr.coding-task',
+    ...overrides,
+  };
+}
+
+/**
+ * Wait for the fire-and-forget writeExecutionStats() call to settle.
+ *
+ * writeExecutionStats() chains .then() calls (mkdir, appendFile, writeStatsSummary).
+ * writeStatsSummary does readFile + writeFile + rename. We poll for the stats-summary.json
+ * file to appear in tmpDir, which signals that the entire chain has completed.
+ * Falls back to a time-based wait if the file never appears (e.g. on write error).
+ */
+async function settleFireAndForget(): Promise<void> {
+  const summaryPath = path.join(tmpDir, 'stats-summary.json');
+  for (let i = 0; i < 50; i++) {
+    try {
+      await fs.access(summaryPath);
+      return; // summary written -- chain is complete
+    } catch {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  // Fallback: waited 500ms -- proceed even if summary was not written
+}
+
+describe('finalizeSession: sidecar deletion', () => {
+  it('deletes sidecar when result is stuck (regression: pre-existing bug fix)', async () => {
+    // Write a fake sidecar file to confirm it gets deleted.
+    const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wr-finsess-'));
+    try {
+      const sessionId = 'fintest-stuck-session';
+      const sidecarPath = path.join(sessionsDir, `${sessionId}.json`);
+      await fs.writeFile(sidecarPath, JSON.stringify({ continueToken: 'ct_fake' }), 'utf8');
+
+      const result = { _tag: 'stuck' as const, reason: 'repeated_tool_call' as const, stopReason: 'stop' };
+      const ctx = makeFinalizationContext(sessionId, sessionsDir);
+
+      await finalizeSession(result, ctx);
+      await settleFireAndForget();
+
+      // Sidecar must be deleted -- this was the pre-existing bug.
+      await expect(fs.access(sidecarPath)).rejects.toThrow();
+    } finally {
+      await fs.rm(sessionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT delete sidecar when result is success with branchStrategy=worktree', async () => {
+    // TriggerRouter.maybeRunDelivery() owns cleanup for worktree success sessions.
+    const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wr-finsess-'));
+    try {
+      const sessionId = 'fintest-worktree-session';
+      const sidecarPath = path.join(sessionsDir, `${sessionId}.json`);
+      await fs.writeFile(sidecarPath, JSON.stringify({ continueToken: 'ct_fake' }), 'utf8');
+
+      const result = {
+        _tag: 'success' as const,
+        stopReason: 'end_turn',
+        notes: undefined,
+        artifacts: undefined,
+      };
+      const ctx = makeFinalizationContext(sessionId, sessionsDir, { branchStrategy: 'worktree' });
+
+      await finalizeSession(result, ctx);
+      await settleFireAndForget();
+
+      // Sidecar must still exist -- trigger-router handles deletion after delivery.
+      await expect(fs.access(sidecarPath)).resolves.toBeUndefined();
+    } finally {
+      await fs.rm(sessionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('deletes sidecar when result is error', async () => {
+    const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wr-finsess-'));
+    try {
+      const sessionId = 'fintest-error-session';
+      const sidecarPath = path.join(sessionsDir, `${sessionId}.json`);
+      await fs.writeFile(sidecarPath, JSON.stringify({ continueToken: 'ct_fake' }), 'utf8');
+
+      const result = { _tag: 'error' as const, message: 'something went wrong', stopReason: 'error' };
+      const ctx = makeFinalizationContext(sessionId, sessionsDir);
+
+      await finalizeSession(result, ctx);
+      await settleFireAndForget();
+
+      await expect(fs.access(sidecarPath)).rejects.toThrow();
+    } finally {
+      await fs.rm(sessionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('deletes sidecar when result is timeout', async () => {
+    const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wr-finsess-'));
+    try {
+      const sessionId = 'fintest-timeout-session';
+      const sidecarPath = path.join(sessionsDir, `${sessionId}.json`);
+      await fs.writeFile(sidecarPath, JSON.stringify({ continueToken: 'ct_fake' }), 'utf8');
+
+      const result = { _tag: 'timeout' as const, reason: 'wall_clock' as const, stopReason: 'timeout' };
+      const ctx = makeFinalizationContext(sessionId, sessionsDir);
+
+      await finalizeSession(result, ctx);
+      await settleFireAndForget();
+
+      await expect(fs.access(sidecarPath)).rejects.toThrow();
+    } finally {
+      await fs.rm(sessionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('deletes sidecar when result is success with no branchStrategy', async () => {
+    const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wr-finsess-'));
+    try {
+      const sessionId = 'fintest-success-session';
+      const sidecarPath = path.join(sessionsDir, `${sessionId}.json`);
+      await fs.writeFile(sidecarPath, JSON.stringify({ continueToken: 'ct_fake' }), 'utf8');
+
+      const result = {
+        _tag: 'success' as const,
+        stopReason: 'end_turn',
+        notes: undefined,
+        artifacts: undefined,
+      };
+      const ctx = makeFinalizationContext(sessionId, sessionsDir, { branchStrategy: undefined });
+
+      await finalizeSession(result, ctx);
+      await settleFireAndForget();
+
+      await expect(fs.access(sidecarPath)).rejects.toThrow();
+    } finally {
+      await fs.rm(sessionsDir, { recursive: true, force: true });
+    }
   });
 });

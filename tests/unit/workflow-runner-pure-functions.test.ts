@@ -339,4 +339,25 @@ describe('evaluateStuckSignals', () => {
     const signal = evaluateStuckSignals(state, makeConfig({ maxTurns: 100 }));
     expect(signal?.kind).toBe('max_turns_exceeded');
   });
+
+  // ---- no_progress is not gated by noProgressAbortEnabled ----
+  // This documents the contract: evaluateStuckSignals() is pure and always returns
+  // no_progress when the condition is met. The noProgressAbortEnabled flag is a
+  // subscriber concern -- the turn_end subscriber checks it before deciding to abort.
+
+  it('returns no_progress even when noProgressAbortEnabled is false', () => {
+    // 80%+ of turns used with 0 step advances, but the flag is off.
+    // The pure function still fires -- the subscriber is the gatekeeper, not the function.
+    const state = makeState({
+      turnCount: 80,
+      stepAdvanceCount: 0,
+      lastNToolCalls: [],
+    });
+    const signal = evaluateStuckSignals(state, makeConfig({ maxTurns: 100, noProgressAbortEnabled: false }));
+    expect(signal?.kind).toBe('no_progress');
+    if (signal?.kind === 'no_progress') {
+      expect(signal.turnCount).toBe(80);
+      expect(signal.maxTurns).toBe(100);
+    }
+  });
 });
