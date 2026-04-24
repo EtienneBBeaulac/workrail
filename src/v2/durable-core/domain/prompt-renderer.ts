@@ -375,11 +375,11 @@ export function buildMetricsSection(
     case 'coding': {
       const shaFooter = cleanFormat
         ? '\n\nMetrics: update context.metrics_commit_shas with the FULL accumulated SHA list (shallow merge -- partial lists lose earlier commits).'
-        : '\n\n**METRICS (System):** This is a coding workflow. After each commit, update `context.metrics_commit_shas` with the FULL accumulated list of commit SHAs from this session -- not just the current step\'s commits. Context uses shallow merge: sending only new SHAs permanently loses earlier ones.\n\nCall `continue_workflow` with:\n- `context: { metrics_commit_shas: ["<sha1>", "<sha2>", ...] }` -- full list, every step that has commits';
+        : '\n\n**METRICS (System):** This is a coding workflow. After each commit, pass `context: { metrics_commit_shas: ["<sha1>", "<sha2>", ...] }` when advancing (via `complete_step` or `continue_workflow`). Always send the FULL accumulated list of all SHAs from this session -- not just the new SHA. Context uses shallow merge: sending only new SHAs permanently loses earlier ones.';
       if (!isLastStep) return shaFooter;
       const finalFooter = cleanFormat
         ? '\n\nMetrics (final): also set metrics_outcome (exactly one of: "success", "partial", "abandoned", "error"), metrics_pr_numbers, metrics_files_changed, metrics_lines_added, metrics_lines_removed in context.'
-        : '\n\n**METRICS (System):** This is the final step. Also report:\n- `metrics_outcome`: set to exactly one of these four strings -- no other values are valid: `"success"`, `"partial"`, `"abandoned"`, `"error"`. Do not describe what you did -- classify the outcome using only these values.\n- `metrics_pr_numbers`: array of integer PR numbers (not URLs)\n- `metrics_files_changed`: integer count\n- `metrics_lines_added`: integer count\n- `metrics_lines_removed`: integer count\n\nCall `continue_workflow` with all of the above in `context: { metrics_commit_shas: [...], metrics_outcome: "success", ... }`.';
+        : '\n\n**METRICS (System):** This is the final step. Also report:\n- `metrics_outcome`: set to exactly one of these four strings -- no other values are valid: `"success"`, `"partial"`, `"abandoned"`, `"error"`. Do not describe what you did -- classify the outcome using only these values.\n- `metrics_pr_numbers`: array of integer PR numbers (not URLs)\n- `metrics_files_changed`: integer count\n- `metrics_lines_added`: integer count\n- `metrics_lines_removed`: integer count\n\nPass all of the above in `context: { metrics_commit_shas: [...], metrics_outcome: "success", ... }` when calling `complete_step` or `continue_workflow`.';
       return shaFooter + finalFooter;
     }
     case 'review': {
