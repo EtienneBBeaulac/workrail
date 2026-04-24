@@ -3,6 +3,7 @@ import { err, ok } from 'neverthrow';
 import type { Workflow } from '../../../types/workflow.js';
 import { getStepById } from '../../../types/workflow.js';
 import type { AssessmentDefinition, PromptFragment } from '../../../types/workflow-definition.js';
+import { isLoopStepDefinition } from '../../../types/workflow-definition.js';
 import type { LoadedSessionTruthV2 } from '../../ports/session-event-log-store.port.js';
 import type { LoopPathFrameV1 } from '../schemas/execution-snapshot/index.js';
 import type { NodeId, RunId } from '../ids/index.js';
@@ -654,12 +655,27 @@ export function renderPendingPrompt(args: {
   // Placed after fragmentSuffix so system instructions trail all authored content
   // (most actionable position: last thing the agent reads before advancing).
   //
-  // isLastStep = last top-level step OR exit step of the last top-level loop.
-  // The parentLoopByStepId index covers exit steps (all loop body steps are indexed).
+  // isLastStep = last top-level step OR last non-exit body step of the last top-level loop.
+  //
+  // WHY non-exit: the exit/loop-control step's outputContract is wr.contracts.loop_control --
+  // it can only emit { kind: 'wr.loop_control', decision: 'continue'|'stop' }. Injecting the
+  // metrics footer there means the agent is in loop-decision mode and ignores the metrics
+  // fields entirely. The last non-exit body step is the actual final work step where the
+  // agent has full context to report commit SHAs, LOC, and outcome.
   const lastTopLevelStepId = args.workflow.definition.steps.at(-1)?.id;
   const isLastTopLevelStep = args.stepId === lastTopLevelStepId;
-  const isLastExitStep = isExitStep && resolveParentLoopStep(args.workflow, args.stepId)?.id === lastTopLevelStepId;
-  const isLastStep = isLastTopLevelStep || isLastExitStep;
+  const lastTopLevelStep = args.workflow.definition.steps.at(-1);
+  const isLastNonExitStepOfLastLoop = (() => {
+    if (!lastTopLevelStep || !isLoopStepDefinition(lastTopLevelStep)) return false;
+    const body = lastTopLevelStep.body;
+    if (!Array.isArray(body) || body.length === 0) return false;
+    // Find the last body step that is NOT an exit/loop-control step.
+    const lastNonExit = [...body].reverse().find(
+      (b) => b.outputContract?.contractRef !== LOOP_CONTROL_CONTRACT_REF,
+    );
+    return lastNonExit?.id === args.stepId;
+  })();
+  const isLastStep = isLastTopLevelStep || isLastNonExitStepOfLastLoop;
   const metricsSection = buildMetricsSection(args.workflow.definition.metricsProfile, isLastStep, cleanResponseFormat);
 
   // Array join avoids intermediate string allocations from the + chain.
