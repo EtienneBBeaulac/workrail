@@ -103,7 +103,7 @@ export interface SessionCompletedEvent {
   readonly kind: 'session_completed';
   readonly sessionId: string;
   readonly workflowId: string;
-  readonly outcome: 'success' | 'error' | 'timeout';
+  readonly outcome: 'success' | 'error' | 'timeout' | 'stuck';
   /** Human-readable reason (stopReason, error message, or timeout type). */
   readonly detail?: string;
   /** The WorkRail session ID for correlation. Present when continueToken was decoded. */

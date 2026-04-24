@@ -24,24 +24,16 @@ Confirm whether `selected_next_step` trace refs already include skipped step IDs
 
 ---
 
-## Ticket 2: Legacy workflow modernization -- exploration-workflow.json
+## ~~Ticket 2: Legacy workflow modernization -- wr.adaptive-ticket-creation~~ (done)
 
-### Goal
+Modernized `workflows/adaptive-ticket-creation.json` to current v2 authoring patterns:
 
-Modernize `workflows/exploration-workflow.json` to current v2/lean authoring patterns. This is the highest-priority candidate among the unmodernized workflows.
+- Added `wr.features.capabilities` declaration (workflow uses optional file system access)
+- Added `pathComplexity` to `outputRequired.context` in `phase-0-triage` (structured output contract)
+- Added `ticket-coverage-gate` assessment on `phase-5-batch-tickets` (bounded judgment at highest-stakes output step)
+- Stamped with `validatedAgainstSpecVersion: 3`
 
-### What modernization means
-
-- Current v2/lean structure where appropriate
-- `metaGuidance` and `recommendedPreferences`
-- `references` for authoritative companion material
-- `templateCall` / routine injection instead of repeating large prompt blocks
-- Tighter loop-control wording and evidence-oriented review structure
-
-### Related
-
-- `docs/roadmap/open-work-inventory.md` (full prioritized modernization list)
-- `docs/authoring.md` (modern baseline)
+`exploration-workflow.json` no longer exists in the bundled set. Next modernization candidate: see `docs/roadmap/open-work-inventory.md` for the current prioritized list.
 
 ---
 

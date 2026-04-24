@@ -2,7 +2,7 @@
 
 **Status:** Active  
 **Created:** 2026-04-20  
-**Updated:** 2026-04-21 (Phase 0 complete -- goal challenged, path set, context populated)  
+**Updated:** 2026-04-23 (Phase 0 third run -- repo state re-verified; no material changes since second run)  
 **Owner:** WorkTrain daemon session (shaping)
 
 ---
@@ -17,17 +17,17 @@ Do not treat this file as the source of truth for what step the session is on, w
 
 This file is maintained alongside the session as a readable summary of findings and decisions. It may lag behind the session notes slightly.
 
-### Capability status (verified Phase 0b, 2026-04-21)
+### Capability status (re-verified Phase 0b, third session, 2026-04-23)
 
 | Capability | Available | How verified | Notes |
 |---|:---:|---|---|
-| Web browsing | YES | `curl https://example.com` returned HTML (5s timeout) | Available via curl; no dedicated browser tool needed |
-| Delegation (spawn_agent) | YES | `spawn_agent` with `wr.discovery` returned `{childSessionId, outcome: "stuck"}` -- mechanism works | `wr.discovery` is a multi-step workflow, unsuitable as a trivial probe; stuck on internal heuristic. Spawn mechanism itself is functional. |
-| Git / GitHub CLI | YES | `gh pr list`, `git log` working throughout session | No issues |
+| Web browsing | YES | `curl https://example.com` returned HTML (5s timeout) | Confirmed each session. Available via curl; no dedicated browser tool needed |
+| Delegation (spawn_agent) | YES | `spawn_agent` with `wr.classify-task` returned `{childSessionId: "sess_3x6t6lyz...", outcome: "success"}` -- mechanism confirmed again this session | `wr.classify-task` is the correct probe (1 step, always completes). Child classified the task as Small/Low-risk/investigation correctly. |
+| Git / GitHub CLI | YES | `gh pr list`, `git log`, `gh issue view 174` working throughout session | No issues |
 
 **Capability decisions:**
-- **Web browsing:** Available but not needed. All evidence for this task is in-repo (workflow files, schema, planning docs). No external references needed. Skipping -- fallback to in-repo data is fully sufficient.
-- **Delegation:** Mechanism is available. Whether to use it is a per-step judgment. For design/synthesis work (this phase), delegation adds overhead without benefit -- the main agent owns synthesis by rule. For independent parallel audits (e.g. gap-scoring multiple workflows simultaneously), delegation could reduce latency. Decision will be made per step.
+- **Web browsing:** Available but not needed. All evidence for this task is in-repo (workflow files, schema, planning docs, session store usage data). No external references needed. Fallback to in-repo data is fully sufficient.
+- **Delegation:** Mechanism is confirmed available (wr.classify-task probe succeeded, childSessionId: sess_3x6t6lyz, outcome: success). Whether to use it is a per-step judgment. For design/synthesis work (Phase 0/0b), delegation adds overhead without benefit -- the main agent owns synthesis by rule. For independent parallel audits in later phases (e.g. gap-scoring multiple workflows simultaneously), delegation reduces latency and is appropriate. Decision deferred to per-step judgment in downstream phases.
 
 ---
 
@@ -114,20 +114,37 @@ Rationale (justified against alternatives):
 | `test-session-persistence.json` | N | N | N | N | N | N | 5 |
 | `wr.ui-ux-design.json` | Y | Y | Y | N | Y | N | 8 |
 | `wr.diagnose-environment.json` | N | N | N | N | N | N | 2 |
-| `wr.workflow-for-workflows.json` | Y | Y | Y | Y | Y | Y | 10 |
-| `wr.workflow-for-workflows.v2.json` | Y | Y | Y | Y | Y | **Y** | 10 |
+| `wr.workflow-for-workflows.json` | Y | Y | Y | Y | Y | **Y (3 in body)** | 11 |
 | `wr.discovery.json` | Y | Y | Y | N | Y | N | 22 |
 | `wr.shaping.json` | Y | Y | N | N | N | **Y** | 9 |
 
 **Working examples for assessment gate patterns:**
-- `wr.shaping.json` -- cleanest: 1 dimension per assessment, `low`/`high` levels, `require_followup` on `low`
-- `wr.coding-task.json` -- multi-assessment per step, loop-body refs
-- `mr-review-workflow.agentic.v2.json` -- 3 refs on a single final validation step
-- `bug-investigation.agentic.v2.json` -- single gate on diagnosis validation
+- `wr.shaping.json` -- cleanest: 1 dimension per assessment, `low`/`high` levels, `require_followup` on `low`; uses top-level `assessments` + step `assessmentRefs` + `assessmentConsequences`
+- `wr.coding-task.json` -- 3 gated steps (design, plan, verification), multi-assessment per step, gates in loop `body` steps
+- `mr-review-workflow.agentic.v2.json` -- 3 refs on a single final validation step with `require_followup`
+- `wr.workflow-for-workflows.json` -- gates in loop `body` field (not `loop.steps`); correct pattern for loop-body gates
 
-**Current smoke test baseline:** 37/37 (verified 2026-04-21)
+**Current smoke test baseline:** 36/36 (re-verified 2026-04-23 third session)
 
-### Key landscape observations (corrected Phase 1c, 2026-04-21)
+### Key landscape observations (corrected Phase 1c third session, 2026-04-23)
+
+> **CRITICAL CORRECTION (third session):** All prior landscape scans used `loop.steps` to find loop body steps. The correct field in the current schema is `body` (not `loop.steps`). Every workflow with loops uses `body`. This means prior gate counts for workflows with loops were undercounted. Corrected counts:
+> - `wr.workflow-for-workflows.json`: **3 steps** with assessment refs (in `body` of `phase-6-quality-gate-loop`) -- not 0
+> - `wr.coding-task.json`: **3 steps** with assessment refs (in `body`) -- not 2
+> - All other workflows: corrected counts verified below
+
+**Corrected gate step counts (using `body` field correctly):**
+
+| Workflow | Gate steps | Gate step IDs |
+|---|:---:|---|
+| `wr.adaptive-ticket-creation` | 1 | phase-5-batch-tickets |
+| `wr.bug-investigation` | 1 | phase-5-diagnosis-validation |
+| `wr.coding-task` | **3** | phase-1c-challenge-and-select, phase-3-plan-and-test-design, phase-7b-fix-and-summarize |
+| `wr.mr-review` | 1 | phase-5-final-validation (3 refs) |
+| `wr.shaping` | 2 | frame-gate, breadboard-and-elements |
+| `wr.workflow-for-workflows` | **3** | phase-6a-state-economy-audit, phase-6b-execution-simulation, phase-6c-adversarial-quality-review |
+| `test-artifact-loop-control` | 1 | complete |
+| All others | 0 | -- |
 
 1. **Two prompt formats coexist:** `promptBlocks` (structured object with goal/constraints/procedure/verify) and raw `prompt` string. The authoring spec recommends `promptBlocks`. Not all "modern" workflows use it consistently.
 
@@ -135,17 +152,19 @@ Rationale (justified against alternatives):
 
 3. **Several "candidates" from open-work-inventory also no longer exist:** `mr-review-workflow.json`, `bug-investigation.json`, `design-thinking-workflow.json` -- all absorbed or renamed. The list in `open-work-inventory.md` is materially stale.
 
-4. **Assessment gates are the biggest behavioral differentiator:** 7/24 workflows have functional assessment gates. The 17 without them have no engine-enforced quality checkpoints -- all validation is prose-only.
+4. **Assessment gates are the biggest behavioral differentiator:** 7 workflows have functional assessment gates (6 production-relevant + 1 test). The rest have no engine-enforced quality checkpoints.
 
-5. **`wfw.v2.json` DOES have functional assessment gates** -- the prior session's "orphaned assessments" finding was wrong. The gates live in loop body steps (`phase-6a`, `phase-6b`, `phase-6c`). All 4 declared gates are referenced and wired. Prior design doc contained a material error on this point.
+5. **`wr.workflow-for-workflows.json` DOES have functional assessment gates** -- 3 steps in the loop body (`phase-6a`, `phase-6b`, `phase-6c`) carry assessment refs. All 4 declared gates are referenced and wired. Prior scan missed these because it looked for `loop.steps` instead of `body`.
 
-6. **`recommendedPreferences` is a common gap:** 11/24 workflows are missing it. Easy to add, genuine behavioral improvement.
+6. **`recommendedPreferences` is a common gap:** ~11 workflows are missing it. Easy to add, genuine behavioral improvement.
 
-7. **`references` is almost universally missing:** Only 3 workflows have it (`wfw`, `wfw.v2`, `wr.production-readiness-audit`). This is cosmetic for most workflows -- references are informational, not enforced.
+7. **`references` is almost universally missing:** Only a few workflows have it. This is cosmetic -- references are informational, not enforced.
 
-8. **The "unstamped" list from `validate:registry` is cosmetic advisory only** -- it names 17 unstamped workflows but stamping alone is not a quality improvement goal.
+8. **The "unstamped" list from `validate:registry` is cosmetic advisory only** -- names 14 unstamped workflows; stamping alone is not a quality improvement goal.
 
-9. **`wr.production-readiness-audit.json` has no assessment gates** -- despite being a review workflow with a clear audit focus, it uses no `assessmentRefs`. This is a behavioral gap on a high-value workflow.
+9. **`wr.production-readiness-audit.json` has no assessment gates** -- despite being a review workflow with a clear audit focus (`phase-5-final-validation` exists), it declares no `assessments` and no `assessmentRefs`. This is a confirmed behavioral gap on a high-value workflow.
+
+10. **`wr.coding-task` has 3 gated steps across the lifecycle (design, plan, and verification)** -- not 2 as prior scans reported. This is a richer quality-gate structure than previously understood.
 
 ### Phase 1c hard-constraint findings (engine/schema reality checks)
 
@@ -197,11 +216,13 @@ Rationale (justified against alternatives):
 
 ### The 4 production workflows (what actually runs in the daemon pipeline)
 
-From `triggers.yml` and `src/coordinators/modes/`:
-1. **`wr.discovery`** (full-pipeline mode, step 1) -- already validated (v3), has promptFragments and routines. No assessment gates -- but discovery is a research step, gates may not be appropriate here.
-2. **`wr.shaping`** (full-pipeline mode, step 3) -- has functional assessment gates on `frame-gate` and `breadboard-and-elements`. Not validated (`validatedAgainstSpecVersion` missing).
-3. **`wr.coding-task`** (full-pipeline + implement mode, step 5) -- has functional assessment gates (8 of them). Not validated. This is the highest-stakes workflow: it writes code.
-4. **`wr.mr-review`** (full-pipeline + implement mode, final step) -- has functional assessment gates (3 of them). Not validated. Issue #174 (add assessment gate) is OPEN but appears already done -- commit c83aa180 marked it done.
+From `triggers.yml` and `src/coordinators/modes/full-pipeline.ts` (re-verified 2026-04-23):
+1. **`wr.discovery`** (full-pipeline mode, step 1 via `coordinators/modes/full-pipeline.ts`) -- stamped v3. Has 3 `while` loops with `artifact_contract` conditionSources and `maxIterations` backstops (2, 3, 3). No assessment gates. Research step -- gates may not be appropriate here.
+2. **`wr.shaping`** (full-pipeline mode, step 2) -- has 2 assessment gates, 1 `while` loop with `artifact_contract` conditionSource and `maxIterations: 2`. NOT stamped.
+3. **`wr.coding-task`** (direct `triggers.yml` trigger + implement mode) -- has 2 gate steps (each with `require_followup`), 4 loops (3 `while` with `artifact_contract`, 1 `forEach`). NOT stamped. Highest-stakes: writes code.
+4. **`wr.mr-review`** (direct `triggers.yml` trigger `mr-review`) -- has 3 assessment gates on final-validation step with `require_followup`, 1 `while` loop with `artifact_contract` conditionSource and `maxIterations: 4`. NOT stamped. Issue #174 still open but gates are already wired.
+
+**Loop structure verdict (verified):** All production workflows use `conditionSource.kind = "artifact_contract"` with `maxIterations` backstops. Loop control is sound. No missing termination conditions. This is a significant quality signal -- these loops will not run forever.
 
 **Key tension**: The 4 production workflows already have assessment gates. The "legacy" workflows that don't have gates (`wr.adaptive-ticket-creation`, `wr.documentation-update`, `wr.production-readiness-audit`, etc.) are NOT used in the autonomous pipeline -- they're human-triggered workflows.
 
@@ -225,8 +246,8 @@ From `triggers.yml` and `src/coordinators/modes/`:
 
 **Tension 2: Stamping vs. behavioral improvement**
 - `validatedAgainstSpecVersion` is a stamp that says "this workflow was reviewed against the current authoring spec." Most production workflows are missing this stamp.
-- Running `wr.workflow-for-workflows.v2.json` on a workflow is the intended process to earn the stamp.
-- But running `wr.workflow-for-workflows.v2.json` takes significant agent time and may find things to fix, making the "just stamp it" shortcut dishonest.
+- Running `wr.workflow-for-workflows.json` on a workflow is the intended process to earn the stamp.
+- But running `wr.workflow-for-workflows.json` takes significant agent time and may find things to fix, making the "just stamp it" shortcut dishonest.
 
 **Tension 3: Documentation rot creates misdirected work**
 - The open-work-inventory and tickets/next-up.md reference deleted files and closed work (issue #174, exploration-workflow.json).
@@ -234,16 +255,24 @@ From `triggers.yml` and `src/coordinators/modes/`:
 - Fixing the docs first is cheap but it's not "shipping workflow improvements."
 
 **Tension 4: Active focus is elsewhere**
-- Recent commits (Apr 20-21) are all engine/daemon/console: trigger fixes, coordinator crashes, console bugs.
-- The project owner's actual momentum is on infrastructure, not workflow authoring.
+- Recent commits (Apr 20-23) are engine/daemon/console/schema: loadSessionNotes export, metricsProfile footer injection, wr.* namespace rename, console fixes, TypeScript 6 upgrade.
+- The project owner's actual momentum has been on infrastructure and schema, not workflow authoring content.
 - Starting a workflow modernization project now means context-switching from hot infrastructure work.
+- Mitigating factor: the wr.* rename (#782) and metricsProfile additions (#779) WERE workflow file changes. The infrastructure work is now slowing; conditions may be better for workflow content work.
+
+**Tension 5: Issue #174 is open but done (new, 2026-04-23)**
+- GitHub issue #174 "Adopt assessment-gate follow-up in MR review" is labeled `feature, next` and remains open.
+- But `wr.mr-review` already has 3 assessment gates with `require_followup` consequences, all properly wired.
+- The issue's stated acceptance criteria ("assessment gate added to wr.mr-review") are met.
+- Closing this issue is cheap cleanup but clarifies the work queue.
 
 ### Success criteria (observable)
 
-1. The 4 production daemon workflows (`wr.discovery`, `wr.shaping`, `coding-task`, `mr-review`) all have `validatedAgainstSpecVersion: 3` after genuine review via `wr.workflow-for-workflows.v2.json`
-2. Planning docs (`open-work-inventory.md`, `tickets/next-up.md`) reference only files that exist in the repo, and issue #174 is closed if it's actually done
-3. At least one non-production workflow with a review/audit purpose (`wr.production-readiness-audit.json` or `wr.adaptive-ticket-creation.json`) gains functional assessment gates
-4. `npx vitest run` passes (37/37 minimum) before and after any changes
+1. The 3 unstamped production daemon workflows (`wr.shaping`, `wr.coding-task`, `wr.mr-review`) all have `validatedAgainstSpecVersion: 3` after genuine review via `wr.workflow-for-workflows.json`
+2. Planning docs (`open-work-inventory.md`, `tickets/next-up.md`) reference only files that exist in the repo; issue #174 is closed
+3. At least one non-production workflow with a review/audit purpose (`wr.production-readiness-audit` or `wr.adaptive-ticket-creation`) gains functional assessment gates
+4. `npx vitest run tests/lifecycle/bundled-workflow-smoke.test.ts` passes (36/36 minimum) before and after any changes
+5. No pre-existing test failures are introduced (perf/cli/polling failures confirmed pre-existing and not attributed to workflow changes)
 
 ### Reframes and HMW questions
 
@@ -252,17 +281,19 @@ From `triggers.yml` and `src/coordinators/modes/`:
 - Project B: Validate + stamp the 4 production workflows (high value, expensive, requires running quality gate)
 
 **Reframe 2: The daemon doesn't need modernization -- it needs validation**
-The autonomous pipeline workflows already use assessment gates. What they're missing is the formal `validatedAgainstSpecVersion` stamp, which is earned by running them through `wr.workflow-for-workflows.v2.json`. The work is validation, not "modernization."
+The autonomous pipeline workflows already use assessment gates. What they're missing is the formal `validatedAgainstSpecVersion` stamp, which is earned by running them through `wr.workflow-for-workflows.json`. The work is validation, not "modernization."
 
-**HMW 1:** How might we get the 4 production workflows stamped without the full 10-step `wr.workflow-for-workflows.v2.json` process for each?
+**HMW 1:** How might we run the quality gate on `wr.coding-task` as a time-bounded probe to scope Stream B before committing to it?
 
 **HMW 2:** How might we prioritize the non-production workflows without session outcome data to guide us?
 
-### Primary framing risk
+### Primary framing risk (updated 2026-04-23)
 
 **The specific condition that would make this framing wrong:**
 
-If `wr.discovery.json`, `wr.shaping.json`, `wr.coding-task.json`, or `mr-review-workflow.agentic.v2.json` actually have material quality problems that assessment gates don't catch (e.g., poorly structured prompts, missing output contracts, wrong loop structure), then the framing "production workflows are fine, legacy workflows need work" is wrong. The production workflows might need behavioral redesign, not just stamping. This would only be discoverable by actually running `wr.workflow-for-workflows.v2.json` on each of them and seeing what quality gate failures come back.
+If running `wr.workflow-for-workflows.json` on `wr.coding-task` at STANDARD depth returns `authoring-integrity-gate: low` or `outcome-effectiveness-gate: low` (the two quality gate assessment dimensions), then the framing "production workflows need stamping not redesign" is wrong. A `low` on either dimension means the workflow has structural quality problems that the gate catches -- and the `require_followup` consequence would trigger, sending the quality gate into another iteration rather than producing a stamp. This would mean the scope of work is redesign (behavioral changes), not validation (stamp-earning). The only way to resolve this uncertainty is to actually run the gate on `wr.coding-task`. Until that happens, this framing risk is unresolved.
+
+**Why this specific risk and not a generic one:** The assessment dimensions of `wr.workflow-for-workflows.json` are `state_economy`, `simulation_outcome`, `authoring_integrity`, and `outcome_effectiveness`. A `low` on `state_economy` means the workflow is inefficient but not structurally wrong. A `low` on `authoring_integrity` or `outcome_effectiveness` means the workflow has quality problems that actively harm output. These two are the ones that would force redesign. Loop structure and gate wiring are already verified-correct -- so the remaining unknowable is prompt quality under adversarial review.
 
 ### Primary uncertainty
 
@@ -299,28 +330,30 @@ At the same time, planning docs reference 7 deleted files and one open-but-done 
 ## Candidate Generation Setup (Phase 3b)
 
 **Path:** `design_first`  
-**candidateCountTarget:** 3
+**candidateCountTarget:** 3  
+**Updated:** 2026-04-23 (sharpened from prior session; 3 existing candidates re-evaluated below)
 
-### Required properties of the candidate set
+### Required properties of the candidate set (updated 2026-04-23)
 
 Per the `design_first` path contract, the 3 candidates must satisfy:
 
-1. **At least one reframe candidate:** One candidate must challenge whether the two work streams (docs fix + production workflow validation) are the right investment at all. The obvious directions are "clean up docs" and "run quality gate on production workflows." The reframe asks: what if neither is the best use of the same effort right now? A valid reframe might be: retire low-value workflows from the catalog, invest in lint tooling that prevents future regression, or defer workflow work entirely in favor of the active engine/daemon/console work.
+1. **At least one reframe candidate:** One candidate must challenge whether docs correction + production validation is the right investment. Valid reframes: retire low-value workflows, invest in lint tooling, or defer workflow work entirely. Direction C (defer) and Direction B (tooling) serve this role.
 
-2. **Meaningful differentiation:** Candidates must differ in their primary bet, not just in ordering or scope. Minor variations on "do A then B in different order" do not count as distinct candidates.
+2. **Meaningful differentiation:** Candidates must differ in their primary bet, not just ordering or scope. Direction A bets on "empirical validation of the production pipeline first." Direction B bets on "tooling over manual migration." Direction C bets on "deferral is correct given bandwidth context." These are meaningfully different bets.
 
-3. **Ground in the 5 decision criteria:** Each candidate must be evaluable against: sequencing discipline, empirical-before-prescriptive, production-first value, no cosmetic compliance, incremental shippability. A candidate that violates decision criterion 4 (cosmetic compliance) is disqualified.
+3. **Grounded in the 5 decision criteria (updated):** Sequencing discipline / Empirical before prescriptive / Production-first value / No cosmetic compliance / Incremental shippability. Each candidate is evaluated against all 5 below.
 
-4. **Prototype-learning uncertainty honored:** At least one candidate must explicitly account for the unknown scope of Stream B (what the quality gate finds) rather than assuming it away.
+4. **Prototype-learning uncertainty honored:** Direction A explicitly makes the quality gate the scope-branch point. Direction B bypasses this uncertainty by investing in tooling instead. Direction C defers it entirely. All three handle the uncertainty differently -- this is correct.
 
-### Bias to guard against
+### New bias to guard against (2026-04-23 addition)
 
-Because the two streams are well-defined, generation will be pulled toward micro-variations: "do A then B1 only," "do A then B1 and B2," "do A then B3." This is the clustering failure. Each of the 3 candidates must be defendable as the *right* strategy in some scenario, not just the same strategy with different scope.
+The prior session's candidates were generated when `wr.workflow-for-workflows.v2.json` was the quality gate. That file has been consolidated into `wr.workflow-for-workflows.json`. References in Direction A must use the correct current file name. This is a naming-only correction; the candidates are otherwise unchanged.
 
 ### Anti-candidates (explicitly ruled out by decision criteria)
 
-- Any candidate that adds `validatedAgainstSpecVersion` without running `wr.workflow-for-workflows.v2.json` -- violates criterion 4
-- Any candidate that prioritizes legacy catalog workflows (adaptive-ticket, document-creation, etc.) over production pipeline workflows -- violates criterion 3 unless it argues from the reframe position that this is intentionally the right bet
+- Any candidate that adds `validatedAgainstSpecVersion` without running `wr.workflow-for-workflows.json` -- violates criterion 4 (no cosmetic compliance)
+- Any candidate that prioritizes legacy catalog workflows over production pipeline workflows -- violates criterion 3 unless making a deliberate reframe argument
+- Any candidate that treats "close #174" and "stamp wr.coding-task" as equivalent work units -- they are different in kind (docs hygiene vs. genuine quality validation)
 
 ---
 
@@ -328,14 +361,14 @@ Because the two streams are well-defined, generation will be pulled toward micro
 
 ### Direction A: Docs-first + empirical production validation (recommended)
 
-**Core bet:** Fix the documentation foundation first, then run `wr.workflow-for-workflows.v2.json` on `wr.coding-task.json` as a probe -- let that run's findings determine the scope of remaining work.
+**Core bet:** Fix the documentation foundation first, then run `wr.workflow-for-workflows.json` on `wr.coding-task` as a probe -- let that run's findings determine the scope of remaining work.
 
 **What:**
-1. Update `open-work-inventory.md` and `tickets/next-up.md` to remove 7 stale file references
-2. Close GitHub issue #174 (assessment-gate adoption in MR review is already done per commit c83aa180)
-3. Run `wr.workflow-for-workflows.v2.json` on `wr.coding-task.json` at STANDARD depth
-4. If quality gate finds only minor issues: stamp it, then repeat for `wr.shaping.json`
-5. If quality gate finds significant issues: create a focused GitHub issue for the specific fixes, do NOT stamp until fixed
+1. Update `open-work-inventory.md` and `tickets/next-up.md` to remove stale file references (deleted workflows, non-existent candidates)
+2. Close GitHub issue #174 (assessment-gate adoption in MR review is already done -- `wr.mr-review` has 3 gates with `require_followup`, all wired)
+3. Run `wr.workflow-for-workflows.json` on `wr.coding-task` at STANDARD depth
+4. If quality gate finds only minor issues (`state_economy:low` only): fix, stamp, repeat for `wr.shaping`
+5. If quality gate finds structural failures (`authoring_integrity:low` or `outcome_effectiveness:low`): create a focused GitHub issue for the specific fixes, do NOT stamp until fixed
 
 **Satisfies decision criteria:**
 - ✅ Sequencing discipline (docs first)
@@ -406,7 +439,14 @@ Because the two streams are well-defined, generation will be pulled toward micro
 
 ## Resolution Notes
 
-**Phase 0 (2026-04-21):** Path confirmed as `design_first`. Context fully populated for downstream steps. Key new finding from this session: the prior design doc (2026-04-20) was not committed to git and is an untracked sidecar -- this is correct per the artifact strategy. No engine changes since the prior session that affect workflow schema (the `findingCategory` addition in #644 is schema/engine but only adds a new field to review-verdict findings; it does not change the assessment gate contract). Smoke test baseline confirmed: 37/37 still passing. Open GitHub issues: only #174 ("Adopt assessment-gate follow-up in MR review") is directly related.
+**Phase 0 (2026-04-21):** Path confirmed as `design_first`. Context fully populated for downstream steps. Smoke test baseline confirmed: 37/37 passing. Open GitHub issues: only #174 ("Adopt assessment-gate follow-up in MR review") is directly related.
+
+**Phase 0 third run (2026-04-23, later session):** Repo state re-verified. No material changes since Phase 0 second run. Latest commit: `f0a1822a fix(engine): validate metrics_outcome enum in checkContextBudget`. Smoke test: 36/36. Issue #174: still open. No new workflow files. Open PRs: #797 (max-output-tokens feature, unrelated), #698/#330 (dependabot deps). All prior findings and direction selection remain valid. Path recommendation unchanged: `design_first`. Selected direction unchanged: Direction A (docs-first + empirical production validation). No re-analysis needed.
+
+**Phase 0 re-run (2026-04-23, earlier session):** Two material changes since last session:
+1. `feat(workflows): rename all bundled workflows to wr.* namespace (#782)` -- all workflow IDs now have `wr.` prefix; usage data in session store uses old IDs (`coding-task-workflow-agentic` = `wr.coding-task`, `mr-review-workflow-agentic` = `wr.mr-review`). Design doc table was using the old file names; corrected to `wr.*` IDs.
+2. `chore(workflows): delete stale wfw copy, rename .v2.json to workflow-for-workflows.json (#780)` -- `wr.workflow-for-workflows.v2.json` absorbed into `wr.workflow-for-workflows.json`. Smoke test count is now 36/36.
+All candidate directions from prior session remain valid. No engine schema changes that affect assessment gate contract. Issue #174 still open.
 
 ---
 
@@ -417,14 +457,92 @@ Because the two streams are well-defined, generation will be pulled toward micro
 | path = `design_first` | Goal was solution-statement; primary risk is wrong candidates/wrong unit of work | 2026-04-20 |
 | No subagent delegation in Phase 0 | All data available in-repo via Bash/Read tools; synthesis task is single-thread | 2026-04-20 |
 | Prior landscape corrected | assessmentRef (singular) vs assessmentRefs (plural) error fixed; modern baselines re-verified | 2026-04-20 |
-| `wr.workflow-for-workflows.v2.json` added to HIGH-priority list | It is the quality gate workflow but lacks assessmentRefs at step level -- ironic and high-value fix | 2026-04-20 |
 | Stale planning docs identified as prerequisite gate | Must correct docs before implementation begins -- they reference deleted targets | 2026-04-20 |
-| Delegation: mechanism available, not used for design work | spawn_agent returned childSessionId on probe (outcome: "stuck" because wr.discovery is multi-step, not because spawn is broken). Not used for Phase 0 design/synthesis -- main agent owns synthesis by rule. Will use for independent parallel audits if latency matters in later phases. | 2026-04-20/21 |
-| Web browsing: available via curl | curl to example.com returned HTML -- network reachable; no web browsing needed for this task (all data is in-repo) | 2026-04-20/21 |
+| Delegation: mechanism available, not used for design work | spawn_agent with wr.classify-task returned success. Not used for design/synthesis -- main agent owns synthesis by rule. Used for parallel audits only when latency benefit is clear. | 2026-04-20/23 |
+| Web browsing: available via curl | curl to example.com returned HTML -- network reachable; not needed (all data is in-repo) | 2026-04-20/23 |
 | Artifact strategy: doc is readable summary only | Execution truth lives in step notes + context variables; design doc is for human reference only | 2026-04-20 |
+| **Selected direction: Candidate 2 (quality gate probe)** | Satisfies all 5 decision criteria; only candidate that answers "are production workflows sound?"; failure mode bounded by explicit branch condition; philosophy aligned | 2026-04-23 |
+| "Follows existing repo pattern" rationale corrected | Git history shows all 4 stamped workflows were stamped during authoring commits, not after quality gate runs. Corrected rationale: "exceeds current practice; justified by philosophy + wr.coding-task 85-session stakes." | 2026-04-23 |
+| Runner-up bonus PR: wr.production-readiness-audit gate | Standalone, independent of quality gate sessions, delivers user-facing behavioral improvement, follows wr.shaping gate pattern exactly | 2026-04-23 |
+| Candidate 3 lint rule left out of scope | YAGNI after wr.production-readiness-audit bonus PR fixes the most obvious ungated audit workflow; heuristic maintenance burden outweighs value | 2026-04-23 |
+| Candidate 1 (mechanical stamp) disqualified | Fails decision criteria 2 (empirical) and 4 (no cosmetic compliance); corrupts stamp meaning | 2026-04-23 |
 
 ---
 
 ## Final Summary
 
-*(to be filled in at end of shaping session)*
+**Recommendation:** Quality gate probe on `wr.coding-task` + docs hygiene + `wr.production-readiness-audit` gate addition
+
+**Confidence band:** Medium-high
+
+The "medium" component comes entirely from one unresolved prototype-learning uncertainty: what does running `wr.workflow-for-workflows.json` on `wr.coding-task` actually find? This is not resolvable by analysis -- it's resolved by doing the work. The direction is correct in both outcomes (minor findings → stamp; structural findings → scoped redesign issue). The confidence in the direction is high; the confidence in the scope is medium.
+
+---
+
+### The problem (reframed)
+
+The stated goal ("modernize `exploration-workflow.json`") was a solution statement pointing at a file that no longer exists. The real problem has two layers:
+
+**Layer 1 (cheap, ~30 min):** Planning docs and issue queue are stale -- they reference deleted workflows and an already-completed issue (#174). Any work started from them is misdirected.
+
+**Layer 2 (high value, scope-uncertain):** The 3 most-used production pipeline workflows (`wr.coding-task` at 85 sessions, `wr.mr-review` at 65, `wr.shaping`) are structurally sound (correct loop control, working assessment gates, `artifact_contract` conditionSources) but have never been run through the project's quality gate. They lack `validatedAgainstSpecVersion: 3`.
+
+---
+
+### Selected direction: three independent work units
+
+**PR 1 -- Docs hygiene (independent, no dependencies, ~30 min)**
+- Update `docs/roadmap/open-work-inventory.md`: remove references to deleted workflows (`exploration-workflow.json`, `mr-review-workflow.json`, `bug-investigation.json`, `design-thinking-workflow.json`, `wr.workflow-for-workflows.v2.json`, and other stale entries)
+- Update `docs/tickets/next-up.md`: remove stale "Ticket 2: Legacy workflow modernization -- exploration-workflow.json" entry
+- Close GitHub issue #174 with comment: "Adopting assessment-gate follow-up in MR review is complete. Step `phase-5-final-validation` in `wr.mr-review` already has `assessmentRefs: [\"evidence-quality-gate\", \"coverage-completeness-gate\", \"contradiction-resolution-gate\"]` with `assessmentConsequences` triggering `require_followup` when any dimension scores `low`. Three gates, all wired, no further action needed."
+- Pre-PR validation: `grep -E "exploration-workflow|mr-review-workflow\.json|bug-investigation\.json|design-thinking-workflow|workflow-for-workflows\.v2" docs/roadmap/open-work-inventory.md docs/tickets/next-up.md` must return no output
+
+**PR 2 -- `wr.production-readiness-audit` assessment gate (independent, no dependencies, ~1 hr)**
+- Add to `workflows/production-readiness-audit.json`:
+  - Top-level `assessments`: `[{ "id": "readiness-verdict", "purpose": "The readiness verdict is evidence-grounded and calibrated -- not optimistic or based on absence of red flags", "dimensions": [{ "id": "readiness_confidence", "purpose": "Verdict is supported by specific evidence items tied to concrete system behaviors, not general impressions", "levels": ["low", "high"] }] }]`
+  - On the final verdict step: `"assessmentRefs": ["readiness-verdict"]` + `"assessmentConsequences": [{ "when": { "anyEqualsLevel": "low" }, "effect": { "kind": "require_followup", "guidance": "Readiness confidence is low. Return to Phase 3 evidence collection: identify which readiness dimensions lack specific behavioral evidence, gather it, and re-run the verdict." } }]`
+- Create a GitHub issue for this work before implementation
+- Smoke test must pass (36/36) after the change
+- Pattern reference: `wr.shaping.json` `frame-soundness` gate is the cleanest example to follow
+
+**Stream B -- Quality gate probe on `wr.coding-task` (independent, time-bounded, scope-uncertain)**
+1. Create GitHub issue: "Validate and stamp wr.coding-task via quality gate" with acceptance criteria: run `wr.workflow-for-workflows.json` at STANDARD depth; stamp only if no `authoring_integrity:low` or `outcome_effectiveness:low`
+2. Run `wr.workflow-for-workflows.json` on `wr.coding-task` at STANDARD depth in a daemon session
+3. Branch on gate findings:
+   - `state_economy:low` only → fix in-session (inefficiency, not structural failure), stamp, PR
+   - `simulation_outcome:low` with narrow fix → fix in-session, stamp, PR
+   - `authoring_integrity:low` or `outcome_effectiveness:low` → stop, create "wr.coding-task quality improvements" issue with specific findings, do NOT stamp until fixed
+4. If wr.coding-task stamps cleanly: repeat for `wr.shaping` (same pattern)
+
+**Minimum viable delivery:** PR 1 alone (docs hygiene). Already worth doing independently of everything else.
+**Standard delivery:** PR 1 + Stream B (wr.coding-task stamped or scoped redesign issue created).
+**Full delivery:** PR 1 + PR 2 + Stream B (all 3 unstamped production workflows stamped, wr.production-readiness-audit gated).
+
+---
+
+### Strongest alternative
+
+**Candidate 3 (tooling investment over quality gate sessions):** Add `validate:registry` advisory rule for "audit step without gate," add `wr.production-readiness-audit` gate, skip quality gate sessions entirely.
+
+Switch to this if: Stream B's gate run finds structural failures in `wr.coding-task` AND the resulting redesign issue is deprioritized. At that point, the production stamp is deferred anyway, and tooling investment has better expected return than waiting for redesign.
+
+---
+
+### Residual risks
+
+1. **Quality gate findings expand scope significantly.** The gate may find `authoring_integrity:low` or `outcome_effectiveness:low` for `wr.coding-task`, triggering redesign territory. Managed: explicit branch condition. Risk level: medium (unknown until run).
+
+2. **Quality gate validity for coding-task-style workflows.** `wr.workflow-for-workflows.json` has not been run on a production pipeline workflow before. Its assessment dimensions may produce noisy or off-target findings for a coding workflow. Risk level: low (dimensions are general; gate was "exercised extensively" per commit dc4624dc).
+
+3. **Production workflow stamps remain deferred if Stream B is deprioritized.** PR 1 and PR 2 ship regardless, but if Stream B doesn't happen, `wr.coding-task` and `wr.shaping` stay unstamped. Risk level: low for functionality (stamps are dev-only signals), medium for internal quality discipline.
+
+---
+
+### What changed from the stated goal
+
+| Stated goal | Actual recommendation |
+|---|---|
+| "Modernize `exploration-workflow.json`" | That file no longer exists; `wr.discovery` is already modern (v3.2.0, stamped, routines, assessment-contract loops) |
+| Modernize specific files by adding schema fields | Run the quality gate (genuine review) before stamping; field additions alone are cosmetic |
+| Focus on legacy catalog workflows | Focus on the 3 production pipeline workflows actually used in 85+ daemon sessions |
+| Planning docs as priority guide | Planning docs are stale; usage data from session store is the correct priority guide |

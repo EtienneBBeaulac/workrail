@@ -550,7 +550,7 @@ describe('doPollGitHubQueue adaptive routing', () => {
     const dispatchSpy = vi.spyOn(router, 'dispatch');
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
 
     // Call doPoll directly (bypasses interval scheduling)
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
@@ -570,7 +570,7 @@ describe('doPollGitHubQueue adaptive routing', () => {
     const { router: routerWithoutAdaptive } = makeRouterWithoutAdaptive();
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], routerWithoutAdaptive, store, makeQueueFetch());
+    const scheduler = new PollingScheduler([trigger], routerWithoutAdaptive, store, makeQueueFetch(), tmpDir);
 
     // doPoll should throw (not silently fall back to dispatch())
     await expect(
@@ -599,7 +599,7 @@ describe('doPollGitHubQueue adaptive routing', () => {
     } as unknown as TriggerRouter;
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
 
     // First poll: issue #42 dispatched, Promise in flight
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
@@ -634,7 +634,7 @@ describe('doPollGitHubQueue adaptive routing', () => {
     } as unknown as TriggerRouter;
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
 
     // First poll: issue #42 dispatched
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
@@ -700,7 +700,7 @@ describe('PollingScheduler.forcePoll', () => {
     const { router, adaptiveDispatched } = makeRouter();
 
     const trigger = makeQueuePollTrigger();
-    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch());
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
 
     const result = await scheduler.forcePoll(trigger.id);
 

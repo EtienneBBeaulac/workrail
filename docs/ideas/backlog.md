@@ -4,6 +4,55 @@ Workflow and feature ideas that are worth capturing but not yet planned or desig
 
 ---
 
+## `jumpIf`: conditional step jumps with per-target jump counter (Apr 23, 2026)
+
+**Problem:** Workflows with investigation or iterative refinement patterns (bug-investigation, mr-review) can exhaust their hypothesis set and reach an `inconclusive_but_narrowed` state with no structural way to restart an earlier phase. The only current options are: (1) prose guidance inside loop decision steps telling the agent to "reopen the shortlist" (unreliable), or (2) nested loops (not yet supported by the schema). A `jumpIf` primitive would let any step conditionally restart execution from an earlier step when a context condition is met.
+
+**Proposed design:**
+
+A `jumpIf` field on any step declaration:
+
+```json
+{
+  "id": "phase-4b-loop-decision",
+  "jumpIf": {
+    "condition": { "var": "diagnosisType", "equals": "inconclusive_but_narrowed" },
+    "target": "phase-2-hypothesis-generation-and-shortlist",
+    "maxJumps": 2
+  }
+}
+```
+
+**Engine behavior:**
+- When a step completes and its `jumpIf.condition` is met, the engine checks the per-session jump counter for `target`
+- Counter is derived from the event log: count `jump_recorded` events where `toStepId === target` -- fully append-only and replayable
+- If `counter < maxJumps`: append `jump_recorded` event, create fresh nodeIds for `target` and all subsequent steps, mint a new continueToken pointing at the fresh target node
+- If `counter >= maxJumps`: jump is blocked, execution falls through to the next step after the `jumpIf` step (safety cap, not an error)
+- Fresh nodeIds mean no dedupeKey collisions and no DAG cycles -- the same step definition can appear multiple times in the session DAG as distinct nodes, same as loop iterations
+
+**Why this is safe:**
+- `maxJumps` is a required field -- no unbounded loops possible
+- Counter is derivable from the append-only event log -- no mutable state
+- The token system is unaffected -- each jump produces a fresh continueToken encoding a fresh nodeId
+- Fall-through on limit reached is predictable and operator-visible
+
+**Open design questions:**
+- `maxJumps` default if omitted -- probably require it explicitly (same as `maxIterations` on loops, which is also required)
+- DAG console rendering -- backward jumps create "re-entry" edges. Needs a distinct visual treatment (dashed edge? "JUMP x2" label?) -- tracked separately under console execution trace work
+- Interaction with `runCondition` -- if a jumped-to step has a `runCondition` that evaluates false at re-entry time, does the engine skip it and advance? Probably yes, same as first-time evaluation.
+- Whether `jumpIf` and loop `body` can coexist on the same step -- probably yes, they're independent control-flow mechanisms
+
+**Scope when ready to implement:**
+- `spec/workflow.schema.json`: add `jumpIf` to `standardStep`
+- `spec/authoring-spec.json`: add authoring rule
+- Compiler: validate `target` resolves to a reachable earlier step, `maxJumps >= 1`
+- Engine (`src/v2/durable-core/`): new `jump_recorded` event kind, counter derivation, fresh nodeId creation on jump
+- Console DAG: render jump edges distinctly
+
+**Motivation workflow:** `wr.bug-investigation` -- when all hypotheses are eliminated and `diagnosisType === 'inconclusive_but_narrowed'`, jump back to phase 2 (hypothesis generation) with the eliminated theories in context, up to 2 times before falling through to validation/handoff.
+
+---
+
 ## Research Notes: Autonomous Platform Vision (Apr 14, 2026)
 
 ### Common-Ground relationship + cross-repo execution model
@@ -4542,22 +4591,22 @@ worktrain console --workspace ~/git/myproject  # workspace-scoped view
 ### What shipped (Apr 17-18)
 
 **Daemon stabilization:**
-- ✅ `report_issue` tool -- agents call this instead of dying silently; structured JSON written to `~/.workrail/issues/<sessionId>.jsonl`, event emitted to daemon stream, WORKTRAIN_STUCK marker in `WorkflowRunResult`
-- ✅ Richer `BASE_SYSTEM_PROMPT` -- baked-in behavioral principles (oracle hierarchy, self-directed reasoning, workflow-as-contract, silent failure policy) rather than relying on soul file alone
-- ✅ `/bin/bash` for Bash tool -- process substitution `<(...)` and other bash-specific syntax now works
-- ✅ `DaemonEventEmitter` -- structured event stream at `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`
-- ✅ Self-configuration -- `triggers.yml`, upgraded `daemon-soul.md` (WorkRail-specific rules + coding philosophy), `AGENTS.md` WorkTrain section
+- `report_issue` tool -- agents call this instead of dying silently; structured JSON written to `~/.workrail/issues/<sessionId>.jsonl`, event emitted to daemon stream, WORKTRAIN_STUCK marker in `WorkflowRunResult`
+- Richer `BASE_SYSTEM_PROMPT` -- baked-in behavioral principles (oracle hierarchy, self-directed reasoning, workflow-as-contract, silent failure policy) rather than relying on soul file alone
+- `/bin/bash` for Bash tool -- process substitution `<(...)` and other bash-specific syntax now works
+- `DaemonEventEmitter` -- structured event stream at `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`
+- Self-configuration -- `triggers.yml`, upgraded `daemon-soul.md` (WorkRail-specific rules + coding philosophy), `AGENTS.md` WorkTrain section
 
 **Workflow library:**
-- ✅ mr-review v2.6 -- `philosophy_alignment` reviewer family; scoped philosophy extraction in fact packet; 7th coverage domain; "is this the right design?" framing
-- ✅ wfw v2.5 -- phases 2 and 3 split into dedicated prep-step design steps (2a/2b, 3a/3b); principle: assessments need dedicated prep steps, not on-the-fly evidence gathering
-- ✅ Clean workflow display names across library (removed `v2 •`, `Lean •`, etc.)
-- ✅ `philosophy.mdc` created at `~/.firebender/commands/philosophy.mdc` -- MR review subagents now evaluate findings against coding philosophy
+- mr-review v2.6 -- `philosophy_alignment` reviewer family; scoped philosophy extraction in fact packet; 7th coverage domain; "is this the right design?" framing
+- wfw v2.5 -- phases 2 and 3 split into dedicated prep-step design steps (2a/2b, 3a/3b); principle: assessments need dedicated prep steps, not on-the-fly evidence gathering
+- Clean workflow display names across library (removed `v2 •`, `Lean •`, etc.)
+- `philosophy.mdc` created at `~/.firebender/commands/philosophy.mdc` -- MR review subagents now evaluate findings against coding philosophy
 
 **Integrations and infrastructure:**
-- ✅ GitLab polling triggers fully merged (#404) -- zero-webhook MR polling
-- ✅ TS6 forward-compat tsconfig fixes (#401) -- unblocks TypeScript 6 dep bumps
-- ✅ Standalone console spec -- `worktrain console` as independent file-reading binary, zero coupling to daemon or MCP server
+- GitLab polling triggers fully merged (#404) -- zero-webhook MR polling
+- TS6 forward-compat tsconfig fixes (#401) -- unblocks TypeScript 6 dep bumps
+- Standalone console spec -- `worktrain console` as independent file-reading binary, zero coupling to daemon or MCP server
 
 ---
 
@@ -5309,19 +5358,19 @@ Long-term (when mobile exists):
 
 ### What works at this commit
 
-- ✅ Daemon accepts webhooks, starts sessions, runs workflows end-to-end
-- ✅ Sessions advance through all workflow phases autonomously
-- ✅ `mr-review-workflow-agentic` v2.6 runs fully -- context gathering, review phases, synthesis loop, validation, handoff
-- ✅ `wr.discovery` v3.2.0 runs fully -- with new phase-0-reframe (goal reframing before research)
-- ✅ Console shows live sessions via event log (no daemon connection required)
-- ✅ MCP server is stable (bridge removed, EPIPE fixed, v3.34.1 published)
-- ✅ GitHub + GitLab polling triggers (no webhooks needed)
-- ✅ `worktrain init`, `tell`, `inbox`, `spawn`, `await` CLI commands
-- ✅ Stuck detection + visibility (`worktrain status`, `worktrain logs --follow`)
-- ✅ `complete_step` tool -- daemon manages continueToken, LLM never handles it
-- ✅ Assessment gate circuit breaker (stops at 3 blocked attempts, shows artifact format)
-- ✅ `worktrain daemon --install` creates launchd service (daemon survives MCP reconnects)
-- ✅ Self-configuration (`triggers.yml`, `daemon-soul.md`, `AGENTS.md` for workrail repo)
+- Daemon accepts webhooks, starts sessions, runs workflows end-to-end
+- Sessions advance through all workflow phases autonomously
+- `mr-review-workflow-agentic` v2.6 runs fully -- context gathering, review phases, synthesis loop, validation, handoff
+- `wr.discovery` v3.2.0 runs fully -- with new phase-0-reframe (goal reframing before research)
+- Console shows live sessions via event log (no daemon connection required)
+- MCP server is stable (bridge removed, EPIPE fixed, v3.34.1 published)
+- GitHub + GitLab polling triggers (no webhooks needed)
+- `worktrain init`, `tell`, `inbox`, `spawn`, `await` CLI commands
+- Stuck detection + visibility (`worktrain status`, `worktrain logs --follow`)
+- `complete_step` tool -- daemon manages continueToken, LLM never handles it
+- Assessment gate circuit breaker (stops at 3 blocked attempts, shows artifact format)
+- `worktrain daemon --install` creates launchd service (daemon survives MCP reconnects)
+- Self-configuration (`triggers.yml`, `daemon-soul.md`, `AGENTS.md` for workrail repo)
 
 ### Current limitations at this commit
 
@@ -5508,10 +5557,10 @@ Artifact: design-candidates-stdio-simplification-2026-04-18.md
 
 ### What additionally shipped since the milestone (commit 473f4bd0)
 
-- ✅ **`complete_step` tool** (#569) -- daemon manages continueToken internally, LLM never handles it. Notes required (min 50 chars). `continue_workflow` deprecated.
-- ✅ **`spawn_agent` tool** (#573) -- native in-process child session spawning. parentSessionId in session_created event. Depth enforcement. Semaphore bypass. All 4 WorkflowRunResult variants handled.
-- ✅ **`complete_step` description fix** (#575) -- removed token-seeking language from deprecated continue_workflow description that would have triggered the LLM to seek a token.
-- ✅ **Discovery ran before both implementations** -- wr.discovery validated complete_step approach (found 1 merge blocker fixed), designed spawn_agent architecture (found semaphore deadlock risk avoided).
+- **`complete_step` tool** (#569) -- daemon manages continueToken internally, LLM never handles it. Notes required (min 50 chars). `continue_workflow` deprecated.
+- **`spawn_agent` tool** (#573) -- native in-process child session spawning. parentSessionId in session_created event. Depth enforcement. Semaphore bypass. All 4 WorkflowRunResult variants handled.
+- **`complete_step` description fix** (#575) -- removed token-seeking language from deprecated continue_workflow description that would have triggered the LLM to seek a token.
+- **Discovery ran before both implementations** -- wr.discovery validated complete_step approach (found 1 merge blocker fixed), designed spawn_agent architecture (found semaphore deadlock risk avoided).
 
 ### Updated limitations
 
@@ -6051,24 +6100,24 @@ Also consolidated from three workflow variants to one canonical file.
 
 ### What shipped since v3.36.0 (Apr 18 -- Apr 19)
 
-- ✅ **`wr.shaping`** -- faithful Shape Up shaping workflow (9 steps, two human gates with autonomous fallback)
-- ✅ **`coding-task-workflow-agentic` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
-- ✅ **Coding workflow consolidated** -- from three variants (lean, full, lean.v2) to one canonical file.
-- ✅ **HttpServer removed from MCP server** (#601) -- pure stdio. MCP server can no longer accidentally start an HTTP server.
-- ✅ **Late-bound goals** (#604) -- `goalTemplate: "{{$.goal}}"` defaults for webhook-driven sessions. Goals can come from the payload, not just the static trigger definition.
-- ✅ **Coordinator message queue drain** (#606) -- `pr-review` coordinator reads `~/.workrail/message-queue.jsonl` before each spawn cycle. `worktrain tell stop`, `skip-pr <n>`, `add-pr <n>` work.
-- ✅ **Notifications shipped** -- `NotificationService` implemented, wired into `TriggerRouter` via `trigger-listener.ts`. `WORKTRAIN_NOTIFY_MACOS=true` and `WORKTRAIN_NOTIFY_WEBHOOK=<url>` in `~/.workrail/config.json`.
-- ✅ **`worktrain run pr-review`** -- fully wired coordinator command. `spawnSession` → `awaitSessions` → `getAgentResult` (session-wide artifact aggregation) → `parseFindingsFromNotes` → route by severity.
-- ✅ **`wr.review_verdict` artifact path** -- end-to-end wired: `mr-review-workflow.agentic.v2.json` phase-6 emits it, `artifact-contract-validator.ts` validates it at `continue_workflow` time, coordinator reads it with keyword-scan fallback.
-- ✅ **`worktrain logs` / `worktrain health`** -- structured daemon log tailing and per-session health summary. `worktrain status <id>` deprecated in favor of `worktrain health <id>`.
-- ✅ **`signal_coordinator` tool** -- agent can emit structured mid-session signals (`progress`, `finding`, `data_needed`, `approval_needed`, `blocked`) without advancing the step.
-- ✅ **`ChildWorkflowRunResult` + `assertNever`** -- spawn_agent delivery_failed bug fixed. `delivery_failed` impossible state is compile-time excluded.
-- ✅ **`lastStepArtifacts` on `WorkflowRunSuccess`** -- `onComplete` callback forwards artifacts alongside notes. Coordinator can read typed artifacts from result without a separate HTTP call.
-- ✅ **`steerRegistry` + POST `/sessions/:id/steer`** -- coordinator injection endpoint wired in daemon console. Running sessions register a steer callback; coordinators can inject mid-session messages via HTTP.
-- ✅ **GitHub polling adapters** -- `github_issues_poll` and `github_prs_poll` providers fully implemented alongside existing `gitlab_poll`.
-- ✅ **Knowledge graph spike** -- `src/knowledge-graph/` module: DuckDB in-memory + ts-morph indexer + two validation queries. NOT yet wired to an MCP tool (ts-morph in devDependencies).
-- ✅ **`worktrain daemon --install`** -- launchd plist creation, load, verify. Daemon survives MCP server reconnects.
-- ✅ **Performance sweep** -- April 2026 sweep identified 10 highest-leverage fixes, filed as issues #248-257. Not yet merged.
+- **`wr.shaping`** -- faithful Shape Up shaping workflow (9 steps, two human gates with autonomous fallback)
+- **`coding-task-workflow-agentic` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
+- **Coding workflow consolidated** -- from three variants (lean, full, lean.v2) to one canonical file.
+- **HttpServer removed from MCP server** (#601) -- pure stdio. MCP server can no longer accidentally start an HTTP server.
+- **Late-bound goals** (#604) -- `goalTemplate: "{{$.goal}}"` defaults for webhook-driven sessions. Goals can come from the payload, not just the static trigger definition.
+- **Coordinator message queue drain** (#606) -- `pr-review` coordinator reads `~/.workrail/message-queue.jsonl` before each spawn cycle. `worktrain tell stop`, `skip-pr <n>`, `add-pr <n>` work.
+- **Notifications shipped** -- `NotificationService` implemented, wired into `TriggerRouter` via `trigger-listener.ts`. `WORKTRAIN_NOTIFY_MACOS=true` and `WORKTRAIN_NOTIFY_WEBHOOK=<url>` in `~/.workrail/config.json`.
+- **`worktrain run pr-review`** -- fully wired coordinator command. `spawnSession` → `awaitSessions` → `getAgentResult` (session-wide artifact aggregation) → `parseFindingsFromNotes` → route by severity.
+- **`wr.review_verdict` artifact path** -- end-to-end wired: `mr-review-workflow.agentic.v2.json` phase-6 emits it, `artifact-contract-validator.ts` validates it at `continue_workflow` time, coordinator reads it with keyword-scan fallback.
+- **`worktrain logs` / `worktrain health`** -- structured daemon log tailing and per-session health summary. `worktrain status <id>` deprecated in favor of `worktrain health <id>`.
+- **`signal_coordinator` tool** -- agent can emit structured mid-session signals (`progress`, `finding`, `data_needed`, `approval_needed`, `blocked`) without advancing the step.
+- **`ChildWorkflowRunResult` + `assertNever`** -- spawn_agent delivery_failed bug fixed. `delivery_failed` impossible state is compile-time excluded.
+- **`lastStepArtifacts` on `WorkflowRunSuccess`** -- `onComplete` callback forwards artifacts alongside notes. Coordinator can read typed artifacts from result without a separate HTTP call.
+- **`steerRegistry` + POST `/sessions/:id/steer`** -- coordinator injection endpoint wired in daemon console. Running sessions register a steer callback; coordinators can inject mid-session messages via HTTP.
+- **GitHub polling adapters** -- `github_issues_poll` and `github_prs_poll` providers fully implemented alongside existing `gitlab_poll`.
+- **Knowledge graph spike** -- `src/knowledge-graph/` module: DuckDB in-memory + ts-morph indexer + two validation queries. NOT yet wired to an MCP tool (ts-morph in devDependencies).
+- **`worktrain daemon --install`** -- launchd plist creation, load, verify. Daemon survives MCP server reconnects.
+- **Performance sweep** -- April 2026 sweep identified 10 highest-leverage fixes, filed as issues #248-257. Not yet merged.
 
 ### Accurate limitations (as of v3.40.0)
 
@@ -6406,27 +6455,27 @@ Design this as part of the adaptive coordinator (#3). The `touchesUI` flag belon
 
 All five top-priority autonomous pipeline items shipped:
 
-- ✅ **#1 -- Worktree isolation + auto-commit** (PR #630) -- Each WorkTrain coding session now runs in an isolated git worktree (`~/.workrail/worktrees/<sessionId>`). `trigger.workspacePath` is never mutated; all tool factories receive `sessionWorkspacePath`. Crash recovery sidecar persists `worktreePath` for orphan cleanup. `delivery-action.ts` asserts HEAD branch before push. `test-task` trigger: `branchStrategy: worktree`, `autoCommit: true`, `autoOpenPR: true`.
+- **#1 -- Worktree isolation + auto-commit** (PR #630) -- Each WorkTrain coding session now runs in an isolated git worktree (`~/.workrail/worktrees/<sessionId>`). `trigger.workspacePath` is never mutated; all tool factories receive `sessionWorkspacePath`. Crash recovery sidecar persists `worktreePath` for orphan cleanup. `delivery-action.ts` asserts HEAD branch before push. `test-task` trigger: `branchStrategy: worktree`, `autoCommit: true`, `autoOpenPR: true`.
 
-- ✅ **#2 -- Stuck detection escalation** (PR #636) -- New `WorkflowRunResult._tag: 'stuck'` discriminant. When `repeated_tool_call` heuristic fires and `stuckAbortPolicy !== 'notify_only'` (default: `'abort'`), daemon aborts the session immediately instead of burning the 30-min wall clock. Writes structured entry to `~/.workrail/outbox.jsonl`. `stuckAbortPolicy` and `noProgressAbortEnabled` configurable per trigger in `agentConfig`. `ChildWorkflowRunResult` updated atomically.
+- **#2 -- Stuck detection escalation** (PR #636) -- New `WorkflowRunResult._tag: 'stuck'` discriminant. When `repeated_tool_call` heuristic fires and `stuckAbortPolicy !== 'notify_only'` (default: `'abort'`), daemon aborts the session immediately instead of burning the 30-min wall clock. Writes structured entry to `~/.workrail/outbox.jsonl`. `stuckAbortPolicy` and `noProgressAbortEnabled` configurable per trigger in `agentConfig`. `ChildWorkflowRunResult` updated atomically.
 
-- ✅ **#3 -- Adaptive pipeline coordinator** (PR #639) -- `worktrain run pipeline --issue N --workspace path` routes tasks to the right pipeline via pure static routing:
+- **#3 -- Adaptive pipeline coordinator** (PR #639) -- `worktrain run pipeline --issue N --workspace path` routes tasks to the right pipeline via pure static routing:
   - dep-bump + PR number → QUICK_REVIEW (delegates to `runPrReviewCoordinator`)
   - PR/MR number → REVIEW_ONLY
   - `current-pitch.md` exists → IMPLEMENT (coding + PR + review + merge)
   - Default → FULL (discovery → shaping → coding → PR → review → merge)
   - Fix loop cap: 2 iterations max. Escalating audit chain for Critical findings. UX gate for UI-touching tasks. 6 hardcoded timeout constants. Pitch archived after IMPLEMENT/FULL completes.
 
-- ✅ **#4 -- GitHub issue queue poll trigger** (PR #637) -- New `github_queue_poll` trigger provider. Polls GitHub issues matching `GitHubQueueConfig` (assignee-based MVP, `label`/`mention`/`query` typed but `not_implemented`). Maturity inference from 3 deterministic heuristics. Idempotency check (conservative: parse errors = active). JSONL decision log at `~/.workrail/queue-poll.jsonl`. `maxTotalConcurrentSessions` cap. Bot identity config (`botName`, `botEmail`).
+- **#4 -- GitHub issue queue poll trigger** (PR #637) -- New `github_queue_poll` trigger provider. Polls GitHub issues matching `GitHubQueueConfig` (assignee-based MVP, `label`/`mention`/`query` typed but `not_implemented`). Maturity inference from 3 deterministic heuristics. Idempotency check (conservative: parse errors = active). JSONL decision log at `~/.workrail/queue-poll.jsonl`. `maxTotalConcurrentSessions` cap. Bot identity config (`botName`, `botEmail`).
 
-- ✅ **#5 -- Context assembly layer** (PR #624, shipped earlier) -- `ContextAssembler` injects git diff summary + prior session notes before turn 1. Feeds into coordinator pre-dispatch.
+- **#5 -- Context assembly layer** (PR #624, shipped earlier) -- `ContextAssembler` injects git diff summary + prior session notes before turn 1. Feeds into coordinator pre-dispatch.
 
-- ✅ **Performance sweep** (all 10 issues #248-257 -- already confirmed complete)
-- ✅ **Console session tree** (PR #607 -- parentSessionId rendered in UI)
-- ✅ **Daemon file-nav tools** (PR #619) -- Glob, Grep, Edit + upgraded Read/Write with staleness guard
-- ✅ **`spawn_agent` artifacts** (PR #613) -- `lastStepArtifacts` surfaced through spawn_agent return
-- ✅ **`wr.shaping` workflow** (PR #610) -- faithful Shape Up shaping, 9 steps
-- ✅ **Coding workflow Phase 0.5** (PR #610) -- upstream context detection, three-workflow pipeline
+- **Performance sweep** (all 10 issues #248-257 -- already confirmed complete)
+- **Console session tree** (PR #607 -- parentSessionId rendered in UI)
+- **Daemon file-nav tools** (PR #619) -- Glob, Grep, Edit + upgraded Read/Write with staleness guard
+- **`spawn_agent` artifacts** (PR #613) -- `lastStepArtifacts` surfaced through spawn_agent return
+- **`wr.shaping` workflow** (PR #610) -- faithful Shape Up shaping, 9 steps
+- **Coding workflow Phase 0.5** (PR #610) -- upstream context detection, three-workflow pipeline
 
 ### WorkTrain current capabilities (v3.45.0)
 
@@ -7497,22 +7546,22 @@ Medium for the cleanup command (quality of life, stops log noise). High for star
 
 **All five autonomous pipeline items (previously recorded) plus:**
 
-- ✅ **Discovery loop fix** (#748) -- three coupled fixes: thread `maxSessionMinutes` through `spawnSession` (sessions now get 55/35/65 min instead of 30 min default), inspect `PipelineOutcome` in polling-scheduler and apply `worktrain:in-progress` label on escalation, write issue-ownership sidecar for cross-restart idempotency
-- ✅ **In-process `awaitSessions` and `getAgentResult`** (#741) -- replaced HTTP calls to the daemon's own console with direct `ConsoleService` access
-- ✅ **Try/catch on all coordinator I/O** (#740) -- `getAgentResult`, `pollForPR`, `postToOutbox` all wrapped; coordinator no longer crashes on I/O failure
-- ✅ **Dispatch dedup prealloc bypass** (#744) -- `dispatch()` now bypasses dedup for pre-allocated sessions, fixing the zombie session bug that prevented discovery from starting
-- ✅ **Promise.race crash fix** (#733) -- worktrees scan timeout no longer crashes the daemon via unhandled rejection
-- ✅ **Trigger validator** (#690) -- `worktrain trigger validate` command, `validateTriggerStrict()` pure function
-- ✅ **`worktrain trigger poll`** (#697) -- force immediate poll cycle on any queue trigger
-- ✅ **`worktrain trigger test`** (#656) -- dry-run showing what would dispatch
-- ✅ **Auto-load ~/.workrail/.env** (#673) -- daemon reads secrets from .env automatically
-- ✅ **Daemon lifecycle events** (#674) -- `session_aborted` on SIGTERM, `daemon_heartbeat` every 30s
-- ✅ **Attribution signals** (#658) -- `[WT]` PR title prefix, `Co-authored-by: WorkTrain` commit trailers, `worktrain:generated` label
-- ✅ **Secret scan before push** (#660) -- pattern-based scan blocks commits with leaked credentials
-- ✅ **Unified logs stream** (#680) -- `worktrain logs` now merges daemon events, queue-poll.jsonl, and filtered stderr
-- ✅ **Stale lock file handling** (#705) -- validates lock file PID before trusting port discovery
-- ✅ **5 architectural audits** (docs/design/) -- coordinator access, error handling, testability, type bloat, memory management
-- ✅ **Stale user workflow cleanup** -- removed old copies from `~/.workrail/workflows/` that were causing ValidationError noise
+- **Discovery loop fix** (#748) -- three coupled fixes: thread `maxSessionMinutes` through `spawnSession` (sessions now get 55/35/65 min instead of 30 min default), inspect `PipelineOutcome` in polling-scheduler and apply `worktrain:in-progress` label on escalation, write issue-ownership sidecar for cross-restart idempotency
+- **In-process `awaitSessions` and `getAgentResult`** (#741) -- replaced HTTP calls to the daemon's own console with direct `ConsoleService` access
+- **Try/catch on all coordinator I/O** (#740) -- `getAgentResult`, `pollForPR`, `postToOutbox` all wrapped; coordinator no longer crashes on I/O failure
+- **Dispatch dedup prealloc bypass** (#744) -- `dispatch()` now bypasses dedup for pre-allocated sessions, fixing the zombie session bug that prevented discovery from starting
+- **Promise.race crash fix** (#733) -- worktrees scan timeout no longer crashes the daemon via unhandled rejection
+- **Trigger validator** (#690) -- `worktrain trigger validate` command, `validateTriggerStrict()` pure function
+- **`worktrain trigger poll`** (#697) -- force immediate poll cycle on any queue trigger
+- **`worktrain trigger test`** (#656) -- dry-run showing what would dispatch
+- **Auto-load ~/.workrail/.env** (#673) -- daemon reads secrets from .env automatically
+- **Daemon lifecycle events** (#674) -- `session_aborted` on SIGTERM, `daemon_heartbeat` every 30s
+- **Attribution signals** (#658) -- `[WT]` PR title prefix, `Co-authored-by: WorkTrain` commit trailers, `worktrain:generated` label
+- **Secret scan before push** (#660) -- pattern-based scan blocks commits with leaked credentials
+- **Unified logs stream** (#680) -- `worktrain logs` now merges daemon events, queue-poll.jsonl, and filtered stderr
+- **Stale lock file handling** (#705) -- validates lock file PID before trusting port discovery
+- **5 architectural audits** (docs/design/) -- coordinator access, error handling, testability, type bloat, memory management
+- **Stale user workflow cleanup** -- removed old copies from `~/.workrail/workflows/` that were causing ValidationError noise
 
 ### Current pipeline state (live)
 
@@ -7591,30 +7640,30 @@ Discovery session `ecf359d7` running: 77 turns, 11 step advances (active, making
 This was a major session covering daemon/console separation, metrics infrastructure, and workflow stability fixes.
 
 **Architecture -- daemon/console/MCP separation:**
-- ✅ **Delete daemon-console.ts** (#753) -- daemon no longer bundles an embedded console; `worktrain console` is now the sole console entry point
-- ✅ **Remove dead steer/poll endpoints** (#755) -- deleted `worktrain trigger poll` CLI and the steer/poll HTTP endpoints that were only used by the deleted daemon-console
-- ✅ **Wire workflow catalog into standalone console** (#783, open) -- `worktrain console` Workflows tab now works without the MCP server running; `EnhancedMultiSourceWorkflowStorage` constructed directly in `standalone-console.ts`
+- **Delete daemon-console.ts** (#753) -- daemon no longer bundles an embedded console; `worktrain console` is now the sole console entry point
+- **Remove dead steer/poll endpoints** (#755) -- deleted `worktrain trigger poll` CLI and the steer/poll HTTP endpoints that were only used by the deleted daemon-console
+- **Wire workflow catalog into standalone console** (#783, open) -- `worktrain console` Workflows tab now works without the MCP server running; `EnhancedMultiSourceWorkflowStorage` constructed directly in `standalone-console.ts`
 
 **Metrics infrastructure (6-step sequence, all merged):**
-- ✅ **timestampMs on events** (#768, #772) -- `DomainEventEnvelopeV1Schema` now has required `timestampMs`; backfill script at `scripts/backfill-timestamps.ts`
-- ✅ **`run_completed` event** (#773) -- emitted on successful session completion with `startGitSha`, `endGitSha`, `agentCommitShas`, `captureConfidence`, `durationMs`
-- ✅ **Authoring docs: metrics_* keys** (#767) -- `metricsProfile` field and SHA accumulation convention documented in `docs/authoring-v2.md`
-- ✅ **`projectSessionMetricsV2` projection** (#771) -- pure projection reading `run_completed` + `context_set metrics_*` keys, wired into `ConsoleSessionSummary`
-- ✅ **Console metrics display** (#777) -- `SessionMetricsSection` in session detail view; `GET /api/v2/sessions/:id/diff-summary` endpoint
-- ✅ **`stats-summary.json` writer** (#769) -- `~/.workrail/data/stats-summary.json` aggregated from `execution-stats.jsonl`, written post-session and every 30s heartbeat
+- **timestampMs on events** (#768, #772) -- `DomainEventEnvelopeV1Schema` now has required `timestampMs`; backfill script at `scripts/backfill-timestamps.ts`
+- **`run_completed` event** (#773) -- emitted on successful session completion with `startGitSha`, `endGitSha`, `agentCommitShas`, `captureConfidence`, `durationMs`
+- **Authoring docs: metrics_* keys** (#767) -- `metricsProfile` field and SHA accumulation convention documented in `docs/authoring-v2.md`
+- **`projectSessionMetricsV2` projection** (#771) -- pure projection reading `run_completed` + `context_set metrics_*` keys, wired into `ConsoleSessionSummary`
+- **Console metrics display** (#777) -- `SessionMetricsSection` in session detail view; `GET /api/v2/sessions/:id/diff-summary` endpoint
+- **`stats-summary.json` writer** (#769) -- `~/.workrail/data/stats-summary.json` aggregated from `execution-stats.jsonl`, written post-session and every 30s heartbeat
 
 **Engine improvements:**
-- ✅ **Execution time tracking** (#756) -- `execution-stats.jsonl` per session in finally block
-- ✅ **Worktree orphan leak fix** (#756) -- sidecar deletion deferred to `maybeRunDelivery()` for worktree sessions
-- ✅ **assertNever for ReviewSeverity** (#756)
-- ✅ **Crash recovery phase A** (#759) -- `clearQueueIssueSidecars()` fixes 56-min re-dispatch block; sidecar preservation for sessions with progress
-- ✅ **Conversation history persistence** (#762) -- `<sessionId>-conversation.jsonl` per daemon session, append-only delta flush at each turn
-- ✅ **queue-poll.jsonl rotation** (#761) -- 10 MB size cap with `.1` backup
-- ✅ **Remove WorkTrain-owned label writes** (#765) -- `worktrain:in-progress`, `worktrain:generated` labels removed; deduplication now purely internal (sidecar + dispatchingIssues + session scan)
-- ✅ **metricsProfile footer injection** (#779) -- engine injects `metrics_*` accumulation footers based on `metricsProfile` workflow field; all 35 bundled workflows assigned profiles
+- **Execution time tracking** (#756) -- `execution-stats.jsonl` per session in finally block
+- **Worktree orphan leak fix** (#756) -- sidecar deletion deferred to `maybeRunDelivery()` for worktree sessions
+- **assertNever for ReviewSeverity** (#756)
+- **Crash recovery phase A** (#759) -- `clearQueueIssueSidecars()` fixes 56-min re-dispatch block; sidecar preservation for sessions with progress
+- **Conversation history persistence** (#762) -- `<sessionId>-conversation.jsonl` per daemon session, append-only delta flush at each turn
+- **queue-poll.jsonl rotation** (#761) -- 10 MB size cap with `.1` backup
+- **Remove WorkTrain-owned label writes** (#765) -- `worktrain:in-progress`, `worktrain:generated` labels removed; deduplication now purely internal (sidecar + dispatchingIssues + session scan)
+- **metricsProfile footer injection** (#779) -- engine injects `metrics_*` accumulation footers based on `metricsProfile` workflow field; all 35 bundled workflows assigned profiles
 
 **Workflow namespace:**
-- ✅ **Rename all bundled workflows to `wr.*`** (#782, open) -- `coding-task-workflow-agentic` → `wr.coding-task`, `mr-review-workflow-agentic` → `wr.mr-review`, etc. Prevents local project source from shadowing bundled workflows on version mismatch.
+- **Rename all bundled workflows to `wr.*`** (#782, open) -- `coding-task-workflow-agentic` → `wr.coding-task`, `mr-review-workflow-agentic` → `wr.mr-review`, etc. Prevents local project source from shadowing bundled workflows on version mismatch.
 
 ---
 
@@ -7648,22 +7697,43 @@ This was a major session covering daemon/console separation, metrics infrastruct
 
 ---
 
-### Current system state (for next engineer picking this up)
+### Current system state (Apr 23, 2026 -- end of session)
 
-**Daemon:** Stopped intentionally. Unload: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
-**To restart daemon:** `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
-**MCP server:** Reconnecting -- run `/mcp` in Claude Code to get fresh 3.66.0 process
-**Global npm:** Updated to 3.66.0 (`npm update -g @exaudeus/workrail`)
-**Local build:** Built from main at 3.66.0 (`npm run build` done)
-**triggers.yml:** Must update `workflowId` values to new `wr.*` IDs after #782 merges (e.g. `coding-task-workflow-agentic` → `wr.coding-task`)
+**npm version: v3.68.1** | Daemon: stopped | MCP: connected on 3.68.1
 
-**Immediate next actions:**
-1. Reconnect MCP (`/mcp` in Claude Code)
-2. Run `wr.mr-review` on PR #782 (rename) and PR #783 (console fix)
-3. Merge both PRs
-4. Wait for validation fix shaping to complete, then code and ship it
-5. Update `triggers.yml` with new `wr.*` workflow IDs
-6. Restart daemon and monitor first pipeline run with new IDs
+**What shipped this session (Apr 23):**
+- **`wr.*` workflow namespace rename** (#782) -- all 31 bundled workflows renamed; `legacy_project` source can no longer shadow bundled ones
+- **`triggers.yml` updated** (#785) -- `wr.coding-task`, `wr.mr-review`
+- **Standalone console Workflows tab** (#783) -- works without MCP server
+- **Validation regression test** (#784) -- `additionalProperties: false` confirmed enforced
+- **Session metrics refactor** (#786) -- defensive cast removed, types clean
+- **Validation warnings in `list_workflows`** (#787) -- users now see why their workflow disappeared
+- **`loadSessionNotes` export fix** (#790) -- 14 pre-existing test failures now pass
+- **`metrics_outcome` validation** (#793) -- agents get `VALIDATION_ERROR` immediately if they pass invalid values; tested and confirmed working
+
+**Active bugs / gaps:**
+- GitHub admin bypass removed from ruleset -- `gh pr merge --admin` will fail
+- `metrics_pr_numbers` still 0% (review workflows not picking up footer) -- expected, no sessions have completed `wr.mr-review` with new IDs yet
+- Only 20% of sessions have `run_completed` -- most daemon sessions don't complete due to crashes/timeouts; normal
+
+**Known gaps (not yet started):**
+- **Phase B crash recovery** -- actual agent loop restart after crash
+- **`workrail cleanup` command** -- dead managed sources, old sessions
+- **Versioned workflow schema validation** -- see backlog entry above
+- **console-routes.ts dispatch coupling** -- `POST /api/v2/auto/dispatch` imports from `src/daemon/`
+- **Daemon agent loop stall detection** -- 120s liveness check for frozen loops
+
+**System state:**
+- **WorkRail MCP server:** Connected at 3.68.1 (global npm `npx -y @exaudeus/workrail`). All `wr.*` IDs working.
+- **WorkTrain daemon:** Stopped. Start: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`. Points at local dist (`/Users/etienneb/git/personal/workrail/dist/cli-worktrain.js`).
+- **WorkRail console:** Not running. Start: `worktrain console`. Reads session files directly, no daemon required.
+- **Global npm:** 3.68.1 (`npm update -g @exaudeus/workrail` done)
+- **Local build:** Built from main at 3.68.1 (`npm run build` done)
+
+**Next up:**
+1. Restart daemon and watch first pipeline run with `wr.*` IDs
+2. Versioned schema validation (design ready in backlog, audit confirmed v1 = current schema)
+3. Daemon agent loop stall detection (medium priority)
 
 ---
 
@@ -7804,3 +7874,49 @@ Convention drift is a recurring tax. Migration is a one-time cost. In a codebase
 This is not urgent -- the current codebase is working well. But if autonomous agent usage grows and human review per-PR decreases further, the compiler enforcement gap becomes more important, not less.
 
 **Priority:** Low / long-term. Worth revisiting when the agent is writing the majority of new code. Requires a concrete spike: rewrite one module (e.g. `src/v2/durable-core/domain/`) in Kotlin and measure the real friction before committing to a full migration.
+
+---
+
+## Task re-dispatch loop protection (Apr 23, 2026) -- HIGH PRIORITY
+
+**The problem:** When a pipeline session fails (stuck, crash, timeout), the idempotency sidecar (`queue-issue-<N>.json`) expires after its TTL and the queue re-selects the same issue on the next poll cycle. There is no memory of how many times an issue has been attempted. A task that consistently fails (bad workflow, broken code, unsolvable problem) gets retried indefinitely, burning API credits and producing no forward progress.
+
+**Concrete incident:** Issue #393 ("test(daemon): add coverage for loadSessionNotes failure paths") was dispatched in a loop -- discovery + shaping + coding sessions repeatedly started, failed stuck, and were re-dispatched. The issue had already been resolved by human intervention but the daemon didn't know.
+
+**What we need:** Per-issue attempt tracking with a max-attempts cap and escalation on exhaustion.
+
+**Design sketch:**
+
+1. **Attempt counter in the sidecar:** Extend `queue-issue-<N>.json` to include `attemptCount: number`. On each new dispatch for the same issue, increment the counter. When `attemptCount >= maxAttempts` (default 3), do not dispatch -- instead emit an outbox notification and apply a `worktrain:needs-human` label (or equivalent internal signal) so the issue is skipped until a human resets it.
+
+2. **Sidecar persistence across TTL expiry:** Today the sidecar is deleted when the TTL expires. To count attempts across expiry, either: (a) use a longer-lived separate tracking file per issue, or (b) check the daemon event log for previous `session_started` events with the same `issueNumber` goal within a lookback window (e.g. last 24h).
+
+3. **Human reset mechanism:** A human should be able to say "try again" by closing and reopening the issue, or by removing a `worktrain:stuck` label, or via a `worktrain retry <issueNumber>` CLI command.
+
+4. **Escalation signal:** When max attempts is hit, post a comment on the GitHub issue: "WorkTrain attempted this task 3 times and was unable to complete it. Manual intervention required." This closes the invisible failure loop.
+
+**Files to change:**
+- `src/trigger/adapters/github-queue-poller.ts` -- track attempt count when writing sidecar
+- `src/trigger/polling-scheduler.ts` -- check attempt count before dispatch
+- `~/.workrail/daemon-sessions/queue-issue-<N>.json` schema -- add `attemptCount`
+
+**Priority:** High. This is a production correctness issue -- the daemon will burn unlimited credits on a broken task without this.
+
+---
+
+## Auto-start mechanism inventory (Apr 23, 2026)
+
+**Current auto-start mechanisms for WorkTrain daemon:**
+
+1. **launchd plist** (`~/Library/LaunchAgents/io.worktrain.daemon.plist`) with `KeepAlive: true` -- daemon restarts automatically on crash or manual kill. Only `launchctl bootout` stops it permanently.
+
+No other auto-start mechanisms exist (no login items, no cron, no systemd).
+
+**Operational notes:**
+- To stop temporarily: `launchctl stop io.worktrain.daemon` -- daemon stops but restarts on next launchd check
+- To stop permanently: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
+- To restart after bootout: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
+
+**Known risk:** When working on daemon code, always `bootout` first. A `stop` will just respawn the old binary. This has caused confusion multiple times in this session.
+
+**Improvement idea:** Add a `worktrain daemon stop --permanent` command that does the bootout automatically, and `worktrain daemon start` that does the bootstrap. Makes the distinction between temporary stop and permanent stop explicit without requiring operators to know launchd internals.

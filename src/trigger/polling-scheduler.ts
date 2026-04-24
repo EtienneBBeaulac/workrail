@@ -119,6 +119,7 @@ export class PollingScheduler {
     private readonly router: TriggerRouter,
     private readonly store: PolledEventStore,
     private readonly fetchFn?: FetchFn,
+    private readonly sessionsDir: string = path.join(os.homedir(), '.workrail', 'daemon-sessions'),
   ) {}
 
   /**
@@ -476,7 +477,7 @@ export class PollingScheduler {
     }
 
     // Concurrency cap check BEFORE per-issue evaluation (INVARIANT per pitch)
-    const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+    const sessionsDir = this.sessionsDir;
     const activeSessions = await countActiveSessions(sessionsDir);
     if (activeSessions >= queueConfig.maxTotalConcurrentSessions) {
       console.log(`[QueuePoll] Skipping cycle: active sessions (${activeSessions}) >= maxTotalConcurrentSessions (${queueConfig.maxTotalConcurrentSessions}).`);

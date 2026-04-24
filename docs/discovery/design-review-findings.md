@@ -1,110 +1,107 @@
-# Design Review Findings: wr.discovery Goal Reframing
+# Design Review Findings: Issue #393 Stale Tracker Close
 
-*Concise, actionable findings for main-agent synthesis. Not a final decision.*
-**Date:** 2026-04-18
+**Reviewed design:** Candidate A -- Close Issue #393 with evidence comment  
+**Review date:** 2026-04-23  
+**Reviewer:** wr.discovery session (design_first / QUICK path)
 
 ---
 
 ## Tradeoff Review
 
-**Tradeoff 1: goalType classification remains agent judgment**
+**Tradeoff 1: Close comment mentions why auto-close did not fire**
+- Does not violate any decision criterion -- in fact satisfies Criterion 5 (captures the learning)
+- Tone risk (sounds like blame): mitigated by using technical/mechanical language
+- Hidden assumption: maintainer reads close comments -- reasonable for a 1-person repo
+- **Verdict: Acceptable**
 
-- Acceptable: this pattern is established in the workflow (rigorMode, pathRecommendation are all agent-derived)
-- Classification examples in the procedure reduce misclassification probability
-- **Finding: YELLOW.** Add goalType classification examples to procedure text to reduce ambiguity at the problem_framed / opportunity_framed boundary.
-
-**Tradeoff 2: overhead for well-framed goals is nonzero**
-
-- A few additional context variable captures and procedure lines in Phase 0
-- Well-framed goals produce minimal output ('goalType = problem_framed, no impliedProblem needed')
-- **Finding: NON-ISSUE.** Overhead is trivial.
-
-**Tradeoff 3: Phase 1g always-on for design_first/full_spectrum**
-
-- One additional advance per session for these paths
-- Produces trivially short output for well-framed sessions ('pathChangedAfterContext = false')
-- **CRITICAL CORRECTION NEEDED:** Phase 1g runCondition must be an OR (`retriageNeeded = true OR pathRecommendation in [design_first, full_spectrum]`) not a replacement. Otherwise landscape_first sessions that explicitly need retriage will not trigger it.
-- **Finding: YELLOW.** Runnable as-designed if the OR condition is used correctly.
+**Tradeoff 2: No AGENTS.md update -- pattern prevention sacrificed**
+- Actively satisfies Criterion 3 (no new problems) by not touching a protected human-maintained file
+- Only one observed instance of the failure mode (PR #790) -- insufficient evidence of a recurring pattern
+- The learning is captured in the close comment itself, which is more contextually located than AGENTS.md
+- **Verdict: Acceptable**
 
 ---
 
 ## Failure Mode Review
 
-**Failure mode 1: Agent misclassifies solution-framed goal as opportunity_framed**
-- Status: **Partially mitigated.** C3's Phase 1e/1f required 'what would make this framing wrong' output provides a downstream catch. Classification examples in Phase 0 reduce probability.
-- Missing mitigation: examples in procedure (address in revisions)
-- **Finding: MEDIUM risk, mitigated.**
+**FM1: Maintainer re-opens because they wanted to close personally**
+- Design handles it: close comment provides full evidence chain; re-open is 5-second CLI command; no data loss
+- Likelihood: Low (0 comments, 2-day stale, daemon assignee, no checkbox activity)
+- Severity if occurs: Minimal (issue re-opens, maintainer closes manually, traceability comment persists)
+- Missing mitigations: None needed
 
-**Failure mode 2: 'What would make this framing wrong' output is formulaic**
-- Status: **Partially mitigated.** Making it required non-empty enforces form but not quality.
-- Missing mitigation: specificity instruction ('name ONE concrete condition, not a general caveat')
-- **Finding: LOW-MEDIUM risk.**
-
-**Failure mode 3: Phase 1g doesn't surface new insights for well-framed sessions**
-- Status: **Non-issue by design.** For well-framed sessions, Phase 1g is a graceful no-op that confirms the path is still correct. One advance wasted, nothing more.
-- **Finding: LOW risk, acceptable.**
+**FM2: CI secretly failing for the test file**
+- Design handles it: 14/14 passing verified locally immediately before action; test is isolated unit coverage
+- No related CI failure issues exist in the open issues list for this test file
+- Severity if occurs: Low (tracker close is orthogonal to CI state; no test regression introduced)
+- Missing mitigations: None needed
 
 ---
 
 ## Runner-Up / Simpler Alternative Review
 
-**C2 (mandatory Phase 0a):** The structural enforcement advantage is real but comes at the cost of a mandatory overhead step for all sessions. The C1+C3 hybrid achieves most of C2's value via procedure-level enforcement plus structural runCondition changes. C2 is the right escalation if the hybrid proves insufficient.
+**Runner-up (Candidate B -- close + AGENTS.md note):**
+- Candidate B's only distinct value (keyword failure mode documentation) is fully absorbed into Candidate A's close comment
+- No element of B is orphaned; no hybrid needed
 
-**Simpler variant:** Just one sentence added to Phase 0: 'If the goal is solution-framed, derive the underlying problem.' Too narrow -- no context variables means no downstream reference to the reframing.
-
-**`alternativeFraming` addition from C2:** Borrowing C2's `alternativeFraming` requirement (one reframe even when the original goal seems correct) is high-value, low-cost. Add to Phase 0 design doc entry, not as a context variable.
-
-**Finding: C1+C3 hybrid with two refinements (examples, alternativeFraming) stands. No direction change needed.**
+**Simpler variant (close without comment):**
+- Fails Criterion 2 (no traceability) and Criterion 5 (no learning capture)
+- Not viable -- the comment is load-bearing, not decorative
 
 ---
 
 ## Philosophy Alignment
 
-| Principle | Status |
-|---|---|
-| Validate at boundaries, trust inside | SATISFIED -- Phase 0 becomes an active validator |
-| Make illegal states unrepresentable | PARTIALLY SATISFIED -- C3 structural changes help; C2 would fully satisfy |
-| YAGNI with discipline | SATISFIED -- no new steps, minimal additions |
-| Architectural fixes over patches | SATISFIED -- runCondition changes and required output contracts are structural |
-| Determinism over cleverness | SATISFIED -- same goalType input produces same path behavior |
+**Clearly satisfied:**
+- Validate at boundaries, trust inside -- all validation done before action
+- Observability -- close comment makes the state transition and rationale fully visible
+- Document "why" not "what" -- comment explains rationale, not just action
+- Atomicity -- single CLI call, no partial state possible
+- Architectural fixes over patches -- reframe correctly identified the real problem (stale tracker) before acting
 
-**One explicit philosophy tension:** 'Make illegal states unrepresentable' vs 'YAGNI with discipline' -- deliberately accepted, C2 is escalation path.
+**Under tension:**
+- Agent authority over human-filed issues -- mild tension; resolved by reversibility + transparent comment
+- **Verdict: Acceptable tension, not risky**
 
 ---
 
 ## Findings
 
-### Yellow findings
+No RED or ORANGE findings. All challenges and reviews converge.
 
-**Y1: goalType classification boundary ambiguity**
-The boundary between `problem_framed` and `opportunity_framed` is unclear without examples. Add classification examples to Phase 0 procedure to reduce misclassification at this boundary.
-
-**Y2: Phase 1g runCondition must be OR, not replacement**
-The retriage step runCondition must be: `retriageNeeded = true OR pathRecommendation == design_first OR pathRecommendation == full_spectrum`. A straight replacement would break landscape_first sessions that legitimately need retriage.
-
-**Y3: 'What would make this framing wrong' needs specificity instruction**
-The required output field should specify 'name ONE concrete falsification condition, not a general caveat.' Without this, the field can be satisfied by formulaic responses.
-
-### No Red or Orange findings
-
-The selected C1+C3 direction has no material structural weaknesses.
+**YELLOW -- Tone of close comment (INFO)**
+- Risk: the explanation of why auto-close did not fire could read as attributing a mistake to the PR author
+- Mitigation: use mechanical/technical language ("GitHub requires `Closes #NNN` syntax; PR #790 used different phrasing") rather than evaluative language
+- Action: word the comment accordingly -- no structural change to the design needed
 
 ---
 
 ## Recommended Revisions
 
-1. **Add goalType classification examples** to Phase 0 procedure (solution_framed: 'add X', 'implement Y', 'build X'; problem_framed: 'reduce X', 'fix Y'; opportunity_framed: 'explore X', 'decide whether Y'; decision_framed: 'choose between A and B')
+**Revision 1 (from YELLOW finding): Prescribe exact comment wording**
 
-2. **Add `alternativeFraming`** as a required design doc entry in Phase 0: 'Before selecting a path, generate one alternative framing -- if the stated goal is wrong, what would a better goal be?'
+Use this comment text:
 
-3. **Use OR condition for Phase 1g runCondition:** `retriageNeeded = true OR pathRecommendation in [design_first, full_spectrum]`
+> All acceptance criteria for this issue are satisfied on `main`.
+>
+> - `loadSessionNotes` is exported at `src/daemon/workflow-runner.ts` (added in PR #790)
+> - All 4 failure paths (token decode, store load, projection, unexpected exception) and the happy path are covered by `tests/unit/workflow-runner-load-session-notes.test.ts` (added in PR #782)
+> - 14 tests pass: `npx vitest run tests/unit/workflow-runner-load-session-notes.test.ts`
+>
+> Note: PR #790 referenced this issue as "Closes issue #393 pre-existing test failures" but GitHub's auto-close requires the exact syntax `Closes #393` -- the non-standard phrasing is why the issue was not automatically closed on merge.
 
-4. **Add specificity instruction** to Phase 1e/1f 'what would make this framing wrong' field: require naming one concrete falsification condition.
+This wording is factual, neutral, and gives any future reader everything they need to verify or re-open.
 
 ---
 
 ## Residual Concerns
 
-1. The goalType classification is LLM-dependent. Without empirical testing on real sessions, we cannot confirm the classification is reliable. This is an inherent limitation of the approach.
+**RC1 (low): Pattern recurrence unaddressed**
+If the PR keyword failure mode recurs on a second PR, the case for Candidate B (AGENTS.md note) strengthens. This is not actionable now but should be noted for future monitoring.
 
-2. The C1+C3 hybrid does not prevent path-selection bias for the window between Phase 0 path selection and Phase 1g retriage. A session that selects the wrong path in Phase 0 runs several steps in the wrong direction before Phase 1g can correct it. Acceptable for STANDARD rigor; C2 is the correct escalation if this proves problematic.
+**RC2 (very low): Open CI failures on main**
+There are 10+ open "CI failure on main blocking release" issues. These are unrelated to the test file in question (verified locally). If main CI is broken in a way that affects this test file, the close would be slightly premature. Probability is very low given local verification.
+
+---
+
+**Overall verdict: PROCEED with Candidate A as designed, using the prescribed comment wording from Revision 1.**
