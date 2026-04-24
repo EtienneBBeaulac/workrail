@@ -3402,9 +3402,11 @@ export async function runWorkflow(
     if (usesBedrock) {
       agentClient = new AnthropicBedrock();
       modelId = 'us.anthropic.claude-sonnet-4-6';
+      console.log(`[WorkflowRunner] Model: ${modelId} (amazon-bedrock, detected from AWS env)`);
     } else {
       agentClient = new Anthropic({ apiKey });
-      modelId = 'claude-sonnet-4-5';
+      modelId = 'claude-sonnet-4-6';
+      console.log(`[WorkflowRunner] Model: ${modelId} (anthropic direct). Set agentConfig.model or AWS env vars to use Bedrock.`);
     }
   }
 
@@ -4241,7 +4243,7 @@ export async function runWorkflow(
       kind: 'session_completed',
       sessionId,
       workflowId: trigger.workflowId,
-      outcome: 'timeout',   // WHY outcome:'timeout': stuck is not yet a first-class outcome in the event schema; backward compat with log parsers that expect 'timeout' for non-success non-error outcomes.
+      outcome: 'stuck',
       detail: stuckReason,
       ...withWorkrailSession(workrailSessionId),
     });
