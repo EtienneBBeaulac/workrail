@@ -26,6 +26,8 @@ import {
   createSessionState,
   buildSessionContext,
   DAEMON_SOUL_DEFAULT,
+  DEFAULT_SESSION_TIMEOUT_MINUTES,
+  DEFAULT_MAX_TURNS,
 } from '../../src/daemon/workflow-runner.js';
 import type { SessionState, StuckConfig, SessionContextInputs } from '../../src/daemon/workflow-runner.js';
 import type { WorkflowRunResult, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
@@ -371,9 +373,6 @@ describe('evaluateStuckSignals', () => {
 // Tests for the pure function that assembles the session configuration from
 // pre-loaded I/O results. No I/O is performed in these tests.
 
-const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
-const DEFAULT_MAX_TURNS = 200;
-
 /** Helper to build a minimal WorkflowTrigger for buildSessionContext tests. */
 function makeSessionTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger {
   return {
@@ -446,6 +445,13 @@ describe('buildSessionContext', () => {
     const trigger = makeSessionTrigger(); // no context field
     const { initialPrompt } = buildSessionContext(trigger, makeInputs());
     expect(initialPrompt).not.toContain('Trigger context:');
+  });
+
+  it('initial prompt contains the closing directive to call complete_step', () => {
+    const { initialPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs());
+    expect(initialPrompt).toContain(
+      'Complete all step work, then call complete_step with your notes to advance.',
+    );
   });
 
   it('initial prompt contains reference URL section when referenceUrls is set', () => {

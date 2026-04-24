@@ -86,7 +86,7 @@ const MAX_SESSION_NOTE_CHARS = 800;
  * If the agent loop does not complete within this window, runWorkflow() aborts
  * the agent and returns { _tag: 'timeout', reason: 'wall_clock' }.
  */
-const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
+export const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
 
 /**
  * Default maximum number of LLM turns per agent session.
@@ -100,7 +100,7 @@ const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
  * exploration) without being the bottleneck -- wall-clock maxSessionMinutes is
  * the primary cap for runaway sessions.
  */
-const DEFAULT_MAX_TURNS = 200;
+export const DEFAULT_MAX_TURNS = 200;
 
 /**
  * Conditionally spreads workrailSessionId into a daemon event object.
@@ -3871,12 +3871,6 @@ export interface SessionContextInputs {
   readonly sessionNotes: readonly string[];
   /** The first step's pending prompt from executeStartWorkflow / _preAllocatedStartResponse */
   readonly firstStepPrompt: string;
-  /** Optional assembled context summary from trigger.context.assembledContextSummary */
-  readonly assembledContextSummary?: string;
-  /** Optional reference URLs from trigger.referenceUrls */
-  readonly referenceUrls?: readonly string[];
-  /** Trigger context for injection into the initial prompt */
-  readonly triggerContext?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -3923,9 +3917,6 @@ export function buildSessionContext(
   // directs the agent to complete the step work before calling complete_step. Without
   // this, the agent may produce a "thinking aloud" turn before the first tool call,
   // which wastes tokens and delays step execution.
-  // WHY triggerContext (not inputs.triggerContext): both refer to the same data.
-  // The inputs field documents the I/O boundary; trigger.context is the authoritative
-  // source. Using trigger.context directly keeps the shape consistent with buildSystemPrompt.
   const contextJson = trigger.context
     ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
     : '';
@@ -4486,11 +4477,6 @@ export async function runWorkflow(
     workspaceContext,
     sessionNotes,
     firstStepPrompt: firstStep.pending?.prompt ?? 'No step content available',
-    assembledContextSummary: typeof trigger.context?.['assembledContextSummary'] === 'string'
-      ? trigger.context['assembledContextSummary'] as string
-      : undefined,
-    referenceUrls: trigger.referenceUrls,
-    triggerContext: trigger.context,
   });
 
   // ---- Observability callbacks for AgentLoop ----
