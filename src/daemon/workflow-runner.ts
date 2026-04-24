@@ -3334,10 +3334,13 @@ export async function runWorkflow(
   // Default 'unknown' is a valid data point (not silent data loss) if a future return
   // path is added without updating this variable.
   //
-  // CLOSURE NOTE: the finally block's async stats write reads sessionOutcome via closure
-  // reference inside a Promise .then() microtask. Microtasks fire after the synchronous
-  // return completes, so the .then() always sees the final value assigned before the return.
-  // This is standard JS closure + microtask sequencing -- it is correct, just subtle.
+  // sessionOutcome is set at each result path and written to execution-stats.jsonl
+  // via writeExecutionStats() at that path's return site. The finally block does NOT
+  // write stats for the agent-loop paths -- only for pre-agent-loop early exits.
+  // WHY: writeExecutionStats() takes outcome by value. Calling it in finally with
+  // sessionOutcome would always capture 'unknown' because the outcome assignments
+  // happen after the finally block exits. Each result path calls writeExecutionStats()
+  // directly with the correct outcome, mirroring the pre-agent-loop early exit pattern.
   let sessionOutcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown' = 'unknown';
 
   // ---- Session ID (process-local, crash safety) ----
@@ -4223,14 +4226,6 @@ export async function runWorkflow(
     }
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
 
-    // ---- Execution stats (for timeout calibration) ----
-    // WHY fire-and-forget: a stats write failure must never crash the session or
-    // block the return path. This is observability data, not crash recovery state.
-    // WHY also in pre-try exits: 4 paths exit before the try block and never reach
-    // this finally clause (model validation, start_workflow failure, worktree creation
-    // failure, instant single-step completion). Each calls writeExecutionStats() directly.
-    // If adding a new result path inside the try block, update sessionOutcome instead.
-    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, sessionOutcome, stepAdvanceCount);
   }
 
   // ---- Stuck result (repeated_tool_call or no_progress abort) ----
@@ -4248,7 +4243,7 @@ export async function runWorkflow(
       ...withWorkrailSession(workrailSessionId),
     });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
-    sessionOutcome = 'stuck'; // timing written in finally block
+    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'stuck', stepAdvanceCount);
     return {
       _tag: 'stuck',
       workflowId: trigger.workflowId,
@@ -4272,7 +4267,7 @@ export async function runWorkflow(
     // WHY: a timed-out session is no longer in-flight. Leaving the file causes
     // countActiveSessions() to permanently inflate until daemon restart.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
-    sessionOutcome = 'timeout'; // timing written in finally block
+    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'timeout', stepAdvanceCount);
     return {
       _tag: 'timeout',
       workflowId: trigger.workflowId,
@@ -4306,7 +4301,7 @@ export async function runWorkflow(
     // WHY: an errored session is no longer in-flight. Leaving the file causes
     // countActiveSessions() to permanently inflate until daemon restart.
     await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`)).catch(() => {});
-    sessionOutcome = 'error'; // timing written in finally block
+    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', stepAdvanceCount);
     return {
       _tag: 'error',
       workflowId: trigger.workflowId,
@@ -4347,8 +4342,7 @@ export async function runWorkflow(
 
   emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: stopReason, ...withWorkrailSession(workrailSessionId) });
   if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
-
-  sessionOutcome = 'success'; // timing written in finally block
+  writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'success', stepAdvanceCount);
   return {
     _tag: 'success',
     workflowId: trigger.workflowId,
