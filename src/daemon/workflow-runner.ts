@@ -1493,7 +1493,7 @@ function getSchemas(): Record<string, any> {
         context: {
           type: 'object',
           additionalProperties: true,
-          description: 'Updated context variables (only changed values).',
+          description: 'Updated context variables (only changed values). Exception: metrics_commit_shas must always contain the FULL accumulated list of all commit SHAs from this session -- never send only new SHAs.',
         },
       },
       required: ['continueToken'],
@@ -1521,7 +1521,7 @@ function getSchemas(): Record<string, any> {
         context: {
           type: 'object',
           additionalProperties: true,
-          description: 'Updated context variables (only changed values). Omit entirely if no facts changed.',
+          description: 'Updated context variables (only changed values). Omit entirely if no facts changed. Exception: metrics_commit_shas must always contain the FULL accumulated list of all commit SHAs from this session -- never send only new SHAs.',
         },
       },
       required: ['notes'],
