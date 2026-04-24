@@ -157,6 +157,98 @@ describe('readAllDaemonSessions()', () => {
     expect(result).toHaveLength(1);
     expect(result[0]!.checkpointToken).toBeNull();
   });
+
+  it('reads workflowId, goal, workspacePath from sidecar when present', async () => {
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    await writeSession(tmpDir, sessionId, {
+      continueToken: 'ct_test',
+      checkpointToken: null,
+      ts: Date.now(),
+      workflowId: 'wr.coding-task',
+      goal: 'Implement OAuth',
+      workspacePath: '/home/user/project',
+    });
+
+    const result = await readAllDaemonSessions(tmpDir);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.workflowId).toBe('wr.coding-task');
+    expect(result[0]!.goal).toBe('Implement OAuth');
+    expect(result[0]!.workspacePath).toBe('/home/user/project');
+  });
+
+  it('returns undefined for workflowId/goal/workspacePath when not present in sidecar (old format)', async () => {
+    // Old-format sidecars do not have recovery context fields -- should parse OK with undefined fields.
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    await writeSession(tmpDir, sessionId, {
+      continueToken: 'ct_test',
+      checkpointToken: null,
+      ts: Date.now(),
+      // no workflowId, goal, or workspacePath
+    });
+
+    const result = await readAllDaemonSessions(tmpDir);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.workflowId).toBeUndefined();
+    expect(result[0]!.goal).toBeUndefined();
+    expect(result[0]!.workspacePath).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// persistTokens() -- recovery context fields
+//
+// WHY test this separately: persistTokens() is not exported, but its effects
+// are observable via readAllDaemonSessions(). We verify that recovery context
+// fields written by persistTokens() are correctly read back.
+// ---------------------------------------------------------------------------
+
+describe('persistTokens() recovery context fields (via readDaemonSessionState)', () => {
+  // persistTokens is private, but we can exercise it via runWorkflow's observable side-effects
+  // through readAllDaemonSessions. However, since we can't call persistTokens directly,
+  // we test the round-trip by writing a sidecar file manually (as persistTokens would)
+  // and verifying readAllDaemonSessions reads it correctly.
+  //
+  // WHY this approach: persistTokens is a private implementation detail. Testing via
+  // readAllDaemonSessions validates the full sidecar round-trip, which is the real invariant.
+
+  it('sidecar with recoveryContext fields round-trips through readAllDaemonSessions', async () => {
+    const sessionId = 'bbbbbbbb-0000-0000-0000-000000000001';
+    // Simulate what persistTokens writes when recoveryContext is provided
+    await writeSession(tmpDir, sessionId, {
+      continueToken: 'ct_persist_test',
+      checkpointToken: null,
+      ts: Date.now(),
+      workflowId: 'wr.mr-review',
+      goal: 'Review PR #42',
+      workspacePath: '/repos/myproject',
+    });
+
+    const sessions = await readAllDaemonSessions(tmpDir);
+    expect(sessions).toHaveLength(1);
+    const session = sessions[0]!;
+    expect(session.workflowId).toBe('wr.mr-review');
+    expect(session.goal).toBe('Review PR #42');
+    expect(session.workspacePath).toBe('/repos/myproject');
+    expect(session.continueToken).toBe('ct_persist_test');
+  });
+
+  it('sidecar without recoveryContext fields round-trips with undefined fields', async () => {
+    const sessionId = 'bbbbbbbb-0000-0000-0000-000000000002';
+    // Simulate old-format sidecar (written before recoveryContext was added)
+    await writeSession(tmpDir, sessionId, {
+      continueToken: 'ct_old_format',
+      checkpointToken: null,
+      ts: Date.now(),
+    });
+
+    const sessions = await readAllDaemonSessions(tmpDir);
+    expect(sessions).toHaveLength(1);
+    const session = sessions[0]!;
+    expect(session.workflowId).toBeUndefined();
+    expect(session.goal).toBeUndefined();
+    expect(session.workspacePath).toBeUndefined();
+    expect(session.continueToken).toBe('ct_old_format');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -344,31 +436,42 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
 
   const noopExecFn = async () => ({ stdout: '', stderr: '' });
 
-  it('preserves sidecar (does not call executeContinueWorkflow) when _countStepAdvancesFn returns 1', async () => {
-    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
-    await writeSession(tmpDir, sessionId, validSessionData());
-
-    const executeCalls: string[] = [];
-    const fakeExecute = async (input: { continueToken: string; intent: string }) => {
-      executeCalls.push(input.continueToken);
-      return { content: [], isError: false } as unknown as Awaited<ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>>;
+  // Helper: build a fake rehydrate response for _executeContinueWorkflowFn.
+  // Returns a ResultAsync<ContinueWorkflowResult, ContinueWorkflowError> that resolves ok
+  // with the minimal shape needed for the resume path.
+  function fakeRehydrateOk(opts: { isComplete?: boolean; pending?: null } = {}) {
+    const response = {
+      kind: 'ok' as const,
+      continueToken: 'ct_fake_rehydrated',
+      checkpointToken: undefined,
+      isComplete: opts.isComplete ?? false,
+      pending: opts.pending !== undefined ? opts.pending : {
+        stepId: 'step-1',
+        prompt: 'Do the thing',
+        contentEnvelope: undefined,
+      },
+      preferences: { model: 'claude-opus-4-5', output: {} },
+      nextIntent: 'advance' as const,
+      nextCall: { tool: 'continue_workflow' as const, params: { continueToken: 'ct_fake_rehydrated' } },
     };
+    return okAsync({ response }) as unknown as ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>;
+  }
 
-    await runStartupRecovery(
-      tmpDir,
-      noopExecFn,
-      stubCtx,
-      async () => 1, // stepAdvances = 1 -> preserve
-      fakeExecute as Parameters<typeof runStartupRecovery>[4],
-    );
+  function fakeRehydrateErr() {
+    return errAsync({ kind: 'validation_failed', failure: { code: 'TOKEN_INVALID_FORMAT', message: 'bad token', kind: 'not_retryable' } }) as unknown as ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>;
+  }
 
-    // Phase B honest deferral: executeContinueWorkflow is NOT called.
-    // Full agent restart is not yet implemented -- sidecar is preserved for future Phase B.
-    expect(executeCalls).toHaveLength(0);
-
-    // Sidecar is NOT deleted -- retained for future resumption.
-    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
-  });
+  // Helper: build a validSessionData with recovery context fields.
+  function sessionDataWithContext(continueToken = `ct_test_${Date.now()}`) {
+    return {
+      continueToken,
+      checkpointToken: null,
+      ts: Date.now(),
+      workflowId: 'wr.coding-task',
+      goal: 'Implement feature X',
+      workspacePath: '/some/workspace',
+    };
+  }
 
   it('discards a session when _countStepAdvancesFn returns 0', async () => {
     const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
@@ -377,7 +480,7 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     const resumedTokens: string[] = [];
     const fakeExecute = async (input: { continueToken: string; intent: string }) => {
       resumedTokens.push(input.continueToken);
-      return { content: [], isError: false } as unknown as Awaited<ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>>;
+      return fakeRehydrateOk();
     };
 
     await runStartupRecovery(
@@ -399,43 +502,126 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
     await writeSession(tmpDir, sessionId, validSessionData());
 
-    const resumedTokens: string[] = [];
-    const fakeExecute = async (input: { continueToken: string; intent: string }) => {
-      resumedTokens.push(input.continueToken);
-      return { content: [], isError: false } as unknown as Awaited<ReturnType<typeof import('../../src/mcp/handlers/v2-execution/index.js').executeContinueWorkflow>>;
+    await runStartupRecovery(
+      tmpDir,
+      noopExecFn,
+      stubCtx,
+      async () => { throw new Error('token decode failed'); }, // step count fails
+      async () => fakeRehydrateOk(),
+    );
+
+    // Step count failure -> discard path
+    // Sidecar IS deleted (fall to discard)
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+  });
+
+  it('discards session with step advances when sidecar has no workflowId (old format)', async () => {
+    // Old-format sidecar: no workflowId/goal/workspacePath. Must be discarded, not resumed.
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    await writeSession(tmpDir, sessionId, validSessionData()); // no recovery context fields
+
+    const runWorkflowCalls: unknown[] = [];
+    await runStartupRecovery(
+      tmpDir,
+      noopExecFn,
+      stubCtx,
+      async () => 1, // stepAdvances = 1 -> resume attempted
+      async () => fakeRehydrateOk(),
+      async (trigger) => { runWorkflowCalls.push(trigger); return { _tag: 'success', workflowId: 'wr.coding-task', stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult; },
+    );
+
+    // Old-format sidecar: hasContext is false -> discard
+    expect(runWorkflowCalls).toHaveLength(0);
+    // Sidecar IS deleted
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+  });
+
+  it('resumes session when stepAdvances >= 1 and sidecar has context fields', async () => {
+    // New-format sidecar: has workflowId/goal/workspacePath. Should be resumed.
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    await writeSession(tmpDir, sessionId, sessionDataWithContext('ct_resume_me'));
+
+    const runWorkflowTriggers: import('../../src/daemon/workflow-runner.js').WorkflowTrigger[] = [];
+    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger) => {
+      runWorkflowTriggers.push(trigger);
+      return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
     };
 
     await runStartupRecovery(
       tmpDir,
       noopExecFn,
       stubCtx,
-      async () => { throw new Error('token decode failed'); }, // step count fails
-      fakeExecute as Parameters<typeof runStartupRecovery>[4],
+      async () => 1, // stepAdvances = 1 -> resume
+      async () => fakeRehydrateOk(),
+      fakeRunWorkflow as Parameters<typeof runStartupRecovery>[5],
     );
 
-    // Step count failure -> discard path
-    expect(resumedTokens).toHaveLength(0);
+    // runWorkflow IS called with the reconstructed trigger
+    expect(runWorkflowTriggers).toHaveLength(1);
+    expect(runWorkflowTriggers[0]!.workflowId).toBe('wr.coding-task');
+    expect(runWorkflowTriggers[0]!.goal).toBe('Implement feature X');
+    expect(runWorkflowTriggers[0]!.workspacePath).toBe('/some/workspace');
+    expect(runWorkflowTriggers[0]!.branchStrategy).toBe('none');
+    expect(runWorkflowTriggers[0]!._preAllocatedStartResponse).toBeDefined();
+    expect(runWorkflowTriggers[0]!._preAllocatedStartResponse?.continueToken).toBe('ct_fake_rehydrated');
 
-    // Sidecar IS deleted (fall to discard)
-    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+    // Sidecar is NOT deleted by runStartupRecovery (runWorkflow manages its own lifecycle)
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
   });
 
-  it('preserves sidecar for sessions with step advances (executeContinueWorkflow is not called)', async () => {
-    // Phase B honest deferral: even if a fakeExecute that would throw is passed,
-    // it is never invoked -- the resume path only logs and preserves the sidecar.
+  it('falls to discard when rehydrate returns isErr()', async () => {
     const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
-    await writeSession(tmpDir, sessionId, validSessionData());
+    await writeSession(tmpDir, sessionId, sessionDataWithContext());
 
+    const runWorkflowCalls: unknown[] = [];
     await runStartupRecovery(
       tmpDir,
       noopExecFn,
       stubCtx,
-      async () => 3, // stepAdvances = 3 -> preserve
-      async () => { throw new Error('should not be called'); },
+      async () => 1,
+      async () => fakeRehydrateErr(), // rehydrate error
+      async (trigger) => { runWorkflowCalls.push(trigger); return { _tag: 'success', workflowId: 'wr.test', stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult; },
     );
 
-    // Sidecar is preserved -- executeContinueWorkflow is never invoked, so no throw occurs.
-    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
+    expect(runWorkflowCalls).toHaveLength(0);
+    // Sidecar IS deleted
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+  });
+
+  it('falls to discard when rehydrate throws', async () => {
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    await writeSession(tmpDir, sessionId, sessionDataWithContext());
+
+    const runWorkflowCalls: unknown[] = [];
+    await runStartupRecovery(
+      tmpDir,
+      noopExecFn,
+      stubCtx,
+      async () => 1,
+      async () => { throw new Error('engine unavailable'); }, // rehydrate throws
+      async (trigger) => { runWorkflowCalls.push(trigger); return { _tag: 'success', workflowId: 'wr.test', stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult; },
+    );
+
+    expect(runWorkflowCalls).toHaveLength(0);
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
+  });
+
+  it('falls to discard when rehydrate returns isComplete=true', async () => {
+    const sessionId = 'aaaaaaaa-0000-0000-0000-000000000001';
+    await writeSession(tmpDir, sessionId, sessionDataWithContext());
+
+    const runWorkflowCalls: unknown[] = [];
+    await runStartupRecovery(
+      tmpDir,
+      noopExecFn,
+      stubCtx,
+      async () => 2,
+      async () => fakeRehydrateOk({ isComplete: true, pending: null }), // already done
+      async (trigger) => { runWorkflowCalls.push(trigger); return { _tag: 'success', workflowId: 'wr.test', stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult; },
+    );
+
+    expect(runWorkflowCalls).toHaveLength(0);
+    await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).rejects.toThrow();
   });
 
   it('clears queue-issue sidecars even when ctx is provided', async () => {
@@ -446,26 +632,36 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
       'utf8',
     );
 
-    await runStartupRecovery(tmpDir, noopExecFn, stubCtx, async () => 0, async () => { throw new Error('unused'); });
+    await runStartupRecovery(tmpDir, noopExecFn, stubCtx, async () => 0, async () => fakeRehydrateOk());
 
     await expect(fs.access(sidecarPath)).rejects.toThrow();
   });
 
-  it('preserves sidecars for multiple sessions with step advances', async () => {
+  it('resumes multiple sessions with step advances (both get runWorkflow called)', async () => {
     const id1 = 'aaaaaaaa-0000-0000-0000-000000000001';
     const id2 = 'aaaaaaaa-0000-0000-0000-000000000002';
-    await writeSession(tmpDir, id1, { ...validSessionData(), continueToken: 'ct_token1' });
-    await writeSession(tmpDir, id2, { ...validSessionData(), continueToken: 'ct_token2' });
+    await writeSession(tmpDir, id1, { ...sessionDataWithContext('ct_token1'), workflowId: 'wr.wf1' });
+    await writeSession(tmpDir, id2, { ...sessionDataWithContext('ct_token2'), workflowId: 'wr.wf2' });
+
+    const runWorkflowIds: string[] = [];
+    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger) => {
+      runWorkflowIds.push(trigger.workflowId);
+      return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
+    };
 
     await runStartupRecovery(
       tmpDir,
       noopExecFn,
       stubCtx,
-      async () => 2, // both have advances -> both preserved
-      async () => { throw new Error('should not be called'); },
+      async () => 2, // both have advances
+      async () => fakeRehydrateOk(),
+      fakeRunWorkflow as Parameters<typeof runStartupRecovery>[5],
     );
 
-    // Both sidecars are preserved -- no agent restart attempted.
+    // Both sessions get runWorkflow called
+    expect(runWorkflowIds.sort()).toEqual(['wr.wf1', 'wr.wf2'].sort());
+
+    // Sidecars are NOT deleted by runStartupRecovery (runWorkflow manages its own lifecycle)
     await expect(fs.access(path.join(tmpDir, `${id1}.json`))).resolves.toBeUndefined();
     await expect(fs.access(path.join(tmpDir, `${id2}.json`))).resolves.toBeUndefined();
   });

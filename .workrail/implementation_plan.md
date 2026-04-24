@@ -844,3 +844,169 @@ Commit: `fix(daemon): abort in-flight agent loops on SIGTERM with 5s drain windo
 `planConfidenceBand`: High
 `estimatedPRCount`: 1
 `followUpTickets`: []
+
+---
+---
+
+# Implementation Plan: Crash Recovery Phase B -- Autonomous Session Resumption
+
+*Generated: 2026-04-23 | Workflow: wr.coding-task | Branch: fix/etienneb/crash-recovery-phase-b*
+
+---
+
+## 1. Problem Statement
+
+When the WorkTrain daemon restarts after a crash and finds an orphaned session sidecar with `stepAdvances >= 1`, the `case 'resume'` branch in `runStartupRecovery()` currently does nothing -- logs a TODO and moves on. The in-progress session is permanently stuck: sidecar accumulates on disk, the workflow never completes, and downstream triggers are silently blocked.
+
+## 2. Acceptance Criteria
+
+1. A session with `stepAdvances >= 1` and new sidecar fields is resumed on daemon restart.
+2. A session with `stepAdvances >= 1` but old sidecar format (no `workflowId`) is discarded gracefully with a log message.
+3. `persistTokens()` writes `workflowId`, `goal`, `workspacePath` on the first call in `runWorkflow()`.
+4. `npm run build` passes.
+5. `npx vitest run` passes (5 pre-existing `polling-scheduler` failures are unrelated).
+
+## 3. Non-Goals
+
+- No changes to `src/mcp/`, `src/v2/`, `src/trigger/trigger-listener.ts`, or session event log schema.
+- No restoration of `agentConfig`, `soulFile`, or LLM conversation history.
+- No new WorkRail event kinds.
+- No retry loop for failed reconstruction -- one attempt per orphan.
+- No worktree re-creation on recovery.
+
+## 4. Philosophy-Driven Constraints
+
+- **Errors are data**: all failure paths use ResultAsync `.isErr()` checks, not try/catch as control flow (except for unexpected throws).
+- **Validate at boundaries**: all context checks happen at the recovery entry point; `runWorkflow` is trusted once trigger is constructed.
+- **YAGNI**: only 3 sidecar fields -- no agentConfig, no soulFile.
+- **Prefer fakes over mocks**: injectable `_executeContinueWorkflowFn` + real fs in tests.
+- **Immutability**: `recoveryContext` is `readonly` struct.
+
+## 5. Invariants
+
+- I1: Old-format sidecars (no `workflowId`) fall to discard -- never crash.
+- I2: Rehydrate failure falls to discard -- never crash.
+- I3: Resumed sessions are fire-and-forget -- `runStartupRecovery` does not await them.
+- I4: Sidecar NOT deleted at resume time -- `runWorkflow()` manages its own lifecycle via `continue`.
+- I5: No new event kinds, no MCP changes.
+- I6: Worktree directory gone -> discard (no re-creation).
+- I7: Already-complete session (`isComplete=true`) -> discard.
+
+## 6. Selected Approach + Rationale
+
+**Candidate A: Hybrid sidecar context fields + rehydrate call.**
+
+Add `workflowId`, `goal`, `workspacePath` to sidecar at session start. At recovery: read fields, call `_executeContinueWorkflowFn` with `intent: 'rehydrate'`, build `WorkflowTrigger` with `_preAllocatedStartResponse` adapter, call `void runWorkflow(...)` fire-and-forget.
+
+Reuses `_preAllocatedStartResponse` (spawn_agent pattern) and injectable `_executeContinueWorkflowFn` (established startup recovery pattern). Zero new infrastructure.
+
+**Runner-up**: None viable (Candidate B violated no-gos; Candidate C too complex per pitch).
+
+## 7. Vertical Slices
+
+### Slice 1: Extend `persistTokens()` and `OrphanedSession`
+
+**File**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. Add optional `recoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string }` param to `persistTokens()`
+2. Include fields in sidecar JSON when `recoveryContext` is provided
+3. Add `workflowId?: string`, `goal?: string`, `workspacePath?: string` to `OrphanedSession` interface (all `readonly`)
+
+**Done when**: Build clean. `persistTokens` signature updated. `OrphanedSession` has new optional fields.
+
+### Slice 2: Update `readAllDaemonSessions()` to read new fields
+
+**File**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. Extend the `parsed` type hint to include `workflowId?: unknown`, `goal?: unknown`, `workspacePath?: unknown`
+2. Spread new fields when they are strings: `...(typeof parsed.workflowId === 'string' ? { workflowId: parsed.workflowId } : {})`
+3. Same pattern for `goal` and `workspacePath`
+
+**Done when**: Build clean. `readAllDaemonSessions` returns new optional fields when present.
+
+### Slice 3: Pass `recoveryContext` in `runWorkflow()` `persistTokens` calls
+
+**File**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. First call (line ~3617): pass `recoveryContext: { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath }`
+2. Second call (line ~3671, after worktree): also pass `recoveryContext` (same values)
+
+**Done when**: Build clean. Both calls include `recoveryContext`.
+
+### Slice 4: Implement resume path in `runStartupRecovery()` + add `_runWorkflowFn` injectable
+
+**File**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. Add `_runWorkflowFn: typeof runWorkflow = runWorkflow` as 6th injectable param to `runStartupRecovery()`
+2. Replace `case 'resume': { preserved++; continue; }` with full implementation:
+   - `hasContext` check (workflowId + workspacePath are strings)
+   - `isStale` guard
+   - Worktree directory existence check (`fs.access` on `session.worktreePath` if set)
+   - Try/catch `_executeContinueWorkflowFn` rehydrate call
+   - `.isErr()` check
+   - `isComplete` / `!pending` guard
+   - `WorkflowTrigger` construction with `_preAllocatedStartResponse` adapter
+   - `void _runWorkflowFn(trigger, ctx, ...).then(...).catch(...)`
+   - `preserved++; continue`
+
+**Done when**: Build clean. Case 'resume' calls `_runWorkflowFn` fire-and-forget when all checks pass.
+
+### Slice 5: Tests
+
+**File**: `tests/unit/workflow-runner-crash-recovery.test.ts`
+
+Changes:
+1. Update 4 existing tests (lines 347-471) to match Phase B behavior
+2. Add tests for new `readAllDaemonSessions` fields
+3. Add tests for `persistTokens` recovery context
+4. Add tests for resume path (happy path, `hasContext` false, rehydrate fails)
+
+**Done when**: All new and updated tests pass. `npx vitest run` exits 0.
+
+## 8. Test Design
+
+**Injectable 6th param**: `_runWorkflowFn: typeof runWorkflow = runWorkflow` enables direct verification that `runWorkflow` is called with the correct trigger shape.
+
+**Key test cases for resume path**:
+- Happy path: `hasContext=true`, rehydrate returns ok with `isComplete=false` and `pending!=null` -> `_runWorkflowFn` called with trigger containing `_preAllocatedStartResponse`; sidecar NOT deleted
+- `hasContext=false`: falls to discard; `_runWorkflowFn` not called; sidecar deleted
+- Rehydrate throws: falls to discard; sidecar deleted
+- Rehydrate returns `isErr()`: falls to discard; sidecar deleted
+- `isComplete=true` from rehydrate: falls to discard; sidecar deleted
+
+## 9. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Schema drift: `_preAllocatedStartResponse` cast breaks | Low | Medium | Explicit field-by-field construction; TypeScript catches at build |
+| Existing tests assert old behavior | Certain | Low | Update 4 specific tests at lines 347-471 |
+| Fire-and-forget retry loop on repeated crash | Low | Low | 2-hour stale threshold discards stuck sessions |
+| Worktree directory missing | Medium | Low | `fs.access` check before using worktreePath |
+
+## 10. PR Packaging Strategy
+
+Single PR. Branch: `fix/etienneb/crash-recovery-phase-b`. One commit.
+Commit: `fix(daemon): resume orphaned daemon sessions on startup after crash`
+
+## 11. Philosophy Alignment per Slice
+
+| Slice | Principle | Status |
+|---|---|---|
+| 1 (persistTokens) | YAGNI | Satisfied -- 3 fields only |
+| 1 (persistTokens) | Immutability | Satisfied -- `readonly` struct |
+| 2 (readAllDaemonSessions) | Validate at boundaries | Satisfied -- type checks on parsed fields |
+| 4 (resume path) | Errors are data | Satisfied -- ResultAsync pattern |
+| 4 (resume path) | Validate at boundaries | Satisfied -- all checks before trigger construction |
+| 4 (resume path) | Non-fatal recovery | Satisfied -- every failure path uses `break` to discard |
+| 5 (Tests) | Prefer fakes over mocks | Satisfied -- injectable fns + real fs |
+| All | YAGNI | Satisfied -- no agentConfig, no history, no new event kinds |
+
+---
+`unresolvedUnknownCount`: 0
+`planConfidenceBand`: High
+`estimatedPRCount`: 1
+`followUpTickets`: []

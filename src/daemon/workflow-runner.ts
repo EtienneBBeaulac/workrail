@@ -717,6 +717,27 @@ export interface OrphanedSession {
    * Used by runStartupRecovery() to remove orphan worktrees older than MAX_WORKTREE_ORPHAN_AGE_MS.
    */
   readonly worktreePath?: string;
+  /**
+   * WorkRail workflow ID for this session (e.g. 'wr.coding-task').
+   * Written to the sidecar by persistTokens() so runStartupRecovery() can reconstruct
+   * a WorkflowTrigger for crash recovery. Absent in old-format sidecars -- sessions
+   * without this field are discarded (not resumed) for backward compatibility.
+   */
+  readonly workflowId?: string;
+  /**
+   * Human-readable goal for this session.
+   * Written alongside workflowId for trigger reconstruction at recovery time.
+   * Absent in old-format sidecars (backward compat).
+   */
+  readonly goal?: string;
+  /**
+   * Original workspacePath passed to runWorkflow() (i.e. trigger.workspacePath).
+   * Stored separately from worktreePath: this is the main repo checkout path, while
+   * worktreePath (when present) is the isolated git worktree for this session.
+   * At recovery: effectiveWorkspacePath = worktreePath (if set and exists) else workspacePath.
+   * Absent in old-format sidecars (backward compat).
+   */
+  readonly workspacePath?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -736,18 +757,39 @@ export interface OrphanedSession {
  *   WHY persisted immediately after worktree creation (not at session end): a crash
  *   between worktree creation and sidecar write would leave an untracked orphan.
  *   Writing immediately ensures the recovery path can always find the worktree.
+ * @param recoveryContext - Optional context fields for crash recovery. Written on the
+ *   FIRST persistTokens() call in runWorkflow() so runStartupRecovery() can reconstruct
+ *   a WorkflowTrigger if the daemon crashes. Only three fields are persisted (workflowId,
+ *   goal, workspacePath) -- agentConfig, soulFile, and history are intentionally excluded
+ *   (recovered sessions use daemon defaults per pitch no-gos).
+ *   Old sidecars lacking these fields fall through to discard on the next daemon start.
  */
 async function persistTokens(
   sessionId: string,
   continueToken: string,
   checkpointToken: string | null,
   worktreePath?: string,
+  recoveryContext?: {
+    readonly workflowId: string;
+    readonly goal: string;
+    readonly workspacePath: string;
+  },
 ): Promise<void> {
   await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
 
   const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
   const state = JSON.stringify(
-    { continueToken, checkpointToken, ts: Date.now(), ...(worktreePath !== undefined ? { worktreePath } : {}) },
+    {
+      continueToken,
+      checkpointToken,
+      ts: Date.now(),
+      ...(worktreePath !== undefined ? { worktreePath } : {}),
+      ...(recoveryContext !== undefined ? {
+        workflowId: recoveryContext.workflowId,
+        goal: recoveryContext.goal,
+        workspacePath: recoveryContext.workspacePath,
+      } : {}),
+    },
     null,
     2,
   );
@@ -856,6 +898,9 @@ export async function readAllDaemonSessions(
         checkpointToken?: unknown;
         ts?: unknown;
         worktreePath?: unknown;
+        workflowId?: unknown;
+        goal?: unknown;
+        workspacePath?: unknown;
       };
 
       if (typeof parsed.continueToken !== 'string' || typeof parsed.ts !== 'number') {
@@ -871,6 +916,13 @@ export async function readAllDaemonSessions(
         // worktreePath is optional -- absent in sessions created before Issue #627.
         // Use undefined (not null) to match the OrphanedSession.worktreePath? type.
         ...(typeof parsed.worktreePath === 'string' ? { worktreePath: parsed.worktreePath } : {}),
+        // Recovery context fields (workflowId, goal, workspacePath) -- written by persistTokens()
+        // on the first call in runWorkflow(). Absent in old-format sidecars (backward compat).
+        // Sessions lacking workflowId or workspacePath will fall through to discard in
+        // runStartupRecovery() rather than being resumed.
+        ...(typeof parsed.workflowId === 'string' ? { workflowId: parsed.workflowId } : {}),
+        ...(typeof parsed.goal === 'string' ? { goal: parsed.goal } : {}),
+        ...(typeof parsed.workspacePath === 'string' ? { workspacePath: parsed.workspacePath } : {}),
       });
     } catch (err: unknown) {
       console.warn(
@@ -894,14 +946,12 @@ export async function readAllDaemonSessions(
  * Phase B (requires ctx): For each orphaned session, decode the continueToken,
  *   count advance_recorded events in the WorkRail session event log, and apply
  *   the binary evaluateRecovery() policy:
- *   - stepAdvances >= 1 -> preserve sidecar (log and skip deletion; Phase B full restart not yet implemented)
+ *   - stepAdvances >= 1 -> attempt resume: rehydrate via executeContinueWorkflow, reconstruct
+ *     WorkflowTrigger with _preAllocatedStartResponse, call runWorkflow fire-and-forget.
+ *     Falls through to discard if sidecar lacks recovery context fields (backward compat),
+ *     if the worktree directory is gone, if rehydrate fails, or if the session is complete.
  *   - stepAdvances === 0 -> discard (sidecar deleted; issue re-dispatched)
  *   When ctx is absent, all sessions fall to discard (backward-compatible behavior).
- *
- * WHY preserve instead of restart for stepAdvances >= 1: full agent loop restart
- *   requires reconstructing the trigger context from session state, which is non-trivial.
- *   The sidecar is kept so a future Phase B implementation can pick it up.
- *   Tracked in backlog as "autonomous crash recovery -- Phase B".
  *
  * Non-fatal: any error during recovery is caught and logged. The daemon starts
  * regardless of whether recovery succeeds.
@@ -911,11 +961,15 @@ export async function readAllDaemonSessions(
  * @param execFn - Injectable exec function for git worktree removal.
  *   Defaults to execFileAsync. Override in tests to avoid real git calls.
  * @param ctx - Optional V2ToolContext for phase B logic. When provided,
- *   sessions with step advances are preserved rather than discarded.
+ *   sessions with step advances are resumed rather than discarded.
  * @param _countStepAdvancesFn - Injectable step-count implementation for testing.
  *   Defaults to the real countOrphanStepAdvances() implementation.
- * @param _executeContinueWorkflowFn - Injectable continue-workflow implementation
- *   (retained for signature backward-compatibility; not currently called in the resume path).
+ * @param _executeContinueWorkflowFn - Injectable continue-workflow implementation for testing.
+ *   Used in the resume path to call intent: 'rehydrate' and get the current step prompt.
+ *   Defaults to the real executeContinueWorkflow().
+ * @param _runWorkflowFn - Injectable runWorkflow implementation for testing.
+ *   Used in the resume path to start a new agent loop from the current step.
+ *   Defaults to the real runWorkflow(). Passed as fire-and-forget in production.
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
@@ -923,6 +977,7 @@ export async function runStartupRecovery(
   ctx?: V2ToolContext,
   _countStepAdvancesFn: typeof countOrphanStepAdvances = countOrphanStepAdvances,
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
+  _runWorkflowFn: typeof runWorkflow = runWorkflow,
 ): Promise<void> {
   // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
   // WHY first: queue-issue cleanup is independent of session state and must
@@ -1004,17 +1059,148 @@ export async function runStartupRecovery(
       // Exhaustive switch: assertNever prevents silent fall-through if
       // RecoveryAction gains new variants in the future.
       switch (action) {
-        case 'resume':
+        case 'resume': {
+          // Phase B: attempt to resume an orphaned session that had meaningful progress.
+          //
+          // Required conditions (all must pass; any failure falls through to discard):
+          //   1. Sidecar has workflowId + workspacePath (written by persistTokens since Phase B).
+          //      Old-format sidecars (missing fields) are discarded for backward compatibility.
+          //   2. Session is not stale (age <= MAX_ORPHAN_AGE_MS = 2h).
+          //   3. If a worktree was used: the worktree directory still exists on disk.
+          //      (No worktree re-creation -- pitch no-go #7.)
+          //   4. Rehydrate call succeeds (executeContinueWorkflow returns ok).
+          //   5. Session is not already complete and has a pending step.
+
+          const hasContext = typeof session.workflowId === 'string' &&
+            typeof session.workspacePath === 'string';
+
+          if (!hasContext) {
+            console.log(
+              `[WorkflowRunner] Startup recovery: cannot resume session ${session.sessionId} -- ` +
+              `missing workflowId/workspacePath in sidecar (old format). Discarding.`,
+            );
+            break; // fall through to sidecar deletion
+          }
+
+          if (isStale) {
+            console.log(
+              `[WorkflowRunner] Startup recovery: discarding stale resumable session ${session.sessionId} ` +
+              `(age=${ageSec}s > ${MAX_ORPHAN_AGE_MS / 1000}s threshold).`,
+            );
+            break;
+          }
+
+          // Worktree existence check: if the session used a worktree, verify it is still on disk.
+          // WHY: runWorkflow with branchStrategy: 'none' uses worktreePath as workspacePath.
+          // A missing worktree means the agent would fail immediately on any file operation.
+          // Discarding is safer than re-creating (pitch no-go #7).
+          if (session.worktreePath !== undefined) {
+            let worktreeExists = true;
+            try {
+              await fs.access(session.worktreePath);
+            } catch {
+              worktreeExists = false;
+            }
+            if (!worktreeExists) {
+              console.log(
+                `[WorkflowRunner] Startup recovery: discarding session ${session.sessionId} -- ` +
+                `worktree no longer exists at ${session.worktreePath}.`,
+              );
+              break;
+            }
+          }
+
+          // Rehydrate: call executeContinueWorkflow with intent: 'rehydrate' to get the current
+          // step prompt and a fresh continueToken, without advancing the session.
+          let rehydrateResult: Awaited<ReturnType<typeof _executeContinueWorkflowFn>>;
+          try {
+            rehydrateResult = await _executeContinueWorkflowFn(
+              { continueToken: session.continueToken, intent: 'rehydrate' },
+              ctx!,
+            );
+          } catch (err: unknown) {
+            console.warn(
+              `[WorkflowRunner] Startup recovery: rehydrate failed for session ${session.sessionId}: ` +
+              `${err instanceof Error ? err.message : String(err)}. Discarding.`,
+            );
+            break;
+          }
+
+          if (rehydrateResult.isErr()) {
+            console.warn(
+              `[WorkflowRunner] Startup recovery: rehydrate error for session ${session.sessionId}: ` +
+              `${rehydrateResult.error.kind}. Discarding.`,
+            );
+            break;
+          }
+
+          const rehydrated = rehydrateResult.value.response;
+
+          // Only resume if the session has a pending step. isComplete=true means nothing to do.
+          if (rehydrated.isComplete || !rehydrated.pending) {
+            console.log(
+              `[WorkflowRunner] Startup recovery: session ${session.sessionId} is already complete ` +
+              `or has no pending step. Discarding.`,
+            );
+            break;
+          }
+
+          // Build the _preAllocatedStartResponse adapter.
+          // WHY: runWorkflow() uses _preAllocatedStartResponse to skip executeStartWorkflow()
+          // (preventing a duplicate session). V2ContinueWorkflowOutputSchema 'ok' variant and
+          // V2StartWorkflowOutputSchema share the fields we care about: continueToken,
+          // checkpointToken, isComplete, pending, preferences, nextIntent, nextCall.
+          // V2StartWorkflowOutputSchema has optional staleRoots/warnings not present here --
+          // they are optional so their absence is correct.
+          const preAllocated: import('zod').infer<typeof V2StartWorkflowOutputSchema> = {
+            continueToken: rehydrated.continueToken ?? '',
+            checkpointToken: rehydrated.checkpointToken,
+            isComplete: rehydrated.isComplete,
+            pending: rehydrated.pending,
+            preferences: rehydrated.preferences,
+            nextIntent: rehydrated.nextIntent,
+            nextCall: rehydrated.nextCall,
+          };
+
+          // Determine effective workspace: use the worktree path if the session had one
+          // (already verified to exist above), otherwise use the original workspacePath.
+          const effectiveWorkspacePath = session.worktreePath ?? session.workspacePath!;
+          // Suppress worktree re-creation: the worktree already exists (or was never created).
+          const branchStrategy: 'none' = 'none';
+
+          const recoveredTrigger: WorkflowTrigger = {
+            workflowId: session.workflowId!,
+            goal: session.goal ?? 'Resumed session (crash recovery)',
+            workspacePath: effectiveWorkspacePath,
+            branchStrategy,
+            _preAllocatedStartResponse: preAllocated,
+          };
+
           console.log(
-            `[WorkflowRunner] Startup recovery: preserving sidecar for session with ${stepAdvances} step advance(s): ` +
-            `sessionId=${session.sessionId} age=${ageSec}s -- full agent restart not yet implemented; ` +
-            `sidecar retained for future resumption. Skipping sidecar deletion.`,
+            `[WorkflowRunner] Startup recovery: resuming session ${session.sessionId} ` +
+            `workflowId=${session.workflowId} stepAdvances=${stepAdvances}`,
           );
-          // WHY: sidecar is preserved so a future resumption implementation can pick it up.
-          // Full agent loop restart requires reconstructing the trigger context from session state,
-          // which is non-trivial. Tracked in backlog as "autonomous crash recovery -- Phase B".
+
+          // Fire-and-forget: run the resumed session without blocking startup.
+          // The sidecar is NOT deleted here -- runWorkflow() manages its own lifecycle.
+          void _runWorkflowFn(
+            recoveredTrigger,
+            ctx!,
+            process.env['ANTHROPIC_API_KEY'] ?? '',
+          ).then((result) => {
+            console.log(
+              `[WorkflowRunner] Startup recovery: resumed session ${session.sessionId} completed: ${result._tag}`,
+            );
+          }).catch((err: unknown) => {
+            console.warn(
+              `[WorkflowRunner] Startup recovery: resumed session ${session.sessionId} failed: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+
           preserved++;
-          continue;
+          continue; // do NOT delete sidecar -- runWorkflow() manages its own lifecycle
+        }
         case 'discard': {
           const label = isStale ? 'stale orphaned session' : 'orphaned session';
           console.log(
@@ -3613,8 +3799,15 @@ export async function runWorkflow(
 
   // Crash safety: persist tokens before starting the agent loop. A crash between
   // this point and the first continue_workflow call leaves a recoverable state file.
+  // WHY recoveryContext here: this is the first persistTokens() call -- it establishes
+  // the sidecar with the three fields (workflowId, goal, workspacePath) needed for
+  // runStartupRecovery() to reconstruct a WorkflowTrigger on the next daemon start.
   if (startContinueToken) {
-    await persistTokens(sessionId, startContinueToken, startCheckpointToken);
+    await persistTokens(sessionId, startContinueToken, startCheckpointToken, undefined, {
+      workflowId: trigger.workflowId,
+      goal: trigger.goal,
+      workspacePath: trigger.workspacePath,
+    });
   }
 
   // ---- Worktree isolation (Issue #627) ----
@@ -3662,13 +3855,19 @@ export async function runWorkflow(
 
       // Persist worktreePath immediately after creation (crash safety).
       // WHY call persistTokens again: the initial call above does not include worktreePath.
-      // Re-calling with all 4 args is intentional -- it is the only way to update
+      // Re-calling with all 5 args is intentional -- it is the only way to update
       // the sidecar with the worktreePath using the atomic temp-rename pattern.
       // WHY unconditional (no `if (startContinueToken)` guard): if startContinueToken is falsy,
       // skipping this call leaves worktreePath untracked in the sidecar. An untracked worktree
       // is an orphan that startup recovery cannot find or reap. Writing '' as token fallback
       // is acceptable -- startup recovery clears malformed sidecars regardless of token value.
-      await persistTokens(sessionId, startContinueToken ?? currentContinueToken, startCheckpointToken, sessionWorktreePath);
+      // WHY recoveryContext repeated: the sidecar is fully rewritten on each persistTokens() call
+      // (atomic temp-rename). All fields must be present on every write.
+      await persistTokens(sessionId, startContinueToken ?? currentContinueToken, startCheckpointToken, sessionWorktreePath, {
+        workflowId: trigger.workflowId,
+        goal: trigger.goal,
+        workspacePath: trigger.workspacePath,
+      });
 
       console.log(
         `[WorkflowRunner] Worktree created: sessionId=${sessionId} ` +
