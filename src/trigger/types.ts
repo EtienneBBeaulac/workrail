@@ -504,6 +504,24 @@ export interface TriggerDefinition {
   readonly concurrencyMode: 'serial' | 'parallel';
 
   /**
+   * Maximum number of dispatches that may wait in the serialization queue for this trigger.
+   * Only applies to concurrencyMode: 'serial'. Parallel-mode triggers are unaffected.
+   *
+   * When the queue for a trigger is already at this depth, route() returns an error
+   * with kind: 'queue_full' and the listener responds with HTTP 429 and a Retry-After
+   * header. This bounds worst-case wait time and prevents unbounded memory growth under
+   * burst load.
+   *
+   * Default: 10 (applied in route() at use time, NOT at parse time here -- this lets
+   * worktrain trigger validate distinguish "not set" from "explicitly set to 10").
+   * Must be >= 1 if present (validated at parse time; 0 or negative is a hard error).
+   *
+   * In YAML:
+   *   maxQueueDepth: 5
+   */
+  readonly maxQueueDepth?: number;
+
+  /**
    * Optional HTTP(S) callback URL. When set, TriggerRouter POSTs the
    * WorkflowRunResult JSON to this URL after runWorkflow() completes,
    * regardless of whether the workflow succeeded or failed.
@@ -722,7 +740,11 @@ export type TriggerValidationRule =
   /** agentConfig.maxTurns absent -- no turn limit will apply */
   | 'missing-max-turns'
   /** autoCommit: true AND branchStrategy: 'none' explicit -- latent danger in serial mode */
-  | 'autocommit-on-main-checkout';
+  | 'autocommit-on-main-checkout'
+  /** serial trigger has no maxQueueDepth -- using default of 10 */
+  | 'missing-max-queue-depth'
+  /** maxQueueDepth < 1 -- value is invalid (hard error) */
+  | 'invalid-max-queue-depth';
 
 // ---------------------------------------------------------------------------
 // TriggerValidationIssue: a single named validation issue for a trigger.

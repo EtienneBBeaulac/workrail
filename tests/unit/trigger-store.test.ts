@@ -1644,3 +1644,159 @@ triggers:
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// maxQueueDepth parsing and validation
+// ---------------------------------------------------------------------------
+
+describe('maxQueueDepth', () => {
+  it('parses maxQueueDepth correctly when set to a positive integer', () => {
+    const yaml = `
+triggers:
+  - id: t1
+    provider: generic
+    workflowId: wr.coding-task
+    workspacePath: /workspace
+    goal: Test
+    maxQueueDepth: 5
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(1);
+      expect(result.value.triggers[0]?.maxQueueDepth).toBe(5);
+    }
+  });
+
+  it('leaves maxQueueDepth undefined when absent', () => {
+    const yaml = `
+triggers:
+  - id: t1
+    provider: generic
+    workflowId: wr.coding-task
+    workspacePath: /workspace
+    goal: Test
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.maxQueueDepth).toBeUndefined();
+    }
+  });
+
+  it('rejects maxQueueDepth: 0 as a hard error (trigger skipped)', () => {
+    const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: wr.coding-task
+    workspacePath: /workspace
+    goal: Test
+    maxQueueDepth: 0
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // Trigger is skipped due to invalid maxQueueDepth
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('rejects maxQueueDepth: -1 as a hard error (trigger skipped)', () => {
+    const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: wr.coding-task
+    workspacePath: /workspace
+    goal: Test
+    maxQueueDepth: -1
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('rejects non-integer maxQueueDepth (float) as a hard error', () => {
+    const yaml = `
+triggers:
+  - id: bad-trigger
+    provider: generic
+    workflowId: wr.coding-task
+    workspacePath: /workspace
+    goal: Test
+    maxQueueDepth: 5.5
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateTriggerStrict: maxQueueDepth advisory rules
+// ---------------------------------------------------------------------------
+
+describe('validateTriggerStrict maxQueueDepth rules', () => {
+  it('emits info advisory for serial trigger without maxQueueDepth', async () => {
+    const { validateTriggerStrict } = await import('../../src/trigger/trigger-store.js');
+    const { asTriggerId } = await import('../../src/trigger/types.js');
+
+    const trigger = {
+      id: asTriggerId('t1'),
+      provider: 'generic',
+      workflowId: 'wr.coding-task',
+      workspacePath: '/workspace',
+      goal: 'Test',
+      concurrencyMode: 'serial' as const,
+      // maxQueueDepth absent
+    };
+
+    const issues = validateTriggerStrict(trigger);
+    const depthIssue = issues.find((i) => i.rule === 'missing-max-queue-depth');
+    expect(depthIssue).toBeDefined();
+    expect(depthIssue?.severity).toBe('info');
+  });
+
+  it('does NOT emit missing-max-queue-depth advisory for parallel trigger', async () => {
+    const { validateTriggerStrict } = await import('../../src/trigger/trigger-store.js');
+    const { asTriggerId } = await import('../../src/trigger/types.js');
+
+    const trigger = {
+      id: asTriggerId('t1'),
+      provider: 'generic',
+      workflowId: 'wr.coding-task',
+      workspacePath: '/workspace',
+      goal: 'Test',
+      concurrencyMode: 'parallel' as const,
+      // maxQueueDepth absent, but parallel -- no advisory
+    };
+
+    const issues = validateTriggerStrict(trigger);
+    const depthIssue = issues.find((i) => i.rule === 'missing-max-queue-depth');
+    expect(depthIssue).toBeUndefined();
+  });
+
+  it('does NOT emit missing-max-queue-depth advisory when maxQueueDepth is set', async () => {
+    const { validateTriggerStrict } = await import('../../src/trigger/trigger-store.js');
+    const { asTriggerId } = await import('../../src/trigger/types.js');
+
+    const trigger = {
+      id: asTriggerId('t1'),
+      provider: 'generic',
+      workflowId: 'wr.coding-task',
+      workspacePath: '/workspace',
+      goal: 'Test',
+      concurrencyMode: 'serial' as const,
+      maxQueueDepth: 5,
+    };
+
+    const issues = validateTriggerStrict(trigger);
+    const depthIssue = issues.find((i) => i.rule === 'missing-max-queue-depth');
+    expect(depthIssue).toBeUndefined();
+  });
+});

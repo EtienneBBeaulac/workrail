@@ -89,4 +89,82 @@ describe('KeyedAsyncQueue', () => {
     ]);
     expect(results).toEqual([1, 2, 3]);
   });
+
+  describe('depth()', () => {
+    it('returns 0 for an unknown key', () => {
+      const queue = new KeyedAsyncQueue();
+      expect(queue.depth('unknown-key')).toBe(0);
+    });
+
+    it('increments when enqueued, decrements after completion', async () => {
+      const queue = new KeyedAsyncQueue();
+
+      let releaseFirst!: () => void;
+      const firstStarted = new Promise<void>((resolve) => {
+        // Enqueue a task that holds open until we release it
+        void queue.enqueue('key', () => new Promise<void>((res) => {
+          releaseFirst = res;
+          resolve();
+        }));
+      });
+
+      await firstStarted;
+      expect(queue.depth('key')).toBe(1);
+
+      // Enqueue a second task (will wait for the first)
+      const second = queue.enqueue('key', () => Promise.resolve());
+      expect(queue.depth('key')).toBe(2);
+
+      releaseFirst();
+      await second;
+
+      // Allow .finally() microtasks to drain
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(queue.depth('key')).toBe(0);
+    });
+
+    it('depth is independent per key', async () => {
+      const queue = new KeyedAsyncQueue();
+
+      let releaseA!: () => void;
+      const aEnqueued = queue.enqueue('a', () => new Promise<void>((res) => {
+        releaseA = res;
+      }));
+      // 'b' enqueues and completes immediately
+      await queue.enqueue('b', () => Promise.resolve());
+      // Allow .finally() microtasks from 'b' to drain
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // 'a' is still pending; 'b' has fully completed
+      expect(queue.depth('a')).toBe(1);
+      expect(queue.depth('b')).toBe(0);
+
+      releaseA();
+      await aEnqueued;
+      // Allow .finally() microtasks from 'a' to drain
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(queue.depth('a')).toBe(0);
+    });
+
+    it('decrements even when fn() rejects', async () => {
+      const queue = new KeyedAsyncQueue();
+
+      // enqueue() increments depth synchronously
+      const promise = queue.enqueue('key', () => Promise.reject(new Error('fail')));
+
+      // Catch the rejection so the test doesn't fail on unhandled rejection
+      await promise.catch(() => {});
+
+      // Allow .finally() microtasks to drain
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(queue.depth('key')).toBe(0);
+    });
+  });
 });

@@ -103,6 +103,7 @@ interface ParsedTriggerRaw {
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
   agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string };
+  maxQueueDepth?: string;  // numeric string; parsed and validated in validateAndResolveTrigger
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
   autoOpenPR?: string;   // 'true' | 'false' scalar
@@ -538,6 +539,7 @@ function setTriggerField(trigger: ParsedTriggerRaw, key: string, value: string):
     case 'branchPrefix':     trigger.branchPrefix = value; break;
     case 'queueType':        trigger.queueType = value; break;
     case 'queueLabel':       trigger.queueLabel = value; break;
+    case 'maxQueueDepth':    trigger.maxQueueDepth = value; break;
     // contextMapping, agentConfig, onComplete, source handled as sub-object blocks
     default:
       // Unknown fields silently ignored for forward compatibility
@@ -912,6 +914,24 @@ function validateAndResolveTrigger(
     });
   }
   const concurrencyMode: 'serial' | 'parallel' = rawConcurrencyMode === 'parallel' ? 'parallel' : 'serial';
+
+  // maxQueueDepth: parse and validate as a positive integer when present.
+  // Default (10) is intentionally NOT applied here -- it is applied at use time in route()
+  // so that validateTriggerStrict() can distinguish "absent" from "explicitly set to 10".
+  let maxQueueDepth: number | undefined;
+  if (raw.maxQueueDepth !== undefined) {
+    // WHY Number.isInteger: same rationale as maxSessionMinutes -- parseInt('5.5', 10) would
+    // silently accept a float; Number.isInteger catches both non-numeric strings and floats.
+    const asNumber = Number(raw.maxQueueDepth);
+    if (!Number.isInteger(asNumber) || asNumber < 1) {
+      return err({
+        kind: 'invalid_field_value',
+        field: 'maxQueueDepth (must be a positive integer >= 1)',
+        triggerId: rawId,
+      });
+    }
+    maxQueueDepth = asNumber;
+  }
 
   // onComplete: emit load-time warning for unsupported runOn values.
   // Why: runOn !== 'success' is parsed and stored but NOT executed in the MVP.
@@ -1307,6 +1327,8 @@ function validateAndResolveTrigger(
     ...(branchPrefix !== undefined ? { branchPrefix } : {}),
     // Dispatch condition for generic webhook triggers (payload-based dispatch gate).
     ...(dispatchCondition !== undefined ? { dispatchCondition } : {}),
+    // maxQueueDepth: only spread when explicitly set in YAML (undefined = apply default 10 in route()).
+    ...(maxQueueDepth !== undefined ? { maxQueueDepth } : {}),
   };
 
   return ok(trigger);
@@ -1574,6 +1596,24 @@ export function validateTriggerStrict(
       message:
         'autoCommit: true with branchStrategy: none commits directly to the main checkout; ' +
         'concurrent sessions will corrupt the checkout -- use branchStrategy: worktree instead',
+    });
+  }
+
+  // Rule: missing-max-queue-depth (info)
+  // Only applies to serial-mode triggers. Parallel triggers are not subject to the queue depth
+  // limit (each fire gets a unique queue key, so depth() always returns 0 for any given key).
+  // When absent on a serial trigger, the default of 10 applies in route(). The advisory
+  // surfaces this to operators who may want to tune the cap for their burst characteristics.
+  if (trigger.concurrencyMode !== 'parallel' && trigger.maxQueueDepth === undefined) {
+    issues.push({
+      rule: 'missing-max-queue-depth',
+      severity: 'info',
+      triggerId: id,
+      message:
+        'maxQueueDepth not set for serial trigger -- default of 10 will apply; ' +
+        'set maxQueueDepth explicitly to control the per-trigger queue depth limit ' +
+        '(at 30-minute sessions, depth 10 implies a worst-case wait of ~5 hours)',
+      suggestedFix: 'maxQueueDepth: 10',
     });
   }
 

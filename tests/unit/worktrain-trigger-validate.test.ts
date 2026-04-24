@@ -44,6 +44,7 @@ const BASE_TRIGGER: TriggerDefinition = {
   branchStrategy: 'worktree',
   baseBranch: 'main',
   branchPrefix: 'worktrain/',
+  maxQueueDepth: 10,
   agentConfig: {
     maxSessionMinutes: 60,
     maxTurns: 50,

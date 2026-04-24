@@ -61,7 +61,24 @@ const execFileAsync = promisify(execFile) as ExecFn;
 export type RouteError =
   | { readonly kind: 'not_found'; readonly triggerId: string }
   | { readonly kind: 'hmac_invalid' }
-  | { readonly kind: 'payload_error'; readonly message: string };
+  | { readonly kind: 'payload_error'; readonly message: string }
+  | {
+      readonly kind: 'queue_full';
+      readonly triggerId: string;
+      readonly queueDepth: number;
+      readonly maxQueueDepth: number;
+      /**
+       * Suggested Retry-After value in seconds.
+       *
+       * WHY computed in route() (not in the listener): route() has access to the
+       * trigger definition where maxSessionMinutes lives. The listener only receives
+       * the RouteResult -- it does not re-look up the trigger.
+       *
+       * Value: (agentConfig.maxSessionMinutes ?? 30) * 60. This is an approximation
+       * of the worst-case drain time for a single session slot. It is advisory only.
+       */
+      readonly retryAfterSeconds: number;
+    };
 
 export type RouteResult =
   | { readonly _tag: 'enqueued'; readonly triggerId: string }
@@ -683,6 +700,44 @@ export class TriggerRouter {
           `(${payloadPath}=${actual} !== ${equals}) for triggerId=${trigger.id}`,
         );
         return { _tag: 'enqueued', triggerId: trigger.id };
+      }
+    }
+
+    // Queue depth guard: reject before accepting if the per-trigger serialization queue
+    // is at capacity. Only applies to serial-mode triggers -- parallel triggers use a
+    // unique UUID queue key per invocation, so depth() always returns 0 for any given key.
+    //
+    // WHY here (after dispatchCondition, before workflowTrigger): the depth check must
+    // happen BEFORE the 202 response is sent (the listener sends 202 only on _tag: 'enqueued').
+    // route() must return synchronously, and the depth read is synchronous. JavaScript is
+    // single-threaded, so no race can occur between the depth read and the enqueue() call.
+    //
+    // WHY default 10 at use time (not at parse time): trigger-store.ts leaves maxQueueDepth
+    // undefined when absent so validateTriggerStrict can emit the 'missing-max-queue-depth'
+    // advisory distinguishing "not set" from "explicitly set to 10".
+    if (trigger.concurrencyMode !== 'parallel') {
+      const maxDepth = trigger.maxQueueDepth ?? 10;
+      const currentDepth = this.queue.depth(trigger.id);
+      if (currentDepth >= maxDepth) {
+        const retryAfterSeconds = (trigger.agentConfig?.maxSessionMinutes ?? 30) * 60;
+        this.emitter?.emit({
+          kind: 'session_dropped',
+          triggerId: trigger.id,
+          workflowId: trigger.workflowId,
+          reason: 'queue_full',
+          queueDepth: currentDepth,
+          maxQueueDepth: maxDepth,
+        });
+        return {
+          _tag: 'error',
+          error: {
+            kind: 'queue_full',
+            triggerId: trigger.id,
+            queueDepth: currentDepth,
+            maxQueueDepth: maxDepth,
+            retryAfterSeconds,
+          },
+        };
       }
     }
 

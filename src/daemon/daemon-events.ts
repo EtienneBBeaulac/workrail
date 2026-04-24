@@ -284,6 +284,25 @@ export interface DaemonHeartbeatEvent {
 }
 
 /**
+ * A dispatch was rejected because the per-trigger serialization queue was at capacity.
+ *
+ * WHY: emitted on every HTTP 429 rejection so operators can observe backpressure events
+ * in the daemon event log. This is the daemon-side counterpart to the HTTP 429 response --
+ * the HTTP layer tells the caller, this event records the rejection in the event log.
+ *
+ * WHY reason is a closed union: make illegal states unrepresentable. Only 'queue_full'
+ * is possible today; future rejection reasons (e.g. 'trigger_paused') can be added here.
+ */
+export interface SessionDroppedEvent {
+  readonly kind: 'session_dropped';
+  readonly triggerId: string;
+  readonly workflowId: string;
+  readonly reason: 'queue_full';
+  readonly queueDepth: number;
+  readonly maxQueueDepth: number;
+}
+
+/**
  * Emitted when the agent calls signal_coordinator to record a coordinator signal.
  *
  * WHY a separate event kind: coordinator signals are categorically different from
@@ -361,6 +380,7 @@ export type DaemonEvent =
   | TriggerFiredEvent
   | SessionQueuedEvent
   | SessionStartedEvent
+  | SessionDroppedEvent
   | ToolCalledEvent
   | ToolErrorEvent
   | StepAdvancedEvent

@@ -217,6 +217,17 @@ export function createTriggerApp(router: TriggerRouter): express.Application {
         case 'payload_error':
           res.status(400).json({ error: result.error.message });
           return;
+        case 'queue_full':
+          // WHY Retry-After: the value comes from route() which has access to the trigger's
+          // maxSessionMinutes. It is an approximation of the worst-case drain time for one slot.
+          res.status(429)
+            .set('Retry-After', String(result.error.retryAfterSeconds))
+            .json({
+              error: 'Trigger queue is full',
+              queueDepth: result.error.queueDepth,
+              maxQueueDepth: result.error.maxQueueDepth,
+            });
+          return;
       }
     }
 
