@@ -166,6 +166,13 @@ const WORKRAIL_DIR = path.join(os.homedir(), '.workrail');
 export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
 
 /**
+ * Directory that holds execution stats JSONL files written by writeExecutionStats().
+ * WHY: each early-exit path and the finally block all write to this same directory.
+ * Centralising it as a constant avoids the repeated inline path.join() calls.
+ */
+const DAEMON_STATS_DIR = path.join(os.homedir(), '.workrail', 'data');
+
+/**
  * Maximum combined byte size of all workspace context files.
  * WHY: Prevents context window bloat from large CLAUDE.md / AGENTS.md files.
  * Approximates 8000 tokens at ~4 bytes/token.
@@ -3351,7 +3358,7 @@ export async function runWorkflow(
     const slashIdx = trigger.agentConfig.model.indexOf('/');
     if (slashIdx === -1) {
       // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
-      writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'error', 0);
+      writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3468,7 +3475,7 @@ export async function runWorkflow(
 
     if (startResult.isErr()) {
       // Registration has not happened yet (happens after token decode below).
-      writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'error', 0);
+      writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3618,7 +3625,7 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
-      writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'error', 0);
+      writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
         workflowId: trigger.workflowId,
@@ -3660,7 +3667,7 @@ export async function runWorkflow(
     }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
-    writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, 'success', 0);
+    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
     return {
       _tag: 'success',
       workflowId: trigger.workflowId,
@@ -4133,10 +4140,11 @@ export async function runWorkflow(
     // ---- Execution stats (for timeout calibration) ----
     // WHY fire-and-forget: a stats write failure must never crash the session or
     // block the return path. This is observability data, not crash recovery state.
-    // WHY finally block (not per-path): a single write site ensures every outcome is
-    // recorded regardless of which return path fires. See startMs/sessionOutcome above.
-    // If adding a new result path, update sessionOutcome before the new return statement.
-    writeExecutionStats(path.join(os.homedir(), '.workrail', 'data'), sessionId, trigger.workflowId, startMs, sessionOutcome, stepAdvanceCount);
+    // WHY also in pre-try exits: 4 paths exit before the try block and never reach
+    // this finally clause (model validation, start_workflow failure, worktree creation
+    // failure, instant single-step completion). Each calls writeExecutionStats() directly.
+    // If adding a new result path inside the try block, update sessionOutcome instead.
+    writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, sessionOutcome, stepAdvanceCount);
   }
 
   // ---- Stuck result (repeated_tool_call or no_progress abort) ----
