@@ -3326,22 +3326,18 @@ export async function runWorkflow(
   // WHY at entry: captures the true start before any early-exit paths (model validation,
   // start_workflow failure, worktree creation failure). A startMs captured after these
   // paths would miss their duration entirely.
-  // WHY fire-and-forget write (in finally block): this is for timeout calibration, not
-  // crash recovery. A write failure must never affect the session.
-  // If adding a new result path, update sessionOutcome before the new return statement.
+  // If adding a new result path, call writeExecutionStats() with the correct outcome
+  // just before the return statement.
   const startMs = Date.now();
   // sessionOutcome is updated before each return path and read in the finally block.
   // Default 'unknown' is a valid data point (not silent data loss) if a future return
   // path is added without updating this variable.
   //
-  // sessionOutcome is set at each result path and written to execution-stats.jsonl
-  // via writeExecutionStats() at that path's return site. The finally block does NOT
-  // write stats for the agent-loop paths -- only for pre-agent-loop early exits.
-  // WHY: writeExecutionStats() takes outcome by value. Calling it in finally with
-  // sessionOutcome would always capture 'unknown' because the outcome assignments
-  // happen after the finally block exits. Each result path calls writeExecutionStats()
-  // directly with the correct outcome, mirroring the pre-agent-loop early exit pattern.
-  let sessionOutcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown' = 'unknown';
+  // Each result path calls writeExecutionStats() directly with the correct outcome.
+  // WHY not in finally: writeExecutionStats() takes outcome by value; calling it
+  // in finally would always capture 'unknown' since the outcome is only known at
+  // the return site. Pre-agent-loop early exits call it inline; agent-loop paths
+  // call it just before their return statement.
 
   // ---- Session ID (process-local, crash safety) ----
   // Each runWorkflow() call generates a unique UUID that keys the per-session
