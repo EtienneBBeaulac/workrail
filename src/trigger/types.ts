@@ -439,6 +439,29 @@ export interface TriggerDefinition {
      */
     readonly maxTurns?: number;
     /**
+     * Maximum number of output tokens allowed in a single LLM response.
+     * Passed directly to the Anthropic API as max_tokens for every LLM request
+     * in this trigger's sessions.
+     *
+     * WHY: Claude Sonnet supports up to 64K output tokens, but the daemon default
+     * is 8192. Complex code generation tasks silently stop mid-output when the
+     * ceiling is too low. This field lets operators raise the ceiling per trigger.
+     *
+     * Typical values:
+     * - 8192  -- default (sufficient for most tasks)
+     * - 32768 -- recommended for complex multi-file code generation
+     * - 64000 -- Sonnet 4.x maximum (check model-specific limits in Anthropic docs)
+     *
+     * NOTE: the value is passed through as-is -- the daemon does NOT validate
+     * against model-specific ceilings. If the value exceeds the model's supported
+     * maximum, the Anthropic API returns a clear error at runtime.
+     *
+     * Default: 8192 (when absent or undefined).
+     * Must be a positive integer (>= 1). Value of 0 is invalid -- omit the field
+     * to use the default.
+     */
+    readonly maxOutputTokens?: number;
+    /**
      * Abort policy when stuck detection fires.
      * - 'abort' (default): call agent.abort() and return _tag: 'stuck'.
      * - 'notify_only': write to outbox.jsonl but do NOT abort the session.

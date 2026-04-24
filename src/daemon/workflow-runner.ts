@@ -325,6 +325,12 @@ export interface WorkflowTrigger {
      */
     readonly maxTurns?: number;
     /**
+     * Maximum number of output tokens allowed in a single LLM response.
+     * See TriggerDefinition.agentConfig.maxOutputTokens for full documentation.
+     * Default: 8192.
+     */
+    readonly maxOutputTokens?: number;
+    /**
      * Maximum spawn depth for nested spawn_agent calls.
      * Root sessions have depth 0. Each child adds 1. When a session's depth reaches
      * this limit, spawn_agent returns a typed error without spawning.
@@ -3819,6 +3825,12 @@ export async function runWorkflow(
     // on the next step. Workflow tools have ordering requirements.
     toolExecution: 'sequential',
     callbacks: agentCallbacks,
+    // WHY: per-trigger token ceiling configured in agentConfig.maxOutputTokens.
+    // When absent, AgentLoop defaults to 8192 (unchanged behavior).
+    // The value is passed through as-is; the Anthropic API enforces model-specific limits.
+    ...(trigger.agentConfig?.maxOutputTokens !== undefined
+      ? { maxTokens: trigger.agentConfig.maxOutputTokens }
+      : {}),
   });
 
   // ---- Session limits (wall-clock timeout + max-turn limit) ----

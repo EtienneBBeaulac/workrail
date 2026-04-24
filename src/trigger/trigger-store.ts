@@ -99,10 +99,10 @@ interface ParsedTriggerRaw {
   referenceUrls?: string;   // space-separated scalar in YAML; split at assemble time
   concurrencyMode?: string; // validated as 'serial' | 'parallel' at assemble time
   callbackUrl?: string;
-  // Note: maxSessionMinutes and maxTurns are stored as raw strings here because
+  // Note: maxSessionMinutes, maxTurns, and maxOutputTokens are stored as raw strings here because
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
-  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; stuckAbortPolicy?: string };
+  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string };
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
   autoOpenPR?: string;   // 'true' | 'false' scalar
@@ -324,7 +324,7 @@ function parseTriggersYaml(
         // agentConfig is a sub-object block with scalar string values.
         // Baseline indent: lineIndent (indent of the "agentConfig:" key line).
         lineIndex++;
-        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string; stuckAbortPolicy?: string } = {};
+        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string } = {};
         while (lineIndex < lines.length) {
           const acLine = lines[lineIndex];
           if (acLine === undefined) break;
@@ -352,6 +352,7 @@ function parseTriggersYaml(
             if (acKey === 'model') agentConfig.model = acValueResult.value;
             else if (acKey === 'maxSessionMinutes') agentConfig.maxSessionMinutes = acValueResult.value;
             else if (acKey === 'maxTurns') agentConfig.maxTurns = acValueResult.value;
+            else if (acKey === 'maxOutputTokens') agentConfig.maxOutputTokens = acValueResult.value;
             else if (acKey === 'stuckAbortPolicy') agentConfig.stuckAbortPolicy = acValueResult.value;
           }
           lineIndex++;
@@ -855,6 +856,21 @@ function validateAndResolveTrigger(
       maxTurns = asNumber;
     }
 
+    let maxOutputTokens: number | undefined;
+    if (raw.agentConfig.maxOutputTokens !== undefined) {
+      // WHY Number.isInteger: same rationale as maxSessionMinutes above.
+      const asNumber = Number(raw.agentConfig.maxOutputTokens);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        // WHY invalid_field_value not missing_field: field is present, value is invalid.
+        return err({
+          kind: 'invalid_field_value',
+          field: 'agentConfig.maxOutputTokens (must be a positive integer)',
+          triggerId: rawId,
+        });
+      }
+      maxOutputTokens = asNumber;
+    }
+
     // stuckAbortPolicy: validate against the closed 'abort' | 'notify_only' enum.
     // WHY fail-fast: an invalid value silently falls through to undefined (no abort),
     // which defeats the operator's intent. Validation at parse time matches the pattern
@@ -872,11 +888,12 @@ function validateAndResolveTrigger(
       stuckAbortPolicy = rawSap;
     }
 
-    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || stuckAbortPolicy !== undefined) {
+    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || maxOutputTokens !== undefined || stuckAbortPolicy !== undefined) {
       agentConfig = {
         ...(model !== undefined ? { model } : {}),
         ...(maxSessionMinutes !== undefined ? { maxSessionMinutes } : {}),
         ...(maxTurns !== undefined ? { maxTurns } : {}),
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
         ...(stuckAbortPolicy !== undefined ? { stuckAbortPolicy } : {}),
       };
     }

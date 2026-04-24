@@ -1542,3 +1542,65 @@ triggers:
     }
   });
 });
+
+// maxOutputTokens parsing
+// WHY: maxOutputTokens is a per-trigger cap on LLM output tokens, threaded from
+// triggers.yml through TriggerDefinition.agentConfig.maxOutputTokens to AgentLoop.maxTokens.
+// Validated as a positive integer at parse time (same pattern as maxTurns/maxSessionMinutes).
+describe('maxOutputTokens parsing', () => {
+  it('parses agentConfig.maxOutputTokens correctly when set to a valid value', () => {
+    const yaml = `
+triggers:
+  - id: max-output-tokens-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      maxOutputTokens: 16384
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.agentConfig?.maxOutputTokens).toBe(16384);
+    }
+  });
+
+  it('skips trigger when maxOutputTokens has an invalid value (zero)', () => {
+    const yaml = `
+triggers:
+  - id: bad-max-output-tokens-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      maxOutputTokens: 0
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // Trigger is skipped due to invalid maxOutputTokens value
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('leaves maxOutputTokens as undefined when not set', () => {
+    const yaml = `
+triggers:
+  - id: no-max-output-tokens-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.agentConfig?.maxOutputTokens).toBeUndefined();
+    }
+  });
+});
