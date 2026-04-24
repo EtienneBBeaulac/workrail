@@ -350,16 +350,38 @@ describe('evaluateStuckSignals', () => {
   // This documents the contract: evaluateStuckSignals() is pure and always returns
   // no_progress when the condition is met. The noProgressAbortEnabled flag is a
   // subscriber concern -- the turn_end subscriber checks it before deciding to abort.
+  //
+  // WHY both directions are tested: the deleted workflow-runner-stuck-escalation.test.ts
+  // had a misleading test name suggesting noProgressAbortEnabled: false meant the pure
+  // function would NOT return no_progress. That was wrong. These two tests make the
+  // correct contract explicit: the flag is irrelevant to evaluateStuckSignals().
 
-  it('returns no_progress even when noProgressAbortEnabled is false', () => {
-    // 80%+ of turns used with 0 step advances, but the flag is off.
-    // The pure function still fires -- the subscriber is the gatekeeper, not the function.
+  it('returns no_progress even when noProgressAbortEnabled is false (subscriber is gatekeeper, not this function)', () => {
+    // 80%+ of turns used with 0 step advances, flag is OFF.
+    // The pure function fires regardless -- the subscriber is the gatekeeper.
     const state = makeState({
       turnCount: 80,
       stepAdvanceCount: 0,
       lastNToolCalls: [],
     });
     const signal = evaluateStuckSignals(state, makeConfig({ maxTurns: 100, noProgressAbortEnabled: false }));
+    expect(signal?.kind).toBe('no_progress');
+    if (signal?.kind === 'no_progress') {
+      expect(signal.turnCount).toBe(80);
+      expect(signal.maxTurns).toBe(100);
+    }
+  });
+
+  it('returns no_progress when noProgressAbortEnabled is true (flag has no effect on pure function)', () => {
+    // 80%+ of turns used with 0 step advances, flag is ON.
+    // The pure function result is identical to when the flag is OFF.
+    // The subscriber uses the flag to decide whether to abort; the pure function does not.
+    const state = makeState({
+      turnCount: 80,
+      stepAdvanceCount: 0,
+      lastNToolCalls: [],
+    });
+    const signal = evaluateStuckSignals(state, makeConfig({ maxTurns: 100, noProgressAbortEnabled: true }));
     expect(signal?.kind).toBe('no_progress');
     if (signal?.kind === 'no_progress') {
       expect(signal.turnCount).toBe(80);

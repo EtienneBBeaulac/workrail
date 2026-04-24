@@ -640,3 +640,100 @@ describe('finalizeSession: sidecar deletion', () => {
     }
   });
 });
+
+// ── finalizeSession: stats file content ──────────────────────────────────────
+//
+// These tests verify that finalizeSession() writes the correct stats entry
+// to execution-stats.jsonl for each result path.
+//
+// WHY here (not only in workflow-runner-agent-loop.test.ts):
+// The agent-loop tests verify stats content via runWorkflow() (full path).
+// These tests verify it via finalizeSession() (direct, no agent loop mocking needed).
+// Together they cover the full invariant surface: every result path writes correct stats.
+//
+// Invariant (worktrain-daemon-invariants.md section 1.1-1.3):
+// - Every exit path produces a defined outcome
+// - 'unknown' never appears for defined paths
+// - _tag -> statsOutcome mapping must be exhaustive
+
+describe('finalizeSession: stats file content (outcome and stepCount)', () => {
+  /** Read all entries from execution-stats.jsonl in a directory. */
+  async function readStatsEntries(dir: string): Promise<Array<{
+    sessionId: string;
+    workflowId: string;
+    outcome: string;
+    stepCount: number;
+  }>> {
+    const statsPath = path.join(dir, 'execution-stats.jsonl');
+    try {
+      const content = await fs.readFile(statsPath, 'utf8');
+      return content
+        .split('\n')
+        .filter(line => line.trim())
+        .map(line => JSON.parse(line));
+    } catch {
+      return [];
+    }
+  }
+
+  const resultVariants: Array<{
+    name: string;
+    result: Parameters<typeof finalizeSession>[0];
+    expectedOutcome: string;
+    stepAdvanceCount: number;
+  }> = [
+    {
+      name: 'success',
+      result: { _tag: 'success', workflowId: 'wr.test', stopReason: 'stop' },
+      expectedOutcome: 'success',
+      stepAdvanceCount: 3,
+    },
+    {
+      name: 'error',
+      result: { _tag: 'error', workflowId: 'wr.test', message: 'agent failed', stopReason: 'error' },
+      expectedOutcome: 'error',
+      stepAdvanceCount: 1,
+    },
+    {
+      name: 'timeout',
+      result: { _tag: 'timeout', workflowId: 'wr.test', reason: 'wall_clock', message: 'timed out after 30 minutes', stopReason: 'aborted' },
+      expectedOutcome: 'timeout',
+      stepAdvanceCount: 5,
+    },
+    {
+      name: 'stuck',
+      result: { _tag: 'stuck', workflowId: 'wr.test', reason: 'repeated_tool_call', message: 'stuck: repeated_tool_call', stopReason: 'aborted' },
+      expectedOutcome: 'stuck',
+      stepAdvanceCount: 2,
+    },
+  ];
+
+  for (const variant of resultVariants) {
+    it(`${variant.name} result writes outcome=${variant.expectedOutcome} and correct stepCount to stats file`, async () => {
+      // Use a fresh statsDir for each test via makeFinalizationContext override.
+      const localStatsDir = await fs.mkdtemp(path.join(os.tmpdir(), `wr-stats-${variant.name}-`));
+      const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), `wr-sess-${variant.name}-`));
+      try {
+        const sessionId = `fintest-stats-${variant.name}`;
+        const ctx = makeFinalizationContext(sessionId, sessionsDir, {
+          statsDir: localStatsDir,
+          stepAdvanceCount: variant.stepAdvanceCount,
+        });
+
+        await finalizeSession(variant.result, ctx);
+        await settleFireAndForget();
+
+        // Read the actual stats file.
+        const entries = await readStatsEntries(localStatsDir);
+        expect(entries).toHaveLength(1);
+        expect(entries[0]?.outcome).toBe(variant.expectedOutcome);
+        expect(entries[0]?.stepCount).toBe(variant.stepAdvanceCount);
+        // Invariant: 'unknown' never appears for defined exit paths.
+        expect(entries[0]?.outcome).not.toBe('unknown');
+      } finally {
+        await fs.rm(localStatsDir, { recursive: true, force: true }).catch(() => {});
+        await fs.rm(sessionsDir, { recursive: true, force: true }).catch(() => {});
+      }
+    });
+  }
+});
