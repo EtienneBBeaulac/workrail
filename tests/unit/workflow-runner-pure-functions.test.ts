@@ -8,6 +8,7 @@
  * - `buildAgentClient(trigger, apiKey, env)` -- pure model selection / client construction
  * - `evaluateStuckSignals(state, config)` -- pure stuck detection logic
  * - `createSessionState(initialToken)` -- factory for SessionState
+ * - `buildSessionContext(trigger, inputs)` -- pure session configuration assembly
  *
  * ## Why pure function tests here (not inline with runWorkflow() tests)
  *
@@ -23,8 +24,12 @@ import {
   buildAgentClient,
   evaluateStuckSignals,
   createSessionState,
+  buildSessionContext,
+  DAEMON_SOUL_DEFAULT,
+  DEFAULT_SESSION_TIMEOUT_MINUTES,
+  DEFAULT_MAX_TURNS,
 } from '../../src/daemon/workflow-runner.js';
-import type { SessionState, StuckConfig } from '../../src/daemon/workflow-runner.js';
+import type { SessionState, StuckConfig, SessionContextInputs } from '../../src/daemon/workflow-runner.js';
 import type { WorkflowRunResult, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
 import { tmpPath } from '../helpers/platform.js';
 
@@ -360,5 +365,179 @@ describe('evaluateStuckSignals', () => {
       expect(signal.turnCount).toBe(80);
       expect(signal.maxTurns).toBe(100);
     }
+  });
+});
+
+// ── buildSessionContext ────────────────────────────────────────────────────────
+//
+// Tests for the pure function that assembles the session configuration from
+// pre-loaded I/O results. No I/O is performed in these tests.
+
+/** Helper to build a minimal WorkflowTrigger for buildSessionContext tests. */
+function makeSessionTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger {
+  return {
+    workflowId: 'wr.coding-task',
+    goal: 'test goal',
+    workspacePath: tmpPath('test-workspace'),
+    ...overrides,
+  };
+}
+
+/** Helper to build a minimal SessionContextInputs. */
+function makeInputs(overrides: Partial<SessionContextInputs> = {}): SessionContextInputs {
+  return {
+    soulContent: DAEMON_SOUL_DEFAULT,
+    workspaceContext: null,
+    sessionNotes: [],
+    firstStepPrompt: 'Step 1: Do the work.',
+    ...overrides,
+  };
+}
+
+describe('buildSessionContext', () => {
+  // ---- System prompt ----
+
+  it('system prompt contains the soul content', () => {
+    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs({
+      soulContent: 'custom-soul-content-marker',
+    }));
+    expect(systemPrompt).toContain('custom-soul-content-marker');
+  });
+
+  it('system prompt contains workspace context when present', () => {
+    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs({
+      workspaceContext: '## Agent Rules\n- Use TypeScript strict mode',
+    }));
+    expect(systemPrompt).toContain('## Workspace Context (from AGENTS.md / CLAUDE.md)');
+    expect(systemPrompt).toContain('## Agent Rules');
+    expect(systemPrompt).toContain('Use TypeScript strict mode');
+  });
+
+  it('system prompt omits workspace context section when workspaceContext is null', () => {
+    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs({
+      workspaceContext: null,
+    }));
+    expect(systemPrompt).not.toContain('## Workspace Context');
+  });
+
+  // ---- Initial prompt ----
+
+  it('initial prompt contains the first step prompt', () => {
+    const { initialPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs({
+      firstStepPrompt: 'unique-first-step-marker-12345',
+    }));
+    expect(initialPrompt).toContain('unique-first-step-marker-12345');
+  });
+
+  it('initial prompt contains trigger context JSON when trigger.context is present', () => {
+    const trigger = makeSessionTrigger({
+      context: { task: 'implement-oauth', priority: 'high' },
+    });
+    const { initialPrompt } = buildSessionContext(trigger, makeInputs());
+    expect(initialPrompt).toContain('Trigger context:');
+    expect(initialPrompt).toContain('"task"');
+    expect(initialPrompt).toContain('"implement-oauth"');
+    expect(initialPrompt).toContain('"priority"');
+    expect(initialPrompt).toContain('"high"');
+  });
+
+  it('initial prompt omits context JSON block when trigger.context is absent', () => {
+    const trigger = makeSessionTrigger(); // no context field
+    const { initialPrompt } = buildSessionContext(trigger, makeInputs());
+    expect(initialPrompt).not.toContain('Trigger context:');
+  });
+
+  it('initial prompt contains the closing directive to call complete_step', () => {
+    const { initialPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs());
+    expect(initialPrompt).toContain(
+      'Complete all step work, then call complete_step with your notes to advance.',
+    );
+  });
+
+  it('initial prompt contains reference URL section when referenceUrls is set', () => {
+    const trigger = makeSessionTrigger({
+      referenceUrls: ['https://example.com/spec.md', 'https://example.com/design.md'],
+    });
+    // referenceUrls appear in the system prompt, not the initial prompt
+    // (they are injected by buildSystemPrompt via trigger.referenceUrls)
+    const { systemPrompt } = buildSessionContext(trigger, makeInputs());
+    expect(systemPrompt).toContain('## Reference documents');
+    expect(systemPrompt).toContain('https://example.com/spec.md');
+    expect(systemPrompt).toContain('https://example.com/design.md');
+  });
+
+  // ---- Session limits ----
+
+  it('sessionTimeoutMs = trigger.agentConfig.maxSessionMinutes * 60 * 1000 when set', () => {
+    const trigger = makeSessionTrigger({
+      agentConfig: { maxSessionMinutes: 45 },
+    });
+    const { sessionTimeoutMs } = buildSessionContext(trigger, makeInputs());
+    expect(sessionTimeoutMs).toBe(45 * 60 * 1000);
+  });
+
+  it('sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MINUTES * 60 * 1000 when agentConfig absent', () => {
+    const trigger = makeSessionTrigger(); // no agentConfig
+    const { sessionTimeoutMs } = buildSessionContext(trigger, makeInputs());
+    expect(sessionTimeoutMs).toBe(DEFAULT_SESSION_TIMEOUT_MINUTES * 60 * 1000);
+  });
+
+  it('maxTurns = trigger.agentConfig.maxTurns when set', () => {
+    const trigger = makeSessionTrigger({
+      agentConfig: { maxTurns: 50 },
+    });
+    const { maxTurns } = buildSessionContext(trigger, makeInputs());
+    expect(maxTurns).toBe(50);
+  });
+
+  it('maxTurns = DEFAULT_MAX_TURNS when agentConfig.maxTurns is absent', () => {
+    const trigger = makeSessionTrigger(); // no agentConfig
+    const { maxTurns } = buildSessionContext(trigger, makeInputs());
+    expect(maxTurns).toBe(DEFAULT_MAX_TURNS);
+  });
+
+  // ---- Session recap in system prompt ----
+
+  it('session recap appears in system prompt when sessionNotes is non-empty', () => {
+    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeInputs({
+      sessionNotes: ['Prior step note: found 3 bugs.', 'Step 2: fixed all 3.'],
+    }));
+    // buildSessionRecap wraps notes in <workrail_session_state>
+    expect(systemPrompt).toContain('Prior step note: found 3 bugs.');
+    expect(systemPrompt).toContain('Step 2: fixed all 3.');
+    expect(systemPrompt).toContain('<workrail_session_state>');
+  });
+
+  it('assembled context summary appears in system prompt when provided via trigger.context', () => {
+    const trigger = makeSessionTrigger({
+      context: { assembledContextSummary: 'prior-session-diff-summary' },
+    });
+    const { systemPrompt } = buildSessionContext(trigger, makeInputs());
+    expect(systemPrompt).toContain('## Prior Context');
+    expect(systemPrompt).toContain('prior-session-diff-summary');
+  });
+
+  // ---- Purity guarantee ----
+
+  it('buildSessionContext is a pure function: same inputs always produce the same output', () => {
+    const trigger = makeSessionTrigger({
+      referenceUrls: ['https://example.com/spec.md'],
+      context: { task: 'test' },
+      agentConfig: { maxSessionMinutes: 20, maxTurns: 100 },
+    });
+    const inputs = makeInputs({
+      soulContent: 'soul-marker',
+      workspaceContext: 'workspace-marker',
+      sessionNotes: ['prior note'],
+      firstStepPrompt: 'Do the work',
+    });
+
+    const result1 = buildSessionContext(trigger, inputs);
+    const result2 = buildSessionContext(trigger, inputs);
+
+    expect(result1.systemPrompt).toBe(result2.systemPrompt);
+    expect(result1.initialPrompt).toBe(result2.initialPrompt);
+    expect(result1.sessionTimeoutMs).toBe(result2.sessionTimeoutMs);
+    expect(result1.maxTurns).toBe(result2.maxTurns);
   });
 });
