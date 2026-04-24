@@ -372,4 +372,51 @@ describe('makeSpawnAgentTool() result mapping', () => {
     // artifacts key must be present with value [] -- [] !== undefined, so the spread fires
     expect(parsed.artifacts).toEqual([]);
   });
+
+  it('threads abortRegistry through to child runWorkflowFn (F2: child sessions abortable on SIGTERM)', async () => {
+    // Verifies that makeSpawnAgentTool passes abortRegistry to the child runWorkflowFn call.
+    // Without this, child sessions created via spawn_agent are invisible to the shutdown handler
+    // and cannot be aborted on SIGTERM.
+    const abortRegistry = new Map<string, () => void>();
+    let capturedAbortRegistry: unknown;
+
+    // The stub captures the abortRegistry argument (7th positional param of runWorkflow:
+    // trigger, ctx, apiKey, daemonRegistry, emitter, steerRegistry, abortRegistry).
+    const runWorkflowStub: typeof import('../../src/daemon/workflow-runner.js').runWorkflow = async (
+      _trigger,
+      _ctx,
+      _apiKey,
+      _daemonRegistry,
+      _emitter,
+      _steerRegistry,
+      capturedReg,
+    ) => {
+      capturedAbortRegistry = capturedReg;
+      return {
+        _tag: 'success',
+        workflowId: 'test-workflow',
+        stopReason: 'completed',
+        lastStepNotes: 'done',
+      } as WorkflowRunSuccess;
+    };
+
+    const tool = makeSpawnAgentTool(
+      'sess-1',
+      FAKE_CTX,
+      FAKE_API_KEY,
+      'parent-session-id',
+      0,
+      3,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      runWorkflowStub as any,
+      FAKE_SCHEMAS,
+      undefined, // emitter
+      abortRegistry,
+    );
+
+    await tool.execute('call-1', FAKE_PARAMS);
+
+    // The abortRegistry passed to makeSpawnAgentTool MUST be forwarded to the child session.
+    expect(capturedAbortRegistry).toBe(abortRegistry);
+  });
 });

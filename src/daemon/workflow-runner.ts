@@ -2504,6 +2504,7 @@ export function makeSpawnAgentTool(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   emitter?: DaemonEventEmitter,
+  abortRegistry?: AbortRegistry,
 ): AgentTool {
   return {
     name: 'spawn_agent',
@@ -2624,6 +2625,8 @@ export function makeSpawnAgentTool(
         apiKey,
         undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
         emitter,
+        undefined, // steerRegistry: child sessions are not steerable by coordinator
+        abortRegistry, // WHY: thread abort registry so child sessions are abortable on SIGTERM
       ) as ChildWorkflowRunResult;
       // WHY cast to ChildWorkflowRunResult: runWorkflow() returns WorkflowRunResult (4 variants)
       // for TriggerRouter compatibility, but structurally only produces success/error/timeout.
@@ -3585,6 +3588,17 @@ export async function runWorkflow(
   // WHY registered here (not at top of function): same as SteerRegistry -- workrailSessionId
   // is the registry key and is only available after parseContinueTokenOrFail() succeeds.
   //
+  // WHY registered BEFORE AgentLoop construction: ensures the registry entry exists if SIGTERM
+  // fires during the context-loading phase (soul + workspace + session notes) between this point
+  // and the `const agent = new AgentLoop(...)` call below. The shutdown handler can safely call
+  // the callback at any point after registration.
+  //
+  // IMPORTANT: Any early-return path between this registration and `const agent = new AgentLoop`
+  // below MUST explicitly delete both steerRegistry and abortRegistry entries. Failing to do so
+  // leaves stale callbacks that will throw a TDZ ReferenceError when the shutdown handler fires
+  // (because `agent` is declared with `const` later in this scope and is never initialized on
+  // those paths).
+  //
   // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
   // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
   // agent directly.
@@ -3667,6 +3681,13 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(workrailSessionId) });
       if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'failed');
+      // Clean up registry entries: agent was never constructed, so these callbacks are stale.
+      // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
+      // ReferenceError because `agent` is declared later in this function scope.
+      if (workrailSessionId !== null) {
+        steerRegistry?.delete(workrailSessionId);
+        abortRegistry?.delete(workrailSessionId);
+      }
       writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         _tag: 'error',
@@ -3709,6 +3730,13 @@ export async function runWorkflow(
     }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(workrailSessionId) });
     if (workrailSessionId !== null) daemonRegistry?.unregister(workrailSessionId, 'completed');
+    // Clean up registry entries: agent was never constructed, so these callbacks are stale.
+    // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
+    // ReferenceError because `agent` is declared later in this function scope.
+    if (workrailSessionId !== null) {
+      steerRegistry?.delete(workrailSessionId);
+      abortRegistry?.delete(workrailSessionId);
+    }
     writeExecutionStats(DAEMON_STATS_DIR, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
     return {
       _tag: 'success',
@@ -3806,6 +3834,7 @@ export async function runWorkflow(
       runWorkflow,
       schemas,
       emitter,
+      abortRegistry, // WHY: thread abort registry so child sessions are abortable on SIGTERM
     ),
     // WHY signal_coordinator is listed last: it is a mid-step observability tool,
     // not a control-flow tool. Placing it after the primary workflow tools ensures
