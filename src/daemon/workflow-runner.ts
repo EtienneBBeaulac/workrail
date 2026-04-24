@@ -327,7 +327,7 @@ export interface WorkflowTrigger {
     /**
      * Maximum number of output tokens allowed in a single LLM response.
      * See TriggerDefinition.agentConfig.maxOutputTokens for full documentation.
-     * Default: 8192.
+     * Default: 8192 (AgentLoop built-in, applied when field is absent).
      */
     readonly maxOutputTokens?: number;
     /**
@@ -2490,6 +2490,7 @@ export function makeSpawnAgentTool(
       'Use this when a step requires delegating a well-defined sub-task to a separate workflow. ' +
       'IMPORTANT: The parent session\'s time limit (maxSessionMinutes) keeps ticking while the child runs. ' +
       'Configure the parent with enough time to cover both its own work and the child\'s work. ' +
+      'Per-trigger limits (maxOutputTokens, maxTurns, maxSessionMinutes) are NOT inherited by child sessions spawned via spawn_agent -- each child uses its own trigger\'s agentConfig. ' +
       'Returns: { childSessionId, outcome: "success"|"error"|"timeout", notes: string, artifacts?: readonly unknown[] }. ' +
       'On success, artifacts contains the child session\'s final step artifacts if any were produced. ' +
       'Check outcome before using notes -- on error/timeout, notes contains the error message.',

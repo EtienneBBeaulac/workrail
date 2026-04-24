@@ -456,7 +456,7 @@ export interface TriggerDefinition {
      * against model-specific ceilings. If the value exceeds the model's supported
      * maximum, the Anthropic API returns a clear error at runtime.
      *
-     * Default: 8192 (when absent or undefined).
+     * Default: 8192 (AgentLoop built-in, applied when field is absent).
      * Must be a positive integer (>= 1). Value of 0 is invalid -- omit the field
      * to use the default.
      */

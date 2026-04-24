@@ -1587,6 +1587,46 @@ triggers:
     }
   });
 
+  it('skips trigger when maxOutputTokens is negative (-1)', () => {
+    const yaml = `
+triggers:
+  - id: neg-max-output-tokens-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      maxOutputTokens: -1
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // Trigger is skipped due to invalid maxOutputTokens value
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('skips trigger when maxOutputTokens is not an integer (1.5)', () => {
+    const yaml = `
+triggers:
+  - id: float-max-output-tokens-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      maxOutputTokens: 1.5
+`;
+    const result = loadTriggerConfig(yaml, {});
+
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      // Trigger is skipped due to non-integer maxOutputTokens value
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
   it('leaves maxOutputTokens as undefined when not set', () => {
     const yaml = `
 triggers:
