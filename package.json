@@ -1,6 +1,6 @@
 {
   "name": "@exaudeus/workrail",
-  "version": "3.69.1",
+  "version": "3.70.0",
   "description": "Step-by-step workflow enforcement for AI agents via MCP",
   "license": "MIT",
   "repository": {
