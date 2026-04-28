@@ -162,16 +162,15 @@ describe('worktrain daemon --install', () => {
     }
   });
 
-  it('returns failure when no LLM credentials are present', async () => {
+  it('succeeds even when no LLM credentials in env (secrets go in ~/.workrail/.env)', async () => {
+    // Credentials are no longer required at install time -- they go in
+    // ~/.workrail/.env and are loaded by loadDaemonEnv() at daemon startup.
     const deps = buildFakeDeps({
       env: { HOME: '/Users/test', PATH: '/usr/bin' },
     });
     const result = await executeWorktrainDaemonCommand(deps, { install: true });
 
-    expect(result.kind).toBe('failure');
-    if (result.kind === 'failure') {
-      expect(result.output.message).toContain('LLM credentials');
-    }
+    expect(result.kind).toBe('success');
   });
 
   it('writes the plist file to ~/Library/LaunchAgents/', async () => {

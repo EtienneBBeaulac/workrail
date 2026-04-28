@@ -49,19 +49,28 @@ const LAUNCHD_LABEL = 'io.worktrain.daemon';
 const PLIST_FILENAME = `${LAUNCHD_LABEL}.plist`;
 
 /**
- * Env vars captured from the current process at install time.
+ * Non-secret env vars captured from the current process into the plist.
  *
- * WHY a fixed list: we do not want to snapshot the full process.env into the
- * plist (that would capture unrelated secrets). Only the vars that the daemon
- * actually reads are included.
+ * WHY a fixed allowlist: we do not snapshot all of process.env -- that would
+ * bake unrelated secrets into a file that persists on disk indefinitely.
+ *
+ * WHY secrets are excluded: API keys and tokens must NOT be baked into the
+ * plist. The plist is stored at ~/Library/LaunchAgents/ (mode 600) but
+ * persists across machine backups, Time Machine, etc. Instead, put secrets in
+ * ~/.workrail/.env -- the daemon loads that file at startup via loadDaemonEnv().
+ *
+ * Secrets to put in ~/.workrail/.env (NOT in the plist):
+ *   ANTHROPIC_API_KEY=sk-ant-...
+ *   GITHUB_TOKEN=ghp_...
+ *   GITLAB_TOKEN=glpat-...
+ *   AWS_ACCESS_KEY_ID=...
+ *   AWS_SECRET_ACCESS_KEY=...
+ *   AWS_SESSION_TOKEN=...
+ *   WORKTRAIN_BOT_TOKEN=...
  */
 const CAPTURED_ENV_VARS = [
-  // LLM credentials (one of these is required at daemon start time)
+  // AWS profile name only (not the actual credentials -- those go in ~/.workrail/.env)
   'AWS_PROFILE',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
-  'ANTHROPIC_API_KEY',
 
   // Daemon feature flags
   'WORKRAIL_TRIGGERS_ENABLED',
@@ -69,10 +78,6 @@ const CAPTURED_ENV_VARS = [
   // Workspace default (also readable from config.json, but plist wins for
   // daemons that start before any user shell is active)
   'WORKRAIL_DEFAULT_WORKSPACE',
-
-  // SCM tokens for polling triggers
-  'GITHUB_TOKEN',
-  'GITLAB_TOKEN',
 
   // Node.js / shell basics needed by the daemon process
   'HOME',
@@ -337,25 +342,8 @@ async function runInstall(
   const plistPath = deps.joinPath(plistDir, PLIST_FILENAME);
   const logDir = deps.joinPath(home, '.workrail', 'logs');
 
-  // Validate that at least one LLM credential is available.
   const env = deps.env;
-  const hasBedrock = !!(env['AWS_PROFILE'] || env['AWS_ACCESS_KEY_ID']);
-  const hasAnthropic = !!env['ANTHROPIC_API_KEY'];
-  if (!hasBedrock && !hasAnthropic) {
-    return failure(
-      'No LLM credentials found in the current environment. ' +
-      'Set AWS_PROFILE (for Bedrock) or ANTHROPIC_API_KEY (for Anthropic) ' +
-      'before running --install so the daemon can authenticate.',
-      {
-        suggestions: [
-          'export AWS_PROFILE=your-sso-profile',
-          'export ANTHROPIC_API_KEY=sk-ant-...',
-        ],
-      },
-    );
-  }
-
-  deps.print('Installing WorkTrain daemon as a launchd service...');
+  deps.print('Registering WorkTrain daemon with launchd...');
 
   // Step 1: Create required directories.
   await deps.mkdir(plistDir, { recursive: true });
@@ -412,7 +400,14 @@ async function runInstall(
   deps.print('');
   deps.print('WorkTrain daemon registered with launchd.');
   deps.print('');
-  deps.print('The daemon does NOT start automatically -- you must start it explicitly:');
+  deps.print('Before starting, put your secrets in ~/.workrail/.env:');
+  deps.print('');
+  deps.print('  ANTHROPIC_API_KEY=sk-ant-...');
+  deps.print('  # or for AWS Bedrock: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY');
+  deps.print('  GITHUB_TOKEN=ghp_...          # for GitHub polling triggers');
+  deps.print('  WORKTRAIN_BOT_TOKEN=ghp_...   # for self-improvement queue');
+  deps.print('');
+  deps.print('Then start the daemon:');
   deps.print('');
   deps.print('  worktrain daemon --start     Start the daemon now');
   deps.print('  worktrain daemon --stop      Stop the daemon');
