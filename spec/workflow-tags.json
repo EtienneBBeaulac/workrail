@@ -313,6 +313,12 @@
         "design",
         "tickets"
       ]
+    },
+    "wr.competitive-analysis": {
+      "tags": [
+        "investigation",
+        "design"
+      ]
     }
   }
 }

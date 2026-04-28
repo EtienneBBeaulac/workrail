@@ -1,0 +1,473 @@
+{
+  "id": "wr.competitive-analysis",
+  "name": "Competitive Analysis Workflow",
+  "version": "1.0.0",
+  "description": "Structured, evidence-driven competitive analysis for software/technology competitors. Produces a decision ledger with forced verdicts, a battlecard, and a 5-sentence executive summary. Optimized for direct feature competitors with inline divergences for alternative-approach, open-source, and platform/ecosystem competitors.",
+  "about": "## Competitive Analysis Workflow\n\nThis workflow conducts a structured, evidence-driven competitive analysis of a specific software or technology competitor. It is built for cases where you need analysis that directly informs a real decision -- not a general market survey filed away and forgotten.\n\n**What it does:**\nThe workflow begins with a mandatory intake gate that forces you to name the decision the analysis must inform. It then builds a weighted source inventory, spawns four parallel evidence-collection subagents across technical, commercial, user-voice, and strategy-signal domains, consolidates and scores all evidence, synthesizes it through a JTBD lens and four-force switching model, runs an adversarial red-hat review, and produces three decision-forcing artifacts: a battlecard, a decision ledger with forced verdicts, and a 5-sentence executive summary. A second human gate validates the ledger verdicts before the workflow closes with re-run trigger configuration.\n\n**When to use it:**\nBefore a roadmap, positioning, pricing, or sales-enablement decision that depends on understanding a specific competitor. Not for general market research.\n\n**What it produces:**\n- `07_battlecard.md`: ready-to-use sales battlecard with honest We Lose When bullets and proof points\n- `07_decision_ledger.md`: every signal as a forced-verdict table row (ignore/backlog/urgent/changes-positioning)\n- `07_so_what.md`: 5-sentence executive summary suitable for a Slack message or board slide\n- `08_human_signoff.md`: human-validated ledger with changed verdicts tracked\n- `09_triggers.json`: re-run trigger configuration for time-based and event-based refresh\n\n**How to get good results:**\nProvide a competitor name and URL. Name the specific decision this analysis must inform before evidence gathering begins -- analysis without a decision target is the dominant filed-away failure mode. The workflow has web-fetch capability requirements for external source gathering.",
+  "examples": [
+    "Analyze Linear before our roadmap planning session to decide how to respond to their project-management features",
+    "Competitive analysis of Cursor vs our AI coding tool before the Q3 pricing change decision",
+    "Analyze Notion as an alternative-approach competitor before we finalize our positioning messaging",
+    "Run a competitive analysis of Vercel before deciding whether to build-vs-buy our deployment infrastructure"
+  ],
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "metricsProfile": "research",
+  "features": [
+    "wr.features.subagent_guidance",
+    "wr.features.capabilities"
+  ],
+  "preconditions": [
+    "A specific competitor name and URL must be provided at invocation.",
+    "A decision that the analysis must inform must be identified before evidence gathering begins.",
+    "The agent must have web-fetch capability to gather external sources.",
+    "Running this workflow without a clear decision target will produce a filed-away report -- the most common competitive analysis failure mode."
+  ],
+  "metaGuidance": [
+    "SHIPPED VS ANNOUNCED: tag every claim as shipped_verified | shipped_claimed | announced_dated | announced_undated | speculation. Only shipped_verified and shipped_claimed enter the gap analysis. Never report an announced capability as shipped.",
+    "MIRROR PROBLEM DEFENSE: the four-force table in step 5 requires ALL FOUR CELLS: push away from us, pull toward competitor, anxiety about switching, habit/inertia. Incomplete tables are the most common AI analysis failure mode.",
+    "DECISION LEDGER IS PRIMARY: the decision ledger (07_decision_ledger.md) is the primary artifact. Everything else is derivative. If the analysis does not produce forced verdicts, it has failed.",
+    "GITHUB STAR COUNT UNRELIABLE: raw GitHub star counts are an unreliable metric. Always use behavioral metrics: fork-to-star ratio, monthly unique contributors, issue close time. Flag if fork-to-star is below 50 per 1000 alongside any star spike.",
+    "VERDICT CONSTRAINT: the decision ledger hard constraint is <=3 urgent items and <=1 changes-positioning item. This is not a style preference -- it forces real prioritization. If the draft exceeds this, re-rank and demote. No TBD verdicts allowed.",
+    "MARKETING COPY IS NOT EVIDENCE: every vendor landing-page claim must be paired with at least one independent user artifact (review, forum, support thread). If no pairing is found, file as vendor_only and weight near zero in synthesis.",
+    "ADVERSARIAL REVIEW IS CORRECTNESS: step 6 is a correctness mechanism, not optional polish. Every adversarial point must be incorporated into the outputs or explicitly rebutted with cited evidence. Unanswered points weaken the analysis."
+  ],
+  "assessments": [
+    {
+      "id": "output-completeness-gate",
+      "purpose": "The three decision-forcing output artifacts are complete and meet their hard constraints before handoff to the human reviewer.",
+      "dimensions": [
+        {
+          "id": "decision_ledger_integrity",
+          "purpose": "Decision ledger has no TBD verdicts, at most 3 urgent items, and at most 1 changes-positioning item. Every finding has a forced-choice verdict with rationale.",
+          "levels": [
+            "incomplete",
+            "complete"
+          ]
+        },
+        {
+          "id": "battlecard_completeness",
+          "purpose": "All required battlecard fields are present. The We Lose When section contains 2-3 honest bullets with proof points. The battlecard cannot ship without this section.",
+          "levels": [
+            "incomplete",
+            "complete"
+          ]
+        },
+        {
+          "id": "adversarial_coverage",
+          "purpose": "Every adversarial point from step 6 is either incorporated into the output artifacts or explicitly rebutted with cited evidence. Unanswered points are surfaced to the human reviewer.",
+          "levels": [
+            "incomplete",
+            "complete"
+          ]
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "intake-and-scoping",
+      "title": "Intake & Scoping",
+      "requireConfirmation": true,
+      "promptBlocks": {
+        "goal": "Collect and confirm the scope of this competitive analysis with the human before any evidence gathering begins. This gate is the primary defense against the most common failure mode: analysis without a clear decision target.",
+        "constraints": [
+          "Do NOT proceed to step 1 without a confirmed decision target. Analysis without a decision target produces a filed-away report.",
+          "The decision target must be a forced choice from the allowed values -- do not accept vague alternatives.",
+          "Competitor type defaults to direct_feature if not specified."
+        ],
+        "procedure": [
+          "Collect the following from the human (ask for anything not already provided in the invocation): competitor name and primary domain/URL; competitor product name(s); competitor type (direct_feature | alternative_approach | open_source | platform_ecosystem -- default: direct_feature); the decision this analysis must inform (FORCED CHOICE -- workflow cannot proceed without it): roadmap_prioritization | positioning_messaging | pricing_change | partnership_build_vs_buy | sales_enablement | exec_briefing; our product context: ICP, top-3 differentiators we currently claim, any recent deals lost to this competitor; path to a prior analysis artifact if one exists (enables diff in step 8 -- use empty string if none); time-box target (default 45 minutes).",
+          "Present a brief confirmation summary to the human showing: competitor, type, decision target, and key product context. Wait for explicit confirmation.",
+          "Set context variables before advancing: competitorName, competitorType, decisionTarget, priorArtifactPath (empty string if none)."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Confirmed scope: competitor name, type, decision target, our product context, prior artifact path, time-box.",
+          "context": "Set competitorName, competitorType, decisionTarget, priorArtifactPath."
+        },
+        "verify": [
+          "The human has confirmed the decision target explicitly.",
+          "competitorType is one of the four valid values.",
+          "decisionTarget is one of the six valid forced-choice values.",
+          "priorArtifactPath is set (empty string is valid)."
+        ]
+      }
+    },
+    {
+      "id": "source-map-and-reach-plan",
+      "title": "Source Map & Reach Plan",
+      "promptBlocks": {
+        "goal": "Build a source inventory weighted by signal/noise for the competitor. Produce 01_source_plan.md listing sources by tier with your assessment of their reachability.",
+        "constraints": [
+          "Apply the shipped_vs_announced filter rule from metaGuidance to all sources from step 1 onward.",
+          "Apply the marketing_vs_user pairing rule from metaGuidance: every vendor landing-page claim must be paired with an independent user artifact.",
+          "Embed both rules in the source plan so all subsequent subagents inherit them."
+        ],
+        "procedure": [
+          "Categorize sources by tier: HIGH SIGNAL: pricing page + Wayback Machine snapshots, changelog/release notes (what actually shipped), job postings last 90 days, user reviews (G2/Capterra/TrustRadius/Reddit last 12 months), support forums/GitHub Issues/Discord. MEDIUM SIGNAL: product website/marketing copy, HN/Reddit/X technical threads, GitHub metrics (use BEHAVIORAL metrics only: fork-to-star ratio, monthly unique contributors, time-to-close issues -- flag fork-to-star below 50/1000 alongside star spike), YouTube demos. LOW SIGNAL: press releases, analyst reports, Twitter/X founder posts (vaporware risk).",
+          "For each source tier, note what you expect to find and what makes it high or low signal for THIS competitor.",
+          "Write 01_source_plan.md with: source inventory by tier, reachability assessment, planned approach for high-signal sources, and explicit statement of the two rules (shipped_vs_announced, marketing_vs_user) that all subagents must apply."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Source inventory summary, tier weights, and reachability assessment for each tier."
+        },
+        "verify": [
+          "01_source_plan.md is written.",
+          "Both rules (shipped_vs_announced, marketing_vs_user) are embedded in the plan for subagent use.",
+          "High-signal sources are prioritized over low-signal ones."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "alternative-approach-source-weight",
+          "when": {
+            "var": "competitorType",
+            "equals": "alternative_approach"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (alternative_approach): Reweight community discussion and JTBD framing upward; feature comparison pages downward. Job postings and customer case studies are high-signal for understanding their market positioning."
+        },
+        {
+          "id": "open-source-source-weight",
+          "when": {
+            "var": "competitorType",
+            "equals": "open_source"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (open_source): Reweight GitHub behavioral metrics, governance analysis (who controls steering, where top contributors work), and license terms. Pricing page is often N/A -- reprioritize to contributor-employer analysis, governance model, and commercial vs community edition differences."
+        },
+        {
+          "id": "platform-ecosystem-source-weight",
+          "when": {
+            "var": "competitorType",
+            "equals": "platform_ecosystem"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (platform_ecosystem): Reweight partner directories, API pricing/rate-limit changes, Terms of Service deltas, and developer relations moves. These signal ecosystem strategy better than product feature pages."
+        }
+      ]
+    },
+    {
+      "id": "parallel-evidence-collection",
+      "title": "Parallel Evidence Collection",
+      "promptBlocks": {
+        "goal": "Spawn four WorkRail Executor subagents simultaneously, each assigned to a distinct evidence domain. Each subagent has isolated context and only consumes the scoping brief and its assigned source slice. You synthesize all four outputs in step 3.",
+        "constraints": [
+          "Spawn all four subagents SIMULTANEOUSLY -- do not run them sequentially.",
+          "Each subagent must apply the shipped_vs_announced and marketing_vs_user rules from 01_source_plan.md.",
+          "Each subagent must URL-cite every claim.",
+          "Each subagent must bucket findings into time periods: last_30_days / 30-180_days / 180+_days.",
+          "Subagent output is raw evidence only -- the main agent synthesizes in step 3."
+        ],
+        "procedure": [
+          "Subagent 2a -- Technical & Product Surface: sources are product docs, API reference, changelog, SDK repos, demo video transcripts. Produce 02a_product_surface.json with: feature inventory (each feature tagged shipped_verified|shipped_claimed|announced_dated|announced_undated|speculation with source URL), architecture inferences with confidence, integration surface, deployment model. Bucket all findings by time period.",
+          "Subagent 2b -- Commercial & Pricing: sources are pricing page, Wayback Machine, G2 pricing field, review mentions of negotiated quotes, Vendr/Tropic if accessible. Tag each price datum: official | review | aggregator | inferred. Produce 02b_commercial.json.",
+          "Subagent 2c -- User Voice & Sentiment: sources are G2/Capterra/TrustRadius (last 12 months, weight last 6 months more heavily), HN threads, relevant subreddits, GitHub Issues if open_source. Cluster verbatim quotes by theme with cluster size. Specifically extract switch_in_narratives (moved from X to competitor) and switch_out_narratives (left competitor for X) -- these are highest-signal artifacts. Produce 02c_user_voice.json with: top_complaints[], top_praises[], switch_in_narratives[], switch_out_narratives[].",
+          "Subagent 2d -- Commercial Strategy Signals: sources are job postings last 90 days, funding history, exec posts, conference talks, partnership announcements. Code each signal as: capability_adding | market_entering | motion_changing. Produce 02d_strategy_signals.json.",
+          "After all four subagents return, record what each produced in your notes. You will synthesize in step 3."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Confirmation that all four subagents ran and brief summary of what each returned. Note any subagent that could not complete its scope."
+        },
+        "verify": [
+          "All four subagents ran simultaneously.",
+          "All four output files exist (02a, 02b, 02c, 02d).",
+          "Each subagent applied the shipped_vs_announced and marketing_vs_user rules.",
+          "URL citations are present in subagent outputs."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "open-source-repo-metrics",
+          "when": {
+            "var": "competitorType",
+            "equals": "open_source"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (open_source) for Subagent 2a: Also perform a shallow-fetch of the main repository. Extract: primary languages, top dependencies, commit cadence last 90 days, top contributors and their employers. Calculate fork-to-star ratio and monthly unique contributors. These behavioral metrics are higher signal than star count."
+        }
+      ]
+    },
+    {
+      "id": "evidence-consolidation",
+      "title": "Evidence Consolidation",
+      "promptBlocks": {
+        "goal": "Read all four subagent output files. Deduplicate, reconcile conflicts, and score every claim. Build the canonical evidence base and gap inventory that steps 5-8 will consume.",
+        "constraints": [
+          "Conflicts get BOTH versions with a conflict tag -- do not silently resolve contradictions.",
+          "Score every claim: verified | likely | unconfirmed | inferred.",
+          "A gap is decision_critical: true if it is essential to informing the decisionTarget set in step 0.",
+          "A gap is recoverable: true if there is a plausible secondary source that could fill it."
+        ],
+        "procedure": [
+          "Read 02a_product_surface.json, 02b_commercial.json, 02c_user_voice.json, and 02d_strategy_signals.json.",
+          "Deduplicate overlapping claims. For conflicts, keep both versions with a conflict tag and note the source disagreement.",
+          "Score every remaining claim: verified (multiple independent sources confirm), likely (one strong source confirms), unconfirmed (single weak source, not independently confirmed), inferred (derived from context, not directly stated).",
+          "Build a gap inventory. For each gap, tag decision_critical: true/false and recoverable: true/false.",
+          "Write 03_evidence_base.json with the consolidated, scored evidence base and gap inventory.",
+          "Determine hasDecisionCriticalGaps: set to true if any gap is tagged decision_critical: true AND recoverable: true."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Evidence consolidation summary: total claims scored, conflict count, gap count, decision-critical gap count, and whether hasDecisionCriticalGaps is true or false.",
+          "context": "Set hasDecisionCriticalGaps (true or false)."
+        },
+        "verify": [
+          "03_evidence_base.json is written.",
+          "hasDecisionCriticalGaps is set in context.",
+          "No silent conflict resolution -- all conflicts are tagged.",
+          "Every claim has a confidence score."
+        ]
+      }
+    },
+    {
+      "id": "gap-closing-pass",
+      "title": "Gap-Closing Pass",
+      "runCondition": {
+        "var": "hasDecisionCriticalGaps",
+        "equals": true
+      },
+      "promptBlocks": {
+        "goal": "Close decision-critical recoverable gaps by spawning up to 3 targeted subagents on high-value secondary sources. Unrecovered decision-critical gaps become explicit human-followup flags in the final artifact.",
+        "constraints": [
+          "Only run this step when hasDecisionCriticalGaps is true (controlled by runCondition).",
+          "Spawn at most 3 targeted subagents for the highest-value recoverable gaps.",
+          "Subagents must still apply shipped_vs_announced and marketing_vs_user rules.",
+          "Unrecovered decision-critical gaps must be surfaced as explicit flags, not silently dropped."
+        ],
+        "procedure": [
+          "From 03_evidence_base.json, identify gaps tagged decision_critical: true AND recoverable: true.",
+          "Prioritize gaps by decision impact. Spawn up to 3 WorkRail Executor subagents targeting the highest-value gaps using the secondary source playbook (priority order): job postings, engineering blog/conference talks, patent filings, Wayback pricing diffs, customer logos + LinkedIn headcount trends, GitHub Issues for missing-feature signal (users asking for a feature signals the competitor lacks it), conference sponsorship lists.",
+          "After subagents return, update 03_evidence_base.json with new findings.",
+          "Write 04_gap_closing_notes.md listing: gaps closed, gaps that remain open, and explicit human-followup flags for unrecovered decision-critical gaps."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Which gaps were targeted, what was recovered, and what remains open as human-followup flags."
+        },
+        "verify": [
+          "04_gap_closing_notes.md is written.",
+          "Unrecovered decision-critical gaps are marked as explicit human-followup flags.",
+          "03_evidence_base.json is updated with new findings."
+        ]
+      }
+    },
+    {
+      "id": "synthesis",
+      "title": "Synthesis: JTBD + Switching Forces + Threat Read",
+      "promptBlocks": {
+        "goal": "Synthesize the evidence base into three linked analytical sections. These three sections are the intellectual core of the analysis. Write to 05_synthesis.md.",
+        "constraints": [
+          "JTBD articulation must NOT reference feature categories -- it must describe the underlying job customers hire either product to do.",
+          "The four-force table REQUIRES ALL FOUR CELLS. An incomplete table is the mirror problem and invalidates the threat read.",
+          "The threat read must cite at least 3 specific evidence items and rate confidence.",
+          "Key Assumptions Check and Premortem are required -- they are not optional depth passes.",
+          "Avoid overclaim AND underclaim in the threat read."
+        ],
+        "procedure": [
+          "Section 5.1 -- JTBD Frame: articulate the underlying job customers hire either product to do, WITHOUT reference to feature categories. Include at least one non-obvious substitute the customer could hire (not another software product -- a process, a workaround, or a different approach entirely).",
+          "Section 5.2 -- Four Forces of Switching (Moesta/Spiek model, ALL FOUR CELLS REQUIRED): Push away from us: what makes users look around? (from switch_out_narratives and lost-deal data). Pull toward competitor: their attractive promise? (from review praise and their positioning). Anxiety about switching to them: what stops the move? (from review complaints and forum pain). Habit/inertia with us: what is the lock-in? (from our product context).",
+          "Section 5.3 -- Threat Read: cite at least 3 specific evidence items by source and confidence score. Rate overall threat confidence. Avoid overclaim and underclaim.",
+          "Key Assumptions Check (append to threat read): list the 3 most load-bearing assumptions in the threat read. Rate each: well_supported | weakly_supported | unsupported_but_assumed.",
+          "Premortem (append to threat read): 'Imagine this analysis is wrong in 12 months. What was the most likely reason?' Write one specific answer."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Summary of JTBD frame, four-force highlights, threat read headline with confidence, and any key assumptions that were weakly supported."
+        },
+        "verify": [
+          "05_synthesis.md is written with all three sections.",
+          "JTBD frame makes no reference to feature categories.",
+          "Four-force table has all four cells populated.",
+          "Threat read cites at least 3 specific evidence items.",
+          "Key Assumptions Check and Premortem are present."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "alternative-approach-synthesis",
+          "when": {
+            "var": "competitorType",
+            "equals": "alternative_approach"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (alternative_approach): JTBD synthesis is the primary output. Feature comparison is demoted to an appendix. The central question is: are we in the same category, adjacent, or is a new category frame needed? Address this explicitly in section 5.1."
+        },
+        {
+          "id": "open-source-threat-model",
+          "when": {
+            "var": "competitorType",
+            "equals": "open_source"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (open_source): Add a commercial threat model section after the threat read. Choose and defend one of: stay_community (no commercial threat), launch_commercial (will offer paid tier), get_acquired (acquisition target). Cite governance and contributor-employer evidence for your choice."
+        },
+        {
+          "id": "platform-ecosystem-integration-map",
+          "when": {
+            "var": "competitorType",
+            "equals": "platform_ecosystem"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (platform_ecosystem): Add a contested integration surface map section after the threat read. List partners and customers tagged as: ours | theirs | contested | uncommitted. Contested entries are the strategic priority."
+        }
+      ]
+    },
+    {
+      "id": "adversarial-review",
+      "title": "Adversarial Review",
+      "promptBlocks": {
+        "goal": "Adopt an adversarial persona and challenge the analysis from 05_synthesis.md. This is not optional polish -- it is a correctness mechanism. Write 06_red_hat_critique.md.",
+        "constraints": [
+          "Adopt the adversarial persona fully: you are a well-informed defender of the competitor. The attached analysis is hostile to your company.",
+          "You MUST address all four tasks -- do not skip any.",
+          "ACH lite requires two alternative hypotheses with specific disconfirming evidence requirements.",
+          "Every unanswered adversarial point in this step becomes a required response in step 7."
+        ],
+        "procedure": [
+          "Adopt the persona: 'You are a well-informed defender of [competitorName]. The analysis in 05_synthesis.md is hostile to your company. Argue back.'",
+          "Task (a): Which threat claims in the synthesis are overstated? Cite specific evidence that was available but not weighted appropriately.",
+          "Task (b): Which competitor strengths did the analysis miss? What is present in the evidence base but not reflected in the synthesis?",
+          "Task (c): Which weaknesses of our product did the analysis fail to acknowledge? Where does the analysis defend us more than the evidence warrants?",
+          "Task (d): What evidence in the evidence base (03_evidence_base.json) contradicts the synthesis's own conclusions? Look for internal inconsistencies.",
+          "ACH Lite: generate two alternative hypotheses to the headline threat claim. For each alternative, list 2-3 specific pieces of evidence that would disconfirm it if true. These constrain what the lead agent needs to verify in step 7.",
+          "Write 06_red_hat_critique.md with all four tasks and ACH lite. Organize by task."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Summary of adversarial findings: strongest overstated claims, biggest missed strengths, most important blind spots about our product, any internal contradictions found, and the two ACH alternative hypotheses."
+        },
+        "verify": [
+          "06_red_hat_critique.md is written.",
+          "All four tasks are addressed.",
+          "ACH lite has two alternative hypotheses with specific disconfirming evidence requirements.",
+          "The adversarial persona was genuinely adopted, not used as light critique."
+        ]
+      }
+    },
+    {
+      "id": "decision-forcing-outputs",
+      "title": "Decision-Forcing Output Generation",
+      "assessmentRefs": [
+        "output-completeness-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "incomplete"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Fix whichever dimension scored incomplete: decision_ledger_integrity -- remove TBD verdicts, enforce <=3 urgent and <=1 changes-positioning by re-ranking. battlecard_completeness -- complete all required fields including We Lose When with 2-3 honest bullets. adversarial_coverage -- for each adversarial point from step 6, incorporate it or write an explicit rebuttal with cited evidence."
+          }
+        }
+      ],
+      "promptBlocks": {
+        "goal": "Produce all three decision-forcing artifacts. These artifacts are the deliverable the human will act on. The decision ledger is the primary artifact -- everything else is derivative.",
+        "constraints": [
+          "HARD CONSTRAINT on decision ledger: at most 3 urgent items, at most 1 changes-positioning item. If draft exceeds this, re-rank and demote. No TBD verdicts allowed.",
+          "HARD CONSTRAINT on battlecard: the We Lose When section is MANDATORY. No battlecard ships without 2-3 honest bullets with proof points.",
+          "Every adversarial point from 06_red_hat_critique.md must be either incorporated into the artifacts or explicitly rebutted with cited evidence. Unanswered adversarial points must be surfaced in 07_decision_ledger.md as a reviewer note."
+        ],
+        "procedure": [
+          "Artifact 7.1 -- Battlecard (07_battlecard.md): Write fields in this order: (1) one-line competitor description (<25 words); (2) We Win When -- 3 bullets, each with a proof point; (3) We Lose When -- 2-3 bullets, MANDATORY, honest, each with a proof point; (4) Top 3 differentiators tied to the switching forces from step 5; (5) Top 3 landmine discovery questions derived from user complaints in 02c_user_voice.json; (6) Pricing posture; (7) 3 objection->response pairs from review themes; (8) Confidence/freshness metadata: date, sources used, fields flagged as unconfirmed.",
+          "Artifact 7.2 -- Decision Ledger (07_decision_ledger.md): For every gap, signal, and threat from the evidence base and synthesis, write one table row: Finding | Source confidence | Verdict | Rationale | Owner. Verdict is a FORCED CHOICE: ignore | backlog | urgent | changes-positioning. Apply the hard constraint: at most 3 urgent, at most 1 changes-positioning. If the draft exceeds this, re-rank and demote lower-priority items. No TBD verdicts. Surface any unanswered adversarial points from step 6 as explicit reviewer notes.",
+          "Artifact 7.3 -- So-What Summary (07_so_what.md): Write exactly 5 sentences: (1) who the competitor is; (2) headline threat with confidence; (3) one switching driver that matters most; (4) recommended decision traceable to a specific ledger entry; (5) what single piece of new information would most change this read.",
+          "Address or rebut every adversarial point from 06_red_hat_critique.md. Record each response in your notes."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Draft completion status for all three artifacts. Note which adversarial points were incorporated vs rebutted, and how the urgent/changes-positioning constraints were applied (what was demoted and why)."
+        },
+        "verify": [
+          "07_battlecard.md is written with all required fields including We Lose When.",
+          "07_decision_ledger.md has no TBD verdicts, at most 3 urgent items, at most 1 changes-positioning item.",
+          "07_so_what.md is exactly 5 sentences.",
+          "Every adversarial point from 06_red_hat_critique.md is addressed or rebutted.",
+          "Unanswered adversarial points are surfaced as reviewer notes in the ledger."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "alternative-approach-battlecard-variant",
+          "when": {
+            "var": "competitorType",
+            "equals": "alternative_approach"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (alternative_approach): Replace the standard battlecard with a category positioning brief (07_battlecard.md repurposed). Answer: are we in the same category, an adjacent category, or do we need a new category frame? What is each product's distinctive promise? Where do we win on category frame and where do we lose?"
+        },
+        {
+          "id": "open-source-ledger-additions",
+          "when": {
+            "var": "competitorType",
+            "equals": "open_source"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (open_source): Add a posture field to the battlecard: compete | embrace-and-extend | partner | ignore. Add two required rows to the decision ledger: license-risk (what is our legal exposure if customers adopt this?) and dependency-risk (are any of our customers or integrations already depending on this?)."
+        },
+        {
+          "id": "platform-ecosystem-battlecard-variant",
+          "when": {
+            "var": "competitorType",
+            "equals": "platform_ecosystem"
+          },
+          "text": "COMPETITOR TYPE DIVERGENCE (platform_ecosystem): Replace the standard battlecard with an ecosystem map (07_battlecard.md repurposed). Show partners and customers tagged: ours | theirs | contested | uncommitted. Highlight contested zone entries as the action items."
+        }
+      ]
+    },
+    {
+      "id": "human-review-and-diff",
+      "title": "Human Review + Diff",
+      "requireConfirmation": true,
+      "promptBlocks": {
+        "goal": "Present the three output artifacts to the human reviewer for validation. The human does three concrete things: edits ledger verdicts, responds to adversarial points, and confirms the staleness threshold. Produce 08_human_signoff.md recording all changes.",
+        "constraints": [
+          "The human reviewer must actively engage -- this is not a passive approval gate.",
+          "Track all verdict changes from the human in 08_human_signoff.md.",
+          "If priorArtifactPath is set (not empty string), produce 08_diff.md before presenting artifacts."
+        ],
+        "procedure": [
+          "If priorArtifactPath is not empty, produce 08_diff.md comparing the current analysis to the prior artifact. Categorize differences as: verdict_changed | new_finding | dropped_finding | confidence_changed.",
+          "Present to the human reviewer: 07_battlecard.md, 07_decision_ledger.md, 07_so_what.md, and (if applicable) 08_diff.md.",
+          "Ask the human to do three things: (1) Confirm or change each verdict in the decision ledger -- edits will be tracked. (2) Accept or rebut each unanswered adversarial point surfaced from step 6. (3) Confirm when this analysis should be considered stale (default: 90 days).",
+          "Record all human changes and responses in 08_human_signoff.md.",
+          "If the human changes any verdicts that violate the <=3 urgent / <=1 changes-positioning constraint, note the constraint and ask them to confirm the override."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Summary of human reviewer changes: how many verdicts changed, which adversarial points were accepted vs rebutted, and confirmed staleness date."
+        },
+        "verify": [
+          "08_human_signoff.md is written recording all verdict changes.",
+          "Adversarial points from step 6 have been accepted or rebutted by the human.",
+          "Staleness date is confirmed.",
+          "08_diff.md produced if priorArtifactPath was set."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "diff-available",
+          "when": {
+            "var": "priorArtifactPath",
+            "not_equals": ""
+          },
+          "text": "A prior analysis artifact was provided. Produce 08_diff.md before the human review session, categorizing all differences as: verdict_changed | new_finding | dropped_finding | confidence_changed. Present the diff summary to the human first so they can focus on what changed."
+        }
+      ]
+    },
+    {
+      "id": "rerun-trigger-registration",
+      "title": "Re-Run Trigger Registration",
+      "promptBlocks": {
+        "goal": "Write 09_triggers.json with layered re-run triggers for this analysis. This file is a configuration document for the operator to act on -- WorkRail cannot register live cron jobs.",
+        "constraints": [
+          "Note explicitly in the file: WorkRail cannot register live cron jobs. This is a configuration document for the operator.",
+          "Set staleness_date to 90 days from today.",
+          "Include both time-based and event-based triggers."
+        ],
+        "procedure": [
+          "Write 09_triggers.json with the following structure: time_based_triggers: full re-run quarterly, lightweight refresh (subagents 2b/2c/2d only) monthly. event_based_triggers: competitor funding round, leadership change (CEO/CPO/head of product), acquisition (either direction), major version release or marketing relaunch, pricing-page diff detected, 3+ new G2 reviews in 30 days with new theme, 2+ lost deals to this competitor in a 30-day window, team is about to make a decision this analysis was meant to inform. staleness_date: [today + 90 days]. analysis_id: [competitorName]-[decisionTarget]-[today's date].",
+          "Add a note at the top of the file: 'WorkRail cannot register live cron jobs. This file is a configuration document for the operator to configure monitoring alerts and calendar reminders based on the triggers listed here.'"
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Confirmation that 09_triggers.json is written with all required trigger types and staleness date. Summary of the analysis run: competitor, decision target, primary verdict recommendation, and key open questions for the next run."
+        },
+        "verify": [
+          "09_triggers.json is written.",
+          "staleness_date is set to 90 days from today.",
+          "Both time-based and event-based triggers are present.",
+          "The operator note about WorkRail not registering live cron jobs is included."
+        ]
+      }
+    }
+  ],
+  "validatedAgainstSpecVersion": 3
+}
