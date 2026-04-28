@@ -247,14 +247,22 @@ describe('worktrain daemon --install', () => {
     expect(loadCall?.args[1]).toBe(PLIST_PATH);
   });
 
-  it('returns success with running PID when launchctl list shows PID', async () => {
+  it('returns success with --start instruction (install no longer auto-starts)', async () => {
     const deps = buildFakeDeps();
     const result = await executeWorktrainDaemonCommand(deps, { install: true });
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
-      expect(result.output?.message).toContain('PID 42');
+      expect(result.output?.message).toContain('--start');
     }
+  });
+
+  it('output tells operator to run --start after install', async () => {
+    const deps = buildFakeDeps();
+    await executeWorktrainDaemonCommand(deps, { install: true });
+    const output = deps.printed.join('\n');
+    expect(output).toContain('--start');
+    expect(output).not.toContain('running (PID');
   });
 
   it('unloads existing service before reinstalling', async () => {
@@ -379,6 +387,131 @@ describe('worktrain daemon --uninstall', () => {
     // Non-fatal: plist should still be removed and result should be success.
     expect(result.kind).toBe('success');
     expect(deps.files.has(PLIST_PATH)).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// --start
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('worktrain daemon --start', () => {
+  it('returns failure when plist is not installed', async () => {
+    const deps = buildFakeDeps();
+    // No plist in files -- not installed
+    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+
+    expect(result.kind).toBe('failure');
+    if (result.kind === 'failure') {
+      expect(result.output.message).toContain('not installed');
+    }
+  });
+
+  it('calls launchctl start with the service label', async () => {
+    const deps = buildFakeDeps();
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    await executeWorktrainDaemonCommand(deps, { start: true });
+
+    const startCall = deps.execCalls.find(
+      (c) => c.command === 'launchctl' && c.args[0] === 'start',
+    );
+    expect(startCall).toBeDefined();
+    expect(startCall?.args[1]).toBe('io.worktrain.daemon');
+  });
+
+  it('returns success with PID when daemon starts successfully', async () => {
+    const deps = buildFakeDeps();
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.output?.message).toContain('PID 42');
+    }
+  });
+
+  it('returns failure when launchctl start fails', async () => {
+    const deps = buildFakeDeps({
+      exec: async (command, args) => {
+        if (command === 'launchctl' && args[0] === 'start') {
+          return { stdout: '', stderr: 'service not loaded', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+
+    expect(result.kind).toBe('failure');
+  });
+
+  it('returns failure on non-darwin platform', async () => {
+    const deps = buildFakeDeps({ platform: 'linux' });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+
+    expect(result.kind).toBe('failure');
+    if (result.kind === 'failure') {
+      expect(result.output.message).toContain('macOS');
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// --stop
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('worktrain daemon --stop', () => {
+  it('calls launchctl stop with the service label', async () => {
+    const deps = buildFakeDeps();
+
+    await executeWorktrainDaemonCommand(deps, { stop: true });
+
+    const stopCall = deps.execCalls.find(
+      (c) => c.command === 'launchctl' && c.args[0] === 'stop',
+    );
+    expect(stopCall).toBeDefined();
+    expect(stopCall?.args[1]).toBe('io.worktrain.daemon');
+  });
+
+  it('returns success when launchctl stop succeeds', async () => {
+    const deps = buildFakeDeps();
+    const result = await executeWorktrainDaemonCommand(deps, { stop: true });
+
+    expect(result.kind).toBe('success');
+  });
+
+  it('returns success with "not running" message when service is already stopped', async () => {
+    const deps = buildFakeDeps({
+      exec: async (command, args) => {
+        if (command === 'launchctl' && args[0] === 'stop') {
+          return { stdout: '', stderr: 'no such process', exitCode: 1 };
+        }
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    const result = await executeWorktrainDaemonCommand(deps, { stop: true });
+
+    // Already stopped is not an error -- it's the desired end state
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.output?.message).toContain('not running');
+    }
+  });
+
+  it('returns failure on non-darwin platform', async () => {
+    const deps = buildFakeDeps({ platform: 'linux' });
+
+    const result = await executeWorktrainDaemonCommand(deps, { stop: true });
+
+    expect(result.kind).toBe('failure');
+    if (result.kind === 'failure') {
+      expect(result.output.message).toContain('macOS');
+    }
   });
 });
 

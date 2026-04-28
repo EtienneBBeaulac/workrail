@@ -1,16 +1,96 @@
 # Ideas Backlog
 
-Workflow and feature ideas that are worth capturing but not yet planned or designed.
+Workflow and feature ideas worth capturing but not yet planned or designed.
+For historical narrative and sprint journals, see `docs/history/worktrain-journal.md`.
 
 ---
 
-## `jumpIf`: conditional step jumps with per-target jump counter (Apr 23, 2026)
+## Daemon and WorkTrain
 
-**Problem:** Workflows with investigation or iterative refinement patterns (bug-investigation, mr-review) can exhaust their hypothesis set and reach an `inconclusive_but_narrowed` state with no structural way to restart an earlier phase. The only current options are: (1) prose guidance inside loop decision steps telling the agent to "reopen the shortlist" (unreliable), or (2) nested loops (not yet supported by the schema). A `jumpIf` primitive would let any step conditionally restart execution from an earlier step when a context condition is met.
+### API key baked into launchd plist at install time (Apr 24, 2026)
+
+**Status: idea** | Priority: medium
+
+`worktrain daemon --install` captures `ANTHROPIC_API_KEY` from the current shell environment and bakes it into `~/Library/LaunchAgents/io.worktrain.daemon.plist` (mode 600). The key persists in the plist file indefinitely and is visible to anyone who can read the file or takes a backup of `~/Library/LaunchAgents/`.
+
+**Better approach:** Read `ANTHROPIC_API_KEY` from `~/.workrail/.env` at daemon startup rather than baking it into the plist. The plist would only contain the non-secret env vars (AWS_PROFILE, WORKRAIL_TRIGGERS_ENABLED, PATH). Secrets live in `~/.workrail/.env` which is already the designated secrets file and is already loaded by `loadDaemonEnv()` at startup.
+
+**Implementation:** In `captureEnvVars()` in `src/cli/commands/worktrain-daemon.ts`, exclude `ANTHROPIC_API_KEY` (and any other `*_API_KEY` vars) from the captured set. The daemon already calls `loadDaemonEnv()` which reads `~/.workrail/.env` -- operators just need to put the key there instead of in their shell env.
+
+**Migration:** Existing installs have the key in the plist. `worktrain daemon --install` should detect an existing plist with an API key and print a migration note.
+
+---
+
+### runWorkflow() functional core refactor -- Phase 2 (Apr 24, 2026)
+
+**Status: idea** | Priority: medium
+
+Phase 1 landed in PR #818: extracted `tagToStatsOutcome`, `buildAgentClient`, `evaluateStuckSignals`, `SessionState`, and `finalizeSession`. `runWorkflow()` is still ~880 lines with I/O and pure logic interleaved in the setup phase.
+
+**What remains:**
+
+**Extract `buildSessionConfig(trigger, loadedCtx) -> SessionConfig`** -- a pure function that takes already-loaded context (soul content, workspace context string, session notes array -- all loaded by I/O before the call) and returns everything the agent loop needs: system prompt, tool list, session limits, model/client config. Currently this logic is scattered through the setup phase alongside the I/O calls that load the data.
+
+```typescript
+interface SessionContext {
+  readonly systemPrompt: string;
+  readonly tools: readonly AgentTool[];
+  readonly sessionTimeoutMs: number;
+  readonly maxTurns: number;
+  readonly initialPrompt: string;
+  readonly agentCallbacks: AgentLoopCallbacks;
+}
+
+function buildSessionContext(
+  trigger: WorkflowTrigger,
+  agentClient: AgentClientInterface,
+  modelId: string,
+  soulContent: string,           // already loaded by loadDaemonSoul()
+  workspaceContext: string | null, // already loaded by loadWorkspaceContext()
+  sessionNotes: readonly string[], // already loaded by loadSessionNotes()
+  state: SessionState,
+  // ... tool factories, schemas, etc.
+): SessionContext
+```
+
+The shell then does:
+1. All I/O in sequence: `loadDaemonSoul`, `loadWorkspaceContext`, `loadSessionNotes`, `git worktree add`, `executeStartWorkflow`, `parseContinueTokenOrFail`, `persistTokens`
+2. One pure call: `buildSessionContext(trigger, client, modelId, soul, ctx, notes, state, ...)`
+3. Run the agent loop with the returned config
+
+**Why this matters:** `buildSessionContext` would be unit-testable without any filesystem, LLM, or session store. The system prompt assembly, tool list construction, and session limit calculation are currently untestable in isolation. This is the biggest remaining testability gap.
+
+**Prerequisite:** Phase 1 (PR #818) -- done. `SessionState` already exists and can be passed in.
+
+**Scope:** Single file (`src/daemon/workflow-runner.ts`). New exports: `buildSessionContext`, `SessionContext`. No public API changes.
+
+---
+
+## Engine and MCP
+
+### Improve commit SHA gathering consistency in wr.coding-task
+
+**Status: idea** | Priority: high
+
+After fixing the primary cause (SHA footer referenced `continue_workflow` by name while daemon agents use `complete_step`), two structural gaps remain that prevent consistent SHA recording:
+
+**Gap 1: SHA footer appears on every non-final step, including planning/design steps with no commits.** Agents correctly skip it on those steps, but the repetition trains them to suppress it reflexively -- including on implementation steps where it matters. Options to explore: inject only inside loop bodies tagged as implementation, add an opt-out flag to steps, or move the SHA reminder into the implementation step prompts directly in the workflow JSON.
+
+**Gap 2: `phase-5-small-task-fast-path` has no correctly-wired final metrics step for Small tasks.** `isLastStep` resolves to `phase-7b-fix-and-summarize`, which has a `runCondition` that skips it for Small tasks. Small-task sessions never see the final metrics footer. Needs either: the final footer added directly to `phase-5`'s authored prompt, or `isLastStep` detection made context-aware (complex).
+
+**Gap 3: No validation for `metrics_commit_shas`.** `checkContextBudget` validates `metrics_outcome` but not SHAs. Missing or partial arrays fail silently. A warning-level soft validation at the final step would at least surface the gap in logs.
+
+The right fix is probably a combination of moving the SHA instruction into the implementation step prompts directly (removing it from the ambient footer entirely) and adding Gap 2's final footer to `phase-5`. That avoids any new engine machinery.
+
+---
+
+### `jumpIf`: conditional step jumps with per-target jump counter
+
+**Status: idea** | Priority: medium
+
+**Problem:** Workflows with investigation or iterative refinement patterns (bug-investigation, mr-review) can exhaust their hypothesis set and reach an `inconclusive_but_narrowed` state with no structural way to restart an earlier phase. A `jumpIf` primitive would let any step conditionally restart execution from an earlier step when a context condition is met.
 
 **Proposed design:**
-
-A `jumpIf` field on any step declaration:
 
 ```json
 {
@@ -27,20 +107,17 @@ A `jumpIf` field on any step declaration:
 - When a step completes and its `jumpIf.condition` is met, the engine checks the per-session jump counter for `target`
 - Counter is derived from the event log: count `jump_recorded` events where `toStepId === target` -- fully append-only and replayable
 - If `counter < maxJumps`: append `jump_recorded` event, create fresh nodeIds for `target` and all subsequent steps, mint a new continueToken pointing at the fresh target node
-- If `counter >= maxJumps`: jump is blocked, execution falls through to the next step after the `jumpIf` step (safety cap, not an error)
-- Fresh nodeIds mean no dedupeKey collisions and no DAG cycles -- the same step definition can appear multiple times in the session DAG as distinct nodes, same as loop iterations
+- If `counter >= maxJumps`: jump is blocked, execution falls through to the next step (safety cap, not an error)
 
 **Why this is safe:**
 - `maxJumps` is a required field -- no unbounded loops possible
 - Counter is derivable from the append-only event log -- no mutable state
-- The token system is unaffected -- each jump produces a fresh continueToken encoding a fresh nodeId
 - Fall-through on limit reached is predictable and operator-visible
 
 **Open design questions:**
-- `maxJumps` default if omitted -- probably require it explicitly (same as `maxIterations` on loops, which is also required)
-- DAG console rendering -- backward jumps create "re-entry" edges. Needs a distinct visual treatment (dashed edge? "JUMP x2" label?) -- tracked separately under console execution trace work
-- Interaction with `runCondition` -- if a jumped-to step has a `runCondition` that evaluates false at re-entry time, does the engine skip it and advance? Probably yes, same as first-time evaluation.
-- Whether `jumpIf` and loop `body` can coexist on the same step -- probably yes, they're independent control-flow mechanisms
+- `maxJumps` default if omitted -- probably require it explicitly (same as `maxIterations` on loops)
+- DAG console rendering -- backward jumps create "re-entry" edges. Needs a distinct visual treatment
+- Interaction with `runCondition` -- if a jumped-to step has a `runCondition` that evaluates false at re-entry time, does the engine skip it and advance?
 
 **Scope when ready to implement:**
 - `spec/workflow.schema.json`: add `jumpIf` to `standardStep`
@@ -53,5991 +130,371 @@ A `jumpIf` field on any step declaration:
 
 ---
 
-## Research Notes: Autonomous Platform Vision (Apr 14, 2026)
+### Versioned workflow schema validation
 
-### Common-Ground relationship + cross-repo execution model
+**Status: idea** | Priority: medium-high
 
-**Common-Ground stays separate -- WorkRail wraps it.**
+**Problem:** WorkRail validates workflow files against the schema bundled in the currently-running MCP binary. Binary too new rejects old workflows; binary too old rejects new workflows. Both cause silent disappearance from `list_workflows` with no explanation.
 
-Common-Ground and WorkRail solve different problems at different layers:
-- Common-Ground: "what does this agent know about this codebase and team?" (context distribution)
-- WorkRail: "what should this agent do next, and did it actually do it?" (workflow enforcement)
+**The right fix:** Each workflow declares `"schemaVersion": 1` (integer). The binary ships validator copies for every schema version it supports. When loading a workflow, pick the validator matching the declared version.
 
-Merging them would make WorkRail opinionated about team structure, IDE configs, AGENTS.md formats, and org-specific conventions -- breaking WorkRail's portability. `npx -y @exaudeus/workrail` works for any engineer anywhere with zero config. That's a feature to protect.
+**Load-time logic:**
+1. Read `schemaVersion` (default 1 if absent -- legacy workflows)
+2. If `schemaVersion === current`: validate against current schema directly
+3. If `schemaVersion < current` (binary newer): validate against the declared schema version
+4. If `schemaVersion > current` (binary too old): load leniently with warnings -- `additionalProperties: false` does not apply
 
-**The right relationship:** Common-Ground distributes WorkRail as part of the team toolchain (already true via `[[workflow_repos]]` in `team.toml`). WorkRail stays generic. Common-Ground stays org-specific. They're friends, not merged.
+**Decision (from Apr 23 audit):** v1 = current schema. The one historical breaking change (`assessmentConsequenceTrigger`, Apr 5) was fully contained within the bundled workflow corpus. No historical reconstruction needed.
 
-**WorkRail bootstraps Common-Ground (tentative idea, low priority):**
-
-> ⚠️ Tentative -- not committed. Needs more thought before pursuing.
-
-WorkRail could be the *setup layer* for Common-Ground -- a guided `workrail init` workflow that generates a Common-Ground config, runs `make sync`, and registers workflow directories as managed sources. Would make Common-Ground configurations shareable as WorkRail workflows.
-
-Also tentative: Common-Ground's `make sync` triggering a WorkRail daemon session to validate the distributed configuration. Interesting but not a near-term priority.
+**Files to change:** `spec/workflow.schema.json`, `spec/workflow.schema.v1.json` (snapshot), `src/application/validation.ts`, `src/types/workflow-definition.ts`, `workflow-for-workflows.json` (stamp `schemaVersion`), all bundled workflows.
 
 ---
 
-**Cross-repo execution model -- HIGH IMPORTANCE, post-MVP:** ⭐
+### Task re-dispatch loop protection
 
-WorkRail must handle any environment. Not MVP, but a must-have before WorkRail can be called a general-purpose platform.
+**Status: idea** | Priority: high
 
-WorkRail currently assumes a single repo. The autonomous daemon breaks this assumption -- a coding task may touch Android, iOS, and a GraphQL backend simultaneously. An investigation may span 5 services.
+**Problem:** When a pipeline session fails (stuck, crash, timeout), the idempotency sidecar expires after its TTL and the queue re-selects the same issue on the next poll cycle. There is no memory of how many times an issue has been attempted. A task that consistently fails gets retried indefinitely, burning API credits with no forward progress.
 
-**Workspace manifest** -- sessions declare which repos they need:
-```json
-{
-  "context": {
-    "repos": [
-      { "name": "android", "path": "~/git/zillow/zillow-android-2" },
-      { "name": "ios", "path": "~/git/zillow/ZillowMap" },
-      { "name": "backend", "path": "~/git/zillow/mercury-graphql" }
-    ]
-  }
-}
+**Concrete incident:** Issue #393 was dispatched in a loop -- discovery + shaping + coding sessions repeatedly started, failed stuck, and were re-dispatched.
+
+**Design:** Extend `queue-issue-<N>.json` to include `attemptCount`. On each new dispatch for the same issue, increment. When `attemptCount >= maxAttempts` (default 3), skip dispatch, emit outbox notification, apply a `worktrain:needs-human` label, and post a comment on the issue.
+
+**Human reset:** Closing/reopening the issue, removing the `worktrain:stuck` label, or `worktrain retry <issueNumber>`.
+
+**Files:** `src/trigger/adapters/github-queue-poller.ts`, `src/trigger/polling-scheduler.ts`, daemon sidecar schema.
+
+---
+
+### Daemon agent loop stall detection
+
+**Status: idea** | Priority: medium
+
+**Problem:** A daemon session that stops making LLM API calls (hung tool, network issue with no timeout, silent deadlock) spins until the wall-clock timeout fires -- up to 55-65 minutes. No indication to the operator, no early abort, no event emitted.
+
+**Design:** In `src/daemon/agent-loop.ts`, add a per-turn heartbeat timer that resets each time an LLM call starts. If the timer fires (120s with no new turn), call `agent.abort()` and emit `agent_stuck` with `reason: 'no_llm_turn'`. Configurable via `agentConfig.stallTimeoutSeconds`.
+
+**Where to look:** `src/daemon/agent-loop.ts` `_runLoop()`, `src/daemon/workflow-runner.ts` stuck detection, `src/daemon/daemon-events.ts` `AgentStuckEvent`.
+
+---
+
+### `queue-poll.jsonl` never rotated
+
+**Status: idea** | Priority: medium
+
+**Bug:** `~/.workrail/queue-poll.jsonl` grows indefinitely -- `appendFile`-only, no rotation. At 5-minute poll intervals: ~8-87 MB/month depending on activity. Disk exhaustion risk on long-running daemons.
+
+**Fix:** Add a size check before appending in `appendQueuePollLog()`. If file exceeds 10 MB, rotate: rename to `queue-poll.jsonl.1`, start fresh. Keep at most 2 rotated files.
+
+**File:** `src/trigger/polling-scheduler.ts`, `appendQueuePollLog()`.
+
+---
+
+### ReviewSeverity: stderr bypassing injected dep
+
+**Status: idea** | Priority: medium
+
+**Bug 1 (DONE):** `assertNever` on `ReviewSeverity` was added at `pr-review.ts:1407`. ✓
+
+**Bug 2 (still open):** `src/coordinators/pr-review.ts:447` -- `process.stderr.write(...)` called directly instead of using injected `deps.stderr`. Tests that inject a fake dep miss this log.
+
+**File:** `src/coordinators/pr-review.ts`.
+
+---
+
+### Session continuation / "just keep talking"
+
+**Status: idea** | Priority: medium
+
+A completed session is not dead -- the conversation is still in the event log. The only thing blocking continuation is the engine rejecting messages to sessions in `complete` state.
+
+**The change:** Remove that gate. `worktrain session continue <sessionId> "<message>"` sends a message to a completed session. New events appended to the same log. Same session ID. The agent has full context of everything it ever did.
+
+Context window overflow (very long sessions) is a separate optimization problem -- truncate oldest turns while keeping step notes. Don't solve it now.
+
+---
+
+### Session as a living record: post-completion phases
+
+**Status: idea** | Priority: medium
+
+A `session_completed` event means the original workflow is done -- not that the session can never receive new events. The event log is append-only: just keep appending. A post-completion interaction adds a `session_resumed` event, then new turns, then a new `session_completed`.
+
+This is already how mid-run resume works. The same mechanism extends naturally to post-completion: rehydrate the completed state, append a new lightweight phase, run it, complete again.
+
+**Richer automatic checkpoints:** Many session events should trigger a checkpoint automatically:
+- `step_advanced` (already essentially a checkpoint)
+- `signal_coordinator` fired (agent surfaced meaningful mid-step state)
+- Worktree commit pushed (code state durable on remote)
+- Coordinator steers the session (notable injection)
+- `spawn_agent` child completes (parent has new information)
+
+---
+
+### Rules preprocessing: normalize workspace rules before injection
+
+**Status: idea** | Priority: medium
+
+**Problem:** WorkTrain injects all rules files raw into every agent's system prompt. A workspace with `.cursorrules`, `CLAUDE.md`, `.windsurf/rules/*.md`, and `AGENTS.md` might inject 10KB of rules into a discovery session that only needs 2KB.
+
+**Design:** A `worktrain rules build` command that reads all IDE rules files from the workspace, deduplicates overlapping rules, categorizes by phase, and writes to `.worktrain/rules/`:
+- `implementation.md`, `review.md`, `delivery.md`, `discovery.md`, `all.md`
+- `manifest.json` -- which files exist, when generated, source files used
+
+At session time: WorkTrain injects only the phase-relevant file.
+
+---
+
+### True session status (live agent state in console)
+
+**Status: idea** | Priority: medium-high
+
+**Problem:** The console currently infers session status from last event timestamp. WorkTrain has direct access to `DaemonRegistry`, `DaemonEventEmitter`, and turn-level events -- it should show true status.
+
+**True session status taxonomy:**
+- `active:thinking` -- LLM API call in progress
+- `active:tool` -- tool executing (name visible)
+- `active:idle` -- between turns, session in DaemonRegistry
+- `stuck` -- stuck heuristic fired
+- `completed:success/timeout/stuck/max_turns`
+- `aborted` -- daemon killed mid-run
+- `daemon:down` -- no recent heartbeat
+
+Surface in: `worktrain status`, `worktrain health <sessionId>`, console session rows.
+
+---
+
+## Daemon and Coordinator
+
+### Event-driven agent coordination (coordinator as event bus)
+
+**Status: idea** | Priority: high
+
+**Problem:** Agents managing an MR should not poll for review comments or CI status -- that wastes turns and burns tokens. Instead, the coordinator should register for events and steer the agent when something relevant happens.
+
+The infrastructure already exists: `steerRegistry` + `POST /sessions/:id/steer`, `signal_coordinator` tool, `DaemonEventEmitter`.
+
+**What's missing:** Coordinator-side event sources (GitHub webhooks or polling fallback) and an event-to-steer bridge that maps `MREvent` to structured steer messages.
+
+**How it works:** MR management agent session is parked (no pending turns). Coordinator registers for GitHub events. When review comment/CI failure/approval arrives, coordinator steers the running session. Agent responds. No polling from the agent side.
+
+**Agent session prompt:** "Do not poll for PR status. Wait for the coordinator to deliver events via injected messages."
+
+---
+
+### MR lifecycle manager
+
+**Status: idea** | Priority: high
+
+**Gap:** WorkTrain currently creates a PR and dispatches an MR review session. Everything between "PR created" and "PR merged" is invisible: CI failures, reviewer comments, requested changes, merge conflicts, required approvals. A human has to watch and intervene.
+
+**Vision:** `runMRLifecycleManager()` takes ownership of the MR from creation to merge.
+
+**Responsibilities:**
+1. MR creation with correct template, labels, milestone, reviewers, linked tickets
+2. CI pipeline monitoring -- parse failures, retry flaky tests, spawn fix sessions
+3. Review comment triage -- classify each comment (actionable/question/nit/approval/blocker), reply autonomously or escalate
+4. Approval tracking -- when all gates pass, trigger merge
+5. Merge conflict resolution -- rebase or escalate complex conflicts
+6. Merge execution + downstream ticket/notification updates
+
+**Dependency:** PR template support, phase-scoped rules, `dispatchCondition` webhook filter.
+
+---
+
+### Phase-scoped context files
+
+**Status: idea** | Priority: medium
+
+**Design:** Teams define context files scoped to specific pipeline phases under `.worktrain/rules/`:
+- `discovery.md`, `shaping.md`, `implementation.md`, `review.md`, `delivery.md`, `pr-management.md`, `all.md`
+
+Each file is injected only into sessions running the matching pipeline phase. Reduces token waste and rule dilution. `all.md` is equivalent to today's AGENTS.md injection.
+
+**Load order (most specific wins):** `AGENTS.md` / `CLAUDE.md` (base) → `.worktrain/rules/all.md` → phase-specific file.
+
+---
+
+### Coordinator architecture: separation of concerns
+
+**Status: idea** | Priority: medium
+
+**Problem:** `src/coordinators/pr-review.ts` is already ~500 LOC doing session dispatch, result aggregation, finding classification, merge routing, message queue drain, and outbox writes. Adding knowledge graph queries, context bundle assembly, and prior session lookups would create a god class.
+
+**Right layering:**
+```
+Trigger layer         src/trigger/          receives events, validates, enqueues
+Dispatch layer        (TBD)                 decides which workflow + what goal
+Context assembly      (TBD)                 gathers and packages context before spawning
+Orchestration layer   src/coordinators/     spawns, awaits, routes, retries, escalates
+Delivery layer        src/trigger/delivery  posts results back to origin systems
 ```
 
-**Scoped tools** -- `BashInRepo`, `ReadRepo`, `WriteRepo` that route to the correct working directory:
-```
-BashInRepo(repo: "android", command: "gradle test")
-ReadRepo(repo: "ios", path: "Sources/Messaging/ZIMGallery.swift")
-```
-
-**Dynamic repo provisioning** -- the daemon resolves repos at session start:
-- If the repo is already cloned locally, use it
-- If declared as a remote URL, clone to `~/.workrail/repos/<name>/` (same pattern as Common-Ground's `[[workflow_repos]]`)
-- Workflow authors declare repo requirements; WorkRail ensures they're available
-
-**Why this matters:** This is what Common-Ground's `make scan` does manually today -- finds repos, injects context. WorkRail's daemon does it dynamically, driven by workflow declarations. Any environment, any combination of repos, any org -- zero manual setup.
-
-**Cross-repo is the feature that makes WorkRail truly freestanding.** A developer anywhere can point WorkRail at their repos, declare a workspace manifest in their workflow, and get the same autonomous multi-repo execution that Mercury Mobile gets -- without Common-Ground, without Zillow infrastructure, without anything except WorkRail.
+**Context assembly** is the missing layer. Before dispatching a coding session, `assembleContext(task, workspace)` runs: knowledge graph query, upstream pitch/PRD fetch, relevant prior session notes, returns a structured context bundle. The orchestration script should call this, not own it.
 
 ---
 
-### Long-term vision: WorkTrain as a general engine, domain packs as configuration (Apr 15, 2026)
+### Scheduled tasks (native cron provider)
 
-WorkTrain is not just a coding tool. The underlying engine -- session management, workflow enforcement, daemon, agent loop, knowledge graph, context bundle assembly -- is domain-agnostic. What makes it a "coding tool" today is entirely configuration: the workflows, the graph schema, the context bundle queries, the trigger definitions.
+**Status: idea** | Priority: medium
 
-**Domain packs** are the abstraction that makes this general:
+**Gap:** No native cron/schedule provider. Workaround is OS crontab calling `curl`.
 
-A domain pack is a self-contained configuration bundle that specializes WorkTrain for a specific problem domain:
-- a set of workflows (the step structure and agent instructions for that domain)
-- a knowledge graph schema (the node and edge types relevant to that domain)
-- context bundle query definitions (what "give me everything relevant to X" means in that domain)
-- trigger definitions (what events kick off work in that domain)
-- a daemon soul template (default agent persona and principles for that domain)
-
-**Examples of domain packs:**
-- `worktrain-coding` -- software engineering (the current default)
-- `worktrain-research` -- literature review, synthesis, citation tracking
-- `worktrain-creative` -- narrative generation, continuity tracking, style enforcement
-- `worktrain-ops` -- incident response, runbook execution, alert-to-action
-- `worktrain-data` -- pipeline validation, schema monitoring, anomaly investigation
-
-**The core engine is shared across all of them.** A domain pack author writes workflows, a graph schema, and context bundle queries -- they don't reimplement session management, token protocols, daemon loops, or the console.
-
-**Why this matters for WorkTrain's positioning:** most autonomous agent platforms are either too generic (the user has to build everything) or too specific (locked to one use case). Domain packs give WorkTrain a middle path: powerful enough to be opinionated about engineering workflows today, open enough to run any structured agentic domain tomorrow. New domains get the session durability, enforcement, observability, and knowledge graph for free.
-
-**What to build first:** nothing new for now. The architecture already supports this -- the domain pack concept is latent in the current design. The right time to make it explicit is when a second domain (creative writing, ops, research) is ready to be added. At that point, extract the coding-specific pieces into `worktrain-coding` and establish the domain pack contract.
-
----
-
-### Core architectural principle: WorkRail drives itself
-
-**The daemon doesn't bypass WorkRail -- it IS WorkRail.**
-
-The autonomous engine uses WorkRail's own MCP tools (`start_workflow`, `continue_workflow`) internally, from inside the same process. When running as MCP server, Claude Code calls these tools over the wire. When running as daemon, WorkRail calls them itself. The session engine, token protocol, step sequencer, and workflow registry are shared -- identical in both modes.
-
-**The workflow is the interface between the two modes.** A workflow has no knowledge of whether it's being driven by a human through Claude Code or by WorkRail's autonomous daemon. Zero changes to existing workflows required -- every workflow in the library today runs in autonomous mode tomorrow.
-
-```
-WorkRail Core (shared)
-├── Session engine (durable store, HMAC token protocol, step sequencer)
-├── Workflow registry (bundled + user + managed sources)
-└── Console (DAG visualization, live session view)
-
-WorkRail MCP Server (existing entry point)
-└── Claude Code / Cursor / Firebender call start_workflow, continue_workflow externally
-
-WorkRail Daemon (new entry point -- same core, different driver)
-├── Trigger listener (webhooks, cron, CLI, REST)
-├── Agent loop (pi-mono's agentLoop calling WorkRail's own MCP tools internally)
-└── Tool execution (Bash, Read, Write -- same tools Claude Code uses)
-```
-
-**Why this matters:**
-- No duplicate session logic, no duplicate workflow format, no duplicate enforcement
-- WorkRail can autonomously improve itself -- the daemon runs `workflow-for-workflows` to author new workflows, which then run in both modes
-- Users who start with Claude Code MCP get autonomous mode for free -- same config, same workflows, second entry point
-- The enforcement guarantee is identical: whether a human or the daemon is driving, the agent cannot skip steps
-
-**The single-process model:** The daemon entry point is a new `src/daemon/` module that imports and calls the same handlers as the MCP server -- `executeStartWorkflow`, `executeContinueWorkflow` -- directly, without HTTP overhead. The session store, pinned workflow store, and all other ports are shared DI singletons. MCP server and daemon can run simultaneously in the same process.
-
----
-
-### The four reference architectures: synthesis
-
-**The vision:** WorkRail as the next evolution -- open source, freestanding autonomous agent platform with cryptographic workflow enforcement, durable sessions, full observability, and first-class Anthropic API integration.
-
-| Source | Stars | What to take | What WorkRail already does better |
-|--------|-------|-------------|----------------------------------|
-| **OpenClaw** | 357k | ACP session store pattern, task flow chaining, policy system, spawn interface, freestanding daemon architecture | Durable disk sessions, cryptographic enforcement, checkpoint/resume tokens, DAG visualization |
-| **Claude Code** (leaked) | - | Compaction hooks (inject WorkRail notes into session memory before compaction), session runner pattern for programmatic Claude API calls, coordinator/subagent model, `PreToolUse`/`PostToolUse` hooks for evidence collection | Everything -- WorkRail is the enforcement layer above Claude Code |
-| **nexus-core** | 11 (internal) | Org profile system concept, skills-as-slash-commands UX, per-repo context injection, multi-model routing hints | Structural enforcement (nexus: advisory prompts; WorkRail: HMAC-gated tokens), cross-session durability, portability |
-| **pi-mono** | 35k | `@mariozechner/pi-ai` unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.), `agentLoop`/`agentLoopContinue` pattern, `ToolExecutionMode` (sequential/parallel), `BeforeToolCallResult`/`AfterToolCallResult` hooks, `EventStream<AgentEvent>` for streaming agent events, `mom` (Slack bot) as the simplest possible channel integration reference | N/A -- pi-mono is libraries, not a workflow engine |
-
-**pi-mono specifically:** 35k stars, MIT, TypeScript monorepo by Mario Zechner (badlogic). The most architecturally clean of the four:
-- `packages/ai` -- `streamSimple`, `complete`, `stream` over a unified `Model<TApi>` abstraction covering OpenAI, Anthropic, Google, Bedrock. This is WorkRail's LLM call layer for autonomous mode.
-- `packages/agent` -- `agentLoop(prompts, context, config, signal?)` returns `EventStream<AgentEvent, AgentMessage[]>`. Clean separation: the loop manages tool calls and context; the caller manages state. `ToolExecutionMode`: "sequential" vs "parallel" tool execution. `BeforeToolCallResult` (can block a tool call with a reason) + `AfterToolCallResult` (can override tool result content). These are the hooks WorkRail needs to observe and gate tool calls.
-- `packages/mom` -- Slack bot that runs an agent per channel, persists MEMORY.md per workspace, loads skills from directory. The simplest reference for "daemon receives message → runs agent → responds." WorkRail's daemon follows this exact pattern.
-- `packages/coding-agent` -- `SessionManager`, `AgentSession`, skill loading from directory. Session/skill abstractions WorkRail's daemon needs.
-
-**The synthesis -- what WorkRail becomes:**
-
-```
-WorkRail Autonomous Platform
-├── Workflow Engine (existing -- keep as-is)
-│   ├── Durable session store (append-only event log)
-│   ├── HMAC token protocol (cryptographic enforcement)
-│   ├── Workflow format (JSON, loops, conditionals, routines)
-│   └── Console + DAG visualization
-│
-├── Daemon (new -- build from pi-mono + OpenClaw patterns)
-│   ├── Trigger system (GitLab/GitHub webhooks, Jira, cron, CLI)
-│   │   └── Pattern: OpenClaw's block/trigger architecture
-│   ├── LLM call layer (pi-mono's pi-ai unified API)
-│   ├── Agent loop (pi-mono's agentLoop/agentLoopContinue)
-│   ├── Session management (OpenClaw's AcpSessionStore pattern)
-│   ├── Task flow chaining (OpenClaw's task-flow-registry pattern)
-│   └── Tool observation (Claude Code's PreToolUse hooks → evidence gating)
-│
-├── Context survival (new -- from Claude Code compaction research)
-│   ├── WorkRail step notes injected into session memory pre-compaction
-│   ├── Session notes survive context resets as structured memory
-│   └── WorkRail session store = ground truth across all compactions
-│
-└── Integration layer (optional extensions)
-    ├── Slack bot (pi-mono's mom pattern)
-    ├── OpenClaw skill (optional, not a dependency)
-    └── REST API / CLI triggers
-```
-
-**Build order for MVP:**
-1. `pi-ai` integration -- WorkRail daemon calls Claude API directly via pi-mono's unified API
-2. `agentLoop` wrapper -- WorkRail drives agent steps using pi-mono's loop, advancing its own session
-3. Single trigger: GitLab MR webhook → `coding-task-workflow` → autonomous execution
-4. Evidence collection: `BeforeToolCallResult` hook intercepts tool calls, WorkRail gates continue token on required evidence
-5. Console live view: active daemon sessions visible in existing console
-6. Task flow chaining: completed workflow A triggers workflow B
-
-**What this surpasses:**
-- nexus-core: autonomous (not human-initiated), durable, enforced, observable
-- OpenClaw: workflow-enforced (not just skill-prompted), cryptographically gated, full audit trail
-- ruflo/oh-my-claudecode: not a black box -- every step is visible, pauseable, resumeable
-- Devin/GitHub Copilot Workspace: open source, self-hosted, works with any LLM, enforcement-first
-
----
-
-### Claude Code source reference
-
-The leaked Claude Code source is at `https://github.com/Archie818/Claude-Code` (also mirrored at `ai-tpstudio/claude-code-haha`). Key files to study before designing WorkRail's autonomous mode:
-
-| File | What to learn |
-|------|---------------|
-| `src/commands/compact/compact.ts` | How compaction works: `trySessionMemoryCompaction` first, then `compactConversation`, then `microcompactMessages`. Session memory compaction is separate from conversation compaction -- two different mechanisms. Pre-compact hooks (`executePreCompactHooks`) run before compaction, giving WorkRail an integration point to inject its session notes before context is summarized. |
-| `src/services/compact/sessionMemoryCompact.ts` | Session memory as a durable store that survives compaction -- this is the pattern WorkRail should adopt: inject WorkRail step notes into session memory so they survive context resets |
-| `src/assistant/sessionHistory.ts` | Paginated session event log via API (`/v1/sessions/{id}/events`). WorkRail already has this pattern in its own session store -- the key insight is that Claude Code stores events server-side and fetches them page by page, not just in the context window |
-| `src/commands/agents/agents.tsx` + `src/components/CoordinatorAgentStatus.tsx` | Subagent coordination model -- coordinator agent dispatches to worker agents, each with their own tool permission context |
-| `src/commands/hooks/hooks.tsx` | Hook system: `PreToolUse`, `PostToolUse`, `Stop` hooks. WorkRail can write these via `setup-hooks.sh` to observe agent actions and gate continue tokens on required evidence |
-| `src/bridge/sessionRunner.ts` | How sessions are initiated and run programmatically -- key for WorkRail's autonomous daemon mode |
-| `src/components/CompactSummary.tsx` | What survives compaction as visible summary -- informs what WorkRail should inject into the summary to preserve workflow state |
-
-### OpenClaw architecture deep-dive
-
-**Repo:** `https://github.com/openclaw/openclaw` -- 357k stars, MIT, TypeScript, sponsored by OpenAI + GitHub + NVIDIA. The real one. Created Nov 2025, actively maintained Apr 2026.
-
-**What OpenClaw is:** A personal AI assistant daemon ("the lobster way 🦞") that runs 24/7 on your machine, listens on 20+ messaging channels (WhatsApp, Telegram, Slack, Discord, iMessage, etc.), and executes tasks autonomously. It's the architecture blueprint for WorkRail's autonomous mode.
-
-**Key architectural concepts:**
-
-**ACP (Agent Control Protocol)** -- OpenClaw's core protocol for managing autonomous agent sessions:
-- `src/acp/session.ts` -- `AcpSessionStore` with in-memory session management (up to 5,000 sessions, 24h idle TTL, LRU eviction). Clean interface: `createSession`, `setActiveRun`, `cancelActiveRun`, `clearActiveRun`. Uses `AbortController` for cancellation. **WorkRail already has a superior version of this** -- durable disk-persisted sessions vs OpenClaw's in-memory store.
-- `src/acp/policy.ts` -- `AcpDispatchPolicyState` ("enabled" | "acp_disabled" | "dispatch_disabled"), per-agent allowlist via `cfg.acp.allowedAgents`. Clean policy separation. WorkRail should adopt the same `isXxxEnabledByPolicy(cfg)` pattern for its daemon config.
-- `src/acp/control-plane/` -- `manager.ts` (session lifecycle), `spawn.ts` (session creation), `session-actor-queue.ts` (serialized per-session message processing), `runtime-cache.ts` (in-flight session cache)
-- `src/agents/acp-spawn.ts` -- `SpawnAcpParams` (`task`, `label`, `agentId`, `resumeSessionId`, `cwd`, `mode`, `thread`, `sandbox`, `streamTo`). This is the entry point for spawning an autonomous agent session. Key insight: `resumeSessionId` enables resuming a previous session -- WorkRail's checkpoint token is the superior version of this.
-
-**Task system** (`src/tasks/`) -- Full task registry with SQLite persistence:
-- `task-registry.store.sqlite.ts` -- SQLite-backed task store (vs WorkRail's append-only event log)
-- `task-executor.ts` -- `createRunningTaskRun`, `TaskRuntime` ("acp" | "subagent"), `TaskScopeKind` ("session"), `TaskFlowRecord` for chained task flows
-- `task-flow-registry.ts` -- Task flow registry for chaining workflows -- `createTaskFlowForTask`, `linkTaskToFlowById`. This is the workflow chaining primitive WorkRail needs for its autonomous mode.
-- `TaskNotifyPolicy`, `TaskDeliveryStatus`, `TaskTerminalOutcome` -- clean typed state machine for task lifecycle
-
-**Channel system** (`src/channels/`) + **Skills** (`skills/`) -- 50+ integrations as installable skills:
-- Each skill is a `SKILL.md` declaring what the skill does and how the agent should use it
-- Channels (WhatsApp, Telegram, Slack, etc.) are separate extensions in `extensions/`
-- For WorkRail: the `skills/github/`, `skills/slack/`, `skills/taskflow/`, `skills/session-logs/` skills are directly relevant
-
-**What WorkRail should take from OpenClaw (architectural patterns, not code):**
-
-1. **`session-actor-queue.ts` pattern** -- serialize messages per session to prevent concurrent modification. WorkRail's gate/lock system already does this but the OpenClaw pattern is simpler for the daemon use case.
-
-2. **`SpawnAcpParams` interface** -- the minimal interface for spawning an autonomous task. WorkRail's equivalent: `{ workflowId, goal, context, triggerSource, resumeCheckpointToken? }`.
-
-3. **Task flow chaining** -- `createTaskFlowForTask` + `linkTaskToFlowById` is the pattern for chaining workflows. WorkRail's version: final step of Workflow A produces a `{kind: "wr.chain", workflowId, context}` artifact that the daemon picks up and starts Workflow B with.
-
-4. **Policy system** -- `isAcpEnabledByPolicy(cfg)` pattern for feature flags and agent allowlists in daemon config. WorkRail daemon config should follow this.
-
-5. **`TaskRuntime` enum** -- distinguishing "acp" (full autonomous session) vs "subagent" (delegated sub-task). WorkRail has the same distinction in its workflow format; the daemon should surface it the same way.
-
-**What WorkRail does BETTER than OpenClaw:**
-- Durable disk-persisted sessions (OpenClaw: in-memory, 24h TTL)
-- Cryptographic step enforcement (OpenClaw: none -- tasks can be abandoned or skipped)
-- Full execution trace + DAG visualization (OpenClaw: none)
-- Checkpoint/resume with signed portable tokens (OpenClaw: `resumeSessionId` but no cryptographic binding)
-- Workflow composition with loops, conditionals, typed context (OpenClaw: free-form task strings)
-
-**The integration play (optional, not a dependency):** OpenClaw's channel system is the input layer; WorkRail's workflow engine is the execution layer. A WorkRail skill for OpenClaw could be: "when you receive a task that matches a WorkRail workflow, dispatch it to the WorkRail daemon and report back results." OpenClaw handles the messaging; WorkRail handles the enforcement.
-
-**However: WorkRail should be freestanding.** The autonomous daemon must work completely independently -- no OpenClaw required. Triggers come from webhooks (GitLab, Jira, GitHub), cron schedules, CLI invocations, and the console UI. The OpenClaw integration is an optional add-on for users who want channel-based interaction (Slack, Telegram, etc.), not a prerequisite. WorkRail's value proposition is enforcement + durability + observability; those are fully available without OpenClaw. Build the daemon first as a self-contained system; consider an OpenClaw skill as a future distribution channel, not a core dependency.
-
-**Key compaction insight for WorkRail:** Claude Code has three compaction tiers: (1) session memory compaction (preferred, uses durable server-side memory), (2) full conversation compaction (summarize everything into one message), (3) microcompaction (emergency, minimal). WorkRail's step notes should be injected into tier 1 (session memory) so they survive all three tiers. The `preCompactHooks` integration point is where WorkRail can do this injection.
-
-### Competitive landscape: autonomous agent platforms
-
-| Project | Stars | What it is | WorkRail's advantage |
-|---------|-------|------------|---------------------|
-| **ruflo** (ruvnet/ruflo) | 31.8k | "Leading agent orchestration platform for Claude" -- multi-agent swarms, RAG, distributed intelligence | No workflow enforcement -- agents can drift or skip. No session durability. WorkRail's token protocol means steps can't be skipped even in long autonomous runs |
-| **oh-my-claudecode** (Yeachan-Heo) | 28.8k | Teams-first multi-agent orchestration for Claude Code | Orchestration without enforcement. No auditability. WorkRail has a full session history and DAG visualization |
-| **AionUi / OpenClaw** (iOfficeAI) | 21.8k | 24/7 cowork app supporting multiple CLI agents (Claude Code, Gemini CLI, Codex, etc.) | Interface/UI layer -- not a workflow engine. No step enforcement or session state |
-| **OpenClaw core** (clawdkit) | ~1 | Language-agnostic autonomous agent runtime | Very early / minimal. No workflow composition, no enforcement, no console |
-| **nexus-core** (Peter Yao, internal) | 11 (internal) | Full-lifecycle AI dev workflow for Zillow engineers | No autonomous mode (human-initiated only). No session durability. No cryptographic enforcement |
-
-**The gap WorkRail fills:** Every existing autonomous agent platform is a black box -- you can't see what the agent did, you can't enforce that it followed a process, and you can't resume a session that was interrupted. WorkRail's autonomous mode would be the first open-source platform that combines:
-1. Autonomous execution (daemon, triggers, API calls)
-2. Cryptographic step enforcement (cannot skip)
-3. Full session observability (DAG, execution trace)
-4. Durable cross-session state (survives restarts, compaction)
-5. Human-in-the-loop control plane (console approvals, pause/resume)
-
-### Workflow chaining + compaction design sketch
-
-When WorkRail chains workflows autonomously:
-1. Workflow A completes -- final step output becomes context for Workflow B
-2. Before starting Workflow B, WorkRail injects relevant step notes from Workflow A's session into Claude's session memory (via pre-compact hook or explicit system prompt injection)
-3. If context compacts during Workflow B, the session memory contains WorkRail's structured notes -- nothing important is lost
-4. WorkRail's own session store has the complete history regardless of what happens to Claude's context window -- it's the ground truth
-
-This means WorkRail's session store is not just a log -- it's the **memory that survives compaction**. Every piece of information in a step note is recoverable even if Claude's context window is completely reset.
-
-### Subagent design sketch
-
-WorkRail autonomous sessions can spawn subagents for parallel work:
-- Coordinator session holds the main workflow state and continue token
-- Subagent sessions each run a delegated routine (already supported in WorkRail's workflow format via `mcp__nested-subagent__Task`)
-- In autonomous mode, subagents are separate Claude API calls managed by WorkRail's daemon
-- Each subagent reports back to the coordinator via WorkRail's session store, not via in-context communication
-- This is more robust than nexus-core's Opus/Sonnet/Haiku orchestration pattern which depends on context not degrading across the delegation boundary
-
----
-
-## Workflow ideas
-
-### Standup Status Generator
-
-- **Status**: idea
-- **Summary**: A workflow that automatically generates a daily standup status by aggregating activity across the user's tools since the last standup.
-- **Data sources** (adaptive based on what the user has available):
-  - Git history (commits, branches, PRs/MRs)
-  - GitLab (merge requests, comments, reviews)
-  - Jira (ticket transitions, comments, new assignments)
-  - Other issue trackers or project management tools the user configures
-- **Key behavior**:
-  - Detect the last standup date (stored in session or inferred from history)
-  - Aggregate activity since that date across all configured sources
-  - Categorize into "what I did", "what I'm doing today", and "blockers"
-  - Generate a concise, human-readable standup message
-- **Design considerations**:
-  - Should be tool-agnostic: detect available integrations and adapt
-  - Could leverage MCP tool discovery to find available data sources at runtime
-  - Needs a lightweight persistence mechanism for last-standup timestamp
-  - Output format should be configurable (Slack message, plain text, structured JSON)
-
-## Feature ideas
-
-### Console interactivity and liveliness
-
-- **Status**: idea
-- **Summary**: Make the console feel more alive and interactive -- currently it is largely a static visualization layer. Key areas: DAG node hover effects, micro-animations, click-to-inspect affordances, and overall responsiveness to user input.
-- **Concrete starting points**:
-  - **DAG node hover effects** -- nodes in `RunLineageDag` should have visible hover states: border brightens, subtle background glow, cursor changes to pointer. Currently nodes are clickable but give no visual feedback until clicked. This is the single highest-impact item.
-  - **Node selection highlight** -- the selected node should pulse or glow in a way that draws the eye, rather than just a static border change.
-  - **Transition animations** -- when the node detail panel slides in, the selected node in the DAG should subtly indicate the connection (e.g. a brief highlight flash).
-  - **Live session pulse** -- sessions with `status: in_progress` could have a subtle periodic animation (not just a static badge) to reinforce that something is actively running.
-  - **Tooltip polish** -- the current tooltip (delayed 300ms, no animation) could fade in/out rather than appearing instantly.
-- **Design constraint**: the console already has a strong aesthetic (dark navy, amber accent, cyberpunk adjacent). Interactivity additions should reinforce this language, not contradict it. See `docs/design/console-cyberpunk-ui-discovery.md` for the ranked visual language list.
-- **Where to start**: DAG node hover is in `console/src/components/RunLineageDag.tsx`. ReactFlow nodes use custom node type components -- hover state can be managed via React state or CSS. The tooltip pattern (`handleNodeMouseEnter`/`handleNodeMouseLeave`) already exists; a hover glow is a natural peer addition.
-- **Related**: `docs/design/console-cyberpunk-ui-discovery.md` (ranked list of visual polish items), `docs/design/console-ui-backlog.md`
-
-### Autonomous background agent platform ⭐ HIGH PRIORITY
-
-- **Status**: idea -- high priority, not yet designed
-- **Summary**: Transform WorkRail from an MCP server that responds to agent calls into a persistent background daemon that initiates workflows autonomously, integrates with external systems (Jira, GitLab, Slack), and uses the console as a control plane rather than a passive visualization tool.
-- **The shift**: today WorkRail waits for an agent to call it. In this model, WorkRail *initiates* -- it listens for triggers, calls the Claude API directly, manages conversations, advances its own sessions, and surfaces results through the console. Humans interact via the console or via external system integrations, not necessarily via an AI coding session.
-- **Core capabilities**:
-  - **Triggers** -- Jira webhook when a ticket moves to "In Progress," GitLab webhook when an MR is opened, cron schedule, Slack message, manual console dispatch. WorkRail selects the right workflow and starts a session automatically.
-  - **Autonomous execution** -- WorkRail spawns a Claude API session (not Claude Code -- direct Anthropic API), passes the workflow step by step, collects tool call results, advances without a human in the loop unless a step requires approval.
-  - **Integration layer** -- first-class tools for Jira (read ticket, post comment, transition status), GitLab (read MR, post review comment, approve/request changes), Slack (send message, read channel), PagerDuty (acknowledge alert). These are just tools workflows can call.
-  - **Console as mission control** -- live running sessions visible in the console, not just history. Pause a session, inject context, approve a step, redirect. Think Temporal's UI but for AI workflows.
-  - **Evidence collection** -- hooks into Claude Code's `PreToolUse`/`PostToolUse` events to observe what the agent actually did, not just what it reported. Required evidence declared in workflow steps; token gated on observed evidence, not agent claims.
-- **Why WorkRail's existing architecture already points here**:
-  - Durable session store is append-only -- exactly right for long-running background jobs
-  - Token protocol handles resumption -- a background job that gets interrupted can resume via checkpoint token
-  - DAG console already visualizes session state -- one step from making it live
-  - Workflow composition (templateCall, routines, loops) already supports complex orchestration
-- **Concrete first use cases** (Zillow/Mercury Mobile):
-  - Auto-review every incoming MR using `mr-review-workflow` -- post findings as GitLab comment
-  - Auto-triage new Jira tickets assigned to Mercury Mobile -- classify, estimate, link to related work
-  - Daily async standup summary -- aggregate team activity, post to Slack channel
-  - Auto-run `goals-update-workflow` before every 1:1 based on calendar trigger
-- **What's genuinely hard**:
-  - MCP transport assumption breaks -- WorkRail needs to *initiate* Claude API calls, not wait for them
-  - Credential management -- background process needs Claude API key, Jira token, GitLab token; secrets model needs design
-  - Concurrency and resource limits -- multiple simultaneous autonomous sessions need guardrails
-  - Human-in-the-loop design -- some steps should pause and wait for human approval before proceeding
-- **Why this surpasses nexus-core**:
-  - nexus-core is fundamentally human-initiated -- you run `/flow`, it works because you're there. It cannot run autonomously while you sleep. It's a plugin, not a daemon.
-  - WorkRail's durable session model is already designed for this. nexus-core would need a full architectural rewrite.
-- **Why this is differentiated in the broader market**:
-  - Devin, GitHub Copilot Workspace, etc. are autonomous coding agents but are black boxes -- no enforcement, no auditability, no human control plane
-  - WorkRail's autonomous mode retains cryptographic step enforcement and full session observability -- you can see exactly what it did and why, pause it, resume it, roll back to a checkpoint
-- **Design questions**:
-  - Should the daemon run as a separate process from the MCP server, or share the same process with different entry points?
-  - How does the console authenticate to the daemon for live session control?
-  - What is the minimal trigger/integration surface for v1 -- just GitLab MR webhooks + Jira ticket webhooks?
-  - How do we handle workflows that require human approval mid-step in an otherwise autonomous session?
-  - Should WorkRail ship integration adapters, or define an integration contract that external adapters implement?
-- **Related**:
-  - `docs/design/console-ui-backlog.md` -- console evolution
-  - `docs/roadmap/open-work-inventory.md` -- platform vision
-  - Discovery notes: `~/git/zillow/etienne-2026-goals/goals/2026/discovery-notes-apr-2026.md`
-
----
-
-### Forever backward compatibility via engine version declaration
-
-- **Status**: high importance, not yet properly thought through -- the solution sketched here is tentative and needs real design work before implementation
-- **Summary**: Every workflow declares the WorkRail engine version it was written against (`workrailVersion: "1.4.0"`). The engine maintains compatibility adapters for all previous declared versions -- old workflows run forever without author intervention. The engine adapts; authors never migrate. **This is one rough idea; the right solution may look completely different after proper design.**
-- **Design direction**:
-  - Add `workrailVersion` as a top-level required field in `workflow.schema.json`. Validated at load time; workflows without it default to `"1.0.0"` (the oldest supported version).
-  - The engine has a `WorkflowVersionAdapter` layer that normalizes old workflow shapes into the current internal representation before execution. Branching paths in the compiler/executor handle version-specific semantics.
-  - New fields are always additive and optional with sensible defaults -- never remove a field, only deprecate with a redirect.
-  - When a workflow is loaded, the engine resolves its declared version and selects the appropriate normalization path. `workrailVersion` is recorded in `run_started` events for diagnostic traceability.
-  - The validation pipeline (`npm run validate:registry`) runs all bundled workflows through all adapters in CI to catch regressions before release.
-- **The web model**: this is how browsers handle HTML from 1995. A `<marquee>` tag still renders because the browser adapts, not because the author rewrote their page. WorkRail should make the same guarantee to workflow authors.
-- **Engineering implication**: this is a permanent commitment. Once a version adapter is shipped, it cannot be removed. The tradeoff is real but the alternative (expecting external authors to track WorkRail releases and migrate) breaks the platform trust model.
-- **What this does NOT mean**:
-  - Authors still benefit from upgrading -- newer versions get access to new primitives (assessment gates, loop control, references, etc.)
-  - The engine only adapts the schema and execution semantics, not the runtime environment (MCP tools, context variables, file system)
-  - "Forever" means "as long as WorkRail is maintained" -- version adapters would only be removed with a major breaking release and explicit migration announcement
-- **Implementation sketch**:
-  - Phase 1: Add `workrailVersion` field to schema. Default to `"1.0.0"` for existing workflows. Record in run events.
-  - Phase 2: Introduce the first adapter when the first schema-breaking change is needed. The adapter normalizes the old shape to the current internal representation.
-  - Phase 3: Build a compatibility test harness that runs representative old-version workflows against the current engine in CI.
-- **Related**:
-  - `docs/design/v2-core-design-locks.md` -- existing invariants (must not conflict)
-  - `docs/reference/workflow-execution-contract.md` -- execution contract
-  - `src/v2/read-only/v1-to-v2-shim.ts` -- existing precedent for version adaptation
-
----
-
-### Remote references (URLs, GDocs, Confluence, etc.)
-
-- **Status**: idea
-- **Summary**: Extend the workflow `references` system to support remote sources (HTTP URLs, Google Docs, Confluence pages, etc.) in addition to local file paths. WorkRail remains a pointer system — it resolves and delivers reference metadata, and the agent does the actual fetching using whatever tools it has available. Auth is entirely delegated to the agent.
-- **Core design principle**: same model as today, extended to remote sources. WorkRail validates that a reference declaration is well-formed, delivers the pointer to the agent at workflow start, and the agent fetches the content with its own HTTP or integration tools. If the agent lacks access, it surfaces that to the user — which is the right failure mode. WorkRail does not need to store credentials or act as a fetch proxy.
-- **Why this matters**: teams keep their authoritative docs (architecture decisions, coding standards, runbooks, API contracts) in external systems. Remote refs let workflows point at those docs directly without requiring anyone to maintain a local copy.
-- **Incremental path**:
-  - Phase 1: public HTTP URLs. `resolveFrom: "url"`. WorkRail delivers the URL as a reference pointer. Agent fetches using HTTP tools. No auth surface in WorkRail.
-  - Phase 2: workspace-configured bearer tokens in `.workrail/config.json` keyed by domain. Covers most internal tools (Confluence API tokens, private wikis, etc.) without native integrations.
-  - Phase 3: named integrations (GDocs, Confluence, Notion) as first-class configured sources — the full platform play, only if Phase 1/2 prove insufficient.
-- **Reachability validation**: soft check or skippable at start time. A URL being reachable during validation doesn't guarantee the agent can authenticate at runtime, and a failed ping shouldn't block the workflow from starting.
-- **Design questions**:
-  - Should WorkRail attempt a reachability check at start time, or skip entirely for remote refs?
-  - How should remote refs appear in `workflowHash`? The declaration is stable but content is not — may need content-hashing at fetch time or explicit versioned URLs for determinism.
-  - Should the `references` schema add a `kind` field (`local` vs `remote`) or infer from the `source` value?
-- **Risks / tradeoffs**:
-  - Agent-side fetching means the workflow only works if the agent has appropriate tools — acceptable tradeoff, explicitly the user's responsibility
-  - Remote content can change between runs, weakening the determinism guarantee that local refs provide
-
-### Declarative workflow composition engine
-
-- **Status**: idea
-- **Summary**: Instead of authoring full workflow JSON for every use case, users or agents fill out a declarative spec (dimensions, scope, rigor level, etc.) and the WorkRail engine assembles a workflow automatically from a library of pre-validated routines and step templates. The agent is a form-filler, not an architect - the composition logic lives in the engine.
-- **Why this is different from agent-generated workflows**:
-  - Agent-generated workflows have no quality gate - you're trusting the agent's judgment on structure, which is exactly what workflow-for-workflows exists to prevent
-  - Engine-composed workflows are assembled from pre-reviewed building blocks using deterministic rules - same spec always produces the same workflow shape
-  - Trustworthy because composition logic is owned by WorkRail, not improvised at runtime
-- **How it would work**:
-  - A composable routine library with well-defined inputs, outputs, and composition contracts
-  - A spec format that captures user intent declaratively (e.g. workflow type, dimensions to cover, scope, rigor mode)
-  - A composition engine that selects and wires the right routines based on the spec
-  - The assembled workflow is fully inspectable before execution - no black box
-- **Relationship to current authoring**:
-  - Full workflow JSON authoring remains the escape hatch for workflows that need custom shapes the composition engine can't express
-  - Composition covers the common cases; manual authoring covers the edge cases
-  - Routines built for composition also remain usable as standalone delegatable units in manually authored workflows
-- **Good early use cases**:
-  - Audit-style workflows (scalability audit, readiness audit, tech debt audit) - user picks dimensions, engine assembles the right auditor steps
-  - Review workflows - user picks scope and rigor, engine assembles reviewer family + synthesis
-  - Investigation workflows - user picks investigation type, engine assembles the right hypothesis + evidence + validation path
-- **Design questions**:
-  - What is the right spec format? Enums + variables + a workflow type identifier? A richer DSL?
-  - How does the engine handle dependencies between composed steps (context flow, artifact ownership)?
-  - Should composition happen at session-start time (assembled once, then executed) or be fully static (compiled to workflow JSON)?
-  - How does the console/dashboard show a composed workflow's structure vs a manually authored one?
-  - What is the governance model for the composable routine library - who can add to it, and what quality bar do new routines need to meet?
-- **Risks / tradeoffs**:
-  - A composition engine is a significant investment - the routine library needs enough coverage before composition is useful
-  - Composition rules can become their own form of complexity if not kept simple
-  - Need a clear story for when manual authoring is the right choice vs composition, so authors don't fight the system
-
-### Dashboard artifacts (replace file-based docs)
-
-- **Status**: designed, not yet implemented
-- **Summary**: Instead of having agents write markdown files into the working repo, agents would submit structured artifacts through `continue_workflow` output payloads. Artifacts are stored per-session and rendered in the console/dashboard. Eliminates repo pollution and gives users a single place to see all workflow outputs.
-- **Key dependencies**: console/dashboard UI (does not exist yet), server-side artifact storage
-- **Design doc**: `docs/reference/workflow-execution-contract.md` (section "Replacing File-Based Docs with Dashboard Artifacts")
-
-### Derived / overlay workflows for bundled workflow specialization
-
-- **Status**: parked idea
-- **Note**: see `docs/roadmap/open-work-inventory.md` for details
-
-### Workflow categories and category-first discovery
-
-- **Status**: idea
-- **Summary**: Improve workflow discovery by organizing bundled workflows into categories and teaching `list_workflows` to support a category-first exploration path instead of always returning one large flat list.
-- **Why this seems useful**:
-  - the workflow catalog is getting large enough that flat discovery is becoming noisy
-  - agents often do not know the exact workflow ID they want, but they may know the task family (coding, review, docs, investigation, planning, learning)
-  - category-first discovery could reduce prompt overload and make workflow selection feel more guided
-- **Possible phase 1 shape**:
-  - add workflow categories as metadata on workflow definitions or a registry-side mapping
-  - extend `list_workflows` with an optional category-style input
-  - if no category is passed, return:
-    - category names
-    - workflow count per category
-    - a few representative workflow titles per category
-    - guidance telling the agent to call `list_workflows` again with the category it wants
-  - if a category is passed, return the full workflows for that category with names, descriptions, IDs, and hashes
-- **Possible phase 2 shape**:
-  - support multiple discovery views such as grouped-by-category, grouped-by-source, or full flat list
-  - add filtering by category + source + maybe keywords
-  - align category discovery with future platform / multi-root discovery work
-- **Design questions**:
-  - should categories live in workflow JSON, in a registry overlay, or be inferred from directory / naming conventions?
-  - should `list_workflows` become polymorphic, or should category discovery be a separate read-only tool / mode?
-  - how much summary content should the uncategorized response include before it becomes too verbose again?
-  - how do categories interact with routines, examples, project workflows, and external workflow repositories?
-- **Risks / tradeoffs**:
-  - changing `list_workflows` is a real tool contract and output-schema change, not just a UI tweak
-  - overloading one tool with too many discovery modes could make the contract less predictable
-  - static categories can drift unless there is a clear ownership model
-- **Related docs / context**:
-  - `docs/plans/workrail-platform-vision.md` (already discusses grouped discovery by source)
-  - `docs/roadmap/open-work-inventory.md` (legacy workflow modernization increases the need for better discovery)
-  - current implementation: `src/mcp/handlers/v2-workflow.ts`, `src/mcp/v2/tools.ts`, `src/mcp/output-schemas.ts`
-
-### Multi-root workflow discovery and setup UX
-
-- **Status**: designing
-- **Summary**: Simplify third-party and team workflow hookup by requiring explicit `workspacePath`, silently remembering repo roots in user-level `~/.workrail/config.json`, recursively discovering team/module `.workrail/workflows/` folders under remembered roots, and improving grouped source visibility / precedence explanations. Use workspace-aware ranking, cross-repo surfacing, and later console integration as the control plane for inspecting remembered roots, discovered workflow sources, and precedence. For remote repositories, prefer **managed sync by default** so users experience remote workflow repos as connected and kept current while WorkRail still reasons over a local effective state. Avoid trusting MCP roots and avoid requiring workflow config to live at the main repo root.
-- **Current recommendation**:
-  - phase 1: `Rooted Team Sharing + minimal Source Control Tower`
-  - require explicit workspace identity
-  - silently persist repo roots at the user level
-  - support cross-repo workflows from remembered roots
-  - make remote repos default to managed-sync mode rather than pinned snapshots or live-remote behavior
-  - treat Slack/chat/file/zip sharing as an ingestion path that classifies into repo, file, pack, or snippet flows
-  - design the backend so the console can eventually manage and explain the remembered/discovered source model
-- **Additional idea**:
-  - explore enterprise auth / SSO integration for private repo access, such as Okta-backed flows for GitHub Enterprise, GitLab, or other self-hosted providers
-  - likely shape: WorkRail detects that a private repo uses org-managed auth and guides the user through the right browser/device-code/credential flow instead of assuming raw personal-access-token setup
-  - main question: should WorkRail integrate directly with identity providers like Okta, or should it integrate one layer lower with Git hosts / credential helpers that are already SSO-aware?
-- **Design doc**: `docs/ideas/third-party-workflow-setup-design-thinking.md`
-
-### Workflow rewind / re-scope support
-
-- **Status**: idea
-- **Summary**: Allow an in-progress workflow session to go back to an earlier point when new information changes scope understanding, invalidates assumptions, or reveals that the current execution path is wrong.
-- **Why this seems useful**:
-  - agents and users often learn important scope information only after work has already started
-  - current step-by-step enforcement is strong, but it can feel rigid if the original framing turns out to be wrong
-  - a first-class rewind / re-scope mechanism could make workflows feel safer and more adaptable without abandoning structure
-- **Possible phase 1 shape**:
-  - allow rewind to a prior checkpoint or earlier decision node with an explicit reason
-  - record a short “why we rewound” note in session history
-  - make the resumed path visible in the console/session timeline
-- **Possible phase 2 shape**:
-  - support scope-change prompts like:
-    - “our understanding changed”
-    - “the task is broader/narrower than we thought”
-    - “we need to revisit planning before implementation”
-  - let workflows declare safe rewind points or re-scope checkpoints explicitly
-  - support branch-aware comparison between abandoned and current paths
-- **Design questions**:
-  - should rewind be limited to explicit checkpoints, or should WorkRail support arbitrary node-level rewind?
-  - how should the system preserve durable notes and outputs from abandoned paths?
-  - should some workflow steps be marked as non-rewindable once external side effects have happened?
-  - how should the agent explain to the user what changed and why a rewind is appropriate?
-- **Risks / tradeoffs**:
-  - rewind power could make workflows feel less deterministic if used too casually
-  - durable session history gets more complex when abandoned paths and resumed paths coexist
-  - workflows with real-world side effects may need stricter rollback / compensation rules
-
-### Assessment-gate follow-up tiers beyond v1
-
-- **Status**: idea
-- **Summary**: Capture the likely progression of assessment-triggered redo / follow-up behavior so the engine can grow beyond the narrow v1 same-step follow-up model without losing the conceptual roadmap.
-- **Why this seems useful**:
-  - assessment-triggered follow-up is likely to want richer behavior over time
-  - the v1 consequence model is intentionally narrow, but the design pressure already points toward stronger redo semantics
-  - writing the tiers down now reduces the chance that future work jumps straight to a subflow design without acknowledging the intermediate options
-- **Tier 1: same-step follow-up retry**
-  - consequence keeps the same step pending
-  - engine returns semantic follow-up guidance
-  - agent retries the same step after improving its work / evidence
-  - this is the current intended v1 behavior
-- **Tier 2: structured redo recipe on the same step**
-  - same step still remains the logical unit of work
-  - engine can surface a bounded checklist or structured follow-up actions
-  - no new DAG nodes or true subflow yet
-  - likely useful if “retry” is too vague but full subflow control flow would be too heavy
-- **Tier 3: assessment-triggered redo subflow**
-  - matched assessment consequence routes into an explicit sequence of follow-up steps
-  - subflow has its own durable progress and then returns to the original step or onward path
-  - this is a significantly larger feature because it introduces assessment-driven control-flow behavior rather than just a blocked follow-up requirement
-- **Design questions**:
-  - when does Tier 2 become necessary instead of plain semantic retry guidance?
-  - what durable model would Tier 3 need for entering, progressing through, and returning from a redo subflow?
-  - how should the engine distinguish “redo the same step better” from “enter a dedicated recovery path”?
-  - can Tier 3 reuse existing workflow / routine primitives, or would it need dedicated assessment-triggered topology support?
-- **Risks / tradeoffs**:
-  - jumping straight from Tier 1 to Tier 3 could create a hidden mini control-flow DSL
-  - Tier 2 may be enough for many real cases and should not be skipped without evidence
-  - Tier 3 likely changes authoring, durability, replay, and console explainability at the same time
-
-### Console engine-trace visibility and phase UX
-
-- **Status**: idea
-- **Summary**: Evolve the console from a node-only DAG viewer into an execution-aware surface that shows both created nodes and the engine decisions that explain how the run got there. This should make fast paths, skipped phases, condition evaluation, loop entry/exit, and branch selection legible instead of looking like missing DAG nodes or broken rendering.
-- **Why this seems useful**:
-  - users currently see only `node_created` / `edge_created`, which makes legitimate engine behavior look like missing workflow phases
-  - workflows use authoring concepts like phases, fast paths, run conditions, and loop gates, but the console does not show those decisions today
-  - sessions like small-task fast paths can appear to “jump” from phase 0 to phase 5 even when the engine is behaving correctly
-- **Current gap**:
-  - engine event log records `decision_trace_appended`, `context_set`, and related runtime decisions
-  - console DTOs expose only run status plus DAG nodes/edges and node detail
-  - there is no first-class UI for “why the engine chose this path”
-- **Recommended direction**:
-  - keep phases as authoring / workflow-organization concepts
-  - stop treating the rendered DAG as the whole execution story
-  - add an engine-trace / decision layer that can show:
-    - selected next step
-    - evaluated conditions
-    - entered/exited loops
-    - important run context variables such as `taskComplexity`
-    - skipped / bypassed planning paths such as small-task fast paths
-- **Possible phase 1 shape**:
-  - extend console service / DTOs with a run-scoped execution-trace summary
-  - show a compact “engine decisions” strip or timeline above the DAG
-  - annotate jumps such as “small-task fast path selected” so sparse DAGs do not look broken
-- **Possible phase 2 shape**:
-  - richer explainability timeline with branches, skipped authoring phases, and condition results
-  - allow toggling between “execution DAG” and “engine trace” views, or combine them in one unified run narrative
-  - surface effective run context and selected branch/loop decisions in node detail or run detail
-- **Design questions**:
-  - should the console continue using phase-oriented labels in the primary UI, or should it prefer step titles / execution narrative labels?
-  - should trace events appear as first-class timeline items, DAG annotations, or a separate run-explanation panel?
-  - what subset of run context variables is useful enough to surface without becoming noisy?
-  - how do we distinguish authoring structure from runtime execution structure cleanly in the UX?
-- **Risks / tradeoffs**:
-  - exposing too much raw engine state could make the console noisier and harder to scan
-  - mixing authoring structure and runtime trace without clear separation could create more confusion, not less
-  - DTO growth needs care so the console does not become tightly coupled to every low-level event detail
-- **Related docs / context**:
-  - `docs/reference/workflow-execution-contract.md`
-  - `docs/design/v2-core-design-locks.md`
-  - `docs/plans/workrail-platform-vision.md`
-  - current implementation: `src/v2/usecases/console-service.ts`, `src/v2/projections/run-context.ts`, `console/src/api/types.ts`
-
-### Workflow previewer for compiled and runtime behavior
-
-- **Status**: idea
-- **Summary**: Add a workflow previewer for the `workflows/` directory that shows what a workflow actually compiles to and how the engine can traverse it at runtime.
-- **Why this seems useful**:
-  - authors currently have to mentally reconstruct branching, loops, blocked-node behavior, and other runtime structure from authored JSON plus tests
-  - advanced workflow authoring gets much easier when the compiled DAG and runtime edges are visible
-  - it would help explain engine behavior to both contributors and workflow authors
-- **What it should show**:
-  - the compiled step graph / DAG
-  - branch points and condition-driven paths
-  - loop structure and loop-control edges
-  - blocked / resumed / checkpoint-related node shapes where applicable
-  - template/routine expansion boundaries or provenance
-  - the gap between authored JSON structure and runtime execution structure
-- **Initial scope**:
-  - start as a read-only preview for bundled workflows
-  - optimize for accuracy over polish
-  - do not require full execution simulation in phase 1
-- **Design questions**:
-  - should this live in the existing Console, as a dev-only page, or as a local authoring utility?
-  - should it show only the compiled DAG, or also annotate likely runtime transitions such as blocked attempts, rewinds, and loop continuations?
-  - how much provenance should it expose for injected routines/templates?
-
-### Native assessment / decision gates for workflows
-
-- **Status**: idea
-- **Summary**: Add a first-class workflow primitive for structured assessments that can drive routing. The agent would assess a small set of named dimensions, give short rationales, and let the engine use explicit aggregation / gate rules to influence continuation, follow-up, branching, or final confidence.
-- **Why this seems useful**:
-  - some workflow decisions are clearer and more auditable as small assessment matrices than as long prompt prose
-  - confidence computation is a strong example: workflows may want to derive final confidence from dimensions like boundary, intent, evidence, coverage, and disagreement
-  - explicit assessment gates would let the engine drive loops/branches without relying entirely on prose interpretation
-- **Near-term shape**:
-  - keep the reasoning with the agent, but let the workflow declare named assessment dimensions and allowed levels such as `High | Medium | Low`
-  - let the agent provide one short rationale per dimension
-  - let the engine compute caps / next actions / routing outcomes from explicit gate rules
-- **Ownership split**:
-  - the **agent** assesses each dimension and gives the short rationale
-  - the **engine** applies declared gate rules such as caps, routing outcomes, or follow-up triggers
-- **Longer-term shape**:
-  - add a first-class authoring primitive such as `assessmentGate`, `assessmentRef`, or similar
-  - optionally allow reusable built-in or repo-owned assessment schemas/matrices
-  - optionally validate assessment shape against WorkRail-owned schemas
-- **Good early use cases**:
-  - MR review confidence assessment
-  - planning readiness / confidence gates
-  - debugging confidence and next-step routing
-  - block-vs-continue / revisit-earlier-step decisions
-- **Design questions**:
-  - should this be a narrow `assessmentGate` primitive or a more generic structured decision-table feature?
-  - should reusable matrices be inline first, or backed by repo-owned refs from the start?
-  - how much aggregation logic should the engine support directly versus leaving to workflow-defined rules?
-  - how should assessment provenance and rationales appear in compiled/runtime traces?
-
-### Engine-injected note scaffolding
-
-- **Status**: related follow-on idea
-- **Summary**: Add an opt-in execution-contract or note-structure feature that helps agents produce compact notes useful to both humans and future resume agents.
-- **Why it may matter**:
-  - some workflows want notes to consistently capture current understanding, key findings, decisions, uncertainties, and next-step implications
-  - this is related to assessment-driven routing, but it is a different product concern
-- **Open question**:
-  - should note scaffolding live as a separate execution-contract feature, or share any underlying primitives with assessment gates?
-
----
-
-### Daemon architecture decision -- findings and direction (Apr 14, 2026)
-
-**Status:** Research complete, direction chosen, not yet implemented.
-
-**The question:** Should the autonomous daemon be (A) same-process calling the engine directly, (B) a separate process connecting to WorkRail's MCP server as an HTTP client, or (C) a composite same-process model with direct engine calls + REST control plane?
-
-**What the research found:**
-
-Two discovery agents independently reached opposite conclusions:
-
-- Agent 1 (correctness focus): **Option B** -- separate process. Two hard bugs in same-process: (1) `LocalSessionLockV2.clearIfStaleLock()` uses `process.kill(pid, 0)` -- same PID for daemon + MCP server means a crashed daemon permanently locks sessions with no recovery; (2) `engineActive` guard in `engine-factory.ts` explicitly blocks a second engine instance per process.
-
-- Agent 2 (vision focus): **Option C** composite -- same process, direct engine calls, REST control plane. `V2Dependencies` is already concurrent-safe (stateless, per-session locking). `engineActive` guard is about DI initialization, not concurrent handler safety. Self-referential workflows (coordinator spawning sub-workflows) work immediately via existing delegation.
-
-**Settling the disagreement -- the lock code:**
-
-Read `src/v2/infra/local/session-lock/index.ts` directly. Line 45 confirms Agent 1's bug is real: `process.kill(pid, 0)` -- if daemon + MCP server share a PID and the daemon crashes mid-step, the lock file's PID check returns "process alive" forever. The session is permanently locked until the process restarts. No recovery path. Hard bug.
-
-**Direction: Option C (in-process composite) -- but fix the lock first.**
-
-Option C is the right 12-month architecture:
-- No transport overhead (MCP HTTP adds ~1ms+ per step, meaningless in human sessions, significant in tight autonomous loops)
-- Shared session store, DI, keyring -- no sync issues
-- Self-referential workflows work immediately -- coordinator spawns sub-workflows via existing delegation
-- REST control plane on existing Express server -- 4 routes, no new process
-- MCP + daemon in same binary, same deployment, same config
-
-**The prerequisite: fix `LocalSessionLockV2`**
-
-Replace PID-only staleness with PID + workerId:
-```json
-{ "pid": 1234, "workerId": "mcp-server", "sessionId": "sess_abc" }
-```
-
-Staleness logic:
-- Same PID + same workerId → I own this, proceed
-- Same PID + different workerId → not stale, return SESSION_LOCK_BUSY
-- Different PID, process alive → SESSION_LOCK_BUSY
-- Different PID, process dead → stale, clear it
-
-`workerId` injected at construction: `new LocalSessionLockV2(dataDir, fs, clock, workerId)`. MCP server passes `"mcp-server"`, daemon passes `"daemon"`. ~50-60 lines across `session-lock/index.ts` + `session-lock.port.ts`. Zero behavior change for existing single-process case.
-
-Also add `isHeldByMe(sessionId)` to the lock port for clean "pause after current step" support.
-
-**Other architecture decisions from the 5 MVP discovery agents:**
-
-- **Context survival**: ~~3-line deletion in `prompt-renderer.ts`~~ **CORRECTED** -- injecting ancestry recap on every normal step advance is wrong. The agent completing step 4 already has steps 1-4 in context -- injecting the recap would be noise and token waste. The correct approach: the **daemon** injects the ancestry recap into the system prompt when initializing a fresh Claude API session via pi-mono's `Agent`. Engine code untouched. The existing `intent: "rehydrate"` path is already correct for human-driven sessions. This is a daemon feature, not a prompt-renderer change.
-- **Evidence gate**: `requiredEvidence` field + `record_evidence` MCP tool + gate check in `detectBlockingReasonsV1`. MVP = assertion gate; push-hook upgrade = zero schema changes later.
-- **Trigger system**: Standalone `src/trigger/` process (~600 LOC). GitLab MR webhook → `start_workflow` → loop `continue_workflow` → post MR comment.
-- **Console live view**: `is_autonomous: true` context_set event + ephemeral `DaemonRegistry` for heartbeat + `[ LIVE ]` badge. Session lock held during steps prevents timer-based heartbeats -- hybrid model required.
-- **Token persistence**: Daemon must write `continueToken` + `checkpointToken` to `~/.workrail/daemon-state.json` (atomic write) before each step. Crash without this = unrecoverable sessions.
-
-**Build order (tentative):**
-
-1. Fix `LocalSessionLockV2` with workerId (prerequisite for in-process model)
-2. Context survival fix (3-line deletion -- ship immediately, it's almost free)
-3. Daemon runtime: `src/daemon/` with `runWorkflow()` calling engine directly
-4. Evidence gate: `requiredEvidence` + `record_evidence` tool
-5. Trigger system: `src/trigger/` webhook server
-6. Console live view: `DaemonRegistry` + `[ LIVE ]` badge
-
-**Reference for loop implementation:** pi-mono `agentLoop` vs OpenClaw `session-actor-queue` -- comparison agent running, results pending.
-
----
-
-### Agent loop decision: pi-mono wins (Apr 14, 2026)
-
-**Use `@mariozechner/pi-agent-core` (pi-mono) as the daemon loop foundation.** Pinned at 0.67.2, MIT, 246kB, 1 dependency, published on npm.
-
-**Key finding:** OpenClaw's runner wraps pi-mono's `Agent` class internally (`src/agents/pi-embedded-runner/run/attempt.ts` imports `@mariozechner/pi-agent-core` directly). OpenClaw adds auth rotation, provider failover, and preemptive compaction -- none needed at MVP. Comparison was always pi-mono vs "pi-mono + 80 internal modules." Easy call.
-
-**What to take from pi-mono:**
-- `Agent` class -- the multi-turn LLM + tool call loop
-- `AgentTool<TParameters>` with TypeBox schemas -- define `start_workflow`, `continue_workflow`, `Bash`, `Read`, `Write`
-- `getFollowUpMessages` -- termination hook: return `[]` when `isComplete=true` from `continue_workflow`
-- `agent.abort()` -- cancellation threaded through every async boundary
-- `agent.subscribe()` -- observability without modifying the loop
-
-**What to reimplement from OpenClaw (not import):**
-- `KeyedAsyncQueue` pattern (~30 lines) -- serializes concurrent runs against same session ID
-- Retry wrapper with backoff on `stopReason === 'error'`
-
-**Non-obvious implementation detail:** pi-mono terminates structurally (no tool calls + no follow-ups), not semantically. Bridge `isComplete` from `continue_workflow` into `getFollowUpMessages` returning `[]`. Use `createDaemonLoopConfig()` factory per run -- no shared state across concurrent sessions.
-
-**Typed discriminant for continue_workflow result:**
-```typescript
-type WorkflowContinueResult =
-  | { _tag: 'advance'; step: PendingStep; continueToken: string }
-  | { _tag: 'complete'; finalNotes: string }
-  | { _tag: 'error'; message: string };
-```
-
-**Pre-production (not MVP blocking):** Add `agent.abort()` after wall-clock limit + max-turn counter via `getSteeringMessages`. No built-in timeout in pi-mono's loop.
-
----
-
-### Mobile monitoring + control (post-MVP) ⭐
-
-**Goal:** Control and monitor autonomous WorkRail sessions from a phone.
-
-**What's needed:**
-
-1. **Mobile-responsive console** -- existing React console needs touch-friendly layout, readable on small screens, tap to pause/resume/cancel sessions. The DAG is probably too complex for mobile; a linear step-by-step log view is better for quick checks.
-
-2. **Push notifications** -- phone notified when a session completes, fails, or hits a human-approval gate. Simplest path: Slack/Telegram notification via configured channel (OpenClaw's channel system is the reference). No native app required for MVP of this feature.
-
-3. **Human-in-the-loop approval on mobile** -- workflow steps that require sign-off before proceeding ("about to merge this MR, confirm?") send a push notification with Approve/Reject. Maps to REST control plane: `POST /api/v2/sessions/:id/resume` from a mobile tap.
-
-4. **Session log view** -- scroll through what the daemon did while you were away. Linear timeline, not DAG.
-
-**Simplest implementation path:** Make console responsive + add Slack/Telegram notification on session completion/failure/approval-needed. OpenClaw's 20+ channel integrations are the reference -- WorkRail doesn't need to build a native app, just configure an output channel.
-
-**Priority:** Post-MVP, but design the REST control plane with mobile in mind from the start (clean JSON responses, no server-side rendering assumptions).
-
----
-
-### Remote access: connect to local WorkRail from phone (post-MVP)
-
-**Goal:** Access and control a WorkRail session running on your laptop from your phone, even behind NAT/VPN.
-
-**The problem:** Laptop is behind NAT. Corporate VPN routes all traffic, blocking direct connections. Phone needs to reach the WorkRail console without port forwarding or IT involvement.
-
-**Options to explore:**
-
-1. **`workrail tunnel` command** -- WorkRail opens an outbound authenticated tunnel (Cloudflare Tunnel or similar) from the laptop and prints a URL. Phone opens the URL, gets the live console. Works behind any NAT/VPN since the connection is outbound from the laptop. Auth via WorkRail keyring token. Most WorkRail-native story.
-
-2. **Tailscale integration** -- document Tailscale as the recommended setup. Zero WorkRail code needed. WorkRail console becomes accessible at a stable Tailscale address. Handles NAT and coexists with most corporate VPNs via split-tunneling.
-
-3. **Cloud session sync** -- daemon pushes session events to a configured cloud store (S3, Cloudflare R2). Mobile reads from there. Most robust, works offline and behind any firewall, but adds complexity and a cloud dependency.
-
-**VPN note:** Tailscale handles most corporate VPN conflicts. `workrail tunnel` sidesteps VPN entirely since it's outbound-only from the laptop. Either approach is better than trying to punch through corporate firewalls.
-
-**Priority:** Post-MVP. Design the REST control plane and console with this in mind -- clean JSON API, no server-side rendering assumptions, authentication token model that works over tunnels.
-
----
-
-### WorkRail Auto: cloud-hosted autonomous platform (long-term vision) ⭐⭐
-
-**Goal:** WorkRail Auto runs on a server 24/7, connected to your engineering ecosystem, working autonomously without a laptop open.
-
-**What this enables:**
-- GitLab opens an MR → WorkRail reviews it, posts comment, done. Laptop closed.
-- Jira ticket moves to In Progress → WorkRail starts coding task, pushes branch, opens draft MR. Review it in the morning.
-- PagerDuty fires → WorkRail runs incident investigation workflow, posts findings to Slack.
-- Scheduled: nightly test suite run, auto-filed bugs for new failures.
-- Docs updated → WorkRail triggers documentation review workflow.
-
-**Integrations needed (not exhaustive):**
-- **Triggers:** GitLab/GitHub webhooks, Jira webhooks, Linear, PagerDuty, Slack slash commands, cron
-- **Actions:** GitLab/GitHub API (MR comments, branch creation, commits), Jira (transition tickets, add comments), Slack (post messages, threads), Confluence/Notion (read docs), email
-- **Auth:** Per-org credential vault (Jira token, GitLab token, Slack token, etc.)
-
-**Architecture implications for hosted:**
-- Multi-tenancy: multiple users/orgs, isolated session stores, isolated credential vaults
-- The tunnel problem disappears -- server has a public IP, webhooks just work
-- Credential vaulting: secrets stored encrypted per org, injected at session start
-- Horizontal scaling: multiple daemon instances consuming from a shared trigger queue
-- Rate limiting per org, per integration
-
-**Relationship to self-hosted:**
-- Self-hosted (local) is always free, always open source, always works offline
-- Hosted WorkRail Auto is the natural SaaS layer -- same engine, same workflows, managed infrastructure
-- Workflows written for self-hosted run unchanged on hosted (this is the portability guarantee)
-
-**Priority:** Long-term. Design the local daemon with multi-tenancy seams in mind from the start (don't hardcode single-user assumptions), but don't build the hosted layer until the local daemon is proven.
-
-**Reference:** OpenClaw's channel/extension architecture is the best existing model for multi-integration connectivity. AutoGPT's block/trigger system is the best model for declarative integration configuration.
-
----
-
-### Business model (tentative)
-
-Three tiers:
-
-| Tier | Who | Price | Notes |
-|------|-----|-------|-------|
-| **Personal / OSS** | Individual devs, open-source projects, non-commercial | Free forever | Builds community, reputation, workflow library. Never charge for this. |
-| **Corporate self-hosted** | Companies running WorkRail on their own infrastructure | Paid license | Data never leaves their VPC. Enterprise buyers pay well for data sovereignty + compliance. Priced per seat or per org. |
-| **WorkRail Auto (cloud)** | Anyone who wants managed, zero-ops | Paid subscription | Higher price, lower friction. Pre-configured integrations. |
-
-**License model options:**
-- **Dual-license:** AGPL for open-source use (anyone can use but must open-source modifications), commercial license for everyone else who doesn't want AGPL obligations. Clean legal distinction.
-- **BSL-style:** Core is source-available, commercial use requires a license after some threshold (employees, revenue, or deployment count). HashiCorp's original model before the community backlash -- careful with this one.
-- **MIT core + paid features:** Core engine stays MIT forever, advanced features (hosted dashboard, enterprise SSO, multi-tenant credential vault, audit logs) are paid. Keeps the community trust, monetizes the enterprise layer.
-
-**The corporate self-hosted market is often the most lucrative.** Enterprises pay well for "runs in our VPC, vendor can't see our code." GitLab, Grafana, Jira -- all built significant businesses on self-hosted enterprise licenses before or alongside their cloud offerings.
-
-**What NOT to do:** Don't charge for the workflow library or the core MCP protocol. Those are the commons that make WorkRail valuable. Charge for the infrastructure layer, not the knowledge layer.
-
-**Priority:** Don't worry about this until there are users. Get the product right first.
-
----
-
-### Competitive landscape findings (Apr 14, 2026)
-
-**WorkRail occupies a nearly empty quadrant:** durable session state + cryptographic step enforcement + MCP-native. No other tool currently has all three.
-
-```
-                   ENFORCEMENT STRENGTH
-                   Weak (Prompt)         Strong (Structural)
-                ┌─────────────────────┬──────────────────────────┐
-          Yes   │  nexus-core          │  WorkRail ← HERE         │
-DURABLE         │  LangGraph+LangSmith │  Temporal.io (not MCP)   │
-STATE           │  CIAME contracts     │  mcp-graph (closest)     │
-                ├─────────────────────┼──────────────────────────┤
-          No    │  CLAUDE.md files     │  CrewAI, AutoGen         │
-                │  maestro, ADbS       │  LangGraph (standalone)  │
-                └─────────────────────┴──────────────────────────┘
-```
-
-**Key findings:**
-
-- **mcp-graph** (DiegoNogueiraDev) -- SQLite-backed MCP server with graph-based step locking. Closest external analog. Not cryptographic enforcement but worth watching.
-- **LangGraph + LangSmith** -- Durable (thread-IDs + Postgres) but prompt-based enforcement. Top-left quadrant, not top-right. **Watch condition:** if LangGraph adds MCP-server exposure, the MCP-native moat shrinks. Response: lean harder on JSON-authored + token-gated.
-- **Temporal.io** -- Different domain (code-defined workflows, Go), different users. Low competitive concern but high architectural learning value for event-sourcing and crash recovery. Study it.
-- **CrewAI / AutoGen / nexus-core** -- No durability, no structural enforcement. Not in the same quadrant.
-
-**Internal finding -- most actionable:**
-The **CIAME team** (Samuel Pérez, `samuelpe@`) is building WorkRail's exact problem manually in markdown (`rs-sdk-agent-execution-contract.md` -- execution contracts for AI agents). Most concrete internal adoption candidate. Direct cold share hook: "you're building this by hand, here's the tool."
-
-**Positioning anchor:** "If you know Temporal.io, WorkRail is Temporal for AI agent process governance via MCP."
-
-**Two immediate internal actions:**
-1. List WorkRail in the Zodiac AI Marketplace + ZG AI Tools Catalog
-2. DM Samuel Pérez (CIAME team) -- strongest cold share candidate alongside Peter Yao
-
----
-
-### Deep dive findings: all reference architectures (Apr 14-15, 2026)
-
-Research complete on all reference projects. Design docs written to `docs/design/` and `docs/ideas/`. Key findings per source:
-
----
-
-#### OpenClaw findings (design-openclaw-deep-dive.md)
-
-**Channel abstraction:** `ChannelPlugin<ResolvedAccount>` -- one TypeScript interface, ~25 optional adapter slots, lazily loaded. WorkRail equivalent: `WorkRailIntegration<TConfig>`. Integration-agnostic daemon core.
-
-**Skills:** Not a separate primitive -- `agentTools` slot on ChannelPlugin injects pi-mono typed tools at session start. **WorkRail workflows ARE the skill layer.** No separate skill system needed.
-
-**Session persistence:** `AcpSessionStore` confirmed in-memory only (LRU, 5k sessions, 24h TTL, vanishes on crash). WorkRail's disk-persisted append-only store is strictly better.
-
-**Delivery binding:** Bind the delivery target (MR iid, Jira key, Slack thread) at spawn time, not completion time. `DeliveryRouter.resolve(triggerSource)` at completion. WorkRail: store `TriggerSource` when session starts.
-
-**Credential model:** `$secret` refs with `file:path`, `exec:command` (enables 1Password CLI, Bitwarden, Keychain), env var. Adopt nearly verbatim.
-
-**DaemonRegistry shape:** `RuntimeCache` (`Map<actorKey, {runtime, handle, lastTouchedAt}>`) + `RunStateMachine` for heartbeat. Extend with `continueToken` + `checkpointToken` + `persistTokens()` for WorkRail.
-
----
-
-#### nexus-core findings
-
-**Org profile system:** `configs/profiles/zillow.yaml` declares CLI tool bindings (glab vs gh, acli vs jira-cli). WorkRail: `workrail profile apply <org>` writes `~/.workrail/config.json` with active integration bindings.
-
-**Skill loading:** Three-mirror layout (`.claude/skills/`, `skills/`, `.agents/skills/`) with symlink-based plugin discovery. Core always wins. WorkRail: `~/.workrail/plugins/` with `workrail-plugin.yaml` manifest.
-
-**SOUL.md:** Behavioral principles injected into agent system prompts. WorkRail Auto should ship a `SOUL.md` equivalent in daemon session system prompts -- agent character beyond workflow steps. "Evidence before assertion" = WorkRail's enforcement principle as a behavioral norm.
-
-**Session lifecycle hooks:** JSON stdin/stdout protocol (`{session_id, reason, transcript_path}`). Maps to WorkRail daemon: init (inject ancestry, register in DaemonRegistry, acquire lock) → end (write checkpointToken atomically, release lock, post results to trigger source).
-
-**Knowledge injection:** `inject-knowledge.sh` -- before Claude API call, inject: ancestry recap + `~/.workrail/knowledge/` + repo-specific `.workrail/context.md`. Cap at N lines (200 default). SHORT_NAME matching for repo-relevant selection.
-
-**Skill-as-git-history:** Each skill evolves through atomic commits traceable to session context. WorkRail: session notes improve workflows via `workflow-for-workflows`.
-
----
-
-#### pi-mono findings (docs/design/pi-mono-integration-discovery.md)
-
-**`agent.state` returns a snapshot, not live reference.** Must reassign: `agent.state.messages = [...agent.state.messages, newMsg]`.
-
-**Tools must throw on failure** -- never encode errors in content. LLM sees and can retry.
-
-**`agent.followUp()` is the termination pattern** -- `continue_workflow` tool calls `agent.followUp(buildStepPrompt(result.step, continueToken))`. `isComplete` captured in closure drives `getFollowUpMessages` returning `[]` to exit naturally.
-
-**Token persistence via `afterToolCall`** -- write `continueToken` + `checkpointToken` to `~/.workrail/daemon-state.json` atomically before returning tool result.
-
-**Console streaming:** Subscribe to `message_update` events where `assistantMessageEvent.type === "text_delta"`. Push over SSE/WebSocket. `tool_execution_start/end` drive tool progress indicators.
-
-**`mom` dispatch model:** One `Agent` instance per session (not per trigger). `ChannelQueue` (KeyedAsyncQueue) serializes messages per channel. WorkRail: one `Agent` per daemon session, reconstructed from WorkRail event log on each run.
-
-Full tool registration TypeScript in design doc.
-
----
-
-#### LangGraph findings (docs/ideas/langgraph-discovery.md)
-
-**Time-travel checkpointing:** `CheckpointMetadata.source = "fork"` enables re-invoking from any historical `checkpoint_id`. This is the implementation pattern for WorkRail's "workflow rewind" backlog feature. WorkRail's event log already stores enough -- what's missing is branch-from-earlier-point API.
-
-**`interrupt()` is a function, not middleware** -- raises `GraphInterrupt`, node re-runs from scratch on resume (requires idempotency). WorkRail's design is cleaner -- step advances, doesn't re-execute. WorkRail's HMAC token can't be faked; LangGraph's interrupt can be bypassed.
-
-**Streaming is a `(namespace, mode, data)` triple** -- includes subgraph namespace path. Right format for WorkRail Auto's console SSE events. pi-mono's `agent.subscribe()` is the direct equivalent.
-
-**Multi-tenancy is soft** -- metadata-filter-based, no per-tenant schema isolation. A bug in an auth handler leaks cross-tenant data. **WorkRail's opportunity: structural per-org storage roots from day one.**
-
-**`Workflow + Session + Run` hierarchy confirmed at scale** -- right entity model for WorkRail Auto cloud.
-
----
-
-#### Temporal.io findings
-
-**Event-sourcing model:** Temporal workflows replay event history deterministically on each activation. `DeterminismViolationError` when code changes break replay compatibility. WorkRail already has this pattern in its event log + `replay.ts`. Key addition: Temporal's `Worker.runReplayHistories()` for batch testing workflow code changes against production history before deploying.
-
-**Activity/workflow separation:** Workflows = deterministic orchestration (no side effects, must be pure). Activities = side-effectful work (API calls, file I/O, non-deterministic ops). WorkRail's current design conflates these -- workflow steps can have side effects. For WorkRail Auto, this distinction matters: the daemon's `runWorkflow()` loop is the "workflow" (deterministic step sequencer), and each tool execution is an "activity" (side-effectful). Not a blocking design change, but a useful mental model.
-
-**Worker polling vs webhook push:** Temporal workers poll a task queue; WorkRail uses webhook push. Both are valid. Worker polling is better for cloud/multi-tenant (workers can scale independently, no direct webhook routing needed). WorkRail Auto local: webhooks are simpler. WorkRail Auto cloud: task queue model worth adopting.
-
-**Workflow versioning:** `patched()` / `deprecatePatch()` pattern for evolving running workflows. WorkRail has no equivalent. Minimal needed: workflow definition hash pinning (already done via `workflowHash`), plus a mechanism to continue old sessions on old workflow versions while new sessions use new versions. Not MVP but important for production.
-
-**Namespace isolation:** Per-org Temporal namespaces with separate history and quota. WorkRail Auto cloud: per-org data dirs (`~/.workrail/orgs/<orgId>/`) from day one. No shared state between orgs.
-
-**Schedule client:** Temporal's `ScheduleClient` has `ScheduleOverlapPolicy` (SKIP, BUFFER_ONE, BUFFER_ALL, CANCEL_OTHER, ALLOW_ALL). WorkRail's cron trigger needs the same overlap policy -- what happens if a scheduled run is still running when the next one fires?
-
----
-
-#### AutoGPT findings
-
-**Block abstraction:** `BlockType` enum includes `WEBHOOK`, `HUMAN_IN_THE_LOOP`, `MCP_TOOL`, `AGENT`, `AI`. Each block has typed `Input`/`Output` schemas (Pydantic). `BlockWebhookConfig` for trigger blocks. This is the right abstraction for WorkRail Auto's integration layer -- every integration (GitHub trigger, Jira action, Slack message) is a typed `WorkRailBlock<TInput, TOutput>`.
-
-**`HUMAN_IN_THE_LOOP` block type:** AutoGPT has this as a first-class concept. Directly maps to WorkRail Auto's approval-gate feature -- workflow steps that pause for human confirmation before proceeding.
-
-**mcp-graph:** Repo not found at `DiegoNogueiraDev/mcp-graph` -- may have been deleted or renamed. The competitive scan agent may have surfaced a different project. Not a concern -- WorkRail has no close competitors in its quadrant.
-
----
-
-#### Key synthesis: what to build vs import
-
-| Component | Decision | Source |
-|-----------|----------|--------|
-| Agent loop | Import `@mariozechner/pi-agent-core` | pi-mono |
-| LLM providers | Import `@mariozechner/pi-ai` | pi-mono |
-| Channel abstraction | Build `WorkRailIntegration<TConfig>` | OpenClaw pattern |
-| Credential system | Build `$secret` resolver | OpenClaw pattern |
-| Delivery binding | Build `TriggerSource` + `DeliveryRouter` | OpenClaw pattern |
-| DaemonRegistry | Build `RuntimeCache` shape | OpenClaw pattern |
-| Session lifecycle | Build `session-init` / `session-end` hooks | nexus-core pattern |
-| Knowledge injection | Build `buildDaemonSystemPrompt()` | nexus-core pattern |
-| SOUL.md | Build daemon behavioral principles | nexus-core pattern |
-| Console streaming | Build SSE with `(namespace, mode, data)` triple | LangGraph pattern |
-| Approval gates | Build `HUMAN_IN_THE_LOOP` block type | AutoGPT pattern |
-| Overlap policy | Build cron trigger overlap config | Temporal pattern |
-| Namespace isolation | Build per-org storage roots | Temporal + LangGraph |
-| Workflow versioning | Defer -- hash pinning sufficient for MVP | Temporal insight |
-| Activity/workflow split | Defer -- useful mental model, not blocking | Temporal insight |
-| Time-travel rewind | Defer -- fork-from-checkpoint API | LangGraph insight |
-
-**AutoGPT + mcp-graph-workflow additional findings (from design agent):**
-
-**AutoGPT trigger declaration pattern:** Three-layer design: block declares schema + `webhook_config`; `WebhooksManager` handles registration + payload validation; payload flows in as hidden `Input.payload` field. Distinction between auto-register (`BlockWebhookConfig`) and user-configured (`BlockManualWebhookConfig`) is exactly the pattern WorkRail's trigger system needs.
-
-**Fernet credential encryption:** `encrypt(data: dict) -> str` / `decrypt(str) -> dict` using symmetric key. 40 lines. WorkRail's `CredentialStore` should be a direct port.
-
-**Acquire-at-execution injection:** Credentials fetched just before step execution, injected as typed objects, held under lock for duration, released in `finally`. Acquire-inject-release contract for WorkRail's step runner.
-
-**`SecretStr` type enforcement:** Wrap secrets in an opaque type (branded type or `class Secret<T>` in TypeScript) that prevents accidental logging.
-
-**mcp-graph-workflow `resource_locks` SQLite table:** `leaseToken + agentId + expiresAt + TTL auto-expiry`. Upgrade `LocalSessionLockV2` from PID-file to SQLite lock table. Adds multi-process safety without Redis. Directly addresses the workerId bug already fixed on `feat/session-lock-worker-id`.
-
-**`leaseToken` for subagent step claiming:** `start_task` returns `leaseToken`; `finish_task` requires it. WorkRail subagent delegation: coordinator passes leaseToken, subagent includes in `continue_workflow` context, engine validates.
-
-**`nextAction` in every tool response:** mcp-graph appends `_lifecycle.nextAction` to every MCP response. WorkRail: add typed `nextAction` field to `continue_workflow` responses (parsed step summary, suggested tool, context keys) -- complement to HMAC enforcement.
-
-**mcp-graph-workflow vs WorkRail honest comparison:** mcp-graph has SQLite persistence, lifecycle phases, gate checks, multi-agent task claiming, RAG, knowledge store. It's in "durable + advisory enforcement" quadrant. WorkRail's moat: cryptographic enforcement (mcp-graph is advisory -- agents CAN call tools out of sequence), checkpoint/resume tokens, workflow composition DSL, DAG visualization. Not marginal differences.
-
-**Temporal/Prefect/Dagster additional findings (full discovery agent):**
-
-**Central insight -- Temporal's replay model is NOT applicable to WorkRail.** Temporal's event-sourcing depends on deterministic code. AI agent tool calls are inherently non-deterministic. WorkRail's checkpoint token + append-only session store is already the right architecture. "Temporal for AI agent process governance" is valid as an analogy -- take Temporal's invariants, not its mechanisms.
-
-**Workflow versioning is already solved.** `PinnedWorkflowStorePortV2` + `workflowHash` verified in `src/mcp/handlers/v2-advance-core/outcome-success.ts` (line 57) and `src/mcp/handlers/v2-workflow.ts` (lines 460-463). Deploy-safe in-flight sessions are fully handled. No new code needed.
-
-**Trigger system from Dagster sensor cursor model (~200 LOC):** `TriggerSourcePortV2<TEvent, TCursor>` port + `TriggerCursorStore` + `CronTrigger` + `GitLabMRTrigger`. Trigger event ID used as workflowId for idempotency (Dagster's `run_key` pattern -- prevents double-fire after daemon restarts). Prefect's lookahead pre-insertion: `CronTrigger.poll()` computes all missed ticks since last cursor and fires them as separate sessions.
-
-**Human approval gates (post-daemon-MVP, ~200 LOC + schema):** Three new typed domain events (`step_approval_pending/received/timeout`) + REST endpoint with HMAC-signed approval token. Requires workflow schema change. Build after autonomous daemon is proven.
-
-**Daemon crash recovery (~80 LOC, build first):** `DaemonStateStore` port -- atomic write of `{ sessionId, continueToken, stepIndex, approvalGate? }` to `~/.workrail/daemon-state.json` before every `continue_workflow`. Follows existing temp→fsync→rename pattern from session store. Out-of-band from session lock by design.
-
-**Temporal-to-WorkRail mapping confirmed:**
-- Event history → append-only session event log ✅ (exists)
-- Workflow task token → `ct_`/`st_` checkpoint token ✅ (exists)
-- `condition(fn, timeout)` human gate → `approvalGate` step + REST resume (to design)
-- Activity heartbeat → `requiredEvidence` field (to implement)
-- Deployment versioning → `PinnedWorkflowStorePortV2` + `workflowHash` ✅ (verified)
-- Namespace → `orgId` prefix in `dataDir` + credential vault (cloud tier)
-- Worker long-polling → direct in-process engine calls ✅ (daemon model)
-
-**Temporal additional findings (third agent, deepest source read):**
-
-**WorkRail's JSON model eliminates Temporal's entire determinism complexity class.** Temporal's VM isolation, `DeterminismViolationError`, `patched()`, and replay machinery exist because Temporal workflows are user TypeScript code. WorkRail workflows are JSON interpreted by the engine -- no determinism problem. Genuine architectural advantage, not a gap.
-
-**Minimum additions to WorkRail schema:**
-- `versioningBehavior: "PINNED" | "AUTO_UPGRADE"` -- PINNED keeps in-flight sessions on current workflow version; AUTO_UPGRADE migrates to latest on next continue_workflow
-- `orgId` in session store paths: `~/.workrail/sessions/<orgId>/` with startup migration (needed for multi-tenancy from day one)
-
-**Human-in-loop signal pattern:** Temporal's `setHandler(signal, handler)` + `condition(fn)` is the right mental model for WorkRail's approval gates. Buffer incoming signals (approval/rejection), `condition()` unblocks when buffer has a matching signal. Translate to WorkRail: daemon emits `step_approval_pending` event, REST endpoint receives approval, emits `step_approval_received`, daemon's `condition()` equivalent unblocks `continue_workflow`.
-
-**Triggers in workflow schema (dedicated sprint):** `triggers: DeploymentTrigger[]` inline in workflow JSON with `posture: "reactive" | "proactive"` + optional `schedule_after` delay. Prefect's `automations.py` deployment trigger pattern. Not MVP.
-
-**Worker polling seam:** Design the trigger port with `poll()` interface now even though self-hosted uses webhooks. Cloud deployment uses long-poll task queue without architectural changes.
-
-**AutoGPT + mcp-graph-workflow CORRECTION (deepest agent, read actual source):**
-
-**mcp-graph-workflow is NOT a close WorkRail analog.** Earlier characterization was wrong. It's a local-first SQLite-backed MCP server that converts PRD docs into execution graphs with a fixed 9-phase lifecycle. Its gates are advisory and bypassable (`force:true` parameter). WorkRail's HMAC tokens are cryptographic and unbypassable. Different quadrants, different trust models.
-
-**mcp-graph does better that's worth watching:** Local RAG context compression (70-85% via BM25 + ONNX embeddings, zero cloud) -- relevant to WorkRail's future context survival. AST code intelligence (out of scope but useful for coding-task workflows).
-
-**Concrete WorkRail Auto trigger system design (from AutoGPT + validation):**
-
-Three-layer model: declare → register → execute.
-
-```typescript
-interface TriggerDefinition {
-  id: string;
-  provider: string;           // "github" | "gitlab" | "jira" | "cron" | "generic"
-  triggerType: string;        // provider-specific
-  resourceTemplate: string;  // "{owner}/{repo}"
-  eventFilter: Record<string, boolean>;
-  credentialRef?: string;     // keyring named ref -- never plaintext
-  workflowId: string;
-  contextMapping?: ContextMapping;  // optional JSONPath payload → workflow context
-}
-```
-
-**The generic provider alone is a complete MVP.** Any system that can send HTTP POST can trigger a WorkRail workflow. GitLab, Jira, Slack, PagerDuty all work without provider-specific code. Auto-registration is post-MVP.
-
-**Port:** 3200 (separate from MCP 3100). **Feature flag:** `wr.features.triggers`.
-
-**MVP build order:** `trigger-store.ts` → `trigger-listener.ts` → `trigger-router.ts` → `providers/generic.ts` → `providers/cron.ts` → MCP CRUD tools.
-
-**Credential model:** keyring-based named refs. Two backends: OS keychain (dev) + encrypted env-file (Docker/CI/headless). Never plaintext in trigger definitions.
-
-Full design at: `docs/design/workrail-auto-trigger-system.md`
-
-**CORRECTION: pi-mono termination bridge (third agent, deepest read):**
-
-**`getFollowUpMessages()` is the WRONG termination bridge.** Earlier finding was incorrect. Correct approach:
-
-- Use `agent.steer()` for step injection -- fires after each tool batch, inside the inner loop
-- `followUp()` only fires when agent would otherwise stop -- adds an unnecessary extra LLM turn per workflow step
-- **Termination:** simply don't call `steer()` when workflow is complete. Agent stops naturally.
-
-**Correct daemon runner pattern (from mom's `createRunner()`):**
-- Subscribe to agent once at daemon session creation
-- Mutable `runState` reset per run (in closure)
-- `agent.steer()` injects next step after each tool batch
-- When `isComplete=true` from `continue_workflow`, stop calling `steer()` -- agent exits cleanly
-
-**`abort()` is best-effort** for synchronous engine operations (SQLite/HMAC can't be interrupted). Don't rely on it for immediate cancellation.
-
-**Claude Code deep dive -- THREE CORRECTIONS to backlog (deepest source read, 11 files):**
-
-**Correction 1: Session memory injection does NOT work for daemon mode.** The session memory file is Claude Code-internal, at a path only Claude Code controls. WorkRail's daemon calls Anthropic API directly via pi-mono -- there is no Claude Code session memory file. **Daemon mode must use system prompt injection:** prepend `<workrail_session_state>` XML block to system prompt before each `agentLoop()` call (last 3 step note summaries, ~200 tokens each).
-
-**Correction 2: PreCompact hooks do NOT fire for Tier 1 (Session Memory Compaction).** `trySessionMemoryCompaction()` runs before hooks are invoked. When Tier 1 succeeds, PreCompact hooks are never called. Hooks only cover Tier 2 (legacy/reactive) compaction.
-
-**Correction 3: `sessionRunner.ts` is NOT the daemon pattern.** It's Claude.ai web UI's bridge for controlling a local Claude CLI subprocess. WorkRail's daemon calls Anthropic API directly.
-
-**Correct integration architecture:**
-
-For **human-driven sessions (Claude Code + WorkRail MCP):**
-```
-PreCompact hook → output step notes as custom compaction instructions
-PostToolUse hook (Bash|Write|Edit) → log tool calls to evidence NDJSON file
-PreToolUse hook (continue_workflow) → check evidence log; deny if required evidence missing
-```
-Evidence gate is fail-open when log missing.
-
-For **daemon mode (WorkRail daemon + pi-mono):**
-```
-Before each agentLoop() call: prepend <workrail_session_state> XML to system prompt
-Evidence gate: in-process check before executeContinueWorkflow() -- reads tool_call_observed
-events from session store (stronger than hook-based, no subprocess reliability concern)
-```
-
-In-process evidence gate is architecturally superior for daemon mode -- direct session store reads, no subprocess IPC.
-
-**OpenClaw final findings (deepest agent, 15+ source files):**
-
-**`KeyedAsyncQueue` is FIRST prerequisite -- build before daemon runner.** Prevents token corruption when multiple triggers fire concurrently. 30-80 LOC to reimplement from `src/acp/control-plane/session-actor-queue.ts`.
-
-**`TriggerPlugin<TConfig, TCredentials>` interface:** Phase 1 MVP -- typed interface + `TRIGGER_REGISTRY = new Map<TriggerId, TriggerPlugin>` + factory credential resolution. ~300 LOC. DI injection deferred to Phase 2 when test coverage needed. Use branded `TriggerId` string type (not closed union) -- extensible without recompile.
-
-**`deliveryContext` persistence (~20 LOC):** Store routing info (MR iid, Jira key, Slack thread) at session creation in session store. Crash recovery: on restart, `DeliveryRouter.resolve(deliveryContext)` knows where to post results.
-
-**`TaskNotifyPolicy` enum:** `done_only` / `state_changes` / `silent` -- 5 LOC, adopt verbatim for trigger notification behavior config.
-
-**`DaemonRegistry.snapshot()`:** `RuntimeCache` equivalent (~50 LOC) feeding console live view API. `snapshot()` returns current running sessions; `collectIdleCandidates()` for GC.
-
-**Pre-implementation checklist before any trigger code:**
-1. `KeyedAsyncQueue` (prerequisite, ~50 LOC)
-2. Branded `TriggerId` type
-3. `never` branch in startup switch over `TriggerInboundAdapter.kind`
-4. `deliveryContext` stored at session start
-
----
-
-## Ultimate MVP -- non-blocking build order
-
-Everything researched. Build order that ships fastest without blocking future:
-
-**Step 1 ✅ DONE:** `LocalSessionLockV2` workerId + instanceId fix (merged to main)
-
-**Step 2: `KeyedAsyncQueue` (~50 LOC)**
-Concurrent session serialization. Prerequisite for daemon safety. Prevents token corruption. Re-implement from OpenClaw pattern, don't import.
-
-**Step 3: `src/daemon/workflow-runner.ts` (~150 LOC)**
-- `runWorkflow(trigger, apiKey)` calls engine directly (in-process, shared DI)
-- `@mariozechner/pi-agent-core` `Agent` class as the loop
-- `agent.steer()` for step injection after each tool batch (NOT `followUp()`)
-- Persist `continueToken` + `checkpointToken` to `~/.workrail/daemon-state.json` atomically before each step
-- `isComplete=true` → stop calling `steer()` → agent exits naturally
-- Register `start_workflow`, `continue_workflow`, `Bash`, `Read`, `Write` as `AgentTool<T>` with TypeBox schemas
-- Inject `<workrail_session_state>` XML block in system prompt (last 3 step note summaries, ~200 tokens each)
-
-**Step 4: Trigger webhook server (~300 LOC)**
-- `TriggerPlugin<TConfig, TCredentials>` interface + `TRIGGER_REGISTRY` Map
-- `POST /webhook/generic` -- accepts any JSON payload on port 3200
-- `triggers.yml` config: `workflowId`, optional `contextMapping` (JSONPath payload → context)
-- HMAC signature verification, async queue, 202 response
-- Feature flag: `wr.features.triggers`
-- Generic provider works for ALL integrations out of the box
-
-**Step 5: Console live view (~3 files, no new routes)**
-- `context_set(is_autonomous: true)` event at session start
-- Ephemeral `DaemonRegistry` with `lastHeartbeatMs`
-- `[ LIVE ]` pulsing badge in session list
-
-**What stays non-blocking:**
-- In-process daemon → cloud HTTP client is a transport swap, not a rewrite
-- `TriggerSourcePortV2` has `poll()` interface → worker polling for cloud is config, not code
-- Per-org session paths (`~/.workrail/sessions/default/`) → adding orgId prefix later is migration
-- Feature flags on everything → merge incrementally
-- Generic webhook → all integrations (GitLab, Jira, Slack) via config, zero code per integration
-
----
-
-### Daemon context customization (implemented Apr 15, 2026)
-
-**`~/.workrail/daemon-soul.md`** -- operator-customizable agent rules injected into every daemon session system prompt. Analogous to nexus-core's `SOUL.md` and Common-Ground's `AGENTS.md`. Default created on first run with commented instructions. Override per-workspace or globally.
-
-**Auto-inject `AGENTS.md` / `CLAUDE.md`** -- daemon scans `workspacePath` for `.claude/CLAUDE.md`, `CLAUDE.md`, `AGENTS.md`, `.github/AGENTS.md` (in priority order) and injects into system prompt under `## Workspace Context`. Combined 32KB limit, truncated with notice if over. Enables the daemon to adapt to different repos' coding standards and conventions automatically -- same as how Claude Code uses these files.
-
-**Daemon calls `start_workflow` directly** -- removes the "Call the start_workflow tool now" LLM indirection. Daemon calls `executeStartWorkflow()` directly, gets step 1, passes it as the initial prompt. More reliable, cheaper (one fewer LLM turn), and the agent starts working immediately instead of being told to call a tool.
-
----
-
-### WorkTrain onboarding: `worktrain init` guided setup (high priority, post-MVP)
-
-**Goal:** A guided CLI onboarding that sets up everything WorkTrain needs to work well, asked once, never asked again.
-
-**What it configures (in order):**
-
-1. **LLM provider** -- Bedrock (AWS SSO profile) or direct Anthropic API key. Validates the credentials actually work before proceeding.
-2. **Workspace** -- default workspacePath for daemon sessions. Offer to auto-detect from git repos in common locations.
-3. **Daemon soul** -- create `~/.workrail/daemon-soul.md` interactively. Ask: "What language/framework does your main project use? Any coding conventions the agent should follow? Commit style?" Write the soul file from answers.
-4. **Trigger configuration** -- set up the first trigger. Ask: what workflow? (list available) what webhook source? (GitHub/GitLab/Jira/manual) Configure `triggers.yml`.
-5. **Common-Ground** -- if detected, offer to sync the team's AGENTS.md and workflows.
-6. **Notification** -- optional Slack/Telegram webhook for session completion/failure notifications.
-7. **Verification** -- fire a smoke-test workflow (cheap, non-destructive) to confirm end-to-end works. Show the result.
-
-**Design principles:**
-- Skip sections that are already configured (idempotent)
-- `--reconfigure <section>` to re-run a specific section
-- All answers stored in `~/.workrail/config.json` (already exists) + `daemon-soul.md` + `triggers.yml`
-- Should complete in under 5 minutes for a typical setup
-- The soul questionnaire is the most important part -- a well-written soul dramatically improves output quality
-
-**Longer term:** A WorkTrain hosted onboarding that teams can share via a URL (`worktrain init --from https://worktrain.io/teams/mercury-mobile`) -- imports team-specific soul, triggers, and workflow config in one command.
-
----
-
-### Post-update onboarding: contextual feature announcements
-
-**Goal:** When WorkTrain updates to a new version with significant new capabilities, it prompts the user to configure the new feature -- once, the first time they run after updating.
-
-**How it works:**
-
-Each significant feature ships with a `migration step` keyed to a minimum version:
-```json
-// ~/.workrail/config.json
-{
-  "onboardingCompleted": "3.17.0",
-  "featureStepsCompleted": ["daemon-soul", "bedrock-setup", "triggers-v2"]
-}
-```
-
-On startup, WorkTrain checks: current version > `onboardingCompleted`? Any new `featureSteps` not in `featureStepsCompleted`? If yes, run those steps interactively before continuing.
-
-**What triggers a feature onboarding step:**
-- New capability that requires user configuration to activate (e.g. daemon soul file, Bedrock credentials, new trigger source)
-- Breaking change to config format that needs migration (e.g. triggers.yml schema v2)
-- Feature that's opt-in and valuable but off by default (e.g. AGENTS.md auto-injection)
-
-**What does NOT trigger it:**
-- Bug fixes and performance improvements
-- New workflows added to the library
-- Any change that works without user input
-
-**Tone:** Brief, useful, never annoying. Each step should take < 60 seconds. Show what changed, ask what's needed, confirm it works. Skip if already configured.
-
-**Example:**
-```
-WorkTrain updated to v4.1.0 ✦ One new capability to configure:
-
-  Workspace Context Injection
-  WorkTrain can now automatically read AGENTS.md and CLAUDE.md from
-  your repos and inject them into every agent session.
-
-  → Your workspaces will be scanned automatically. No action needed.
-  → To add custom rules for all sessions: ~/.workrail/daemon-soul.md
-     (run: workrail init --section soul)
-
-  Press Enter to continue, or 's' to skip this setup.
-```
-
----
-
-### Multi-agent support: concurrent sessions + agent collaboration (high importance, post-MVP)
-
-**Concurrent sessions (near-term):**
-WorkTrain should run multiple workflows in parallel -- different agents on different repos or different tasks simultaneously. The current architecture supports this (per-session state files, `KeyedAsyncQueue` serializes per trigger ID), but the global concurrency cap from the arch audit needs implementing:
-- `maxConcurrentSessions: N` config in `~/.workrail/config.json`
-- Global semaphore in `TriggerRouter` -- queues new dispatches when at capacity
-- Console shows all concurrent sessions in QueuePane
-- Mobile monitoring shows live count
-
-**Agent collaboration on a single task (longer-term):**
-Multiple agents coordinating on one task. Two patterns:
-
-1. **Coordinator + worker subagents** -- already possible today via WorkRail's existing `mcp__nested-subagent__Task` delegation in workflow steps. A coordinator workflow spawns subagents with scoped tasks (e.g. one agent writes Android code, another writes iOS). Each subagent has its own WorkRail session and reports back to the coordinator.
-
-2. **Parallel agent teams** -- multiple agents working independently on separate parts of a task (e.g. separate feature branches) with a final merge/review step. Requires cross-repo execution and a workflow that understands how to partition and recombine work.
-
-**MVP path:** Concurrent sessions with `maxConcurrentSessions` first (small change). Coordinator + subagent delegation second (already works, just needs workflow authoring). Full parallel teams is the longer-term investment.
-
----
-
-### Core daemon design principle: scripts over agent (permanent)
-
-**The agent is expensive, inconsistent, and slow. Scripts are free, deterministic, and instant.**
-
-Any operation the daemon can perform with a shell script, git command, or API call should be done that way -- not delegated to the LLM. The agent's job is cognition: understanding the task, making decisions, writing code. Everything else is mechanical work that scripts do better.
-
-**Concrete rule:** if an operation is deterministic and has no ambiguity, it is a script. Examples:
-
-- `git add -A && git commit -m "..."` -- script (daemon reads the handoff artifact the agent produced and runs this itself)
-- `gh pr create --title "..." --body "..."` -- script (daemon reads PR title/body from the agent's handoff note)
-- running the build (`npm run build`, `gradle assembleDebug`) -- script
-- running tests (`npm test`, `./gradlew test`) -- script
-- reading a file to check if it exists -- script (use Read tool, not ask the agent)
-- detecting which workflow to run for a given trigger -- script (workflowId is in `triggers.yml`)
-- formatting output, writing JSON state files, sending HTTP requests -- scripts
-
-**The agent only does what requires judgment:**
-
-- understanding what files need to change and how
-- evaluating whether an approach matches the repo's patterns
-- generating commit messages and PR descriptions (because those require understanding the change)
-- deciding whether a test failure is a real issue or a flaky test
-- making tradeoff decisions when there are competing valid approaches
-
-**Auto-commit and auto-PR design (near-term daemon work):**
-
-The workflow's final step produces a structured handoff artifact with `commitType`, `commitScope`, `commitSubject`, `prTitle`, `prBody`, and `filesChanged`. The daemon reads this artifact after the workflow completes and runs git commands directly:
-
-```typescript
-// After runWorkflow() resolves successfully:
-const handoff = extractHandoffArtifact(result); // parse notes for the structured block
-if (handoff && triggerConfig.autoCommit) {
-  await execa('git', ['add', ...handoff.filesChanged], { cwd: workspacePath });
-  await execa('git', ['commit', '-m', handoff.commitMessage], { cwd: workspacePath });
-}
-if (handoff && triggerConfig.autoOpenPR) {
-  await execa('gh', ['pr', 'create', '--title', handoff.prTitle, '--body', handoff.prBody], { cwd: workspacePath });
-}
-```
-
-`autoCommit` and `autoOpenPR` are opt-in flags in `triggers.yml`. Default off. The daemon never commits without explicit config.
-
-**Why this matters for quality:** LLM-run git commands have non-deterministic output, can hallucinate flags, and burn tokens on mechanical work. A script-run commit is always correct, always fast, always auditable. The agent writes the message; the daemon runs the command. That split is the right architecture.
-
-**Key open question:** When two agents work on the same repo concurrently, file conflicts are possible. The right answer is git worktrees -- each agent gets its own worktree, merges at the end. This is what the `cw` command does for human developers. WorkTrain should do the same autonomously.
-
----
-
-### Workflow complexity routing: fast-path thoroughness and subagent offloading (design questions, Apr 15, 2026)
-
-Three open questions that should be resolved before the lean.v2 workflow is considered stable for autonomous use:
-
----
-
-**Q1: Is one step enough for Small tasks?**
-
-Currently: Small tasks take one step (phase-5-small-task-fast-path). That step now requires wiring verification, build, tests, and a handoff artifact. But it is still one LLM context doing everything.
-
-The real risk is not the number of steps -- it is context overload within that one step. If the task is genuinely small (add a CLI flag, fix a one-line bug), one focused context is fine and lower cost. But if "Small" is being misclassified -- or if the task is technically small but requires non-obvious wiring across several files -- a single context is likely to miss things.
-
-**Tentative answer:** the classification is the real gate, not the step count. The fix is making Phase 0 classify more conservatively and making it easier to reclassify upward after the fast path discovers unexpected scope. A `reclassifyToMedium` escape hatch in the fast path step (sets a context var that routes to phase-3 planning) would cover the "started small, turned out bigger" case without forcing every Small task through the full path.
-
----
-
-**Q2: Should Medium tasks get a dedicated path?**
-
-Currently: Medium falls into the same non-Small path as Large, which includes the full design review, plan audit, and final verification loops. For genuinely Medium tasks (well-understood, moderate scope, low architectural uncertainty), that path is too heavy.
-
-**Tentative answer:** add a QUICK rigor path for Medium. The existing `rigorMode=QUICK` conditions already skip the hypothesis, deep design, and plan audit steps -- so Medium+QUICK already produces a lighter path. The issue is that the workflow doesn't explicitly name "Medium fast path" anywhere. Document that `taskComplexity=Medium + rigorMode=QUICK` is the intended Medium track. No new steps needed -- just make the intended routing explicit in Phase 0 guidance.
-
----
-
-**Q3: Subagent offloading for classification and context gathering**
-
-The main agent's context is expensive and degrades as it fills up. The right architecture is:
-
-- **Phase 0 (classify)**: delegate to a cheap subagent. It reads the task description, scans relevant files, and returns: `taskComplexity`, `riskLevel`, `rigorMode`, `candidateFiles`, `invariants`. Main agent reviews and accepts/overrides. Cost: one cheap context instead of part of the main context.
-
-- **Context gathering (phase-1)**: already delegates to `routine-context-gathering` subagents. That's the right model. The question is whether those subagents share results via a persistent layer (knowledge graph) or repeat sweeps every session.
-
-- **Design review, plan audit, final verification**: already delegate to routine subagents. Good.
-
-The main agent should own: decisions, synthesis, and implementation. Everything else should be offloaded.
-
-**Dependency:** subagent offloading at scale requires a reliable handoff/knowledge-sharing system. Right now subagent results live in step notes and context variables -- ephemeral, per-session. If agents are going to stop repeating repo sweeps, something needs to persist knowledge between sessions.
-
----
-
-### Knowledge graph for agent context (high importance, research needed, Apr 15, 2026)
-
-**The problem:** every session starts with a full repo sweep. Context gathering subagents re-read the same files, re-trace the same call chains, re-identify the same invariants. This is expensive, slow, and scales badly as the codebase and team grow. The same problem appears in Storyforge (see `~/git/personal/storyforge/docs/architecture/design-notes/graph-memory-mcp.md`).
-
-**The idea:** a persistent, derived knowledge graph that agents build incrementally and query instead of sweeping. Key properties from Storyforge's design thinking that apply directly to WorkRail:
-
-- **Derived, not authoritative.** Source files are ground truth. The graph is a compiled/indexed view with provenance pointers back to source. Graph state never silently outranks a file read.
-- **Context bundles, not raw queries.** An agent doesn't query individual nodes -- it requests a context bundle: "give me everything relevant to `src/trigger/trigger-router.ts` for a bug investigation." The graph assembles and returns one scoped bundle.
-- **Provenance on every fact.** Every node/edge records: which file it came from, which session created it, which agent, when. Stale facts are detectable.
-- **Incremental, session-driven updates.** After each session completes, the daemon updates the graph with what the agent learned (new files read, new relationships traced, new invariants recorded). The graph grows session by session without requiring a full sweep.
-
-**Node types for a code knowledge graph:**
-- `file` (path, language, last_modified, last_indexed)
-- `symbol` (function, class, type, constant -- with file + line)
-- `call_edge` (caller -> callee with file/line provenance)
-- `invariant` (named constraint with the files it spans)
-- `workflow_session` (what task was done, which files changed, what was found)
-- `dependency` (npm/gradle package with version)
-- `test` (test file -> symbols under test)
-
-**Edge types:**
-- `imports`, `calls`, `exports`, `implements`, `extends`
-- `tested_by`, `modified_in_session`, `invariant_spans`
-- `depends_on`, `registered_in` (DI container, CLI map, router)
-
-**What this solves for WorkRail:**
-- Context gathering drops from "sweep 200 files" to "query the graph for the relevant subgraph + fetch the 5-10 source files that are actually going to change"
-- Agents can ask "what other files import `trigger-router.ts`?" in one graph query instead of a grep sweep
-- The wiring check in the fast path becomes: "query the graph for all registrations of type `CliCommand`, confirm the new command is in the set" -- not "read index.ts, cli.ts, and hope you find all the entry points"
-- Session history is queryable: "what sessions touched `session-lock` in the last 30 days?" -- useful for debugging and for not re-investigating known issues
-
-**The target architecture: vector + graph hybrid (not just a relational index)**
-
-The knowledge graph vision is more than a queryable symbol index. The real goal is a system where an agent asks "give me everything related to trigger-router.ts" and the system surfaces things that are *semantically relevant* -- not just things explicitly linked by import edges, but files that implement the same pattern, functions with similar signatures, sessions that touched related concepts. This is closer to a neural network for knowledge than to a SQL database.
-
-This requires two complementary layers:
-
-**Layer 1: Structural graph (hard edges, deterministic)**
-Built by parsing the codebase. Captures known, explicit relationships:
-- `imports`, `calls`, `exports`, `implements`, `extends`
-- `registers_in` (DI container, CLI command map, router)
-- `tested_by`, `modified_in_session`
-
-This layer answers precise questions with certainty: "what imports trigger-router.ts?", "what CLI commands are registered?", "what did session X touch?" Built by scripts (ts-morph for TypeScript, equivalent parsers for other languages), never by an LLM. Fast, deterministic, always correct.
-
-**Layer 2: Vector similarity (soft weights, semantic)**
-Every node in the structural graph also gets an **embedding** -- a vector encoding its semantic meaning (function name + signature + docstring + surrounding context). Nodes that are semantically similar end up geometrically close in vector space, regardless of whether they have an explicit edge between them.
-
-This layer answers fuzzy questions: "what is conceptually related to this?", "what files implement patterns similar to this one?", "what past sessions are relevant to this bug?" It surfaces things the agent didn't know to look for.
-
-**Together:** the structural graph provides the skeleton; the vector layer provides the connective tissue. An agent query resolves both: exact structural neighbors first, semantically similar nodes ranked by distance second. Per-repo and per-module scoping is handled naturally -- intra-repo edges are hard structural links, cross-repo relevance falls back to vector similarity.
-
-**Technology layers:**
-
-| Layer | Technology | Role |
-|-------|-----------|------|
-| Structural parsing | ts-morph (TypeScript), tree-sitter (other langs) | Extract hard edges deterministically |
-| Structural storage + traversal | DuckDB | Store nodes/edges, recursive reachability queries |
-| Vector embeddings | Local embedding model (e.g. `nomic-embed-text` via Ollama, or `@xenova/transformers`) | Encode every node as a vector |
-| Vector storage + similarity search | LanceDB (embedded, TypeScript-native) or Qdrant (self-hosted) | ANN search over embeddings |
-| Unified query layer | WorkTrain MCP tool | Single `query_knowledge_graph(intent)` call returns merged structural + semantic results |
-
-LanceDB is the strongest fit for the vector layer: embedded (no server process), TypeScript-native, local-first, co-locates vector and metadata in the same store. It pairs cleanly with DuckDB handling the structural/relational queries.
-
-**Build order (spike first, hybrid later):**
-
-The structural layer (ts-morph + DuckDB) is the right first spike because:
-1. It answers the immediately valuable questions (wiring checks, import graphs, CLI registration)
-2. It produces the nodes that the vector layer will embed -- you can't embed nothing
-3. It proves the foundation before adding semantic complexity
-
-Once the structural spike works, add the vector layer: embed each node's name + context, store in LanceDB, expose a similarity query alongside the structural query. The two layers are additive -- the structural layer doesn't get replaced, it gets augmented.
-
-**Per-repo and per-module scoping:**
-Each repo gets its own structural graph partition and its own vector namespace. Cross-repo queries join partitions explicitly (structural) or search across namespaces with a distance penalty (semantic). The system handles this automatically once the partition boundaries are defined at index time. Finer-grained module-level scoping falls out naturally from the structural graph -- the subgraph rooted at a module's entry point is the module's partition.
-
-**WorkRail fits:** the graph becomes a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph(intent)`. Workflow steps call it instead of running file sweeps. The daemon runs the indexer post-session as a script (structural layer: re-index changed files; vector layer: re-embed changed nodes).
-
-**Cross-project note:** the same architecture applies to any domain pack. Storyforge's graph has narrative nodes (characters, promises, locations) instead of code nodes, and a different parser (YAML/markdown instead of ts-morph), but the same two-layer design -- structural edges + vector embeddings -- gives it both "what chapters does this character appear in?" (structural) and "what story elements are thematically related to this scene?" (semantic).
-
----
-
-### Knowledge graph candidate research findings (Apr 15, 2026)
-
-Four discovery subagents evaluated Cognee, GraphRAG, LightRAG, Mem0, Zep, Sourcegraph, LSP, ctags, tree-sitter, ts-morph, and DuckDB against a pure relational/structural framing. Findings below, updated with the corrected hybrid architecture understanding.
-
-**Structural layer decision: ts-morph + DuckDB for the spike.**
-
-- **ts-morph**: wraps the real TypeScript Compiler API, not a generic parser. Extracts exports, imports, call sites, class implementations, DI `.bind()` patterns, CLI registration maps. In-process, zero external dependencies. Strictly better than tree-sitter for a TypeScript codebase.
-- **DuckDB**: embedded SQL with recursive CTEs. Handles structural reachability queries. No server process. A 1-day spike, not a 2-week project.
-- **LSP**: correct answers but requires managing a long-running server process -- wrong operational model.
-- **ctags**: definitions only, no call edges. Too shallow.
-- **Sourcegraph**: right idea, enterprise weight. Overkill for local daemon use.
-
-**Vector layer decision: LanceDB (deferred to post-spike).**
-
-- **LanceDB**: embedded, TypeScript-native, local-first. Best fit for the vector layer alongside DuckDB.
-- **Qdrant**: self-hosted, strong ANN performance. Good alternative if LanceDB proves insufficient at scale.
-- **Weaviate**: vector + graph hybrid in one system. Worth revisiting if maintaining two separate stores becomes painful -- it does both layers but is heavier to self-host.
-
-**Why GraphRAG/Cognee/LightRAG don't fit (even with the hybrid architecture):**
-These tools use LLMs to *build* the graph -- entity extraction, relationship identification, summarization all require LLM calls during indexing. That violates the scripts-over-agent principle. The structural layer must be deterministic (parser-built); the vector layer uses an embedding model (deterministic given the same input), not a generative LLM. GraphRAG's semantic richness is real but the wrong tradeoff for a system that needs to re-index after every session without burning tokens.
-
-**The spike (structural layer, build now):**
-1. `npm install ts-morph @duckdb/node-api`
-2. 50-line indexer: `project.getSourceFiles()` → walk exports, imports, call expressions → rows into DuckDB nodes/edges tables
-3. One MCP tool: `query_knowledge_graph(query: string)` running SQL, returning a context bundle
-4. Validation: "what imports trigger-router.ts?" and "what CLI commands are registered?" must return correct answers
-
-**Post-spike (vector layer):**
-1. `npm install vectordb` (LanceDB) + local embedding model via Ollama or `@xenova/transformers`
-2. After each structural node is created, embed `name + file + context snippet` → store vector alongside node ID in LanceDB
-3. Extend `query_knowledge_graph` to merge: structural neighbors (DuckDB) + semantic neighbors (LanceDB ANN search) → unified ranked context bundle
-4. Validate: "what is related to trigger-router.ts?" should surface files not directly imported but implementing the same webhook/routing pattern
-
-**Incremental update model:**
-After each daemon session completes, re-index only files in the handoff artifact's `filesChanged` list (structural: ts-morph re-parse; vector: re-embed changed nodes). Full rebuild only on first run or schema changes. Script, not agent.
-
----
-
-### Polling trigger model: zero-external-config integrations (Apr 15, 2026)
-
-**Problem with webhooks:** GitLab/GitHub webhooks require admin access to the project, a publicly reachable URL, and per-project setup. Three friction points that break the freestanding, zero-config philosophy.
-
-**Solution: polling triggers.** WorkTrain polls external APIs on a schedule instead of waiting for pushes. No external system configuration required -- just a token.
-
-```yaml
-# triggers.yml example
-triggers:
-  - id: new-mrs
-    type: gitlab_poll
-    source:
-      baseUrl: https://gitlab.com
-      projectId: 12345
-      token: $GITLAB_TOKEN
-      events: [merge_request.opened, merge_request.updated]
-      pollIntervalSeconds: 60
-    workflowId: mr-review-workflow-agentic
-    goalTemplate: "Review MR !{{$.iid}}: {{$.title}}"
-    workspacePath: ~/git/my-project
-```
-
-**What to build:**
-1. `PollingTriggerSource` -- new source type alongside existing `generic` (webhook). Fields: `pollIntervalSeconds`, `token`, `baseUrl`, `projectId`, `events`.
-2. `PolledEventStore` -- lightweight local state file (`~/.workrail/polled-events.json`) tracking which event IDs have been processed. Prevents re-firing after restart.
-3. Polling scheduler in the daemon -- calls `TriggerRouter.dispatch()` directly when a new event is detected. Clean integration, no new routing plumbing.
-
-**Generalizes to all sources without external config:**
-- GitHub: poll `/repos/:owner/:repo/pulls`
-- Jira: poll `/rest/api/3/search?jql=...`
-- Linear: poll GraphQL for new issues
-- Slack: poll conversations for pattern matches
-
-**This is the preferred trigger model for external integrations.** Webhooks remain available for high-volume or latency-sensitive use cases, but polling is the default for everything else -- it works behind firewalls, requires no admin access, and fits `worktrain init` naturally (just ask for a token).
-
-**Tradeoff:** up to `pollIntervalSeconds` latency (60s default). Acceptable for MR reviews and most agentic tasks. Not acceptable for real-time chat bots.
-
-**Market research needed before building:**
-Several tools in this space worth evaluating before building from scratch:
-
-- **CodeGraph / Tree-sitter based indexes** -- open source, parse-based symbol graphs. Fast to build, no LLM required, but only structural (no semantic edges).
-- **Sourcegraph** -- enterprise code search + graph. Well-proven at scale. Question: does it expose an API suitable for agent context bundle queries? Overkill for solo/small team.
-- **Microsoft GraphRAG** -- LLM-built knowledge graphs with community detection. Research project, but directly relevant architecture. Slower to build (LLM-driven), richer semantic edges.
-- **Cognee** -- open source knowledge graph + RAG, designed for agent workflows. Active project, worth a close look.
-- **Mem0** -- agent memory layer with graph backend. Simpler than Cognee but less code-specific.
-- **tree-sitter + DuckDB** -- build-it-yourself option: tree-sitter parses symbols + call graph, DuckDB stores and queries. Full control, no external dependency, fits WorkRail's freestanding philosophy.
-
-**Recommended approach:** research Cognee and tree-sitter+DuckDB first. Cognee may already solve 80% of this. If not, tree-sitter+DuckDB is the build path -- it fits the "scripts over agent" principle (the graph is built by a deterministic parser, not by asking an LLM to summarize files).
-
-**WorkRail fits:** the graph is a new WorkRail source -- `graphSource` alongside `bundledSource`, `userSource`, and `managedSource`. The MCP server exposes `query_knowledge_graph` and `update_knowledge_graph` tools. Workflow steps call those tools instead of running file sweeps. The daemon updates the graph after each session completes (script, not agent).
-
-**Cross-project note:** Storyforge will likely need the same graph layer. Worth building it once in WorkRail and making it available to both -- the node/edge schema is different (code vs narrative) but the architecture (derived layer, provenance, context bundles, session-driven updates) is identical.
-
----
-
-### Knowledge graph candidate research findings (Apr 15, 2026)
-
-Four discovery subagents evaluated Cognee, GraphRAG, LightRAG, Mem0, Zep, Sourcegraph, LSP, ctags, tree-sitter, ts-morph, and DuckDB. Findings were unanimous.
-
-**Decision: ts-morph + DuckDB. Spike it now.**
-
-**Why the others lost:**
-
-- **Cognee**: Python-only SDK, no TypeScript client, no code-aware indexing primitives. Built for document RAG not code graphs. Watch list only.
-- **GraphRAG / LightRAG**: Use LLMs to build the graph -- violates the "scripts over agent" principle. Non-deterministic output, expensive, no TypeScript client. Skip.
-- **Mem0 / Zep**: Conversational/session memory, not code graphs. Orthogonal problem. Skip for this use case.
-- **Sourcegraph**: Enterprise-scale, heavy Docker infrastructure. Overkill for local daemon use. Skip.
-- **LSP (typescript-language-server)**: Queryable from Node.js but requires managing a separate long-running process with stdio IPC. Correct answers, wrong operational model for a daemon.
-- **universal-ctags**: Definitions only, no call edges or cross-file references. Too shallow.
-- **tree-sitter**: Generic parser, good but requires custom TypeScript-specific traversal logic. ts-morph is strictly better for a TypeScript codebase because it uses the real TypeScript compiler.
-
-**Why ts-morph + DuckDB wins:**
-
-- **ts-morph** wraps the TypeScript Compiler API directly -- it understands TypeScript semantics, types, and scopes, not just syntax. Extracts exports, imports, call sites, class implementations, DI `.bind()` patterns, and CLI registration maps out of the box. Runs in-process, zero external dependencies.
-- **DuckDB** is embedded SQL with recursive CTE support. Graph reachability queries work today with `WITH RECURSIVE`. Fast, local, no server process.
-- Combined: a 1-day spike, not a 2-week project.
-
-**Schema (from subagent):**
-```sql
-nodes  (id, file, name, kind, scope)
-  -- kind: "function" | "class" | "interface" | "constant" | "export" | "di_binding" | "cli_command"
-
-edges  (from_id, to_id, kind, line)
-  -- kind: "calls" | "imports" | "exports" | "registers_in" | "provides"
-
-provenance  (node_id, source_file, source_line, session_id, indexed_at)
-```
-
-**Reachability query example:**
-```sql
-WITH RECURSIVE reachable AS (
-  SELECT id FROM nodes WHERE name = 'executeVersionCommand'
-  UNION ALL
-  SELECT e.to_id FROM edges e JOIN reachable r ON e.from_id = r.id
-)
-SELECT n.* FROM nodes n WHERE n.id IN (SELECT id FROM reachable);
-```
-
-**The spike (what to build first):**
-1. `npm install ts-morph @duckdb/node-api` -- both are available today
-2. Write a 50-line indexer: `project.getSourceFiles()` → walk exports, imports, and call expressions → emit rows to DuckDB nodes/edges tables
-3. Write one MCP tool: `query_knowledge_graph(query: string)` that runs SQL and returns a context bundle
-4. Test it against the WorkRail `src/` directory: can it answer "what imports trigger-router.ts?" and "what CLI commands are registered?"
-
-If the spike answers those two questions correctly, the foundation is proven and we build out incrementally from there.
-
-**Incremental update model (post-spike):**
-After each daemon session completes, run the indexer only on files that appear in the session's `filesChanged` list (from the handoff artifact). Full re-index only on first run or when the schema changes. This is a script the daemon runs post-workflow, not an agent task.
-
----
-
-### Dynamic pipeline composition: task maturity determines the workflow mix (Apr 15, 2026)
-
-**The insight:** not all tasks are equal in how much work is needed before implementation. A raw idea needs a completely different pipeline than a fully-specced ticket with BRD and designs. WorkTrain should compose the pipeline dynamically based on what already exists, not always run the same fixed set of phases.
-
-**The maturity spectrum:**
-
-```
-Raw idea                                                    Fully specced
-    │                                                              │
-    ▼                                                              ▼
-"it would be nice if..."        "here's the BRD, designs,    "fix this bug in
-                                 acceptance criteria, and     file X, line Y"
-                                 ticket with all context"
-```
-
-**What changes at each maturity level:**
-
-| What exists | Pipeline additions |
-|-------------|-------------------|
-| Nothing -- just an idea | ideation → market research → feasibility → scope definition → spec authoring → design → ticket creation → then all of implementation phases |
-| Rough spec or ticket | clarify requirements → design → then implementation |
-| BRD + designs | architecture review → implementation |
-| BRD + designs + arch decision | implementation only |
-| Fully specced + arch decided | coding → review → audit → verify |
-| Code written, needs validation | review → audit → test → verify |
-
-**How classify-task-workflow learns maturity:**
-The classify step doesn't just classify complexity and risk -- it also assesses maturity:
-- `taskMaturity`: idea / rough / specced / ready / code-complete
-- `existingArtifacts`: which of [brd, designs, arch-decision, acceptance-criteria, ticket, implementation] exist
-- `missingArtifacts`: what needs to be created before implementation can begin
-
-The coordinator script uses `taskMaturity` and `missingArtifacts` to prepend the right phases to the pipeline.
-
-**New workflows needed for the early phases:**
-
-| Workflow | Purpose |
-|----------|---------|
-| `ideation-workflow` | Expand a raw idea into a structured opportunity: problem statement, user value, rough scope, open questions |
-| `market-research-workflow` | Research whether this problem is solved elsewhere, what competitors do, what patterns exist |
-| `spec-authoring-workflow` | Author a BRD/PRD from scratch: user stories, acceptance criteria, non-goals, success metrics |
-| `ticket-creation-workflow` | Break a spec into actionable tickets with proper sizing and dependencies |
-| `grooming-workflow` | Review a spec or ticket for completeness, edge cases, and implementation readiness |
-
-**The full lifecycle pipeline for a raw idea:**
-```
-idea → ideation → market research → spec authoring → grooming/validation
-     → design (if hasUI) → architecture → ticket creation
-     → for each ticket: implementation pipeline
-     → integration testing → production audit → ship
-```
-
-**The key design:** the coordinator script drives all of this. It checks what artifacts exist, decides which phases to run, spawns workers for each phase in the right order, and gates on artifacts before proceeding. No human needed to manage the pipeline -- the maturity assessment tells the coordinator exactly what to do.
-
-**Context from today's session as evidence:** we've been doing exactly this manually -- ideas emerged in conversation (coordinator sessions, message queue, knowledge graph), we groomed them into backlog items, the backlog items have varying levels of completeness, and different agents are running different phases based on where each item is in the lifecycle. WorkTrain should own this entire flow.
-
----
-
-### Verification and proof as first-class citizens (Apr 15, 2026)
-
-**The problem:** today there's no single place that tells you "here's everything that was done to verify this feature is correct." Tests pass, a review ran, an audit happened -- but it's scattered across session notes, PR descriptions, CI logs, and half-remembered conversations. No verification chain.
-
-**The vision:** every shipped change has a **proof record** -- a structured document that answers: what was built, how was it verified, by whom (which agents), and what was the verdict at each gate. Not a summary for humans -- a queryable record that the coordinator and watchdog can use to enforce quality gates and answer questions like "has this module been production-audited in the last 30 days?"
-
-**What a proof record contains:**
-
-```json
-{
-  "prNumber": 402,
-  "goal": "auto-commit and auto-PR daemon feature",
-  "verificationChain": [
-    {
-      "kind": "unit_tests",
-      "outcome": "pass",
-      "coverage": "14 tests, delivery-action.ts covered",
-      "sessionId": "sess_abc123",
-      "timestamp": "2026-04-15T22:00:00Z"
-    },
-    {
-      "kind": "mr_review",
-      "outcome": "request_changes",
-      "findings": [{ "severity": "Major", "id": "F1", "description": "shell injection via exec()" }],
-      "sessionId": "sess_def456",
-      "timestamp": "2026-04-15T22:10:00Z"
-    },
-    {
-      "kind": "mr_review",
-      "outcome": "approve",
-      "findings": [],
-      "sessionId": "sess_ghi789",
-      "timestamp": "2026-04-15T23:00:00Z"
-    },
-    {
-      "kind": "production_audit",
-      "outcome": "pass",
-      "sessionId": "sess_jkl012",
-      "timestamp": "2026-04-15T23:05:00Z"
-    }
-  ],
-  "gates": {
-    "unit_tests": "pass",
-    "mr_review": "approved",
-    "production_audit": "pass",
-    "architecture_audit": "skipped (riskLevel=Medium)"
-  },
-  "overallVerdict": "verified",
-  "mergedAt": "2026-04-15T23:15:00Z"
-}
-```
-
-**Verification gates the coordinator enforces:**
-
-| Gate | Required for | Trigger |
-|------|-------------|---------|
-| Unit tests pass | All changes | After coding, before review |
-| MR review approved (no Critical/Major) | All changes | After unit tests |
-| Architecture audit | `touchesArchitecture=true` or `riskLevel=High` | Before coding |
-| Production audit | `riskLevel=High` or affects prod paths | After coding |
-| Integration tests | `taskComplexity=Large` | After all slices |
-| Performance audit | touches hot paths | After coding |
-| Security audit | touches auth/input/external | After coding |
-
-No PR merges without passing all required gates for its classification. The coordinator enforces this -- not as a suggestion, but as a hard gate in the script.
-
-**Visibility surfaces:**
-
-1. **Console PR view** -- shows the full verification chain for any merged or open PR. Expandable: click any gate to see the session notes from that review.
-
-2. **Module health dashboard** -- per module (e.g. `src/trigger/`, `src/daemon/`), shows: last MR review date, last production audit date, test coverage, open findings. Answers "is this module production-ready right now?"
-
-3. **`worktrain verify <pr-number>`** -- command that checks whether a PR has passed all required gates for its classification. Output: pass/fail per gate, with session links.
-
-4. **Proof record in every PR description** -- auto-generated section: "Verification chain: ✅ 14 unit tests | ✅ MR review (0 findings) | ✅ Production audit | ⏭ Architecture audit (skipped: riskLevel=Low)"
-
-**Why this matters:**
-Right now, "has this been reviewed and audited?" is a question that requires reading through PRs and session notes. With proof records, it's a query: `SELECT * FROM proof_records WHERE module='src/trigger/' AND kind='production_audit' AND outcome='pass' AND timestamp > NOW()-30days`. The knowledge graph stores these records. The watchdog checks them on a schedule. The coordinator gates on them before merging. Verification becomes infrastructure, not process.
----
-
-### Scripts-first coordinator: avoid the main agent wherever possible (Apr 15, 2026)
-
-**The insight:** In the coordinator workflow we built manually today, the main agent spent most of its time on mechanical work -- reading PR lists, checking CI status, deciding whether findings are blocking, sequencing merges. That's all deterministic logic. An LLM is expensive, slow, and inconsistent for deterministic work.
-
-**The principle extended to coordinators:** the scripts-over-agent rule applies at the coordinator level too. The coordinator's job is to drive a DAG of child sessions. The DAG structure, routing decisions, and termination conditions should be scripts, not LLM reasoning.
-
-**What this means concretely:**
-
-Instead of a coordinator *agent* that reads MR review findings and decides what to do, use a **coordinator script** that:
-1. Calls `gh pr list` → list of PRs (script)
-2. For each PR, calls `spawn_session(mr-review-workflow-agentic)` → session handles (script)
-3. Calls `await_sessions(handles)` → structured findings (script waits)
-4. Parses the findings JSON block from each session's output (script)
-5. Routes: clean → merge queue, minor → spawn fix agent, blocking → escalate (script decision tree)
-6. Calls `spawn_session(coding-task-workflow-agentic, fix: <finding>)` for each fix needed (script)
-7. Awaits fix agents, re-queues for re-review (script loop)
-8. Executes merge sequence when queue is empty (script)
-
-The agent is only invoked for the *leaf work* -- the actual MR review, the actual coding fix. All coordination, routing, sequencing, and decision-making is a script.
-
-**What the coordinator workflow looks like under this model:**
-
-Not a workflow that a single LLM session runs end-to-end. Instead, a **script-driven workflow** where each step is a shell/TypeScript script that calls WorkTrain's API to spawn/await child sessions and route based on their structured outputs. WorkTrain provides:
-- `worktrain spawn --workflow <id> --goal <text>` → prints sessionHandle
-- `worktrain await --sessions <handle1,handle2>` → prints structured results JSON
-- `worktrain merge --pr <number>` → runs the merge sequence
-
-The coordinator "workflow" is then a shell script or TypeScript file that composes these commands. Fully deterministic, fully auditable, no tokens burned on routing decisions.
-
-**Why this is better than a coordinator agent:**
-- Zero LLM cost for coordination -- only leaf sessions burn tokens
-- Fully deterministic routing -- the same PR list always produces the same execution plan
-- Trivially auditable -- `set -x` on the shell script shows every decision
-- Trivially testable -- mock `worktrain spawn` and `worktrain await`, test the routing logic in isolation
-- Reusable across teams -- share the script, not the prompt
-
-**Build order for this model:**
-1. `worktrain spawn` / `worktrain await` CLI commands that wrap the session engine
-2. Structured output format for leaf sessions (the handoff artifact JSON block already exists)
-3. A reference `coordinator-groom-prs.sh` (or `.ts`) as the first coordinator template
-4. Console DAG view updated to show coordinator-script-spawned sessions with parent-child relationships
-
-**The long-term vision:** WorkTrain workflows handle the hard cognitive work. WorkTrain scripts handle orchestration, routing, and sequencing. Together they make the system fully autonomous with full observability and zero wasted tokens.
-
----
-
-### Full development pipeline: coordinator scripts drive multi-phase autonomous work (Apr 15, 2026)
-
-The coordinator isn't just for review → fix → merge. The full pipeline we run manually covers every phase of software development, with different phases triggered based on task classification.
-
-**Full pipeline DAG:**
-
-```
-trigger: "implement feature X"
-  │
-  ├── [always] classify-task
-  │     outputs: taskComplexity, riskLevel, hasUI, touchesArchitecture
-  │
-  ├── [if taskComplexity != Small] discovery
-  │     workflow: routine-context-gathering (COMPLETENESS + DEPTH in parallel)
-  │     outputs: context bundle, candidate files, invariants
-  │
-  ├── [if hasUI] ux-design
-  │     workflow: ux-design-workflow (mockups, component spec, interaction model)
-  │     outputs: design-spec.md, component-list
-  │
-  ├── [if touchesArchitecture] architecture-design
-  │     workflow: coding-task-workflow-agentic (design phases only)
-  │     outputs: design-candidates.md, selected approach
-  │     └── arch-review (parallel, 2 auditors)
-  │           workflow: routine-hypothesis-challenge + routine-philosophy-alignment
-  │           outputs: findings → revise design if RED/ORANGE
-  │
-  ├── [always] coding-task
-  │     workflow: coding-task-workflow-agentic
-  │     inputs: context bundle + design spec + arch decision
-  │     outputs: implementation + handoff artifact (commitType, prTitle, filesChanged)
-  │
-  ├── [always] mr-review
-  │     workflow: mr-review-workflow-agentic
-  │     outputs: findings with severity
-  │     ├── [if clean] → auto-commit → auto-pr → merge
-  │     ├── [if Minor/Nit] → spawn fix agent → re-review (max 3 passes)
-  │     └── [if Critical/Major] → escalate to human (Slack/GitLab comment)
-  │
-  ├── [if riskLevel == High] prod-risk-audit
-  │     workflow: production-risk-audit-workflow
-  │     outputs: go / no-go + risk register
-  │     └── [if no-go] → escalate, block merge
-  │
-  └── [if merged] notify
-        script: post summary to Slack/GitLab with session DAG link
-```
-
-**The key insight:** the coordinator script reads the `taskComplexity`, `riskLevel`, `hasUI`, and `touchesArchitecture` flags from the classify step's output and uses them to decide which phases to spawn. A one-line bug fix runs: classify → coding-task → mr-review. A new UI feature runs everything. The same coordinator script handles both -- the DAG is dynamic, driven by structured outputs.
-
-**Workflow library needed (not all exist yet):**
-
-| Workflow | Status |
-|----------|--------|
-| `coding-task-workflow-agentic` | ✅ `coding-task-workflow-agentic.lean.v2.json` |
-| `mr-review-workflow-agentic` | ✅ `mr-review-workflow.agentic.v2.json` |
-| `routine-context-gathering` | ✅ `routines/` |
-| `routine-hypothesis-challenge` | ✅ `routines/` |
-| `routine-philosophy-alignment` | ✅ `routines/` |
-| `ux-design-workflow` | ✅ `ui-ux-design-workflow.json` |
-| `production-risk-audit-workflow` | ✅ `production-readiness-audit.json` |
-| `architecture-review-workflow` | ✅ `architecture-scalability-audit.json` |
-| `bug-investigation-workflow` | ✅ `bug-investigation.agentic.v2.json` |
-| `discovery-workflow` | ✅ `wr.discovery.json` |
-| `classify-task-workflow` | ❌ needs authoring -- fast, 1-step, outputs taskComplexity/riskLevel/hasUI/touchesArchitecture |
-
-**The classify step is the gate.** A cheap, fast workflow that takes a task description and returns structured vars. This is where the coordinator decides what to run. It's the single most important missing workflow -- without it, the coordinator has to spawn everything for every task, which is wasteful.
-
-**The coordinator script for this pipeline:**
-```typescript
-// coordinator-implement-feature.ts
-const { taskComplexity, riskLevel, hasUI, touchesArchitecture } =
-  await runWorkflow('classify-task-workflow', { goal: taskDescription });
-
-const contextHandle = taskComplexity !== 'Small'
-  ? spawnSession('routine-context-gathering', { goal: taskDescription })
-  : null;
-
-const uxHandle = hasUI
-  ? spawnSession('ux-design-workflow', { goal: taskDescription })
-  : null;
-
-const [context, uxSpec] = await awaitSessions([contextHandle, uxHandle]);
-
-// ... arch design if needed, then coding, then review, then audit
-```
-
-Zero coordinator LLM calls. Every decision is a script condition on structured output.
-
-**Audit workflows the coordinator can chain:**
-Beyond MR review, the same pattern applies to any quality gate:
-- **Production risk audit** -- scans for: exposed secrets, missing rate limits, no-rollback schema changes, unguarded env vars
-- **Architecture audit** -- scans for: coupling violations, missing abstractions, incorrect layer dependencies
-- **Test coverage audit** -- identifies untested paths on changed files
-- **Performance audit** -- scans for N+1 queries, missing indexes, unbounded loops on hot paths
-- **Security audit** -- OWASP top 10 scan on changed surfaces
-
-Each is a workflow. The coordinator decides which to run based on `riskLevel`, what files changed, and what domain the task touches. All feed findings back to the coordinator script which routes: fix, skip, or escalate.
-
----
-
-### Additional coordinator pipeline templates (Apr 15, 2026)
-
-Beyond the feature implementation pipeline, three more coordinator templates are high value:
-
----
-
-#### Backlog grooming coordinator
-
-```
-trigger: "groom backlog" (cron: weekly, or manual dispatch)
-  │
-  ├── [for each open issue] classify-issue
-  │     outputs: issueType (bug/feature/tech-debt/question), priority, complexity, stale?
-  │
-  ├── [for stale issues > 90 days with no activity] auto-close-or-ping
-  │     script: post "Still relevant?" comment, label as stale
-  │
-  ├── [for unclassified issues] label-and-size
-  │     script: apply labels (bug/enhancement/question), size estimate (XS/S/M/L)
-  │
-  ├── [for duplicate issues] detect-duplicates
-  │     workflow: semantic search over existing issues, flag likely dupes
-  │     script: comment "possible duplicate of #X", label as needs-triage
-  │
-  ├── [for high-priority bugs with no assignee] suggest-fix-approach
-  │     workflow: bug-investigation-agentic (surface root cause + candidate fix)
-  │     outputs: investigation summary posted as issue comment
-  │
-  └── produce grooming summary
-        script: post weekly digest to Slack -- issues triaged, dupes found, investigations run
-```
-
-No human needed for any of this. The coordinator classifies, labels, pings stale items, and runs investigations on the important ones. The human reviews the digest and acts on what needs judgment.
-
----
-
-#### Bug investigation + fix coordinator
-
-```
-trigger: new issue labeled "bug" OR incident alert from monitoring
-  │
-  ├── bug-investigation-agentic
-  │     outputs: root cause hypothesis, affected files, severity, reproduction steps
-  │
-  ├── [if severity == Critical] page-oncall
-  │     script: post to Slack #incidents with investigation summary + session link
-  │
-  ├── [if severity <= High and hypothesis_confidence >= 0.8] attempt-fix
-  │     workflow: coding-task-workflow-agentic (targeted fix)
-  │     inputs: investigation findings, affected files, reproduction steps
-  │     outputs: implementation + handoff artifact
-  │     │
-  │     ├── mr-review
-  │     │     └── [if clean] auto-commit → auto-pr
-  │     │
-  │     └── regression-test
-  │           script: run test suite against affected paths
-  │           outputs: pass/fail
-  │
-  ├── [if severity == Critical OR hypothesis_confidence < 0.8] escalate
-  │     script: post investigation summary to issue + tag team lead
-  │
-  └── close-or-update-issue
-        script: if fix merged → close with "Fixed in PR #X". if escalated → update with findings.
-```
-
-The daemon can go from "bug filed" to "fix merged" with zero human involvement for well-understood bugs with high-confidence hypotheses. Critical bugs and uncertain root causes always escalate to a human -- the investigation is done for them, not by them.
-
-**What makes this work:**
-- `bug-investigation-agentic` already exists and produces structured findings
-- The `hypothesis_confidence` output from the investigation gates the auto-fix attempt
-- The coordinator script decides: high confidence + not critical = try to fix autonomously
-- The circuit breaker (max 3 fix attempts) prevents infinite loops on hard bugs
-- The human always gets the investigation findings, whether the fix succeeded or not
-
----
-
-#### Incident monitoring coordinator
-
-```
-trigger: monitoring alert (CPU spike, error rate increase, latency P99 > threshold)
-  │
-  ├── triage-alert
-  │     workflow: classify if real incident vs noise (check recent deploys, known issues)
-  │     outputs: isRealIncident, likelyCause, affectedServices
-  │
-  ├── [if isRealIncident] investigate
-  │     workflow: bug-investigation-agentic (logs, traces, recent changes)
-  │     outputs: root cause, blast radius, mitigation options
-  │
-  ├── [if mitigation is config change or rollback] auto-mitigate
-  │     script: execute safe mitigations (feature flag flip, config change)
-  │     -- NEVER auto-rollback code without human approval
-  │
-  ├── page-oncall
-  │     script: post to Slack #incidents with full context + session DAG link
-  │     content: what fired, what was found, what was auto-mitigated, what needs human action
-  │
-  └── follow-up
-        cron: 30 min later → check if resolved, post update
-```
-
-The operator gets paged with a complete picture: what happened, likely why, what was already done automatically, and exactly what decision they need to make. No more waking up to an alert with no context.
-
----
-
-### Interactive ideation: WorkTrain as a thinking partner with full project context (Apr 15, 2026)
-
-**What this is:** The ability to have a conversation with WorkTrain the way we've been talking today -- bouncing ideas, asking "what if", surfacing tradeoffs, refining designs -- and have WorkTrain respond with full awareness of what's been built, what's in flight, what's in the backlog, and what decisions were made and why.
-
-Today this requires a human (Claude Code + a long conversation) to maintain context across everything. WorkTrain should be able to do this natively because it already has:
-- The session store (every step note from every session ever run)
-- The knowledge graph (structural understanding of the codebase)
-- The backlog (design decisions, research findings, priorities)
-- In-flight agent state (what's running, what's been found)
-
-**The gap:** there's no conversational interface that pulls all of this together. The console shows sessions. The backlog is a markdown file. There's no "talk to WorkTrain about the project" entry point.
-
-**What it needs:**
-
-1. **A "talk" command** -- `worktrain talk` opens an interactive session that starts with a synthesized context bundle: recent session outcomes, open PRs, backlog top items, any findings from in-flight agents. The user types naturally; WorkTrain responds with awareness of all of it.
-
-2. **Project memory** -- WorkTrain maintains a synthesized "project state" that's updated after each coordinator run or major session batch. Answers questions like: "what did we build today?", "why did we choose polling triggers over webhooks?", "what's the biggest gap right now?", "what would happen if we removed pi-mono?" without requiring the user to re-explain context.
-
-3. **Idea capture** -- when the conversation surfaces something new (a gap, an architectural insight, a design decision), WorkTrain should offer to record it to the backlog or open a GitHub issue immediately, right from the conversation.
-
-4. **Context awareness** -- WorkTrain knows which agents are running, what they've found so far, and can report on it during a conversation: "the #400 review just came back with a fetch timeout blocker -- want me to queue a fix agent?"
-
-**What makes this different from just using Claude Code:** Claude Code has no persistent project context -- every conversation starts from scratch. WorkTrain's ideation session starts with everything loaded: session history, knowledge graph results for relevant files, backlog items, open PRs. The conversation is grounded in the actual project state, not just what the user remembers to paste in.
-
-**Architecture:** this is a new `talk` workflow -- a conversational loop workflow with no fixed step count. The agent has access to `query_knowledge_graph`, `read_session_notes`, `read_backlog`, `list_in_flight_agents`, and `append_to_backlog` as tools. It maintains the conversation as a standard message history. The session never "completes" -- it ends when the user exits.
-
----
-
-### Automatic gap and improvement detection: proactive WorkTrain (Apr 15, 2026)
-
-**What this is:** WorkTrain notices things without being asked. After a batch of work lands, it scans for gaps, inconsistencies, missed connections, and improvement opportunities -- and surfaces them proactively.
-
-**Examples of what it would have caught today without human prompting:**
-- "PR #400 delivery client has no fetch timeout -- delivery could hang indefinitely" (caught by MR review, but WorkTrain could catch this pre-review)
-- "PR #391 picked up GAP-1 crash recovery code it shouldn't have -- scope leak" (caught by the reviewer)
-- "The backlog says knowledge graph should be persistent but the spike uses in-memory DuckDB" (gap between spec and impl)
-- "Three open PRs all modify workflow-runner.ts -- they're going to conflict when merged sequentially"
-- "Issue #393 filed for loadSessionNotes coverage -- this is related to the GAP-2 PR that's open, might as well fix both together"
-- "The classify-task-workflow was just authored but it's not referenced in the coordinator spec yet"
-
-**Two modes:**
-
-**1. Event-triggered scans** -- fires after significant events:
-- After a batch of PRs merge: scan for spec/impl gaps, check if any backlog items are now addressable
-- After a new workflow is authored: check if it should be added to the coordinator pipeline
-- After a bug is filed: check if any recent changes are likely culprits
-- After a coordinator run: check if findings surfaced any architectural concerns not in the backlog
-
-**2. Periodic health checks** -- runs on a schedule (e.g. weekly):
-- Are there backlog items that have all their prerequisites met but haven't been started?
-- Are there open issues that are actually already fixed by merged PRs?
-- Are there PRs that have been approved but not merged for more than N days?
-- Is the knowledge graph stale (files changed since last index)?
-- Are any daemon sessions orphaned (in daemon-sessions/ but older than 24h)?
-
-**Architecture:** a `watchdog` workflow that runs on a cron trigger. It queries the knowledge graph, reads recent session notes, lists open PRs and issues, reads the backlog priorities, and produces a `gap-report.md` with actionable findings. Each finding is either: auto-actionable (spawn a fix agent), conversation-worthy (add to the ideation queue), or escalation-worthy (post to Slack/file a GitHub issue).
-
-**The key difference from the coordinator:** the coordinator executes a known plan. The watchdog discovers things that aren't in any plan yet. It's the system's immune response -- continuously scanning for drift between intention and reality.
-
-**What makes this tractable:** WorkTrain already has all the inputs. The knowledge graph has the structural state. The session store has the history. The backlog has the intentions. The gap detection is the synthesis layer that connects them -- "what was planned" vs "what was built" vs "what's in flight". This is exactly the kind of thing an LLM is good at: cross-referencing multiple sources and identifying inconsistencies.
-
----
-
-### Dynamic model selection: right model for the right task (Apr 15, 2026)
-
-**The principle:** not every task needs Sonnet 4.6. Not every task should be locked to Anthropic. The coordinator and the task classifier should be able to select the model dynamically based on what the task actually needs.
-
-**Why this matters:**
-- **Cost**: classification, simple routing decisions, and status checks don't need a frontier model. A fast cheap model (Haiku) costs ~20x less and is fast enough for deterministic tasks.
-- **Quality ceiling**: some tasks (complex architecture decisions, multi-file refactors) benefit from the best available model regardless of cost.
-- **Provider flexibility**: Anthropic goes down, pricing changes, a new provider releases a better model. Being locked to one provider is an operational risk and a competitive disadvantage.
-- **Specialization**: some models are better at specific tasks -- code generation, reasoning, multimodal (if designs/screenshots are involved).
-
-**Model selection in triggers.yml:**
-```yaml
-triggers:
-  - id: mr-review
-    workflowId: mr-review-workflow.agentic.v2
-    agentConfig:
-      model: claude-sonnet-4-6          # explicit override
-      provider: anthropic               # or: amazon-bedrock, openai, gemini
-
-  - id: classify-task
-    workflowId: classify-task-workflow
-    agentConfig:
-      model: claude-haiku-4-5           # fast + cheap for classification
-      provider: amazon-bedrock
-
-  - id: architecture-design
-    workflowId: architecture-scalability-audit
-    agentConfig:
-      model: claude-opus-4-6            # best available for high-stakes design
-      provider: anthropic
-```
-
-**Model selection in the classifier output:**
-The classify-task-workflow can output a `recommendedModel` var alongside the pipeline:
-- `Small + Low` → Haiku (fast, cheap)
-- `Medium + Medium` → Sonnet (balanced)
-- `Large + High` or `touchesArchitecture=true` → Opus (best quality)
-
-The coordinator script reads `recommendedModel` from the classifier and passes it as `agentConfig` when spawning child sessions.
-
-**Provider abstraction (already partially built):**
-The Bedrock integration (`src/daemon/pi-mono-loader.ts` / first-party agent loop in progress) already handles Anthropic vs Bedrock. The abstraction needs to extend to:
-- **OpenAI** -- GPT-4o, o3 (useful for reasoning-heavy tasks)
-- **Google Gemini** -- Gemini 1.5 Pro (strong at long-context, multimodal)
-- **Ollama** -- local models (air-gapped environments, cost-zero for classification tasks)
-- **Any OpenAI-compatible API** -- covers most new providers automatically
-
-**Implementation path:**
-The first-party agent loop (in progress, PR TBD) is the right place to implement the provider abstraction. Instead of hardcoding the Anthropic SDK, it accepts a provider client that conforms to the Anthropic messages API format (which most providers support via compatibility layers). The `agentConfig.provider` and `agentConfig.model` fields are already in `TriggerDefinition` (added in GAP-8 / PR #397) -- the loop just needs to instantiate the right client.
-
-**Cost optimization opportunity:**
-With model routing, a full development pipeline becomes significantly cheaper:
-- classify-task: Haiku (~$0.002)
-- discovery: Sonnet (~$0.05)
-- coding: Sonnet (~$0.20)
-- mr-review: Sonnet (~$0.10)
-- production-audit: Sonnet (~$0.08)
-- architecture (if needed): Opus (~$0.50)
-
-vs today where everything runs on Sonnet by default. For a typical Medium task, model routing saves ~60% cost with no quality loss on the lightweight phases.
-
----
-
-### Native multi-agent orchestration: coordinator sessions + session DAG (HIGH PRIORITY, Apr 15, 2026)
-
-**The problem:** Everything we can do manually today -- spawn parallel agents, chain discovery→implement→review→fix, react to findings, merge when clean -- WorkTrain should be able to do natively, fully autonomously, with full observability, and without any user feedback.
-
-Today this requires a human (or Claude Code) to:
-- Read completion notifications
-- Interpret findings
-- Decide what follow-up agents to spawn
-- Track which PRs are clean vs need fixes
-- Trigger the merge sequence when everything is ready
-
-None of that should require a human. It's all policy that belongs in a coordinator workflow.
-
----
-
-#### New primitives required
-
-**`spawn_session` tool** (available inside workflow steps)
-Starts a child session with a given workflowId + goal. Non-blocking -- returns a `sessionHandle` immediately. The coordinator continues executing the current step.
-
-```typescript
-spawn_session({
-  workflowId: 'mr-review-workflow-agentic',
-  goal: `Review PR #${prNumber}: ${prTitle}`,
-  workspacePath: '/path/to/repo',
-  context: { prNumber, prTitle, prDiff }
-}) → { sessionHandle: 'sess_abc123' }
-```
-
-**`await_sessions` tool** (available inside workflow steps)
-Blocks until one or all of a set of session handles complete. Returns their results and output artifacts (notes, handoff artifacts, MR review findings).
-
-```typescript
-await_sessions({
-  handles: ['sess_abc123', 'sess_def456'],
-  mode: 'all'  // or 'any'
-}) → [{ handle, result, outputs: { notes, findings, artifacts } }]
-```
-
-**Coordinator session type**
-A session that owns child sessions. Parent-child relationship stored in the session store. Killing a coordinator kills all its children. The console DAG view shows the full tree.
-
-**Result routing**
-Child session outputs are automatically available when `await_sessions` resolves -- the coordinator doesn't manually query the session store.
-
----
-
-#### Coordinator workflow pattern
-
-A coordinator workflow uses a `while` loop step with `spawn_session` + `await_sessions` to drive a dynamic DAG:
-
-```
-Phase 1: Gather work items (e.g. open PRs, open issues, failing tests)
-Phase 2: Spawn workers in parallel (one per work item)
-Phase 3: Await all workers
-Phase 4: Classify results
-  - Clean items: queue for merge/close
-  - Items with findings: spawn fix agents
-  - Items with blockers: escalate to human (fire onComplete notification)
-Phase 5: Await fix agents, re-review if needed (circuit breaker: max 3 attempts)
-Phase 6: Execute final action (merge sequence, create summary, post to Slack)
-```
-
-This is what we did manually all day. It should be a workflow anyone can run with a single trigger.
-
----
-
-#### Observability: session DAG view in console
-
-The QueuePane shows a flat list today. For coordinator workflows it must show a tree:
-
-```
-● coordinator: groom and fix all PRs          [running, 47 min]
-  ├── ✓ sess_abc: GAP-1 implement             [merged, 18 min]
-  ├── ✓ sess_def: GAP-1 MR review             [approved, 4 min]
-  ├── ✓ sess_ghi: GAP-6 implement             [merged, 12 min]
-  ├── ● sess_jkl: GAP-6 MR review fix         [running, 3 min]
-  │     └── ✓ sess_mno: GAP-6 findings fix    [complete, 8 min]
-  └── ✓ sess_pqr: TS6 tsconfig fix            [merged, 6 min]
-```
-
-Each node: status icon, workflow type, goal snippet, duration. Expand to see step notes. Parent-child edges visible. Critical path highlighted.
-
----
-
-#### No-user-feedback policy logic
-
-The coordinator workflow encodes the policy as workflow step instructions:
-
-- **Critical/Major finding** → block merge, spawn fix agent, re-review (max 3 passes), escalate if still failing
-- **Minor finding** → spawn fix agent if auto-fixable, else log and proceed
-- **Nit** → log, proceed without fix
-- **Clean** → queue for merge
-- **Merge sequence** → serial (one at a time, pull before each merge to avoid conflicts)
-- **Circuit breaker** → after 3 failed fix attempts on same finding, post to Slack/GitLab and pause
-
-This policy lives in the coordinator workflow, not in the daemon code. Different teams can have different policies by using different coordinator workflows.
-
----
-
-#### What this unlocks
-
-A single trigger fires the entire development cycle autonomously:
-
-```yaml
-# triggers.yml
-- id: daily-grooming
-  type: cron
-  schedule: "0 9 * * 1-5"   # 9am weekdays
-  workflowId: coordinator-groom-and-ship
-  goal: "Review all open PRs, fix findings, merge clean PRs, file issues for blockers"
-  workspacePath: ~/git/my-project
-  autoCommit: true
-  autoOpenPR: true
-```
-
-WorkTrain wakes up at 9am, reviews every open PR, fixes everything it can, merges what's clean, posts a summary to Slack, and files GitHub issues for anything that needs human judgment. No human involved unless the circuit breaker fires.
-
----
-
-#### Build order
-
-1. **`spawn_session` + `await_sessions` tools** -- the core primitives. These are new MCP tools exposed to workflow steps, backed by a new `SpawnedSessionRegistry` in the DI container.
-2. **Parent-child session relationship in session store** -- `parentSessionId` field on session creation event.
-3. **Console DAG view** -- new `CoordinatorView` component that renders the session tree from the parent-child graph.
-4. **Coordinator workflow templates** -- `coordinator-groom-and-ship`, `coordinator-review-all-prs`, `coordinator-investigate-and-fix` as bundled workflows.
-5. **No-feedback policy encoding** -- document the MR review finding classification schema so coordinator workflows can reliably parse and act on it.
-
-**This is the most important architectural work remaining in WorkTrain.** Everything else -- polling triggers, onboarding, knowledge graph -- makes WorkTrain better. This makes it genuinely autonomous.
-
----
-
-### Message queue: async communication with WorkTrain from anywhere (Apr 15, 2026)
-
-**The problem:** working with WorkTrain today requires you to be in the terminal, watching notifications, responding in real time. But the most valuable moments are often asynchronous -- you have a thought at 2am, want to redirect a running agent from your phone, or want to queue a direction before the current batch finishes.
-
-**The design:** a persistent message queue that decouples when you send a message from when WorkTrain acts on it.
-
-```bash
-worktrain tell "skip the architecture review for the polling triggers PR, it's low risk"
-worktrain tell "add knowledge graph vector layer to next sprint"
-worktrain tell "stop the worktrain-init agent, I changed my mind on the UX"
-```
-
-Each command appends to `~/.workrail/message-queue.jsonl` (append-only, one JSON line per message). The daemon drains the queue between agent completions -- never mid-run, always at a natural break point. Messages are delivered in order and never lost across restarts.
-
-**What the queue enables:**
-
-- **Direction changes while agents run** -- "actually, use polling not webhooks" can be queued while 6 agents are running; the coordinator picks it up before spawning the next batch
-- **Mobile input** -- a mobile app (or simple HTTP endpoint) writes to the queue; WorkTrain processes when ready
-- **Async ideation** -- thoughts queued whenever they occur, not forced into a synchronous conversation window
-- **Stop/pause signals** -- `worktrain tell "pause after current batch"` is queue-delivered; coordinator checks for pause signals before each spawn
-- **Priority override** -- `worktrain tell "prioritize the shell injection fix, it's blocking"` bumps a task to the front of the coordinator's work list
-
-**Outbox (WorkTrain → user):**
-The same pattern in reverse. WorkTrain appends notifications to `~/.workrail/outbox.jsonl` -- agent completions, findings that need human judgment, questions that require a decision. A mobile client polls this file (or an HTTP SSE endpoint wraps it) and pushes to the user's phone. The user reads the notification, taps a response, it goes into the message queue. Full async loop with no real-time presence required.
-
-**Architecture:**
-- `~/.workrail/message-queue.jsonl` -- inbound, append-only, drained in order
-- `~/.workrail/outbox.jsonl` -- outbound, append-only, read by clients
-- `worktrain tell <message>` CLI command -- appends to message-queue
-- `worktrain inbox` CLI command -- reads unread outbox items
-- Coordinator loop checks message-queue at the start of each cycle before spawning new agents
-- The `talk` session (interactive ideation) consumes from the same queue -- seamless transition between async messages and live conversation
-
-**This is the foundation for mobile monitoring.** The mobile app is just a client that reads outbox and writes to message-queue. No new daemon capability needed -- just a thin client over these two files.
-
----
-
-### Autonomous merge: WorkTrain approves and merges its own PRs after full vetting (Apr 15, 2026)
-
-**The idea:** after the full verification chain passes (unit tests, MR review clean, all required audits green), WorkTrain runs `gh pr review --approve && gh pr merge --squash` itself. No human needed in the loop for PRs that pass all gates.
-
-**This is already mostly built.** The coordinator script already calls `gh pr merge` -- we've been doing it today. The gap is formalizing the policy that makes auto-merge safe: what gates must pass, what findings are acceptable, and what always requires a human.
-
----
-
-#### The auto-merge policy (what makes it safe)
-
-**Auto-merge allowed when ALL of:**
-- All required verification gates pass (defined by task classification)
-- MR review: 0 Critical, 0 Major findings
-- If `riskLevel=High`: production audit also passes
-- If `touchesArchitecture=true`: architecture audit also passes
-- CI is green (all required checks pass)
-- No `needs-human-review` label on the PR
-- The PR is not to a protected branch that requires human approval (configurable)
-
-**Auto-merge blocked when ANY of:**
-- Any Critical or Major finding in any review/audit
-- CI is failing
-- The PR was authored by a human (WorkTrain only auto-merges its own PRs)
-- The PR touches security-sensitive paths (auth, credentials, network exposure) -- configurable blocklist
-- Circuit breaker has fired (3+ fix attempts on same finding = escalate to human)
-- `riskLevel=Critical` (always human approval for highest-risk changes)
-
-**Human always required for:**
-- Schema changes (breaking changes to public API contracts)
-- Dependency upgrades (major version)
-- Infrastructure/CI/CD changes
-- Changes to WorkTrain's own merge policy
-- Anything the watchdog flags as a drift-from-spec
-
----
-
-#### Implementation
-
-This is a coordinator script policy, not a new capability. The required pieces:
-
-1. **Proof record gates** (in progress -- verification chain spec) -- the coordinator checks the proof record before calling merge
-2. **`--admin` merge bypass for CI false positives** -- already used today; coordinator should note when it uses `--admin` and why
-3. **`needs-human-review` label escape hatch** -- any human can block auto-merge by adding this label; WorkTrain respects it
-4. **Merge audit log** -- every auto-merge appended to `~/.workrail/merge-log.jsonl`: which PR, which gates passed, which were skipped and why, timestamp. The watchdog checks this log.
-
-**The coordinator script merge gate:**
-```typescript
-const proofRecord = await getProofRecord(prNumber);
-const canAutoMerge =
-  proofRecord.gates.unit_tests === 'pass' &&
-  proofRecord.gates.mr_review === 'approved_clean' &&  // 0 Critical, 0 Major
-  (riskLevel !== 'High' || proofRecord.gates.production_audit === 'pass') &&
-  (touchesArchitecture !== true || proofRecord.gates.architecture_audit === 'pass') &&
-  !prLabels.includes('needs-human-review') &&
-  prAuthor.startsWith('worktrain-');  // only merge own PRs
-
-if (canAutoMerge) {
-  await exec(`gh pr merge ${prNumber} --squash`);
-  appendMergeLog({ prNumber, gates: proofRecord.gates, timestamp: new Date() });
-} else {
-  await notifyHuman(prNumber, proofRecord);  // post to Slack with what's blocking
-}
-```
-
-**The trust boundary is the proof record.** WorkTrain doesn't decide "this looks fine" -- it checks whether each required gate has a recorded pass. The merge decision is deterministic. A human can always override by adding `needs-human-review`. The audit log makes every auto-merge traceable.
-
-**Why this is safe even though it sounds scary:**
-The risk of auto-merge is "something bad gets into main." The mitigations are: the review agent is adversarial (actively looks for problems), the production audit checks for runtime risks, CI validates behavior, and the proof record is the immutable record of what was checked. A human reviewing the PR manually doesn't add much signal beyond what 3 specialized audit agents already found. The real human value is in edge cases -- which is exactly what `needs-human-review` and the `riskLevel=Critical` block handle.
-
-**Near-term:** WorkTrain already merges in the coordinator script (we've done it today). Formalizing the policy above just makes it explicit and auditable rather than ad-hoc.
-
----
-
-### Periodic analysis agents: continuous project health scanning (Apr 15, 2026)
-
-**The idea:** WorkTrain runs agents on a schedule to proactively identify issues, gaps, improvement opportunities, and ideas -- without being asked. The watchdog (already spec'd) handles drift detection. These are deeper, domain-specific scans that run weekly or monthly.
-
-**The agent zoo:**
-
-**Weekly: Code health scan**
-Runs `architecture-scalability-audit` on modules that haven't been audited in 30 days. Scans for: coupling violations, growing complexity hotspots (files with most churn), missing abstractions that are emerging across multiple recent PRs, performance anti-patterns introduced in the last sprint. Output: `code-health-report.md` + GitHub issues filed for actionable findings.
-
-**Weekly: Test coverage scan**
-Identifies files modified in the last 30 days with zero or low test coverage. Files with new exported symbols that have no tests. Critical paths (error handling, auth, external API boundaries) with only happy-path tests. Output: files a missing test coverage filed as GitHub issues with suggested test scenarios.
-
-**Weekly: Documentation drift scan**
-Checks if recently merged PRs changed behavior that's described in docs. Identifies code that lacks inline documentation for non-obvious logic. Finds CLAUDE.md / AGENTS.md that haven't been updated to reflect new modules or conventions. Output: `doc-drift-report.md` + PRs to fix the most important gaps.
-
-**Monthly: Dependency health scan**
-Goes beyond just "is it outdated?" -- assesses: are there known CVEs? are there active forks or replacements? are there lighter alternatives for heavy dependencies? is pi-mono still the right choice or should it be replaced? Output: `dependency-health-report.md` with recommendations ranked by impact.
-
-**Monthly: Performance baseline**
-Runs a set of benchmark scenarios: startup time, first workflow step latency, session store read/write throughput, knowledge graph query time on a real repo. Compares against the previous month's baseline. Flags regressions > 10%. Output: `performance-baseline-YYYY-MM.md` + issues for regressions.
-
-**Continuous: Security scan**
-On every PR merge: scan changed files for OWASP top 10 patterns -- hardcoded secrets, command injection vectors (like the `exec()` issue we found in #402), missing input validation at boundaries, unsafe deserialization. Output: findings posted as PR comments before merge if not already reviewed.
-
-**Monthly: Ideas generation**
-The most interesting one. Runs `wr.discovery` on the current state of the codebase + backlog + recent session history and asks: "what's the most impactful thing we could build next that we haven't thought of yet?" Cross-references with competitor landscape (GraphRAG, LangGraph, nexus-core updates), recent AI research, and user pain points in the session notes. Output: `ideas-YYYY-MM.md` -- a list of concrete improvement opportunities with rough effort estimates. The best ideas get promoted to the backlog by the watchdog.
-
-**How this works with the coordinator:**
-All of these are just cron triggers in `triggers.yml`. The coordinator script for each runs the appropriate workflow, reads the output, files GitHub issues for actionable findings, and posts a summary to Slack. No human needed to kick them off -- they just run.
-
+**Design:**
 ```yaml
 triggers:
   - id: weekly-code-health
-    type: cron
-    schedule: "0 8 * * 1"   # Monday 8am
+    provider: schedule
+    cron: "0 9 * * 1"
     workflowId: architecture-scalability-audit
-    goal: "Weekly code health scan: identify coupling violations, complexity hotspots, missing abstractions"
-    workspacePath: ~/git/personal/workrail
-    agentConfig:
-      model: claude-sonnet-4-6
-    callbackUrl: http://localhost:3200/internal/file-issues
-
-  - id: monthly-ideas
-    type: cron
-    schedule: "0 9 1 * *"   # 1st of every month
-    workflowId: wr.discovery
-    goal: "Monthly ideas generation: what's the most impactful improvement we haven't thought of yet?"
-    workspacePath: ~/git/personal/workrail
+    workspacePath: /path/to/repo
+    goal: "Run weekly code health scan"
 ```
 
-**The meta-point:** WorkTrain running these agents on the WorkRail/WorkTrain repo means the product improves itself on a schedule. Every Monday it finds its own architectural problems. Every month it generates ideas for its own improvement. Every PR gets a security scan before it merges. The codebase gets continuously healthier without anyone managing it.
+**Key decisions:**
+- Standard 5-field cron syntax, configurable timezone
+- Missed runs NOT caught up by default (optional `catchUp: true`)
+- Overlap prevention: if a run is still active when the next tick fires, skip it
+- `worktrain run schedule <trigger-id>` for manual trigger
+
+**Implementation:** `PollingScheduler` already runs time-based loops. Schedule provider would use cron expression matching instead of API polling. State persists to `~/.workrail/schedule-state.json`.
 
 ---
 
-### Monitoring, analytics, and autonomous remediation (Apr 15, 2026)
+### Autonomous grooming loop + workOnAll mode
 
-**The idea:** WorkTrain watches your application's health metrics in real time, identifies anomalies, investigates root causes, and resolves what it can -- automatically. This closes the full loop from "something went wrong" to "it's fixed and here's why."
+**Status: idea** | Priority: medium
 
----
+**Three autonomy levels:**
 
-#### What WorkTrain monitors
+- **Level 0 (current):** Human applies `worktrain` label to specific issues. WorkTrain works those only.
+- **Level 1 -- workOnAll:** Config flag `workOnAll: true`. WorkTrain looks at ALL open issues, infers which are actionable, picks highest-priority. Escape hatch: `worktrain:skip` label.
+- **Level 2 -- Fully proactive:** WorkTrain also surfaces work it found itself (failing CI, backlog items with no issue, patterns in git history).
 
-**Application metrics (via polling or push):**
-- Error rate (Sentry, Datadog, CloudWatch, custom endpoint)
-- Latency P50/P95/P99 (per endpoint, per workflow step)
-- Memory and CPU usage of the daemon itself
-- Session success/failure rate (from the daemon's own session store)
-- Workflow completion time trends (are sessions getting slower?)
-- Queue depth (are triggers backing up?)
+**Grooming loop (scheduled nightly):** Reads backlog, open issues, recent completed work. Closes resolved issues. For ungroomed items: infers maturity (linked spec, acceptance criteria, vague language). For high-value idea-level items: runs `wr.discovery` + `wr.shaping`, creates/updates issue.
 
-**Codebase health metrics (derived from WorkTrain's own data):**
-- Test coverage trends (going up or down over time?)
-- Build time trends
-- PR cycle time (time from open to merge)
-- Number of open findings by severity across all open PRs
-- Number of sessions that ended in `_tag: 'error'` vs `'success'` in the last 7 days
-- Workflow steps most likely to fail (from session store analysis)
-
-**Custom metrics (user-defined):**
-```yaml
-# triggers.yml
-monitoring:
-  - id: session-error-rate
-    type: metric_threshold
-    source: daemon_sessions    # reads from ~/.workrail/data/sessions/
-    query: "error_rate_7d > 0.15"   # >15% session failure rate
-    workflowId: bug-investigation.agentic.v2
-    goal: "Investigate high daemon session error rate: {{$.error_rate}}% failures in last 7 days"
-    workspacePath: ~/git/personal/workrail
-
-  - id: sentry-errors
-    type: sentry_poll
-    project: workrail
-    token: $SENTRY_TOKEN
-    threshold: new_error_rate_1h > 5
-    workflowId: bug-investigation.agentic.v2
-    goalTemplate: "Investigate Sentry error spike: {{$.error.type}} -- {{$.error.message}}"
-```
-
----
-
-#### The monitoring loop
-
-```
-monitor: detect anomaly
-  │
-  ├── classify severity (script -- based on threshold breach magnitude)
-  │     Critical: > 3x normal, affects production users
-  │     High: > 2x normal, degraded but functional
-  │     Low: trending bad but within bounds
-  │
-  ├── [if Critical] page immediately
-  │     script: post to Slack #incidents with metric data + session link
-  │
-  ├── investigate
-  │     workflow: bug-investigation.agentic.v2
-  │     inputs: metric data, recent commits, error logs, affected code paths
-  │     outputs: root cause hypothesis, affected files, confidence score
-  │
-  ├── [if confidence >= 0.8 AND severity <= High] attempt auto-remediation
-  │     ├── [if config/feature-flag fix] flip flag (script, instant)
-  │     ├── [if code fix, well-understood] spawn coding-task → review → merge
-  │     └── [if rollback needed] create rollback PR → review → merge
-  │
-  ├── [if confidence < 0.8 OR severity == Critical] escalate
-  │     script: post full investigation findings to Slack + file GitHub issue
-  │
-  └── follow-up check
-        cron: 30 min later → has the metric recovered? post update.
-```
-
----
-
-#### WorkTrain analytics dashboard
-
-Beyond alerting, WorkTrain maintains a persistent analytics layer that answers questions like:
-
-- "What's our average PR cycle time this month vs last month?"
-- "Which workflow steps fail most often?"
-- "How much did autonomous sessions cost in tokens this week?"
-- "What percentage of bugs were auto-fixed vs escalated?"
-- "Which modules have the most open findings from MR reviews?"
-- "How many sessions ran today / this week / this month?"
-
-This data lives in the knowledge graph (structured, queryable) and is visualized in the console. The `worktrain talk` interface can answer these questions conversationally: "how are we doing this week?" → pulls the analytics and gives a natural language summary.
-
----
-
-#### Self-monitoring: WorkTrain watching itself
-
-The most immediately useful instance is WorkTrain monitoring its own daemon:
-
-- Session error rate rising → investigate what kinds of tasks are failing
-- Queue depth growing → daemon may be overloaded → reduce poll frequency or spawn fewer concurrent sessions
-- Session duration outliers → some sessions are running way too long → investigate which workflow step is stuck
-- Memory leak → daemon process growing unbounded → restart + file bug
-- Disk usage → session store growing too large → prune old sessions
-
-These are all monitorable from `~/.workrail/data/sessions/` with no external dependency. WorkTrain can watch itself with zero additional infrastructure.
-
----
-
-#### Implementation path
-
-**Now (no new features needed):** cron trigger → `wr.discovery` workflow that reads session store metrics → posts summary to Slack. This gives analytics immediately.
-
-**Near-term (needs `metric_threshold` trigger type):** new `PollingMonitorSource` that evaluates a metric expression on a schedule and fires only when threshold breaches. Same polling infrastructure as `gitlab_poll`.
-
-**Medium-term:** Sentry/Datadog/CloudWatch adapters as polling sources. Same pattern as GitLab -- poll the API, deduplicate events, dispatch workflow.
-
-**Long-term:** real-time metric ingestion (push rather than pull), time-series storage in DuckDB alongside the knowledge graph, analytics dashboard in the console.
-
----
-
-### Per-workspace work queue: proactive task drain instead of pure event-driven (Apr 15, 2026)
-
-**The insight:** triggers make WorkTrain reactive (something happens, WorkTrain responds). A work queue makes WorkTrain proactive -- it pulls the next item when capacity is available, works it to completion, pulls the next. This is how a real development team operates: you have a sprint board you drain, not just a webhook listener.
-
-**The queue is the backlog made executable.** Every item in the backlog, every GitHub issue labeled for autonomous work, every `worktrain enqueue "..."` from the terminal -- all normalized into one ordered list per workspace that WorkTrain drains continuously.
-
----
-
-#### How it works
-
-**Internal queue format:** `~/.workrail/workspaces/<name>/queue.jsonl` -- append-only, one item per line. The daemon's coordinator loop checks this file between sessions and pulls the next item when under `maxConcurrentSessions`. Items are consumed in priority order, then FIFO.
-
-```jsonl
-{"id":"q_001","goal":"implement maxConcurrentSessions global semaphore","priority":"high","source":"manual","createdAt":"2026-04-15T22:00:00Z","workflow":null,"status":"pending"}
-{"id":"q_002","goal":"add GitHub polling adapter","priority":"medium","source":"github_issue","issueNumber":410,"createdAt":"2026-04-15T22:01:00Z","workflow":null,"status":"pending"}
-{"id":"q_003","goal":"investigate flaky timing test in console-service-dormancy","priority":"low","source":"manual","createdAt":"2026-04-15T22:02:00Z","workflow":"bug-investigation.agentic.v2","status":"pending"}
-```
-
-**CLI interface:**
-```bash
-worktrain enqueue "implement X" --workspace workrail --priority high
-worktrain enqueue "investigate this bug" --workspace workrail --workflow bug-investigation.agentic.v2
-worktrain queue list --workspace workrail          # show pending items
-worktrain queue pause --workspace workrail         # stop draining
-worktrain queue resume --workspace workrail        # resume draining
-worktrain queue remove <id> --workspace workrail   # remove an item
-```
-
-**External pull sources (normalized into the internal queue):**
-```yaml
-workspaces:
-  workrail:
-    path: ~/git/personal/workrail
-    queue:
-      maxConcurrentSessions: 3
-      sources:
-        - type: github_issues
-          integration: github
-          filter: 'label:worktrain-queue'
-          priority:
-            - label: 'priority:high'   → high
-            - label: 'priority:medium' → medium
-            - default:                 → low
-        - type: internal              # always included
-```
-
-When a GitHub issue is labeled `worktrain-queue`, a poll cycle picks it up and normalizes it into the internal queue. When WorkTrain completes the work, it removes the label (or transitions status) and closes the issue. The team uses GitHub issues as their task interface; WorkTrain drains them autonomously.
-
-**Supported external sources:**
-- GitHub issues (label filter)
-- GitLab issues (label filter)
-- Jira sprint board (active sprint items assigned to worktrain user)
-- Linear (triage queue or assignee filter)
-- Internal queue.jsonl (always available, zero config)
-
----
-
-#### Queue + message queue + talk: the full interface
-
-Three modes, all async-safe, all persisted:
-
-| Interface | Use case | Latency |
-|-----------|----------|---------|
-| **Work queue** | "do this when you have capacity" | Whenever a slot is free |
-| **Message queue** (`worktrain tell`) | "do this now, between current sessions" | End of current batch |
-| **Talk** (`worktrain talk`) | "let's discuss and decide together" | Interactive |
-
-You can send a thought from your phone at 2am via `worktrain tell`, and separately have a queue of 10 backlog items WorkTrain is draining during the day. The talk session can inspect the queue, reorder items, and add new ones -- all from natural conversation.
-
----
-
-#### Queue-aware coordinator loop
-
-The coordinator's main loop becomes:
-
-```typescript
-while (daemon.running) {
-  // 1. Drain message queue (direction changes, questions)
-  const messages = await readMessageQueue();
-  for (const msg of messages) await handleMessage(msg);
-
-  // 2. Pull next queue items up to maxConcurrentSessions
-  const active = await getActiveSessions();
-  const slots = maxConcurrentSessions - active.length;
-  if (slots > 0) {
-    const items = await dequeueItems(slots);
-    for (const item of items) {
-      const pipeline = await classifyAndBuildPipeline(item.goal);
-      await spawnCoordinatorSession(pipeline, item);
-    }
-  }
-
-  // 3. Check external pull sources for new items
-  await syncExternalSources();
-
-  await sleep(5_000);  // 5s coordinator tick
-}
-```
-
-The queue is the thing that makes WorkTrain feel like a teammate rather than a service -- it has its own work to do, it makes progress autonomously, and you can check in on it rather than having to drive every task manually.
-
----
-
-#### Queue visibility in the console
-
-The console adds a **Queue tab** (alongside Sessions and AUTO):
-- Pending items (ordered by priority, FIFO within priority)
-- Active items (with live session link)
-- Completed items (with outcome, duration, PR link if applicable)
-- Paused/blocked items (with reason)
-
-Drag-to-reorder for priority. Click to expand and see the full pipeline plan. Button to pause/resume the queue. "Add item" form that goes to `worktrain enqueue`.
-
----
-
-#### Relationship to worktrain spawn/await
-
-`worktrain spawn` / `worktrain await` are for coordinator *scripts* -- explicit programmatic orchestration. The work queue is for *ambient* drain -- WorkTrain autonomously pulls items when capacity is free. Both use the same underlying session engine. The difference is who's driving: a script (spawn/await) or the queue drain loop. They compose naturally: a queue item might be a coordinator script that spawns its own child sessions via spawn/await.
-
----
-
-### Work queue refinements: filtering, catch-all mode, and deadline-aware prioritization (Apr 15, 2026)
-
-#### Issue/ticket filtering
-
-The external pull sources need richer filtering than just a label. Real teams organize work by project, team, component, sprint, and assignee -- all of these should be filterable:
-
-```yaml
-workspaces:
-  workrail:
-    queue:
-      sources:
-        - type: github_issues
-          integration: github
-          filter:
-            labels: ['worktrain-queue']     # optional -- if omitted, pulls all open issues
-            milestone: 'Sprint 12'          # optional
-            assignee: 'worktrain-bot'       # optional -- only issues assigned to WorkTrain
-            notLabels: ['needs-human', 'blocked', 'wontfix']  # always exclude these
-
-        - type: jira
-          integration: jira
-          filter:
-            project: ENG                    # required -- scope to one project
-            sprint: active                  # 'active', 'backlog', or sprint name
-            assignee: worktrain             # Jira user
-            issueTypes: ['Bug', 'Task']     # not Stories/Epics
-            notStatuses: ['Done', 'Closed']
-
-        - type: linear
-          integration: linear
-          filter:
-            team: platform                  # Linear team slug
-            state: triage                   # pull from triage queue
-            priority: [urgent, high]        # only urgent and high priority
-```
-
-**Catch-all mode:** if `filter` is omitted entirely, WorkTrain pulls everything open and unassigned in the project/repo. This is the "let WorkTrain go find work" mode -- useful for batch grooming sessions but should require explicit opt-in (`catchAll: true`) since it could pull thousands of items.
-
-```yaml
-- type: github_issues
-  integration: github
-  catchAll: true                # pulls ALL open issues, no label required
-  filter:
-    notLabels: ['needs-human', 'wontfix']
-  maxItemsPerCycle: 5           # drain slowly, not everything at once
-```
-
----
-
-#### Deadline-aware prioritization
-
-WorkTrain should be able to determine priority not just from labels, but from deadlines it finds anywhere:
-
-**Sources WorkTrain reads for deadline context:**
-- Issue/ticket due dates (Jira, Linear, GitHub milestones)
-- Epic end dates (Jira epics, Linear projects)
-- Sprint end date (current active sprint)
-- Release/milestone dates from the repo
-- Calendar events (via Glean or Google Calendar integration)
-- Confluence/Notion pages that mention deadlines
-- Docs in the repo (`ROADMAP.md`, `docs/milestones.md`, etc.)
-
-**What WorkTrain does with deadlines:**
-The classify-task-workflow (or a new `prioritize-queue` workflow) reads the deadline context and produces an adjusted priority score:
-
-```
-base_priority = from label/assignee (low/medium/high)
-deadline_urgency = days_until_deadline:
-  < 2 days  → +3 (critical)
-  < 7 days  → +2 (high)
-  < 14 days → +1 (medium)
-  > 14 days → +0 (no adjustment)
-  past due  → +4 (overdue, surface immediately)
-
-adjusted_priority = base_priority + deadline_urgency
-```
-
-Items are queued in adjusted_priority order, not just the label order. A medium-priority task due tomorrow beats a high-priority task due in 3 months.
-
-**Glean integration for deadline discovery:**
-Glean indexes everything -- Jira, Confluence, Google Docs, Slack, emails. WorkTrain can query Glean: "what are the deadlines affecting the workrail project this month?" and get a synthesized view across all systems. This is especially powerful for deadline context that lives in documents rather than tickets (e.g. a Confluence roadmap page that says "feature X must ship by Q2").
-
-```yaml
-workspaces:
-  workrail:
-    queue:
-      deadlineContext:
-        sources:
-          - type: glean
-            query: "workrail deadlines milestones due dates"
-            maxResults: 10
-          - type: github_milestones
-            integration: github
-          - type: jira_epics
-            integration: jira
-            project: ENG
-        refreshInterval: 3600   # re-fetch deadline context every hour
-```
-
-**The prioritize-queue routine:**
-A cheap, fast routine (one step, Haiku model) that runs after each external sync and re-scores the queue. Reads: current queue items + deadline context. Outputs: reordered queue with deadline annotations. The coordinator's drain loop always reads the latest ordering.
-
-```
-Input: queue items + deadline context
-Output: same items reordered, each with:
-  - adjustedPriority (critical/high/medium/low)
-  - deadlineReason: "Sprint 12 ends in 3 days" or "Epic ENG-200 due June 1"
-  - deadlineSource: URL or doc reference
-```
-
-**Escalation when deadlines are at risk:**
-If a queue item has a deadline within 48 hours and hasn't been started yet, the watchdog notifies: "WORKRAIL-410 (GitHub polling adapter) is due in 2 days and hasn't been started. Current queue position: 8. Bumping to position 1." Posts to Slack + the message outbox. The user can override via message queue if they disagree.
-
-**Why this is powerful:**
-WorkTrain effectively becomes your sprint manager. It knows what's due, in what order things need to happen, and it works the highest-urgency items first -- without anyone having to manually reorder a board. The deadline context is always fresh (re-fetched every hour), so if a Confluence page updates the roadmap, the queue re-prioritizes automatically.
-
----
-
-### Workspace pipeline policy: artifact gates vs autonomous decomposition (Apr 15, 2026)
-
-**The core tension:** some workspaces have rigorous pre-implementation processes (BRD required, design approved, shapeup doc reviewed). Others are solo/small-team projects where you figure it out as you go. WorkTrain should respect both -- waiting patiently in governed workspaces, doing the work itself in autonomous workspaces.
-
----
-
-#### Two workspace modes
-
-**Governed mode** -- for projects with existing process gates:
-
-```yaml
-workspaces:
-  my-work-project:
-    path: ~/git/work/my-project
-    pipelinePolicy:
-      mode: governed
-      requiredArtifacts:
-        - type: brd                    # Business Requirements Document
-          sources: [confluence, jira_epic, google_docs]
-          searchQuery: "BRD {{ticket.key}}"
-        - type: design                 # UI/UX designs
-          sources: [figma, confluence]
-          searchQuery: "designs {{ticket.key}}"
-        - type: shapeup                # Shape Up pitch/bet
-          sources: [notion, confluence]
-      onMissingArtifacts: wait         # 'wait', 'skip', or 'escalate'
-      waitCheckInterval: 3600          # re-check every hour
-      waitTimeout: 168h                # escalate after 7 days of waiting
-      escalationMessage: "Ticket {{ticket.key}} has been waiting for required artifacts for {{wait_duration}}. Manual review needed."
-```
-
-When WorkTrain picks up a ticket in governed mode, it first searches for the required artifacts using the configured sources and search queries. If they're not found:
-- `wait`: holds the ticket in a "waiting" state, re-checks every hour, notifies when artifacts appear
-- `skip`: moves to the next ticket, re-queues this one later
-- `escalate`: posts to Slack + blocks the ticket, requires human to resolve
-
-When artifacts are found, WorkTrain automatically extracts context from them, attaches them as `referenceUrls` to the session, and proceeds with implementation -- skipping the discovery/design phases since those artifacts already contain the answer.
-
-**Autonomous mode** -- for projects without pre-existing process:
-
-```yaml
-workspaces:
-  workrail:
-    path: ~/git/personal/workrail
-    pipelinePolicy:
-      mode: autonomous
-      # No required artifacts -- WorkTrain does its own discovery and design
-      # Uses the full pipeline: classify → discovery → design → arch review → implement → review
-      decompositionEnabled: true       # can break large tasks into sub-tickets
-      decompositionThreshold: Large    # tasks classified Large get decomposed
-```
-
-In autonomous mode, WorkTrain runs the full pipeline including discovery, UX design (if `hasUI`), architecture review (if `touchesArchitecture`), and implementation. It doesn't wait for external artifacts because there are none -- it generates them itself.
-
----
-
-#### Automatic task decomposition
-
-When a task is classified as `Large` (or Medium with high complexity), WorkTrain decomposes it into sub-tickets before starting implementation. The sub-tickets go into the workspace queue and are worked in order.
-
-**Decomposition workflow** (new, needs authoring):
-```
-Input: task description + context from discovery
-Output: ordered list of sub-tickets, each with:
-  - title (imperative, specific)
-  - goal (1-2 sentence description)
-  - estimatedComplexity (Small/Medium)
-  - dependencies (which sub-tickets must complete first)
-  - workflowId (which workflow to use)
-```
-
-**Example:** task "implement polling triggers system"
-```
-Decomposed into:
-  1. [Small] Add PollingTriggerSource type to TriggerDefinition   → depends: none
-  2. [Small] Implement PolledEventStore with atomic persistence    → depends: 1
-  3. [Small] Implement GitLab MR polling adapter                  → depends: 2
-  4. [Small] Implement PollingScheduler with setInterval          → depends: 2,3
-  5. [Small] Wire PollingScheduler into TriggerListener           → depends: 4
-  6. [Small] Add unit tests for all new modules                   → depends: 1-5
-```
-
-Each sub-ticket is Small or Medium -- never Large. If a sub-ticket comes out Large during decomposition, it gets recursively decomposed. The decomposition agent enforces this invariant.
-
-Sub-tickets are added to the queue with:
-- `parentTicketId` linking back to the original task
-- `dependsOn` list preventing out-of-order execution
-- Same priority as the parent ticket
-- Auto-label so they're visually grouped in GitHub/Jira
-
-**Queue behavior with dependencies:**
-The queue drain loop respects `dependsOn` -- a sub-ticket is only picked up when all its dependencies are completed. The coordinator naturally serializes dependent work and parallelizes independent work (sub-tickets with no shared dependencies can run concurrently).
-
----
-
-#### Hybrid: governed workspace with autonomous decomposition
-
-Some workspaces need both -- a BRD required before implementation starts, but the implementation itself gets decomposed autonomously:
-
-```yaml
-workspaces:
-  my-work-project:
-    pipelinePolicy:
-      mode: governed
-      requiredArtifacts:
-        - type: brd
-          onMissingArtifacts: wait
-      decompositionEnabled: true       # once BRD is found, decompose into sub-tickets
-      decompositionThreshold: Medium   # decompose Medium and Large tasks
-```
-
-Flow: ticket filed → WorkTrain finds BRD → reads BRD for context → classifies task → if Medium/Large decomposes into sub-tickets → works sub-tickets in order. The BRD gates the start; decomposition handles the execution.
-
----
-
-#### The "patiently waiting" UX
-
-In the console Queue tab, tickets waiting for artifacts show a distinct state:
-
-```
-⏳ WORKRAIL-410: Implement new auth flow        [waiting for: BRD, designs]
-   Waiting 2d 4h · Last checked: 5 min ago · Artifacts: 0/2 found
-   
-   → Found: none
-   → Searched: Confluence ("BRD WORKRAIL-410"), Figma ("WORKRAIL-410 designs")
-```
-
-WorkTrain posts a Slack message when it starts waiting: "I picked up WORKRAIL-410 but it's missing required artifacts (BRD, designs). I'll check hourly and start automatically when they're ready." Then posts again when artifacts are found: "Found BRD and designs for WORKRAIL-410. Starting implementation now."
-
-The team doesn't have to remember to trigger WorkTrain -- they just do their normal process (write the BRD, create the designs) and WorkTrain starts automatically.
-
----
-
-#### Why this matters
-
-- **Governed projects**: WorkTrain integrates with existing process rather than bypassing it. PMs and designers work normally; WorkTrain picks up when the handoff is ready. No one has to remember to trigger it.
-- **Autonomous projects**: WorkTrain is a full solo developer -- it discovers, designs, decomposes, implements, reviews, and ships. The only human touchpoint is approving the final PR (or enabling auto-merge for fully vetted changes).
-- **The queue is the unifying interface**: both modes feed the same queue. The pipeline policy determines what happens when an item is picked up.
-
----
-
-### Templates, living docs, and external workflow ingestion (Apr 15, 2026)
-
----
-
-#### Templates: consistent output formatting across all systems
-
-WorkTrain should know the templates used in each workspace and apply them automatically when creating artifacts. No more agents writing PRs in inconsistent formats or Jira tickets missing required fields.
-
-**Template types:**
-
-```yaml
-workspaces:
-  my-work-project:
-    templates:
-      pullRequest:
-        source: .github/pull_request_template.md   # repo-local
-      mergeRequest:
-        source: .gitlab/merge_request_templates/default.md
-      jiraTicket:
-        source: confluence://ENG/ticket-template   # from Confluence
-        requiredFields: [summary, description, acceptanceCriteria, storyPoints, component]
-      jiraBug:
-        source: confluence://ENG/bug-template
-        requiredFields: [summary, description, stepsToReproduce, expectedVsActual, severity]
-      shapeup:
-        source: notion://templates/shapeup-pitch
-      brd:
-        source: confluence://templates/brd-template
-      designSpec:
-        source: notion://templates/design-spec
-      incidentPostmortem:
-        source: confluence://templates/postmortem
-```
-
-When WorkTrain creates a PR, it reads the PR template and structures its output to match. When it files a Jira bug from an investigation, it reads the bug template and fills every required field. When it writes a BRD in autonomous mode, it uses the BRD template so the output looks like what the team expects.
-
-Templates are resolved at session start and injected as context. The agent is told: "When creating a [type], use this template structure exactly." The handoff artifact for the auto-commit/PR path includes the PR body pre-formatted to match the template.
-
-**Template sources:**
-- Local files in the repo (`.github/`, `.gitlab/`, `docs/templates/`)
-- Confluence pages
-- Notion databases/templates
-- Google Docs
-- Inline in `triggers.yml`
-
----
-
-#### Living docs: on-demand generation and continuous updates
-
-WorkTrain maintains documentation as a first-class output, not an afterthought. Docs can be generated on-demand and kept current automatically.
-
-**On-demand doc generation:**
-
-```bash
-worktrain doc generate --type architecture-overview --workspace workrail
-worktrain doc generate --type api-reference --workspace workrail
-worktrain doc generate --type runbook "How to debug a stuck daemon session"
-worktrain doc generate --type adr "Why we replaced pi-mono with a first-party agent loop"
-```
-
-Each generates a doc by pulling from all available sources:
-- Knowledge graph (structural understanding of the codebase)
-- Session store (recent decisions and findings)
-- Backlog (design decisions and rationale)
-- GitHub PRs (what changed and why -- from PR descriptions)
-- Confluence/Notion (existing docs to extend, not duplicate)
-
-**Continuous doc updates:**
-When code changes, affected docs are flagged for update. WorkTrain runs a `doc-drift-scan` (part of the periodic analysis agents) that identifies docs whose described behavior no longer matches the code. When drift is detected, a queue item is created: "Update architecture-overview.md -- AgentLoop class was added, pi-mono removed."
-
-```yaml
-workspaces:
-  workrail:
-    docs:
-      autoUpdate: true
-      docPaths:
-        - docs/architecture/
-        - docs/design/
-        - README.md
-      driftCheck:
-        schedule: "0 8 * * 1"    # Monday morning
-        onDrift: queue            # or: pr, notify, ignore
-```
-
-**Doc sources it pulls from:**
-
-| Source | What it provides |
-|--------|-----------------|
-| Knowledge graph | Symbol relationships, module structure, call paths |
-| Session store | Recent decisions, investigation findings, design rationale |
-| Backlog | Why things were built the way they were |
-| Git log | What changed, when, linked PRs |
-| Confluence/Notion | Existing team knowledge to incorporate |
-| Glean | Cross-system knowledge synthesis |
-| Code comments and JSDoc | Inline documentation |
-
-**Doc formats it produces:**
-- Architecture overview (modules, dependencies, data flow)
-- API reference (from TypeScript types + JSDoc)
-- Runbook (operational procedures)
-- ADR (Architecture Decision Record -- from backlog decisions)
-- Postmortem (from incident investigation sessions)
-- Sprint recap (from completed queue items)
-- Onboarding guide (from architecture + setup docs)
-
----
-
-#### External workflow ingestion
-
-WorkTrain can already discover and run workflows from external repos via managed sources (`[[workflow_repos]]` in Common-Ground config). This should be a first-class feature, not just a Common-Ground integration.
-
-**How it works today (via managed sources):**
-Any workflow JSON file in a configured directory or git repo is automatically available. `workrail list` shows all workflows from all sources.
-
-**What to add:**
-
-**1. Workflow registry / marketplace:**
-A curated list of community workflows that WorkTrain can pull from. `worktrain workflow install <id>` fetches a workflow from the registry and adds it to the user's workflow library.
-
-```bash
-worktrain workflow install community/postgres-migration-workflow
-worktrain workflow install company/my-company-mr-review      # private org registry
-worktrain workflow install ./local-custom-workflow.json      # local file
-```
-
-**2. Workflow composition:**
-A workflow that calls another workflow as a step (already possible via `templateCall`, extend to full `workflowCall`). A coordinator workflow can invoke specialized workflows as phases:
-
+**workOnAll config:**
 ```json
-{
-  "id": "full-feature-pipeline",
-  "steps": [
-    { "workflowCall": { "workflowId": "classify-task-workflow" } },
-    { "workflowCall": { "workflowId": "wr.discovery", "when": "taskComplexity != Small" } },
-    { "workflowCall": { "workflowId": "coding-task-workflow-agentic" } },
-    { "workflowCall": { "workflowId": "mr-review-workflow.agentic.v2" } }
-  ]
-}
-```
-
-**3. Workflow sharing between workspaces:**
-A workflow authored for workrail can be shared to storyforge without copying it. Workflows are linked by reference, not copied. Updates to the source propagate automatically (or on explicit sync).
-
-**4. Org-level workflow libraries:**
-Teams publish their workflow libraries to a git repo. WorkTrain pulls from it. Every team member's WorkTrain automatically gets the team's curated workflow set. This is exactly what Common-Ground's `[[workflow_repos]]` does today -- make it a first-class WorkTrain config option without requiring Common-Ground.
-
-```yaml
-workspaces:
-  my-work-project:
-    workflowSources:
-      - type: git
-        url: https://github.com/mycompany/worktrain-workflows
-        branch: main
-        syncInterval: 3600
-      - type: local
-        path: ~/git/personal/workrail/workflows
+{ "workOnAll": true, "workOnAllExclusions": ["needs-design", "blocked-external"], "maxConcurrentSelf": 2 }
 ```
 
 ---
 
-### Workflow effectiveness assessment and self-improvement proposals (Apr 15, 2026)
+### Escalating review gates based on finding severity
 
-**The idea:** WorkTrain runs workflows hundreds of times. It accumulates more data about workflow effectiveness than any human author ever could. It should use that data to propose improvements back -- to the workflow library, to the workflow authors, and to the community.
+**Status: idea** | Priority: medium
 
-This closes the self-improvement loop: WorkTrain uses workflows → measures outcomes → proposes improvements → workflows get better → WorkTrain produces better results.
+**Problem:** "Blocking" is binary -- a single Critical finding and a trivially incorrect comment are treated identically.
 
----
+**Right behavior:** After a fix round, if re-review still returns Critical:
+1. Another full MR review -- confirm the Critical is real, not a false positive
+2. Production readiness audit -- a Critical finding often implies a runtime risk
+3. Architecture audit -- if the Critical is architectural
 
-#### What WorkTrain measures per workflow run
+Routing by `finding.category` from `wr.review_verdict`:
+- `correctness` / `security` -> always trigger prod audit
+- `architecture` / `design` -> trigger arch audit
+- All -> trigger re-review
 
-Every session already stores rich data in the session store. From this, WorkTrain can derive:
-
-**Efficiency metrics:**
-- Steps skipped (condition gates that always skip for a given workflow type) → candidate for removal or restructuring
-- Steps that consistently take the most tokens/time → candidates for subagent offloading or simplification
-- Steps where the agent calls `continue_workflow` immediately with minimal work → the step prompt may be too vague or redundant
-- Steps where the agent hits `requireConfirmation` and always gets the same response → the gate is unnecessary for autonomous use
-
-**Quality metrics:**
-- Sessions that produced PRs: how many had MR review findings? How severe?
-- Sessions where findings required multiple fix passes → the workflow may not be thorough enough in those areas
-- Sessions where the final output was rejected or required manual correction → workflow produced low-quality output
-- Verification gate pass rate (build_correctness, invariant_preservation) → how often does the workflow produce code that actually works?
-
-**Completion metrics:**
-- Sessions that completed vs hit max_turns or timeout → workflow may be too long for the given task type
-- Steps where the agent loops unexpectedly (loop_control: continue more than expected) → loop exit conditions may be wrong
-- Steps with unusually high token consumption → prompt may be bloated
+**Hard rule:** A PR that triggered the escalating audit chain should NEVER auto-merge. Human explicit approval required.
 
 ---
 
-#### The assessment workflow
+### Workflow execution time tracking and prediction
 
-A new `workflow-effectiveness-assessment` workflow (or routine) that:
+**Status: idea** | Priority: medium
 
-1. Reads session store history for a given workflowId (last N sessions)
-2. Computes the metrics above
-3. Identifies the top 3-5 issues with evidence (specific sessions, specific steps)
-4. Proposes concrete changes:
-   - "Step `phase-1b-design-quick` was skipped in 87% of sessions because `rigorMode != QUICK`. Consider making this condition more permissive or removing the step."
-   - "Step `phase-4-plan-audit` consumed an average of 4,200 tokens per session. The loop runs 1.8 times on average. Consider reducing `maxIterations` from 2 to 1 for QUICK rigor mode."
-   - "3 of the last 8 `coding-task-workflow-agentic` sessions produced PRs with Critical MR review findings. The workflow's verification step may not be catching these issues."
+**Problem:** Timeouts are set by intuition. No data on how long workflows actually take.
 
-5. Outputs a structured proposal:
+**What to track:** For every completed session -- workflow ID, total wall-clock duration, turn count, step advances, outcome, task complexity signals. Store in `~/.workrail/data/execution-stats.jsonl`.
 
-```json
-{
-  "workflowId": "coding-task-workflow-agentic.lean.v2",
-  "assessmentPeriod": "last 30 sessions",
-  "proposedChanges": [
-    {
-      "stepId": "phase-1b-design-quick",
-      "issue": "Skipped in 87% of sessions",
-      "evidence": ["sess_abc", "sess_def", "sess_ghi"],
-      "proposedChange": "Remove or restructure -- not exercised enough to justify its existence",
-      "confidence": 0.85,
-      "impactEstimate": "Saves ~200 tokens per session, no quality impact"
-    }
-  ],
-  "overallHealthScore": 0.72,
-  "recommendation": "Run workflow-for-workflows on this workflow with assessment findings attached"
-}
-```
+**Uses:**
+- Calibrate timeouts automatically (p95 * 1.5)
+- Predict duration before dispatch
+- Step-advance rate as workflow efficiency proxy
+
+**Implementation:** Append to `execution-stats.jsonl` in `runWorkflow()`'s finally block.
 
 ---
 
-#### How proposals flow back
+### WorkRail MCP server self-cleanup
 
-**To WorkRail (the open-source project):**
-WorkTrain creates a GitHub issue on `EtienneBBeaulac/workrail` with the assessment findings and proposed changes. The issue includes:
-- The assessment data (anonymized session stats, no content)
-- The proposed changes with rationale
-- Label: `workflow-improvement-proposal`
+**Status: idea** | Priority: medium
 
-Any WorkTrain user can contribute workflow improvements back to the community just by running WorkTrain and enabling assessments.
+**Sources of stale state:** old workflow copies in `~/.workrail/workflows/`, dead managed sources, stale git repo caches, 500+ sessions accumulating with no TTL, remembered roots for non-existent paths.
 
-**To workflow authors (for non-bundled workflows):**
-If the workflow came from an org workflow library (`workflowSources: git`), WorkTrain opens a PR against that repo with the proposed changes. The workflow author reviews and merges.
+**Fix -- two layers:**
 
-**To the local workflow library:**
-WorkTrain can automatically apply low-risk changes (reordering steps, updating prompt text) to the user's local workflow copy. High-risk changes (removing steps, changing conditions) require human review. Same governed/autonomous split as everywhere else.
+1. **Startup auto-cleanup (light):** On MCP server startup, silently remove managed sources where the filesystem path doesn't exist. Log "removed N stale sources."
 
----
-
-#### Continuous improvement loop
-
-```
-WorkTrain runs workflows
-  → session store accumulates data
-  → weekly: assessment routine analyzes patterns
-  → proposals generated per workflow
-  → low-confidence proposals: GitHub issue for human review
-  → high-confidence, low-risk proposals: auto-applied to local copy + PR to community
-  → workflow gets better
-  → WorkTrain produces better results
-  → loop repeats
-```
-
-**The compounding effect:** every WorkTrain instance that runs assessments contributes signal. A workflow used by 100 teams accumulates 10x the data of a workflow used by 10 teams. The more WorkTrain is used, the better its workflows get -- for everyone. This is the flywheel that makes WorkTrain's workflow library genuinely better than hand-authored alternatives over time.
-
-**What makes this different from manual workflow improvement:**
-Humans improve workflows based on intuition and memorable failures. WorkTrain improves workflows based on statistical patterns across hundreds of runs. It finds issues that no human would notice -- like a step that's almost always skipped, or a loop that almost always terminates on the first pass, or a prompt fragment that correlates with lower-quality output.
-
-**Integration with `workflow-for-workflows`:**
-The assessment output is designed to feed directly into `workflow-for-workflows`. Assessment findings become the context for authoring improved workflow versions. WorkTrain literally uses its own meta-workflow to improve its own workflows, informed by real execution data.
-
-
-**The problem with polling-only:** the queue is as fresh as the last poll cycle. A critical bug filed in Jira might not appear in the queue for 5 minutes. A deadline that just moved to tomorrow might not re-prioritize for an hour. The work queue should feel live -- changes in external systems should surface in the queue within seconds, not minutes.
-
-**Two mechanisms for live updates:**
-
-**1. Push sources (webhooks from external systems)**
-When an external system supports webhooks, WorkTrain should register a receiver and process events immediately -- no polling lag.
-
-```yaml
-workspaces:
-  workrail:
-    queue:
-      sources:
-        - type: github_issues
-          integration: github
-          mode: push              # vs poll -- receives webhook, processes immediately
-          webhookSecret: $GITHUB_WEBHOOK_SECRET
-          filter:
-            labels: ['worktrain-queue']
-
-        - type: jira
-          integration: jira
-          mode: push              # Jira webhook on issue create/update/transition
-          webhookSecret: $JIRA_WEBHOOK_SECRET
-          filter:
-            project: ENG
-```
-
-A new GitHub issue labeled `worktrain-queue` fires a webhook → WorkTrain adds it to the queue within milliseconds. A Jira ticket assigned to WorkTrain → in the queue before the assignee closes the tab.
-
-**2. The message queue as live input**
-`worktrain tell "add X to the queue"` is already instantaneous -- it appends to `message-queue.jsonl` which the daemon drains between sessions. This is the live grooming path for manual items. It's also how you reorder, prioritize, remove, or modify queue items in real time:
-
-```bash
-worktrain tell "move the GitHub polling adapter to the top of the queue"
-worktrain tell "remove the documentation update task -- no longer needed"
-worktrain tell "bump the maxConcurrentSessions task to high priority, we need it for the demo"
-```
-
-The daemon's coordinator loop reads these messages, interprets them as queue operations, and applies them immediately.
-
-**3. Live re-prioritization via deadline watcher**
-The deadline context refresh (already spec'd) runs every hour. For live grooming, the deadline watcher should also subscribe to calendar/milestone change events via webhook where available:
-- GitHub milestone due date changed → immediate re-prioritization
-- Jira sprint end date changed → immediate re-scoring
-- Google Calendar event added/moved → immediate re-scoring
-
-**The live queue architecture:**
-
-```
-External events (webhooks) ──→ POST /webhook/queue-push
-                                │
-                                ▼
-                          QueueEventProcessor
-                                │
-                          ┌─────┴──────┐
-                          │            │
-                    Add to queue   Re-prioritize
-                    immediately    affected items
-                          │            │
-                          └─────┬──────┘
-                                ▼
-                          queue.jsonl updated
-                                │
-                                ▼
-                    Console Queue tab refreshes (SSE)
-                    Coordinator picks up next item
-```
-
-**The queue tab in the console is live:**
-The console Queue tab streams updates via SSE (same pattern as the live session badge already implemented). When a new item is added via webhook or message queue, it appears in the tab within milliseconds -- no page refresh needed. When re-prioritization happens, items smoothly reorder. This is the always-on view of what WorkTrain is working on and what's coming next.
-
-**Grooming operations the live queue supports:**
-
-| Operation | How |
-|-----------|-----|
-| Add item | `worktrain tell`, webhook, `worktrain enqueue` |
-| Remove item | `worktrain tell "remove X"`, `worktrain queue remove <id>` |
-| Reprioritize | `worktrain tell "prioritize X"`, deadline watcher, manual drag in console |
-| Pause item | `worktrain queue pause <id>` -- holds in place, not worked until resumed |
-| Block item | System-set when dependencies not met (auto-resolves when deps complete) |
-| Split item | `worktrain tell "split X into smaller tasks"` → runs decomposition workflow |
-| Merge items | `worktrain tell "X and Y are the same thing, merge them"` |
-| Add context | `worktrain tell "for X, the BRD is at <url>"` → attaches to queue item |
-
-**Why this changes the interaction model:**
-With polling-only queues, you have to trust that WorkTrain will eventually see the work. With live queuing, WorkTrain is always current. You file a critical bug at 11pm, the webhook fires, it's at the top of the queue, and WorkTrain starts investigating within seconds. You push a doc link into `worktrain tell`, the queue item gets the context immediately. The queue feels like a shared workspace, not a batch job.
+2. **`workrail cleanup` command:**
+   ```
+   workrail cleanup [--yes] [--sessions --older-than <age>] [--sources] [--cache] [--roots]
+   ```
 
 ---
 
-### Live status briefings: WorkTrain narrates its own work in human terms (Apr 15, 2026)
+### Subagent context packaging
 
-**The problem:** WorkTrain is doing a lot. Sessions are running, PRs are open, the queue has items. But the raw view -- session IDs, PR numbers, branch names -- is only meaningful to someone who's been following along. A user who checks in after a few hours needs a human-readable briefing, not a list of `sess_abc123` entries.
+**Status: idea** | Priority: medium
 
-**The vision:** WorkTrain can produce a live status briefing at any time -- a clear, plain-language summary of what's happening, why, and what comes next. Like a teammate giving you a standup.
+**Problem:** When a main agent spawns a subagent, the work package is too thin. The main agent has rich context (why this approach was chosen, what was tried, what constraints were discovered) but packages the subagent task as a one-liner.
 
----
-
-#### The `worktrain status` command
-
-```bash
-worktrain status --workspace workrail
-```
-
-Example output:
-```
-WorkTrain — workrail workspace  [16 Apr 2026, 14:32]
-
-ACTIVE (3 sessions running)
-  ● Implementing GitHub polling adapter
-    → Adding support for GitHub Issues/PRs without requiring webhooks
-    → Step 4 of 8: writing the polling scheduler integration tests
-    → Running ~22 min, estimated 15 min remaining
-
-  ● Reviewing PR #406: first-party agent loop
-    → Critical dependency removal: eliminates private npm package blocking public install
-    → Step 2 of 6: analyzing tool schema migration
-    → Running ~8 min
-
-  ● Fixing PR #402: auto-commit shell injection
-    → Security fix: replacing exec() with execFile() to prevent shell injection
-    → Step 6 of 8: running verification
-    → Running ~31 min
-
-QUEUE (next 5 items)
-  1. [HIGH]  Implement maxConcurrentSessions semaphore
-             → Prevents token burn under high load
-  2. [HIGH]  worktrain tell/inbox message queue CLI
-             → Enables async communication from mobile
-  3. [MED]   Proof record schema for verification chain
-             → Gates the auto-merge capability
-  4. [MED]   Workspace namespacing groundwork
-             → Prerequisite for multi-project support
-  5. [MED]   Native cron trigger provider
-
-RECENTLY COMPLETED (last 6 hours)
-  ✓ PR #403 merged  — worktrain init onboarding command (now: npm install -g + worktrain init = running)
-  ✓ PR #397 merged  — Session timeout + max-turn limit (prevents runaway LLM loops)
-  ✓ PR #392 merged  — Prior session context injection (agent remembers previous work)
-  ✓ PR #405 merged  — classify-task workflow (coordinator can now route pipelines)
-
-BLOCKED / WAITING
-  ⏸ PR #406 review returned changes — fixing 2 issues (tsc breakage + max_tokens handling)
-     Will resume automatically once fixed and re-reviewed
-
-UPCOMING MILESTONES
-  → First-party agent loop (#406) — unblocks: public npm install without private packages
-  → worktrain spawn/await — unblocks: script-driven coordinator orchestration
-  → Auto-merge on proof records — unblocks: fully autonomous merge without human approval
-```
-
----
-
-#### How it works
-
-The briefing is assembled by a `build-status-briefing` routine (not a full workflow -- a single fast step) that reads:
-- Active sessions from the session store (what's running, which step, how long)
-- Queue state from `queue.jsonl`
-- Recent completions from the merge audit log + session store
-- Blocked/waiting items from the queue
-- Milestone dependencies from the backlog (which items unblock what)
-
-The routine summarizes each session in 2-3 plain English lines:
-- What is being built (not the PR number, the capability)
-- Why it matters (how it connects to the user's goals)
-- Where it is (which step, estimated remaining time)
-
-This requires WorkTrain to maintain a brief "plain English description" for each queue item and active session -- either extracted from the goal text, or generated when the item is enqueued.
-
----
-
-#### Live view in the console
-
-The console gains a **Status tab** (the default view when you open the console):
-
-```
-┌─────────────────────────────────────────────┐
-│ WorkTrain — workrail                    Live │
-├─────────────────────────────────────────────┤
-│ ACTIVE                                    3 │
-│                                             │
-│ ● GitHub polling adapter          22m  ████ │
-│   Step 4/8: writing tests                   │
-│                                             │
-│ ● PR #406 agent loop review        8m  ██   │
-│   Step 2/6: schema analysis                 │
-│                                             │
-│ ● PR #402 shell injection fix     31m  ████ │
-│   Step 6/8: verification                    │
-├─────────────────────────────────────────────┤
-│ QUEUE                                     8 │
-│  1 ▲ maxConcurrentSessions (HIGH)           │
-│  2   message queue CLI (HIGH)               │
-│  3   proof record schema (MED)              │
-│  4 ▼ workspace namespacing (MED)            │
-├─────────────────────────────────────────────┤
-│ DONE TODAY                               12 │
-│  ✓ worktrain init    ✓ session timeout      │
-│  ✓ classify-task     ✓ session context      │
-└─────────────────────────────────────────────┘
-```
-
-Updates via SSE -- the progress bars move in real time, completed items slide up to DONE, new queue items animate in. Click any row to expand the full session detail or queue item.
-
----
-
-#### Push notifications to mobile/Slack
-
-The same briefing data drives push notifications:
-
-**Milestone completions:**
-> "WorkTrain shipped: worktrain init is live. You can now run `npm install -g @exaudeus/workrail && worktrain init` to set up a new instance in under 5 minutes. 3 more PRs in review."
-
-**Blockers surfaced:**
-> "PR #406 (first-party agent loop) came back with 2 issues -- one causes tsc to fail on clean install. Fixing automatically, estimated 20 min."
-
-**Daily digest (optional, configurable):**
-> "WorkTrain daily summary — 6 sessions completed, 3 PRs merged, 2 in review. Top priority tomorrow: spawn/await CLI (unblocks coordinator scripts). Queue has 8 items, 3 high priority."
-
-The briefing is generated by a fast, cheap routine (Haiku model) that translates raw state into the right level of detail for the audience. Technical details available on request; the default is executive summary.
-
----
-
-#### Context-aware summarization
-
-The briefing adapts to who's asking and what they know:
-
-- **Owner/developer** (you): full detail -- PR numbers, session steps, technical blockers
-- **Stakeholder** (PM, manager): capability level -- "implementing X which enables Y, shipping this week"
-- **External** (customer, blog post): outcome level -- "automated code review is live, auto-merge coming next sprint"
-
-`worktrain status --audience stakeholder` generates the right level of detail automatically. The underlying data is the same; the presentation layer changes.
-
-This is also what the `worktrain talk` session uses as its opening context -- before any conversation, WorkTrain gives itself a briefing on the current state so it can answer questions accurately.
-
----
-
-### WorkTrain analytics: stats, time saved, and quality metrics (Apr 15, 2026)
-
-**The principle:** WorkTrain should be accountable. Not just "it did work" but "did it do good work?" Stats without quality metrics are vanity. Quality metrics without stats lack context. Both together tell you whether WorkTrain is actually worth running.
-
----
-
-#### Volume stats (what got done)
-
-Derived from session store + merge audit log + GitHub/Jira API:
-
-```
-WorkTrain — workrail workspace  [last 30 days]
-
-VOLUME
-  PRs opened:          23   (18 merged, 3 in review, 2 closed)
-  PRs reviewed:        31   (autonomous MR review sessions)
-  Bugs investigated:    8   (bug-investigation workflow runs)
-  Tasks completed:     19   (coding-task workflow runs → merged PRs)
-  Discoveries run:     12   (wr.discovery workflow runs)
-  Issues filed:         6   (by WorkTrain based on findings)
-  Issues resolved:      4   (WorkTrain opened and closed)
-
-QUEUE THROUGHPUT
-  Items added:         34
-  Items completed:     27
-  Items in progress:    4
-  Items deferred:       3
-  Average queue time:  2.4h  (enqueue → session start)
-```
-
----
-
-#### Time saved estimates
-
-"Time saved" is directionally useful but must be honest about what it's estimating. WorkTrain shouldn't claim 40 hours saved if a human would have done the same work in 30 minutes.
-
-**Estimation model:**
-
-Each workflow type has a calibrated human-equivalent time estimate, validated against real data where possible:
-
-| Workflow | Human equivalent | Basis |
-|----------|-----------------|-------|
-| MR review (STANDARD) | 25 min | Industry average for 200-line diff |
-| MR review (THOROUGH) | 45 min | Complex architectural changes |
-| Bug investigation | 60 min | Triage + root cause hypothesis |
-| Coding task (Small) | 30 min | Estimate based on task complexity |
-| Coding task (Medium) | 2h | |
-| Coding task (Large) | 6h | |
-| Discovery run | 45 min | Research + synthesis |
-
-```
-TIME SAVINGS (estimated)
-  MR reviews:      31 × 25 min  =  12.9h
-  Bug investigation: 8 × 60 min =   8.0h
-  Coding tasks:    19 tasks      =  32.5h  (mix of Small/Medium)
-  Discovery:       12 × 45 min  =   9.0h
-  ─────────────────────────────────────────
-  Total estimate:                  62.4h  ≈ 1.5 engineer-weeks
-
-COST
-  Total LLM tokens used:   4.2M
-  Estimated API cost:      $12.40
-  Cost per hour saved:     $0.20/h
-
-  NOTE: These are estimates. Actual time savings depend on task complexity
-  and whether the work would otherwise have been done at all.
-```
-
-The honesty note matters. "Time saved" is only real if the work would have been done by a human. Tasks that were deprioritized indefinitely until WorkTrain did them represent more value than 25-minute estimates suggest.
-
----
-
-#### Quality metrics (is WorkTrain actually doing a good job?)
-
-This is the most important section. Volume without quality is noise.
-
-**Output quality:**
-
-```
-QUALITY — last 30 days
-
-MR REVIEWS
-  Reviews with 0 findings:        14 / 31  (45%)  -- clean PRs, reviewed correctly
-  Reviews that caught Critical:     4 / 31  (13%)  -- high-value catches
-  Reviews where human disagreed:    2 / 31   (6%)  -- false positives / misses
-  Review finding accuracy:         94%             -- verified against merge outcomes
-
-CODING TASKS
-  PRs merged without rework:       13 / 18  (72%)
-  PRs that needed 1 fix cycle:      4 / 18  (22%)
-  PRs that needed 2+ fix cycles:    1 / 18   (6%)
-  PRs that were rejected/closed:    0 / 18   (0%)
-  
-  Post-merge bugs filed (30d):      1         -- bug traced to WorkTrain PR
-  Post-merge bugs rate:           5.6%        -- 1 in 18 PRs caused a bug
-
-BUG INVESTIGATIONS
-  Correct root cause identified:    6 / 8   (75%)
-  Confidence was too high:          1 / 8   (13%)  -- confidently wrong
-  Insufficient context:             1 / 8   (13%)  -- escalated correctly
-
-OVERALL QUALITY SCORE:  78 / 100
-  Trend:  ↑ +6 vs last month
-```
-
-**What the failure rate means:**
-A 5.6% post-merge bug rate on coding tasks means roughly 1 in 18 WorkTrain PRs introduced a bug that was later filed as an issue. That's comparable to junior developer rates (industry average ~10-15%). If it rises above 10%, there's a systemic problem to investigate -- maybe the verification step isn't thorough enough, maybe certain task types are too risky for autonomous work.
-
-The quality score is a weighted composite:
-- Review accuracy (40%)
-- Coding task success rate (35%)
-- Investigation accuracy (25%)
-
-It's the single number that answers "is WorkTrain doing good work?" A score below 70 should trigger a `workflow-effectiveness-assessment` run automatically.
-
----
-
-#### Quality feedback loop
-
-WorkTrain actively solicits quality signals:
-
-1. **Post-merge outcome tracking:** when a PR merged by WorkTrain has a bug filed against it within 30 days, the session that produced that PR is flagged. The bug filing creates a data point that reduces the quality score.
-
-2. **MR review validation:** when WorkTrain reviews a PR and the PR author disputes a finding (e.g. closes without fixing what WorkTrain flagged, or fixes something WorkTrain missed), that's a signal. WorkTrain tracks these via webhook: if a PR that WorkTrain reviewed APPROVE ships a Critical bug, that review retroactively becomes a miss.
-
-3. **Human override tracking:** when a human changes a WorkTrain decision (reorders the queue, rejects a proposed change, overrides an auto-merge), those are signals that WorkTrain got something wrong. Each override is logged with a reason (if provided) and fed into the quality model.
-
-4. **Explicit feedback:** `worktrain feedback "the PR #402 review missed the temp file cleanup issue"` appends to a feedback log. The workflow effectiveness assessment picks these up.
-
----
-
-#### The quality dashboard (console Analytics tab)
-
-```
-┌─────────────────────────────────────────────────────┐
-│ WorkTrain Analytics — workrail          Last 30 days │
-├─────────────────────────────────────────────────────┤
-│ QUALITY SCORE    78/100  ↑+6       COST  $12.40     │
-│ ████████████████░░░░                                 │
-├─────────────────────────────────────────────────────┤
-│ VOLUME                    QUALITY                   │
-│ PRs opened:    23         Merge success:   94%      │
-│ PRs reviewed:  31         Review accuracy: 94%      │
-│ Tasks done:    19         Post-merge bugs:  5.6%    │
-│ Bugs found:     8         Bug investigation: 75%    │
-├─────────────────────────────────────────────────────┤
-│ TIME SAVED (estimated)                              │
-│ Total: ~62h  Cost/hour: $0.20                       │
-│ ████████████████████████████░░░ (62/80h budget)     │
-├─────────────────────────────────────────────────────┤
-│ TREND  ──────────────────────────────────           │
-│ Quality score by week:                              │
-│  W1: 68  W2: 71  W3: 74  W4: 78  ↑ improving       │
-│                                                     │
-│ Post-merge bug rate by workflow:                    │
-│  coding-task (Small): 0%  (Medium): 8%  (Large): 0%│
-│  → Medium tasks have highest bug rate, investigate  │
-└─────────────────────────────────────────────────────┘
-```
-
-The "investigate" callout in the trend section is important -- the analytics dashboard doesn't just show numbers, it flags anomalies and links to the `workflow-effectiveness-assessment` that would address them. Stats → insight → action is the full loop.
-
----
-
-### Pattern and architecture validation: WorkTrain enforces team conventions (Apr 15, 2026)
-
-**The idea:** beyond just reviewing code for bugs, WorkTrain validates that the code matches the patterns and architecture the team expects. Not "does it work?" but "does it fit?"
-
-**Two levels:**
-
-**1. Philosophy lens (already partially built)**
-The coding-task workflow already applies the user's coding philosophy as a review lens -- flagging violations by principle name. This needs to be extended to be:
-- **Per-workspace configurable** -- different projects have different conventions
-- **Machine-checkable** -- some patterns can be verified structurally (no direct db access outside the repository layer, no console.log in production code, no any types) rather than relying on the LLM to catch them
-
-**2. Architectural invariant checking (new)**
-Explicit rules about what the codebase's structure must look like:
-
-```yaml
-workspaces:
-  workrail:
-    architectureRules:
-      # Layer boundaries
-      - id: no-daemon-imports-from-mcp
-        rule: "src/daemon/** must not import from src/mcp/**"
-        type: import_boundary
-        severity: error
-
-      - id: no-di-calls-in-daemon
-        rule: "src/daemon/** must not call initializeContainer() or container.resolve()"
-        type: forbidden_call
-        severity: error
-
-      # Pattern enforcement
-      - id: errors-as-data
-        rule: "No throw statements in src/daemon/**, src/trigger/** -- use Result types"
-        type: no_throw
-        severity: warning
-        exceptions: ["constructor", "assertExhaustive"]
-
-      - id: no-exec-shell
-        rule: "No child_process.exec() -- use execFile() with args array"
-        type: forbidden_call
-        severity: error
-
-      - id: no-hardcoded-tmp
-        rule: "No '/tmp/' string literals -- use os.tmpdir()"
-        type: forbidden_literal
-        severity: warning
-```
-
-These rules run as scripts (static analysis, not LLM) -- fast, deterministic, zero tokens. They're checked:
-- During the coding-task workflow (before the agent commits anything)
-- As part of the CI gate (same `posix_tmp_literal` rule we fixed in PR #390 -- this is exactly that pattern generalized)
-- By the periodic architecture scan
-
-**What this enables combined with quality metrics:**
-If WorkTrain's coding tasks have a 5.6% post-merge bug rate AND those bugs consistently violate the same architectural rule, the pattern validation catches it before merge next time. Quality metrics identify the problem; architecture rules prevent recurrence. The self-improvement loop: bugs found → rule added → violations caught earlier → bug rate drops.
-
-**The self-improvement connection:**
-When the `workflow-effectiveness-assessment` runs and finds that a certain class of bug appears repeatedly in WorkTrain's output (e.g. "3 of the last 5 coding tasks had shell injection risks"), it can propose a new architecture rule (`no-exec-shell`) that prevents the pattern going forward. Rules start as soft warnings, graduate to errors after being validated. WorkTrain learns from its own failure patterns and codifies them as invariants.
-
----
-
-### Resource management: preventing agent congestion under high concurrency (Apr 15, 2026)
-
-**Observed problem:** running 10 simultaneous agents bogs down the system -- API rate limits, token exhaustion, context degradation from too many concurrent Bedrock/Anthropic calls, and the host machine running hot. The `maxConcurrentSessions` semaphore addresses the daemon-level cap, but the broader resource management problem has several dimensions.
-
-**The dimensions:**
-
-**1. API rate limits**
-Anthropic and Bedrock both have tokens-per-minute limits. 10 concurrent agents each hitting the API at once creates bursts that exceed the limit, causing retries and backpressure. The daemon needs a token-bucket rate limiter shared across all sessions: before each LLM call, acquire a slot from the bucket. If the bucket is empty, wait.
-
-**2. Host machine resources**
-Each agent loop runs in-process, consuming RAM and CPU. Node.js is single-threaded but I/O is concurrent -- 10 agents making parallel API calls is fine until they all get responses simultaneously and saturate the JS event loop with JSON parsing and session store writes. The right limit is not "10 sessions" but "N sessions where N is calibrated to the host's memory and the model's response size."
-
-**3. Tiered concurrency by task type**
-Not all sessions are equal. A `wr.discovery` session is cheap (mostly reads, fast). A `coding-task-workflow-agentic` session is expensive (many tool calls, long responses). Running 10 coding tasks simultaneously is very different from running 10 discovery sessions.
-
-```yaml
-workspaces:
-  workrail:
-    concurrency:
-      maxTotal: 6                  # global cap
-      perWorkflowType:
-        coding-task-workflow-agentic: 2    # expensive, cap low
-        mr-review-workflow.agentic.v2: 3   # medium cost
-        wr.discovery: 5                    # cheap, allow more
-        bug-investigation.agentic.v2: 2
-```
-
-**4. Queue-aware throttling**
-When the queue has a mix of high-priority and low-priority items, WorkTrain should prefer starting high-priority items even if slots are available for low-priority ones. If all slots are taken by low-priority work, high-priority items wait unnecessarily.
-
-**5. Graceful degradation**
-When the system is under load, WorkTrain should degrade gracefully rather than failing hard. Options:
-- Slow down polling intervals (less frequent API calls)
-- Prefer fast/cheap workflows over slow/expensive ones
-- Pause the queue drain and process the backlog sequentially
-
-**Build order:**
-1. `maxConcurrentSessions` semaphore (in flight -- simple global cap)
-2. Token-bucket rate limiter in the agent loop (prevents API bursts)
-3. Per-workflow-type concurrency limits (tiered caps)
-4. Queue-aware slot allocation (high-priority first)
-5. Adaptive throttling based on observed latency (automatic backpressure)
-
-**The meta-point:** WorkTrain running at full capacity on itself is the best stress test for these constraints. Every day we run 10 simultaneous agents, we discover the edges of what the system can handle. Those discoveries should directly inform the resource management implementation.
-
-
----
-
-### Universal integration layer: WorkTrain interfaces with everything (Apr 15, 2026)
-
-**The principle:** WorkTrain is not opinionated about your stack. It works with whatever version control, project management, communication, monitoring, and documentation systems you use -- cloud or self-hosted, SaaS or on-prem. The integration layer is the boundary where WorkTrain connects to the outside world.
-
----
-
-#### Integration categories
-
-**Version control**
-| System | Interface | Notes |
-|--------|-----------|-------|
-| GitHub (cloud) | REST API + polling | Primary target, already designed |
-| GitLab (cloud + self-hosted) | REST API + polling | Already in polling triggers |
-| Bitbucket | REST API + polling | Same pattern as GitLab |
-| Azure DevOps | REST API + polling | Large enterprise share |
-| Gitea / Forgejo | REST API + polling | Self-hosted open source |
-| Gerrit | REST API | Google's code review system |
-| Raw git | git CLI + filesystem | No API needed -- just a remote |
-
-All VCS integrations share the same polling adapter pattern. The difference is the API schema -- the `GitLabPoller` becomes a template: implement `fetchEvents(since: Date): Event[]` and WorkTrain handles the rest.
-
-**Project management / ticketing**
-| System | Interface | Notes |
-|--------|-----------|-------|
-| GitHub Issues | REST API (same token as VCS) | Zero extra config for GitHub users |
-| GitLab Issues | REST API (same token as VCS) | Zero extra config for GitLab users |
-| Jira (Cloud + Server + Data Center) | REST API + polling | Dominant enterprise tracker |
-| Linear | GraphQL API | Dominant startup tracker |
-| Asana | REST API | Common in non-engineering teams |
-| Notion | REST API | Database + docs hybrid |
-| Monday.com | REST API | Common in agencies/SMB |
-| Azure Boards | REST API | Azure ecosystem |
-| Shortcut (formerly Clubhouse) | REST API | Engineering-focused |
-
-WorkTrain reads tickets to understand context, writes comments/status updates when work completes, creates new tickets when investigations surface issues, and transitions ticket status when PRs merge.
-
-**Communication / notifications**
-| System | Interface | Notes |
-|--------|-----------|-------|
-| Slack | Incoming webhooks + Bot API | Most common dev team chat |
-| Microsoft Teams | Incoming webhooks + Graph API | Enterprise dominant |
-| Discord | Webhooks + Bot API | Common in open source |
-| Telegram | Bot API | Common for personal/small team |
-| Email | SMTP | Universal fallback |
-| PagerDuty | Events API | Incident escalation |
-| OpsGenie | REST API | Alerting + on-call |
-| Webhook (generic) | HTTP POST | Any system that accepts webhooks |
-
-WorkTrain posts to the right channel based on the event type: PR review findings → the team's dev channel, critical incidents → #incidents + on-call, weekly health summary → #engineering, ideas → #product.
-
-**Monitoring / observability**
-| System | Interface | Notes |
-|--------|-----------|-------|
-| Sentry | REST API + polling | Error tracking |
-| Datadog | REST API + polling | Metrics, traces, logs |
-| New Relic | REST API | APM |
-| Grafana / Prometheus | HTTP API | Self-hosted metrics |
-| PagerDuty | Events API | Incident triggers |
-| CloudWatch | AWS SDK | AWS-native |
-| Custom HTTP endpoint | HTTP GET/POST | Any system with an API |
-
-WorkTrain polls for threshold breaches (same `PollingTriggerSource` pattern as VCS), investigates anomalies, and posts findings back.
-
-**Documentation**
-| System | Interface | Notes |
-|--------|-----------|-------|
-| Confluence (Cloud + Server) | REST API | Most common enterprise wiki |
-| Notion | REST API | Also a project management system |
-| Google Docs / Drive | Google API | Common in startups |
-| Markdown in repo | git + filesystem | Zero extra config |
-| ReadTheDocs / Sphinx | Filesystem | Generated docs |
-| Docusaurus | Filesystem | Modern static docs |
-
-WorkTrain reads doc systems as reference context for agents (same as `referenceUrls` today). It writes back when documentation needs updating after code changes.
-
----
-
-#### The integration architecture
-
-**Three integration modes:**
-
-1. **Polling source** (already built for GitLab) -- WorkTrain calls the external API on a schedule, deduplicates events, dispatches workflows. Works for: VCS (new PRs/issues), ticketing (new tickets), monitoring (threshold breaches).
-
-2. **Delivery target** (already built for `callbackUrl`) -- WorkTrain POSTs results to an external system when a workflow completes. Works for: Slack/Teams/Discord notifications, Jira status updates, GitLab MR comments, PagerDuty incident resolution.
-
-3. **Reference context** (already built for `referenceUrls`) -- WorkTrain fetches external documents and injects them into the agent's context. Works for: Confluence pages, Google Docs, Notion databases, external API docs.
-
-**The integration manifest in triggers.yml:**
-```yaml
-integrations:
-  github:
-    token: $GITHUB_TOKEN
-    baseUrl: https://api.github.com    # override for GitHub Enterprise
-  
-  jira:
-    token: $JIRA_TOKEN
-    baseUrl: https://mycompany.atlassian.net
-    projectKey: ENG
-  
-  slack:
-    webhookUrl: $SLACK_WEBHOOK_URL
-    channels:
-      reviews: "#code-review"
-      incidents: "#incidents"
-      weekly: "#engineering"
-  
-  datadog:
-    apiKey: $DATADOG_API_KEY
-    appKey: $DATADOG_APP_KEY
-
-triggers:
-  - id: new-jira-bug
-    type: jira_poll
-    source:
-      integration: jira
-      jql: "project = ENG AND issuetype = Bug AND status = Open AND created >= -1h"
-      pollIntervalSeconds: 300
-    workflowId: bug-investigation.agentic.v2
-    goalTemplate: "Investigate Jira bug {{$.key}}: {{$.fields.summary}}"
-    callbackUrl: "{{jira.baseUrl}}/rest/api/3/issue/{{$.key}}/comment"
-```
-
-**The adapter pattern:**
-Each integration is a standalone adapter module in `src/trigger/adapters/`:
-- `github-poller.ts` -- `fetchEvents(since): GitHubEvent[]`
-- `gitlab-poller.ts` -- (already exists) `fetchEvents(since): GitLabMR[]`
-- `jira-poller.ts` -- `fetchEvents(since): JiraIssue[]`
-- `linear-poller.ts` -- `fetchEvents(since): LinearIssue[]`
-- `sentry-poller.ts` -- `fetchEvents(since): SentryError[]`
-- `datadog-poller.ts` -- `fetchEvents(since): DatadogAlert[]`
-
-Each adapter implements the same interface. The `PollingScheduler` doesn't know which adapter it's running -- it just calls `fetchEvents()` and dispatches. Adding a new integration is: implement the adapter, add a type to `TriggerDefinition`, handle it in `trigger-store.ts`. No changes to the scheduler or router.
-
-**Delivery adapters** follow the same pattern for writing back:
-- `slack-delivery.ts` -- formats and POSTs to Slack webhook
-- `jira-delivery.ts` -- adds comment to Jira issue, transitions status
-- `github-delivery.ts` -- posts PR review comment, creates issue
-- `pagerduty-delivery.ts` -- resolves or escalates incident
-
-**The `callbackUrl` field becomes `deliveryTarget`** with a richer schema:
-```yaml
-deliveryTarget:
-  type: slack           # or: jira, github, gitlab, pagerduty, webhook
-  integration: slack    # reference to integrations block
-  channel: "#code-review"
-  # OR for generic webhook:
-  url: https://hooks.example.com/worktrain
-```
-
----
-
-#### What this enables
-
-A fully connected WorkTrain for a typical engineering team:
-
-```
-New Jira bug filed
-  → WorkTrain investigates → posts findings as Jira comment
-  → if auto-fixable → opens GitHub PR → reviews it → merges
-  → transitions Jira ticket to "In Review" / "Done"
-  → posts to #engineering: "Fixed JIRA-1234 autonomously -- PR #456"
-
-Datadog alert fires
-  → WorkTrain investigates logs + recent commits
-  → posts to #incidents with root cause + affected files
-  → if config fix → deploys fix → resolves PagerDuty incident
-  → updates Confluence runbook with new pattern
-
-Weekly
-  → WorkTrain posts health summary to #engineering
-  → files Linear tickets for technical debt items found in audit
-  → updates Google Doc "Architecture Notes" with recent decisions
-```
-
-Zero humans needed unless the circuit breaker fires.
-
----
-
-#### Build order
-
-**Now (already works):** generic `callbackUrl` (HTTP POST to any endpoint). Any system that accepts webhooks works immediately.
-
-**Near-term:** GitHub polling adapter (same as GitLab, already written as template), Slack delivery adapter (format + post to webhook).
-
-**Medium-term:** Jira polling + delivery (high enterprise value), Linear polling (high startup value), PagerDuty delivery (incident escalation).
-
-**Long-term:** the full matrix above. Each adapter is a bounded, testable, independently shippable unit. The architecture supports adding them without touching the core engine.
-
----
-
-
-
----
-
-### Multi-project WorkTrain: workspace isolation vs cross-project knowledge (to investigate, Apr 15, 2026)
-
-**The problem:** WorkTrain needs to handle multiple completely unrelated projects simultaneously, but some projects are related and need to share knowledge. These are contradictory requirements if handled naively.
-
-**Three axes of tension:**
-
-1. **Isolation vs shared context** -- project A's TypeScript symbols should never pollute project B's Python context. But if A and B share architectural patterns (both use WorkTrain, both follow the same auth pattern), that shared knowledge is valuable.
-
-2. **Independent execution vs cross-project tasks** -- most tasks are scoped to one project. But some tasks span projects: "update the mobile app AND the backend API for this feature", "apply the same refactor pattern we used in workrail to storyforge".
-
-3. **One daemon vs many** -- one daemon is easier to manage (one config, one console, one binary). Multiple daemons give true blast-radius isolation. The right answer is probably workspace namespacing inside one process, but with cross-namespace knowledge queries for when projects are related.
-
-**The cross-project knowledge requirement:**
-When two projects are related (share patterns, have a dependency relationship, or are being worked on together), the knowledge graph should be queryable across project boundaries -- but opt-in, not default. A session working on project A can explicitly query "what's the equivalent pattern in project B?" but never sees project B's context by default.
-
-**Proposed model:** workspace namespacing with explicit cross-workspace links
-
-```yaml
-workspaces:
-  workrail:
-    path: ~/git/personal/workrail
-    soul: ~/.workrail/souls/workrail.md
-    knowledgeGraph: ~/.workrail/graphs/workrail.db
-    maxConcurrentSessions: 3
-    relatedWorkspaces: [storyforge]   # can query storyforge graph when explicitly needed
-    
-  storyforge:
-    path: ~/git/personal/storyforge
-    soul: ~/.workrail/souls/storyforge.md
-    knowledgeGraph: ~/.workrail/graphs/storyforge.db
-    maxConcurrentSessions: 1
-    relatedWorkspaces: [workrail]
-```
-
-A session in `workrail` gets `workrail` context by default. If it calls `query_knowledge_graph(workspace: 'storyforge', ...)`, it gets storyforge context explicitly. The coordinator script can spawn workers in multiple workspaces for cross-project tasks.
-
-**Investigation needed (discovery agent running):**
-- Is workspace namespacing inside one process the right architecture, or should each project run a separate daemon?
-- What exactly needs to be workspace-scoped vs globally shared?
-- How do cross-project coordinator tasks work? (spawn worker in workspace A, spawn worker in workspace B, coordinator synthesizes)
-- What's the knowledge graph query interface for cross-workspace queries?
-- How does the console show multi-workspace activity without being overwhelming?
-- What's the blast radius if one workspace's agent goes rogue?
-
-**What CAN be shared globally (no namespace needed):**
-- The WorkTrain binary and workflow library
-- Token usage / billing tracking
-- The message queue (`~/.workrail/message-queue.jsonl`)
-- The merge audit log
-- The outbox (notifications to the user)
-- The `worktrain talk` session (can discuss any workspace)
-
-**What MUST be workspace-scoped:**
-- Knowledge graph (symbols from different codebases must not mix)
-- daemon-soul.md (different stacks need different principles)
-- Session store (project A's sessions should not appear in project B's console view by default)
-- Concurrency limits (project A should not starve project B)
-- Triggers and polling sources (each workspace has its own event sources)
-
----
-
-
-
----
-
-### Never worktree main: branch safety rules for WorkTrain (Apr 16, 2026)
-
-**Critical invariant:** WorkTrain must never check out `main` or `master` into a worktree. Locking main in a worktree blocks all other agents from checking out main and prevents fast-forward merges.
-
-**The rule:**
-- All agent worktrees must use feature branches, never `main` or `master` or any protected branch
-- When creating a worktree for a task, WorkTrain always creates a new branch: `git worktree add <path> -b <branch-name>`
-- If an agent needs to read main's state, it uses `git show origin/main:<file>` without checking out the branch
-- Stale worktrees (branches that have been merged) must be cleaned up automatically after session completion
-
-**How it breaks today:**
-The `--isolation worktree` flag on subagents creates a worktree. If the agent's task involves reading and committing to main directly (e.g. a merge task), it can end up with main locked. This happened during today's session.
-
-**The fix (two parts):**
-
-1. **In the daemon worktree creation code:** before creating a worktree, check if the requested branch is `main`, `master`, or any branch in a configurable `protectedBranches` list. If so, create a new branch from it instead.
-
-2. **In the daemon-soul.md:** add explicit rule:
-```
-## Branch Safety
-- NEVER check out main, master, or any protected branch into a worktree
-- NEVER use 'git checkout main' -- always work on a feature branch
-- When merging to main, use 'gh pr merge' (via PR), never direct git push
-- After a PR merges, immediately clean up the local worktree
-```
-
-3. **Automatic stale worktree cleanup:** after each session completes (success or failure), the daemon should run `git worktree prune` and remove any worktrees whose branches have been merged to main.
-
-
----
-
-
----
-
-### Communication agent: Slack monitoring, email management, and suggested responses (Apr 16, 2026)
-
-**The idea:** WorkTrain monitors your communication channels, understands context, and either responds on your behalf or prepares vetted drafts for you to send.
-
-**Slack:**
-- Monitor specified channels and DMs for messages that mention you, reference your projects, or require a response
-- Understand context: "who is asking, what do they need, what's the relevant project state?"
-- Options: auto-respond for routine questions ("what's the status of X?" → WorkTrain knows), draft a response for you to review and send, or surface with a notification "someone needs your input on Y"
-- Configurable per-channel: some channels auto-respond, some always require your review
-- Filter noise: identify which Slack threads are actually important vs chatter
-
-**Email:**
-- Same pattern as Slack -- monitor inbox, understand context, draft responses
-- Suggest email filters, folder rules, and unsubscribe candidates based on patterns WorkTrain observes
-- "You've received 47 newsletters this month from 12 senders and never opened them -- want me to unsubscribe?"
-- Priority surfacing: "3 emails in your inbox need a response, here are the drafts"
-
-**Important constraint:** WorkTrain never sends on your behalf without explicit approval for anything that goes to other people. Auto-respond is opt-in per-channel, with a review window before sending. You always see what was sent and can recall/edit.
-
----
-
-
-
----
-
-### Local file organization and maintenance (Apr 16, 2026)
-
-- WorkTrain scans specified directories for stale, duplicate, and disorganized files
-- Suggests folder structures based on file content and usage patterns
-- Identifies documents that are out of date and offers to update them
-- Keeps project-related files in sync with the repo (e.g. local design files linked to Figma specs, local notes linked to Confluence pages)
-- "~/Downloads has 847 files, most untouched for 6 months -- here's what's safe to delete and what should be archived"
-- Connects to the knowledge graph: files that reference code or projects get indexed alongside the code
-
----
-
-
-
----
-
-### Git worktrees and branch management as a first-class capability (Apr 16, 2026)
-
-**Critical for parallel work.** WorkTrain needs native, sophisticated git management -- not just running git commands but understanding the full branching topology and managing it intelligently.
-
-**What this means:**
-
-**Worktree management:**
-- Create, list, switch between, and clean up worktrees automatically
-- Each concurrent task gets its own worktree (WorkTrain already does this via `.claude/worktrees/`)
-- Detect and warn about stale worktrees (branches that have been merged or abandoned)
-- The `cw <branch>` command pattern already exists -- WorkTrain should be able to invoke it for any task that needs isolation
-
-**Branch lifecycle:**
-- Know which branches are: active (being worked on), stale (no commits in N days), merged (on main), or orphaned (created but abandoned)
-- Automatic cleanup proposals: "14 branches are merged and safe to delete, 3 are stale, 2 have uncommitted work"
-- Rebase management: when main advances, WorkTrain knows which in-flight branches need rebasing and does it automatically (or queues it)
-- Conflict detection: before spawning a new session, check if any in-flight branch would conflict with the planned changes
-
-**Parallel work coordination:**
-- When multiple tasks touch the same files, WorkTrain detects potential conflicts before they happen
-- Sequences tasks that would conflict, parallelizes those that won't
-- Maintains a "file lock" mental model: this file is being modified by session A, session B should wait or work on a different scope
-- When a feature branch is ready, WorkTrain handles the full merge/rebase/PR creation flow
-
-**Branch naming and organization:**
-- Enforces consistent branch naming conventions (already partially done via daemon soul)
-- Groups related branches: `feat/github-polling-*` are all part of the same epic
-- Links branches to tickets/queue items: opening a PR creates the Jira transition, closing a PR cleans up the branch
-
-**The `worktrain worktree` command family:**
-```bash
-worktrain worktree list                    # all worktrees and their status
-worktrain worktree clean                   # remove merged/stale worktrees
-worktrain worktree new <branch> [--task]   # create worktree + optionally link to queue item
-worktrain worktree status                  # which files are locked by active sessions
-```
-
-This is especially critical when WorkTrain is managing 10 concurrent sessions -- without explicit worktree management, two sessions could clobber each other's changes on the same branch.
-
----
-
-
----
-
-### Thin spots: ideas that need fuller spec (Apr 16, 2026)
-
-These were mentioned and partially captured but need more detail when the time comes:
-
-**`worktrain feedback` command:**
-Explicit quality feedback loop. `worktrain feedback "the PR #402 review missed the temp file cleanup issue"` appends to `~/.workrail/feedback.jsonl`. The workflow-effectiveness-assessment picks these up alongside statistical patterns. User feedback is weighted higher than inferred signals.
-
-**`worktrain idea` command:**
-Lightweight idea capture without interrupting active work. `worktrain idea "nested subagents up to N depth"` appends to `~/.workrail/ideas-buffer.jsonl`. The `worktrain talk` session reviews the buffer at conversation start and decides what to groom into the backlog. Prevents good ideas from getting lost when 10 agents are running.
-
-**Audience-aware status briefings (`--audience` flag):**
-`worktrain status --audience owner` (full technical detail, default) vs `--audience stakeholder` (capability level, no PR numbers) vs `--audience external` (outcome level, no internal terminology). Same underlying data, different presentation layer. The Haiku-level routine adjusts verbosity and replaces technical terms with plain language.
-
-**`worktrain queue` CLI commands:**
-```bash
-worktrain queue list [--workspace <name>]    # show queue with priorities and status
-worktrain queue pause [--workspace <name>]   # stop draining
-worktrain queue resume [--workspace <name>]  # resume draining
-worktrain queue remove <id>                  # remove item
-worktrain queue bump <id>                    # move to top
-worktrain queue show <id>                    # full item details + pipeline plan
-```
-
-**Workspace-scoped soul and config:**
-Each workspace has its own `daemon-soul.md` at a configurable path. Soul resolution cascade: trigger-level override → workspace soul → global `~/.workrail/daemon-soul.md` → built-in default. Enables TypeScript and Python workspaces to have different behavioral profiles on the same WorkTrain instance.
-
-**Automatic worktree cleanup:**
-After any session completes (success or failure), the daemon automatically runs `git worktree prune` and removes any worktrees whose branches are merged to main. Prevents the main-worktree-lock issue encountered today.
-
----
-
-### The single-conversation problem: WorkTrain needs multi-threaded interaction (Apr 16, 2026)
-
-A single chat where everything is happening at the same time is not ideal. When WorkTrain is managing 10 concurrent agents, it becomes impossible to know what's been captured vs what's floating, follow any one thread, or distinguish "in progress" from "needs a decision."
-
-**Threaded conversations per work group:**
-Each active work group gets its own conversation thread. You can follow the polling-triggers work in thread A without seeing the spawn/await implementation in thread B. Threads are persistent -- come back 2 hours later and pick up exactly where you left off.
-
-**`worktrain talk` shows a thread list:**
-```
-Threads:
-  ● WorkRail development     [3 active agents, 2 waiting]
-  ● Storyforge chapter work  [idle]
-  → Select thread or type to start a new one
-```
-
-**`worktrain idea` for mid-conversation capture:**
-When a new idea comes up while 10 agents are running, `worktrain idea "..."` appends to an ideas buffer without interrupting active work. The talk session reviews the buffer at the start of each conversation.
-
-**Build order:** thread model → thread list console view → cross-thread notifications → idea capture buffer.
-
----
-
-### Nested subagent depth: configurable delegation chains (Apr 16, 2026)
-
-WorkTrain should support nested subagents -- an agent spawning a subagent, which spawns its own -- up to a configurable depth limit.
-
-```yaml
-workspaces:
-  workrail:
-    agentDefaults:
-      maxSubagentDepth: 3     # coordinator=0, worker=1, subagent=2, sub-subagent=3
-      maxTotalAgentsPerTask: 10  # hard cap across all depths for a single task
-```
-
-**Depth semantics:**
-- Depth 0: coordinator script (no LLM, pure script)
-- Depth 1: main worker (coding-task, mr-review)
-- Depth 2: subagent from workflow step (routine-context-gathering, etc.)
-- Depth 3: sub-subagent (rare, deep investigation chains)
-- Depth 4+: almost certainly a bug or runaway loop
-
-**The `maxTotalAgentsPerTask` budget** prevents exponential explosion -- a depth-3 tree with 3 agents per node = 27 concurrent agents without this cap.
-
-**Console DAG view** shows nesting depth as indentation. Makes over-delegation immediately visible.
-
----
-
-### WorkTrain attribution and acting as the user (Apr 16, 2026)
-
-**Attribution / signing:**
-1. **Commit signatures:** commits made by WorkTrain include `Co-Authored-By: WorkTrain <worktrain@etienneb.dev>`. The configured `worktrain-bot` identity is consistent across all workspaces.
-2. **PR/MR description footer:** `---\n🤖 Implemented by WorkTrain · Session: sess_abc123 · Workflows run: coding-task, mr-review`. Links to session for full audit trail.
-3. **Issue/comment attribution:** WorkTrain comments include "WorkTrain investigation" with session link. Clearly not a human.
-
-**Value:** audit trail, trust calibration for reviewers, "how much of our code was WorkTrain-authored?" becomes queryable, open-source visibility.
-
-**Acting as the user:**
-WorkTrain uses the user's git identity and GitHub account (via user's token) to act as them. PRs appear from @EtienneBBeaulac, commits show as Etienne Beaulac.
-
-**Why useful:** normal PR approval flows, no bot account permissions needed, personal git history stays personal even for WorkTrain-authored work.
-
-**Trust guardrails:** `actAsUser: true` explicit opt-in, only for commits/PRs (never emails or Slack without additional permission), PR description always notes "Created by WorkTrain," full audit log in `~/.workrail/actions-as-user.jsonl`.
-
----
-
-### Console session detail: more than the DAG when running standalone (Apr 16, 2026)
-
-**The gap:** the session DAG shows structure (steps, edges, progress) but not meaning. When you're watching a session run in the console without being in Claude Code, you want to know what the agent is *actually doing* -- not just which step it's on.
-
-**What's missing from the current DAG view:**
-- The latest step output note, rendered inline and updating as it streams (not hidden behind a click)
-- A plain-English summary of what the agent is doing right now ("Analyzing the diff for shell injection risks")
-- Current step prompt visible on demand (so you know what the agent was asked to do)
-- Token count and cost estimate for the session so far
-- Time elapsed + estimated time remaining based on step history
-- A live feed of tool calls as they happen ("Reading trigger-router.ts", "Running npm test")
-
-**The streaming step output** is the most valuable addition. Right now the DAG shows a step as "in progress" with a spinner. It should show the last few lines of the step's output note as it's being written, similar to how a terminal streams command output.
-
-**Build order:**
-1. Inline latest step output in the session detail panel (read from session store, poll every 2s)
-2. Live tool call feed alongside the DAG (SSE from the daemon, log each tool call as it fires)
-3. Token/cost counter (daemon tracks tokens per session, expose via GET /api/v2/sessions/:id)
-4. Plain-English status line ("Step 3/8: analyzing diff" vs just a spinner)
-
-This makes the console genuinely useful as a standalone monitoring surface -- not just for developers who understand the DAG topology, but for anyone who wants to know if WorkTrain is doing useful work or spinning.
-
----
-
-### Orphaned daemon session state: smarter recovery (Apr 16, 2026)
-
-**The problem:** When the daemon is killed mid-session, the session's in-process `KeyedAsyncQueue` promise chain is lost. On restart, the startup recovery reads orphaned session files and clears them from disk -- but the `serial` concurrency queue key based on `trigger.id` is an in-memory construct. Any external state (e.g. a lock file, a flag in the session store) that was tied to the queue is now inconsistent.
-
-More critically: if a session is restarted by the daemon but then stalls (Bedrock call hangs, exception suppressed), the daemon log shows nothing after "Injecting workspace context" -- no error, no completion. The session is in limbo.
-
-**What needs to happen:**
-
-1. **Startup recovery should also clear any pending queue slots.** If a session file exists in `~/.workrail/daemon-sessions/` at startup, that trigger's queue key should be treated as free -- no prior promise is alive.
-
-2. **Session liveness detection.** If a session has been `in_progress` for more than N minutes with no `advance_recorded` events, the daemon watchdog should log a warning and optionally abort the session. Currently a hung session is invisible.
-
-3. **Orphaned session cleanup should be user-facing.** `worktrain cleanup` or `worktrain status` should surface orphaned sessions with their age and offer to clear them. Right now they silently accumulate.
-
-4. **Better logging when runWorkflow() swallows errors.** The `void runWorkflow(...)` pattern in `console-routes.ts` and `trigger-router.ts` drops errors silently. Every path that ends in silence (no log, no session advance, no error) should at minimum log `[WorkflowRunner] Session died silently` with the session ID.
-
----
-
-### Observability and logging as first-class citizens (Apr 17, 2026)
-
-**The principle:** WorkTrain should never be a black box. Every action, decision, failure, and state transition should be traceable after the fact -- by a human, by another agent, or by a coordinator script. Logging and observability are not afterthoughts; they are core infrastructure.
-
-**What "first-class" means:**
-
-1. **Structured, not prose.** Every log line should be machine-parseable. Use consistent prefixes (`[WorkflowRunner]`, `[TriggerRouter]`, `[DaemonConsole]`), consistent key=value pairs, and structured JSON for rich payloads. No freeform strings that require regex to parse.
-
-2. **Levels matter.** INFO for normal operations, WARN for recoverable anomalies, ERROR for failures that need attention. Silence = actively working, not unknown. A session that produces no logs for 5+ minutes should emit a heartbeat.
-
-3. **Every state transition logged.** Session start, step advance, tool call, tool result (including errors), session end (success/timeout/error). No silent gaps. The daemon observability logs (#442) are a start -- extend this everywhere.
-
-4. **Errors always include context.** Not just the message -- which session, which tool, which step, which trigger, how long it had been running, what the last successful action was. Enough to diagnose without re-running.
-
-5. **Correlation IDs.** Every session has a `sessionId`. Every tool call has a `toolCallId`. Log entries should include the relevant ID so you can filter across a full session's history. Today the daemon logs include `sessionId` -- extend this to trigger IDs, workflow IDs, and step IDs.
-
-6. **Log destinations are configurable.** Today: stdout → daemon.log file via redirect. Long-term: structured JSON to a log aggregator (Datadog, CloudWatch, file), separate log files per workspace, log rotation. The daemon should accept a `--log-level` flag and a `--log-format json|human` flag.
-
-7. **The session store IS the audit log.** Every `advance_recorded`, `node_output_appended`, `validation_performed` event is a durable structured record. The session store should be queryable as a post-mortem tool. `worktrain session logs <id>` should reconstruct the full story of what happened.
-
-**Specific gaps to close:**
-
-- `continue_workflow` tool: log the step ID and notes length being submitted, not just "continue_workflow called"
-- `makeBashTool`: log exit code and output length in addition to the command
-- `makeReadTool` / `makeWriteTool`: log file path and bytes
-- `AgentLoop`: log each LLM turn (turn number, stop reason, tool count) -- today nothing is logged between tool calls
-- `TriggerRouter`: log when a session is queued (semaphore at capacity) and when it dequeues
-- `PollingScheduler`: log each poll cycle result (N events found, N new, N dispatched)
-- `DeliveryClient`: log delivery attempt, HTTP status, response time
-- `DaemonConsole`: log when the console HTTP server starts, stops, or fails a request
-
-**The `worktrain logs` command:**
-```bash
-worktrain logs                          # tail daemon.log
-worktrain logs --session sess_abc123    # replay full session from event store
-worktrain logs --trigger test-task      # all sessions for this trigger
-worktrain logs --level error            # only errors across all sources
-worktrain logs --since 1h               # last hour
-worktrain logs --format json            # machine-readable output
-```
-
-**Self-healing dependency:** The automatic gap detection, WORKTRAIN_STUCK routing, and coordinator self-healing patterns all depend on logs being structured and complete. You can't auto-fix what you can't observe. Logging quality is a prerequisite for autonomous operation at scale.
-
----
-
-### Event sourcing for orchestration: extend the session store to daemon and coordinator events (Apr 17, 2026)
-
-**The decision:** extend the existing WorkRail event store infrastructure to cover orchestration-level events, not build a separate system. The session store is already append-only, crash-safe, content-addressed, and queryable -- rebuilding those properties would be wasteful.
-
-**The model: multiple event streams, same infrastructure**
-
-```
-~/.workrail/events/
-  sessions/          ← already exists (per-session workflow events)
-  daemon/            ← new: lifecycle, triggers, delivery, errors
-  triggers/          ← new: per-trigger poll history and outcomes
-  coordinator/       ← future: coordinator script decisions and routing
-```
-
-Each stream is append-only JSONL with the same segment/manifest pattern as the session store. The `worktrain logs` command queries across streams. Watchdog and coordinator scripts subscribe to streams.
-
-**Daemon event stream: what gets recorded**
-
-Every significant daemon action becomes a structured event:
-
-```jsonl
-{"ts":"2026-04-17T...","kind":"daemon_started","port":3200,"workspacePath":"...","version":"3.31.0"}
-{"ts":"...","kind":"trigger_fired","triggerId":"test-task","workflowId":"coding-task-workflow-agentic"}
-{"ts":"...","kind":"session_queued","sessionId":"sess_abc","triggerId":"test-task","queueDepth":0}
-{"ts":"...","kind":"session_started","sessionId":"sess_abc","workflowId":"coding-task-workflow-agentic","modelId":"..."}
-{"ts":"...","kind":"tool_called","sessionId":"sess_abc","tool":"Bash","command":"ls docs/ | grep trigger"}
-{"ts":"...","kind":"tool_error","sessionId":"sess_abc","tool":"Bash","error":"exit 1","isError":true}
-{"ts":"...","kind":"step_advanced","sessionId":"sess_abc","stepId":"phase-0-triage-and-mode","advance":1}
-{"ts":"...","kind":"session_completed","sessionId":"sess_abc","stopReason":"stop","durationMs":1847000}
-{"ts":"...","kind":"delivery_attempted","sessionId":"sess_abc","callbackUrl":"https://...","status":200}
-{"ts":"...","kind":"poll_cycle","triggerId":"pr-review","eventsFound":3,"newEvents":1,"dispatched":1}
-```
-
-**`DaemonEventEmitter`:** thin wrapper around the event store, called from TriggerRouter, workflow-runner, delivery-client, and polling-scheduler. Each call appends one event to `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`. Zero overhead when nothing is listening.
-
-**`worktrain logs` CLI:** reads from both session store and daemon event stream, correlates by `sessionId`, presents a unified timeline:
-
-```
-worktrain logs                          # tail current daemon events
-worktrain logs --session sess_abc123    # full timeline: trigger → steps → delivery
-worktrain logs --trigger test-task      # all sessions for this trigger  
-worktrain logs --level error            # only errors across all streams
-worktrain logs --since 1h               # last hour of activity
-worktrain logs --format json            # machine-readable for scripts
-```
-
-**SSE extension:** the console already streams session events via SSE. Extend to also stream daemon events so the console live feed shows everything: trigger fires, tool calls, delivery attempts, errors -- not just step advances. This is the "more than just the DAG" console improvement.
-
-**Why this matters for self-healing:** The coordinator self-healing pattern requires the coordinator to observe what happened. Today it reads `lastStepNotes` and session store snapshots -- both batch reads after the fact. With a subscribable daemon event stream, the coordinator can react in real time: "tool_error event for session X → spawn diagnostic sub-session now" rather than "check for WORKTRAIN_STUCK markers after the fact."
-
-**Build order:**
-1. `DaemonEventEmitter` + daemon event stream file (append-only JSONL, no fancy infra needed to start)
-2. Wire emitter calls into TriggerRouter, workflow-runner, delivery-client
-3. `worktrain logs` CLI commands (reads files, correlates by sessionId)
-4. SSE extension in DaemonConsole for live event streaming
-5. Coordinator script subscription to event streams (replaces polling session store)
-
----
-
-### Subagent context packaging: the main agent assumes too much (Apr 17, 2026)
-
-**The problem:** When a main agent spawns a subagent, the work package it creates is usually too thin. The main agent has rich context from the full conversation -- why this task matters, what was already tried, what constraints were discovered -- but it packages the subagent task as if that context is shared. The subagent gets a one-liner and has to rediscover everything from scratch.
-
-This is the same problem as a developer handing a junior a vague JIRA ticket instead of a proper brief. The subagent wastes tokens re-deriving what the main agent already knows, or worse, makes wrong assumptions.
-
-**Where this manifests:**
-- Coding task subagents that don't know why a specific approach was chosen
-- MR review subagents that don't know what invariants matter for this codebase
-- Discovery subagents that re-read files the main agent just read
-- Fix subagents that don't know what was already tried and failed
-
-**Three solution directions:**
-
-**Option A: Better instructions to the main agent (prompt engineering)**
-Add explicit guidance to the WorkTrain system prompt: "When spawning a subagent, include: (1) what you already know that the subagent won't, (2) what was already tried, (3) why this specific approach was chosen, (4) what constraints or invariants matter, (5) what 'done' looks like." This is the cheapest fix but depends on the main agent reliably following it.
-
-**Option B: Platform-assisted package creation (structured)**
-The `worktrain spawn` command (or the `spawn_session` tool) takes a structured work package:
+**Design (Option B -- structured work package):**
 ```typescript
 spawnSession({
   workflowId: 'coding-task-workflow-agentic',
   goal: '...',
   context: {
-    whyThisApproach: '...',        // what the main agent knows about the decision
-    alreadyTried: [...],           // what failed
-    knownConstraints: [...],       // invariants the subagent must respect
-    relevantFiles: [...],          // files the main agent already read
-    completionCriteria: '...'      // what done actually looks like
+    whyThisApproach: '...',
+    alreadyTried: [...],
+    knownConstraints: [...],
+    relevantFiles: [...],
+    completionCriteria: '...'
   }
 })
 ```
-The platform validates that the package is complete before spawning -- missing fields emit a warning or block the spawn. The subagent's system prompt is enriched with this context automatically, without the main agent having to think about how to format it.
 
-**Option C: Platform-mediated context transfer (autonomous)**
-The platform automatically packages context from the spawning session into the child session. When the main agent calls `spawn_session`, the platform reads the current session's step notes and recent advances, synthesizes a context bundle, and injects it into the child's system prompt. No explicit packaging required from the main agent.
+**Context mode:** `context: 'inherit' | 'blank' | 'custom'`. Blank is for adversarial roles (challenger, reviewer) where anchoring to main-agent context is counterproductive.
 
-This is the most powerful but also the most complex -- requires the platform to understand what's relevant, not just what's recent.
-
-**Recommended approach: B + A**
-Option B (structured work package with validation) as the primary mechanism. Option A (better main agent instructions) as a fallback. Option C as a long-term goal once the knowledge graph and session event stream are queryable enough to synthesize context automatically.
-
-**The `context` field in the structured package is the key addition.** Today `worktrain spawn` takes `goal`, `workflowId`, `workspacePath`. Adding a structured `context` object that the platform validates and injects gives subagents the brief they need without depending on the main agent to remember to include it.
-
-**Connection to knowledge graph:** Once the structural knowledge graph is built, `relevantFiles` can be auto-populated from a graph query rather than requiring the main agent to list them. The platform asks "what files are relevant to this goal?" and includes them automatically. This is how the context packaging problem gets solved at scale -- the platform knows what the subagent needs without the main agent having to enumerate it.
-
-**Session knowledge log (extends Option B):**
-As the main agent progresses, it continuously appends to a structured `session-knowledge.jsonl` for the session. Not step notes (those are workflow artifacts) -- this is a running record of things that would matter to any agent picking up this work:
-
-```jsonl
-{"kind":"decision","summary":"Using execFile not exec for all subprocess calls","reason":"Shell injection risk with user-controlled content","ts":1234567890}
-{"kind":"user_pushback","summary":"User rejected the polling approach","detail":"Wants webhook-based solution instead","ts":...}
-{"kind":"relevant_file","path":"src/trigger/trigger-router.ts","why":"Core routing logic, all trigger changes flow through here","ts":...}
-{"kind":"constraint","summary":"Never modify triggers.yml autonomously","source":"daemon-soul.md","ts":...}
-{"kind":"tried_and_failed","summary":"Tried npx approach, got version mismatch","detail":"Local build is different from installed package","ts":...}
-{"kind":"external_ref","url":"https://github.com/...","why":"Design doc for the delivery pattern","ts":...}
-{"kind":"plan","path":"implementation_plan.md","summary":"3-slice plan for the feature","ts":...}
-```
-
-When spawning a subagent, the platform automatically includes the session knowledge log in the work package. The subagent gets the full brief without the main agent having to reconstruct it.
-
-**Blank subagents (intentionally uncontextualized):**
-Sometimes you explicitly DON'T want context from the main session -- fresh eyes are the point. A hypothesis challenge subagent should challenge the leading hypothesis, not be anchored to it. An adversarial reviewer should find problems without knowing the main agent thinks the approach is sound.
-
-The `spawn_session` call should have an explicit `context: 'inherit' | 'blank' | 'custom'` field:
-- `inherit` -- auto-package from session knowledge log (default for most tasks)
-- `blank` -- no session context injected, subagent starts fresh (for adversarial roles)
-- `custom` -- explicit structured package (for precise control)
-
-**Subagent types with specialized system prompts and tools:**
-
-Different tasks need different cognitive profiles. A subagent type bundles: system prompt, available tools, and context mode:
-
-| Type | System prompt focus | Tools | Context |
-|------|---------------------|-------|---------|
-| `researcher` | Thorough, neutral, evidence-first | Read, Bash (read-only), Glob, Grep | inherit |
-| `challenger` | Adversarial, finds holes, challenges assumptions | Read, Bash | blank (intentionally unanchored) |
-| `implementer` | Precise, follows plans, no improvisation | Read, Write, Bash, continue_workflow | inherit |
-| `reviewer` | Finds bugs, security issues, philosophy violations | Read, Bash | blank |
-| `verifier` | Confirms claims with evidence, runs commands | Read, Bash | inherit |
-| `coordinator` | Routes work, reads event streams, dispatches | worktrain_spawn, worktrain_await | inherit |
-
-The type determines the system prompt variant, not just the tools. A `challenger` gets a system prompt that explicitly says "your job is to find problems, not solve them -- do not offer solutions." A `verifier` gets "do not trust claims without running the commands yourself."
-
-This is the WorkTrain equivalent of cognitive specialization -- different agents for different modes of thought, not just different tasks. The workflow step can specify which subagent type to spawn: `spawn_session({ type: 'challenger', goal: '...' })`.
+**Session knowledge log:** As the main agent progresses, it appends to `session-knowledge.jsonl` -- decisions, user pushback, relevant files, constraints, things tried and failed. Auto-included in subagent work packages.
 
 ---
 
-### Workflow-scoped system prompts for subagents (Apr 17, 2026)
+### Workflow-scoped system prompts for subagents
 
-**The idea:** Workflows (and individual steps within them) can declare a `systemPrompt` field that gets injected into subagent sessions spawned by that workflow step. The workflow author encodes the cognitive mode directly rather than describing it in step prose that the agent has to interpret.
+**Status: idea** | Priority: medium
 
-**Why this is the right layer:**
-The workflow already controls: what steps run, what tools are available, what the output contract is, what assessments are required. The cognitive mode -- how the agent should think -- is a natural extension of that. A workflow that says "run as adversarial challenger" should be able to enforce that at the platform level, not just suggest it in a prompt.
+**Design:** Workflows (and individual steps) can declare a `systemPrompt` field injected into subagent sessions.
 
-**Two levels:**
-
-**1. Workflow-level `systemPrompt`** -- applies to all subagents spawned by this workflow:
 ```json
 {
   "id": "mr-review-workflow.agentic.v2",
-  "systemPrompt": "You are an adversarial code reviewer. Your job is to find problems, not validate the approach. Do not offer solutions -- only surface issues with evidence. Treat every claim as unproven until you verify it yourself.",
+  "systemPrompt": "You are an adversarial code reviewer. Your job is to find problems, not validate the approach.",
   "steps": [...]
 }
 ```
 
-**2. Step-level `systemPrompt`** -- overrides the workflow-level prompt for a specific step:
-```json
-{
-  "id": "phase-hypothesis-challenge",
-  "systemPrompt": "You are a devil's advocate. For every assumption in the hypothesis, find the strongest counterargument. Do not be balanced -- be adversarial.",
-  "prompt": "Challenge the leading hypothesis..."
-}
-```
+Step-level `systemPrompt` overrides workflow-level for that step.
 
-**How it composes with the base system prompt:**
-The final subagent system prompt is assembled in layers:
-1. WorkTrain base prompt (execution contract, oracle priority, tools)
-2. Workflow-level `systemPrompt` (cognitive mode for this workflow)
-3. Step-level `systemPrompt` (cognitive override for this step)
+**Composition layers:**
+1. WorkTrain base prompt
+2. Workflow-level `systemPrompt`
+3. Step-level `systemPrompt`
 4. Soul file (operator behavioral rules)
 5. AGENTS.md / workspace context
-6. Session knowledge log (inherited context, if `context: 'inherit'`)
-7. Step prompt (the actual work instruction)
-
-The workflow author controls layers 2-3. The operator controls layer 4. The platform assembles 1 and 5-7 automatically. Clear separation of concerns.
-
-**This also enables the subagent type system** (from the previous backlog entry) to be workflow-driven rather than call-site-driven. Instead of `spawn_session({ type: 'challenger' })`, the workflow step that spawns a challenger simply declares `systemPrompt: "you are adversarial..."` -- the cognitive mode travels with the workflow definition, not the spawn call.
-
-**Schema addition:**
-```typescript
-interface WorkflowDefinition {
-  systemPrompt?: string;  // workflow-level, injected into all subagent sessions
-  steps: WorkflowStep[];
-}
-
-interface WorkflowStep {
-  systemPrompt?: string;  // step-level, overrides workflow-level for this step
-  prompt: string;
-  // ...existing fields
-}
-```
-
-**Authoring implication:** The `workflow-for-workflows` meta-workflow should guide authors to write cognitive mode as `systemPrompt` rather than embedding it in `prompt` prose. "What mode should the agent be in?" is a structural question, not a content question.
+6. Session knowledge log (if `context: 'inherit'`)
+7. Step prompt
 
 ---
 
-### Console as the unified WorkRail dashboard -- standalone, file-reading, zero coupling (Apr 18, 2026)
+### `context-gather` step type
 
-**The insight:** The console is the unified view of all WorkRail activity -- whether sessions were started by the autonomous daemon or by a human working interactively through the MCP server. It doesn't care how a session was created. It reads the same session store either way.
+**Status: idea** | Priority: medium
 
-The console doesn't need a live connection to either the daemon or the MCP server. It reads files. The current architecture where the console is owned by whichever process wins a port election is wrong -- it's a legacy of when the MCP server was the only long-running process.
+**Problem:** Phase 0.5 in the coding workflow currently looks for a shaped pitch by checking a local path. This doesn't handle coordinator-injected context, manually written docs (GDoc, Confluence, Notion), Glean-indexed artifacts, or URLs embedded in the task description. The search logic is duplicated if other workflows need the same document.
 
-**Target architecture -- zero coupling:**
-
-```
-Daemon          → writes ~/.workrail/data/sessions/
-                → writes ~/.workrail/events/daemon/
-                → serves :3200 (webhooks only)
-
-MCP server      → reads/writes session store (same files as daemon)
-                → serves :3100 (Claude Code bridge only)
-
-Console         → reads ~/.workrail/data/sessions/ (file watch, not HTTP)
-                → reads ~/.workrail/events/daemon/ (file watch)
-                → reads git for PR/commit context
-                → serves :3456 (browser UI only)
-                → `worktrain console` -- fully standalone binary
-```
-
-**No startup coordination. No lock files. No port election. No coupling.**
-
-The console works whether the daemon is running or not, whether the MCP server is running or not. Start it once, leave it running permanently. It shows whatever is in the files.
-
-**How it gets live updates without HTTP:** FSEvents (macOS) / inotify (Linux) file watching on the session store and daemon event stream. When a new event is appended, the console picks it up within milliseconds and pushes to the browser via SSE -- same latency as today, no polling, no HTTP connection to the daemon required.
-
-**The `worktrain console` command:**
-```bash
-worktrain console              # start on default port 3456
-worktrain console --port 4000  # custom port
-worktrain console --workspace ~/git/myproject  # workspace-scoped view
-```
-
-**Migration:** Remove console startup from both the daemon command and the MCP server startup. The primary election logic (`DashboardLock`, `bindWithPortFallback`) becomes unnecessary. The `DaemonConsole` module in `src/trigger/daemon-console.ts` becomes `src/console/standalone-console.ts` with a simpler interface.
-
-**Why this matters:** Today the console goes down whenever the MCP server crashes. With this architecture, the console is as stable as the filesystem. The daemon crashing doesn't affect the console. The MCP server crashing doesn't affect the console. The only thing that can take down the console is killing the `worktrain console` process itself.
-
----
-
-## WorkTrain sprint: Apr 17-18, 2026 -- shipped and current state
-
-### What shipped (Apr 17-18)
-
-**Daemon stabilization:**
-- `report_issue` tool -- agents call this instead of dying silently; structured JSON written to `~/.workrail/issues/<sessionId>.jsonl`, event emitted to daemon stream, WORKTRAIN_STUCK marker in `WorkflowRunResult`
-- Richer `BASE_SYSTEM_PROMPT` -- baked-in behavioral principles (oracle hierarchy, self-directed reasoning, workflow-as-contract, silent failure policy) rather than relying on soul file alone
-- `/bin/bash` for Bash tool -- process substitution `<(...)` and other bash-specific syntax now works
-- `DaemonEventEmitter` -- structured event stream at `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`
-- Self-configuration -- `triggers.yml`, upgraded `daemon-soul.md` (WorkRail-specific rules + coding philosophy), `AGENTS.md` WorkTrain section
-
-**Workflow library:**
-- mr-review v2.6 -- `philosophy_alignment` reviewer family; scoped philosophy extraction in fact packet; 7th coverage domain; "is this the right design?" framing
-- wfw v2.5 -- phases 2 and 3 split into dedicated prep-step design steps (2a/2b, 3a/3b); principle: assessments need dedicated prep steps, not on-the-fly evidence gathering
-- Clean workflow display names across library (removed `v2 •`, `Lean •`, etc.)
-- `philosophy.mdc` created at `~/.firebender/commands/philosophy.mdc` -- MR review subagents now evaluate findings against coding philosophy
-
-**Integrations and infrastructure:**
-- GitLab polling triggers fully merged (#404) -- zero-webhook MR polling
-- TS6 forward-compat tsconfig fixes (#401) -- unblocks TypeScript 6 dep bumps
-- Standalone console spec -- `worktrain console` as independent file-reading binary, zero coupling to daemon or MCP server
-
----
-
-### Current state (Apr 18, 2026)
-
-**What works:**
-- Daemon runs autonomously on webhook triggers
-- Sessions advance through full workflow steps
-- Console at `:3456` when daemon starts before MCP server
-- Daemon event stream logging every tool call
-- GitLab + GitHub polling (no webhooks needed)
-- Philosophy-aligned MR reviews
-- `report_issue` tool available to agents
-
-**Known issues / active bugs:**
-
-1. **Daemon killed by MCP server reconnects** (CRITICAL) -- the daemon and MCP server share process infrastructure via the bridge mechanism. When Claude Code reconnects and a new MCP server process starts, it displaces the running daemon. The daemon must be run from a separate terminal or as a `launchd` service to survive MCP reconnects. Root fix: decouple daemon from the MCP server process tree entirely.
-
-2. **Console unstable** -- the console port (3456) is contested between daemon and MCP server. Whoever starts first wins. When the MCP server reconnects, it takes the port and the daemon console goes down. Root fix: standalone `worktrain console` binary (spec in backlog).
-
-3. **`workflow_not_found` on first test** -- trigger used `coding-task-workflow-agentic.lean.v2` (filename) instead of `coding-task-workflow-agentic` (workflow ID). Fixed in triggers.yml. Symptom of workflow ID vs filename confusion -- worth a validator that catches this at `worktrain daemon` startup.
-
-4. **Session advances 0 when daemon crashes** -- if daemon dies mid-Phase-0 (before any `continue_workflow` call), the session is orphaned at `observation_recorded(8)` with 0 advances and no output. No automatic recovery. Crash recovery reads the daemon-session token file but can't resume a session that never advanced. No fix yet.
-
----
-
-### Next priorities (groomed Apr 18)
-
-**Tier 1 -- Must fix for reliable autonomous operation:**
-1. **Daemon as a launchd service** -- run daemon outside Claude Code's process tree so MCP reconnects can't kill it. `worktrain daemon --install` creates a launchd plist and starts it.
-2. **Standalone `worktrain console`** -- file-watching binary independent of daemon/MCP. Zero coupling. Spec in backlog.
-3. **Workflow ID validation at startup** -- `workrail daemon` should validate that all `workflowId` values in triggers.yml resolve to real workflows before starting, not fail silently at dispatch time.
-
-**Tier 2 -- Workflow quality:**
-4. **mr-review prep steps** -- the audit identified missing dedicated prep steps for philosophy extraction, pattern baseline, and design decision reconstruction. These are described in the backlog but not yet in the workflow JSON. wfw v2.5 guides new workflows to add them; the mr-review workflow itself still needs a v2.7 pass to implement them.
-5. **Autonomous workflow variants** -- audit `requireConfirmation` gates across all workflows; confirm daemon's `autonomy: full` setting correctly bypasses the right ones.
-
-**Tier 3 -- Features:**
-6. **`worktrain spawn` / `worktrain await`** -- already merged, needs real-world test
-7. **Auto-commit from handoff artifact** -- merged but untested end-to-end
-8. **Session knowledge log** -- continuous context accumulation for subagent packaging
-9. **TypeScript 6 dep bump** -- tsconfig fixes are in (#401), unblocks #244 and #231
-
-**Open PRs (only dep bumps remain):**
-- #330, #287, #288 -- vitest 4 + vite 8 (major version, needs testing)
-- #244, #231 -- TypeScript 6.0.2 (now unblocked by #401)
-
----
-
-### Duplicate task detection: prevent agents from doing the same work twice (Apr 18, 2026)
-
-**The problem:** with multiple agents running concurrently and a persistent work queue, it's easy to accidentally start two agents on the same task -- especially when the queue drains items from external sources (GitHub issues, Jira) that may be added again after a sync. Today, two agents can independently pick up the same issue, do the same investigation, and open duplicate PRs.
-
-**Detection sources:**
-1. **Open PRs**: before starting any coding task, check `gh pr list --state open` -- if a PR already exists that addresses the same issue/goal, skip it
-2. **Active sessions**: the session store knows which workflows are currently running and what their goals are; a new dispatch can check for semantic overlap before starting
-3. **Queue deduplication**: the work queue should deduplicate by external item ID (GitHub issue number, Jira ticket key) so the same item can't be enqueued twice
-4. **Session history**: before starting an investigation, check recent session notes for the same workflowId + goal combination -- if it was completed in the last 24 hours with a successful result, skip or ask the user
-
-**Implementation approach:**
-- Queue-level dedup is the simplest and most reliable: each queue item from an external source carries its `sourceId` (e.g. `github:EtienneBBeaulac/workrail:issues:123`). On enqueue, check if `sourceId` already exists in the queue (pending or active) -- if so, skip with a log.
-- PR-level dedup: before `worktrain spawn` dispatches a coding task, run `gh pr list --search "<issue title keywords>"` and check for matches. If found, add to outbox ("task already in progress as PR #X") and skip.
-- Session-level dedup: the coordinator script checks active session goals before spawning a new one with the same goal text.
-
-**The classify-task-workflow role:** when a task is classified, it can also output a `deduplicationKey` (e.g. `fix:trigger-store:error-kind-consistency`) that is stored with the queue item. Queue items with the same key are considered duplicates.
-
-**What makes this hard:** semantic dedup (two tasks described differently but solving the same problem) requires embedding-based similarity, not exact match. For MVP, exact `sourceId` match + approximate PR title search is sufficient. Semantic dedup is a post-knowledge-graph feature.
-
----
-
-### Agent actions as first-class events in the session event log (Apr 18, 2026)
-
-**The vision:** the console should be able to reconstruct exactly what an agent did in a session -- every tool call, every argument, every result, every decision -- by reading the event log alone. No log files, no stdout parsing, no separate monitoring infrastructure. The session event store IS the audit trail.
-
-**What's already in the event log:**
-- `session_created`, `run_started`, `run_completed`
-- `node_created`, `edge_created`, `advance_recorded`
-- `node_output_appended` (step notes)
-- `preferences_changed`, `context_set`, `observation_recorded`
-
-**What's missing -- agent-level actions:**
-- `tool_call_started` -- which tool was called, with what arguments, at what timestamp
-- `tool_call_completed` -- result (truncated), duration, success/error
-- `llm_turn_started` -- model, token count estimate, step context
-- `llm_turn_completed` -- stop reason, output tokens, whether steer() was injected
-- `steer_injected` -- what context was injected and why (session recap, workspace context)
-- `report_issue_recorded` -- the structured issue from the `report_issue` tool
-- `worktrain_stuck` -- when WORKTRAIN_STUCK marker is emitted
-
-**Why this matters:**
-Today the `DaemonEventEmitter` writes to `~/.workrail/events/daemon/YYYY-MM-DD.jsonl` separately from the session store. That's two places to look -- and they're not correlated to specific sessions. Putting agent actions into the session event log means:
-- Console can show a session timeline: "Phase 0: called `bash` 3 times (12ms, 8ms, 45ms) → called `read` 2 times → advanced to Phase 1"
-- The proof record (verification chain spec) can link specific tool calls to assessment gate evidence
-- Crash recovery knows exactly where in the agent's execution it died
-- The knowledge graph can be updated from session events without re-reading step notes
-
-**The event schema (additions to the existing event store format):**
-
-```typescript
-// Tool call lifecycle
-{ kind: 'tool_call_started', tool: 'bash', args: { command: 'git status' }, nodeId, ts }
-{ kind: 'tool_call_completed', tool: 'bash', durationMs: 45, exitCode: 0, resultSummary: '...', nodeId, ts }
-{ kind: 'tool_call_failed', tool: 'bash', durationMs: 45, error: 'ENOENT', nodeId, ts }
-
-// LLM turn lifecycle  
-{ kind: 'llm_turn_started', model: 'claude-sonnet-4-6', inputTokens: 12000, nodeId, ts }
-{ kind: 'llm_turn_completed', stopReason: 'tool_use', outputTokens: 450, toolsRequested: ['bash'], nodeId, ts }
-
-// Steer injection
-{ kind: 'steer_injected', reason: 'session_recap', contentLength: 800, nodeId, ts }
-
-// Agent self-reporting
-{ kind: 'report_issue_recorded', severity: 'warning', summary: '...', sessionId, ts }
-```
-
-**Where to emit them:**
-- In `src/daemon/agent-loop.ts` -- before and after each `tool.execute()` call, before and after each LLM call
-- In `src/daemon/workflow-runner.ts` -- for steer injection and report_issue recording
-- Use the existing `V2ToolContext` session store to append events (same mechanism as `continue_workflow` and `start_workflow`)
-
-**Console rendering:**
-Each session detail view gets a "Timeline" tab alongside "Steps" and "Notes":
-```
-Phase 0: Understand & Classify         [2m 14s]
-  ├── llm_turn              450 tokens → 3 tool calls
-  ├── bash: git status                    45ms ✓
-  ├── bash: gh pr list                   180ms ✓  
-  ├── read: AGENTS.md                      8ms ✓
-  └── llm_turn              280 tokens → advance
-Phase 1a: State Hypothesis              [0m 38s]
-  ├── llm_turn              310 tokens → advance
-  ...
-```
-
-**Relationship to DaemonEventEmitter:**
-The existing `DaemonEventEmitter` (written in #498) writes to a separate daily log file. Once agent actions are first-class session events, the daemon event emitter can be simplified or removed -- the session event log is the canonical record. The console reads session events, not daemon event files.
-
-**Build order:**
-1. Add `tool_call_started`/`tool_call_completed` events to `agent-loop.ts` -- smallest change, highest value
-2. Add `llm_turn_started`/`llm_turn_completed` events
-3. Console Timeline tab reads and renders the new event kinds
-4. Wire `report_issue_recorded` and `steer_injected` events
-5. Deprecate `DaemonEventEmitter` once console reads from session events
-
----
-
-### FatalToolError: distinguish recoverable from non-recoverable tool failures (follow-up from PR #523)
-The blanket try/catch in AgentLoop._executeTools() converts ALL tool throws to isError tool_results. This is correct for Bash/Read/Write (LLM can see and retry), but potentially wrong for continue_workflow failures (LLM retrying with a broken token loops). The discovery agent proposed a FatalToolError subclass: tools throw FatalToolError for non-recoverable errors (session corruption, bad tokens), plain Error for recoverable failures. _executeTools catches plain Error and returns isError; FatalToolError propagates and kills the session. Combined with the DEFAULT_MAX_TURNS cap (PR followup), this provides defense-in-depth.
-
----
-
-### Worktree lifecycle management: automatic cleanup and inventory (Apr 18, 2026)
-
-**The problem:** every WorkTrain agent that uses `--isolation worktree` leaves a worktree on disk after completion. With 10 concurrent agents running all day, this accumulated to 69 worktrees in `.claude/worktrees/`, triggering hundreds of simultaneous `git status` processes that saturated the CPU.
-
-**What's needed:**
-
-1. **Automatic cleanup on session end** -- when a WorkTrain session completes (success or failure), the daemon automatically runs `git worktree remove <path> --force` for the session's worktree. If the branch is already merged to main, also delete the local branch ref.
-
-2. **Startup pruning** -- `workrail daemon` startup runs `git worktree prune` in each configured workspace before starting the trigger listener.
-
-3. **`worktrain worktree list`** -- shows all WorkTrain-managed worktrees: path, branch, session ID, age, whether the branch is merged.
-
-4. **`worktrain worktree clean`** -- removes all worktrees whose branches are merged to main, or older than N days. Dry-run mode by default.
-
-5. **`worktrain worktree status`** -- summary: how many worktrees, total disk usage, any stale ones.
-
-6. **Never use main as a worktree** (already in backlog) -- enforced at worktree creation time, not just as a rule.
-
-**Root cause of the CPU spike:** 69 worktrees × repeated `git status --short` from tools/IDE plugins = hundreds of concurrent git processes. Each `git status` on a large repo with many untracked files is CPU-intensive.
-
-**Mitigation already in place:** `--isolation worktree` creates branches named `worktree-agent-<id>` -- these are identifiable and bulk-deletable. The daemon's `runStartupRecovery()` could also prune them.
-
-**Build order:** startup pruning (trivial, high value) → automatic cleanup on session end → `worktrain worktree` CLI commands.
-
----
-
-### Simplify MCP server: remove primary election, bridge, and HTTP serving (architectural cleanup)
-
-**The core insight:** the bridge/primary-election system exists solely to solve "only one process should serve the console UI on port 3456." Now that `worktrain console` is a standalone file-watching binary (PR #512), that problem is already solved. The entire bridge/election system can be removed.
-
-**What "allow multiple MCP processes" means in practice:**
-- Each Claude Code window gets its own MCP server -- no port contention, no primary election, no bridge reconnect cycles
-- MCP server becomes pure stdio: starts, handles tools, exits. Nothing async needs to write after the pipe closes -- EPIPE is irrelevant.
-- Session store is append-only JSONL per-session -- multiple processes writing different sessions cannot corrupt each other
-- `worktrain console` aggregates all sessions from the file store regardless of how many MCP servers ran
-
-**What to remove:**
-- `DashboardLock` / `tryBecomePrimary()` / `bindWithPortFallback()` -- the entire primary election system
-- `bridge-entry.ts` -- the bridge, spawn storm, and reconnect drama are gone
-- `HttpServer` starting as part of the MCP server -- console owns HTTP, not MCP
-
-**What remains for the MCP server:** pure stdio MCP protocol + session engine. No HTTP, no port binding, no lock files. Starts instantly, exits cleanly.
-
-**Why this is safe:**
-- Tokens are session-scoped UUIDs -- two servers cannot share a session
-- Append-only JSONL has no exclusive file locks
-- ~50MB per process × 3 Claude Code windows = 150MB -- acceptable
-
-**The bridge complexity was always a band-aid.** It was the right solution when the MCP server also owned the console UI. With the standalone console, the band-aid can come off and the system becomes dramatically simpler and more reliable.
-
-**Build order:** extract `worktrain console` fully (done) → remove HttpServer from MCP startup → remove bridge → remove DashboardLock/primary election → MCP server is pure stdio.
-
----
-
-### Agent-engine communication: first principles design (Apr 18, 2026)
-
-**The setup for this conversation:**
-
-Three discovery agents investigated whether the daemon should continue using MCP-style tool calls for workflow control (`continue_workflow`). Their findings:
-
-- **Discovery 1**: Tool calls are fine; enrich `continue_workflow` with `artifacts` now, explore structured output hybrid later pending Bedrock verification. ~225 tokens/request saved with hybrid.
-- **Discovery 2**: `complete_step` tool -- daemon owns transitions, continueToken hidden from LLM, notes required at type level. Cleaner DX without paradigm shift.
-- **Discovery 3**: The field has converged on tool calls. OpenAI Agents SDK, LangGraph, Temporal, Vercel AI SDK all use tool calls for workflow control. WorkRail's `continue_workflow` with HMAC tokens is already field-standard or better.
-
-**User's response to "the field has converged on tool calls":**
-
-> "Right, but do we want industry standards? Aren't we trying to build something special? What if there is better?"
-
-This is the right question. "Field convergence" is a description of where everyone ended up starting from the MCP/function-calling paradigm -- not proof that it's optimal. Every system surveyed treats the workflow engine as external infrastructure the agent calls into. WorkRail is different: **the daemon IS the workflow engine**. The agent loop and the step sequencer run in the same process, sharing the same DI container. Tool calls are a network-origin concept -- they exist because there's an LLM over there and an executor over here. WorkRail doesn't have that constraint.
-
----
-
-#### First-principles alternatives (unexplored territory)
-
-These were not in any of the discovery agents' outputs -- they emerge from the insight that WorkRail owns both sides of the conversation:
-
-**1. Structured response parsing (no tool call for workflow control)**
-The agent outputs a structured response at the end of each turn. The daemon parses it. The LLM never "calls a tool" to advance -- it produces a well-structured output and the daemon acts on it. The continueToken and workflow machinery are completely invisible to the LLM. Example: agent outputs `{"step_complete": true, "notes": "...", "artifacts": [...]}` as its final text, daemon detects this and advances.
-
-**2. Implicit advancement (criteria-based)**
-The daemon watches what the agent produces (file writes, bash outcomes, notes) and decides when to advance -- the agent never explicitly signals "I'm done." The workflow step has completion criteria, and the daemon evaluates them against the agent's cumulative output. More like a CI pipeline (tests pass = done) than an API call. The agent just works; the daemon decides when the step is complete.
-
-**3. Declarative intent + daemon execution**
-The agent outputs what it *wants* to happen: "I want to commit these files with this message and advance to the next step." The daemon executes. Same as the scripts-over-agent principle applied to the agent's own workflow control -- the agent declares intent, scripts execute. No tool call for the mechanical parts.
-
-**4. Streaming judgment**
-The daemon reads the agent's streaming response in real-time, extracts notes and artifacts as they appear, and makes the advance decision before the agent "finishes." No explicit signal from the agent. The daemon monitors and decides.
-
-**5. Separation of concerns: tools for world, declaration for workflow**
-Keep tool calls for external actions (Bash, Read, Write) -- these genuinely need interleaved execution and result reasoning. But workflow control (advance, submit artifacts, set context) uses a different mechanism entirely: structured response, implicit detection, or a single lightweight declaration. The protocol distinction: tools are for I/O, declarations are for state.
-
----
-
-#### What makes this hard
-
-These alternatives trade off in important ways:
-- **Structured response parsing**: requires reliable structured output from the LLM, which can fail without explicit enforcement
-- **Implicit advancement**: requires the daemon to correctly evaluate completion criteria -- complex for open-ended steps
-- **Declarative intent**: still needs some kind of output format; essentially moves the "tool call" into the response text
-- **Streaming judgment**: hardest to implement correctly; requires the daemon to parse partial responses reliably
-
-The current tool-call approach works precisely because it's explicit: the agent signals intent exactly once, the daemon acts on it. The alternatives are more elegant but less reliable.
-
----
-
-#### What to actually investigate
-
-Before committing to any alternative, these questions need answers:
-
-1. **Does Bedrock support `response_format + tools` simultaneously?** A 10-line test call resolves this. If yes, hybrid structured output is immediately viable for workflow control.
-2. **What does implicit advancement actually look like for a coding task?** Write out the completion criteria for `coding-task-workflow-agentic` phase-0 (classify). Can a daemon reliably detect "Phase 0 is done" without an explicit signal?
-3. **What is the actual failure mode of structured response parsing?** How often does Claude 4.6 Sonnet fail to produce valid JSON when asked to end its turn with a structured summary? Under what conditions?
-4. **What did nexus-core do?** The backlog notes nexus-core as a more advanced system -- how does it handle agent-step transitions?
-
-These are prototype questions, not design questions. Build the smallest possible test for each before committing to any direction.
-
----
-
-### Bundled trigger templates: zero-config workflow automation via worktrain init (Apr 18, 2026)
-
-**Problem:** Every user has to write their own triggers.yml manually. Wrong workflow IDs, missing required fields, wrong workspace paths -- all common mistakes (we hit all three today). There's no "just works" path to workflow automation.
-
-**Solution:** Ship common trigger templates bundled with WorkTrain. `worktrain init` presents a menu and generates a pre-filled triggers.yml.
-
-**Bundled templates to ship:**
-
-```yaml
-# Template: mr-review
-- id: mr-review
-  workflowId: mr-review-workflow-agentic
-  goal: "Review the PR specified in the webhook payload goal field"
-  concurrencyMode: parallel
-  autoCommit: false
-  agentConfig: { maxSessionMinutes: 30 }
-
-# Template: coding-task  
-- id: coding-task
-  workflowId: coding-task-workflow-agentic
-  concurrencyMode: parallel
-  autoCommit: false
-  agentConfig: { maxSessionMinutes: 60 }
-
-# Template: discovery-task
-- id: discovery-task
-  workflowId: wr.discovery
-  concurrencyMode: parallel
-  autoCommit: false
-  agentConfig: { maxSessionMinutes: 60 }
-
-# Template: bug-investigation
-- id: bug-investigation
-  workflowId: bug-investigation.agentic.v2
-  agentConfig: { maxSessionMinutes: 45 }
-
-# Template: weekly-health-scan (cron, when native cron trigger ships)
-# - id: weekly-health-scan
-#   type: cron
-#   schedule: "0 9 * * 0"
-#   workflowId: architecture-scalability-audit
-```
-
-**`worktrain init` flow:**
-1. "Which workflows do you want to run automatically?" (checkbox menu)
-2. For each selected: set `workspacePath` to current directory (overridable)
-3. Generate `triggers.yml` in the workspace root
-4. Validate workflow IDs exist before writing (use the startup validator)
-5. Tell the user how to fire each trigger: `curl -X POST http://localhost:3200/webhook/<id> ...`
-
-**Why this matters:** The difference between WorkTrain being usable by anyone vs only by engineers who read the source code. A new user should be able to go from `worktrain init` to their first automated workflow in under 5 minutes.
-
-**Also needed:** `worktrain trigger add <template-name>` to add a single trigger to an existing triggers.yml without re-running init.
-
----
-
-### Coordinator context injection standard: agents start informed, not discovering (Apr 18, 2026)
-
-**The problem:** subagents spawned by a coordinator are completely blind. They know nothing of prior conversations, existing docs, the pipeline, or what's already been tried. The workflows compensate by spending 3-5 turns on "Phase 0: context gathering" every session -- expensive in tokens, time, and LLM turns -- just to get oriented before work starts.
-
-**The root cause:** the coordinator spawns agents with task descriptions but not context. "Fix the Windows CI failures" is a task. "The Windows CI failures are in `workflow-runner-bash-tool.test.ts` because `node -e` isn't in PATH on Windows -- the fix is to use `process.execPath` instead of `node`, which is the established pattern in this codebase" is context. The difference is 0 discovery turns vs 5.
-
-**The standard to establish:**
-
-Every coordinator-spawned agent gets a pre-packaged context bundle. The coordinator assembles it before calling `worktrain spawn`. The bundle includes:
-
-1. **Prior session findings** -- what relevant sessions discovered (from session store query)
-2. **Established patterns** -- the specific invariants and patterns the agent needs (from knowledge graph or AGENTS.md)
-3. **What NOT to discover** -- explicit list of things already known so the agent doesn't waste turns
-4. **Failure history** -- what's been tried and didn't work (prevents re-exploring dead ends)
-
-**Format:** ~2000 tokens max, injected as a `<context>` block before the task description. Structured so the agent can skip Phase 0 context gathering entirely when the bundle is complete.
-
-**Build order:**
-1. Write the standard as a prompt template for coordinator scripts (`worktrain spawn` calls)
-2. The knowledge graph provides the infrastructure for querying relevant context automatically
-3. Eventually: `worktrain spawn` reads the context bundle from the graph + session store automatically, coordinator doesn't have to assemble it manually
-
-**Why this is high priority:** every agent spawned today without proper context is burning tokens on discovery that should have been provided upfront. At 10 concurrent agents, that's 10x the waste. With proper context injection, Phase 0 becomes 1 turn instead of 5, and output quality improves because the agent starts with the right mental model.
-
----
-
-### Context budget per spawned agent: capped, structured, queryable (Apr 18, 2026)
-
-**The companion spec to context injection:**
-
-Rather than hoping agents discover the right context, the coordinator guarantees a minimum context budget: a pre-packaged bundle of ~2000 tokens that every agent starts with. The knowledge graph is what makes this scalable -- without it, the coordinator has to manually assemble context from files, which is itself expensive.
-
-**Bundle contents (structured):**
-- `<relevant_files>` -- paths + key excerpts from files the agent will likely touch (from KG query)
-- `<prior_sessions>` -- summaries of the last 3 sessions that touched related code (from session store)
-- `<established_patterns>` -- specific patterns the agent must follow (e.g. "use `tmpPath()` not `/tmp/`")
-- `<known_facts>` -- things already proven true (e.g. "semantic-release runs automatically after CI, not before")
-- `<do_not_explore>` -- explicit list of dead ends and already-tried approaches
-
-**How the knowledge graph enables this:**
-- `relevant_files`: KG query "what files are related to the goal?" returns the structural subgraph
-- `prior_sessions`: session store query "what sessions touched these files in the last 7 days?"
-- `established_patterns`: AGENTS.md + KG pattern nodes
-- `known_facts` and `do_not_explore`: built by the coordinator from prior session outputs
-
-**Without the KG (today):** the coordinator manually includes key context in the prompt. Better than nothing, but requires the coordinator to know what's relevant.
-**With the KG (future):** `worktrain spawn --workflow X --goal "..."` automatically queries the KG and assembles the context bundle. Coordinator just provides the goal.
-
----
-
-### Decouple goal from trigger definition -- late-bound goals for daemon sessions (Apr 18, 2026)
-
-**The problem:** `goal` is currently required at trigger-definition time (in triggers.yml). For triggers like `mr-review`, the goal is inherently dynamic -- it's the PR title and description, known only when the webhook fires, not when the trigger is configured.
-
-The current workaround: `goalTemplate: "{{$.goal}}"` with the caller passing `{"goal": "Review PR #123..."}` in the webhook payload. This works but is awkward -- the caller must know the payload field convention, and it's not obvious from the trigger definition.
-
-**The right model:** separate "which workflow" (trigger definition) from "what to do" (dispatch-time goal).
-
-```yaml
-# Trigger definition -- no goal required
-triggers:
-  - id: mr-review
-    workflowId: mr-review-workflow-agentic
-    workspacePath: ~/git/myproject
-    # No goal here -- goal comes from dispatch context
-```
-
-```bash
-# Dispatch with goal at call time
-curl -X POST http://localhost:3200/webhook/mr-review \
-  -d '{"goal": "Review PR #123: fix authentication bug"}'
-
-# Or via worktrain spawn
-worktrain spawn --trigger mr-review --goal "Review PR #123: fix authentication bug"
-```
-
-**Implementation options:**
-
-1. **goalTemplate with `$.goal` as the default** -- if no `goal` is set in the trigger and no `goalTemplate` is set, default to `goalTemplate: "{{$.goal}}"`. The webhook payload's `goal` field becomes the canonical way to pass a dynamic goal. Zero breaking changes.
-
-2. **Late-bound goal field on WorkflowTrigger** -- `executeStartWorkflow` accepts `goal` as a separate parameter. The trigger provides everything except the goal; the dispatcher (TriggerRouter) resolves the goal from the webhook payload or a default. This makes the separation explicit at the type level.
-
-3. **Prompt injection** -- the workflow's first step can read `context.goal` which is injected from the webhook payload. The trigger has a static placeholder; the real goal comes through as a context variable. This is how it currently half-works but without the clean API.
-
-**Preferred: Option 1 (default goalTemplate)** -- minimal change, backward compatible, works immediately. If `goal` is absent from the trigger and the webhook payload contains `{"goal": "..."}`, use it. Document this as the standard pattern for dynamic-goal triggers.
-
-**Also needed:** the `worktrain spawn` CLI command should accept `--goal` as a first-class flag (already partially implemented) so coordinator scripts can pass goals without knowing the webhook payload format.
-
-**Why this matters for WorkTrain being production-ready:** most real-world triggers (PR review, issue investigation, incident response) have dynamic goals that depend on what just happened. Static goals in triggers.yml only work for scheduled/cron tasks. Late-bound goals make the whole trigger system composable with external events.
-
----
-
-### Session identity: a unit of work is one session, not many (Apr 18, 2026)
-
-**The problem:** WorkTrain creates a separate WorkRail session for every workflow run. A task that involves discovery + design + implementation + review + re-review appears as 5 unrelated sessions in the console. There's no way to know they belong together without reading the goals. The user sees 50 flat sessions instead of 10 units of work.
-
-**The correct model:** a session is a unit of work, not a workflow run. "Review PR #559" is one session. It might internally run 3 workflow sessions (context gathering, review, re-review) but the user sees one thing with one identity.
-
-**What's needed:**
-
-**1. Parent-child session relationships**
-`session_created` in the session store gets an optional `parentSessionId` field. When a coordinator spawns a child via `worktrain spawn`, the child carries the parent's ID. The session store becomes a tree.
-
-```typescript
-// session_created event
-{
-  kind: 'session_created',
-  sessionId: 'sess_abc123',
-  parentSessionId: 'sess_root456',  // NEW -- absent for root sessions
-  workflowId: 'wr.discovery',
-  goal: '...'
-}
-```
-
-**2. Root session as the identity**
-The root session is what the user sees. It represents the unit of work ("Review PR #559", "Implement GitHub polling adapter"). Child sessions are implementation details -- they may be visible on drill-down but not in the top-level list.
-
-**3. Console session DAG view**
-The console shows root sessions, each expandable to show the tree of child sessions:
-```
-● Review PR #559                    [3 sessions, 22 min]
-  ├── wr.discovery (context)        [completed, 8 min]
-  ├── mr-review-workflow-agentic    [completed, 11 min]  
-  └── coding-task (fix findings)    [running, 3 min...]
-```
-
-**4. Session identity propagated through coordinator**
-`worktrain spawn` accepts `--parent-session <id>` to link child sessions. The coordinator script passes this when spawning each phase of a pipeline. When spawning via the daemon trigger, the trigger's initial session becomes the root.
-
-**Relationship to coordinator sessions spec:**
-The coordinator sessions spec (`spawn_session` + `await_sessions` tools) handles the orchestration. This spec handles the identity and visibility. They're complementary: coordinator scripts drive the work, session identity makes the work visible as a coherent unit.
-
-**Why this matters:**
-- Today: user sees "what are all these sessions?" -- has to read goals to understand grouping
-- With this: user sees "here are my 5 units of work today" -- each one tells a coherent story
-- The console becomes a work log, not a session log
-
-**Build order:**
-1. Add `parentSessionId` to `session_created` event schema (small, additive)
-2. `worktrain spawn --parent-session <id>` flag (wires through TriggerRouter dispatch)
-3. Console aggregates sessions by root and shows tree on expand
-4. Dashboard "work sessions" view replaces flat session list as default
-
----
-
-### Trigger-derived tool availability and knowledge configuration (Apr 18, 2026, to investigate)
-
-**Observation:** the trigger already declares what external system matters. A `gitlab_poll` trigger means the agent will be working on GitLab content. A `jira_poll` trigger means Jira. WorkTrain should use this declaration to automatically configure what tools and knowledge sources the agent gets -- no manual per-trigger MCP configuration.
-
-**Idea 1: Implicit tool availability from trigger source**
-If `provider: gitlab_poll` → agent automatically gets GitLab MCP tools.
-If `provider: github_poll` → agent gets GitHub tools.
-If `provider: jira_poll` → agent gets Jira tools.
-The trigger source is a declaration of intent -- WorkTrain infers the tool environment from it. No extra config needed for the common case.
-
-**Idea 2: Trigger as knowledge configuration**
-The trigger could declare where the agent gets different kinds of knowledge:
-
-```yaml
-- id: jira-bug-fix
-  provider: jira_poll
-  knowledge:
-    general:   [glean, confluence]         # background org knowledge
-    codebase:  [github, local-kg]           # structural code knowledge  
-    task:      [jira-ticket, related-prs]   # what this specific task is about
-    style:     [team-conventions, agents-md] # how to do the work
-```
-
-The daemon assembles a pre-packaged context bundle from these sources before the agent starts. The agent skips Phase 0 discovery entirely for the declared knowledge domains.
-
-**Why this is interesting:**
-- Closes the loop between "what triggers the work" and "what context the agent needs"
-- The trigger author knows better than anyone what knowledge sources are relevant
-- Eliminates redundant context gathering across sessions for the same trigger type
-- Natural fit with workspace-scoped MCP config and the knowledge graph
-
-**What needs investigating:**
-- Is the trigger → tool mapping always 1:1 (gitlab_poll → gitlab MCP) or does it need explicit override?
-- What are the right "knowledge categories"? (general, codebase, task, style seem like a reasonable starting set)
-- How does this interact with the knowledge graph? (local-kg is already planned as a knowledge source)
-- Can this be inferred automatically or does it always need explicit declaration?
-- How do you handle a trigger that spans multiple systems (e.g. a Jira ticket about a GitHub PR)?
-
-**This is a design-first item** -- the ideas are promising but the right shape isn't obvious. Needs a discovery pass before any implementation.
-
----
-
-### Rethinking the subagent loop from first principles (Apr 18, 2026)
-
-**Step back from all assumptions.** The current design assumes subagent spawning works like Claude Code's `mcp__nested-subagent__Task` -- the LLM decides when to spawn, what to give it, and handles the result. That's not the only model, and it might not be the best one for WorkTrain.
-
----
-
-#### The current assumption (inherited from Claude Code)
-
-```
-Agent decides → calls spawn_agent tool → subagent runs → agent gets result → agent continues
-```
-
-The LLM is the orchestrator. It decides when parallelism is needed, what context to pass, how to handle results.
-
-**Problems with this:**
-- LLMs are bad at orchestration decisions -- they sometimes delegate when they shouldn't, sometimes don't when they should
-- Context passing is lossy -- the LLM decides what to include, which is usually insufficient
-- Subagent output competes with everything else in the parent's context window
-- The LLM has to reason about the subagent's output before continuing -- burns context and turns
-- No enforcement -- the LLM can skip delegation entirely and just do the work itself (often wrong)
-
----
-
-#### Alternative model: workflow-declared parallelism, daemon-enforced
-
-**The workflow spec is the orchestration. The daemon is the orchestrator. The LLM is the executor.**
-
-```yaml
-# Workflow step definition
-- id: parallel-review
-  type: parallel
-  agents:
-    - workflow: routine-correctness-review
-      contextFrom: [phase-3-output, candidateFiles]
-    - workflow: routine-philosophy-alignment  
-      contextFrom: [phase-0-output, philosophySources]
-    - workflow: routine-hypothesis-challenge
-      contextFrom: [phase-2-output, selectedApproach]
-  synthesisStep: synthesize-parallel-review
-```
-
-The daemon sees this step definition and:
-1. Automatically spawns 3 child sessions with specified workflows
-2. Injects the declared context bundles (from prior step outputs) into each child
-3. Waits for all 3 to complete
-4. Passes all 3 results to a synthesis step
-5. Injects the synthesis into the parent agent's next turn
-
-**The parent LLM never decides to spawn anything.** It just does its part. The workflow declares the orchestration pattern. The daemon enforces it.
-
----
-
-#### What this changes about the agent's job
-
-Today: "Do this work, and decide when to delegate parts of it to subagents."
-
-New model: "Do this bounded cognitive task. The daemon handles everything else."
-
-The agent's job becomes strictly about the cognitive work -- reasoning, writing, deciding within a defined scope. Orchestration, parallelism, context packaging, result synthesis -- all daemon responsibilities defined by the workflow spec.
-
----
-
-#### The agent gives context to the daemon, not to subagents directly
-
-Instead of the LLM calling `spawn_agent({ goal: "...", context: {...} })`, the workflow step has:
-
-```yaml
-- id: context-gathering
-  output:
-    contextFor:
-      - step: parallel-review
-        keys: [candidateFiles, invariants, philosophySources]
-```
-
-The agent writes outputs as structured artifacts. The daemon routes those artifacts to the right child agents at the right time. The LLM never packages context for a subagent -- it just produces outputs, and the workflow spec declares where those outputs go.
-
-**This is the shift:** from "agent as orchestrator" to "workflow as orchestrator, daemon as executor, agent as cognitive unit."
-
----
-
-#### What the subagent loop might look like
-
-```
-Parent workflow step completes
-  ↓ Daemon reads step output artifacts
-  ↓ Daemon checks workflow spec for parallel/sequential children
-  ↓ Daemon spawns child sessions with structured context bundles
-  ↓ Children run their bounded tasks
-  ↓ Daemon collects child outputs
-  ↓ Daemon passes synthesized context to parent's next step
-  ↓ Parent continues with full context
-```
-
-No LLM orchestration. No token-burning context packaging decisions. No "did I remember to delegate this?" uncertainty.
-
----
-
-#### What needs to be designed (don't implement yet)
-
-1. **Workflow step schema for parallelism** -- how does the workflow spec declare parallel agents, sequential chains, fan-out/fan-in patterns?
-2. **Context routing spec** -- how does a step's output get routed to specific child agents? What's the schema for `contextFor`?
-3. **Synthesis patterns** -- how do multiple child outputs get combined? (concatenate? LLM synthesis step? structured merge?)
-4. **Failure handling** -- if one child fails, what happens? (fail-fast? continue with partial results? retry?)
-5. **Depth limits** -- same constraints as native agent spawning, but enforced at the workflow level not tool level
-6. **Backward compatibility** -- workflows that currently use `mcp__nested-subagent__Task` can be migrated incrementally
-
-**This is a design-first item.** Run a discovery session to explore the design space before any implementation. The current assumptions about subagent loops may be entirely wrong.
-
----
-
-### Workflow runtime adapter: one spec, two runtimes (Apr 18, 2026)
-
-**The core insight:** as workflows evolve (potentially morphing significantly once the subagent loop is rethought), the workflow JSON becomes the canonical spec for *what work needs to happen*. How that spec gets executed depends on the runtime. A single adapter layer translates the canonical spec to runtime-specific execution plans.
-
-**Two runtimes, one spec:**
-
-```
-workflows/mr-review-workflow-agentic.json  ← canonical spec (unchanged)
-         ↓
-WorkflowAdapter.forRuntime('mcp')          ← MCP runtime interpretation
-WorkflowAdapter.forRuntime('daemon')       ← Daemon runtime interpretation
-```
-
-**What each adapter does:**
-
-MCP adapter (human-in-the-loop):
-- Preserves `requireConfirmation` gates
-- Presents `continue_workflow` tool call interface
-- LLM drives subagent spawning manually via `mcp__nested-subagent__Task`
-- Maintains backward compat with all existing Claude Code usage
-
-Daemon adapter (fully autonomous):
-- Removes or auto-bypasses `requireConfirmation` gates
-- Replaces `continue_workflow` with `complete_step` (daemon manages tokens)
-- Converts workflow-declared parallelism into automatic child session spawning
-- Routes step outputs to child agents per workflow spec
-- Enforces output contracts at step boundaries
-
-**Why this matters as workflows evolve:**
-
-Once the subagent loop is rethought (workflow-as-orchestrator model), workflow steps will likely declare parallelism, context routing, and synthesis patterns explicitly. These declarations make no sense to the MCP runtime (a human is already deciding this in real-time). The adapter translates them:
-
-```yaml
-# Workflow spec (future shape)
-- id: parallel-review
-  type: parallel
-  agents: [correctness, philosophy, hypothesis-challenge]
-  contextFrom: [phase-3-output]
-```
-
-MCP adapter sees this → renders as: "You should spawn 3 reviewer subagents now. Here's a template..."
-Daemon adapter sees this → actually spawns 3 child sessions automatically
-
-The workflow spec describes the intent. The adapter knows how each runtime fulfills it.
-
-**Key guarantee:** workflow improvements automatically benefit both runtimes. Improving `mr-review-workflow-agentic`'s philosophy alignment step shows up whether a human runs it through Claude Code or WorkTrain runs it autonomously. No dual maintenance.
-
-**Also eliminates "autonomous workflow variants":** the backlog had a separate item for autonomous variants of workflows. With the adapter, the canonical workflow spec is the only version -- the daemon adapter handles what "autonomy: full" means in practice. No parallel workflow files.
-
-**Build order:**
-1. Define the canonical workflow spec surface (what can be declared)
-2. MCP adapter (largely a no-op -- existing behavior, but formally defined)
-3. Daemon adapter (the interesting one -- translates declarations to daemon execution)
-4. Converter for upgrading existing workflow JSONs to the new canonical spec if the schema evolves
-
-**Dependencies:** requires the subagent loop rethinking to be resolved first -- the adapter can't be designed until we know what the workflow spec will declare.
-
----
-
-### User notifications when daemon starts and finishes work (Apr 18, 2026)
-
-**The problem:** the daemon silently starts and finishes sessions. Unless you're watching the console or tailing the log, you have no idea work happened or completed. For autonomous sessions that run over minutes or hours, this is a significant UX gap.
-
-**What users need to know:**
-- Session started: "WorkTrain started reviewing PR #566" (with a link)
-- Session completed: "WorkTrain finished reviewing PR #566 -- APPROVED, no findings" (with session link)
-- Session failed/stuck: "WorkTrain got stuck on PR #566 after 15 turns -- needs attention" (with details)
-
-**Notification channels -- anything the user wants:**
-
-The notification system should be open-ended. Any channel that accepts a webhook or has an API should be configurable. The architecture is: `DaemonEventEmitter` → `NotificationRouter` → one or more configured channels.
-
-Short-term (easiest to ship):
-- **Outbox.jsonl** -- already spec'd. `worktrain inbox` reads it, mobile client polls it. Works everywhere, zero config.
-- **Generic webhook** -- HTTP POST to any URL. Covers Slack, Discord, Teams, PagerDuty, Zapier, IFTTT, and anything else that accepts webhooks. One implementation, infinite integrations.
-- **macOS notification** -- `osascript` on Mac. Useful for local dev awareness.
-- **Linux/Windows notification** -- `notify-send` on Linux, Windows Toast via PowerShell.
-
-Medium-term (first-class integrations):
-- **Slack** (direct API, not just webhook -- enables threading, reactions, rich formatting)
-- **Discord** (webhook, then bot for richer interactions)
-- **Microsoft Teams** (Adaptive Cards)
-- **Telegram** (popular for personal automation)
-- **Email** (SMTP for async, digest mode)
-
-Long-term (when mobile exists):
-- **Mobile push notifications** -- the mobile app (spec'd in backlog) receives push notifications directly. When the app exists, this becomes the primary channel -- native push is better than any polling-based alternative.
-- **Desktop app** -- if WorkTrain ever has a desktop app, native notifications from there.
-
-**The outbox is the universal foundation.** Every notification goes through `~/.workrail/outbox.jsonl` first. Channel-specific delivery (webhook, Slack, push) is a fan-out from the outbox. This means: a mobile app polling the outbox gets ALL notifications regardless of which other channels are configured.
-
-**Config:**
-```json
-// ~/.workrail/config.json
-{
-  "notifications": {
-    "onSessionComplete": true,
-    "onSessionFailed": true,
-    "onStuck": true,
-    "onSessionStart": false,
-    "channels": [
-      { "type": "webhook", "url": "$SLACK_WEBHOOK_URL" },
-      { "type": "webhook", "url": "$DISCORD_WEBHOOK_URL" },
-      { "type": "macos" },
-      { "type": "outbox" }
-    ]
-  }
-}
-```
-
-**Build order:** outbox.jsonl integration (foundation, works everywhere) → generic webhook (covers Slack/Discord/Teams/anything) → platform notifications (macOS/Linux/Windows) → mobile app push (when mobile exists).
-
----
-
-## 🎉 WorkTrain first confirmed end-to-end autonomous session (Apr 18, 2026)
-
-**Timestamp:** 2026-04-18T15:09:49Z  
-**Commit:** `473f4bd0` (main)  
-**npm version:** v3.34.1 (published, installable by anyone)  
-**What happened:** A real MR review workflow (`mr-review-workflow-agentic`) ran completely autonomously via webhook trigger, advanced through all phases (context gathering, review, synthesis, validation, handoff), self-validated, and produced a structured finding set. 8 step advances, `outcome: success`.
-
-**Trigger:** `POST /webhook/mr-review {"goal": "Review PR #566: fix two minor bugs..."}`  
-**Session:** `sess_3bmjuzf7l2vrqynjtleg5iskm4`  
-**Result:** APPROVE with High confidence. 3 Minor findings, 1 Informational. Correctly decided not to delegate since no Critical/Major issues.
-
----
-
-### What works at this commit
-
-- Daemon accepts webhooks, starts sessions, runs workflows end-to-end
-- Sessions advance through all workflow phases autonomously
-- `mr-review-workflow-agentic` v2.6 runs fully -- context gathering, review phases, synthesis loop, validation, handoff
-- `wr.discovery` v3.2.0 runs fully -- with new phase-0-reframe (goal reframing before research)
-- Console shows live sessions via event log (no daemon connection required)
-- MCP server is stable (bridge removed, EPIPE fixed, v3.34.1 published)
-- GitHub + GitLab polling triggers (no webhooks needed)
-- `worktrain init`, `tell`, `inbox`, `spawn`, `await` CLI commands
-- Stuck detection + visibility (`worktrain status`, `worktrain logs --follow`)
-- `complete_step` tool -- daemon manages continueToken, LLM never handles it
-- Assessment gate circuit breaker (stops at 3 blocked attempts, shows artifact format)
-- `worktrain daemon --install` creates launchd service (daemon survives MCP reconnects)
-- Self-configuration (`triggers.yml`, `daemon-soul.md`, `AGENTS.md` for workrail repo)
-
-### Current limitations at this commit
-
-**Blocking reliable complex workflows:**
-1. **`complete_step` not yet tested in production** -- just merged, daemon still using `continue_workflow` in running sessions. Needs daemon restart to take effect.
-2. **Assessment gates still unreliable** -- `complete_step` fixes the token issue; the `artifacts` field (#557) fixes the submission issue. But `coding-task-workflow-agentic` phases with quality gates haven't been tested end-to-end yet.
-3. **Native `spawn_agent` not yet merged** -- implementation in progress. Until it lands, all subagent delegation is via `mcp__nested-subagent__Task` (invisible black box).
-4. **No session identity (parentSessionId)** -- multi-phase work appears as unrelated flat sessions in the console.
-
-**Architecture not yet realized:**
-5. **Coordinator scripts don't exist** -- `worktrain spawn/await` is there but no templates.
-6. **Subagent loop not rethought** -- LLM still decides when to delegate; workflow-as-orchestrator model is spec'd but not built.
-7. **Workflow runtime adapter not built** -- workflows run in daemon mode as-is; no MCP vs daemon adaptation layer.
-8. **Knowledge graph not built** -- context gathering still sweeps files on every session.
-9. **MCP simplification PR-B not done** -- HttpServer still starts with MCP server.
-
-**Missing for production autonomy:**
-10. **No notifications** -- daemon completes work silently. Users have no awareness unless watching console/logs.
-11. **No auto-commit from handoff artifact** -- merged but untested end-to-end.
-12. **Late-bound goals not implemented** -- triggers require static goals; dynamic goals (like PR reviews) need `goalTemplate: "{{$.goal}}"` as default.
-13. **No coordinator script template** -- the multi-phase autonomous pipeline exists as primitives but not as a usable script.
-
----
-
-### Artifacts as first-class citizens: explorable, accessible, out of the repo (Apr 18, 2026)
-
-**The current mess:** every autonomous session dumps `design-candidates.md`, `implementation_plan.md`, `design-review-findings.md`, `mr-review.md` etc. as files in the repo root or worktrees. They are:
-- Not indexed or searchable
-- Not visible in the console
-- Not accessible to other sessions (agent B can't read agent A's handoff without knowing the exact file path)
-- Polluting the repo with ephemeral working documents
-- Lost when worktrees are cleaned up
-- Scattered across the filesystem with no structure
-
-**The right model:** artifacts are WorkTrain data, not filesystem files.
-
----
-
-#### What an artifact is
-
-Any structured output from a session that has value beyond the session itself:
-- **Handoff docs** -- what one session produces for the next to consume
-- **Design candidates** -- research output with tradeoffs and recommendation
-- **Implementation plans** -- what to build, how, in what order
-- **Review findings** -- MR review output with findings, severity, recommendation
-- **Spec files** -- behavioral specs, acceptance criteria, API contracts
-- **Investigation summaries** -- bug investigation root cause and reproduction
-- **Context bundles** -- pre-packaged knowledge for subagent consumption
-
-**NOT artifacts:** step notes (stay in WorkRail session store), event logs (stay in daemon events), source code (stays in repo).
-
----
-
-#### Where artifacts live
-
-`~/.workrail/artifacts/<sessionId>/<artifact-type>-<timestamp>.json`
-
-Structured JSON, not markdown. The display layer (console, `worktrain artifacts`) renders them as human-readable. Other agents query them as structured data.
-
-**Why JSON not markdown:**
-- Queryable by other agents (what are the findings with severity=critical?)
-- Renderable by the console with proper formatting, filtering, search
-- Versionable and diffable in the artifact store
-- Accessible via the knowledge graph (artifacts become nodes with typed edges)
-
----
-
-#### Console integration
-
-The console session detail view gets an "Artifacts" tab alongside "Steps" and "Notes":
-
-```
-Session: sess_3bmj...  [MR Review: PR #566]
-├── Steps (8)
-├── Notes
-└── Artifacts (3)
-    ├── 📋 review-findings.json    "APPROVE -- 3 Minor, 1 Info"
-    ├── 📄 context-bundle.json     "12 files read, 4 patterns identified"  
-    └── 🔍 investigation-notes.json "Signal 3 dead code in max_turns path"
-```
-
-Click an artifact → full rendered view in the console.
-
----
-
-#### Accessibility to other agents
-
-Agents can query artifacts from prior sessions via a new tool:
-
-```
-read_artifact({ sessionId: 'sess_3bmj...', type: 'review-findings' })
-→ { verdict: 'APPROVE', findings: [...], recommendation: '...' }
-
-search_artifacts({ type: 'implementation-plan', workflowId: 'coding-task-workflow-agentic', since: '7d' })
-→ [{ sessionId, summary, createdAt }, ...]
-```
-
-This replaces the current pattern where agents `cat design-candidates.md` from a known path -- fragile, path-dependent, breaks across worktrees.
-
----
-
-#### Workflow integration
-
-Workflow steps declare their artifact output type:
-
-```json
-{
-  "id": "phase-1c-challenge-and-select",
-  "output": {
-    "artifact": "design-candidates",
-    "schema": "wr.artifacts.design-candidates.v1"
-  }
-}
-```
-
-**Both the daemon AND the MCP server** store step artifacts automatically. The artifact store is a WorkRail data layer feature, not daemon-specific. A human using Claude Code with the MCP produces the same artifacts in the same store as an autonomous daemon session. The console shows them for both. Other sessions (human-driven or autonomous) can query them either way.
-
-In MCP mode, the human can explicitly commit an artifact to the repo if desired (e.g. a final spec becomes `docs/specs/feature-x.md`). But the default is the artifact store -- repo is opt-in. The `NEVER COMMIT MARKDOWN FILES` rule in workflow metaGuidance exists because the artifact store doesn't exist yet. Once it does, that rule becomes unnecessary for all runtimes.
-
----
-
-#### What stays in the repo
-
-Almost nothing from WorkTrain sessions. The only things that belong in the repo:
-- Source code changes (committed via auto-commit or human review)
-- Long-lived spec files that are part of the product (e.g. `docs/ideas/backlog.md`)
-- Workflow definitions (`workflows/*.json`)
-
-Everything else -- design docs, review findings, investigation notes, implementation plans -- lives in `~/.workrail/artifacts/`. If you want a design doc in the repo, you explicitly commit it. The default is: it lives in WorkTrain's data layer.
-
----
-
-#### Build order
-
-1. **Artifact store** -- `~/.workrail/artifacts/<sessionId>/` directory structure, JSON schema for common types
-2. **Daemon writes artifacts** -- workflow steps with `output.artifact` declaration write to the artifact store automatically
-3. **`worktrain artifacts` CLI** -- list, read, search artifacts by session, type, date
-4. **Console artifacts tab** -- render artifacts in session detail view
-5. **`read_artifact` / `search_artifacts` tools** -- agents can query the artifact store
-6. **Knowledge graph integration** -- artifacts become nodes, sessions link to their artifacts
-
-**The `NEVER COMMIT MARKDOWN FILES` rule in metaGuidance is a symptom of this missing feature.** The rule exists because agents keep dumping files in the wrong place. With a proper artifact store, the rule becomes unnecessary -- artifacts have nowhere to go except the artifact store.
-
----
-
-### "Add to repo" button in console for artifacts (Apr 18, 2026)
-
-Instead of workflow steps declaring upfront whether an artifact goes to the repo, the human makes that decision after seeing the content -- via a button in the console.
-
-**The flow:**
-1. Agent produces artifact → stored automatically in `~/.workrail/artifacts/`
-2. Human opens it in the console Artifacts tab
-3. Sees action buttons: **📁 Add to repo** | **📋 Copy** | **🔗 Share link**
-4. Clicks "Add to repo" → console prompts: "Save as: `docs/design/design-candidates-<name>.md`" (editable path with sensible default)
-5. Console commits the artifact as markdown to the repo at that path, with a commit message like `docs: add design candidates for <workflow-goal>`
-
-**Why this is better than workflow-level declaration:**
-- Agent doesn't need to know at step time whether output will be repo-worthy
-- Human decides after seeing actual content quality
-- Ephemeral working artifacts stay ephemeral; only promoted ones go to the repo
-- No "NEVER COMMIT MARKDOWN FILES" rule needed -- agents just produce artifacts, humans decide what's repo-worthy
-
-**Button options:**
-- **📁 Add to repo** -- renders artifact as markdown, commits to repo at specified path
-- **📋 Copy** -- copies rendered markdown to clipboard
-- **🔗 Share link** -- generates a URL that opens the artifact in the console. ⚠️ Local-only: only works on the same machine or with shared filesystem access. Requires cloud hosting for true team sharing (see cloud hosting spec in backlog)
-- **📤 Export** -- save to arbitrary filesystem path outside the repo
-
-**The commit WorkTrain creates:**
-```
-docs(design): add design candidates for MCP simplification
-
-Source: WorkTrain session sess_3bmj... (mr-review-workflow-agentic)
-Artifact: design-candidates-stdio-simplification-2026-04-18.md
-```
-
-**Also useful for:** implementation plans the team wants to track, spec files that belong in the repo permanently, investigation summaries that become part of incident post-mortems.
-
----
-
-## Current state update (Apr 18, 2026 -- later)
-
-**npm version: v3.35.1** (auto-released after spawn_agent merged)
-
-### What additionally shipped since the milestone (commit 473f4bd0)
-
-- **`complete_step` tool** (#569) -- daemon manages continueToken internally, LLM never handles it. Notes required (min 50 chars). `continue_workflow` deprecated.
-- **`spawn_agent` tool** (#573) -- native in-process child session spawning. parentSessionId in session_created event. Depth enforcement. Semaphore bypass. All 4 WorkflowRunResult variants handled.
-- **`complete_step` description fix** (#575) -- removed token-seeking language from deprecated continue_workflow description that would have triggered the LLM to seek a token.
-- **Discovery ran before both implementations** -- wr.discovery validated complete_step approach (found 1 merge blocker fixed), designed spawn_agent architecture (found semaphore deadlock risk avoided).
-
-### Updated limitations
-
-**Still open from previous list:**
-1. ~~complete_step just merged, untested~~ → ✅ merged, description fixed, discovery validated
-2. ~~spawn_agent not merged~~ → ✅ merged as #573
-3. **No session identity in console UI** -- parentSessionId is NOW in the event store (schema extended in #573) but console doesn't show the tree yet. Data is there; visualization is not.
-4. **No coordinator scripts** -- spawn_agent exists, coordinator templates don't.
-5. **Subagent loop still LLM-driven** -- workflow-as-orchestrator model spec'd but not built.
-6. **Workflow runtime adapter not built** -- one spec, two runtimes model spec'd but not built.
-7. **Knowledge graph not built** -- context still sweeps files every session.
-8. **Artifacts not first-class** -- agents still dump markdown files in repo. Artifact store spec'd but not built.
-9. **No notifications** -- daemon completes silently.
-10. **MCP simplification PR-B** -- HttpServer still starts with MCP server.
-
-### What's now possible that wasn't before
-
-With `complete_step` + `spawn_agent`:
-- Agents can advance workflows without ever touching a token (removes the #1 session failure cause)
-- Workflows can declare delegation and the daemon spawns proper child sessions (all visible in event log)
-- Multi-phase work has a path to becoming a coherent work unit (parentSessionId in data, UI visualization next)
-
-### Next priorities
-
-1. **Console session tree view** -- parentSessionId data is in the store. Build the UI to show it.
-2. **First coordinator script template** -- `coordinator-mr-review.sh` that spawns: discovery → review → (conditional) fix → re-review. Proves the spawn/await loop works end-to-end.
-3. **Notifications** -- macOS notification + generic webhook. ~30 min implementation.
-4. **Late-bound goals** -- default `goalTemplate: "{{$.goal}}"` when no static goal. 10-line fix in trigger-store.ts.
-5. **Artifacts store foundation** -- `~/.workrail/artifacts/` directory structure. Step 1 of the first-class artifacts vision.
-
----
-
-## What WorkTrain is currently capable of (as of v3.36.0, Apr 18, 2026)
-
-Tested empirically today. This is what actually works, not what's specced.
-
----
-
-### Autonomous workflow execution
-
-**Confirmed working:**
-- Accepts webhook triggers and dispatches workflow sessions autonomously
-- `mr-review-workflow-agentic` v2.6 runs end-to-end: context gathering, parallel reviewer phases, synthesis loop, validation, structured handoff. **Confirmed today** (sess_3bmj..., APPROVE verdict).
-- `coding-task-workflow-agentic` (lean v2) runs end-to-end for Small tasks. **Confirmed today** (evidenceFrom field implementation, completed successfully).
-- `wr.discovery` v3.2.0 runs with goal reframing. **Confirmed today** (spawn_agent architecture discovery).
-- Sessions advance through 8+ workflow steps autonomously (36 step advances today across 6 sessions).
-- 402 LLM turns + 660 tool calls executed autonomously today.
-
-**Known reliability issues:**
-- `wr.discovery` hit timeout once today -- multi-step discovery workflows can run long and hit the 60-min limit
-- One coding task failed (error) -- assessment gate or tool issue, still being investigated
-- One MR review timed out -- complex PRs need more time than the configured limit
-
----
-
-### Trigger system
-
-**Confirmed working:**
-- Generic webhook trigger (fire-and-forget via `POST /webhook/<id>`)
-- GitHub Issues polling (no webhook registration needed)
-- GitLab MR polling (no webhook registration needed)
-- Multiple triggers in one triggers.yml
-- WorkflowId validation at startup (wrong IDs caught before traffic arrives)
-- `goalTemplate` interpolation from webhook payload
-
-**Not yet working:**
-- Native cron trigger (requires OS crontab workaround)
-- Late-bound goals (static goal required in triggers.yml, dynamic goal via payload requires `goalTemplate`)
-
----
-
-### Agent capabilities inside sessions
-
-**Confirmed working:**
-- Bash (read files, run commands, git, gh CLI)
-- Read (read files)
-- Write (write files -- used by coding tasks)
-- `complete_step` (daemon-managed token, LLM never handles continueToken)
-- `continue_workflow` (deprecated but functional for backward compat)
-- `report_issue` (agents call this when stuck, logged to `~/.workrail/issues/`)
-- `spawn_agent` (spawns child WorkRail sessions in-process, v3.35.1+)
-- Assessment artifact submission (`artifacts` field in complete_step)
-
-**Not yet working in production:**
-- `spawn_agent` just shipped (v3.35.1) -- untested in real workflows yet
-- `complete_step` just shipped (v3.34.1) -- daemon now using it but not yet validated end-to-end through full assessment-gate workflow
-
----
-
-### Observability
-
-**Confirmed working:**
-- Daemon event log (`~/.workrail/events/daemon/YYYY-MM-DD.jsonl`) -- every LLM turn, tool call, session lifecycle event
-- `worktrain logs --follow` -- real-time event stream
-- `worktrain status <sessionId>` -- session health summary with stuck detection
-- Console (`http://localhost:3456/console`) -- live sessions, step notes, repoRoot grouping, `isLive` from event log
-- Stuck detection -- `agent_stuck` events emitted for repeated tool calls, no-progress, timeout imminent
-- `issue_reported` events when agents hit walls
-
-**Known gaps:**
-- Console shows flat session list, not work-unit tree (parentSessionId data exists, visualization not built)
-- `isLive` only covers today's event log (cross-midnight limitation)
-- No push notifications when daemon completes work
-
----
-
-### Infrastructure
-
-**Confirmed working:**
-- MCP server stable (v3.36.0, bridge removed, EPIPE fixed)
-- `worktrain daemon --install` creates launchd service (daemon survives MCP reconnects)
-- `worktrain console` standalone (independent of daemon and MCP server)
-- `worktrain init` guided onboarding
-- `worktrain tell` / `worktrain inbox` message queue
-- `worktrain spawn` / `worktrain await` CLI (primitives exist, no coordinator templates yet)
-- Crash recovery (orphaned sessions detected and cleared on startup)
-- Workspace context injection (CLAUDE.md, AGENTS.md, daemon-soul.md)
-- maxConcurrentSessions semaphore (default 3)
-- Per-trigger timeout + max-turn limits
-
----
-
-### What WorkTrain cannot do yet (key gaps for autonomous production use)
-
-1. **Multi-phase work is invisible** -- sessions are flat in console. A 5-session MR review pipeline looks like 5 unrelated sessions.
-2. **No coordinator scripts** -- spawn_agent and spawn/await exist but there's no coordinator template to run a full pipeline.
-3. **No auto-commit** -- agents write code but don't commit or open PRs autonomously (merge workflow exists in spec, not in production use).
-4. **No notifications** -- daemon completes work silently.
-5. **Assessment gates unreliable** -- complete_step fixes the token issue but full assessment-gate workflows not yet validated end-to-end.
-6. **Subagent delegation invisible** -- spawn_agent creates proper child sessions, but workflows still use mcp__nested-subagent__Task for most delegation (invisible black box).
-7. **No artifact store** -- agents dump markdown in the repo as a workaround.
-8. **Context poverty** -- each session starts from scratch, no persistent knowledge graph.
-
----
-
-### WorkTrain benchmarking: prove it's better, publish the results (Apr 18, 2026)
-
-**The opportunity:** if WorkTrain can demonstrably outperform one-shot LLM calls and human-in-the-loop for specific task types, with reproducible benchmarks published in GitHub and visible in the console, that's the killer adoption argument. Not "trust us, it's better" -- actual numbers.
-
-**What to benchmark:**
-
-| Dimension | WorkTrain | One-shot | Human-in-loop |
-|-----------|-----------|----------|---------------|
-| MR review finding rate (Critical/Major caught) | ? | ? | ? |
-| False positive rate (findings that were wrong) | ? | ? | ? |
-| Coding task correctness (builds + tests pass) | ? | ? | ? |
-| Coding task completeness (wiring, exports, tests) | ? | ? | ? |
-| Bug investigation accuracy (correct root cause) | ? | ? | ? |
-| Time to complete | ? | ? | ? |
-| Token cost per task | ? | ? | ? |
-
-**Model comparison within WorkTrain:**
-- Haiku (fast, cheap) vs Sonnet (balanced) vs Opus (best) for each task type
-- Other providers: GPT-4o, Gemini 1.5 Pro, Llama 3 (via Ollama) -- can WorkTrain run on any model?
-- Does the workflow structure make Haiku competitive with Sonnet one-shot? (hypothesis: yes, for structured tasks)
-
-**The benchmark suite:**
-
-1. **MR review benchmark** -- 50 PRs with known ground truth (bugs that were later filed, correct implementations that had no bugs). Score: recall (caught real issues) + precision (didn't flag non-issues).
-2. **Coding task benchmark** -- 50 tasks with objective completion criteria (build passes, tests pass, correct wiring). Score: % completing correctly on first autonomous run.
-3. **Bug investigation benchmark** -- 30 real bugs with known root causes. Score: % identifying correct root cause.
-4. **Discovery quality benchmark** -- 20 design questions with expert-evaluated answers. Score: coverage of key tradeoffs, identification of non-obvious alternatives.
-
-**How to publish:**
-
-- `docs/benchmarks/` directory in the repo -- YAML results files, one per benchmark run
-- GitHub Actions CI job that runs the benchmark suite on each release and commits results
-- Console "Benchmarks" tab showing historical performance by model and workflow version
-- Public benchmark page (once cloud hosting exists) showing WorkTrain vs alternatives
-- Badge in README: "MR review recall: 87% (Sonnet 4.6, v3.36.0)"
-
-**Why this matters for adoption:**
-- Developers are skeptical of autonomous agents -- "it probably makes stuff up"
-- Hard numbers cut through skepticism instantly
-- Showing WorkTrain with Haiku beating one-shot Opus on structured tasks is a compelling cost argument
-- Showing improvement over workflow versions gives teams confidence the system is getting better
-- The benchmark suite is also a regression test -- if a workflow change degrades performance, CI catches it
-
-**What makes this hard:**
-- Ground truth is expensive to establish (need expert-labeled evaluation sets)
-- Some tasks are inherently subjective (discovery quality)
-- Benchmarks can be gamed (optimize for the benchmark, not real performance)
-- Need enough volume to be statistically meaningful
-
-**Starting point:** the mr-review workflow is the easiest to benchmark objectively. Start with 20 PRs where bugs were later discovered and 20 PRs that shipped cleanly. Run each through `mr-review-workflow-agentic` on several model tiers. Measure recall and precision. That's a publishable result with one weekend of work.
-
----
-
-### Autonomous feature development: scope → breakdown → parallel execution → merge (Apr 18, 2026)
-
-**The vision:** give WorkTrain a feature scope -- from a vague idea to a fully groomed ticket -- and it figures out the rest. Discovery if needed, design if needed, breakdown into parallel slices, execution across worktrees, context management across agents, bringing it all back together.
-
-**The four pillars the user cares about:**
-1. **Autonomy** -- WorkTrain takes a scope and figures out the work breakdown without hand-holding
-2. **Quality** -- comes FROM autonomy + workflow enforcement + coordination. Each slice goes through the right phases.
-3. **Throughput** -- parallel slices across worktrees simultaneously. N agents working while you focus elsewhere.
-4. **Visibility** -- one coherent work unit you can track at a glance, not N unrelated sessions in a flat list.
-
-**The pipeline for a scope:**
-
-```
-Input: "add GitHub polling support" (any level of definition -- idea to full spec)
-  │
-  ├── [if vague] ideation + spec authoring → output: BRD / acceptance criteria
-  ├── classify-task → taskComplexity, hasUI, touchesArchitecture, taskMaturity
-  ├── [if Medium/Large] discovery → context bundle, invariants, candidate files
-  ├── [if touchesArchitecture] design → candidates, review, selected approach
-  ├── breakdown → parallel slices with dependency graph
-  │     ├── Slice 1: types + schema         (worktree A)
-  │     ├── Slice 2: polling adapter        (worktree B, depends: 1)
-  │     ├── Slice 3: scheduler integration  (worktree C, depends: 2)
-  │     └── Slice 4: tests                 (worktree D, depends: 1-3)
-  ├── [parallel execution] each slice: implement → review → (fix if needed) → approved
-  ├── [serial integration] merge slices in dependency order, verify after each
-  └── [final] integration test → PR created → notification to user
-```
-
-**Context management across agents:**
-- Coordinator maintains a "work unit manifest": current phase, slice status, shared invariants, decisions made in design phase
-- Each spawned agent receives a context bundle: relevant portion of the manifest + files it needs + decisions from upstream phases
-- Agents don't rediscover what the coordinator already knows
-- After each agent completes, its findings update the manifest (new invariants found, scope changes, follow-up tickets)
-
-**Worktree coordination:**
-- Each slice gets its own worktree (already done via `--isolation worktree`)
-- Coordinator tracks which files each slice touches -- detects conflicts before they happen
-- Independent slices run in parallel; dependent slices queue automatically
-- Merge order follows the dependency graph, not wall-clock completion time
-
-**Knowing when to spawn a new main agent:**
-- When a slice is too large or discovers unexpected scope, it requests a breakdown from the coordinator
-- When a review finds a Critical finding, the coordinator spawns a dedicated fix agent with the finding + relevant context
-- When integration reveals a regression, coordinator spawns an investigation agent before retrying the merge
-
-**The coordinator's job (what stays in scripts, not LLM):**
-- Maintain the manifest (JSON file, append-only)
-- Compute the dependency graph
-- Decide parallelism vs serialization
-- Route: clean → merge, minor findings → fix agent, critical → escalate
-- Track worktrees, detect conflicts
-- Sequence the merge order
-
-**What requires LLM cognition:**
-- Discovery (what are the invariants, which files matter)
-- Design (which approach, what tradeoffs)
-- Implementation (write the code)
-- Review (is this correct and complete)
-- Breakdown (what are the right slice boundaries)
-
-**The minimum viable version:**
-A coordinator that handles a Medium/Small scoped task (already classified, no need for ideation or design). Takes 2-4 parallel slices, runs them, reviews each, merges when clean. No escalation handling in v1 -- if anything fails, notify the user.
-
-This is the thing that makes WorkTrain feel like a senior engineer taking ownership of a task, not a tool you have to supervise step by step.
-
----
-
-### Coordinator design decision: MVP-first, generalize after (Apr 18, 2026)
-
-**Decision:** Build the first coordinator as a PR review-specific script. Generalize to a reusable coordinator framework after proving it works end-to-end.
-
-**Rationale:** Three discovery runs all converged on the architecture (TypeScript script, `CoordinatorDeps` interface, 2-call HTTP for notes). The risk is over-engineering for hypothetical pipelines before validating the real one. PR review is the highest-value first use case with a clear success criterion.
-
-**The generic coordinator architecture is already designed** (see `docs/discovery/coordinator-script-design.md`). The `CoordinatorDeps` interface and `AgentResult` bridge type make migration to a generic coordinator trivial -- the PR review script uses these types, so generalizing is additive, not a rewrite.
-
-**Migration path:** once PR review coordinator is proven in production, extract the routing logic (`parseFindings`, `routeByFindings`) and `CoordinatorDeps` interface into `src/coordinators/base.ts`. The PR review coordinator becomes one implementation of the base pattern.
-
----
-
-### Architecture decisions from Apr 17-18 sessions (to record before files are cleaned up)
-
-**Decision 1: Structured output + tool calls can coexist (Apr 18)**
-Validated empirically via integration test. The beta API (`client.beta.messages.create()`) supports both JSON schema enforcement AND tool calls in the same request. Schema enforcement applies at `end_turn` only. Bedrock is more consistent than direct Anthropic API for system-prompt fallback behavior. This opens a future path for replacing `complete_step` with structured output, but `complete_step` remains the chosen primitive for now.
-
-**Decision 2: `complete_step` is the preferred daemon workflow-control primitive (Apr 18)**
-PR #569 merged. The daemon holds the continueToken in a closure; LLM calls `complete_step(notes)` and never handles the token directly. Structured output (`beta.messages.create` with JSON schema) was evaluated as an alternative and deferred -- it's a viable migration path for a future version but adds API complexity today. Follow-up: track a structured output migration as a future improvement, not a current priority.
-
-**Decision 3: AgentLoop error handling contract -- FatalToolError (Apr 16)**
-`FatalToolError` subclass selected for distinguishing recoverable from non-recoverable tool failures in the AgentLoop. The contract: user-facing tools (Bash, Read, Write) catch failures and return `isError: true` in the tool_result (loop continues, LLM can retry). Coordination tools with unrecoverable failures (session store corruption, token decode failure) throw `FatalToolError` -- `_executeTools` instanceof-checks this and kills the session rather than surfacing a confusing error to the LLM. This contract is part of the AgentLoop architecture and must be followed by any new tool implementations.
-
-**Decision 4: Use `wr.discovery` for discovery-only tasks, not `coding-task-workflow-agentic` (Apr 17)**
-Discovered from a broken session: `coding-task-workflow-agentic` dispatched with "do discovery only, no code" ran 11 step advances then stopped without `run_completed`. The workflow's implementation phases fired even with explicit instructions not to code. Lesson: when a trigger or coordinator wants pure discovery/research, use `wr.discovery` as the workflowId. `coding-task-workflow-agentic` should only be dispatched when implementation is the actual goal.
-
-**Decision 5: Bug -- MCP server EPIPE crash (Apr 18)**
-Root cause confirmed with 15 production crash log entries: `process.stderr` is missing an `'error'` event handler in `registerFatalHandlers()`. When an MCP client disconnects, Node.js emits `EPIPE` on stderr which crashes the process with an unhandled error. `process.stdout` already has equivalent protection via `wireStdoutShutdown()`. Fix: mirror the stdout protection for stderr. One-line fix being implemented in PR `fix/mcp-stderr-epipe-crash`.
-
----
-
-### worktrain status → console integration (Apr 18, 2026)
-
-The `worktrain status` CLI command is Phase 1. Phase 2: the same data and rendering lives inside the console as the default landing view when you open it -- not the sessions list, the overview. Same `StatusDataPacket` type, two surfaces. The console overview replaces the need to run a CLI command; it auto-refreshes and stays live.
-
----
-
-### WorkTrain as a native macOS app (Apr 18, 2026)
-
-Long-term vision: WorkTrain becomes a full native Mac app -- not just a CLI + web console, but a proper macOS application with a menubar icon, system notifications, windows, and native UX.
-
-**What this unlocks:**
-- Always-on menubar presence showing daemon status at a glance
-- Native macOS notifications (already built via osascript -- the app version uses UserNotifications framework directly)
-- The `worktrain status` overview as a native window, not a browser tab
-- Message queue and inbox as a native interface (type a message from anywhere on your Mac, not just the terminal)
-- Background daemon management -- start/stop/restart from the menubar without terminal
-- Deep system integration: file system events, calendar, Contacts, native share sheet
-
-**Tech stack options:**
-- Swift/SwiftUI: full native, best macOS integration, steeper learning curve from TypeScript
-- Electron + existing console UI: fastest path, same TypeScript codebase, but heavy
-- Tauri: Rust core + existing web frontend, lighter than Electron, good macOS support
-- React Native macOS: reuses React knowledge, not quite native feel
-
-**Recommended path:** Tauri wrapping the existing console UI. The console is already a React/Vite app. Tauri gives native menubar, notifications, and system APIs without rewriting the frontend. The WorkTrain daemon stays as a separate process managed by the app.
-
-**This is a post-v1 platform decision** -- not a near-term priority, but worth designing toward. Don't make architectural decisions that would make the Tauri wrapper hard later.
-
----
-
-### Long-running sessions: stay open across agent handoffs (Apr 18, 2026)
-
-**The problem:** today when an MR review session completes, it writes its findings and exits. If the findings require fixes, a new fix agent starts from scratch with no shared context. When the fix is done, a new re-review agent also starts from scratch. Three sessions that are logically one unit of work are isolated from each other.
-
-**The vision:** a session can stay open and wait -- dormant but alive -- while another agent does work. When that work completes, the waiting session resumes with full context continuity.
-
-**The MR review example:**
-
-```
-[MR review session]  finds: 2 critical, 3 minor
-  → stays open, waiting for fixes
-  
-  [Fix agent session]  addresses all 5 findings
-    → completes, signals "fixes ready"
-  
-[MR review session resumes]  re-reads the diff, re-evaluates
-  → all 5 verified fixed, 0 new findings
-  → completes with APPROVE verdict
-```
-
-The same session that found the issues verifies the fixes. No context reconstruction. No risk of re-review missing something the original reviewer knew.
-
-**Other use cases for waiting sessions:**
-
-- **Architecture review waiting for approval:** architect session identifies a design gap, waits for the human to decide on direction, resumes when the decision is recorded
-- **Discovery session waiting for data:** a research session identifies that it needs a specific file or API response, signals "blocked on: fetch X", waits for a retrieval agent to deliver it, resumes with the data injected
-- **Coordinator waiting on child completion:** instead of a coordinator script polling `worktrain await`, the coordinator session can yield and be resumed by the daemon when child sessions complete -- same session, same context, no polling overhead
-- **Spec authoring waiting for stakeholder input:** a spec session writes a draft, flags "needs: human review of acceptance criteria", waits, resumes when the human adds a comment
-- **Integration test waiting for deployment:** a test coordination session waits for a deploy to complete before running integration tests
-
-**The key insight: the LLM doesn't experience waiting.**
-
-LLMs have no concept of time. Between one turn and the next, zero time passes from the agent's perspective. This means "waiting" is not a thing that happens to the agent -- it just doesn't receive its next turn until the coordinator has something to give it.
-
-The session is paused at the engine level (DAG holds at a node, no new turns issued). The agent submitted its output and simply hasn't received a response yet. When the coordinator is ready -- fix agent completed, human reviewed, deployment finished -- it advances the session with a turn that contains the new context. From the agent's perspective: it submitted findings and immediately received "here are the fixes, verify them."
-
-**No `wait_for` primitive needed at the workflow level.** The coordinator is the timing mechanism. This is the coordinator's job: know when each session is ready for its next input, and deliver that input at the right time.
-
-```
-Coordinator logic:
-
-1. Advance review session to "findings complete" node
-2. Read findings from session output
-3. Spawn fix agent with those findings
-4. Wait for fix agent to complete (worktrain await)
-5. Inject fix summary into review session's next turn
-6. Advance review session: "Here are the fixes. Verify them."
-   → LLM receives this as the natural next step, no time gap perceived
-```
-
-**Why this is more powerful than re-running a fresh session:**
-
-- **Context continuity:** the reviewer remembers what it found, why it flagged it, what invariants it was checking. A fresh session has to re-discover all of that.
-- **Relational memory:** "does this fix address the root cause I identified, or just the symptom?" -- only the original session knows the root cause reasoning.
-- **Efficiency:** no redundant context gathering. The resumed session picks up exactly where it left off.
-- **The agent doesn't know it's coordinating:** from the agent's view, it's a continuous workflow. The coordinator manages the timing externally.
-
-**Implementation path:**
-
-- Phase 1: coordinator scripts withhold `complete_step` advancement until the condition is met. This already works today -- the coordinator just doesn't advance the session until the fix agent is done.
-- Phase 2: the coordinator passes structured context when advancing: `complete_step(session, { injectedContext: fixSummary })`. The session receives it as part of the next step's prompt.
-- Phase 3: declarative pipelines -- workflow JSON declares that step N waits for an external condition before proceeding. The coordinator reads this and manages the timing automatically. No hand-coded coordinator script needed for common patterns.
-
----
-
-### Coordinatable workflow steps: confirmation points the coordinator can satisfy (needs discovery, Apr 18, 2026)
-
-⚠️ **Needs discovery before implementation. The questions below are open, not answered.**
-
-**The insight:** workflows already have `requireConfirmation: true` on certain steps -- these are natural coordination points. Right now they pause for a human. The idea is to make them also pausable-for-a-coordinator, so a coordinator (or another agent) can be the one that responds instead of a human.
-
-**The vision:**
-A workflow reaches a `requireConfirmation` step. In MCP mode (human-driven), it behaves exactly as today -- pauses and waits. In daemon/coordinator mode, instead of blocking forever, the coordinator can:
-- Inject a synthesized answer based on external work it just did ("architecture review found X, proceed with approach A")
-- Spawn another agent to generate the answer and inject its output
-- Ask a discovery agent to weigh in and forward the result
-- Simply forward a human's message from the message queue
-
-The original session never knows whether a human or a coordinator satisfied the confirmation. It just receives the next turn with context.
-
-**Why this is powerful:**
-Today the coordinator is external to the workflow -- it orchestrates sessions from outside. This makes the workflow itself coordinatable from within, so multi-agent collaboration can be declared in the workflow spec rather than bolted on in coordinator scripts.
-
-**What's unknown and needs discovery:**
-1. **Mechanism:** is this an enriched `requireConfirmation` (add a `coordinatable: true` flag?), a new step type (`requireCoordinatorInput`?), or something at the engine level? Tradeoffs between each.
-2. **What gets injected:** always a structured decision ("proceed/revise/abort + findings"), or also data injection ("here are the file contents", "here's what the API returned")? How does the step receive it -- as a new tool call result, as a steer, as part of the step prompt?
-3. **Coordinator discovery:** how does the coordinator know a step is waiting for it vs waiting for a human? Does it poll the session state? Does the session emit a `coordinator_gate_pending` event? (This connects to the `waitForCoordinator` spec in this backlog.)
-4. **Timeout/fallback:** if the coordinator never responds, what happens? Fall back to human? Error? Configurable?
-5. **MCP invariant:** must behave identically to today in MCP/human-driven mode. The coordinator path is additive, not a behavior change for existing users.
-
-**Relationship to other specs:**
-- "Long-running sessions: stay open across agent handoffs" -- the session pauses at the confirmation point, coordinator acts, session resumes
-- "POST /api/v2/sessions/:id/steer" -- this might be the injection mechanism
-- `signal_coordinator` tool -- the session might signal the coordinator instead of blocking
-- `waitForCoordinator` step flag (already in this backlog) -- same underlying need, different framing
-- "Coordinator review mode: self-healing vs comment-and-wait" -- confirmation points are where that routing decision gets expressed
-
----
-
-## Architecture Decision: Three-Workflow Pipeline (Apr 18, 2026)
-
-### Decision
-
-The canonical WorkRail workflow pipeline for new features is:
-
-```
-wr.discovery (optional) → wr.shaping (optional) → coding-task-workflow-agentic
-```
-
-Each workflow is independently useful. The pipeline is an optional chain, not a required sequence.
-
-### Rationale
-
-**wr.discovery** produces a direction -- what problem is worth solving. Output: structured discovery notes at `.workrail/discovery/`.
-
-**wr.shaping** produces a bounded pitch -- what specifically to build and explicitly NOT build, at a product level. Output: `.workrail/current-pitch.md`. Faithful Shape Up methodology. Tech-agnostic. No code-level content.
-
-**coding-task-workflow-agentic** produces running code -- engineering approach, sliced implementation, verification. When pitch.md exists (Phase 0.5), it skips design ideation and translates the pitch directly into an engineering approach. The pitch's no-gos and appetite are binding constraints.
-
-### No TechSpec workflow needed
-
-The coding workflow already does everything a TechSpec workflow would do: Phase 1b generates design candidates, Phase 1c selects and challenges the approach, Phase 3 writes the spec and implementation plan. Adding a separate TechSpec workflow would duplicate this and create a question of which is canonical. The coding workflow is the engineering planning layer.
-
-**The split that matters is product vs engineering:**
-- Product decisions (what to build, for whom, within what time) → wr.shaping
-- Engineering decisions (how to build it, which interfaces, which tests) → coding workflow
-
-### When to skip shaping
-
-- Task is small, concrete, and clearly scoped → go straight to coding workflow
-- Discovery already produced a bounded, implementable direction
-- You have a pre-written ticket or spec that already defines what to build
-
-### Faithful Shape Up constraint
-
-wr.shaping is tech-agnostic. A pitch for a Kotlin Android app and a pitch for a Python API service look structurally identical. No file paths, no function signatures, no implementation details. This makes pitches usable by human engineering teams at companies using Shape Up, not just WorkRail's coding workflow.
-
-### Phase 0.5 mechanics
-
-When `coding-task-workflow-agentic` finds `.workrail/current-pitch.md`:
-1. Reads all five pitch sections (Problem, Appetite, Solution/Elements, Rabbit Holes, No-Gos)
-2. Sets `shapedInputDetected=true`
-3. Skips phases 1a-1c (hypothesis, design generation, challenge-and-select)
-4. Phase 1d translates pitch elements/invariants/no-gos into an engineering approach
-5. Plan audit (Phase 4) checks for drift against the pitch
-6. Appetite is a hard ceiling -- oversized engineering work becomes follow-up tickets
-
-
----
-
-## Idea: `context-gather` Step Type (Apr 19, 2026)
-
-### Problem
-
-Phase 0.5 in the coding workflow currently looks for a shaped pitch by checking a local path. This doesn't handle: coordinator-injected context, manually written docs (GDoc, Confluence, Notion), Glean-indexed artifacts, or URLs embedded in the task description. The search logic is duplicated if other workflows need the same document.
-
-### Proposed primitive
-
-A new engine-level step type `context-gather` that resolves a named context artifact from ordered sources:
-
+**Proposed primitive:**
 ```json
 {
   "type": "context-gather",
@@ -6050,1873 +507,508 @@ A new engine-level step type `context-gather` that resolves a named context arti
 ```
 
 **Source resolution order (stops at first hit):**
-1. `coordinator-injected` -- coordinator already attached context of this type to the session (most common in autonomous mode)
-2. `local-paths` -- check `.workrail/current-pitch.md`, `pitch.md`, `PRD.md`, `.workrail/pitches/` (most recent)
-3. `task-url` -- extract any URL from the task description and fetch via WebFetch or matching MCP (GDoc, Confluence, Notion)
-4. `glean` -- search Glean for recent docs matching the task keywords and `contextType`; opt-in only (risk of false positives silently constraining wrong scope)
+1. `coordinator-injected` -- coordinator already attached context of this type
+2. `local-paths` -- check `.workrail/current-pitch.md`, `pitch.md`, `.workrail/pitches/`
+3. `task-url` -- extract any URL from task description and fetch
+4. `glean` -- search Glean for recent docs matching task keywords (opt-in only)
 
-If `optional: true` and no source resolves: `outputVar = null`, workflow continues normally.
-
-### Why engine-level, not a routine
-
-- Coordinator intercept requires the engine to check "has this type already been provided?" before running any search -- a routine can't express that
-- `contextType` is a declared intent multiple workflows can share (`wr.shaping`, `coding-task-workflow`, `wr.discovery`) without duplicating resolver logic
-- New sources (Linear, Jira, Notion) get added to the engine once, immediately available to all workflows
-
-### Relationship to existing work
-
-- Replaces/supersedes Phase 0.5's current local-path check in `coding-task-workflow-agentic`
-- Coordinator PR-review flow would inject `shaped-pitch` context before spawning the coding session
-- Any workflow that needs "find the spec/pitch/PRD for this task" uses the same step type
-
-### Open questions
-
-- How does the coordinator inject context into a session? Via a session variable set before `start_workflow`, or a new `inject_context` call?
-- How does `task-url` distinguish a GDoc URL from a Confluence URL from a Notion URL? MCP routing by domain?
-- What is the `contextType` vocabulary? Start with `shaped-pitch` -- what else? (`discovery-notes`, `design-spec`, `api-contract`?)
-- Glean false-positive risk: wrong document fed as shaped input silently constrains wrong scope. Needs confidence threshold or explicit user confirmation when Glean is the only hit.
-
+**Why engine-level:** Coordinator intercept requires the engine to check "has this type already been provided?" before running any search. A routine can't express that.
 
 ---
 
-## Completed (Apr 19, 2026)
+## Console
 
-### wr.shaping -- Faithful Shape Up shaping workflow
+### Console interactivity and liveliness
 
-Created `workflows/wr.shaping.json`. Faithful Shape Up methodology, tech-agnostic, produces `.workrail/current-pitch.md` only. Nine steps: ingest → frame gate → diverge (6 shapes, Verbalized Sampling) → converge → breadboard + elements → rabbit holes + no-gos → draft/critique loop → approval gate → write pitch.md. Two human gates with autonomous fallback. Appetite is calendar-time only (xs/s/m/l/xl). No code-level content -- a pitch for a Kotlin app and a pitch for a Python service look structurally identical.
+**Status: idea** | Priority: medium
 
-### coding-task-workflow-agentic -- Upstream context Phase 0.5
+**Key areas:**
+- **DAG node hover effects** -- nodes in `RunLineageDag` should have visible hover states: border brightens, subtle glow, cursor changes to pointer. This is the single highest-impact item.
+- **Node selection highlight** -- selected node should pulse or glow, not just change border color
+- **Live session pulse** -- sessions with `status: in_progress` could have a subtle periodic animation
+- **Tooltip polish** -- fade in/out rather than appearing instantly
 
-Added Phase 0.5 "Locate Upstream Context" to `coding-task-workflow-agentic.json`. Format-agnostic: the agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, etc.) to find any upstream document -- pitch, PRD, BRD, RFC, design doc, user story, Jira epic, etc. Sets `upstreamSpecDetected` + `solutionFixed` flags. When `solutionFixed=true`, design ideation phases (1a-1c) are skipped and Phase 1d translates upstream constraints directly into an engineering approach. Plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.
+**Design constraint:** Dark navy, amber accent aesthetic. Additions should reinforce this language.
 
-Also consolidated from three workflow variants to one canonical file.
+**Where to start:** `console/src/components/RunLineageDag.tsx`. The tooltip pattern (`handleNodeMouseEnter`/`handleNodeMouseLeave`) already exists; a hover glow is a natural peer addition.
 
-
----
-
-## Current state update (Apr 19, 2026)
-
-**npm version: v3.40.0**
-
-### What shipped since v3.36.0 (Apr 18 -- Apr 19)
-
-- **`wr.shaping`** -- faithful Shape Up shaping workflow (9 steps, two human gates with autonomous fallback)
-- **`coding-task-workflow-agentic` Phase 0.5** -- upstream context detection; skips design phases when solution is pre-specified. Three-workflow pipeline: shaping → discovery → coding.
-- **Coding workflow consolidated** -- from three variants (lean, full, lean.v2) to one canonical file.
-- **HttpServer removed from MCP server** (#601) -- pure stdio. MCP server can no longer accidentally start an HTTP server.
-- **Late-bound goals** (#604) -- `goalTemplate: "{{$.goal}}"` defaults for webhook-driven sessions. Goals can come from the payload, not just the static trigger definition.
-- **Coordinator message queue drain** (#606) -- `pr-review` coordinator reads `~/.workrail/message-queue.jsonl` before each spawn cycle. `worktrain tell stop`, `skip-pr <n>`, `add-pr <n>` work.
-- **Notifications shipped** -- `NotificationService` implemented, wired into `TriggerRouter` via `trigger-listener.ts`. `WORKTRAIN_NOTIFY_MACOS=true` and `WORKTRAIN_NOTIFY_WEBHOOK=<url>` in `~/.workrail/config.json`.
-- **`worktrain run pr-review`** -- fully wired coordinator command. `spawnSession` → `awaitSessions` → `getAgentResult` (session-wide artifact aggregation) → `parseFindingsFromNotes` → route by severity.
-- **`wr.review_verdict` artifact path** -- end-to-end wired: `mr-review-workflow.agentic.v2.json` phase-6 emits it, `artifact-contract-validator.ts` validates it at `continue_workflow` time, coordinator reads it with keyword-scan fallback.
-- **`worktrain logs` / `worktrain health`** -- structured daemon log tailing and per-session health summary. `worktrain status <id>` deprecated in favor of `worktrain health <id>`.
-- **`signal_coordinator` tool** -- agent can emit structured mid-session signals (`progress`, `finding`, `data_needed`, `approval_needed`, `blocked`) without advancing the step.
-- **`ChildWorkflowRunResult` + `assertNever`** -- spawn_agent delivery_failed bug fixed. `delivery_failed` impossible state is compile-time excluded.
-- **`lastStepArtifacts` on `WorkflowRunSuccess`** -- `onComplete` callback forwards artifacts alongside notes. Coordinator can read typed artifacts from result without a separate HTTP call.
-- **`steerRegistry` + POST `/sessions/:id/steer`** -- coordinator injection endpoint wired in daemon console. Running sessions register a steer callback; coordinators can inject mid-session messages via HTTP.
-- **GitHub polling adapters** -- `github_issues_poll` and `github_prs_poll` providers fully implemented alongside existing `gitlab_poll`.
-- **Knowledge graph spike** -- `src/knowledge-graph/` module: DuckDB in-memory + ts-morph indexer + two validation queries. NOT yet wired to an MCP tool (ts-morph in devDependencies).
-- **`worktrain daemon --install`** -- launchd plist creation, load, verify. Daemon survives MCP server reconnects.
-- **Performance sweep** -- April 2026 sweep identified 10 highest-leverage fixes, filed as issues #248-257. Not yet merged.
-
-### Accurate limitations (as of v3.40.0)
-
-1. **Console session tree UI not built** -- `parentSessionId` is stored in the `session_created` event and in `WorkflowRunSuccess`. Console `RunLineageDag` shows the per-session step DAG only. Cross-session parent-child tree is data-only. PRs #607 (tree view) and #608 (steer endpoint) are OPEN.
-2. **Daemon tool set is minimal** -- agent has: `complete_step`, `continue_workflow` (deprecated), `Bash`, `Read`, `Write`, `report_issue`, `spawn_agent`, `signal_coordinator`. No `Glob`, `Grep`, or `Edit`. Read/Write are thin wrappers.
-3. **`worktrain tell` messages only drained by coordinator** -- `drainMessageQueue` is called by `runPrReviewCoordinator`, not by the daemon loop. A running autonomous session cannot receive mid-run injections from `worktrain tell`. The `steerRegistry` HTTP endpoint is the mid-session channel.
-4. **Knowledge graph not wired** -- module exists, ts-morph must move to dependencies before an MCP tool can be built.
-5. **`spawn_agent` return missing `artifacts`** -- returns `{ childSessionId, outcome, notes }` only. Typed artifacts from child session are not surfaced to the parent agent. `lastStepArtifacts` on `WorkflowRunSuccess` exists but spawn_agent doesn't return it.
-6. **`worktrain inbox --watch` stub** -- `--watch` flag prints "not yet implemented" and exits.
-7. **Artifact store not built** -- agents still dump markdown/files directly into the repo. `~/.workrail/artifacts/` directory structure not created.
-8. **Performance issues not fixed** -- issues #248-257 filed from April sweep. `continue_workflow` triggers 6+ event log scans, full session rebuild per `/api/v2/sessions` request, N+1 workflow fetches, no caching.
-9. **No auto-commit** -- agents can write code but do not commit, push, or open PRs autonomously.
-10. **Assessment gates not battle-tested** -- end-to-end flow with `outputContract: required: true` not validated in production use.
-
-### Open PRs to merge
-
-- **#607** `feat(console): add session tree view for coordinator sessions` -- cross-session parent-child hierarchy in console. Blocked on: `parentSessionId` data is in store but console routes need to surface it.
-- **#608** `feat(console): add POST /api/v2/sessions/:sessionId/steer for coordinator injection` -- NOTE: this endpoint is already implemented in `daemon-console.ts` via `steerRegistry`. PR #608 may be adding this to the MCP server console separately. Check before merging.
-- **#610** `feat(workflows): add wr.shaping` -- the shaping workflow. Ready to merge.
-- **#587** `fix(mcp): add assertNever exhaustiveness guard to TriggerRouter` -- likely already applied in codebase (ChildWorkflowRunResult assertNever is live). May be a duplicate or different scope. Check.
-
-### Next priorities (groomed Apr 19)
-
-1. **Merge #610 (wr.shaping)** -- ready. Workflow is implemented and in the branch.
-2. **Merge #587 (TriggerRouter assertNever)** -- quick fix, check if still relevant.
-3. **Review and merge #607 + #608** -- console tree view and steer endpoint. Verify #608 doesn't duplicate what's already live in daemon-console.ts.
-4. **Performance fixes** -- issues #248-257. Pick highest-leverage first: SessionIndex (#248) and console projection cache (#249) eliminate most of the repeated scans.
-5. **Daemon tool set: add Glob + Grep** -- agents routinely need to search files. `Read` + `Bash` grep is slow and lossy. Native `Glob` and `Grep` tools would make coding sessions more reliable.
-6. **`spawn_agent` artifacts gap** -- add `artifacts?: readonly unknown[]` to the return value. `lastStepArtifacts` is already on `WorkflowRunSuccess`; wiring it through is ~30 LOC.
-7. **Knowledge graph wiring** -- move `ts-morph` and `@duckdb/node-api` to dependencies, add `query_knowledge_graph` MCP tool.
-8. **Artifact store foundation** -- `~/.workrail/artifacts/` directory, write path in `complete_step`.
+**Related:** `docs/design/console-cyberpunk-ui-discovery.md`, `docs/design/console-ui-backlog.md`
 
 ---
 
-### wr.shaping workflow: shape messy problems into implementation-ready specs (needs authoring, Apr 18, 2026)
+### Console engine-trace visibility and phase UX
 
-**Status:** Design complete. Ready to author as a WorkRail workflow JSON.
+**Status: idea** | Priority: medium
 
-**Design docs:**
-- `docs/design/shaping-workflow-discovery.md` -- WorkRail-internal discovery findings
-- `docs/design/shaping-workflow-external-research.md` -- External research synthesis (Shape Up, LLM failure modes, artifact schema)
+**Gap:** Users currently see only `node_created`/`edge_created`, which makes legitimate engine behavior look like missing workflow phases. Fast paths, skipped phases, condition evaluation, and loop gates are invisible.
 
-**The gap this fills:** WorkRail has `wr.discovery` (divergent) and `coding-task-workflow-agentic` (convergent). Shaping is the missing middle -- converting messy discovery output into a bounded, implementation-ready spec without mid-implementation rabbit holes.
+**Recommended direction:**
+- Keep phases as authoring/workflow-organization concepts
+- Add an engine-trace/decision layer showing: selected next step, evaluated conditions, entered/exited loops, important run context variables (e.g. `taskComplexity`), skipped/bypassed planning paths
 
-**The 11-step skeleton (see design doc for full detail):**
-1. ingest_and_extract -- extract problem frames, forces, open questions
-2. **frame_gate** -- MANDATORY HUMAN GATE: confirm problem + appetite
-3. diverge_solution_shapes -- 4 parallel rough shapes with varied framings
-4. converge_pick -- SEPARATE JUDGE (different model/prompt): pick best shape
-5. breadboard_and_elements -- fat-marker breadboard + Interface/Invariant/Exclusion classification
-6. rabbit_holes_nogos -- adversarial: risks, mitigations, no-gos, assumptions
-7. context_pack_build -- file globs, reuse_utilities, conventions, do-not-touch boundaries
-8. example_map_and_gherkin -- Given/When/Then acceptance criteria + verification commands
-9. draft_pitch -- self-refine ×2, SEPARATE CRITIC (obfuscated authorship)
-10. **approval_gate** -- MANDATORY HUMAN GATE: approve, edit, or restart
-11. finalize_and_handoff -- schema validation, emit shape.json + pitch.md
+**Phase 1:** Extend console service/DTOs with a run-scoped execution-trace summary. Show a compact "engine decisions" strip or timeline above the DAG.
 
-**The single most important design decision:** generator and critic run on structurally different prompts (ideally different model families). CoT and self-reflection alone do NOT mitigate anchoring or self-preference bias (Lou & Sun 2025; Panickssery et al. 2024).
-
-**Output artifact:** `shape.json` -- contains problem story, appetite (multi-dimensional: calendar + tokens + turns + files), breadboard, elements, context_pack (file boundaries + reuse_utilities), Gherkin acceptance criteria, rabbit holes, no-gos, decomposition with walking skeleton, assumptions_log, build_readiness_score.
-
-**Key insight for AI implementers:** LLMs need MORE explicit specs than humans on interfaces/invariants/file boundaries (no tacit knowledge, no scope-shame), but LESS explicit than junior humans on standard patterns. The dominant failure mode is confident architectural divergence -- working code that reinvents an existing utility. Context Pack (Step 7) directly prevents this.
-
-**Next action:** author `wr.shaping` as a WorkRail workflow JSON using workflow-for-workflows, then update `coding-task-workflow-agentic` Phase 0 to detect and consume `shape.json` when present.
+**Phase 2:** Richer explainability timeline with branches, skipped phases, condition results. Toggle between "execution DAG" and "engine trace" views.
 
 ---
 
-## Coordinator architecture: separation of concerns (Apr 19, 2026)
+### Console ghost nodes (Layer 3b)
 
-**Decision: defer knowledge graph implementation until the context assembly layer is designed.**
+**Status: idea** | Priority: low
 
-### The god class problem
-
-`src/coordinators/pr-review.ts` is already ~500 LOC doing: session dispatch, result aggregation, finding classification, merge routing, message queue drain, and outbox writes. Adding knowledge graph queries, context bundle assembly, upstream doc fetching, and prior session lookups would make it a god class.
-
-"Coordinator" is not a class or a script -- it is a **layer** that orchestrates across multiple concerns. Those concerns need to be separated before we add more to them.
-
-### The right layering
-
-```
-Trigger layer         src/trigger/          receives events, validates, enqueues
-Dispatch layer        (TBD)                 decides which workflow + what goal
-Context assembly      (TBD)                 gathers and packages context before spawning
-Orchestration layer   src/coordinators/     spawns, awaits, routes, retries, escalates
-Delivery layer        src/trigger/delivery  posts results back to origin systems
-```
-
-**Context assembly** is the missing layer. Before dispatching a coding session, something needs to:
-- Run `buildIndex()` and query "what imports the file being changed"
-- Find the upstream pitch/PRD/BRD for the task
-- Pull relevant prior session notes
-- Package everything as a structured context bundle
-
-This is NOT the orchestration script's job. The orchestration script should call `assembleContext(task, workspace)` and receive a bundle -- it should not know how that bundle was gathered.
-
-### Why the knowledge graph belongs in context assembly, not in the daemon
-
-Two options were considered:
-- **Daemon tool** (`makeQueryKnowledgeGraphTool` in `workflow-runner.ts`) -- agent queries mid-session on demand
-- **Coordinator pre-fetch** -- coordinator runs queries before spawning, injects answers as context
-
-The coordinator pre-fetch is better for known patterns (e.g. "what imports the file being changed" before a coding task). The agent doesn't need to know the graph exists -- it just gets the relevant facts as context. This also avoids adding `ts-morph` + DuckDB to the production build.
-
-The daemon tool approach is only better for ad-hoc mid-session queries the agent discovers dynamically. That's a secondary use case for v1.
-
-### What to build before the knowledge graph
-
-1. **Design the `ContextAssembler` abstraction** -- takes task description + workspace + trigger metadata, returns a structured context bundle. The knowledge graph is one of several sources (alongside upstream docs, prior session notes, repo state).
-2. **Refactor `pr-review.ts`** to use a `ContextAssembler` for the bits that fit there.
-3. **Then** implement knowledge graph as a `ContextAssembler` plugin -- not as a coordinator script addition and not as a daemon tool.
-
-### Anti-pattern to avoid
-
-Adding knowledge graph calls directly into `pr-review.ts` or any other coordinator script. That immediately creates the god class we're trying to avoid and couples the orchestration layer to a specific context source.
+Ghost nodes represent steps that were compiled into the DAG but skipped at runtime due to `runCondition`. Currently the DAG just shows fewer nodes with no indication of what was bypassed. Layer 3b would render skipped nodes as faded/ghost elements with a tooltip explaining the skip condition.
 
 ---
 
-## Scheduled tasks (Apr 19, 2026)
+## Workflow Library
 
-**The idea:** WorkTrain runs tasks on a schedule -- not triggered by an external event, but by time. "Every Monday morning, run the code health scan." "Every night at 2am, check for new GitHub issues and triage them." "First of the month, run the production readiness audit."
+### Standup status generator
 
-### Why this matters for the autonomous pipeline vision
+**Status: idea** | Priority: low
 
-The full autonomous pipeline (prioritize → discover → shape → implement → test → PR → review → fix → merge) needs a way to start without a human pushing a button. Scheduled tasks are the trigger layer for proactive, time-driven work. Without them, WorkTrain is purely reactive -- it only acts when a webhook fires or a human dispatches it.
+A workflow that aggregates activity across git history, GitLab/GitHub MRs and reviews, and Jira ticket transitions since the last standup. Outputs a categorized ("what I did / doing today / blockers") human-readable message. Tool-agnostic: detect available integrations and adapt.
 
-### What exists today
+---
 
-The trigger system (`src/trigger/`) supports `generic` (webhook) and polling providers (`gitlab_poll`, `github_issues_poll`, `github_prs_poll`). There is no native cron/schedule provider. The workaround today is OS crontab calling `curl` to fire a webhook.
+### Workflow effectiveness assessment and self-improvement proposals
 
-### What to build
+**Status: idea** | Priority: medium
 
-A `schedule` provider in triggers.yml:
+**Idea:** WorkTrain runs workflows hundreds of times. It should use that data to propose improvements.
+
+**Per-run metrics to collect:**
+- Steps skipped most often (candidate for removal)
+- Steps consuming the most tokens/time
+- Steps where the agent calls `continue_workflow` immediately (prompt too vague or redundant)
+- Sessions that produced PRs with Critical findings (workflow not thorough enough)
+- Sessions that completed vs hit max_turns
+
+**Output:** Structured proposal per workflow:
+- Step-level issues with evidence (specific sessions, specific steps)
+- Proposed changes with confidence and impact estimate
+- Feed directly into `workflow-for-workflows`
+
+**Flow-back:** Low-confidence proposals as GitHub issues. High-confidence, low-risk proposals auto-applied to local copy + PR to community.
+
+---
+
+## Platform Vision (longer-term)
+
+### Knowledge graph for agent context
+
+**Status: idea** | Priority: medium
+
+**Problem:** Every session starts with a full repo sweep. Context gathering subagents re-read the same files, re-trace the same call chains, re-identify the same invariants.
+
+**Design -- two-layer hybrid:**
+
+**Layer 1: Structural graph (hard edges, deterministic)**
+Built by `ts-morph` (TypeScript Compiler API) + DuckDB. Captures: `imports`, `calls`, `exports`, `implements`, `extends`, `registers_in`, `tested_by`. Answers precise questions with certainty: "what imports trigger-router.ts?", "what CLI commands are registered?"
+
+**Layer 2: Vector similarity (soft weights, semantic)**
+Every node gets an embedding. Answers fuzzy questions: "what is conceptually related to this?", "what past sessions are relevant to this bug?" Built with LanceDB (embedded, TypeScript-native, local-first).
+
+**Technology:**
+- Structural: `ts-morph` + DuckDB
+- Vector: LanceDB + local embedding model (Ollama or `@xenova/transformers`)
+- Unified query: `query_knowledge_graph(intent)` returns merged structural + semantic results
+
+**Build order:** Structural layer spike first (1-day). Vector layer after spike proves the foundation. Incremental update: re-index only files in `filesChanged` after each session.
+
+**Build decision (from Apr 15 research):** ts-morph + DuckDB wins. Cognee: Python-only. GraphRAG/LightRAG: use LLMs to build graph (violates scripts-over-agent). Mem0/Zep: conversational memory, not code graphs. Sourcegraph: enterprise weight, overkill.
+
+---
+
+### Dynamic pipeline composition
+
+**Status: idea** | Priority: medium
+
+**Insight:** Not all tasks are equal in how much work is needed before implementation. A raw idea needs a completely different pipeline than a fully-specced ticket.
+
+**Maturity spectrum:**
+- `idea` -> `rough` -> `specced` -> `ready` -> `code-complete`
+
+**Coordinator reads maturity + existing artifacts and prepends the right phases:**
+- Nothing -> ideation -> market research -> spec authoring -> ticket creation -> implementation
+- BRD + designs -> architecture review -> implementation
+- Fully specced -> coding only
+
+**New workflows needed:**
+- `classify-task-workflow` -- fast, 1-step, outputs `taskComplexity`/`riskLevel`/`hasUI`/`touchesArchitecture`/`taskMaturity`
+- `ideation-workflow`, `spec-authoring-workflow`, `ticket-creation-workflow`, `grooming-workflow`
+
+---
+
+### Per-workspace work queue
+
+**Status: idea** | Priority: medium
+
+**The insight:** Triggers make WorkTrain reactive. A work queue makes it proactive -- it pulls the next item when capacity is available, works it to completion, pulls the next.
+
+**Internal queue:** `~/.workrail/workspaces/<name>/queue.jsonl` -- append-only, one item per line, consumed in priority order then FIFO.
+
+**External pull sources:**
+- GitHub issues (label filter)
+- GitLab issues (label filter)
+- Jira sprint board
+- Linear triage queue
+
+**Queue + message queue + talk:**
+
+| Interface | Use case | Latency |
+|-----------|----------|---------|
+| Work queue | "do this when you have capacity" | When a slot is free |
+| Message queue (`worktrain tell`) | "do this now, between current sessions" | End of current batch |
+| Talk (`worktrain talk`) | "let's discuss and decide together" | Interactive |
+
+---
+
+### Remote references (URLs, GDocs, Confluence)
+
+**Status: idea** | Priority: medium
+
+**Design:** Extend the workflow `references` system to support remote sources (HTTP URLs, Google Docs, Confluence pages). WorkRail remains a pointer system -- it validates declarations are well-formed, delivers the pointer, and the agent fetches with its own tools. Auth is entirely delegated to the agent.
+
+**Incremental path:**
+- Phase 1: public HTTP URLs. `resolveFrom: "url"`. WorkRail delivers the URL; agent fetches. No auth surface in WorkRail.
+- Phase 2: workspace-configured bearer tokens in `.workrail/config.json` keyed by domain
+- Phase 3: named integrations (GDocs, Confluence, Notion) as first-class configured sources
+
+**Design questions:**
+- Should WorkRail attempt a reachability check at start time, or skip entirely for remote refs?
+- How should remote refs appear in `workflowHash`? Content can change between runs.
+- `kind` field (`local` vs `remote`) or infer from `source` value?
+
+---
+
+### Declarative composition engine
+
+**Status: idea** | Priority: low
+
+**Summary:** Users or agents fill out a declarative spec (dimensions, scope, rigor level) and the WorkRail engine assembles a workflow automatically from a library of pre-validated routines. The agent is a form-filler, not an architect -- the composition logic lives in the engine.
+
+**Why different from agent-generated workflows:** Engine-composed workflows are assembled from pre-reviewed building blocks using deterministic rules. Same spec always produces the same workflow shape.
+
+**Good early use cases:** Audit-style workflows (user picks dimensions, engine assembles auditor steps), review workflows, investigation workflows.
+
+---
+
+### Workflow categories and category-first discovery
+
+**Status: idea** | Priority: low
+
+**Summary:** Improve workflow discovery by organizing bundled workflows into categories. Currently the catalog is large enough that flat discovery is becoming noisy.
+
+**Phase 1 shape:** If no category is passed, return category names + workflow count per category + a few representative titles. If a category is passed, return the full workflows for that category.
+
+**Design questions:**
+- Should categories live in workflow JSON, in a registry overlay, or be inferred from directory/naming?
+- Should `list_workflows` become polymorphic, or should category discovery be a separate mode?
+
+---
+
+### Forever backward compatibility (workrailVersion)
+
+**Status: idea** | Priority: medium
+
+Every workflow declares `workrailVersion: "1.4.0"`. The engine maintains compatibility adapters for all previous declared versions -- old workflows run forever without author intervention. The engine adapts; authors never migrate.
+
+**The web model:** this is how browsers handle HTML from 1995. A `<marquee>` tag still renders because the browser adapts, not because the author rewrote their page.
+
+**Engineering implication:** permanent commitment. Once a version adapter is shipped, it cannot be removed. The tradeoff is real but the alternative (expecting external authors to track WorkRail releases and migrate) breaks the platform trust model.
+
+**Phase 1:** Add `workrailVersion` field to schema. Default to `"1.0.0"` for existing workflows. Record in run events.
+**Phase 2:** Introduce the first adapter when the first schema-breaking change is needed.
+**Phase 3:** Build a compatibility test harness in CI.
+
+**Related:** `src/v2/read-only/v1-to-v2-shim.ts` (existing precedent for version adaptation).
+
+---
+
+### Parallel forEach execution
+
+**Status: idea** | Priority: low
+
+Sequential `forEach` (and `for`, `while`, `until`) all work -- implemented in the v1 interpreter and the v2 durable core. The idea here is parallel execution: run all iterations concurrently rather than sequentially. Requires design around: session store concurrent writes, token protocol isolation per iteration, and console DAG rendering for parallel branches.
+
+---
+
+### Assessment-gate tiers beyond v1
+
+**Status: idea** | Priority: low
+
+**Tier 1 (current):** Same-step follow-up retry. Consequence keeps the same step pending; engine returns semantic follow-up guidance.
+
+**Tier 2 (future):** Structured redo recipe on the same step. Engine surfaces a bounded checklist. No new DAG nodes or true subflow.
+
+**Tier 3 (future):** Assessment-triggered redo subflow. Matched consequence routes into an explicit sequence of follow-up steps. Introduces assessment-driven control-flow behavior.
+
+**Design questions:** When does Tier 2 become necessary? What durable model would Tier 3 need for entering, progressing through, and returning from a redo subflow?
+
+---
+
+### Workflow rewind / re-scope support
+
+**Status: idea** | Priority: low
+
+Allow an in-progress session to go back to an earlier point when new information changes scope, invalidates assumptions, or reveals the current path is wrong.
+
+**Phase 1:** Allow rewind to a prior checkpoint with an explicit reason. Record a "why we rewound" note in session history.
+
+**Phase 2:** Scope-change prompts ("our understanding changed", "the task is broader/narrower"). Let workflows declare safe rewind points explicitly.
+
+**Design questions:**
+- Should rewind be limited to explicit checkpoints, or support arbitrary node-level rewind?
+- How should the system preserve notes from abandoned paths?
+- Should some steps be marked non-rewindable once external side effects have happened?
+
+---
+
+### Subagent composition chains
+
+**Status: idea** | Priority: low
+
+Native support for nested subagents -- an agent spawning a subagent, which spawns its own -- up to a configurable depth limit.
 
 ```yaml
-triggers:
-  - id: weekly-code-health
-    provider: schedule
-    cron: "0 9 * * 1"          # every Monday at 9am
-    workflowId: architecture-scalability-audit
-    workspacePath: /path/to/repo
-    goal: "Run weekly code health scan -- identify coupling violations, complexity hotspots, and performance anti-patterns introduced this week"
-
-  - id: nightly-issue-triage
-    provider: schedule
-    cron: "0 2 * * *"          # every night at 2am
-    workflowId: wr.discovery
-    workspacePath: /path/to/repo
-    goal: "Review open GitHub issues created in the last 24 hours and triage them: classify severity, identify duplicates, suggest which to prioritize"
-
-  - id: backlog-next-task
-    provider: schedule
-    cron: "0 8 * * 1-5"        # weekday mornings at 8am
-    workflowId: coding-task-workflow-agentic
-    workspacePath: /path/to/repo
-    goal: "Pick the highest-priority unstarted task from docs/ideas/backlog.md and implement it"
+agentDefaults:
+  maxSubagentDepth: 3
+  maxTotalAgentsPerTask: 10
 ```
 
-### Key design decisions
+**Depth semantics:** Coordinator=0, worker=1, subagent=2, sub-subagent=3.
 
-- **Cron syntax**: standard 5-field cron (`min hour dom month dow`). Parsed by `node-cron` or equivalent -- already a pattern in the codebase (backlog mentions cron).
-- **Timezone**: configurable per trigger, defaults to system timezone. Important for "weekday morning" schedules that need to fire in the user's timezone.
-- **Missed runs**: if the daemon was down when a scheduled run should have fired, it does NOT catch up on missed runs by default. "Run at 9am Monday" means "run the next time 9am Monday arrives." Optional `catchUp: true` flag for cases where missing a run should be recovered.
-- **Overlap prevention**: if a scheduled run fires while the previous run is still active, it should be skipped (not queued). A `coding-task` that takes 2 hours should not spawn a second instance at the next cron tick.
-- **Manual trigger**: `worktrain run schedule <trigger-id>` to fire a scheduled trigger immediately without waiting for the cron time. Useful for testing.
-
-### Integration with the autonomous pipeline
-
-Scheduled tasks are the entry point for fully autonomous work:
-- "Every weekday morning, pick the next backlog item and run the full pipeline" -- this is how WorkTrain improves WorkTrain without any human input.
-- "Every time a PR is opened, run the MR review pipeline" -- this is github_prs_poll, already exists.
-- "Every Monday, run the architecture audit and file GitHub issues for findings" -- new scheduled capability.
-
-### Implementation notes
-
-- The `PollingScheduler` in `src/trigger/polling-scheduler.ts` already runs time-based loops for GitLab/GitHub polling. The schedule provider would be a similar loop, using cron expression matching instead of API polling.
-- `node-cron` or `croner` npm package for cron expression parsing and next-fire-time calculation. Lightweight, no daemon dependencies.
-- Scheduled triggers have no webhook payload -- `contextMapping` is empty, `goalTemplate` uses only static text or env vars.
-- The schedule state (last-fired-at per trigger) persists to `~/.workrail/schedule-state.json` so the daemon can detect missed runs on restart.
+`maxTotalAgentsPerTask` prevents exponential explosion: depth-3 tree with 3 agents per node = 27 concurrent agents without this cap.
 
 ---
 
-## Autonomous grooming loop + workOnAll mode (Apr 19, 2026)
+### Mobile monitoring and remote access
 
-### The vision
+**Status: idea** | Priority: low (post-daemon-MVP)
 
-WorkTrain eventually finds and executes its own work without any human seeding the queue. This is the full autonomous loop: raw backlog idea → groomed issue → discovered/shaped spec → implemented PR → reviewed → merged. Zero human input required once configured.
+**Goal:** Control and monitor autonomous WorkRail sessions from a phone.
 
-### Three autonomy levels
+**What's needed:**
+1. Mobile-responsive console with touch-friendly layout and tap to pause/resume/cancel
+2. Push notifications (via Slack/Telegram webhook -- no native app required for MVP)
+3. Human-in-the-loop approval on mobile -- maps to `POST /api/v2/sessions/:id/resume`
+4. Session log view -- linear timeline, not DAG
 
-**Level 0 -- Opt-in queue (current design)**
-Human adds `worktrain` label to specific issues. WorkTrain works those issues only. Safe, predictable, explicit.
+**Remote access options:**
+1. `workrail tunnel` command (Cloudflare Tunnel from the laptop) -- works behind any NAT/VPN
+2. Tailscale integration -- zero WorkRail code needed
+3. Cloud session sync -- daemon pushes events to S3/R2
 
-**Level 1 -- workOnAll mode**
-Config flag `workOnAll: true` in `~/.workrail/config.json`. WorkTrain looks at ALL open issues, infers which ones are actionable, picks the highest-priority one. Human escape hatch: `worktrain:skip` label blocks WorkTrain from touching a specific issue. Status labels (`worktrain:in-progress`, `worktrain:done`) are coordinator-managed for observability. No human-set maturity labels needed -- coordinator infers from content.
+**Priority:** Post-daemon-MVP. Design the REST control plane with mobile in mind from the start.
 
-**Level 2 -- Fully proactive**
-WorkTrain also surfaces work it found itself: failing CI, Dependabot alerts, backlog items with no issue, patterns in git history suggesting missing tests or docs. Creates its own work items, runs them, closes the loop.
+---
 
-### The grooming loop (scheduled, e.g. nightly)
+### WorkRail Auto: cloud-hosted autonomous platform
 
-Runs on a cron trigger. Responsibilities:
-1. Read `docs/ideas/backlog.md`, `docs/roadmap/now-next-later.md`, open GitHub issues
-2. Reconcile: close issues that are already done (PR merged), update priorities based on what shipped recently, flag duplicate or obsolete items
-3. For each ungroomed `worktrain` issue (or all issues in workOnAll mode): infer maturity -- does it have a linked spec? acceptance criteria? concrete implementation plan?
-4. For high-value `idea`-level items: autonomously run `wr.discovery` → `wr.shaping` → update or create issue with pitch attached, set `worktrain:specced`
-5. Backlog → issue promotion: when a backlog item crosses a readiness threshold (has enough context to act on), create a GitHub issue from it
+**Status: idea** | Priority: long-term
 
-### Maturity inference (no human-set labels required in Level 1+)
+**Goal:** WorkRail Auto runs on a server 24/7, connected to your engineering ecosystem, working autonomously without a laptop open.
 
-The coordinator reads issue content and infers:
-- Linked pitch/PRD/spec URL → `ready` or `specced`
-- Has acceptance criteria or concrete implementation plan → `specced` or `ready`
-- Vague/exploratory language → `idea`
-- Has open PR or recent branch activity → skip (already in flight)
+**What this enables:** GitLab MR opened -> WorkRail reviews, posts comment. Jira ticket moves to In Progress -> WorkRail starts coding task, pushes branch. PagerDuty fires -> WorkRail runs investigation, posts findings to Slack.
 
-The `worktrain:idea/specced/ready` taxonomy is the coordinator's internal model, not something humans set. In Level 1+ the coordinator manages it automatically.
+**Architecture implications:**
+- Multi-tenancy: isolated session stores, isolated credential vaults per org
+- Horizontal scaling: multiple daemon instances consuming from a shared trigger queue
+- Rate limiting per org, per integration
 
-### workOnAll config
+**Relationship to self-hosted:** Self-hosted is always free, always open source, always works offline. WorkRail Auto is the natural SaaS layer -- same engine, same workflows, managed infrastructure.
 
+**Priority:** Long-term. Design the local daemon with multi-tenancy seams in mind from the start (don't hardcode single-user assumptions). Don't build the hosted layer until the local daemon is proven.
+
+---
+
+### Multi-project WorkTrain
+
+**Status: idea** | Priority: medium (to investigate)
+
+**Problem:** WorkTrain needs to handle multiple completely unrelated projects simultaneously, but some projects are related and need to share knowledge.
+
+**Proposed model:** Workspace namespacing with explicit cross-workspace links:
+```yaml
+workspaces:
+  workrail:
+    path: ~/git/personal/workrail
+    knowledgeGraph: ~/.workrail/graphs/workrail.db
+    maxConcurrentSessions: 3
+    relatedWorkspaces: [storyforge]
+  storyforge:
+    path: ~/git/personal/storyforge
+    knowledgeGraph: ~/.workrail/graphs/storyforge.db
+    relatedWorkspaces: [workrail]
+```
+
+**Must be workspace-scoped:** knowledge graph, daemon-soul.md, session store, concurrency limits, triggers.
+
+**Can be shared globally:** WorkTrain binary, token usage tracking, message queue, merge audit log.
+
+---
+
+### Message queue: async communication with WorkTrain from anywhere
+
+**Status: idea** | Priority: medium
+
+**Design:** A persistent message queue (`~/.workrail/message-queue.jsonl`) that decouples when you send a message from when WorkTrain acts on it.
+
+```bash
+worktrain tell "skip the architecture review for the polling triggers PR, it's low risk"
+worktrain tell "add knowledge graph vector layer to next sprint"
+```
+
+Each command appends to the queue. The daemon drains between agent completions -- never mid-run, always at a natural break point.
+
+**Outbox (WorkTrain -> user):** WorkTrain appends notifications to `~/.workrail/outbox.jsonl`. A mobile client polls this or an HTTP SSE endpoint wraps it.
+
+**This is the foundation for mobile monitoring.** The mobile app is just a client that reads outbox and writes to message-queue.
+
+---
+
+### Periodic analysis agents
+
+**Status: idea** | Priority: low
+
+Agents on a schedule that proactively identify issues, gaps, improvement opportunities:
+
+- **Weekly: Code health scan** -- `architecture-scalability-audit` on modules not audited in 30 days
+- **Weekly: Test coverage scan** -- files modified with zero/low test coverage
+- **Weekly: Documentation drift scan** -- recently merged PRs changed behavior described in docs
+- **Monthly: Dependency health scan** -- CVEs, active forks, lighter alternatives
+- **Monthly: Performance baseline** -- benchmark scenarios vs previous month
+- **Continuous: Security scan** -- on every PR merge, OWASP top 10 patterns in changed files
+- **Monthly: Ideas generation** -- `wr.discovery` on codebase + backlog + session history, asking "what's the most impactful thing we could build next?"
+
+---
+
+### Monitoring, analytics, and autonomous remediation
+
+**Status: idea** | Priority: low
+
+WorkTrain watches application health metrics (error rate, latency, session success/failure rate, queue depth), identifies anomalies, investigates root causes, and resolves what it can automatically.
+
+**Monitoring loop:** Detect anomaly -> classify severity -> investigate with `bug-investigation.agentic.v2` -> if confidence >= 0.8 and severity <= High, attempt auto-remediation (config/feature-flag fix, code fix) or else escalate with full findings.
+
+**Analytics dashboard:** Per-module PR cycle time, workflow step failure rates, token cost per session type, quality score (weighted composite of review accuracy + coding success rate + investigation accuracy).
+
+---
+
+### Cross-repo execution model
+
+**Status: idea** | Priority: medium (post-MVP for hosted tier)
+
+**Problem:** WorkRail currently assumes a single repo. The autonomous daemon breaks this -- a coding task may touch Android, iOS, and a backend API simultaneously.
+
+**Workspace manifest:** Sessions declare which repos they need:
 ```json
-// ~/.workrail/config.json
 {
-  "workOnAll": true,
-  "workOnAllExclusions": ["needs-design", "blocked-external", "wontfix"],
-  "maxConcurrentSelf": 2
+  "context": {
+    "repos": [
+      { "name": "android", "path": "~/git/my-project/android" },
+      { "name": "backend", "path": "~/git/my-project/backend" }
+    ]
+  }
 }
 ```
 
-`maxConcurrentSelf` caps how many autonomous self-improvement sessions run simultaneously -- important so WorkTrain doesn't try to implement 10 things at once and create merge conflicts.
+**Scoped tools:** `BashInRepo`, `ReadRepo`, `WriteRepo` that route to the correct working directory.
 
-### Design notes
+**Dynamic provisioning:** If the repo is already cloned locally, use it. If declared as a remote URL, clone to `~/.workrail/repos/<name>/`.
 
-- The grooming loop and the work loop are **separate triggers** with separate schedules. Grooming runs more frequently (nightly or post-merge). Work loop runs on demand or weekly.
-- The grooming loop requires LLM judgment ("is this ready?") -- it's a `wr.discovery`-style session on the backlog, not a deterministic script. This is a feature, not a limitation.
-- `worktrain:skip` is the only label humans need to set in Level 1+ -- it's the explicit "not this one" override.
-- Auto-PR-from-backlog requires careful scope: WorkTrain should create draft PRs for its own discoveries, not automatically push to open issues on other people's repos.
-
-### Priority
-
-This is the long-term autonomous vision. Implement in order:
-1. Level 0 (current, task queue PR #4)
-2. workOnAll config flag (small addition to the coordinator, after #4 ships)
-3. Maturity inference (replace label-based routing with content inference)
-4. Grooming loop (scheduled cron trigger, wr.discovery session on backlog)
-5. Level 2 proactive work (post-grooming, after proving the loop works)
+**This is the feature that makes WorkRail truly freestanding** for multi-repo development teams.
 
 ---
 
-## Escalating review gates based on finding severity (Apr 19, 2026)
+### Long-term vision: WorkRail as a general engine, domain packs as configuration
 
-**The idea:** when an MR review returns a Critical finding post-implementation, the review is not over -- it triggers a deeper audit chain before merge is allowed.
+**Status: idea** | Priority: long-term
 
-### Current state
+WorkTrain is not just a coding tool. The underlying engine -- session management, workflow enforcement, daemon, agent loop, knowledge graph, context bundle assembly -- is domain-agnostic.
 
-`worktrain run pr-review` routes by severity: `clean` → merge, `minor` → fix-agent loop, `blocking` → escalate to human. But "blocking" is binary -- a single Critical finding and a trivially incorrect comment are treated identically (both block, neither gets more scrutiny).
+**Domain packs:** Self-contained configuration bundles that specialize WorkTrain for a specific problem domain: a set of workflows, a knowledge graph schema, context bundle query definitions, trigger definitions, a daemon soul template.
 
-### The right behavior
+**Examples:** `worktrain-coding` (current default), `worktrain-research`, `worktrain-creative`, `worktrain-ops`, `worktrain-data`.
 
-After a fix round, if the re-review still returns a Critical finding (or the original review does):
-1. **Another full MR review** -- confirm the Critical is real, not a false positive from the reviewer
-2. **Production readiness audit** (`production-readiness-audit` workflow) -- a Critical finding often implies a runtime risk. Check for error handling gaps, security exposure, missing observability.
-3. **Architecture audit** (`architecture-scalability-audit`) -- if the Critical is architectural (wrong abstraction, tight coupling, violates invariants), run a targeted audit on the affected modules.
-
-Not all Criticals warrant all three. The coordinator should route based on the finding's `category` field (from `wr.review_verdict`):
-- `correctness` / `security` → always trigger prod audit
-- `architecture` / `design` → trigger arch audit
-- All → trigger re-review
-
-### Auto-merge policy interaction
-
-A PR that triggered the escalating audit chain should NEVER auto-merge, even if the final re-review comes back clean. The human should approve it explicitly after seeing the audit trail. This is a hard rule, not a setting.
-
-### Implementation notes
-
-- The escalation logic belongs in the `IMPLEMENT` and `REVIEW_ONLY` mode coordinators (part of the adaptive pipeline coordinator work).
-- `wr.review_verdict` `findings[].category` field needs to be defined if not already -- check `src/v2/durable-core/schemas/artifacts/review-verdict.ts`.
-- The audit chain runs sequentially (prod then arch), not in parallel -- each audit's output informs the next.
-- All audit session IDs should be linked to the same parent work unit so the console session tree shows the full chain.
-
-### Priority
-
-Design this alongside the adaptive pipeline coordinator (#3). The coordinator needs to know about this escalation policy before its routing logic is finalized -- the `IMPLEMENT` mode's post-review handling is incomplete without it.
+**When to make it explicit:** The right time is when a second domain is ready to be added. Extract the coding-specific pieces into `worktrain-coding` and establish the domain pack contract.
 
 ---
 
-## UX/UI impact detection and design workflow integration (Apr 19, 2026)
+## Done / Shipped
 
-**The idea:** When the adaptive pipeline coordinator classifies a task, it should detect whether the task touches user-facing surfaces (UI components, user flows, API contracts that clients consume) and automatically insert a `ui-ux-design-workflow` run before implementation.
+### Autonomous background agent platform (WorkTrain daemon)
 
-### Why this matters
+**Status: done** | Shipped as `worktrain daemon`
 
-Coding tasks that touch UI get implemented without a design pass today. The agent writes functional code but often produces interfaces that are technically correct but experientially wrong -- wrong information hierarchy, wrong affordances, missing error states, missing loading states, wrong copy. A `ui-ux-design-workflow` run before coding forces the "multiple design directions before converging" discipline that prevents the single-solution trap.
+WorkTrain is a persistent background daemon that initiates workflows autonomously, integrates with external systems, and uses the console as a control plane. Key shipped capabilities:
+- `runWorkflow()` with `KeyedAsyncQueue` for concurrent session serialization
+- `spawn_agent` / multi-agent subagent delegation
+- Polling triggers (GitLab MRs, GitHub issues/PRs, GitHub queue poll)
+- Webhook triggers via generic provider
+- Worktree isolation (`branchStrategy: worktree`)
+- Bot identity (`botIdentity`) and acting-as-user support
+- Dynamic model selection (`agentConfig.model`)
+- macOS notifications
+- SteerRegistry + mid-session injection
+- AbortRegistry + SIGTERM graceful shutdown
+- `maxOutputTokens` per trigger, `maxQueueDepth` with HTTP 429
+- Crash recovery Phase B
+- `daemon-soul.md` / workspace context injection
+- `complete_step` tool
+- Execution stats + structured event log
+- Stuck detection (`repeated_tool_call`, `no_progress`)
+- `signal_coordinator` tool
+- `worktrain init` soul setup
+- Per-trigger crash safety (`persistTokens`)
+- Worktree orphan cleanup on delivery failure
 
-### Detection signals (what marks a task as UX-impactful)
+### WorkRail engine / MCP features
 
-The coordinator should classify a task as `touchesUI: true` when any of:
-- Issue title or body mentions: component, screen, page, modal, dialog, button, form, flow, onboarding, dashboard, table, list, navigation, UX, UI, design, user-facing, frontend, console, web
-- Affected files (from git diff or knowledge graph) include: `console/src/`, `*.tsx`, `*.css`, `web/`, `views/`
-- The task has a `ui` or `frontend` label
-- The upstream spec (pitch/PRD) explicitly calls out visual or interaction design requirements
+**Status: done**
 
-False positives (running design workflow unnecessarily) are cheaper than false negatives (shipping bad UX). Default to `touchesUI: true` when signals are ambiguous and the task is `complexity: Medium` or larger.
+- Assessment gates v1 with consequences
+- Loop control -- all four types (`while`, `until`, `for`, `forEach`) implemented
+- Subagent guidance feature
+- References system (local file refs)
+- Routine/templateCall injection
+- Workspace source discovery
+- Branch safety (never checkout main into worktree) -- enforced via trigger validation rules and worktree isolation in daemon; NOT a compiled `wr.features.*` engine feature
+- Console execution trace Layers 1+2+3a
+- Console MVI architecture
+- `worktrain` CLI (logs, health, status, trigger validate)
+- Notification service
 
-### Pipeline integration
+### Scripts-over-agent design principle
 
-When `touchesUI: true`, the `IMPLEMENT` pipeline becomes:
+**Status: done** -- codified in AGENTS.md and daemon-soul.md
 
-```
-coding-task-classify → ui-ux-design-workflow → coding-task-workflow-agentic → PR → review → merge
-```
+The agent is expensive, inconsistent, and slow. Scripts are free, deterministic, and instant. Any operation the daemon can perform with a shell script, git command, or API call should be done that way -- not delegated to the LLM.
 
-The `ui-ux-design-workflow` output (a design spec with chosen direction, information architecture, component breakdown, error states) feeds into Phase 0.5 of `coding-task-workflow-agentic` as the upstream spec. The coding agent then implements against a concrete design spec, not ad-hoc intuition.
+### Dynamic model selection
 
-### Relationship to escalating review gates
+**Status: done** -- shipped in `triggers.yml` `agentConfig.model`
 
-When a post-implementation MR review finds a UI/UX finding (wrong affordance, missing state, confusing flow), the escalation should include a targeted `ui-ux-design-workflow` audit pass, not just a code review. UX regressions need design eyes, not just code eyes.
+### Multi-agent support (spawn_agent + coordinator sessions)
 
-### Open design questions
+**Status: done (partial)** -- `spawn_agent` tool and coordinator sessions with `steer` are shipped. Full `spawn_session`/`await_sessions` as first-class workflow primitives is still an idea (see "Native multi-agent orchestration" above).
 
-- **Who reviews the design spec before coding starts?** If the UX design workflow runs autonomously at 2am and coding starts immediately after, there is no human review of the design direction. This is fine for small UI tweaks; it's wrong for new user flows. The coordinator needs a complexity gate: `complexity: Large AND touchesUI: true` → require human ack on the design spec before coding.
-- **Design spec format:** `ui-ux-design-workflow` currently produces a markdown design document. Does the coding workflow reliably consume this as an upstream spec via Phase 0.5? Verify before relying on the automated handoff.
-- **Console-specific workflows:** WorkRail's console is a React/TypeScript SPA. Consider a `worktrain:console` label or file-path heuristic that routes to a console-specific design workflow variant.
+### WorkTrain onboarding (`worktrain init`)
 
-### Priority
+**Status: done (basic version)** -- initial soul setup ships. The full guided LLM-provider + trigger + smoke-test onboarding flow described in the idea above is not yet built.
 
-Design this as part of the adaptive coordinator (#3). The `touchesUI` flag belongs on the classification output alongside `taskComplexity` and `maturity`. The UI detection logic and the design workflow insertion are both coordinator-level concerns, not engine-level.
+### Daemon context customization
 
----
+**Status: done** -- `~/.workrail/daemon-soul.md`, AGENTS.md auto-inject, direct `start_workflow` call from daemon.
 
-## Current state update (Apr 20, 2026)
+### Workflow complexity routing
 
-**npm version: v3.45.0**
+**Status: done (partial)** -- `runCondition`/QUICK/STANDARD/THOROUGH rigor modes ship. A dedicated classify-task-workflow and the full dynamic pipeline coordinator are still ideas above.
 
-### What shipped in this session (Apr 19-20, 2026)
+### `wr.*` namespace rename
 
-All five top-priority autonomous pipeline items shipped:
+**Status: done** -- all bundled workflows renamed to `wr.*` namespace (PR #782).
 
-- **#1 -- Worktree isolation + auto-commit** (PR #630) -- Each WorkTrain coding session now runs in an isolated git worktree (`~/.workrail/worktrees/<sessionId>`). `trigger.workspacePath` is never mutated; all tool factories receive `sessionWorkspacePath`. Crash recovery sidecar persists `worktreePath` for orphan cleanup. `delivery-action.ts` asserts HEAD branch before push. `test-task` trigger: `branchStrategy: worktree`, `autoCommit: true`, `autoOpenPR: true`.
+### Metrics outcome validation
 
-- **#2 -- Stuck detection escalation** (PR #636) -- New `WorkflowRunResult._tag: 'stuck'` discriminant. When `repeated_tool_call` heuristic fires and `stuckAbortPolicy !== 'notify_only'` (default: `'abort'`), daemon aborts the session immediately instead of burning the 30-min wall clock. Writes structured entry to `~/.workrail/outbox.jsonl`. `stuckAbortPolicy` and `noProgressAbortEnabled` configurable per trigger in `agentConfig`. `ChildWorkflowRunResult` updated atomically.
-
-- **#3 -- Adaptive pipeline coordinator** (PR #639) -- `worktrain run pipeline --issue N --workspace path` routes tasks to the right pipeline via pure static routing:
-  - dep-bump + PR number → QUICK_REVIEW (delegates to `runPrReviewCoordinator`)
-  - PR/MR number → REVIEW_ONLY
-  - `current-pitch.md` exists → IMPLEMENT (coding + PR + review + merge)
-  - Default → FULL (discovery → shaping → coding → PR → review → merge)
-  - Fix loop cap: 2 iterations max. Escalating audit chain for Critical findings. UX gate for UI-touching tasks. 6 hardcoded timeout constants. Pitch archived after IMPLEMENT/FULL completes.
-
-- **#4 -- GitHub issue queue poll trigger** (PR #637) -- New `github_queue_poll` trigger provider. Polls GitHub issues matching `GitHubQueueConfig` (assignee-based MVP, `label`/`mention`/`query` typed but `not_implemented`). Maturity inference from 3 deterministic heuristics. Idempotency check (conservative: parse errors = active). JSONL decision log at `~/.workrail/queue-poll.jsonl`. `maxTotalConcurrentSessions` cap. Bot identity config (`botName`, `botEmail`).
-
-- **#5 -- Context assembly layer** (PR #624, shipped earlier) -- `ContextAssembler` injects git diff summary + prior session notes before turn 1. Feeds into coordinator pre-dispatch.
-
-- **Performance sweep** (all 10 issues #248-257 -- already confirmed complete)
-- **Console session tree** (PR #607 -- parentSessionId rendered in UI)
-- **Daemon file-nav tools** (PR #619) -- Glob, Grep, Edit + upgraded Read/Write with staleness guard
-- **`spawn_agent` artifacts** (PR #613) -- `lastStepArtifacts` surfaced through spawn_agent return
-- **`wr.shaping` workflow** (PR #610) -- faithful Shape Up shaping, 9 steps
-- **Coding workflow Phase 0.5** (PR #610) -- upstream context detection, three-workflow pipeline
-
-### WorkTrain current capabilities (v3.45.0)
-
-**Autonomous workflow execution -- confirmed working:**
-- `worktrain run pipeline --issue N` routes to the right pipeline and runs it end-to-end
-- `worktrain run pr-review` autonomous PR review with structured verdicts and auto-merge
-- Coding sessions run in isolated worktrees, auto-commit, auto-open PR
-- Sessions abort when stuck (instead of burning 30-min wall clock)
-- GitHub issue queue polling: assign issue to `worktrain-etienneb` → daemon picks it up automatically
-- All sessions start with git diff + prior session notes injected (ContextAssembler)
-- Daemon file-nav tools: Glob, Grep, Edit, Read (paginated), Write (staleness guard)
-- Escalating audit chain: Critical findings → prod audit → re-review → escalate if still Critical
-- Fix loop: minor findings → max 2 fix iterations before escalation
-
-**WorkTrain agent tool set (v3.45.0):**
-`complete_step`, `continue_workflow` (deprecated), `Bash`, `Read`, `Write`, `Glob`, `Grep`, `Edit`, `report_issue`, `spawn_agent`, `signal_coordinator`
-
-**Trigger system:**
-- Generic webhook, GitLab MR polling, GitHub Issues polling, GitHub PR polling
-- **NEW: `github_queue_poll`** -- assignee-based issue queue with maturity inference
-- `branchStrategy: worktree` -- isolated worktree per session
-- `autoCommit: true` / `autoOpenPR: true` -- full delivery pipeline
-- `stuckAbortPolicy: 'abort' | 'notify_only'`
-- `goalTemplate`, `referenceUrls`, `contextMapping`, `agentConfig`
-
-### Accurate limitations (v3.45.0)
-
-1. **`dispatchAdaptivePipeline()` not yet connected** -- `TriggerRouter.dispatchAdaptivePipeline()` exists but `polling-scheduler.ts` still calls `router.dispatch()`. Queue poll sessions run as generic sessions, not routed through the adaptive coordinator. Cross-PR gap documented with TODO.
-
-2. **`findingCategory` not on review-verdict** -- Audit chain always dispatches `production-readiness-audit` for Critical findings regardless of finding type. `findingCategory` field on `findings[]` items needs to be added to `wr.review_verdict` schema as a follow-up so architecture findings can route to `architecture-scalability-audit` correctly.
-
-3. **Bot account setup required before first queue run** -- `worktrain-etienneb` GitHub account must be created, PAT generated with `repo:read` scope, stored as `WORKTRAIN_BOT_TOKEN`, and added as repo collaborator. Commit identity: `worktrain-etienneb@users.noreply.github.com`. Without this, `github_queue_poll` trigger has no bot identity.
-
-4. **No auto-merge setting in `worktrain init`** -- Auto-merge policy is hardcoded in the coordinator. Should be a `~/.workrail/config.json` setting exposed during `worktrain init`.
-
-5. **Grooming loop not built** -- Three open design decisions must be settled before building (human-ack boundary, compute budget, priority signal source). Deferred until Level 1 usage data exists.
-
-6. **Knowledge graph not wired** -- `src/knowledge-graph/` module exists (DuckDB + ts-morph), `ts-morph` in devDependencies. No daemon tool yet. Architecture decision: belongs in context assembly layer, not as a daemon tool.
-
-7. **`worktrain inbox --watch` stub** -- Prints "not yet implemented." The outbox mechanism exists; just needs a polling loop.
-
-8. **Artifact store not built** -- Agents dump markdown in the repo. `~/.workrail/artifacts/` not created.
-
-### Next priorities (groomed Apr 20)
-
-1. **Connect `dispatchAdaptivePipeline()`** -- Wire `polling-scheduler.ts` to call `TriggerRouter.dispatchAdaptivePipeline()` when `context.taskCandidate` is present. Small change, unlocks the full autonomous queue → pipeline connection.
-
-2. **`findingCategory` on review-verdict schema** -- Add `findingCategory: 'correctness' | 'security' | 'architecture' | 'ux' | 'performance' | 'testing'` to `findings[]` in `ReviewVerdictArtifactV1Schema`. Update `mr-review-workflow-agentic` final step to emit it. Unlocks correct audit routing.
-
-3. **Bot account setup + `worktrain init` overhaul** -- Create `worktrain-etienneb`, add `worktrain daemon --check` command (API key + git fetch dry run), expose auto-merge policy in `worktrain init`.
-
-4. **Level 1 usage: run WorkTrain on its own backlog** -- Create `worktrain:ready` issues for the top 10 ready tasks, assign to `worktrain-etienneb`, observe one full queue → pipeline run. Collect data on misclassifications and weak PRs before designing the grooming loop.
-
-5. **`worktrain inbox --watch`** -- Close the notification loop. Outbox exists, just needs the polling implementation.
-
----
-
-## WorkTrain identity model: act as the user, not as a bot (Apr 20, 2026)
-
-**Design decision:** WorkTrain acts as the configured user, not as a separate bot account.
-
-### Why bot accounts are the wrong default
-
-Most developers -- especially at companies -- cannot create separate bot GitHub accounts. Jira, GitLab, and other enterprise systems tie authentication to employee identity. Requiring a separate account creates friction that blocks adoption entirely.
-
-WorkTrain's attribution signal is the **work pattern**, not the identity:
-- Branch name: `worktrain/<sessionId>` -- immediately recognizable
-- PR body footer: "🤖 Automated by WorkTrain" + session ID + workflow name
-- Commit co-author: `Co-Authored-By: WorkTrain <worktrain@noreply>`
-
-Anyone reviewing a PR knows it was autonomous. The developer's name on the PR is not a lie -- they configured WorkTrain to do this work on their behalf.
-
-### Queue membership without a bot account
-
-Assignee-based opt-in only works with a dedicated bot account. Label-based opt-in works with any setup:
-- Apply `worktrain:ready` label to an issue → WorkTrain picks it up
-- The queue poll trigger uses `queueType: label` + `queueLabel: "worktrain:ready"`
-- No bot account, no special permissions, no friction
-
-`workOnAll: true` (future) processes any open issue -- also requires no bot account.
-
-### Token: use your own PAT
-
-`$GITHUB_TOKEN` (your personal token) or a fine-grained PAT scoped to the target repo. WorkTrain uses it for API calls; the commit identity (`git user.name`, `git user.email`) is set separately in the worktree and can be whatever you want.
-
----
-
-## Jira + GitLab integration for WorkTrain (Apr 20, 2026)
-
-**Context:** Most enterprise developers use Jira for tickets and GitLab for code hosting. WorkTrain should work in this environment without requiring GitHub or a bot account.
-
-### What exists
-
-`gitlab_poll` trigger already exists -- polls GitLab MR list and dispatches sessions when new/updated MRs appear. WorkTrain can already do autonomous MR review on GitLab.
-
-### What's missing
-
-**`jira_poll` trigger:** Poll a Jira board/sprint/filter for issues in a specific status (e.g., "In Progress", "Ready for Dev") assigned to the configured user, and dispatch WorkTrain sessions for them. The developer labels Jira issues for WorkTrain the same way they'd assign to a teammate.
-
-Proposed `jira_poll` config:
-```yaml
-- id: jira-queue
-  provider: jira_poll
-  jiraBaseUrl: https://zillow.atlassian.net
-  token: $JIRA_API_TOKEN
-  project: ACEI
-  statusFilter: "Ready for Dev"
-  assigneeFilter: "$JIRA_USERNAME"
-  workspacePath: /path/to/repo
-  branchStrategy: worktree
-  autoCommit: true
-  autoOpenPR: true
-  agentConfig:
-    maxSessionMinutes: 90
-```
-
-**GitLab issue queue:** Same as `github_queue_poll` but for GitLab issues. Dispatch coding sessions for GitLab issues labeled `worktrain` or in a specific milestone.
-
-### Implementation notes
-
-- `jira_poll` follows the same `PollingSource` discriminated union pattern as `gitlab_poll` and `github_queue_poll`
-- Jira REST API v3: `GET /rest/api/3/search?jql=project=X+AND+status="Ready for Dev"+AND+assignee=currentUser()`
-- Token: Jira API token (not OAuth -- simpler for developer tools)
-- `jira_poll` should extract issue title + description as the goal, and the Jira issue URL as `upstreamSpecUrl` in `TaskCandidate`
-
-### Priority
-
-Medium. GitLab MR review already works. Jira issue queue is the next most impactful integration for enterprise users. Design alongside the label-based GitHub queue -- the patterns are identical, just different API shapes.
-
----
-
-## Queue opt-in design: unresolved decisions (Apr 20, 2026)
-
-**Status: DO NOT IMPLEMENT until these questions are answered.**
-
-The self-improvement queue was partially implemented using label-based opt-in, then later walked back. This section records what's actually unresolved so future work starts from the right place.
-
-### What's wrong with the current state
-
-The `github_queue_poll` trigger now supports both `assignee` and `label` queue types. The code is correct. But `triggers.yml` has no active queue trigger because the opt-in mechanism isn't settled -- see below.
-
-The label approach was implemented as a practical fallback when "no bot account" ruled out assignee-based. But labels were what we explicitly rejected in the original design because they require humans to apply them per issue. Reversing that decision without acknowledging it was a mistake. The right answer isn't to pick one mechanism -- it's to keep the queue shape configurable (which we already designed) and pick the right shape per context.
-
-### The configurable queue shape (already designed, partially implemented)
-
-```
-{ "queue": { "type": "github_assignee", "user":  "worktrain-etienneb" } }
-{ "queue": { "type": "github_label",    "name":  "worktrain:ready" } }
-{ "queue": { "type": "github_query",    "search": "is:issue is:open ..." } }
-{ "queue": { "type": "jql",             "query": "assignee=currentUser() AND status='Ready for Dev'" } }
-{ "queue": { "type": "gitlab_label",    "name":  "worktrain" } }
-```
-
-For the workrail repo specifically: either `github_assignee` (accept the conflation between your personal assignments and WorkTrain's queue -- fine for a solo repo) or `github_label` (apply label per issue -- more discipline, more friction). Neither is wrong; pick based on preference.
-
-### Enterprise implications that must be resolved before Zillow work
-
-Three questions for the user to verify before designing any Zillow path:
-
-1. **Service account process**: Does Zillow have a ServiceDesk or security review process for requesting service accounts (`worktrain-etienneb@zillow`)? If yes, request one through proper channels rather than acting under your personal identity.
-
-2. **AUP check**: Does Zillow's Acceptable Use Policy permit automation acting under employee identities without an explicit security review? If not, "WorkTrain acts as you" is not viable -- a service account is required.
-
-3. **Self-approval rules**: Can you approve your own MRs in Zillow's GitLab? If "no self-approval" is enforced, every WorkTrain MR needs a human reviewer. That changes the pipeline (no auto-merge under personal identity).
-
-These three answers determine the entire architecture for Zillow. Do not design the Jira/GitLab path until they are known.
-
-### Enterprise identity risk (important)
-
-"WorkTrain acts as you" is different from "Dependabot acts as you." Dependabot does narrow, predictable operations (dependency bumps). WorkTrain does arbitrary LLM-driven code changes. Every autonomous action -- MR opened, commit pushed, comment posted -- is attributed to you in audit logs. If WorkTrain does something wrong under your identity, the audit trail points to you. Understand this risk before turning on autonomy against company repos.
-
-### Jira return path (missing from current jira_poll design)
-
-The `jira_poll` backlog entry describes pulling tickets from Jira. It does not describe writing back:
-- Moving the ticket to "In Review" when an MR is opened
-- Adding the MR URL to the Jira ticket (a Jira field or comment)
-- Reacting to Jira transitions mid-work (ticket moved back to "To Do" → WorkTrain stops)
-
-The full Jira integration is a round-trip, not just a poll. Design the return path before implementing `jira_poll`.
-
----
-
-## Gate 2 follow-up: per-trigger gh CLI token for delivery (Apr 20, 2026)
-
-`delivery-action.ts` calls `gh pr create` using whatever `gh` CLI auth is configured globally -- it does not pass a per-trigger token. For single-identity (always acting as yourself) this is fine. For multi-identity (Zillow service account alongside personal trigger), the globally authenticated `gh` user handles all PR creation, silently using the wrong identity.
-
-**Fix when multi-identity is needed:** Pass `GH_TOKEN=<triggerToken>` env override to `execFn` when calling `gh pr create` and `gh pr merge`. Not a blocker for single-identity. Prerequisite for multi-identity support.
-
----
-
-## Queue config discriminated union tightening (Apr 20, 2026)
-
-`GitHubQueueConfig` uses a flat interface with runtime validation. Should be a proper TypeScript discriminated union so `type: 'assignee'` requires `user` at compile time. Low priority but tracked per "make illegal states unrepresentable."
-
----
-
-## Kill switch and commit signing (Apr 20, 2026)
-
-**Kill switch:** `worktrain kill-sessions` -- aborts all running daemon sessions immediately. Useful when WorkTrain is doing something unexpected. Sends abort signal to all active sessions, marks them user-killed in the event log.
-
-**Commit signing:** verify `git commit` honors existing `commit.gpgsign` config, or add explicit opt-out for bot identities that don't have signing keys. Empirically verify before declaring this solved.
-
----
-
-## triggers.yml hot-reload (Apr 20, 2026)
-
-The daemon reads `triggers.yml` once at startup. Any change requires a full daemon restart. This creates friction during trigger configuration iteration.
-
-**The fix:** watch `triggers.yml` for changes using `fs.watch()` or `chokidar`, re-validate the file on change, and if valid swap the in-memory trigger index without restarting the daemon. Active sessions in flight are unaffected (they hold their own trigger snapshot). New sessions after the reload use the new config.
-
-**Partial hot-reload is acceptable:** if the new `triggers.yml` fails validation, log a warning and keep the old config. Don't crash the daemon on a syntax error.
-
-**Implementation:** `TriggerRouter` already accepts a `TriggerIndex` at construction. The hot-reload path re-calls `loadTriggerStore()` and swaps the index reference on the router. `PollingScheduler` loops are keyed per trigger -- swapping the index would also require restarting the polling loops cleanly.
-
-**Priority:** Medium -- useful for onboarding and trigger iteration, not a production blocker.
-
----
-
-## GitHub webhook trigger with assignee/event filtering (Apr 20, 2026)
-
-**The problem:** `github_queue_poll` has a 5-minute latency floor. Assigning an issue fires a GitHub webhook immediately -- WorkTrain should start within seconds, not minutes.
-
-### What exists today
-
-- `provider: generic` handles arbitrary POST webhooks with HMAC validation
-- `goalTemplate: "{{$.issue.title}}"` extracts issue title from payload
-- `hmacSecret: $MY_SECRET` validates `X-Hub-Signature-256`
-
-**You can use this today** but without an assignee filter -- any issue event fires the trigger regardless of who it's assigned to.
-
-### What's missing: assignee filtering
-
-A `contextCondition` or `dispatchCondition` field on the trigger that gates dispatch on a payload value:
-
-```yaml
-- id: self-improvement-hook
-  provider: generic
-  workflowId: coding-task-workflow-agentic
-  workspacePath: /path/to/repo
-  goalTemplate: "{{$.issue.title}}"
-  hmacSecret: $GITHUB_WEBHOOK_SECRET
-  dispatchCondition:
-    payloadPath: "$.assignee.login"
-    equals: "worktrain-etienneb"
-```
-
-Without this, the workaround is to create a dedicated webhook URL per-trigger so only the right events reach it (GitHub lets you filter by event type at the webhook level -- set it to "Issues" events only, which already narrows scope significantly).
-
-### The hook+poll pattern (recommended for production)
-
-```yaml
-# Primary: instant response via webhook
-- id: self-improvement-hook
-  provider: generic
-  goalTemplate: "{{$.issue.title}}"
-  hmacSecret: $GITHUB_WEBHOOK_SECRET
-  dispatchCondition:
-    payloadPath: "$.assignee.login"
-    equals: "worktrain-etienneb"
-
-# Fallback: catch anything missed during downtime
-- id: self-improvement-poll
-  provider: github_queue_poll
-  pollIntervalSeconds: 3600   # once per hour, safety net only
-```
-
-### Implementation
-
-1. Add `dispatchCondition: { payloadPath, equals }` to `TriggerDefinition` -- parsed in `trigger-store.ts`, checked in `trigger-router.ts` before enqueuing. Single condition is MVP; AND/OR logic is follow-up.
-2. Add `github_issues_webhook` as a named provider (wraps generic with GitHub-specific HMAC and event schema awareness). Convenience only -- generic already works.
-
-**Priority:** Medium-high. The 5-minute latency is the main UX gap once the queue is live. `dispatchCondition` is ~50 LOC in trigger-store + trigger-router.
-
----
-
-## Demo repo feedback loop: WorkTrain improves itself via real task execution (Apr 20, 2026)
-
-### The idea
-
-Run WorkTrain against a real demo repo, observe what breaks, automatically file issues against the workrail repo, and have WorkTrain fix them. A self-improving feedback loop that surfaces real production failures faster than any manual testing.
-
-### Why this matters
-
-Right now WorkTrain's quality is validated by: the tasks we built it on (workrail itself) and manual inspection. That's a small, biased sample. A demo repo with diverse real tasks reveals failure modes in the full pipeline that workrail's self-improvement loop won't surface -- because the workrail tasks are always WorkTrain-flavored (TypeScript, same patterns, same tool use).
-
-### The loop
-
-```
-Demo repo tasks (worktrain:ready issues)
-  ↓
-WorkTrain runs full pipeline: discover → shape → code → PR → review → merge
-  ↓
-Failure classifier watches daemon event log
-  ↓
-For each failure: structured issue filed against workrail repo
-  (what task, what step, what went wrong, session ID, relevant log lines)
-  ↓
-worktrain-etienneb assigned → WorkTrain fixes itself
-  ↓
-WorkTrain re-runs the failed task → confirms fix
-```
-
-### What to build
-
-**Phase 1: Demo repo + manual observation**
-- Create or pick a demo repo -- real TypeScript project, diverse tasks (feature add, refactor, bug fix, test coverage, docs)
-- Add 5-10 `worktrain:ready` issues with acceptance criteria
-- Run WorkTrain on them, manually supervise first few runs
-- Collect failure patterns: what breaks, how often, at which pipeline step
-
-**Phase 2: Failure classifier**
-- Scheduled session (nightly cron trigger) that reads `~/.workrail/events/daemon/YYYY-MM-DD.jsonl`
-- Classifies sessions by outcome: success, error, timeout, stuck
-- For non-success sessions: extracts failure context (last tool call, stuck reason, step that failed, issue summaries from `report_issue`)
-- For each new failure: creates a GitHub issue against the workrail repo with:
-  ```
-  Title: [WorkTrain failure] <workflow> failed at <step>: <reason>
-  Body: Session: sess_xxx | Trigger: self-improvement | Task: #N "<title>"
-        Step: phase-3-plan-and-test-design
-        Failure: repeated_tool_call (grep on same pattern 3x)
-        Last tool args: {"pattern": "...", "path": "..."}
-        Issue summaries: ["Could not find X in codebase"]
-  Labels: worktrain:ready, bug
-  Assignee: worktrain-etienneb
-  ```
-- Deduplicates: doesn't file if an identical failure issue already exists and is open
-- ~100-150 LOC, new coordinator script `src/coordinators/failure-classifier.ts`
-
-**Phase 3: Auto-rerun after fix**
-- When WorkTrain merges a fix for a failure issue, the failure classifier re-queues the original demo task
-- Confirms the fix actually resolved the failure
-- Closes the failure issue if the task now succeeds
-
-### Demo repo criteria
-
-Good demo repo characteristics:
-- Real TypeScript project with actual functionality (not just stubs)
-- Has existing tests (so WorkTrain's changes can be verified)
-- Diverse task types: feature addition, refactor, bug fix, test coverage gap, documentation
-- Small enough that sessions complete within the 90-min timeout
-- Not workrail itself (avoids circular dependency in failure classification)
-
-Options:
-- A new personal project created specifically for this
-- An existing open source tool or library you maintain
-- A stripped-down clone of a Zillow service (no internal dependencies)
-
-### Demo repo tasks for first run (suggested)
-
-1. Add a new CLI flag with validation and tests
-2. Refactor a module to use a different pattern
-3. Fix a bug from a failing test
-4. Add test coverage for an uncovered function
-5. Write a README section documenting a feature
-
-These span the full task maturity spectrum and exercise different pipeline paths.
-
-### Relationship to benchmarking
-
-The same 10 demo tasks run after each WorkTrain release become a regression benchmark. Track: % completing successfully, # fix loop iterations needed, LLM turns per task, token cost per task. Plot over time. When the numbers improve, the release is better. When they regress, something broke.
-
-### Priority
-
-High -- this is the fastest path to data-driven self-improvement. Build Phase 1 first (pick a demo repo, run tasks manually), then Phase 2 (failure classifier) once you've seen 2-3 recurring failure patterns.
-
----
-
-## triggers.yml: composable configuration for multi-workspace support (Apr 20, 2026)
-
-**Current state:** Single `triggers.yml` at `WORKRAIL_DEFAULT_WORKSPACE`. Works well for one workspace. Becomes boilerplate-heavy and hard to read as more repos are added.
-
-**The scaling problem:** Each new repo needs a full trigger block repeating shared fields (`branchStrategy`, `branchPrefix`, `autoCommit`, `autoOpenPR`, `agentConfig`). A three-repo setup has 3x the duplication. The file mixes two concerns: **what to watch** (source, provider, repo, token, poll interval) and **what to do** (workflow, branch strategy, delivery, timeouts).
-
-### Proposed direction: two-layer config
-
-**Layer 1: Trigger templates** (global defaults)
-
-Defined in `~/.workrail/config.json` or a global `~/.workrail/trigger-defaults.yml`:
-```yaml
-defaults:
-  coding-pipeline:
-    branchStrategy: worktree
-    baseBranch: main
-    branchPrefix: "worktrain/"
-    autoCommit: true
-    autoOpenPR: true
-    agentConfig:
-      maxSessionMinutes: 120
-      maxTurns: 60
-      stuckAbortPolicy: abort
-
-  review-only:
-    branchStrategy: none
-    autoCommit: false
-    agentConfig:
-      maxSessionMinutes: 30
-```
-
-**Layer 2: Per-workspace or per-trigger overrides**
-
-Each trigger references a template and only specifies what's different:
-```yaml
-triggers:
-  - id: self-improvement
-    extends: coding-pipeline
-    provider: github_queue_poll
-    workspacePath: /path/to/repo
-    queueType: assignee
-    source:
-      repo: owner/repo
-      token: $WORKTRAIN_BOT_TOKEN
-```
-
-**Alternative: per-workspace discovery**
-
-WorkTrain scans each configured `workspaceRoots` entry for `.workrail/triggers.yml`. Per-workspace files apply only to that repo. Global `~/.workrail/triggers.yml` defines cross-workspace triggers. This is the GitHub Actions model -- one file per workflow per repo.
-
-### Priority
-
-Medium -- essential before WorkTrain manages more than 2-3 repos. Single file is fine for the workrail self-improvement loop today. Design this when adding the second workspace.
-
-### Open questions
-
-- Does `extends` merge deeply (arrays concatenated) or shallowly (top-level keys override)?
-- How does `worktrain trigger validate` handle templates -- validate the template in isolation, or only validate instantiated triggers?
-- Where do trigger templates live: `config.json` (structured), a separate `trigger-defaults.yml`, or inline in `triggers.yml` as a `defaults:` section?
-
----
-
-## MR/PR template support (Apr 20, 2026)
-
-**The problem:** WorkTrain opens PRs using a generic body format hardcoded in `delivery-action.ts`. Teams maintain `.github/PULL_REQUEST_TEMPLATE.md` (GitHub), `.gitlab/merge_request_templates/` (GitLab), or custom templates -- WorkTrain ignores all of them. PRs opened by WorkTrain look structurally different from human-authored PRs and skip required fields (checklists, reviewer guidelines, linked issue fields).
-
-### What needs to happen
-
-Before `gh pr create`, `delivery-action.ts` should:
-1. Check for a PR/MR template in standard locations:
-   - `.github/PULL_REQUEST_TEMPLATE.md` (GitHub default)
-   - `.github/pull_request_template.md` (case variant)
-   - `.github/PULL_REQUEST_TEMPLATE/*.md` (multiple templates -- pick default or first)
-   - `.gitlab/merge_request_templates/Default.md` (GitLab)
-   - `.gitlab/merge_request_templates/*.md` (GitLab named templates)
-2. If a template exists: merge the agent's `HandoffArtifact.prBody` into the template structure rather than replacing it. Strategy: fill in template sections that match (Summary, Description, Changes) and mark template checkboxes as checked/unchecked based on what the agent actually did.
-3. If no template: current behavior (use `prBody` directly).
-
-### The merge challenge
-
-Template merging is non-trivial. A template may have:
-- Checklists: `- [ ] Tests added` -- agent should check based on what it did
-- Required sections: `## Description` -- agent fills in
-- Guidelines/instructions: `<!-- Please describe your changes -->` -- strip before submitting
-- Linked issue refs: `Closes #N` -- agent knows the issue number from `taskCandidate`
-
-**Recommended approach:** Pass the template to the agent's final step as additional context. The final step (phase-7-final-verification or phase-5-small-task-fast-path) already produces the `HandoffArtifact.prBody`. Inject the template there so the agent fills it out correctly rather than trying to merge post-hoc.
-
-Alternatively: post-hoc mechanical merge -- fill `## Summary` and `## Changes` sections with the agent's content, auto-check boxes where the agent produced evidence (test files changed = check "Tests added"), leave the rest empty/unchecked.
-
-### GitLab MR description templates
-
-Same concept for GitLab MRs. WorkTrain uses `gh pr create` for GitHub and `glab mr create` (or the GitLab API) for GitLab. Both have template support.
-
-### Priority
-
-Medium. Teams with strict PR templates will notice WorkTrain's PRs immediately. Not a blocker for solo repos. Should land before WorkTrain is used in team repos.
-
----
-
-## Coordinator as comment router: right agent for each review comment (Apr 20, 2026)
-
-**The principle:** When a reviewer comments on a PR, the MR lifecycle coordinator shouldn't handle it in one monolithic agent. Instead, it routes each comment to the agent best positioned to respond.
-
-### Routing table
-
-| Comment type | Who handles it | Why |
-|---|---|---|
-| "Why did you use X pattern?" | Original implementing agent (resumed with notes) | It wrote the code and has the design decisions in its session notes |
-| "Please change this to Y" | New fix session seeded with implementing agent's notes + the comment | Targeted change, needs implementation context |
-| "This has a security concern" | Review agent (spawned with the specific finding) | Security judgment is a review-domain skill |
-| "This violates our architecture" | Discovery/design agent | Needs architectural perspective, may require rethinking the approach |
-| "Nit: rename this variable" | Coordinator directly | No agent needed -- just apply the change programmatically |
-| "LGTM" / "Approved" | Coordinator tracks approval state | No comment response needed |
-
-### The session notes advantage
-
-The original implementing agent has institutional knowledge in its session notes: why it chose approach A over B, what alternatives it considered, what edge cases it intentionally deferred. Today that knowledge dies when the session ends.
-
-With coordinator routing:
-1. Coordinator looks up the original implementing session for the PR
-2. Reads its `lastStepNotes` and any `report_issue` summaries
-3. Seeds the response session with that context bundle
-4. The response agent can say "I chose X because Y (from the original design decision)" rather than re-inferring from the code alone
-
-This is the first concrete use case for the cross-session prior notes system (`ContextAssembler.listRecentSessions`).
-
-### What the coordinator does (not the agent)
-
-- Classifies each comment by type (question, change request, concern, nit, approval)
-- Routes to the right handler
-- Collects the response (text reply, code fix, or architectural recommendation)
-- Posts the reply to GitHub/GitLab via API
-- Marks threads as resolved when the response is accepted
-- Aggregates all comment outcomes before deciding to re-request review
-
-The MR management agent (if there is one) becomes thin: it's the interface for complex judgment calls that don't fit the routing table. The coordinator handles the mechanical parts.
-
-### Dependency
-
-Requires the event-driven coordination architecture (coordinator as event bus) -- so the coordinator knows when new comments arrive rather than the agent polling for them.
-
----
-
-## Phase-scoped context files: rules targeted at specific pipeline phases (Apr 20, 2026)
-
-**The idea:** Instead of injecting all rules into every session, let teams define context files scoped to specific pipeline phases. A rule about "how we write commit messages" only matters at delivery time. A rule about "what makes a blocking finding" only matters during MR review. Injecting everything into every session wastes tokens and dilutes relevance.
-
-### Proposed convention
-
-**Phase-scoped files under `.worktrain/rules/`:**
-
-```
-.worktrain/rules/
-  discovery.md       -- injected into wr.discovery sessions only
-  shaping.md         -- injected into wr.shaping sessions only
-  implementation.md  -- injected into coding-task-workflow-agentic sessions
-  review.md          -- injected into mr-review-workflow-agentic sessions
-  delivery.md        -- injected at commit/push/PR-creation time (delivery-action.ts)
-  pr-management.md   -- injected into sessions that manage the MR lifecycle:
-                        answering review comments, applying requested changes,
-                        resolving conversations, updating PR description
-  all.md             -- injected into every session (same as today's AGENTS.md)
-```
-
-**Examples of what goes in each:**
-
-- `delivery.md`: "Commit messages must reference the Jira ticket. PR title must start with ticket number. Always request review from @team-lead."
-- `review.md`: "A blocking finding requires reproducible evidence. Performance findings are major only if the regression exceeds 10%. Security findings are always blocking."
-- `implementation.md`: "Never use `any`. Always write tests before implementation. Follow the Result/Either pattern, no thrown exceptions."
-- `pr-management.md`: "When a reviewer requests changes: acknowledge in a comment, create a fixup commit per finding, re-request review when done. Never resolve review threads yourself."
-
-### Relationship to existing AGENTS.md / CLAUDE.md
-
-Phase-scoped files are additive, not a replacement. The existing `AGENTS.md` / `CLAUDE.md` continue to apply to all sessions. Phase-scoped files are additional context loaded on top.
-
-**Load order (most specific wins if conflict):**
-1. `AGENTS.md` / `CLAUDE.md` (base, all sessions)
-2. `.worktrain/rules/all.md` (WorkTrain-specific base)
-3. Phase-specific file (e.g. `.worktrain/rules/review.md` for review sessions)
-
-### Implementation notes
-
-- The workflow runner already has `WORKSPACE_CONTEXT_CANDIDATE_PATHS`. Phase-scoped files add a second lookup: at session spawn time, the coordinator or trigger knows which workflow is being run and can pass an additional `phaseContextPath` to inject.
-- `delivery.md` is special -- it's injected into `delivery-action.ts`'s git commit message construction, not into a session prompt. The delivery action would read it and pass it as additional context to the `HandoffArtifact` construction.
-- The `pr-management.md` concept implies a new pipeline phase that doesn't exist yet: an autonomous PR management agent that monitors review comments and responds. This is a substantial new feature -- the rules file is ahead of the implementation.
-
-### Priority
-
-Medium. Phase-scoped rules make WorkTrain's autonomous actions more consistent with team conventions without requiring custom workflows per team. Design alongside multi-workspace support and trigger templates (they share the "per-workspace configuration" concern).
-
----
-
-## MR lifecycle manager: autonomous coordinator from branch to merged (Apr 20, 2026)
-
-**The gap:** WorkTrain currently creates a PR and dispatches an MR review session. If the review returns minor findings, a fix loop runs. But everything between "PR created" and "PR merged" that isn't covered by the review verdict is invisible to WorkTrain: CI failures, reviewer comments, requested changes, label requirements, required approvals, merge conflicts. A human has to watch and intervene.
-
-**The vision:** A `runMRLifecycleManager()` coordinator that takes ownership of the MR from creation to merge and handles everything autonomously.
-
-### Responsibilities
-
-**1. MR creation (already partially done, needs hardening)**
-- Apply PR template (`.github/PULL_REQUEST_TEMPLATE.md` or GitLab equivalent) -- see PR template backlog entry
-- Set correct title format per team convention (from `delivery.md` phase rules)
-- Apply correct labels (from `worktrain:generated` + workflow-specific labels)
-- Set milestone, assignee, reviewers per team convention
-- Link to the originating ticket (Jira issue number, GitHub issue number) in description
-
-**2. CI pipeline monitoring**
-- Poll CI status after PR creation
-- On failure: parse the failed job, determine if it's a flaky test (retry) or a real failure (spawn a fix session with the failing job log as context)
-- On persistent failure (N retries): escalate to Human Outbox with structured summary
-- On success: proceed to review phase
-
-**3. Review comment triage**
-- Poll for new review comments/threads after reviewer activity
-- For each comment/thread: classify as:
-  - `actionable`: code change requested -- feed to fix loop as a finding
-  - `question`: reviewer is asking for clarification -- generate a reply explaining the decision
-  - `nit`: style suggestion -- optionally apply or reply "acknowledged, will address in follow-up"
-  - `approval`: positive review, no action needed
-  - `blocker`: security/architecture concern -- escalate to Human Outbox
-- Reply to questions and nits autonomously (following `pr-management.md` rules)
-- Never resolve threads on behalf of the reviewer (that's their action)
-
-**4. Approval tracking**
-- Track required approvals (from branch protection rules or CODEOWNERS)
-- When approved: check all CI green + all required approvals → trigger merge
-- When changes requested: run targeted fix loop, re-push, re-request review
-
-**5. Merge conflict resolution**
-- Detect merge conflicts (target branch moved while PR was open)
-- Rebase or merge main into the branch
-- If conflicts are in files the agent touched: attempt auto-resolution
-- If conflicts are complex: escalate to Human Outbox
-
-**6. Merge execution**
-- When all gates pass: merge with correct strategy (squash/rebase/merge per team convention)
-- Delete the source branch
-- Update the originating ticket (Jira: move to "Done", GitHub: close issue)
-- Notify via outbox: "PR #N merged. Ticket ACEI-1234 updated."
-
-### Architecture
-
-This is a coordinator script (`src/coordinators/mr-lifecycle.ts`), not a workflow session. It loops with polling, spawning fix sessions as needed. The MR review workflow (`mr-review-workflow-agentic`) becomes one of the tools it calls, not the full pipeline.
-
-The adaptive coordinator's IMPLEMENT and FULL modes would call `runMRLifecycleManager()` instead of `runPrReviewCoordinator()` after the coding session completes. `runPrReviewCoordinator()` becomes a thin wrapper around the lifecycle manager for the standalone `worktrain run pr-review` use case.
-
-### Phase-scoped rules integration
-
-`pr-management.md` in `.worktrain/rules/` defines team-specific behavior:
-- Which comment types to auto-reply vs escalate
-- Whether to rebase or merge for conflict resolution
-- How many CI retry attempts before escalating
-- Whether to request specific reviewers
-- Auto-merge policy (clean + approved = merge, or always wait for human)
-
-### Priority
-
-High -- this is the most visible gap in the autonomous pipeline. Without it, every PR needs human monitoring. With it, WorkTrain can own an MR from first commit to merge with zero human involvement for clean cases.
-
-**Dependency:** PR template support (needed for step 1). Phase-scoped rules (needed for step 3). `dispatchCondition` webhook filter (needed for GitLab MR event triggers).
-
----
-
-## Event-driven agent coordination: coordinator as event bus (Apr 20, 2026)
-
-**The principle:** Agents should be event-driven, not poll-driven. An agent managing an MR should not repeatedly call `gh pr view --comments` to check for new activity. That wastes turns, burns tokens, and puts timing logic in the wrong place. Instead, the coordinator registers for events and steers the agent when something relevant happens.
-
-**The current infrastructure (already built):**
-- `steerRegistry` + `POST /sessions/:id/steer` -- coordinator can inject a message into a running agent's next turn
-- `signal_coordinator` tool -- agent can surface structured findings to the coordinator without advancing the workflow step
-- `DaemonEventEmitter` -- structured lifecycle events for observability
-
-**What's missing:**
-
-### 1. Coordinator-side event sources
-
-The coordinator needs to listen for MR/PR lifecycle events from external systems:
-
-**GitHub webhooks** (if the repo is reachable):
-- `pull_request_review` -- reviewer approved, requested changes, or dismissed
-- `pull_request_review_comment` -- inline comment added
-- `check_suite` / `check_run` -- CI status changed (pass, fail, queued)
-- `issue_comment` -- general PR comment
-- `pull_request` -- PR labeled, unlabeled, merged, closed
-
-**Polling fallback** (for systems without webhook delivery):
-- Poll `gh pr view`, `gh pr checks`, `gh pr review` on a schedule
-- Diff against last-known state to detect new events
-- Same interface as webhooks, different source
-
-### 2. Event-to-steer mapping
-
-When an event arrives, the coordinator translates it into a structured steer message and injects it into the running MR management agent session:
-
-```typescript
-// CI failure → steer
-steer(sessionId, `[CI_FAILURE] Job: build-and-test (Node 20, ubuntu)
-Status: failed
-Error: 3 tests failed in tests/unit/workflow-runner.test.ts
-Failing tests: loadSessionNotes failure paths (3 cases)
-Log tail: ${logExcerpt}
-Action: fix the failing tests and push a new commit to this branch.`);
-
-// Review comment → steer
-steer(sessionId, `[REVIEW_COMMENT] @kenton-acei commented on src/daemon/workflow-runner.ts:568:
-"This function should export a type alias for the return value"
-Thread ID: thread_abc123
-Action: decide whether to address this comment (reply, fix, or acknowledge as out-of-scope).`);
-
-// Approval → steer
-steer(sessionId, `[REVIEW_APPROVED] @etienneb approved the PR.
-Required approvals: 1/1 met. CI: all green.
-Action: the PR is ready to merge. Execute merge now unless any open threads need resolution.`);
-```
-
-### 3. Agent waits; coordinator drives
-
-The MR management agent's session prompt should explicitly say:
-- "Do not poll for PR status, CI results, or review comments. Wait for the coordinator to deliver events via injected messages."
-- "When you receive a `[CI_FAILURE]` message, fix it. When you receive a `[REVIEW_COMMENT]` message, triage it. When you receive a `[REVIEW_APPROVED]` message, execute merge."
-- "Use `signal_coordinator` to surface anything the coordinator needs to know (blocker found, question for reviewer, etc.)."
-
-This is the `pr-management.md` phase rules file in action -- it defines how the agent should respond to each event type.
-
-### 4. Session lifecycle alignment
-
-A MR management session is inherently long-lived -- it exists for the full lifetime of the PR (hours to days). Today's session model assumes sessions complete in under 2 hours. Long-lived sessions need:
-- Checkpoint/resume support (already exists via `checkpointToken`)
-- Heartbeat-based liveness (already exists via `daemon_heartbeat`)
-- Coordinator-driven wakeup (the steer mechanism is exactly this)
-
-The coordinator parks the session (no pending turns), registers for events, and wakes the session when something happens. No busy-waiting, no polling from the agent side.
-
-### Implementation order
-
-1. **Coordinator event listener** -- `src/coordinators/mr-event-listener.ts`. Registers GitHub webhook handlers OR runs a polling loop. Normalizes events to a common `MREvent` type.
-2. **Event-to-steer bridge** -- maps `MREvent` to structured steer message text, calls `steerRegistry` callback.
-3. **MR management session prompt** -- defines agent behavior for each event type (from `pr-management.md` phase rules).
-4. **Session parking** -- coordinator marks session as "waiting" when no events are pending; wakes it when an event arrives.
-
-### Priority
-
-High -- required for the MR lifecycle manager to work correctly. Without event-driven coordination, the MR management agent burns all its turns polling and times out before the PR is merged. This is the missing architectural piece that makes long-running coordinator sessions viable.
-
----
-
-## Session as a living append-only record: richer checkpoints and post-completion phases (Apr 21, 2026)
-
-### complete ≠ terminal
-
-A `session_completed` event means the original workflow is done -- not that the session can never receive new events. The event log is append-only: we just keep appending. A post-completion interaction adds a `session_resumed` event, then new turns, then a new `session_completed`. The DAG advances; nothing is rewritten. The append-only invariant holds.
-
-This is already how mid-run resume works (`resume_session` + `continue_workflow`). The same mechanism extends naturally to post-completion: rehydrate the completed state, append a new lightweight phase, run it, complete again.
-
-### Richer automatic checkpoints
-
-Checkpoints are currently sparse -- mostly the automated one before the agent loop starts, plus manual `checkpoint_workflow` calls. A checkpoint is a durable queryable snapshot. Many session events should trigger one automatically:
-
-| Event | Why checkpoint |
-|---|---|
-| `step_advanced` | Already essentially a checkpoint -- make it explicit |
-| `signal_coordinator` fired | Agent surfaced meaningful mid-step state |
-| Worktree commit pushed | Code state is now durable on remote |
-| Coordinator steers the session | Notable injection worth marking |
-| Long `worktrain await` starts | Session about to be idle; preserve state before the wait |
-| Post-completion question asked | Marks the start of a resurrection phase |
-| `spawn_agent` child completes | Parent session has new information |
-
-Making checkpoints richer turns the session history from a raw event stream into a series of meaningful state snapshots -- queryable by the console, readable by the coordinator, resumable by future sessions.
-
-### How post-completion interaction works (engine view)
-
-1. Completed session has a final checkpoint at completion
-2. `worktrain session ask <id> "question"` appends `session_resumed` event
-3. Agent loop starts from the completion checkpoint context (notes, artifacts, DAG state)
-4. Agent answers the question, appends turn events to the same session log
-5. `session_completed` appended again -- now the session has two completion events
-6. The console session tree shows both phases; the lineage is intact
-
-No new session ID. No parentSessionId link needed (it's the same session). The history is continuous.
-
-### How "continue the work" works
-
-Same as above, but instead of a free-form question, the continuation appends a new workflow phase:
-- Coordinator injects new context: "new constraint X emerged"
-- A new workflow step (or a mini-workflow) runs on top of the completed session
-- Step output appended to the same log
-- The worktree (if still alive) gets new commits on the same branch
-
-The session's worktree and branch become the persistent workspace for the full lifetime of the task, not just the original coding session.
-
-### Priority
-
-Medium-high for basic `worktrain session ask`. The engine checkpoint enrichment is a longer-term investment that pays dividends across observability, coordinator coordination, and session quality.
-
----
-
-## Session continuation: just keep talking (Apr 21, 2026)
-
-A completed session is not dead. It's paused. The conversation is still there -- all the LLM turns, all the tool calls, all the responses, in the event log. To continue it, you just send the next message.
-
-**The only thing blocking this:** the engine rejects messages to sessions in `complete` state. Remove that gate.
-
-**That's the entire change.** No rehydration. No resumption protocol. No special context injection. The LLM receives the full conversation history (it's already stored) and continues as if it never stopped. Because it didn't.
-
-**`worktrain session continue <sessionId> "<message>"`** -- sends a message to a completed session. New events appended to the same log. Same session ID. The agent has full context of everything it ever did.
-
-Context window overflow (very long sessions) is a separate optimization problem -- truncate oldest turns while keeping step notes. Don't solve it now.
-
----
-
-## Rules preprocessing: normalize and categorize workspace rules before injection (Apr 21, 2026)
-
-**The problem with direct injection:** WorkTrain currently injects all rules files raw into every agent's system prompt. A workspace with `.cursorrules`, `CLAUDE.md`, `.windsurf/rules/*.md`, and `AGENTS.md` might inject 10KB of rules into a discovery session that only needs 2KB of it. Rules from different tools that say the same thing get repeated. The agent gets everything, not what's relevant.
-
-**The better approach: preprocess once, inject targeted**
-
-A `worktrain rules build` command (or automatic first-run) that:
-1. Reads all IDE rules files from the workspace (the full set from `WORKSPACE_CONTEXT_CANDIDATE_PATHS`)
-2. Deduplicates overlapping rules (same constraint stated multiple ways)
-3. Categorizes by phase: implementation, review, delivery, discovery, all
-4. Resolves conflicts between tools (precedence: `.worktrain/rules/` > `CLAUDE.md` > `.cursorrules` > tool-specific)
-5. Writes to `.worktrain/rules/`:
-   - `implementation.md` -- coding conventions, patterns, what to avoid
-   - `review.md` -- what makes a finding, severity criteria, blocking vs non-blocking
-   - `delivery.md` -- commit message format, PR title format, required labels
-   - `discovery.md` -- what to investigate, what to ignore, architecture invariants
-   - `all.md` -- cross-cutting rules for every session
-   - `manifest.json` -- which files exist, when they were last generated, source files used
-
-At session time: WorkTrain injects only the phase-relevant file, not all files.
-
-**What runs the preprocessing**
-
-Option A (LLM): A lightweight `wr.rules-build` workflow session that reads the source files and writes the categorized output. Better categorization, costs a few turns.
-
-Option B (heuristic): Pattern matching on section headers, keywords, file origins. Zero LLM cost, runs on every `worktrain init` or `rules build` call.
-
-Option C (hybrid): Heuristic pass first, LLM for anything ambiguous or conflicting.
-
-**Automatic rebuild triggers:**
-- `worktrain rules build` manual command
-- Automatic on first session if `.worktrain/rules/` doesn't exist
-- On a schedule (weekly) to pick up new rules added to the repo
-- When any source rules file changes (file watcher)
-
-**The manifest enables smart injection:**
-- Each pipeline phase knows which rule file to request
-- If a phase-specific file doesn't exist, fall back to `all.md`
-- The manifest records which source files were used -- if sources change, mark rules as stale
-
-**Relationship to phase-scoped rules files (.worktrain/rules/)**
-This IS the implementation of that feature. The manually-authored `.worktrain/rules/*.md` files are the canonical output. The preprocessing is how you get there automatically without having to write them by hand.
-
-**Priority:** Medium. Useful for any workspace with multiple tools. Essential for team repos where Cursor rules, AGENTS.md, and custom conventions might conflict. Build the categorized injection path (phase-scoped rules) first; add the automated preprocessing as a follow-up.
-
----
-
-## True session status for WorkTrain: live agent state, not activity inference (Apr 21, 2026)
-
-**The problem:** The console currently infers session status from last event timestamp. A session with no events for >1 hour becomes "dormant." For the WorkRail MCP server this is unavoidable -- it doesn't have access to the agent loop state. But WorkTrain does. It should show true status.
-
-### What WorkTrain knows that the MCP server doesn't
-
-WorkTrain has direct access to:
-- `DaemonRegistry` -- tracks every active session by workrailSessionId in memory. If a session is in the registry, it's running. If not, it's not.
-- `DaemonEventEmitter` -- structured events fired synchronously by the agent loop
-- `daemon_heartbeat` -- fires every 30s. If last heartbeat >90s ago, daemon is down.
-- Turn-level events -- `llm_turn_started/completed`, `tool_call_started/completed` -- know exactly what the agent is doing RIGHT NOW
-- `agent_stuck` -- stuck heuristic fired, session may be stalled
-- `session_aborted` -- daemon killed mid-session (now emitted on SIGTERM)
-
-### True session status taxonomy
-
-| Status | Meaning | Detection |
-|---|---|---|
-| `active:thinking` | LLM API call in progress | `llm_turn_started` without `llm_turn_completed` |
-| `active:tool` | Tool executing | `tool_call_started` without `tool_call_completed`, name=Bash/Read/etc. |
-| `active:idle` | Between turns | Last event was `llm_turn_completed`, session in DaemonRegistry |
-| `stuck` | Stuck heuristic fired | `agent_stuck` event, session still in DaemonRegistry |
-| `completed:success` | Done successfully | `session_completed` outcome=success |
-| `completed:timeout` | Hit wall-clock limit | `session_completed` outcome=timeout |
-| `completed:stuck` | Aborted by stuck policy | `session_completed` outcome=stuck |
-| `completed:max_turns` | Hit turn limit | `session_completed` outcome=timeout detail=max_turns |
-| `aborted` | Daemon killed mid-run | `session_aborted` event |
-| `daemon:down` | No recent heartbeat | Last `daemon_heartbeat` >90s ago |
-
-### Where to surface this
-
-1. **`worktrain status`** -- already shows session overview. Replace activity-inferred "RUNNING" with true status labels.
-2. **`worktrain health <sessionId>`** -- already shows per-session summary. Add "Current state: active:tool (Bash, 23s)" line.
-3. **Console workspace view** -- each session row should show true status badge, not just "live" vs "dormant."
-4. **`worktrain logs --follow`** -- prefix each event with the derived session state so the log stream is self-explanatory.
-
-### Implementation
-
-The status is derivable from the event log in O(N) where N is events for this session -- scan from the end, find the most recent relevant event. For live sessions, also check DaemonRegistry membership.
-
-The daemon heartbeat + DaemonRegistry membership is the key insight: if the session's workrailSessionId is in DaemonRegistry AND the daemon is alive (recent heartbeat), the session is definitely running. If it's not in DaemonRegistry, the session is done regardless of what the event log says.
-
-### Priority
-
-Medium-high. True session status makes WorkTrain trustworthy as an autonomous system -- operators can see exactly what's happening without guessing. Especially important as session durations get longer (55-minute discovery sessions, 120-minute pipeline runs).
-
----
-
-## Workflows tab: incorrect source attribution for bundled workflows (Apr 21, 2026)
-
-**The bug:** The Workflows tab in the console shows bundled workflows (e.g. `coding-task-workflow-agentic`, `workflow-for-workflows`) as coming from "User Library" instead of "WorkRail Built-in". This is a WorkRail MCP server issue, not a WorkTrain issue.
-
-**Likely cause:** The source attribution logic reads from the workflow's loaded source (the `WorkflowSource` type). When a workflow exists in both the bundled set AND a user's managed sources or remembered roots, the source returned is the one that "wins" in the storage layer -- which may be the user path rather than the bundled path. Or the `source.kind` field is incorrectly set to `'personal'` for workflows that were loaded from the bundled workflows directory.
-
-**Where to look:**
-- `src/infrastructure/storage/schema-validating-workflow-storage.ts` -- source kind propagation
-- `src/mcp/handlers/shared/workflow-source-visibility.ts` -- how source is mapped to display label in `list_workflows`
-- `src/infrastructure/storage/file-workflow-storage.ts` -- how `source.kind` is assigned when loading from disk
-
-**Expected behavior:** Workflows in the `workflows/` directory of the workrail package should always display as "WorkRail Built-in" regardless of whether the user also has a managed source that happens to include the same directory.
-
-**Priority:** Low for WorkTrain (doesn't affect functionality). Medium for WorkRail MCP (misleading UI, users may think they accidentally modified bundled workflows).
-
----
-
-## Coordinator-managed git state and agent crash recovery (Apr 21, 2026)
-
-### Git state management (coordinator's job)
-
-Before dispatching any WorkTrain session that does git work:
-1. Check for `.git/index.lock` -- if present, verify the owning PID is dead (via `lsof` on macOS), then remove it
-2. Abort any in-progress git operations: `git rebase --abort; git merge --abort`
-3. Verify the workspace is in a clean state before handing off to the agent
-
-Every session that touches files gets a worktree (already implemented). The coordinator ensures worktrees are created cleanly and removed after session completion. The orphan TTL cleanup (24h) handles crash cases.
-
-### Agent crash recovery (coordinator's job)
-
-An agent can die from: stream watchdog timeout (600s no progress), OOM kill, or SIGKILL. In all cases the session event log is intact -- the full conversation history is preserved.
-
-**The coordinator should detect and recover automatically:**
-
-1. Monitor child sessions via `worktrain await`
-2. If a session returns `_tag: 'aborted'` or `_tag: 'timeout'` mid-pipeline:
-   - Check if the session made meaningful progress (step advances > 0, or notes written)
-   - If yes: resume the session -- same session ID, same context, agent picks up at last checkpoint
-   - If no (zero progress): retry from scratch with a fresh session, same context bundle
-3. Retry up to N times (configurable, default 2) before escalating to Human Outbox
-4. Track which phase failed and inject a hint on retry: "Previous attempt failed at this step. Retry with fresh approach."
-
-**This is session continuation applied to crash recovery.** The agent's conversation history is fully preserved. Resuming puts it back exactly where it was. The 600s watchdog timeout (the most common failure) almost always means a hung LLM call or a tool timeout -- resuming naturally retries the step.
-
-**Implementation:** `runFullPipeline` and `runImplementPipeline` already have per-phase error handling. Extend each `awaitSessions` call: on non-success outcome, attempt resume before returning escalated. The resume logic is `worktrain session continue <sessionId>` (once that command exists) or `dispatchAdaptivePipeline` with the existing session's context.
-
-### Priority
-
-High. Agent crash recovery makes the overnight-autonomous bar achievable. Without it, any hung LLM call or tool timeout fails the entire pipeline silently. With it, transient failures are automatically retried and the pipeline continues.
-
----
-
-## Workflow execution time tracking and prediction (Apr 21, 2026)
-
-**The problem:** WorkTrain has no data on how long workflows actually take. Timeouts are set by intuition (55 min for discovery, 35 for shaping, 65 for coding). We just discovered that discovery on a real workrail task takes ~16 minutes. The 55-minute timeout is 3x the actual time -- but we didn't know that until we ran a benchmark manually.
-
-### What to track
-
-For every completed session, record:
-- Workflow ID
-- Total wall-clock duration
-- Number of turns
-- Number of step advances
-- Outcome (success / timeout / stuck / error)
-- Task complexity signals (codebase size, number of files read, task type from context)
-
-Store in `~/.workrail/data/execution-stats.jsonl` -- one line per completed session, append-only.
-
-### What to do with it
-
-**Immediate use: calibrate timeouts automatically**
-
-Instead of hardcoded `DISCOVERY_TIMEOUT_MS = 55 * 60 * 1000`, read the p95 completion time from execution stats and set the timeout to `p95 * 1.5`. Start with the hardcoded values as seeds; refine after 10+ samples.
-
-**Medium-term use: predict duration before dispatch**
-
-Given: task description + workflow ID + codebase characteristics → predicted duration range.
-
-The coordinator could use this to:
-- Warn when a task is likely to exceed session limits before starting
-- Adjust timeout budgets per-dispatch based on predicted complexity
-- Surface "this type of task usually takes 45 minutes" in `worktrain trigger test` output
-
-**Longer-term use: quality/efficiency metrics**
-
-Track step-advance rate (steps per turn) as a proxy for workflow efficiency. A session with 50 turns and 2 step advances is spending too many turns between steps. This feeds into the workflow improvement loop.
-
-### Implementation notes
-
-- Append to `execution-stats.jsonl` in `runWorkflow()`'s finally block, same pattern as the daemon event log
-- Keep it simple: flat JSONL, no database, no schema migration
-- `worktrain status` can show recent timing stats: "Last 10 wr.discovery sessions: avg 18min, p95 31min"
-- `worktrain trigger validate` can warn if configured timeouts are well below historical p95
-
-### Priority
-
-Medium. The data collection is small (~5 lines in `runWorkflow()`). The prediction and calibration are more involved. Ship collection first, calibration second.
-
----
-
-## WorkRail MCP server self-cleanup (Apr 21, 2026)
-
-**The problem:** The WorkRail MCP server accumulates stale state that never cleans itself up: old workflow copies in `~/.workrail/workflows/`, dead managed sources, git repo caches that can't pull, 500+ sessions in the store, stale remembered roots. None of it has a TTL or cleanup mechanism. Every server startup loads everything and logs validation errors for stale state.
-
-### Sources of stale state
-
-1. **`~/.workrail/workflows/`** -- manually copied or `worktrain init`-placed workflows that go stale when the repo updates. MCP server loads both repo copy and user copy; older one fails validation silently or noisily.
-
-2. **Managed sources** (`~/.workrail/data/managed-sources/`) -- paths that no longer exist stay registered. Server tries to load them on every startup.
-
-3. **Git workflow cache** (`~/.workrail/cache/git-*`) -- cloned repos whose remotes have changed, been deleted, or whose auth has expired. `git pull` fails; errors logged on every startup.
-
-4. **Session store** (`~/.workrail/data/sessions/`) -- sessions accumulate forever. No TTL, no archival. Console loads all 500+ on every `/api/v2/sessions` request (partially mitigated by mtime cache).
-
-5. **Remembered roots** (`~/.workrail/data/managed-sources/remembered-roots.json`) -- workspace paths from past sessions that no longer exist.
-
-### Fix: two layers
-
-**Layer 1: Defensive loading (mostly already done)**
-Every loader should already handle missing/broken sources gracefully. Audit: are all managed source failures caught and logged as warnings rather than errors? Are git cache failures non-fatal?
-
-**Layer 2: `workrail cleanup` command**
-```
-workrail cleanup [--yes] [--sessions --older-than <age>] [--sources] [--cache] [--roots]
-```
-- `--sources`: remove managed sources where path doesn't exist on disk
-- `--cache`: remove git caches where `git pull` fails (remote gone or auth expired)  
-- `--sessions --older-than 30d`: archive or delete sessions older than N days
-- `--roots`: remove remembered roots where path doesn't exist
-- Without `--yes`: show what would be removed and ask for confirmation
-- With `--yes`: remove without prompting (for CI / worktrain init)
-
-**Layer 3: Automatic startup cleanup (light)**
-On MCP server startup, silently remove managed sources where the filesystem path doesn't exist (non-destructive -- the path is already gone). Log a single "removed N stale sources" line. Do not auto-remove sessions or caches -- those require explicit user intent.
-
-**Layer 4: User workflow directory sync**
-`~/.workrail/workflows/` should not be a place users copy workflows to manually. It should either:
-- Be deprecated entirely (use managed sources / workspace roots instead)
-- Have a `workrail sync` command that updates it from the canonical sources
-- Auto-detect when a user workflow is an older version of a bundled workflow and skip loading it
-
-### Priority
-
-Medium for the cleanup command (quality of life, stops log noise). High for startup auto-cleanup of dead managed sources (prevents the `Invalid workflow` errors that have been confusing throughout this session). Low for session TTL/archival (the mtime cache handles the performance concern).
-
----
-
-## Worktree orphan leak on delivery failure (Apr 21, 2026, from Audit 4)
-
-**The bug:** In `src/trigger/trigger-router.ts`, `maybeRunDelivery()` on the success path deletes the session sidecar file before attempting worktree removal. If worktree removal fails (network error, git command failure), the sidecar is already gone. `runStartupRecovery()` scans sidecar files to find orphan worktrees -- so the orphaned worktree is invisible and accumulates indefinitely.
-
-**Fix:** In the success path cleanup, delete the sidecar AFTER worktree removal, not before. Or better: always attempt worktree removal in a `try/finally` that deletes the sidecar regardless of whether removal succeeded.
-
-**File:** `src/trigger/trigger-router.ts`, `maybeRunDelivery()` success path.
-
-**Priority:** Medium. Worktrees are small, but the leak is permanent across daemon restarts.
-
----
-
-## queue-poll.jsonl never rotated (Apr 21, 2026, from Audit 5)
-
-**The bug:** `~/.workrail/queue-poll.jsonl` grows indefinitely. `appendFile`-only, no rotation. At 5-minute poll intervals with 2-3 events per cycle, this is ~8-87 MB/month depending on activity. Disk exhaustion risk on long-running daemons.
-
-**Fix:** Add a size check before appending in `appendQueuePollLog()`. If file exceeds 10 MB, rotate it: rename to `queue-poll.jsonl.1`, start fresh. Keep at most 2 rotated files.
-
-**File:** `src/trigger/polling-scheduler.ts`, `appendQueuePollLog()` function.
-
-**Priority:** Medium. Not urgent but a production correctness issue.
-
----
-
-## ReviewSeverity missing assertNever + stderr bypassing injected dep (Apr 21, 2026, from Audit 2)
-
-**Bug 1 (Major):** In `src/coordinators/modes/implement-shared.ts`, the `switch(findings.severity)` over `ReviewSeverity` has no `default: assertNever(findings.severity)`. Widening `ReviewSeverity` with a new variant compiles cleanly and falls through silently.
-
-**Fix:** Add `default: assertNever(findings.severity)` to the switch.
-
-**Bug 2 (Major):** In `src/coordinators/pr-review.ts`, `readVerdictArtifact()` calls `process.stderr.write(...)` directly instead of using the injected `deps.stderr`. Tests that inject a fake dep will miss this log.
-
-**Fix:** Replace `process.stderr.write(...)` with `deps.stderr(...)`.
-
-**Files:** `src/coordinators/modes/implement-shared.ts`, `src/coordinators/pr-review.ts`.
-
-**Priority:** Medium. Correctness issues that won't crash in production but make future refactors unsafe.
-
----
-
-## Current state update (Apr 21, 2026)
-
-**npm version: v3.59.6** | Daemon PID: 54113 | Status: Running, pipeline active
-
-### What shipped in this session (Apr 19-21, 2026)
-
-**All five autonomous pipeline items (previously recorded) plus:**
-
-- **Discovery loop fix** (#748) -- three coupled fixes: thread `maxSessionMinutes` through `spawnSession` (sessions now get 55/35/65 min instead of 30 min default), inspect `PipelineOutcome` in polling-scheduler and apply `worktrain:in-progress` label on escalation, write issue-ownership sidecar for cross-restart idempotency
-- **In-process `awaitSessions` and `getAgentResult`** (#741) -- replaced HTTP calls to the daemon's own console with direct `ConsoleService` access
-- **Try/catch on all coordinator I/O** (#740) -- `getAgentResult`, `pollForPR`, `postToOutbox` all wrapped; coordinator no longer crashes on I/O failure
-- **Dispatch dedup prealloc bypass** (#744) -- `dispatch()` now bypasses dedup for pre-allocated sessions, fixing the zombie session bug that prevented discovery from starting
-- **Promise.race crash fix** (#733) -- worktrees scan timeout no longer crashes the daemon via unhandled rejection
-- **Trigger validator** (#690) -- `worktrain trigger validate` command, `validateTriggerStrict()` pure function
-- **`worktrain trigger poll`** (#697) -- force immediate poll cycle on any queue trigger
-- **`worktrain trigger test`** (#656) -- dry-run showing what would dispatch
-- **Auto-load ~/.workrail/.env** (#673) -- daemon reads secrets from .env automatically
-- **Daemon lifecycle events** (#674) -- `session_aborted` on SIGTERM, `daemon_heartbeat` every 30s
-- **Attribution signals** (#658) -- `[WT]` PR title prefix, `Co-authored-by: WorkTrain` commit trailers, `worktrain:generated` label
-- **Secret scan before push** (#660) -- pattern-based scan blocks commits with leaked credentials
-- **Unified logs stream** (#680) -- `worktrain logs` now merges daemon events, queue-poll.jsonl, and filtered stderr
-- **Stale lock file handling** (#705) -- validates lock file PID before trusting port discovery
-- **5 architectural audits** (docs/design/) -- coordinator access, error handling, testability, type bloat, memory management
-- **Stale user workflow cleanup** -- removed old copies from `~/.workrail/workflows/` that were causing ValidationError noise
-
-### Current pipeline state (live)
-
-Discovery session `ecf359d7` running: 77 turns, 11 step advances (active, making real progress on issue #393). Session `b7df0c8b` also running (just started). First clean run after all pipeline fixes landed.
-
-### Accurate limitations (v3.59.6)
-
-1. **Ghost sessions in event log** -- sessions killed by daemon crashes don't get `session_aborted` events from old daemon instances. New daemons emit it on shutdown, but historical sessions show as RUNNING.
-2. **Worktree orphan leak** -- if `maybeRunDelivery()` worktree removal fails after sidecar deletion, orphan is invisible to `runStartupRecovery`. See backlog.
-3. **`queue-poll.jsonl` never rotated** -- disk exhaustion risk on long-running daemons. See backlog.
-4. **`ReviewSeverity` missing `assertNever`** -- future variants silently fall through. See backlog.
-5. **`process.stderr.write` in `readVerdictArtifact`** -- bypasses injected dep, invisible to test fakes. See backlog.
-6. **WorkRail MCP stale state** -- `workrail cleanup` command doesn't exist yet. Manual cleanup needed for dead managed sources, old session accumulation.
-7. **Trigger validation static/runtime gap** -- some runtime checks not in static validator. See trigger-validation-gap-audit.md.
-8. **WorkflowTrigger type bloat** -- mixes trigger config, session runtime state, delivery config. See workflow-trigger-lifecycle-audit.md.
-9. **Conversation history not persisted** -- LLM conversation history is in-memory only. On crash, context is lost. See backlog.
-
-### Next priorities (groomed Apr 21)
-
-1. **Watch the current pipeline run** -- discovery `ecf359d7` is active at 77 turns/11 steps. If it completes, shaping and coding should fire automatically. First end-to-end validation.
-2. **Execution time tracking** -- add session timing to `execution-stats.jsonl` for timeout calibration. Small change in `runWorkflow()` finally block.
-3. **Three audit findings from above** -- worktree orphan leak, queue-poll rotation, assertNever fixes. All small, targeted.
-4. **`workrail cleanup` command** -- removes dead managed sources, rotates old session files, clears stale git caches. Stops ValidationError noise in MCP server logs.
-5. **Conversation history persistence** -- `conversation.jsonl` per session, append-only. Prerequisite for true crash recovery.
-6. **Autonomous crash recovery and interrupted-session resume** -- see full entry below (Apr 21).
-
----
-
-## Autonomous crash recovery and interrupted-session resume (Apr 21, 2026)
-
-**The problem we hit today:** A daemon crash loop (console `worktrees scan` unhandled rejection) killed all in-flight sessions. The queue correctly detected the sidecar and skipped re-dispatch for 56 min (TTL), but when the sidecar expired the session was re-dispatched from scratch with zero context from the previous attempt. The agent had already spent ~10 min in Phase 0, read codebase files, and formed a plan -- all of that work was lost.
-
-**What we want:** WorkTrain should be able to detect orphaned sessions on startup and make an autonomous decision: resume if the session had meaningful progress, discard and re-dispatch from scratch if it was too early to be worth resuming.
-
-**Resumability decision criteria (heuristics):**
-- Session had >= 1 `continue_workflow` call (at least one step advance): worth resuming -- the agent made real progress.
-- Session is at step 0 with 0 advances but > 5 LLM turns: borderline -- context was accumulated but no checkpoint written. Resume is risky (stale context), discard is safer. Could surface to console for human decision.
-- Session is at step 0, < 5 turns, < 2 min: discard -- nothing was lost.
-- Session's worktree is missing or corrupted: discard -- can't resume cleanly.
-- Session is on a coding workflow and has uncommitted changes in the worktree: pause for human review before discarding (could have partial work).
-
-**Implementation sketch:**
-
-1. **On daemon startup**, `runStartupRecovery()` already scans `daemon-sessions/` for orphaned token files. Extend it to also inspect the session event log for each orphan:
-   - Count `continue_workflow` calls and LLM turns from `~/.workrail/events/<sessionId>.jsonl`
-   - Apply decision criteria above
-   - For resume candidates: call `continue_workflow` with the checkpoint token and a synthesized re-entry prompt: "You are resuming a session that was interrupted by a daemon crash. Your last known step was [stepLabel]. Continue from where you left off."
-   - For discard candidates: emit `session_aborted` event, delete the sidecar, re-add the issue to the queue (or just let the TTL expire and the queue re-select naturally)
-
-2. **Conversation history prerequisite**: Resume is only useful if the agent can reconstruct its context. Today, conversation history is in-memory only -- it is lost on crash. The `conversation.jsonl` per-session persistence (backlog item #5 above) is a prerequisite for high-quality resume. Without it, resume starts from the workflow system prompt plus the current step recap only. This is enough for mid-pipeline phases (shaping, coding) since they read artifacts from disk. It may be insufficient for early discovery phases.
-
-3. **`worktrain session resume <sessionId>` CLI** -- manual override for human-initiated resume. Useful when the daemon's automatic heuristic chose to discard but the user sees partial work worth keeping.
-
-4. **Queue sidecar TTL for resume vs. discard**: Today the sidecar TTL prevents re-dispatch during the entire pipeline window (56 min). With autonomous resume, the TTL for a discarded session should be much shorter (5 min) so the queue can quickly re-select. For a resumed session, keep the full TTL and extend it by the time already spent.
-
-**Files to change:**
-- `src/daemon/workflow-runner.ts` -- `runStartupRecovery()`: add event log inspection and conditional resume
-- `src/trigger/polling-scheduler.ts` -- `doPollGitHubQueue()`: accept a `ttlOverride` param so discard path uses short TTL
-- `src/trigger/adapters/github-queue-poller.ts` -- `checkIdempotency()`: handle expired sidecars with `ttlOverride`
-- New: `src/daemon/session-recovery-policy.ts` -- pure function `evaluateRecovery(orphan, eventLog) -> 'resume' | 'discard' | 'human_review'`
-
-**Priority:** High. Every daemon crash currently wastes all in-flight work and waits up to 56 min before retrying. With even basic resume (step > 0 → resume, step = 0 → discard + fast re-dispatch), we'd recover most of the lost work and reduce retry latency from 56 min to < 5 min.
-
-**Depends on:** Conversation history persistence (for high-quality resume context).
-
----
-
-## Current state update (Apr 23, 2026)
-
-**npm version: v3.66.0** | Daemon: stopped (intentionally, undergoing MCP reconnect) | MCP: reconnecting to updated binary
-
----
-
-### What shipped in this session (Apr 22-23, 2026)
-
-This was a major session covering daemon/console separation, metrics infrastructure, and workflow stability fixes.
-
-**Architecture -- daemon/console/MCP separation:**
-- **Delete daemon-console.ts** (#753) -- daemon no longer bundles an embedded console; `worktrain console` is now the sole console entry point
-- **Remove dead steer/poll endpoints** (#755) -- deleted `worktrain trigger poll` CLI and the steer/poll HTTP endpoints that were only used by the deleted daemon-console
-- **Wire workflow catalog into standalone console** (#783, open) -- `worktrain console` Workflows tab now works without the MCP server running; `EnhancedMultiSourceWorkflowStorage` constructed directly in `standalone-console.ts`
-
-**Metrics infrastructure (6-step sequence, all merged):**
-- **timestampMs on events** (#768, #772) -- `DomainEventEnvelopeV1Schema` now has required `timestampMs`; backfill script at `scripts/backfill-timestamps.ts`
-- **`run_completed` event** (#773) -- emitted on successful session completion with `startGitSha`, `endGitSha`, `agentCommitShas`, `captureConfidence`, `durationMs`
-- **Authoring docs: metrics_* keys** (#767) -- `metricsProfile` field and SHA accumulation convention documented in `docs/authoring-v2.md`
-- **`projectSessionMetricsV2` projection** (#771) -- pure projection reading `run_completed` + `context_set metrics_*` keys, wired into `ConsoleSessionSummary`
-- **Console metrics display** (#777) -- `SessionMetricsSection` in session detail view; `GET /api/v2/sessions/:id/diff-summary` endpoint
-- **`stats-summary.json` writer** (#769) -- `~/.workrail/data/stats-summary.json` aggregated from `execution-stats.jsonl`, written post-session and every 30s heartbeat
-
-**Engine improvements:**
-- **Execution time tracking** (#756) -- `execution-stats.jsonl` per session in finally block
-- **Worktree orphan leak fix** (#756) -- sidecar deletion deferred to `maybeRunDelivery()` for worktree sessions
-- **assertNever for ReviewSeverity** (#756)
-- **Crash recovery phase A** (#759) -- `clearQueueIssueSidecars()` fixes 56-min re-dispatch block; sidecar preservation for sessions with progress
-- **Conversation history persistence** (#762) -- `<sessionId>-conversation.jsonl` per daemon session, append-only delta flush at each turn
-- **queue-poll.jsonl rotation** (#761) -- 10 MB size cap with `.1` backup
-- **Remove WorkTrain-owned label writes** (#765) -- `worktrain:in-progress`, `worktrain:generated` labels removed; deduplication now purely internal (sidecar + dispatchingIssues + session scan)
-- **metricsProfile footer injection** (#779) -- engine injects `metrics_*` accumulation footers based on `metricsProfile` workflow field; all 35 bundled workflows assigned profiles
-
-**Workflow namespace:**
-- **Rename all bundled workflows to `wr.*`** (#782, open) -- `coding-task-workflow-agentic` → `wr.coding-task`, `mr-review-workflow-agentic` → `wr.mr-review`, etc. Prevents local project source from shadowing bundled workflows on version mismatch.
-
----
-
-### Open PRs (waiting for WorkRail MCP review before merge)
-
-| PR | Title | Status |
-|---|---|---|
-| #782 | Rename all bundled workflows to `wr.*` namespace | CI passing, needs `wr.mr-review` |
-| #783 | Wire workflow catalog into standalone console | CI pending, needs `wr.mr-review` |
-
-**Do not merge #782 or #783 without running `wr.mr-review` on each.** The MCP needs to reconnect to the updated 3.66.0 binary first.
-
----
-
-### Active bugs (investigated, not yet fixed)
-
-1. **`additionalProperties: false` not enforced in Ajv** -- `src/application/validation.ts` uses `strict: false`, making schema's `additionalProperties` advisory only. A workflow with an unknown field passes `validate:registry`. Discovery+shaping in progress (agent running). **High priority -- fix before next release.**
-
-2. **`wr.mr-review` NOT_FOUND from MCP** -- `list_workflows` finds it but `start_workflow` returns NOT_FOUND. Root cause: MCP process is still running old 3.60.0 binary (global npm was stale). Fixed by `npm update -g @exaudeus/workrail` (done). Requires MCP reconnect to take effect.
-
-3. **User's `wr.discovery` VALIDATION_ERROR** -- stale `npx` cache pre-3.11.2. Fix: `npm cache clean --force && npx @exaudeus/workrail`. No code change needed.
-
----
-
-### Known gaps (not yet started)
-
-- **Phase B crash recovery** -- actual agent loop restart after crash (not just sidecar preservation). Blocked on conversation history being tested end-to-end. See "Autonomous crash recovery" entry above.
-- **`workrail cleanup` command** -- removes dead managed sources, old sessions. Still needed.
-- **console-routes.ts dispatch coupling** -- `POST /api/v2/auto/dispatch` still imports `runWorkflow` from `src/daemon/`. See backlog entry.
-- **`wr.*` list/get inconsistency** -- user-source `wr.*` copies appear in list but execution uses bundled. Low priority.
-
----
-
-### Current system state (Apr 23, 2026 -- end of session)
-
-**npm version: v3.68.1** | Daemon: stopped | MCP: connected on 3.68.1
-
-**What shipped this session (Apr 23):**
-- **`wr.*` workflow namespace rename** (#782) -- all 31 bundled workflows renamed; `legacy_project` source can no longer shadow bundled ones
-- **`triggers.yml` updated** (#785) -- `wr.coding-task`, `wr.mr-review`
-- **Standalone console Workflows tab** (#783) -- works without MCP server
-- **Validation regression test** (#784) -- `additionalProperties: false` confirmed enforced
-- **Session metrics refactor** (#786) -- defensive cast removed, types clean
-- **Validation warnings in `list_workflows`** (#787) -- users now see why their workflow disappeared
-- **`loadSessionNotes` export fix** (#790) -- 14 pre-existing test failures now pass
-- **`metrics_outcome` validation** (#793) -- agents get `VALIDATION_ERROR` immediately if they pass invalid values; tested and confirmed working
-
-**Active bugs / gaps:**
-- GitHub admin bypass removed from ruleset -- `gh pr merge --admin` will fail
-- `metrics_pr_numbers` still 0% (review workflows not picking up footer) -- expected, no sessions have completed `wr.mr-review` with new IDs yet
-- Only 20% of sessions have `run_completed` -- most daemon sessions don't complete due to crashes/timeouts; normal
-
-**Known gaps (not yet started):**
-- **Phase B crash recovery** -- actual agent loop restart after crash
-- **`workrail cleanup` command** -- dead managed sources, old sessions
-- **Versioned workflow schema validation** -- see backlog entry above
-- **console-routes.ts dispatch coupling** -- `POST /api/v2/auto/dispatch` imports from `src/daemon/`
-- **Daemon agent loop stall detection** -- 120s liveness check for frozen loops
-
-**System state:**
-- **WorkRail MCP server:** Connected at 3.68.1 (global npm `npx -y @exaudeus/workrail`). All `wr.*` IDs working.
-- **WorkTrain daemon:** Stopped. Start: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`. Points at local dist (`/Users/etienneb/git/personal/workrail/dist/cli-worktrain.js`).
-- **WorkRail console:** Not running. Start: `worktrain console`. Reads session files directly, no daemon required.
-- **Global npm:** 3.68.1 (`npm update -g @exaudeus/workrail` done)
-- **Local build:** Built from main at 3.68.1 (`npm run build` done)
-
-**Next up:**
-1. Restart daemon and watch first pipeline run with `wr.*` IDs
-2. Versioned schema validation (design ready in backlog, audit confirmed v1 = current schema)
-3. Daemon agent loop stall detection (medium priority)
-
----
-
-## Daemon agent loop stall detection (Apr 23, 2026)
-
-**The problem:** When a subagent (workrail-executor) stalls with no progress for 600s, the stream watchdog kills it with "Agent stalled: no progress for 600s (stream watchdog did not recover)". The daemon has no equivalent mechanism. A daemon session that stops making LLM API calls (e.g. waiting on a hung tool, a network issue with no timeout, or a silent deadlock) will spin until the wall-clock timeout fires -- which can be up to 55-65 minutes. No indication to the operator, no early abort, no event emitted.
-
-**What we want:** The daemon's `AgentLoop` should detect when no LLM turn starts within a configurable window (e.g. 120s) and abort the session with a `'stuck'` result. This is different from the existing `repeated_tool_call` / `no_progress` stuck detection, which watches for behavioral loops. This is a liveness check: if the loop simply isn't making any API calls at all, something is frozen.
-
-**Design sketch:**
-- In `src/daemon/agent-loop.ts`, add a per-turn heartbeat timer that resets each time an LLM call starts
-- If the timer fires (120s with no new turn), call `agent.abort()` and emit `agent_stuck` with `reason: 'no_llm_turn'`
-- Configurable via `agentConfig.stallTimeoutSeconds` in `triggers.yml` (default 120s)
-- Distinct from wall-clock timeout (`maxSessionMinutes`) which covers the full session
-
-**Where to look:**
-- `src/daemon/agent-loop.ts` -- `_runLoop()`, where LLM calls are made
-- `src/daemon/workflow-runner.ts` -- existing stuck detection and abort logic
-- `src/daemon/daemon-events.ts` -- `AgentStuckEvent` already has `reason` union (add `'no_llm_turn'`)
-
-**Priority:** Medium. The wall-clock timeout provides a safety net, but 55 minutes is a long time to wait for a frozen session. A 2-minute liveness check would dramatically improve operator experience.
-
----
-
-## Versioned workflow schema validation (Apr 23, 2026)
-
-### The problem
-
-WorkRail validates workflow files against the schema bundled in the currently-running MCP binary. This creates a bidirectional version mismatch problem:
-
-**New binary, old workflow:** Binary's schema has tightened validation (new required field, removed enum value) → old workflow fails → silently dropped from registry.
-
-**Old binary, new workflow:** Workflow has new fields the old schema doesn't know about → `additionalProperties: false` rejects it → silently dropped from registry.
-
-Both directions cause the same symptom: workflow disappears from `list_workflows` with no explanation. This is what we hit Apr 22-23: local `workflows/` directory (v3.66.0 with `metricsProfile`) was loaded by an old global npm binary (v3.60.0) whose schema didn't know `metricsProfile`, causing the entire registry to appear empty.
-
-The `wr.*` rename solves the specific case of bundled workflows being shadowed by local project files. But the version mismatch problem affects any non-bundled workflow (user, managed source, project) when the binary and the workflow file are at different schema versions.
-
-### The right long-term fix: versioned schema validation (like Android Room migrations)
-
-**Model:** Each workflow declares `"schemaVersion": 2` (integer). The binary ships validator copies for every schema version it supports. When loading a workflow, pick the validator matching the declared version -- not the current one.
-
-```json
-{ "schemaVersion": 2, "id": "my-workflow", ... }
-```
-
-**Load-time logic:**
-1. Read `schemaVersion` from the workflow file (default to 1 if absent -- legacy workflows)
-2. If `schemaVersion === current`: validate against current schema directly
-3. If `schemaVersion < current` (binary newer): validate against the declared schema version (workflow is valid for its era)
-4. If `schemaVersion > current` (binary too old): load leniently with warnings -- binary doesn't know this schema version, so `additionalProperties: false` doesn't apply
-
-This gives you full schema freedom going forward. You can add required fields, tighten enums, rename things -- without breaking workflows written for older schema versions.
-
-### Why NOT migrations (yet)
-
-A migration chain (v1→v2→v3 transform functions like Room) is the logical extension but adds complexity:
-- Migration functions on JSON documents with free-form prose are harder to write correctly than SQL schema migrations
-- The forward direction (binary too old for workflow) can't be migrated -- you'd have to downgrade the workflow, which is lossy
-- Requires process discipline: every schema change must increment the version AND write a migration. Easy to forget.
-- Migration chain length grows over time -- a v1 workflow loading against a v10 binary runs 9 migrations
-
-**Recommended phased approach:**
-- **Phase 1 (ship first):** Schema version dispatch without migrations. Keep old schema files (`spec/workflow.schema.v1.json`, `v2.json`, etc.). Validate each workflow against its declared version. No migration functions yet. Simple, no bugs, covers the backward direction.
-- **Phase 2 (add when needed):** Add migration functions when you actually need to make a breaking schema change that would invalidate old workflows. Not before.
-
-### Gaps and known issues with this approach
-
-1. **Forward direction still requires leniency.** When a workflow declares `schemaVersion: 5` and the binary only knows up to `schemaVersion: 4`, the only option is lenient loading with warnings. This is the `additionalProperties: true` approach, scoped to the mismatch case. This is acceptable -- if the binary is too old, it can still try to run the workflow with unknown fields ignored.
-
-2. **Schema version vs. authoring spec version.** WorkRail already has `validatedAgainstSpecVersion` on workflows (authoring spec -- style/quality). `schemaVersion` is separate (structural validity). Two version numbers with similar names need clear documentation.
-
-3. **External author burden.** When a new schema version ships, teams using managed sources need to know what changed and whether their workflows need updating. A changelog per schema version is required.
-
-4. **Default for legacy workflows.** Workflows without `schemaVersion` should default to `1` (oldest supported), not current. This means they get validated against the oldest schema -- which is lenient and permissive -- rather than the current strict one. Acceptable tradeoff.
-
-5. **`workflow-for-workflows` should stamp `schemaVersion`.** When authoring or modernizing a workflow, `wfw` should set `schemaVersion` to the current version automatically. This keeps the version accurate without requiring manual maintenance.
-
-### What's already in place
-
-- `validatedAgainstSpecVersion` field exists on workflows (authoring spec version, different concept)
-- `workflow.schema.json` has a `$id` with a version string (`v0.3.0`) but it's decorative -- not used at runtime
-- Validation warnings in `list_workflows` (PR #787) give users visibility when their workflow is silently dropped -- this is the interim fix until versioned validation ships
-
-### Files to change (Phase 1)
-
-- `spec/workflow.schema.json` -- add `schemaVersion` as an optional integer field (default 1 if absent)
-- `spec/workflow.schema.v1.json` -- snapshot of the current schema as "v1" (baseline)
-- `src/application/validation.ts` -- version dispatch: load the right schema based on `schemaVersion`
-- `src/types/workflow-definition.ts` -- add `readonly schemaVersion?: number` to `WorkflowDefinition`
-- `workflow-for-workflows.json` -- add step that stamps `schemaVersion` on the authored workflow
-- All bundled workflows -- add `"schemaVersion": 1` (once Phase 1 ships, bump to whatever the current version is)
-
-### Priority
-
-Medium-High. The `wr.*` rename (PR #782) is the immediate fix. This is the permanent architectural solution that prevents the problem for all workflow sources, not just bundled ones. Should ship after the rename stabilizes.
-
-**Implementation note (Apr 23):** Start with v1 = current schema. A git history audit is running to check whether any breaking changes have already been shipped. If none found: all existing workflows are valid against the current schema, v1 = today, no reconstruction needed. If breaking changes are found: snapshot the pre-break schema as v1, declare current as v2 (or higher), and existing workflows without `schemaVersion` default to v1. **Do not ship schema versioning until the audit completes and this determination is made.**
-
-**Audit result (Apr 23):** Exactly one breaking change found -- commit `b3212b45` (Apr 5, 2026) restructured `assessmentConsequenceTrigger` (`dimensionId`/`equalsLevel` → `anyEqualsLevel`). This affected only the `assessmentConsequences` feature which was introduced 4 days earlier (Apr 1). The bundled workflows that used it were migrated atomically in the same commit. No external workflows could have adopted this feature in that 4-day window. All other 14 schema changes in history are additive or loosening -- fully backward compatible.
-
-**Decision: v1 = current schema. No historical reconstruction needed.** The one breaking change was fully contained within the bundled workflow corpus at the time it shipped.
-
----
-
-## Consider rewriting WorkRail engine in Kotlin (Apr 23, 2026)
-
-### The argument
-
-WorkRail's coding philosophy demands "make illegal states unrepresentable" and "type safety as the first line of defense." TypeScript is structurally at odds with this: the compiler is advisory, not enforcing. `as unknown as`, `any`, and type assertion casts are always one line away. In a codebase where autonomous agents write and merge code without deep human review, the compiler is the reviewer -- and TypeScript's escape hatches make it too easy for an agent to paper over a real design problem with a cast.
-
-Evidence from today's work: the `RunCompletedDataExpected` intermediate interface and the `as unknown as` cast in `session-metrics.ts` both existed for weeks. TypeScript didn't prevent them. A stricter compiler -- one where bypass requires genuine effort -- raises the bar the agent has to clear before code is valid.
-
-### What Kotlin actually buys
-
-- **Sealed classes** -- exhaustive `when` is a compile error, not a runtime `assertNever` pattern that convention must enforce
-- **No easy escape hatch** -- `as` in Kotlin throws at runtime on type mismatch; there's no equivalent of `as unknown as` that silently lies to the compiler
-- **Null safety by default** -- `String` vs `String?` is a language distinction, not a `strict: true` compiler flag that can be turned off
-- **Value classes and data classes** -- less boilerplate for domain types, stronger invariants
-
-### What TypeScript + current tooling already covers
-
-- Zod at boundaries provides runtime validation that Kotlin's type system would provide at compile time -- this gap is smaller than it looks
-- `neverthrow` gives Result types
-- Discriminated unions + `assertNever` give exhaustiveness -- but enforced by convention, not the compiler
-
-### Real costs
-
-- JVM startup latency for an MCP server that starts/stops frequently -- mitigable with GraalVM native image, but adds build complexity
-- Full rewrite of `src/` -- months of work, not weeks
-- Console stays TypeScript/React regardless
-- The Kotlin MCP SDK exists but the ecosystem tooling (npm, Node.js file I/O patterns) needs reimplementation
-
-### The honest tradeoff
-
-Convention drift is a recurring tax. Migration is a one-time cost. In a codebase driven heavily by autonomous agents, the compiler is the last line of defense against accumulated drift. TypeScript's permissiveness means that defense has holes.
-
-This is not urgent -- the current codebase is working well. But if autonomous agent usage grows and human review per-PR decreases further, the compiler enforcement gap becomes more important, not less.
-
-**Priority:** Low / long-term. Worth revisiting when the agent is writing the majority of new code. Requires a concrete spike: rewrite one module (e.g. `src/v2/durable-core/domain/`) in Kotlin and measure the real friction before committing to a full migration.
-
----
-
-## Task re-dispatch loop protection (Apr 23, 2026) -- HIGH PRIORITY
-
-**The problem:** When a pipeline session fails (stuck, crash, timeout), the idempotency sidecar (`queue-issue-<N>.json`) expires after its TTL and the queue re-selects the same issue on the next poll cycle. There is no memory of how many times an issue has been attempted. A task that consistently fails (bad workflow, broken code, unsolvable problem) gets retried indefinitely, burning API credits and producing no forward progress.
-
-**Concrete incident:** Issue #393 ("test(daemon): add coverage for loadSessionNotes failure paths") was dispatched in a loop -- discovery + shaping + coding sessions repeatedly started, failed stuck, and were re-dispatched. The issue had already been resolved by human intervention but the daemon didn't know.
-
-**What we need:** Per-issue attempt tracking with a max-attempts cap and escalation on exhaustion.
-
-**Design sketch:**
-
-1. **Attempt counter in the sidecar:** Extend `queue-issue-<N>.json` to include `attemptCount: number`. On each new dispatch for the same issue, increment the counter. When `attemptCount >= maxAttempts` (default 3), do not dispatch -- instead emit an outbox notification and apply a `worktrain:needs-human` label (or equivalent internal signal) so the issue is skipped until a human resets it.
-
-2. **Sidecar persistence across TTL expiry:** Today the sidecar is deleted when the TTL expires. To count attempts across expiry, either: (a) use a longer-lived separate tracking file per issue, or (b) check the daemon event log for previous `session_started` events with the same `issueNumber` goal within a lookback window (e.g. last 24h).
-
-3. **Human reset mechanism:** A human should be able to say "try again" by closing and reopening the issue, or by removing a `worktrain:stuck` label, or via a `worktrain retry <issueNumber>` CLI command.
-
-4. **Escalation signal:** When max attempts is hit, post a comment on the GitHub issue: "WorkTrain attempted this task 3 times and was unable to complete it. Manual intervention required." This closes the invisible failure loop.
-
-**Files to change:**
-- `src/trigger/adapters/github-queue-poller.ts` -- track attempt count when writing sidecar
-- `src/trigger/polling-scheduler.ts` -- check attempt count before dispatch
-- `~/.workrail/daemon-sessions/queue-issue-<N>.json` schema -- add `attemptCount`
-
-**Priority:** High. This is a production correctness issue -- the daemon will burn unlimited credits on a broken task without this.
-
----
-
-## Auto-start mechanism inventory (Apr 23, 2026)
-
-**Current auto-start mechanisms for WorkTrain daemon:**
-
-1. **launchd plist** (`~/Library/LaunchAgents/io.worktrain.daemon.plist`) with `KeepAlive: true` -- daemon restarts automatically on crash or manual kill. Only `launchctl bootout` stops it permanently.
-
-No other auto-start mechanisms exist (no login items, no cron, no systemd).
-
-**Operational notes:**
-- To stop temporarily: `launchctl stop io.worktrain.daemon` -- daemon stops but restarts on next launchd check
-- To stop permanently: `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
-- To restart after bootout: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/io.worktrain.daemon.plist`
-
-**Known risk:** When working on daemon code, always `bootout` first. A `stop` will just respawn the old binary. This has caused confusion multiple times in this session.
-
-**Improvement idea:** Add a `worktrain daemon stop --permanent` command that does the bootout automatically, and `worktrain daemon start` that does the bootstrap. Makes the distinction between temporary stop and permanent stop explicit without requiring operators to know launchd internals.
+**Status: done** -- `checkContextBudget` validates `metrics_outcome` enum (PR f0a1822a). SHA validation (Gap 3 above) is still open.

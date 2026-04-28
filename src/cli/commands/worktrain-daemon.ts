@@ -410,21 +410,23 @@ async function runInstall(
   }
 
   deps.print('');
-  if (status.running) {
-    deps.print(`WorkTrain daemon installed and running (PID ${status.pid}).`);
-  } else {
-    deps.print(`WorkTrain daemon installed. Service loaded but not yet running.`);
-    deps.print(`This may be normal if WORKRAIL_TRIGGERS_ENABLED was not set.`);
-  }
+  deps.print('WorkTrain daemon registered with launchd.');
+  deps.print('');
+  deps.print('The daemon does NOT start automatically -- you must start it explicitly:');
+  deps.print('');
+  deps.print('  worktrain daemon --start     Start the daemon now');
+  deps.print('  worktrain daemon --stop      Stop the daemon');
+  deps.print('  worktrain daemon --status    Check if running');
+  deps.print('  worktrain daemon --uninstall Remove the registration');
+  deps.print('');
   deps.print(`Logs: ${logDir}/daemon.stdout.log`);
   deps.print(`      ${logDir}/daemon.stderr.log`);
 
   return success({
-    message: status.running
-      ? `WorkTrain daemon installed and running (PID ${status.pid})`
-      : 'WorkTrain daemon installed (service loaded, not yet running)',
+    message: 'WorkTrain daemon registered. Run: worktrain daemon --start',
     details: [
       `Plist: ${plistPath}`,
+      `Start: worktrain daemon --start`,
       `Logs:  ${logDir}/daemon.stdout.log`,
       `       ${logDir}/daemon.stderr.log`,
     ],
@@ -517,9 +519,6 @@ async function runStatus(
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function runStart(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
-  if (deps.platform !== 'darwin') {
-    return failure('--start is only supported on macOS (launchd).');
-  }
   const home = deps.homedir();
   const plistPath = deps.joinPath(home, 'Library', 'LaunchAgents', PLIST_FILENAME);
   const logDir = deps.joinPath(home, '.workrail', 'logs');
@@ -557,10 +556,6 @@ async function runStart(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
 }
 
 async function runStop(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
-  if (deps.platform !== 'darwin') {
-    return failure('--stop is only supported on macOS (launchd).');
-  }
-
   const result = await deps.exec('launchctl', ['stop', LAUNCHD_LABEL]);
   if (result.exitCode !== 0) {
     // launchctl stop exits non-zero if the service is already stopped -- not fatal
@@ -623,15 +618,10 @@ export async function executeWorktrainDaemonCommand(
     return misuse('--install, --uninstall, --start, --stop, and --status are mutually exclusive. Specify only one.');
   }
 
-  // --start and --stop are routed before the platform guard since they
-  // provide their own platform check inside.
-  if (opts.start) return runStart(deps);
-  if (opts.stop) return runStop(deps);
-
-  // Platform guard: launchd management (install/uninstall/status) is macOS-only.
+  // All management flags (install/uninstall/start/stop/status) require macOS (launchd).
   if (deps.platform !== 'darwin') {
     return failure(
-      `worktrain daemon --install/--uninstall/--status requires macOS (launchd). ` +
+      `worktrain daemon management flags require macOS (launchd). ` +
       `Current platform: ${deps.platform}.`,
       {
         suggestions: [
@@ -644,6 +634,8 @@ export async function executeWorktrainDaemonCommand(
 
   if (opts.install) return runInstall(deps);
   if (opts.uninstall) return runUninstall(deps);
+  if (opts.start) return runStart(deps);
+  if (opts.stop) return runStop(deps);
   // opts.status must be true at this point.
   return runStatus(deps);
 }
