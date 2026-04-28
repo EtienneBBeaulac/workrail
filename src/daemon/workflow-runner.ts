@@ -4066,6 +4066,12 @@ export async function runWorkflow(
     state.isComplete = true;
     state.lastStepNotes = notes;
     state.lastStepArtifacts = artifacts;
+    // WHY increment here: the final step is a real advance (the workflow completed it)
+    // but onAdvance is not called for isComplete responses -- so without this increment
+    // stepCount in execution-stats.jsonl is always off by one (misses the final step).
+    state.stepAdvanceCount++;
+    if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
+    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
   };
 
   // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
