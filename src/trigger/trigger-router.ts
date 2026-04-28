@@ -303,18 +303,17 @@ async function maybeRunDelivery(
 ): Promise<void> {
   // Only deliver on success with autoCommit enabled
   if (result._tag !== 'success') return;
-  if (trigger.autoCommit !== true) {
-    console.log(`[TriggerRouter] Delivery skipped: triggerId=${triggerId} -- autoCommit not set for this trigger.`);
-    return;
-  }
   if (result.lastStepNotes === undefined) {
-    console.warn(
-      `[TriggerRouter] Delivery skipped: triggerId=${triggerId} -- ` +
-      `lastStepNotes is absent (agent did not provide notes on the final step). ` +
-      `Ensure the workflow produces a JSON handoff block in its final step notes.`,
-    );
+    if (trigger.autoCommit === true) {
+      console.warn(
+        `[TriggerRouter] Delivery skipped: triggerId=${triggerId} -- ` +
+        `lastStepNotes is absent (agent did not provide notes on the final step). ` +
+        `Ensure the workflow produces a JSON handoff block in its final step notes.`,
+      );
+    }
     return;
   }
+  if (trigger.autoCommit !== true) return;
 
   // Parse the structured handoff artifact from the agent's final step notes
   const parseResult = parseHandoffArtifact(result.lastStepNotes);

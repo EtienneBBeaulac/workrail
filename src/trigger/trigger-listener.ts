@@ -261,13 +261,9 @@ export async function startTriggerListener(
     return null;
   }
 
-  // Resolve API key -- either Anthropic direct or Bedrock (AWS credentials).
-  // WHY accept empty string for Bedrock: runWorkflow() auto-detects AWS_PROFILE /
-  // AWS_ACCESS_KEY_ID and uses AnthropicBedrock instead of the apiKey parameter.
-  // The trigger listener should not block startup when Bedrock credentials are present.
-  const apiKey = options.apiKey ?? env['ANTHROPIC_API_KEY'] ?? '';
-  const hasBedrock = !!(env['AWS_PROFILE'] || env['AWS_ACCESS_KEY_ID']);
-  if (!apiKey && !hasBedrock) {
+  // Resolve API key
+  const apiKey = options.apiKey ?? env['ANTHROPIC_API_KEY'];
+  if (!apiKey) {
     return { _kind: 'err', error: { kind: 'missing_api_key' } };
   }
 

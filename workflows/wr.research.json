@@ -1,0 +1,158 @@
+{
+  "id": "wr.research",
+  "name": "General-Purpose Research",
+  "description": "General-purpose agentic research workflow for any topic — technology evaluation, design decisions, codebase exploration, markets, frameworks, architectural patterns. Produces a BLUF-headed Research Brief with ranked findings, falsified priors, and explicit what-was-not-verified boundaries. Two scale modes: quick (~20 min) and deep (~2 hr).",
+  "about": "Use `wr.research` when you have an open-ended question and want a structured, evidence-grounded answer rather than a summary dump. The workflow is built for the everyday research moment: you're considering adopting a framework, you need to understand a technology before a design review, you're trying to figure out who's doing the most interesting work in some space, or you need to inform a real decision. It is *not* the right tool for a competitor battlecard (use `wr.competitive-analysis` instead) or for a documented bug investigation (use `wr.bug-investigation`).\n\n**What you get out**: a Research Brief that opens with the answer in 3–5 sentences (BLUF), then ranked findings with confidence bands, the contradictions found between sources, the priors of yours and the agent's that were *falsified* during the run, an explicit 'what we still don't know' section, and recommended next steps tied to specific unanswered sub-questions. The brief earns its conclusions: every load-bearing claim is multi-source verified; single-source claims are confined to the body with explicit [unconfirmed] markers; training-time agent priors are inadmissible to the BLUF.\n\n**How to get good results**: be specific at intake. The workflow asks what you already believe — give it concrete claims, not vague impressions, because falsifiable priors are what produces the 'oh, that is not actually true' moments that distinguish insight from summary. Pick `decision` mode if you have a real choice to make and a deadline; pick `understanding` mode if you are building a mental model. Pick `quick` (~20 min) for a directional answer, `deep` (~2 hr) when you would otherwise spend a day reading. There is one human gate after planning where you approve or edit the Source Map and sub-question decomposition; everything after that runs unattended.\n\n**Mode budgets** (quick / deep): subagent fan-out cap 5/10; per-subagent token budget 8k/25k; total depth-serial token budget 30k/120k; iteration cap 1/2; brief word budget 800/2500; source map cap 5/8.",
+  "examples": [
+    "Should we adopt Kotlin Multiplatform for our shared business logic?",
+    "How do modern Android apps typically handle navigation state in 2026?",
+    "Decide between FSRS, SM-2, and Anki default scheduler for a vocabulary app",
+    "Survey current published work on agent memory architectures"
+  ],
+  "version": "1.0.0",
+  "validatedAgainstSpecVersion": 3,
+  "metricsProfile": "research",
+  "preconditions": [
+    "User can supply a research question they care about, including what they already believe, what good enough looks like, and if applicable the decision the research is meant to inform.",
+    "Environment has web_search, web_fetch, file read/write, and bash tools available.",
+    "Working directory is writable; the workflow creates ./research/<sessionId>/ for durable artifacts."
+  ],
+  "metaGuidance": [
+    "Notes-first durability: notesMarkdown and context variables are the durable execution truth. Disk artifacts under ./research/<sessionId>/ are rich content backing the notes.",
+    "The main agent owns every merge, every confidence promotion, every narrative decision, every word-budget cut, and every emission gate. Subagents produce raw outputs; they never produce canonical answers.",
+    "Parallelize only breadth-regime collection in Phase 3. All synthesis (merge, gap-analysis, brief-writing, dissent integration) is serial main-agent work.",
+    "Confidence laundering is the highest-stakes failure: a finding's confidence band cannot exceed the lowest-tier claim it depends on. prior:unverified claims are inadmissible to BLUF and ranked findings, period.",
+    "Hard word budget at Phase 8 enforces anti-completionism. The agent must cut, not expand, to fit. Empty 'What we do not know' sections fail the validation gate.",
+    "Adversarial review (Phase 7) must run as a separate Executor with artifacts-only context — no chain-of-thought sharing. Pass only file paths and an explicit 'do not infer prior reasoning' clause.",
+    "The collection-gap loop (Phases 3-5) runs at most iterationCap times (1 quick / 2 deep). Encode the cap as a context variable check: refuse the loop continuation when iterationCount >= iterationCap."
+  ],
+  "references": [
+    {
+      "id": "spec-bluf",
+      "title": "BLUF communication standard",
+      "source": "docs/reference/worktrain-daemon-invariants.md",
+      "purpose": "Reference for the brief's required opening structure: answer in 3-5 sentences, then evidence, then caveats.",
+      "authoritative": false
+    },
+    {
+      "id": "spec-authoring",
+      "title": "WorkRail authoring principles",
+      "source": "docs/authoring-v2.md",
+      "purpose": "Authoring rules for step prompts, output contracts, and loop control patterns used throughout this workflow.",
+      "authoritative": true
+    }
+  ],
+  "assessments": [
+    {
+      "id": "assessment-brief-quality",
+      "purpose": "Final Research Brief meets structural, confidence, and focus requirements before emission.",
+      "dimensions": [
+        {
+          "id": "structural_integrity",
+          "purpose": "All required sections present in canonical order, within size caps, with non-empty required sections.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        },
+        {
+          "id": "confidence_integrity",
+          "purpose": "Every BLUF and ranked-finding claim is verified or inferred; no prior:unverified claims; confidence bands respect lowest-tier rule.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        },
+        {
+          "id": "focus_integrity",
+          "purpose": "Brief stays within word budget, every claim ties to a sub-question, BLUF directly answers the intake question.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "id": "phase-0-intake",
+      "title": "Phase 0: Intake",
+      "prompt": "Capture exactly what the user wants to know, what they already believe, and what 'good enough' looks like. Seed the Priors Ledger to distinguish verified evidence from training-time memory.\n\nConstraints: Do not start any web_search or web_fetch. Treat your own training-time knowledge with suspicion -- anything you already know about the topic is a prior, not a fact, until you fetch it in-session.\n\nProcedure:\n1. Create ./research/<sessionId>/. If research-log.md already exists, this is a resume -- read the log, find the last completed phase marker, and skip ahead.\n2. Initialize research-log.md with: '# Research Log -- <sessionId> -- <ISO timestamp>'\n3. Present the user with this seven-field intake form (all required):\n   - Q1: Question (one sentence, no jargon)\n   - Q2: Mode (decision | understanding). If decision: also capture decision deadline and decision owner.\n   - Q3: What you already believe (free text; seeds the Priors Ledger)\n   - Q4: What 'good enough' looks like (e.g., 'I can confidently choose between A and B')\n   - Q5: Out-of-scope (explicit list)\n   - Q6: Source preferences or exclusions (optional)\n   - Q7: Run mode (quick | deep)\n4. Write intake.json.\n5. Initialize priors-ledger.json: extract atomic falsifiable claims from Q3 tagged `prior:unverified` source `user`. Then write your own atomic priors about the topic tagged `prior:unverified` source `agent`. Ask one focused follow-up if Q3 yields no atomic claims.\n6. Append '## Phase 0 complete' plus a one-line summary to research-log.md.\n\nOutput context keys: sessionId, workingDir, intakeQuestion, intakeMode (decision|understanding), mode (quick|deep), goodEnoughCriteria, outOfScope, priorsLedgerPath, intakeJsonPath, iterationCount (set to 0), iterationCap (1 if quick else 2).\n\nVerify: working directory and both JSON files exist; priors-ledger.json has at least one prior or an explicit 'no priors' note; research-log.md ends with Phase 0 marker."
+    },
+    {
+      "id": "phase-1-plan",
+      "title": "Phase 1: Plan, Source Map, and Dependency Matrix",
+      "prompt": "Produce three artifacts that commit the run to a specific shape before any collection happens.\n\nConstraints: Light web_search to map the source landscape is permitted, but do NOT begin substantive collection. The regime is determined by a mechanical rule, not judgment. Source Map: max 5 entries (quick) / 8 (deep). Sub-questions: 3-8 entries.\n\nProcedure:\n1. Source Map (source-map.md): enumerate source types most relevant to THIS specific question. One-line rationale per entry tied to this question. Include critic/contrarian sources proactively if the topic has hype.\n2. Sub-question decomposition (dependency-matrix.json): split the intake question into 3-8 sub-questions whose conjunction would answer it. For each, list IDs of other sub-questions it depends on.\n3. Regime decision (mechanical rule):\n   - All dependency lists empty -> regime = breadth (answers can be gathered in parallel)\n   - Any sub-question has dependencies -> regime = depth_serial (produce topological ordering)\n4. Plan (plan.md): per sub-question: planned subagent task, source-map entries to prioritize, stop rule (min 3 fetches AND 2 consecutive zero-novelty fetches OR token budget hit), token budget (8k quick / 25k deep per subagent).\n5. Append '## Phase 1 complete' plus regime and sub-question count to research-log.md.\n\nOutput context keys: sourceMapPath, dependencyMatrixPath, planPath, regime (breadth | depth_serial), subQuestionCount, subagentCap (5 quick / 10 deep), perSubagentTokenBudget (8000 quick / 25000 deep).\n\nVerify: Source Map respects mode cap; sub-question count 3-8; regime set by mechanical rule; all three files exist."
+    },
+    {
+      "id": "phase-2-confirm-plan",
+      "title": "Phase 2: Confirm plan with user (single human gate)",
+      "prompt": "Get user approval or edits on the Plan, Source Map, and Dependency Matrix before any collection tokens are spent. This is the workflow's only human gate.\n\nConstraints: Do not proceed without explicit user response. User edits to the Dependency Matrix can flip the regime; honor that. Show artifact content inline, not just file paths.\n\nProcedure:\n1. Present inline: the intake question, the Source Map, the sub-questions with dependencies and declared regime, and the per-sub-question Plan.\n2. Ask: 'Approve, edit, or abort?' with a one-sentence summary of each option.\n3. If edit: capture edits, revise artifacts on disk, present again. Repeat until approve or abort.\n4. If abort: append '## Phase 2: aborted by user' to research-log.md and end.\n5. If approve: append '## Phase 2 complete' to research-log.md.\n\nOutput context keys: planApproved (true/false), regime (possibly updated), aborted (true/false).\n\nVerify: User explicitly approved or aborted; if edits applied, artifacts on disk reflect them; if regime flipped, topological ordering updated.",
+      "requireConfirmation": true
+    },
+    {
+      "id": "collection-gap-loop",
+      "title": "Collection and gap-analysis loop (bounded)",
+      "type": "loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control",
+          "loopId": "research_collection_loop"
+        },
+        "maxIterations": 3
+      },
+      "body": [
+        {
+          "id": "phase-3-collection",
+          "title": "Phase 3: Collection (regime-dependent)",
+          "prompt": "Execute collection in the declared regime. Produce per-pass claim files under ./research/<sessionId>/claims/.\n\nConstraints: Each claim must include: text, source_url, source_type, confidence (single-source|inferred -- NEVER verified, that is Phase 4's job), answers_subquestion (ID), fetched_at (ISO timestamp). Per-pass token budgets are hard caps. Do not mix regimes within a pass.\n\nIf regime = breadth:\n1. Spawn N WorkRail Executors in parallel (N = min(subQuestionCount, subagentCap)).\n2. Each Executor receives: its sub-question, Source Map, relevant priors-ledger.json slice. Tools: web_search, web_fetch, file:read, bash.\n3. Each Executor: stop after min 3 fetches AND 2 consecutive zero-novelty fetches OR token budget (perSubagentTokenBudget) OR 5-minute wall-clock. Write exactly one file: claims/pass-<iterationCount+1>-sub-<subQuestionId>.json. NEVER tag `verified`. Do NOT modify other files or spawn subagents.\n4. Wait for all Executors.\n\nIf regime = depth_serial:\n1. Walk topological ordering of sub-questions.\n2. For each sub-question: fetch sources; you may revise earlier claims in this same pass.\n3. Stop per-sub-question: min 3 fetches AND 2 consecutive zero-novelty OR budget hit OR 5-minute wall-clock.\n4. Write claims/pass-<iterationCount+1>-step-<i>-<subQuestionId>.json.\n5. Total token budget: 30000 (quick) / 120000 (deep).\n\nBoth regimes: append '## Phase 3 complete (pass <iterationCount+1>)' plus one-line summary per Executor/step to research-log.md.\n\nOutput context keys: claimsThisPass (int), claimFilesThisPass (paths array).\n\nVerify: Every Executor/step produced exactly one claims file; no subagent tagged `verified`; budgets respected."
+        },
+        {
+          "id": "phase-4-merge",
+          "title": "Phase 4: Merge and corroborate",
+          "prompt": "Merge all claim files from Phase 3, apply the typed corroboration rule, and flag falsified priors. Main-agent only -- no delegation.\n\nCorroboration rule:\n- verified: >= 2 source URLs from distinct hostnames, not syndicated copies citing the same primary article.\n- single-source: 1 URL supports it.\n- inferred: derived across multiple fetched sources; record the derivation chain.\n\nPriors Ledger update:\n- prior:unverified contradicted by >= 1 verified or single-source claim -> tag falsified-pending-review.\n- prior:unverified corroborated by >= 1 verified claim -> tag corroborated.\n- Untouched priors remain prior:unverified and inadmissible to user-facing claims.\n\nProcedure:\n1. Read all claims/ files for current pass.\n2. Deduplicate by claim text + source URL.\n3. Apply corroboration rule to each unique claim.\n4. Cross-reference against priors-ledger.json; update tags.\n5. Write claims/merged-pass-<passNumber>.json.\n6. Update priors-ledger.json.\n7. Append '## Phase 4 complete (pass <passNumber>): <X> verified, <Y> single-source, <Z> inferred, <P> falsified-pending, <Q> corroborated' to research-log.md.\n\nOutput context keys: verifiedClaimCount, singleSourceClaimCount, inferredClaimCount, falsifiedPendingPriorCount, corroboratedPriorCount, mergedLedgerPath.\n\nVerify: merged-pass-<passNumber>.json exists with final confidence tags; no claim promoted to verified on a single source; priors-ledger.json updated."
+        },
+        {
+          "id": "phase-5-gap-analysis",
+          "title": "Phase 5: Gap analysis and loop decision",
+          "prompt": "Identify which sub-questions are resolved, partial, or open. Decide whether to iterate or proceed to synthesis. Emit a wr.loop_control artifact to control the loop.\n\nClassification:\n- resolved: >= 2 verified claims OR (1 verified claim AND no contradicting evidence)\n- partial: only single-source or inferred claims, OR verified claims that contradict each other unresolvedly\n- open: no claims or only prior:unverified speculation\n\nIteration is justified ONLY IF: at least one partial/open sub-question is on the critical path to the deliverable AND iterationCount < iterationCap AND named gap differs from lastGapName (no-progress detector).\n\nProcedure:\n1. Read merged-pass-<passNumber>.json and dependency-matrix.json.\n2. Classify each sub-question. Write gap-analysis.md with three sections.\n3. Determine loop decision:\n   - If iterationCount >= iterationCap: decision = stop.\n   - If all resolved OR no critical-path gap: decision = stop.\n   - If named gap = lastGapName: decision = stop (no-progress).\n   - Else: decision = continue. Name the single highest-priority gap; update Plan with focused sub-question; increment iterationCount; set lastGapName.\n4. Append '## Phase 5 complete (pass <passNumber>): <decision>' to research-log.md.\n5. Emit the wr.loop_control artifact in complete_step artifacts: { kind: 'wr.loop_control', decision: <'continue'|'stop'> }\n\nOutput context keys: iterationCount (incremented if continuing), lastGapName, focusedSubQuestion (if continuing).\n\nVerify: Every sub-question classified; iteration decision respects cap and no-progress detector; wr.loop_control artifact emitted.",
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-6-synthesis",
+      "title": "Phase 6: Synthesis — structured findings before any prose",
+      "prompt": "Produce, in strict order, the structured contents of the Research Brief before any narrative prose. This discipline is what produces insight rather than summary.\n\nConstraints:\n- Restate the intake question verbatim at the top. Do not drift the question.\n- Structured sections first, prose last -- a summary cannot be produced from these artifacts, only synthesis can.\n- BLUF and ranked findings: only verified or inferred (with shown derivation) claims. prior:unverified inadmissible. single-source admissible in body only with [unconfirmed] marker.\n- Finding confidence band cannot exceed lowest-tier load-bearing claim.\n- Word budget: 800 (quick) / 2500 (deep) excluding appendices. Cut to fit.\n- Caps: <= 5 ranked findings, <= 3 recommended next steps.\n- 'What we do not know' must be non-empty and specific.\n\nProcedure:\n1. Restate intake question verbatim.\n2. Produce in exact order before any prose:\n   a. Ranked findings (<= 5): confidence band H|M|L|U, strongest evidence for (cite), strongest evidence against (cite or 'no significant counter-evidence found').\n   b. Contradictions: source pairs that disagree, both citations, one-line resolution or 'unresolved'.\n   c. Falsified priors: every priors-ledger entry tagged falsified-pending-review, with the overturning claim. Promote to 'falsified' here.\n   d. What we now know / What we still do not know: partition from Phase 5 sub-question statuses.\n   e. Implications for the requestor's decision/goal: from intakeMode and goodEnoughCriteria.\n   f. Recommended next steps (<= 3): each tied to a specific remaining unknown with estimated cost.\n3. Write BLUF (3-5 sentences answering the question directly). Then weave (a)-(f) into body prose. Stay under word budget.\n4. Save draft as brief.md.\n5. Append '## Phase 6 complete: <wordCount> words' to research-log.md.\n\nOutput context keys: briefPath, draftWordCount, rankedFindingsCount, falsifiedPriorCount, contradictionsCount.\n\nVerify: Intake question restated verbatim; structured sections exist before prose; no prior:unverified in BLUF or ranked findings; 'What we do not know' non-empty and specific; word count at or under budget."
+    },
+    {
+      "id": "phase-7-adversarial-review",
+      "title": "Phase 7: Adversarial review — isolated Executor, artifacts only",
+      "prompt": "Spawn a separate WorkRail Executor with artifacts-only context to produce the strongest argument that the BLUF and ranked-finding #1 are wrong. Structural isolation is the whole point.\n\nConstraints:\n- Executor receives ONLY: brief.md, claims/, priors-ledger.json, source-map.md file paths. NOT notesMarkdown from Phase 6, NOT any in-context narrative.\n- Executor has NO web tools. Its job is to challenge the existing evidence base, not extend it.\n- Executor writes only dissent.md.\n- 'Looks good' is not acceptable output.\n\nProcedure:\n1. Spawn one WorkRail Executor with file paths to brief.md, claims/ directory, priors-ledger.json, source-map.md. Tools: file:read only.\n2. Executor prompt (verbatim contract to include): 'Read brief.md, claims/, priors-ledger.json, and source-map.md. Produce the strongest written argument that the BLUF and ranked-finding #1 are wrong, using ONLY the evidence in these artifacts. If you cannot mount such an argument, identify the single weakest claim and explain in detail why -- citing evidence gaps, single-source dependencies, or unresolved contradictions. No significant dissent is acceptable ONLY IF you explicitly state the brief is unfalsifiable with available evidence and name what would change that. Write to dissent.md.'\n3. Wait for Executor. Read dissent.md.\n4. Append '## Phase 7 complete: dissent type = <substantive|weakest-claim|unfalsifiable>' to research-log.md.\n\nOutput context keys: dissentPath, dissentType (substantive|weakest-claim|unfalsifiable), dissentIdentifiesLoadBearingError (boolean).\n\nVerify: dissent.md exists and is non-trivial; Executor had file paths only; Executor had no web tools."
+    },
+    {
+      "id": "phase-8-finalize",
+      "title": "Phase 8: Finalize, integrate dissent, validate, emit",
+      "prompt": "Integrate dissent into the brief, add the premortem, run the three-dimension validation gate, and emit the final brief.\n\nDissent integration:\n- If dissentIdentifiesLoadBearingError: revise brief to address it.\n- If dissent is legitimate weaker case: append verbatim under 'Dissent' section.\n- If unfalsifiable disclosure: include as 'No significant dissent reached threshold; reviewer noted: <quote>'.\n\nAdd premortem paragraph: 'If this brief turns out to be wrong six months from now, the most likely reason is ___'.\n\nAssemble final brief in canonical order: BLUF -> Ranked findings -> Contradictions -> Falsified priors -> What we know/do not know -> Implications -> Recommended next steps -> Dissent -> Premortem -> Evidence base [1]... -> Appendix A (Priors Ledger) -> Appendix B (Source Map) -> Appendix C (Dependency Matrix) -> Appendix D (Gap analysis log).\n\nRun validation gate (assessmentRefs: assessment-brief-quality). For each failed dimension:\n- structural_integrity low: fix section order, caps, or missing required sections (max 2 revise attempts).\n- confidence_integrity low: remove prior:unverified claims from BLUF/findings or add missing confidence bands (max 1 revise attempt).\n- focus_integrity low: cut to word budget, remove orphan claims, or fix question drift (max 1 revise attempt).\nAfter revise caps: set validationGateResult = fail and surface to user with named failed dimension.\n\nIf all pass: append '## Phase 8 complete: RESEARCH COMPLETE -- brief.md emitted' to research-log.md. Present the brief to the user.\n\nOutput context keys: validationGateResult (pass|fail), finalWordCount, finalBriefPath.\n\nVerify: Sections in canonical order; validation passed or failure named; premortem present; word count at or under budget; 'What we do not know' non-empty; no prior:unverified in BLUF or ranked findings.",
+      "assessmentRefs": [
+        "assessment-brief-quality"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "low"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "structural_integrity low: fix section order, caps, or missing required sections (BLUF 3-5 sentences, findings <=5, next-steps <=3, What-we-do-not-know non-empty, Dissent present, Premortem present). confidence_integrity low: remove prior:unverified claims from BLUF and ranked findings; ensure all findings have confidence bands; check no finding band exceeds its lowest-tier supporting claim. focus_integrity low: cut prose to word budget (800 quick / 2500 deep excluding appendices); tie all body claims to ..."
+          }
+        }
+      ]
+    }
+  ]
+}
