@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   executeWorktrainDaemonCommand,
+  parseDotEnv,
   type WorktrainDaemonCommandDeps,
 } from '../../src/cli/commands/worktrain-daemon.js';
 import { loadDaemonEnv, type LoadDaemonEnvDeps } from '../../src/daemon/daemon-env.js';
@@ -678,5 +679,113 @@ describe('loadDaemonEnv', () => {
     await loadDaemonEnv(fakeDeps('COMPLEX_VALUE=value=with=equals=signs'));
 
     expect(process.env['COMPLEX_VALUE']).toBe('value=with=equals=signs');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// parseDotEnv
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('parseDotEnv', () => {
+  it('parses simple KEY=VALUE lines', () => {
+    const result = parseDotEnv('FOO=bar\nBAZ=qux');
+    expect(result['FOO']).toBe('bar');
+    expect(result['BAZ']).toBe('qux');
+  });
+
+  it('ignores comment lines starting with #', () => {
+    const result = parseDotEnv('# this is a comment\nFOO=bar');
+    expect(Object.keys(result)).toEqual(['FOO']);
+  });
+
+  it('ignores blank lines', () => {
+    const result = parseDotEnv('\n\nFOO=bar\n\n');
+    expect(Object.keys(result)).toEqual(['FOO']);
+  });
+
+  it('handles value with equals signs', () => {
+    const result = parseDotEnv('API_KEY=sk-ant-abc=123');
+    expect(result['API_KEY']).toBe('sk-ant-abc=123');
+  });
+
+  it('returns empty object for empty content', () => {
+    expect(parseDotEnv('')).toEqual({});
+    expect(parseDotEnv('# only comments\n\n')).toEqual({});
+  });
+
+  it('ignores lines without equals sign', () => {
+    const result = parseDotEnv('INVALID_LINE\nFOO=bar');
+    expect(result['INVALID_LINE']).toBeUndefined();
+    expect(result['FOO']).toBe('bar');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// --start credential warning
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('worktrain daemon --start credential check', () => {
+  it('starts without warning when ANTHROPIC_API_KEY is in process env', async () => {
+    const deps = buildFakeDeps({
+      env: { AWS_PROFILE: undefined, ANTHROPIC_API_KEY: 'sk-ant-test', HOME: '/Users/test', PATH: '/usr/bin' },
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    await executeWorktrainDaemonCommand(deps, { start: true });
+
+    const output = deps.printed.join('\n');
+    expect(output).not.toContain('WARNING');
+  });
+
+  it('starts without warning when AWS_PROFILE is in process env', async () => {
+    const deps = buildFakeDeps({
+      env: { AWS_PROFILE: 'my-profile', HOME: '/Users/test', PATH: '/usr/bin' },
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    await executeWorktrainDaemonCommand(deps, { start: true });
+
+    const output = deps.printed.join('\n');
+    expect(output).not.toContain('WARNING');
+  });
+
+  it('starts without warning when ANTHROPIC_API_KEY is in ~/.workrail/.env', async () => {
+    const deps = buildFakeDeps({
+      env: { HOME: '/Users/test', PATH: '/usr/bin' }, // no creds in env
+    });
+    // Put the key in the .env file
+    deps.files.set('/Users/test/.workrail/.env', { content: 'ANTHROPIC_API_KEY=sk-ant-from-file' });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    await executeWorktrainDaemonCommand(deps, { start: true });
+
+    const output = deps.printed.join('\n');
+    expect(output).not.toContain('WARNING');
+  });
+
+  it('prints WARNING when no credentials found anywhere', async () => {
+    const deps = buildFakeDeps({
+      env: { HOME: '/Users/test', PATH: '/usr/bin' }, // no creds
+      // readFile will throw ENOENT for .env since files map is empty
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    await executeWorktrainDaemonCommand(deps, { start: true });
+
+    const output = deps.printed.join('\n');
+    expect(output).toContain('WARNING');
+    expect(output).toContain('~/.workrail/.env');
+  });
+
+  it('still starts successfully even when credentials warning fires', async () => {
+    const deps = buildFakeDeps({
+      env: { HOME: '/Users/test', PATH: '/usr/bin' }, // no creds
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+
+    // Warning is advisory -- start still proceeds
+    expect(result.kind).toBe('success');
   });
 });

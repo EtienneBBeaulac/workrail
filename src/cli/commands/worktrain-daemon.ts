@@ -400,7 +400,8 @@ async function runInstall(
   deps.print('');
   deps.print('WorkTrain daemon registered with launchd.');
   deps.print('');
-  deps.print('Before starting, put your secrets in ~/.workrail/.env:');
+  deps.print('Before starting, put your secrets in ~/.workrail/.env');
+  deps.print('(see docs/configuration.md for the full list):');
   deps.print('');
   deps.print('  ANTHROPIC_API_KEY=sk-ant-...');
   deps.print('  # or for AWS Bedrock: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY');
@@ -510,6 +511,72 @@ async function runStatus(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CREDENTIAL CHECK
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Parse KEY=VALUE lines from a .env file string.
+ * Lines starting with # and blank lines are ignored.
+ * Exported for testing.
+ */
+export function parseDotEnv(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim();
+    if (key) result[key] = value;
+  }
+  return result;
+}
+
+/**
+ * Check whether at least one LLM credential is available, combining the
+ * current process env with keys parsed from ~/.workrail/.env.
+ *
+ * WHY warn not fail: the credential may be in ~/.aws/credentials (SSO) or
+ * injected by the system in ways we can't detect at start time. A warning
+ * surfaces the misconfiguration without blocking legitimate setups.
+ *
+ * Returns a warning message if no credential is found, or null if ok.
+ */
+async function checkCredentials(
+  deps: WorktrainDaemonCommandDeps,
+): Promise<string | null> {
+  const home = deps.homedir();
+  const envFilePath = deps.joinPath(home, '.workrail', '.env');
+
+  // Merge process env + .env file
+  const merged: Record<string, string | undefined> = { ...deps.env };
+  try {
+    const envContent = await deps.readFile(envFilePath);
+    const parsed = parseDotEnv(envContent);
+    for (const [k, v] of Object.entries(parsed)) {
+      if (!(k in merged)) merged[k] = v; // .env does not override process env
+    }
+  } catch {
+    // .env is optional -- missing is fine
+  }
+
+  const hasAnthropic = !!(merged['ANTHROPIC_API_KEY']);
+  const hasBedrock = !!(merged['AWS_PROFILE'] || merged['AWS_ACCESS_KEY_ID']);
+
+  if (!hasAnthropic && !hasBedrock) {
+    return (
+      'No LLM credentials found in process env or ~/.workrail/.env.\n' +
+      'The daemon will fail when it tries to call the LLM.\n' +
+      'Add one of the following to ~/.workrail/.env:\n' +
+      '  ANTHROPIC_API_KEY=sk-ant-...\n' +
+      '  AWS_PROFILE=your-sso-profile'
+    );
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // START / STOP
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -523,6 +590,14 @@ async function runStart(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
       'WorkTrain daemon is not installed. Run: worktrain daemon --install',
       { suggestions: ['worktrain daemon --install'] },
     );
+  }
+
+  // Warn if no LLM credentials found -- sessions will fail without them.
+  const credWarning = await checkCredentials(deps);
+  if (credWarning) {
+    deps.print('');
+    deps.print('WARNING: ' + credWarning);
+    deps.print('');
   }
 
   const result = await deps.exec('launchctl', ['start', LAUNCHD_LABEL]);
