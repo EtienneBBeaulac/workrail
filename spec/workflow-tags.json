@@ -313,6 +313,12 @@
         "design",
         "tickets"
       ]
+    },
+    "wr.research": {
+      "tags": [
+        "investigation",
+        "design"
+      ]
     }
   }
 }

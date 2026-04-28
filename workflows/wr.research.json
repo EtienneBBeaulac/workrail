@@ -1,0 +1,374 @@
+{
+  "id": "wr.research",
+  "name": "General-Purpose Research",
+  "version": "1.0.0",
+  "description": "A seven-stage orchestrator-worker research workflow for any topic. Handles technology evaluation, design decisions, codebase exploration, market research, framework comparison, and architectural patterns. Produces a BLUF-headed Research Brief with ranked findings, falsified priors, and explicit unknowns.",
+  "about": "## General-Purpose Research Workflow\n\nThis workflow conducts structured, evidence-driven research on any question. Unlike domain-specific research tools, it adapts to whatever you are investigating -- technology evaluation, design decisions, codebase exploration, market research, framework comparison, or architectural patterns.\n\n**What it does:**\nThe workflow runs through seven stages: session initialization, structured intake, planning (source map + dependency matrix + sub-question decomposition), evidence collection (parallel subagent fan-out or depth-serial depending on question structure), gap analysis with bounded re-collection iteration, synthesis with adversarial review, and final brief production.\n\nTwo modes: **Quick** (~20 min, single subagent fan-out, 1 re-collection iteration cap, 800-word brief) and **Deep** (~2 hr, full multi-subagent, 2 re-collection iterations cap, 2500-word brief).\n\n**Key structural features:**\n- **Priors Ledger**: explicitly separates agent training-time knowledge (inadmissible as evidence) from session-verified facts. Falsified priors are the highest-insight output in most runs.\n- **Source Map**: built per-question at planning time -- no fixed source hierarchy imposed\n- **Dependency Matrix**: decides collection regime (breadth-parallel vs depth-serial) based on actual sub-question dependencies\n- **Bounded re-collection loop**: gap analysis can trigger one or two focused re-collection passes before finalizing\n- **Adversarial review**: structurally isolated subagent with no access to synthesis chain-of-thought challenges the brief from artifacts alone\n- **BLUF-headed Research Brief**: leads with a direct answer, includes ranked hypotheses with confidence bands, falsified priors section, and a mandatory 'what we still don't know' section\n\n**When to use it:**\n- Before making a significant technology adoption decision\n- When you need a structured answer to a design or architectural question with evidence\n- When you want to understand a topic area deeply rather than get a quick summary\n- When you need to document your research process and sourcing for a team decision\n\n**What it produces:**\nA Research Brief with: BLUF (3-5 sentences), ranked findings with H/M/L/U confidence bands and evidence citations, contradictions found in sources, falsified priors, what we now know vs. what we still don't know, implications for your decision, recommended next steps, adversarial dissent, premortem, and appendices (Priors Ledger, Source Map, Dependency Matrix, Gap Analysis).\n\n**How to get good results:**\nProvide a specific, answerable research question (one sentence). State what you already believe -- this seeds the Priors Ledger and produces the most valuable output when beliefs are overturned. Name what 'good enough' looks like so the workflow knows when to stop. Choose Quick for time-bounded decisions; choose Deep for consequential or complex questions.",
+  "examples": [
+    "Evaluate whether to adopt Temporal.io for our background job system vs staying with BullMQ",
+    "Research the tradeoffs between event sourcing and traditional CRUD for our audit log requirements",
+    "Investigate why LLM-based code review tools struggle with large diffs and what approaches work better",
+    "Research the current state of WASM outside the browser for server-side compute workloads",
+    "Evaluate open-source vector database options for our semantic search use case at 10M documents",
+    "Understand the failure modes of distributed tracing in high-throughput microservice architectures"
+  ],
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "metricsProfile": "research",
+  "features": [
+    "wr.features.subagent_guidance",
+    "wr.features.capabilities"
+  ],
+  "validatedAgainstSpecVersion": 3,
+  "preconditions": [
+    "Working directory must be writable -- the workflow creates a research artifacts directory.",
+    "Web fetch capability is required for collection subagents (at least preferred).",
+    "A specific answerable question must be provided; 'research everything about X' is not acceptable intake."
+  ],
+  "assessments": [
+    {
+      "id": "brief-integrity-gate",
+      "purpose": "The Research Brief is grounded in session-verified evidence and names its remaining gaps honestly.",
+      "dimensions": [
+        {
+          "id": "evidence_grounding",
+          "purpose": "Each finding in the ranked list has at least one specific source citation. No finding is supported only by prior:unverified claims from the Priors Ledger.",
+          "levels": ["low", "high"]
+        },
+        {
+          "id": "gap_disclosure",
+          "purpose": "The 'What we still don't know' section is non-empty and names at least one concrete remaining gap -- not 'N/A', not a placeholder, not a restatement of what was answered.",
+          "levels": ["low", "high"]
+        }
+      ]
+    },
+    {
+      "id": "dissent-quality-gate",
+      "purpose": "The adversarial review produced a specific, grounded challenge -- not a generic pass or diplomatic fence-sitting.",
+      "dimensions": [
+        {
+          "id": "dissent_specificity",
+          "purpose": "The dissent either: (a) names a specific claim, cites the weakest supporting evidence, and explains why it might be wrong, or (b) states specifically which claim it examined and why no strong counterargument could be mounted from the available artifacts.",
+          "levels": ["low", "high"]
+        }
+      ]
+    }
+  ],
+  "metaGuidance": [
+    "PRIORS LEDGER: prior:unverified claims are inadmissible to the BLUF and ranked findings. Training-time knowledge is hypothesis generation only, never evidence. This is the most important invariant in the workflow.",
+    "FALSIFIED PRIORS: every Priors Ledger entry tagged falsified-pending-review must appear in the brief's Falsified Priors section with the overturning claim and its citation. Falsified priors are the highest-insight output in most runs.",
+    "GAP DISCIPLINE: the 'What we still don't know' section must be non-empty. An empty section means the research was incomplete or dishonest. If everything is answered, name at least one question that would require more work to answer with higher confidence.",
+    "WORD BUDGET: 800 words (Quick) / 2500 words (Deep) for the narrative brief EXCLUDING appendices. These are hard constraints. Cut to fit -- do not expand.",
+    "ADVERSARIAL ISOLATION: the adversarial reviewer must have NO access to the synthesis chain-of-thought. Structural isolation is the whole point. Pass only artifacts: brief.md, claims/*.json, priors-ledger.json.",
+    "REGIME DISCIPLINE: the Dependency Matrix determines collection regime. Breadth if all sub-questions are independent. Depth-serial if any sub-question depends on another. Never declare both. Never declare breadth when dependencies exist.",
+    "V2 DURABILITY: use output.notesMarkdown and explicit context variables as durable state. Artifact files (brief.md, etc.) are human-facing outputs only -- not required workflow memory. Notes and context survive a chat rewind; files may not.",
+    "SUBAGENT SYNTHESIS: treat collection subagent output as evidence, not conclusions. The main agent owns synthesis, Priors Ledger mutation, brief authoring, and final validation. Never adopt a subagent's framing verbatim without review.",
+    "DEFAULT BEHAVIOR: self-execute with tools. Only ask the user for things you cannot determine yourself.",
+    "OWNERSHIP: the main agent owns the research question, the Priors Ledger, the synthesis, the brief, and the final assessment. Subagents provide isolated evidence perspectives only."
+  ],
+  "steps": [
+    {
+      "id": "step-0-initialize",
+      "title": "Step 0: Initialize Session",
+      "prompt": "Initialize the research session.\n\nCreate the artifacts directory at `./research/<session-id>/` where `<session-id>` is a short stable identifier (e.g., slug of the research question or a timestamp).\n\nCheck for an existing `research-log.md` in that directory. If one exists, this is a resumed session -- note it and continue from where it left off.\n\nIf this is a fresh session, write the following header to `research-log.md`:\n```\n# Research Session Log\nStarted: <ISO timestamp>\nQuestion: (to be filled in step 1)\nMode: (to be filled in step 1)\n```\n\nRecord the artifacts directory path in notes for reference in later steps.",
+      "requireConfirmation": false,
+      "notesOptional": false
+    },
+    {
+      "id": "step-1-intake",
+      "title": "Step 1: Intake",
+      "promptBlocks": {
+        "goal": "Collect structured intake using the seven-field Heilmeier-derived intake form. Seed the Priors Ledger with the user's stated beliefs and your own relevant priors.",
+        "constraints": [
+          "Collect all seven fields. Do not skip or combine fields.",
+          "Field 2 (Mode) determines downstream routing -- if 'decision', decision deadline and owner are required.",
+          "Field 3 (What you already believe) is the seed for the Priors Ledger -- every claim stated here becomes a prior:unverified entry.",
+          "Field 7 (Run mode) sets the word budget, subagent cap, and iteration cap for the entire session.",
+          "Write intake.json and priors-ledger.json before advancing.",
+          "All Priors Ledger entries start tagged prior:unverified -- none are promoted to evidence without session verification."
+        ],
+        "procedure": [
+          "Ask the user for the seven intake fields in order:",
+          "1. **Question** (one sentence): What specific question are you trying to answer?",
+          "2. **Mode**: Is this a 'decision' (you need to choose between options) or 'understanding' (you want to know more about a topic)? If decision: what is the decision deadline and who is the decision owner?",
+          "3. **What you already believe**: State your current beliefs, hypotheses, or assumptions about the answer. These seed the Priors Ledger and will be explicitly tested.",
+          "4. **What 'good enough' looks like**: What outcome would let you stop researching and act? This is the stopping criterion.",
+          "5. **Out-of-scope**: What should NOT be covered in this research? Be explicit.",
+          "6. **Source preferences/exclusions** (optional): Any source types to prioritize or exclude?",
+          "7. **Run mode**: 'quick' (~20 min, 800-word brief, 1 re-collection iteration cap) or 'deep' (~2 hr, 2500-word brief, 2 re-collection iteration caps)?",
+          "After collecting all fields:",
+          "- Write `./research/<session-id>/intake.json` with all seven fields frozen",
+          "- Write `./research/<session-id>/priors-ledger.json` with one entry per claim from field 3, plus any relevant priors you hold from training, each tagged 'prior:unverified'",
+          "- Append '## Step 1 complete' to research-log.md"
+        ],
+        "verify": [
+          "All seven fields are collected and non-empty (field 6 may be 'none').",
+          "intake.json is written and frozen.",
+          "priors-ledger.json has at least one entry if field 3 was non-empty.",
+          "Every priors-ledger.json entry is tagged prior:unverified."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "step-2-plan",
+      "title": "Step 2: Plan, Source Map, and Decomposition",
+      "promptBlocks": {
+        "goal": "Produce three artifacts in order: Source Map, Dependency Matrix, and Plan. Present them for human approval before research begins.",
+        "constraints": [
+          "Produce the three artifacts in declared order: Source Map first, then Dependency Matrix, then Plan.",
+          "Source Map: max 8 source types. Each entry needs a one-line rationale specific to THIS question.",
+          "Dependency Matrix: 3-8 sub-questions. Every dependency must be explicitly declared (or declared empty if none). Never declare breadth when dependencies exist.",
+          "Regime declaration is final after this step. The plan must match the declared regime.",
+          "Do not start collection until the human approves or edits these artifacts."
+        ],
+        "procedure": [
+          "**1. Source Map** (`./research/<session-id>/source-map.md`):",
+          "Enumerate the source types most relevant to THIS specific question. Max 8 entries. For each entry: source type name + one-line rationale for why it is relevant to this question. Do not use a generic list -- derive it from the actual question.",
+          "**2. Dependency Matrix** (`./research/<session-id>/dependency-matrix.json`):",
+          "Split the research question into 3-8 sub-questions that together answer it. For each sub-question, list which OTHER sub-questions it depends on (empty list if none). Then declare regime:",
+          "- If ALL dependency lists are empty -> regime: 'breadth' (parallel fan-out possible)",
+          "- If ANY dependency list is non-empty -> regime: 'depth-serial' (topological order required)",
+          "If depth-serial: produce topological ordering of sub-questions.",
+          "**3. Plan** (`./research/<session-id>/plan.md`):",
+          "For each sub-question: planned investigation task, source priorities from the Source Map, and stop conditions (what evidence would be sufficient).",
+          "**Human gate**: present Plan + Source Map + Dependency Matrix for approval. User edits are written back to the artifact files. Edits to the Dependency Matrix may flip the regime -- update the context variable if so."
+        ],
+        "verify": [
+          "source-map.md, dependency-matrix.json, and plan.md are all written.",
+          "regime is explicitly set to 'breadth' or 'depth-serial'.",
+          "subquestionCount matches the number of sub-questions in dependency-matrix.json.",
+          "If depth-serial, topological ordering is present in dependency-matrix.json."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "collection-loop",
+      "type": "loop",
+      "title": "Collection and Gap Analysis Loop",
+      "loop": {
+        "type": "while",
+        "conditionSource": {
+          "kind": "artifact_contract",
+          "contractRef": "wr.contracts.loop_control"
+        },
+        "maxIterations": 2
+      },
+      "body": [
+        {
+          "id": "step-3-collection",
+          "title": "Step 3: Evidence Collection",
+          "prompt": "Collect evidence for the research question using the plan and source map from Step 2.\n\nThe collection regime is determined by the Dependency Matrix from Step 2. Check the `regime` context variable.\n\n**BREADTH REGIME (parallel fan-out):**\nSpawn N WorkRail Executor subagents where N = subquestionCount (from context), capped at maxParallelism (from context: 5 for quick, 10 for deep).\n\nEach subagent receives:\n- Its assigned sub-question (non-overlapping)\n- The Source Map\n- The relevant slice of the Priors Ledger (entries tagged with this sub-question's topic)\n- The plan for its sub-question\n- NO access to other subagents' claim files or chain-of-thought\n\nEach subagent writes `./research/<session-id>/claims/pass-<NN>-sub-<X>.json` with a claims list.\n\nEach claim in the file must have:\n- `text`: the claim being made\n- `source_url`: URL of the source\n- `source_type`: type from the Source Map\n- `confidence`: 'verified' | 'single-source' | 'inferred'\n- `answers_subquestion`: which sub-question this addresses\n- `contradicts_prior` (optional): ID of Priors Ledger entry this contradicts\n\nSubagent stop rule: minimum 3 source fetches; stop when 2 consecutive fetches yield no new claims (Francis criterion) OR token budget hit (quick: 8k, deep: 25k tokens).\n\n**DEPTH-SERIAL REGIME (single agent, topological order):**\nWalk the topological ordering from dependency-matrix.json. For each sub-question in order:\n- Fetch sources per the plan\n- Write `./research/<session-id>/claims/pass-<NN>-step-<N>.json` with claims in the same schema\n- You may revise earlier claims in the same pass if new evidence contradicts them\n\nDepth-serial stop rule: Francis criterion applied to the whole pass + token budget (quick: 30k, deep: 120k tokens).\n\n**After collection (both regimes):**\nMerge all `claims/pass-<NN>-*.json` files.\n\nDeduplication rules:\n- Deduplicate by source URL + claim hash\n- Any claim asserted by 2+ independent sources -> promote confidence to 'verified'\n- Any claim with contradicts_prior set -> tag that Priors Ledger entry as 'falsified-pending-review'\n\nUpdate context variables:\n- collectionPassCount: increment by 1\n- verifiedClaimCount: count of claims with confidence='verified'\n- falsifiedPriorCount: count of Priors Ledger entries tagged 'falsified-pending-review'\n\nAppend `## Step 3 complete (pass <N>)` to research-log.md.",
+          "requireConfirmation": false,
+          "promptFragments": [
+            {
+              "id": "breadth-mode-cap",
+              "when": {
+                "var": "regime",
+                "equals": "breadth"
+              },
+              "text": "BREADTH MODE: You are running in parallel fan-out. maxParallelism is set in context -- do not exceed it. Each subagent works in isolation with no access to other subagents' results."
+            },
+            {
+              "id": "depth-serial-mode",
+              "when": {
+                "var": "regime",
+                "equals": "depth_serial"
+              },
+              "text": "DEPTH-SERIAL MODE: You are the single collection agent walking the topological order. Complete each sub-question before moving to the next. You may revise earlier claims if later evidence contradicts them -- note the revision."
+            }
+          ]
+        },
+        {
+          "id": "step-4-gap-analysis",
+          "title": "Step 4: Gap Analysis and Iteration Decision",
+          "prompt": "Read the merged claim ledger from Step 3. Write `./research/<session-id>/gap-analysis.md` with three sections:\n\n**Section 1: Sub-questions fully answered**\nList sub-questions where 2+ verified claims exist that directly address the sub-question.\n\n**Section 2: Sub-questions partially answered**\nList sub-questions with only single-source claims or inferred claims. Note the gap.\n\n**Section 3: Sub-questions unanswered or single-source only**\nList sub-questions with no claims or only single-source/inferred claims insufficient to answer them.\n\nThen answer the gating question:\n**Is any unanswered or partially-answered sub-question on the critical path to the final deliverable?**\n\nCritical path = any sub-question whose answer materially affects the BLUF, the top-ranked finding, or the recommendation.\n\nIf YES:\n- Name the specific critical-gap sub-question\n- Propose a focused follow-up sub-question for the next collection pass\n- Set hasCriticalGap = true and record criticalGapDescription\n\nIf NO:\n- Declare research collection complete\n- Set hasCriticalGap = false\n\nThen decide the loop control signal:\n- If hasCriticalGap = true AND collectionPassCount < maxPassCount (quick: 1, deep: 2): emit loop control CONTINUE\n- Otherwise: emit loop control STOP\n\nAppend `## Step 4 complete (pass <N>)` to research-log.md.",
+          "requireConfirmation": false,
+          "outputContract": {
+            "contractRef": "wr.contracts.loop_control"
+          },
+          "promptFragments": [
+            {
+              "id": "quick-mode-cap",
+              "when": {
+                "var": "researchMode",
+                "equals": "quick"
+              },
+              "text": "QUICK MODE: maxPassCount = 1. If collectionPassCount >= 1, emit STOP regardless of gaps. Note any remaining gaps in the gap-analysis.md -- they will be disclosed in the brief's 'what we don't know' section."
+            },
+            {
+              "id": "deep-mode-cap",
+              "when": {
+                "var": "researchMode",
+                "equals": "deep"
+              },
+              "text": "DEEP MODE: maxPassCount = 2. If collectionPassCount >= 2, emit STOP regardless of gaps. Note any remaining gaps in the gap-analysis.md -- they will be disclosed in the brief's 'what we don't know' section."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "step-5a-synthesis",
+      "title": "Step 5a: Synthesis",
+      "promptBlocks": {
+        "goal": "Synthesize all collected evidence into a structured findings summary and draft the Research Brief.",
+        "constraints": [
+          "Produce the structured sections IN ORDER before any narrative prose. Do not reverse or merge the sections.",
+          "prior:unverified claims from the Priors Ledger are inadmissible in the BLUF and ranked findings. Evidence must come from session-collected claims.",
+          "Word budget: 800 words (Quick) / 2500 words (Deep) for the narrative BLUF brief EXCLUDING appendices and structured sections.",
+          "Ranked findings: at most 5 entries.",
+          "Recommended next steps: at most 3 entries.",
+          "Every Priors Ledger entry tagged 'falsified-pending-review' must appear in the Falsified Priors section with the overturning claim and its citation.",
+          "What we still don't know: must be non-empty. If you believe everything is answered, name the question that would require more work to answer with higher confidence."
+        ],
+        "procedure": [
+          "Read all evidence from `./research/<session-id>/claims/`, the Priors Ledger (`priors-ledger.json`), and the gap analysis (`gap-analysis.md`).",
+          "Produce these sections IN STRICT ORDER before narrative prose:",
+          "1. **Ranked findings** (at most 5): each with confidence band [H|M|L|U], strongest evidence for (claim + cite), strongest evidence against (counter-claim + cite or 'none found')",
+          "2. **Contradictions found between sources**: list any two sources that assert contradictory claims, with both URLs, and your resolution or 'unresolved'",
+          "3. **Falsified priors**: every Priors Ledger entry tagged 'falsified-pending-review' with the overturning claim and citation",
+          "4. **What we now know / What we still don't know**: draw from the gap analysis",
+          "5. **Implications for the decision/goal**: reference field 4 from intake (what 'good enough' looks like) and field 2 (decision vs. understanding mode)",
+          "6. **Recommended next steps** (at most 3): each tied to a remaining unknown with estimated investigation cost",
+          "THEN write the BLUF-headed narrative Research Brief:",
+          "- Lead with BLUF: 3-5 sentences that directly answer the question, state confidence, and give the recommended action (if decision mode)",
+          "- Followed by the structured sections above",
+          "- Word budget: 800 (Quick) / 2500 (Deep) for the narrative EXCLUDING structured sections and appendices",
+          "Write the draft to `./research/<session-id>/brief.md` (preliminary, will be finalized in Step 6).",
+          "Append '## Step 5a complete' to research-log.md."
+        ],
+        "verify": [
+          "Ranked findings section exists with at least 1 entry.",
+          "Falsified priors section covers all 'falsified-pending-review' Priors Ledger entries.",
+          "What we still don't know is non-empty.",
+          "BLUF is 3-5 sentences and leads the brief.",
+          "Word budget is within bounds (count the narrative section, not appendices).",
+          "No finding in the ranked list is supported only by prior:unverified claims."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-5b-adversarial",
+      "title": "Step 5b: Adversarial Review",
+      "promptBlocks": {
+        "goal": "Spawn a structurally isolated adversarial reviewer that challenges the BLUF and top-ranked finding using only the artifacts -- no access to synthesis chain-of-thought, no web tools.",
+        "constraints": [
+          "The adversarial reviewer MUST NOT have access to your chain-of-thought from Step 5a.",
+          "The adversarial reviewer MUST NOT use web tools. Evidence must come only from the artifact files provided.",
+          "The adversarial reviewer is a WorkRail Executor subagent -- it does NOT have decision authority. Its output is evidence, not a verdict.",
+          "After the dissent returns, you (main agent) decide: revise the brief if a load-bearing error is found, OR append the dissent verbatim if no load-bearing error.",
+          "Never suppress or soften the dissent in the brief -- append it verbatim."
+        ],
+        "procedure": [
+          "Spawn ONE WorkRail Executor subagent with the following artifacts and prompt:",
+          "**Artifacts to provide**: `./research/<session-id>/brief.md`, `./research/<session-id>/claims/` (all files), `./research/<session-id>/priors-ledger.json`",
+          "**Subagent prompt**: 'Read the Research Brief and the supporting evidence artifacts. Produce the strongest written argument that the BLUF and top-ranked finding are wrong. Use only the evidence in the artifacts provided -- do not use external knowledge or web tools. If you cannot mount such an argument, identify the single weakest claim in the brief and state: (1) which claim it is, (2) why it is the weakest, and (3) what additional evidence would be needed to strengthen or overturn it.'",
+          "**Output**: write the dissent to `./research/<session-id>/dissent.md`",
+          "After receiving the dissent:",
+          "- If the dissent finds a load-bearing error in the BLUF or top-ranked finding: revise `brief.md` to correct it, note the revision",
+          "- If the dissent names only the weakest claim or cannot mount an argument: append the dissent verbatim to `brief.md` as a 'Dissent' section",
+          "Write the Premortem to brief.md: 'If this brief turns out to be wrong six months from now, the most likely reason is...' (2-4 sentences).",
+          "Append '## Step 5b complete' to research-log.md."
+        ],
+        "verify": [
+          "Adversarial subagent was spawned with brief.md + claims + priors-ledger.json and nothing else.",
+          "dissent.md exists.",
+          "brief.md contains either the revised finding (if load-bearing error found) or the verbatim dissent appendix.",
+          "Premortem is present in brief.md."
+        ]
+      },
+      "requireConfirmation": false,
+      "assessmentRefs": ["dissent-quality-gate"],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "low"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "The adversarial review was too generic. Ask the subagent to re-examine the brief and produce a more specific critique: name the specific claim being contested, cite the evidence used to challenge it, and explain why that claim is the weakest link in the argument."
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-6-finalize",
+      "title": "Step 6: Finalize and Emit",
+      "promptBlocks": {
+        "goal": "Assemble the final Research Brief in canonical structure with inline citations and appendices. Validate it against hard checks. Emit to brief.md.",
+        "constraints": [
+          "Maximum 2 revision attempts if validation fails -- do not loop indefinitely.",
+          "Word budget check: count the narrative section (BLUF through Recommended next steps) EXCLUDING structured sections and appendices.",
+          "BLUF check: 3-5 sentences. Not 2, not 6.",
+          "Ranked hypotheses: present and has at least 1 entry.",
+          "What we still don't know: non-empty. A placeholder or 'none' fails this check.",
+          "Dissent: present or 'no dissent reached threshold' explicitly disclosed.",
+          "Citations must be inline-numeric [1], [2], etc. matching the Evidence Base appendix."
+        ],
+        "procedure": [
+          "Assemble the final `./research/<session-id>/brief.md` in this canonical structure:",
+          "```",
+          "# <Question> -- Research Brief",
+          "Mode: decision|understanding  Run: quick|deep  Date: ISO",
+          "",
+          "## BLUF",
+          "3-5 sentences: answer, confidence, recommended action.",
+          "",
+          "## Ranked findings",
+          "1. <Finding>  [H|M|L|U]",
+          "   For: <evidence + cite>",
+          "   Against: <counter-evidence + cite>",
+          "",
+          "## Contradictions found in sources",
+          "## Falsified priors",
+          "## What we now know / What we still don't know",
+          "## Implications for <decision/goal>",
+          "## Recommended next steps (at most 3)",
+          "## Dissent",
+          "## Premortem",
+          "## Evidence base",
+          "[1] URL -- description -- date",
+          "",
+          "## Appendix A -- Priors Ledger",
+          "## Appendix B -- Source Map",
+          "## Appendix C -- Dependency Matrix",
+          "## Appendix D -- Gap Analysis",
+          "```",
+          "Insert inline-numeric citations throughout the narrative.",
+          "**Run validation checks:**",
+          "- BLUF present and 3-5 sentences (count them)",
+          "- Ranked findings present and at least 1 entry",
+          "- 'What we still don't know' is non-empty and not a placeholder",
+          "- Dissent section present OR 'no dissent reached threshold' disclosed",
+          "- Word budget respected (count the narrative, not appendices)",
+          "**If any check fails**: revise and re-run. Maximum 2 revision attempts.",
+          "Append '## Step 6 complete -- RESEARCH COMPLETE' to research-log.md."
+        ],
+        "verify": [
+          "All five hard validation checks pass.",
+          "brief.md is complete and uses canonical structure.",
+          "research-log.md ends with 'RESEARCH COMPLETE' entry.",
+          "Word budget is respected."
+        ]
+      },
+      "requireConfirmation": false,
+      "assessmentRefs": ["brief-integrity-gate"],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "low"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "The brief failed the integrity check. If evidence_grounding is low: identify which ranked findings lack source citations and add them, or remove findings that cannot be grounded. If gap_disclosure is low: the 'What we still don't know' section is empty or a placeholder -- replace it with at least one concrete remaining gap."
+          }
+        }
+      ]
+    }
+  ]
+}
