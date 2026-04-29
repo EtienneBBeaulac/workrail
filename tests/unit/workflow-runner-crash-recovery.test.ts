@@ -672,9 +672,17 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
 
     const runWorkflowTriggers: import('../../src/daemon/workflow-runner.js').WorkflowTrigger[] = [];
     const capturedApiKeys: string[] = [];
-    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger, _ctx: unknown, key: string) => {
+    const capturedSources: import('../../src/daemon/workflow-runner.js').SessionSource[] = [];
+    const fakeRunWorkflow = async (
+      trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger,
+      _ctx: unknown,
+      key: string,
+      _d?: unknown, _e?: unknown, _f?: unknown, _g?: unknown, _h?: unknown,
+      source?: import('../../src/daemon/workflow-runner.js').SessionSource,
+    ) => {
       runWorkflowTriggers.push(trigger);
       capturedApiKeys.push(key);
+      if (source !== undefined) capturedSources.push(source);
       return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
     };
 
@@ -690,9 +698,16 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
 
     // Worktree exists -> _runWorkflowFn IS called
     expect(runWorkflowTriggers).toHaveLength(1);
-    // effectiveWorkspacePath should be the worktree path, not the original workspacePath
-    expect(runWorkflowTriggers[0]!.workspacePath).toBe(fakeWorktreePath);
+    // trigger.workspacePath is the original main checkout (not the worktree).
+    // The worktree path flows through AllocatedSession.sessionWorkspacePath so
+    // buildSystemPrompt() can correctly identify this as a worktree session.
+    expect(runWorkflowTriggers[0]!.workspacePath).toBe('/some/workspace');
     expect(runWorkflowTriggers[0]!.branchStrategy).toBe('none');
+    // AllocatedSession.sessionWorkspacePath carries the worktree path so the
+    // agent is scoped to the worktree and gets the scope boundary paragraph.
+    expect(capturedSources).toHaveLength(1);
+    const allocatedSession = capturedSources[0]!.kind === 'pre_allocated' ? capturedSources[0]!.session : null;
+    expect(allocatedSession?.sessionWorkspacePath).toBe(fakeWorktreePath);
     expect(capturedApiKeys[0]).toBe('test-api-key');
 
     // Sidecar is NOT deleted (runWorkflow manages its own lifecycle)
