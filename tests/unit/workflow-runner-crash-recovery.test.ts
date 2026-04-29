@@ -542,8 +542,10 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     await writeSession(tmpDir, sessionId, sessionDataWithContext('ct_resume_me'));
 
     const runWorkflowTriggers: import('../../src/daemon/workflow-runner.js').WorkflowTrigger[] = [];
-    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger) => {
+    const capturedApiKeys: string[] = [];
+    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger, _ctx: unknown, key: string) => {
       runWorkflowTriggers.push(trigger);
+      capturedApiKeys.push(key);
       return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
     };
 
@@ -554,6 +556,7 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
       async () => 1, // stepAdvances = 1 -> resume
       async () => fakeRehydrateOk(),
       fakeRunWorkflow as Parameters<typeof runStartupRecovery>[5],
+      'test-api-key',
     );
 
     // runWorkflow IS called with the reconstructed trigger
@@ -564,6 +567,8 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     expect(runWorkflowTriggers[0]!.branchStrategy).toBe('none');
     expect(runWorkflowTriggers[0]!._preAllocatedStartResponse).toBeDefined();
     expect(runWorkflowTriggers[0]!._preAllocatedStartResponse?.continueToken).toBe('ct_fake_rehydrated');
+    // apiKey is forwarded to runWorkflow -- a regression here would pass all other assertions silently
+    expect(capturedApiKeys[0]).toBe('test-api-key');
 
     // Sidecar is NOT deleted by runStartupRecovery (runWorkflow manages its own lifecycle)
     await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
@@ -650,8 +655,10 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     });
 
     const runWorkflowTriggers: import('../../src/daemon/workflow-runner.js').WorkflowTrigger[] = [];
-    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger) => {
+    const capturedApiKeys: string[] = [];
+    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger, _ctx: unknown, key: string) => {
       runWorkflowTriggers.push(trigger);
+      capturedApiKeys.push(key);
       return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
     };
 
@@ -662,6 +669,7 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
       async () => 1, // stepAdvances = 1 -> resume attempted
       async () => fakeRehydrateOk(),
       fakeRunWorkflow as Parameters<typeof runStartupRecovery>[5],
+      'test-api-key',
     );
 
     // Worktree exists -> _runWorkflowFn IS called
@@ -669,6 +677,7 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     // effectiveWorkspacePath should be the worktree path, not the original workspacePath
     expect(runWorkflowTriggers[0]!.workspacePath).toBe(fakeWorktreePath);
     expect(runWorkflowTriggers[0]!.branchStrategy).toBe('none');
+    expect(capturedApiKeys[0]).toBe('test-api-key');
 
     // Sidecar is NOT deleted (runWorkflow manages its own lifecycle)
     await expect(fs.access(path.join(tmpDir, `${sessionId}.json`))).resolves.toBeUndefined();
@@ -711,8 +720,10 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     await writeSession(tmpDir, id2, { ...sessionDataWithContext('ct_token2'), workflowId: 'wr.wf2' });
 
     const runWorkflowIds: string[] = [];
-    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger) => {
+    const capturedApiKeys: string[] = [];
+    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger, _ctx: unknown, key: string) => {
       runWorkflowIds.push(trigger.workflowId);
+      capturedApiKeys.push(key);
       return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
     };
 
@@ -723,10 +734,14 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
       async () => 2, // both have advances
       async () => fakeRehydrateOk(),
       fakeRunWorkflow as Parameters<typeof runStartupRecovery>[5],
+      'test-api-key',
     );
 
     // Both sessions get runWorkflow called
     expect(runWorkflowIds.sort()).toEqual(['wr.wf1', 'wr.wf2'].sort());
+    // apiKey forwarded to both sessions
+    expect(capturedApiKeys).toHaveLength(2);
+    expect(capturedApiKeys.every(k => k === 'test-api-key')).toBe(true);
 
     // Sidecars are NOT deleted by runStartupRecovery (runWorkflow manages its own lifecycle)
     await expect(fs.access(path.join(tmpDir, `${id1}.json`))).resolves.toBeUndefined();

@@ -989,6 +989,10 @@ export async function readAllDaemonSessions(
  * @param _runWorkflowFn - Injectable runWorkflow implementation for testing.
  *   Used in the resume path to start a new agent loop from the current step.
  *   Defaults to the real runWorkflow(). Passed as fire-and-forget in production.
+ * @param apiKey - Anthropic API key forwarded to runWorkflow() on the resume path.
+ *   Injected by the caller (startTriggerListener) rather than read from process.env
+ *   so this function stays boundary-clean. Defaults to '' for tests that do not
+ *   exercise the resume path.
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
@@ -997,6 +1001,10 @@ export async function runStartupRecovery(
   _countStepAdvancesFn: typeof countOrphanStepAdvances = countOrphanStepAdvances,
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
   _runWorkflowFn: typeof runWorkflow = runWorkflow,
+  // WHY last / default '': adding after all injectable params keeps every existing call
+  // site valid without positional changes. Production passes the key from startTriggerListener;
+  // tests that don't exercise the resume path can omit it.
+  apiKey: string = '',
 ): Promise<void> {
   // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
   // WHY first: queue-issue cleanup is independent of session state and must
@@ -1210,7 +1218,7 @@ export async function runStartupRecovery(
           void _runWorkflowFn(
             recoveredTrigger,
             ctx!,
-            process.env['ANTHROPIC_API_KEY'] ?? '',
+            apiKey,
           ).then((result) => {
             console.log(
               `[WorkflowRunner] Startup recovery: resumed session ${session.sessionId} completed: ${result._tag}`,
