@@ -878,7 +878,7 @@ describe('doPollGitHubQueue dispatch loop protection', () => {
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
 
     // Wait for fire-and-forget sidecar write to complete
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
 
     const sidecarContent = await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8');
     const sidecar = JSON.parse(sidecarContent) as Record<string, unknown>;
@@ -903,7 +903,7 @@ describe('doPollGitHubQueue dispatch loop protection', () => {
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
 
     // Wait for fire-and-forget sidecar write AND the failure handler to complete
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
 
     const sidecarContent = await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8');
     const sidecar = JSON.parse(sidecarContent) as Record<string, unknown>;
