@@ -94,11 +94,21 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
-      - name: Install dependencies (no lifecycle scripts)
-        run: npm ci --ignore-scripts
+      - name: Upgrade npm (fix lockfile cpu-filter bug present in npm <11.3.0)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
+
+      - name: Regenerate lockfile (no lifecycle scripts)
+        run: npm install --ignore-scripts
 
       - name: Verify lockfile unchanged
         run: git diff --exit-code package-lock.json
+
+      - name: Upload regenerated lockfile (download and commit if this job failed)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-lock-regenerated
+          path: package-lock.json
 
   # ============================================================================
   # REQUIRED (PR only): semantic-release dry-run (config + version validation)
