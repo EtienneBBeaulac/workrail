@@ -472,6 +472,73 @@ export interface WorkflowTrigger {
   readonly branchPrefix?: string;
 }
 
+// ---------------------------------------------------------------------------
+// SessionSource discriminated union (A8)
+// ---------------------------------------------------------------------------
+
+/**
+ * A session that was fully allocated by the caller before the agent loop.
+ * Used when the caller needs the session ID synchronously (console dispatch,
+ * spawnSession, crash recovery).
+ *
+ * WHY this type: replaces the implicit contract encoded in
+ * WorkflowTrigger._preAllocatedStartResponse with an explicit, named type.
+ * Callers that pre-allocate a session now hold an AllocatedSession value
+ * rather than an ad-hoc optional field on WorkflowTrigger.
+ */
+export interface AllocatedSession {
+  /** Continue token from executeStartWorkflow response. */
+  readonly continueToken: string;
+  readonly checkpointToken?: string | null;
+  /** First step prompt from the session. May be empty if isComplete. */
+  readonly firstStepPrompt: string;
+  readonly isComplete: boolean;
+  /** Source of this session (daemon trigger or MCP client). */
+  readonly triggerSource: 'daemon' | 'mcp';
+}
+
+/**
+ * Explicit discriminated union for session creation source.
+ *
+ * WHY: replaces the _preAllocatedStartResponse optional escape-hatch on
+ * WorkflowTrigger with a typed discriminant that makes the two paths explicit.
+ * 'allocate' -> buildPreAgentSession calls executeStartWorkflow internally.
+ * 'pre_allocated' -> executeStartWorkflow was already called by the caller.
+ *
+ * MIGRATION: existing code still uses WorkflowTrigger._preAllocatedStartResponse
+ * directly. New callers should construct SessionSource directly. Existing callers
+ * can use sessionSourceFromTrigger() to adapt a legacy WorkflowTrigger.
+ */
+export type SessionSource =
+  | { readonly kind: 'allocate'; readonly trigger: WorkflowTrigger }
+  | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession };
+
+/**
+ * Convert a legacy WorkflowTrigger to a SessionSource.
+ *
+ * WHY: allows gradual migration -- callers that still use WorkflowTrigger
+ * can wrap with this helper; new callers construct SessionSource directly.
+ * When _preAllocatedStartResponse is set, maps the full schema response to
+ * the narrower AllocatedSession shape (only the fields runWorkflow actually uses).
+ */
+export function sessionSourceFromTrigger(trigger: WorkflowTrigger): SessionSource {
+  if (trigger._preAllocatedStartResponse !== undefined) {
+    const r = trigger._preAllocatedStartResponse;
+    return {
+      kind: 'pre_allocated',
+      trigger,
+      session: {
+        continueToken: r.continueToken ?? '',
+        checkpointToken: r.checkpointToken,
+        firstStepPrompt: r.pending?.prompt ?? '',
+        isComplete: r.isComplete,
+        triggerSource: 'daemon',
+      },
+    };
+  }
+  return { kind: 'allocate', trigger };
+}
+
 /** Successful completion of a workflow run. */
 export interface WorkflowRunSuccess {
   readonly _tag: 'success';
