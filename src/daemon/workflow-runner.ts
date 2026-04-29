@@ -3464,6 +3464,57 @@ export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | '
 }
 
 /**
+ * Sidecar lifecycle decision for a completed runWorkflow() session.
+ *
+ * WHY a discriminated union: the two outcomes have categorically different
+ * cleanup owners. 'delete_now' means runWorkflow() (via finalizeSession) deletes
+ * the sidecar before returning. 'retain_for_delivery' means TriggerRouter.maybeRunDelivery()
+ * deletes it after git delivery completes -- runWorkflow() must NOT delete it.
+ */
+export type SidecarLifecycle =
+  | { readonly kind: 'delete_now' }
+  | { readonly kind: 'retain_for_delivery' };
+
+/**
+ * Determine the correct sidecar lifecycle action for a completed session.
+ *
+ * Pure: no I/O, no side effects, deterministic.
+ *
+ * Rules (from worktrain-daemon-invariants.md section 2.2):
+ * - success + worktree: retain -- delivery (git push, gh pr create) runs in the
+ *   worktree after runWorkflow() returns; sidecar must outlive this function.
+ * - all other outcomes and branch strategies: delete immediately.
+ *
+ * WHY delivery_failed hits assertNever: runWorkflow() never produces delivery_failed
+ * (invariant 1.2). If it ever does, a compile error here forces the caller to handle it.
+ */
+export function sidecardLifecycleFor(
+  tag: WorkflowRunResult['_tag'],
+  branchStrategy: WorkflowTrigger['branchStrategy'],
+): SidecarLifecycle {
+  switch (tag) {
+    case 'success':
+      return branchStrategy === 'worktree'
+        ? { kind: 'retain_for_delivery' }
+        : { kind: 'delete_now' };
+    case 'error':
+    case 'timeout':
+    case 'stuck':
+      return { kind: 'delete_now' };
+    case 'delivery_failed':
+      // WHY throw: delivery_failed is in WorkflowRunResult but is never produced by
+      // runWorkflow() directly (invariant 1.2). This case is unreachable in production.
+      // Explicit handling (not assertNever) so the default: branch remains typed as never,
+      // making the assertNever guard work for future WorkflowRunResult variants.
+      throw new Error(`sidecardLifecycleFor: delivery_failed is not a valid input (invariant 1.2)`);
+    default:
+      // WHY assertNever: if a new WorkflowRunResult._tag variant is added without updating
+      // this function, the compiler breaks here and forces handling.
+      return assertNever(tag);
+  }
+}
+
+/**
  * Build the Anthropic (or AnthropicBedrock) client and resolve the model ID.
  *
  * Pure: no I/O. Reads only the trigger config and process.env.
@@ -3830,16 +3881,20 @@ export async function finalizeSession(
   writeExecutionStats(ctx.statsDir, ctx.sessionId, ctx.workflowId, ctx.startMs, outcome, ctx.stepAdvanceCount);
 
   // ---- 4. Sidecar deletion ----
-  // Rules (invariants doc section 2.2):
-  // - success + worktree: do NOT delete (TriggerRouter.maybeRunDelivery handles it after delivery)
-  // - success + non-worktree: delete
-  // - error: delete
-  // - timeout: delete
-  // - stuck: delete (FIX: pre-existing bug -- stuck path previously did not delete the sidecar)
-  // - delivery_failed: runWorkflow() never produces this, but handled for exhaustiveness
-  const isWorktreeSuccess = result._tag === 'success' && ctx.branchStrategy === 'worktree';
-  if (!isWorktreeSuccess) {
-    await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+  // Decision is delegated to sidecardLifecycleFor() -- see that function and
+  // worktrain-daemon-invariants.md section 2.2 for the full rules.
+  // WHY assertNever is in sidecardLifecycleFor: if WorkflowRunResult gains a new
+  // variant, the compiler breaks there and forces the caller to handle it here.
+  const lifecycle = sidecardLifecycleFor(result._tag, ctx.branchStrategy);
+  switch (lifecycle.kind) {
+    case 'delete_now':
+      await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+      break;
+    case 'retain_for_delivery':
+      // TriggerRouter.maybeRunDelivery() deletes the sidecar after delivery completes.
+      break;
+    default:
+      assertNever(lifecycle);
   }
 
   // ---- 5. Conversation file deletion ----
@@ -4173,35 +4228,6 @@ export async function runWorkflow(
     steerRegistry?.set(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
   }
 
-  // ---- AbortRegistry: register abort callback for graceful shutdown ----
-  // The abort callback calls agent.abort(), which cancels any in-flight LLM API call
-  // and signals the agent loop to exit. Called by the daemon shutdown handler on
-  // SIGTERM/SIGINT to abort all in-flight sessions simultaneously.
-  //
-  // WHY registered here (not at top of function): same as SteerRegistry -- state.workrailSessionId
-  // is the registry key and is only available after parseContinueTokenOrFail() succeeds.
-  //
-  // WHY registered BEFORE AgentLoop construction: ensures the registry entry exists if SIGTERM
-  // fires during the context-loading phase (soul + workspace + session notes) between this point
-  // and the `const agent = new AgentLoop(...)` call below. The shutdown handler can safely call
-  // the callback at any point after registration.
-  //
-  // IMPORTANT: Any early-return path between this registration and `const agent = new AgentLoop`
-  // below MUST explicitly delete both steerRegistry and abortRegistry entries. Failing to do so
-  // leaves stale callbacks that will throw a TDZ ReferenceError when the shutdown handler fires
-  // (because `agent` is declared with `const` later in this scope and is never initialized on
-  // those paths).
-  //
-  // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
-  // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
-  // agent directly.
-  //
-  // Registration gap: same ~50ms window as SteerRegistry. A session started in this window
-  // will not receive abort() from the shutdown handler. Acceptable -- same accepted tradeoff.
-  if (state.workrailSessionId !== null) {
-    abortRegistry?.set(state.workrailSessionId, () => { agent.abort(); });
-  }
-
   // Crash safety: persist tokens before starting the agent loop. A crash between
   // this point and the first continue_workflow call leaves a recoverable state file.
   // WHY recoveryContext here: this is the first persistTokens() call -- it establishes
@@ -4287,12 +4313,11 @@ export async function runWorkflow(
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
       emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(state.workrailSessionId) });
       if (state.workrailSessionId !== null) daemonRegistry?.unregister(state.workrailSessionId, 'failed');
-      // Clean up registry entries: agent was never constructed, so these callbacks are stale.
-      // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
-      // ReferenceError because `agent` is declared later in this function scope.
+      // WHY steerRegistry.delete (but NOT abortRegistry.delete): steerRegistry was registered
+      // above (before this early-exit path). abortRegistry is registered AFTER agent construction,
+      // which never happens on this path -- no abortRegistry entry exists to delete.
       if (state.workrailSessionId !== null) {
         steerRegistry?.delete(state.workrailSessionId);
-        abortRegistry?.delete(state.workrailSessionId);
       }
       writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
@@ -4336,12 +4361,11 @@ export async function runWorkflow(
     }
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(state.workrailSessionId) });
     if (state.workrailSessionId !== null) daemonRegistry?.unregister(state.workrailSessionId, 'completed');
-    // Clean up registry entries: agent was never constructed, so these callbacks are stale.
-    // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
-    // ReferenceError because `agent` is declared later in this function scope.
+    // WHY steerRegistry.delete (but NOT abortRegistry.delete): steerRegistry was registered
+    // above (before this early-exit path). abortRegistry is registered AFTER agent construction,
+    // which never happens on this path -- no abortRegistry entry exists to delete.
     if (state.workrailSessionId !== null) {
       steerRegistry?.delete(state.workrailSessionId);
-      abortRegistry?.delete(state.workrailSessionId);
     }
     writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
     return {
@@ -4551,6 +4575,26 @@ export async function runWorkflow(
       ? { maxTokens: trigger.agentConfig.maxOutputTokens }
       : {}),
   });
+
+  // ---- AbortRegistry: register abort callback now that agent is initialized ----
+  // WHY registered here (not before context loading): the closure `() => agent.abort()`
+  // references `agent`, which is declared with `const` above. Registering before `agent`
+  // is initialized would be a TDZ (Temporal Dead Zone) hazard -- the shutdown handler
+  // could call the callback on an early-exit path where `agent` was never assigned,
+  // throwing a ReferenceError. Registering here, after `const agent = new AgentLoop(...)`,
+  // guarantees the binding is initialized at the point of registration.
+  //
+  // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
+  // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
+  // agent directly.
+  //
+  // Registration gap: steerRegistry is registered ~336 lines earlier (before context loading).
+  // This abort registration happens after context loading completes, so there is a ~200-500ms
+  // window where SIGTERM will not abort this session. Sessions in that window run to completion
+  // or hit the wall-clock timeout. Accepted tradeoff -- see worktrain-daemon-invariants.md 3.4.
+  if (state.workrailSessionId !== null) {
+    abortRegistry?.set(state.workrailSessionId, () => { agent.abort(); });
+  }
 
   // ---- Session limits (wall-clock timeout + max-turn limit) ----
   // Provided by buildSessionContext() -- resolved from trigger.agentConfig with

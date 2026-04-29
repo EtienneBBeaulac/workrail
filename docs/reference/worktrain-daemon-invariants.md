@@ -58,13 +58,15 @@ Each `runWorkflow()` call writes a per-session sidecar file at `~/.workrail/daem
 
 ### 2.2 Sidecar is deleted on every non-worktree terminal path
 
+The sidecar lifecycle decision is delegated to `sidecardLifecycleFor(tag, branchStrategy)` in `workflow-runner.ts`. That function is the authoritative source for this table; its `assertNever` default case ensures a compile error when `WorkflowRunResult` gains new variants without updating the rules.
+
 | Outcome | Sidecar deleted? |
 |---|---|
-| `success` (non-worktree) | Yes -- in `runWorkflow()` before returning |
+| `success` (non-worktree) | Yes -- `finalizeSession()` deletes via `sidecardLifecycleFor` |
 | `success` (worktree) | No -- `TriggerRouter.maybeRunDelivery()` deletes it after delivery |
-| `error` | Yes |
-| `timeout` | Yes |
-| `stuck` | Yes |
+| `error` | Yes -- `finalizeSession()` deletes via `sidecardLifecycleFor` |
+| `timeout` | Yes -- `finalizeSession()` deletes via `sidecardLifecycleFor` |
+| `stuck` | Yes -- `finalizeSession()` deletes via `sidecardLifecycleFor` |
 
 **Why worktree sessions differ:** Delivery (git commit, git push, gh pr create) runs inside the worktree after `runWorkflow()` returns. The sidecar must exist until delivery completes so `runStartupRecovery()` can find the worktree path if the daemon crashes during delivery.
 
@@ -110,7 +112,11 @@ If `parseContinueTokenOrFail()` fails (unusual -- the token just came from `exec
 
 ### 3.4 Registration gap is documented
 
-There is a ~50ms window between `executeStartWorkflow()` returning and `steerRegistry.set()` being called (after `parseContinueTokenOrFail()` completes). A `POST /sessions/:id/steer` call in this window receives 404. Coordinators should retry once on 404 during session startup.
+**SteerRegistry gap (~50ms):** There is a ~50ms window between `executeStartWorkflow()` returning and `steerRegistry.set()` being called (after `parseContinueTokenOrFail()` completes). A `POST /sessions/:id/steer` call in this window receives 404. Coordinators should retry once on 404 during session startup.
+
+**AbortRegistry gap (~200-500ms):** `abortRegistry.set()` is registered _after_ `const agent = new AgentLoop(...)` is constructed, which happens after the context-loading phase (`loadDaemonSoul`, `loadWorkspaceContext`, `loadSessionNotes` in parallel). This means there is a ~200-500ms window where SIGTERM will not abort an in-flight session. Sessions in this window run to completion or hit the wall-clock timeout.
+
+**Why the abort gap is wider than the steer gap:** `abortRegistry.set` registers `() => agent.abort()` which closes over `agent`. Registering this callback before `agent` is constructed would be a TDZ (Temporal Dead Zone) hazard -- `agent` is declared with `const` and would not yet be initialized if the shutdown handler fired on an early-exit path. Registering after `agent` construction eliminates the hazard at the cost of a wider registration window. The accepted tradeoff is the same as for the steer gap.
 
 ---
 

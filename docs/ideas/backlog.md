@@ -5,7 +5,89 @@ For historical narrative and sprint journals, see `docs/history/worktrain-journa
 
 ---
 
-## Daemon and WorkTrain
+## P0 / Critical (blocks WorkTrain from working correctly)
+
+### Agent is doing coordinator work
+
+**Status: bug** | Priority: P0
+
+The agent ran `cd /path/to/main-checkout && git log`, `gh issue view`, read roadmap docs, checked open PRs -- coordinator work. The agent should never do this. It is a worker: receive scoped task, produce output, call `complete_step`. All environment setup, context gathering, git operations, worktree management, PR creation, and orchestration is coordinator responsibility.
+
+The coordinator should: create the worktree before the agent starts, pass a clean context packet (issue body, relevant code, what to produce), handle all git operations after the agent finishes, spawn specialized sub-agents for subtasks.
+
+**Near-term mitigation:** Inject `sessionWorkspacePath` (the worktree) into the system prompt instead of `trigger.workspacePath` (main checkout), and explicitly tell the agent "do not run git commands, do not read roadmap docs -- that is coordinator work." Partial fix held pending full redesign.
+
+**Full fix:** Coordinator-heavy pipeline redesign (see below).
+
+---
+
+### Wrong directory: agent worked in main checkout instead of worktree
+
+**Status: bug** | Priority: P0
+
+All bash commands used `cd /main-checkout` instead of the worktree. Code changes went nowhere. Delivery found nothing to commit and silently skipped. Root cause: system prompt names `trigger.workspacePath`, not `sessionWorkspacePath`.
+
+---
+
+### Agent faked commit SHAs in handoff block
+
+**Status: bug** | Priority: high
+
+Handoff block `agentCommitShas` contained existing main-branch SHAs from `git log`, not new commits. Fix: coordinator records commit SHAs itself (before/after diff) rather than trusting the agent.
+
+---
+
+### `taskComplexity=Small` misclassification
+
+**Status: bug** | Priority: medium
+
+Issue #241 (TTL eviction across multiple files + new tests) was classified as Small, skipping design review, planning audit, and verification loops. Consider requiring human confirmation on Small classification before bypassing phases.
+
+---
+
+### Daemon binary stale after rebuild, no indication to user
+
+**Status: ux gap** | Priority: medium
+
+After `npm run build`, `worktrain daemon --start` launches the old binary. No warning. Fix: compare binary mtime to running process's binary and warn if stale.
+
+---
+
+### `worktrain daemon --start` reports success even when daemon crashes immediately
+
+**Status: bug** | Priority: medium
+
+Health check waits 1 second then checks `launchctl list`. If daemon crashes in < 1s, check sees a PID and reports success. Fix: poll for up to 5 seconds, verify daemon is still running at end of window.
+
+---
+
+### Handoff block not surfaced to operator
+
+**Status: ux gap** | Priority: medium
+
+Agent writes a complete handoff block (commitType, prTitle, prBody, filesChanged) to the session store. Invisible to operator without digging through event logs. Fix: `worktrain status <sessionId>` should show it; console session detail should surface it prominently.
+
+---
+
+## WorkTrain Daemon
+
+The autonomous workflow runner (`worktrain daemon`). Completely separate from the MCP server -- calls the engine directly in-process.
+
+
+### `wr.refactoring` workflow (Apr 28, 2026)
+
+**Status: idea** | Priority: medium
+
+A dedicated `wr.refactoring` workflow for structural refactors that don't change behavior. Distinct from `wr.coding-task` because refactors have a different shape: no new features, no bug fixes, just architecture alignment. The workflow should enforce:
+- **Discovery phase**: understand current state, identify violations, classify scope
+- **Test-first phase**: write tests for any extracted pure functions BEFORE extracting them (TDD red)
+- **Extraction phase**: one slice at a time, tests green after each
+- **Verification phase**: full suite green, build clean, no behavior changes
+- **Doc update phase**: update any reference docs that describe the changed invariants
+
+The `wr.coding-task` workflow has too much overhead for pure refactors (design review, risk assessment gating, PR strategy) and not enough refactor-specific discipline (test-first enforcement, behavior-unchanged verification).
+
+---
 
 ### API key baked into launchd plist at install time (Apr 24, 2026)
 
@@ -66,7 +148,10 @@ The shell then does:
 
 ---
 
-## Engine and MCP
+## Shared / Engine
+
+The durable session store, v2 engine, and workflow authoring features shared by all three systems.
+
 
 ### Improve commit SHA gathering consistency in wr.coding-task
 
@@ -264,7 +349,10 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 
 ---
 
-## Daemon and Coordinator
+## WorkTrain Daemon -- Coordinator patterns
+
+Coordinator design patterns for WorkTrain's autonomous pipeline.
+
 
 ### Event-driven agent coordination (coordinator as event bus)
 
@@ -516,6 +604,12 @@ Step-level `systemPrompt` overrides workflow-level for that step.
 
 ---
 
+## WorkRail MCP Server
+
+The stdio/HTTP MCP server that Claude Code (and other MCP clients) connect to. MUST be bulletproof -- crashes kill all in-flight Claude Code sessions.
+
+
+
 ## Console
 
 ### Console interactivity and liveliness
@@ -561,6 +655,40 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 ---
 
 ## Workflow Library
+
+### General-purpose workflow / intelligent dispatcher
+
+**Status: idea** | Priority: medium
+
+Two related ideas:
+
+**`wr.quick-task`** -- the simplest possible workflow. 2 steps: do the work, call complete_step. No complexity routing, no design review, no phased implementation. For tasks under ~10 minutes. Currently small tasks go through `wr.coding-task`'s Small fast-path which is still heavier than needed.
+
+**`wr.dispatch`** -- an intelligent routing workflow. Given a goal, classify it and route to the right workflow: `wr.quick-task` | `wr.research` | `wr.coding-task` | `wr.mr-review` | `wr.competitive-analysis`. The general-purpose entry point -- not a workflow that does everything, but one that decides which workflow to use. The adaptive pipeline coordinator already does this for the queue-poll trigger; the question is whether to expose it as a named user-facing workflow.
+
+Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or coexist alongside it? How does it handle tasks that don't fit any known workflow?
+
+---
+
+### MR review session count inflation
+
+**Status: idea** | Priority: medium
+
+A single PR review dispatches 6-12 autonomous sessions (one per reviewer family: correctness_invariants, runtime_production_risk, missed_issue_hunter, etc.). This inflates session counts, complicates cost attribution, and makes ROI calculations imprecise. Worth investigating: are all 6 families catching distinct issues, or is there significant overlap? Should families be parallelized into a single session with sub-agents rather than separate top-level sessions?
+
+---
+
+### Session trigger source attribution (daemon vs MCP)
+
+**Status: idea** | Priority: high
+
+No reliable way to determine whether a session was started by the daemon (WorkTrain) or a human via MCP (Claude Code). Every session-level metric and ROI calculation is ambiguous without this.
+
+**Fix:** Add `triggerSource: 'daemon' | 'mcp'` to `run_started` event data. One-line change at each entry point, makes attribution permanent and queryable from the event log.
+
+Files: `src/v2/durable-core/schemas/session/events.ts`, `src/mcp/handlers/v2-execution/start-workflow.ts`, `src/daemon/workflow-runner.ts`.
+
+---
 
 ### Standup status generator
 
@@ -1012,3 +1140,6 @@ The agent is expensive, inconsistent, and slow. Scripts are free, deterministic,
 ### Metrics outcome validation
 
 **Status: done** -- `checkContextBudget` validates `metrics_outcome` enum (PR f0a1822a). SHA validation (Gap 3 above) is still open.
+
+---
+

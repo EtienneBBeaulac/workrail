@@ -25,6 +25,7 @@ import {
   evaluateStuckSignals,
   createSessionState,
   buildSessionContext,
+  sidecardLifecycleFor,
   DAEMON_SOUL_DEFAULT,
   DEFAULT_SESSION_TIMEOUT_MINUTES,
   DEFAULT_MAX_TURNS,
@@ -561,5 +562,63 @@ describe('buildSessionContext', () => {
     expect(result1.initialPrompt).toBe(result2.initialPrompt);
     expect(result1.sessionTimeoutMs).toBe(result2.sessionTimeoutMs);
     expect(result1.maxTurns).toBe(result2.maxTurns);
+  });
+});
+
+// ── sidecardLifecycleFor ──────────────────────────────────────────────────────
+//
+// Truth table from worktrain-daemon-invariants.md section 2.2:
+//
+//   success + worktree  -> retain_for_delivery (TriggerRouter.maybeRunDelivery owns cleanup)
+//   success + non-worktree -> delete_now
+//   error / timeout / stuck (any branchStrategy) -> delete_now
+//   delivery_failed -> assertNever (impossible from runWorkflow(); compile-time guard)
+//
+// WHY these tests: the function is the authoritative sidecar lifecycle decision.
+// If a new WorkflowRunResult variant is added without updating this function,
+// the assertNever guard causes a TypeScript compile error -- these tests document
+// the contract that the guard enforces.
+
+describe('sidecardLifecycleFor', () => {
+  it('success + worktree -> retain_for_delivery', () => {
+    expect(sidecardLifecycleFor('success', 'worktree')).toEqual({ kind: 'retain_for_delivery' });
+  });
+
+  it('success + none -> delete_now', () => {
+    expect(sidecardLifecycleFor('success', 'none')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('success + undefined branchStrategy -> delete_now', () => {
+    expect(sidecardLifecycleFor('success', undefined)).toEqual({ kind: 'delete_now' });
+  });
+
+  it('error + worktree -> delete_now', () => {
+    expect(sidecardLifecycleFor('error', 'worktree')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('error + none -> delete_now', () => {
+    expect(sidecardLifecycleFor('error', 'none')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('timeout + worktree -> delete_now', () => {
+    expect(sidecardLifecycleFor('timeout', 'worktree')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('timeout + none -> delete_now', () => {
+    expect(sidecardLifecycleFor('timeout', 'none')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('stuck + worktree -> delete_now', () => {
+    expect(sidecardLifecycleFor('stuck', 'worktree')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('stuck + none -> delete_now', () => {
+    expect(sidecardLifecycleFor('stuck', 'none')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('delivery_failed -> throws via assertNever (impossible from runWorkflow())', () => {
+    // delivery_failed is in WorkflowRunResult but is never produced by runWorkflow() directly
+    // (invariant 1.2). assertNever fires if it ever reaches this function.
+    expect(() => sidecardLifecycleFor('delivery_failed', 'none')).toThrow();
   });
 });
