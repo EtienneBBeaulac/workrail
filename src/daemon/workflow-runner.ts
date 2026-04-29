@@ -4351,9 +4351,9 @@ function constructTools(
   const { state, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth } = session;
   const { fileTracker, onAdvance, onComplete, emitter, abortRegistry, maxIssueSummaries } = scope;
   const sid = scope.sessionId;
-  // WHY from scope (not state.workrailSessionId): scope.workrailSessionId is set at
-  // SessionScope construction time in runWorkflow() and is read-only. This mirrors
-  // how TurnEndSubscriberContext captures workflowId once at construction.
+  // WHY from scope (not state directly): SessionScope is the typed boundary for what
+  // constructTools() is allowed to see. Passing state directly would leak all mutable
+  // session fields to the tool layer; scope captures only the subset tools need.
   const workrailSid = scope.workrailSessionId;
   // WHY toMap(): tool factories (makeReadTool, makeWriteTool, makeEditTool) accept
   // Map<string, ReadFileState> directly. Their public signatures cannot change because

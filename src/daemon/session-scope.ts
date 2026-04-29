@@ -171,7 +171,11 @@ export interface SessionScope {
   /** The daemon-local session identifier (a UUID). */
   readonly sessionId: string;
 
-  /** The workflow ID being executed (e.g. "wr.coding-task"). */
+  /**
+   * The workflow ID being executed (e.g. "wr.coding-task").
+   * Not destructured inside constructTools() in this PR -- will be consumed by
+   * individual tool factories in A4 when they move to their own files.
+   */
   readonly workflowId: string;
 
   /**
