@@ -5,6 +5,46 @@ Not a backlog -- use `docs/ideas/backlog.md` and `docs/roadmap/` for actionable 
 
 ---
 
+## WorkTrain / WorkRail session: Apr 29, 2026 (continued) -- daemon Phase 3 refactor
+
+### What shipped (PRs #835, #837)
+
+**PR #835: Turn_end subscriber extraction + tool param validation**
+
+Extracted the 126-line inline turn_end subscriber from `runWorkflow()` into `buildTurnEndSubscriber(ctx: TurnEndSubscriberContext)`. The mutable `lastFlushedMessageCount` counter became `lastFlushedRef: { count: number }` -- a plain object shared by reference between the subscriber and the `finally`-block final flush. `runWorkflow()` body reduced from ~426 to ~539 lines... wait, wrong direction. From 539 → 426 lines.
+
+Also added required-field validation at the top of 8 tool `execute()` functions (Bash, Read, Write, Glob, Grep, Edit, spawn_agent, report_issue, signal_coordinator). `complete_step` already validated; `continue_workflow` delegates to the engine. Each validation throws `Error` with a clear message -- `AgentLoop._executeTools()` catches all throws and converts to `isError` tool_results so the LLM can self-correct. 22 new unit tests in `workflow-runner-tool-validation.test.ts`.
+
+**PR #837: buildAgentCallbacks + buildSessionResult extractions + test flakiness fix**
+
+Extracted the 40-line inline `agentCallbacks` object into `buildAgentCallbacks(sessionId, state, modelId, emitter, stuckRepeatThreshold): AgentLoopCallbacks`. The `onToolCallStarted` callback still mutates `state.lastNToolCalls` -- that's intentional and documented.
+
+Extracted the 82-line result-building block into `buildSessionResult(state, stopReason, errorMessage, trigger, sessionId, sessionWorktreePath): WorkflowRunResult` -- a pure function. `runWorkflow()` calls it and then delegates all I/O to the existing `finalizeSession()`. `runWorkflow()` body: 426 → 308 lines.
+
+13 new unit tests covering all 4 result paths (stuck/timeout/error/success), the stuck-over-timeout priority invariant, issueSummaries threading, wall_clock vs max_turns messages, worktree path threading, and botIdentity threading.
+
+Also fixed a pre-existing test flakiness issue: `writeExecutionStats()` is fire-and-forget, and under load with 4 parallel vitest workers its async write chain sometimes didn't complete before tests read the stats file. Fix: added `settleFireAndForget()` before `readStatsFile()` in the stats contract tests (waits for `stats-summary.json` which is written last in the chain), and added `retry: 2` to the vitest config for all test projects.
+
+### runWorkflow() line count progression
+
+| After PR | Lines |
+|---|---|
+| Pre-refactor (original) | ~880 (body only, in 4900-line file) |
+| PR #818 (Phase 1) | ~700 |
+| PR #830 (Phase 2: buildPreAgentSession, constructTools) | ~539 |
+| PR #835 (Phase 3a: buildTurnEndSubscriber) | ~426 |
+| PR #837 (Phase 3b: buildAgentCallbacks, buildSessionResult) | ~308 |
+
+### What's still open
+
+- `CriticalEffect<T>` / `ObservabilityEffect` type distinction -- deferred (requires changing all fire-and-forget call sites)
+- `StateRef` mutation wrapper -- deferred as YAGNI
+- `ContextBundle` with layer provenance -- deferred as YAGNI (no consumer)
+- Zod tool param validation (replacing manual `typeof` checks) -- deferred (requires zodToJsonSchema or accepting two sources of truth)
+- `wr.refactoring` workflow -- captured in backlog
+
+---
+
 ## WorkTrain / WorkRail session: Apr 28-29, 2026 -- architecture, engine bug fix, workflow improvements
 
 ### What shipped (PR #830)

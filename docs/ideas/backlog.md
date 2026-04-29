@@ -145,10 +145,16 @@ The shell then does:
 - `sidecardLifecycleFor()` pure function with `assertNever` exhaustiveness
 - TDZ hazard fixed: `abortRegistry.set()` now registered after `const agent = new AgentLoop()`
 
-**Still deferred (not in Phase 2):**
-- `CriticalEffect<T>` for `persistTokens` callers -- requires changing return type + all tool factory call sites
+**Phase 3 (PRs #835, #837)** continued the refactor:
+- `buildTurnEndSubscriber()` extracted -- runWorkflow() body: 539 → 426 lines
+- Tool param validation at LLM boundary (8 tool factories)
+- `buildAgentCallbacks()` + `buildSessionResult()` pure functions -- body: 426 → 308 lines
+- Test flakiness fix: `settleFireAndForget()` + `retry: 2` in vitest config
+
+**Still deferred:**
+- `CriticalEffect<T>` / `ObservabilityEffect` type distinction
 - `StateRef` mutation wrapper
-- Zod tool param validation at LLM boundary
+- Zod tool param validation (replacing manual typeof checks -- requires zodToJsonSchema or two sources of truth)
 - `wr.refactoring` workflow (see backlog entry above)
 
 ---
@@ -1096,6 +1102,7 @@ WorkTrain is a persistent background daemon that initiates workflows autonomousl
 - Per-trigger crash safety (`persistTokens`)
 - Worktree orphan cleanup on delivery failure
 - runWorkflow() Phase 2 architecture (PR #830): `PreAgentSession`/`buildPreAgentSession`, `constructTools`, `persistTokens` Result type, `sidecardLifecycleFor` pure function, TDZ hazard fix for abort registry
+- runWorkflow() Phase 3 architecture (PRs #835, #837): `buildTurnEndSubscriber` (539→426 lines), tool param validation at LLM boundary (8 factories), `buildAgentCallbacks` + `buildSessionResult` pure functions (426→308 lines), test flakiness fix (settleFireAndForget + retry:2)
 
 ### WorkRail engine / MCP features
 
