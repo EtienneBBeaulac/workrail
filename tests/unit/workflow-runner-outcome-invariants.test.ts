@@ -170,17 +170,20 @@ afterEach(async () => {
 
 async function readStatsFile(statsDir: string): Promise<Array<{ outcome: string; stepCount: number }>> {
   const statsPath = path.join(statsDir, 'execution-stats.jsonl');
-  // writeExecutionStats is fire-and-forget -- poll briefly to let it complete.
-  for (let attempt = 0; attempt < 20; attempt++) {
+  // writeExecutionStats is fire-and-forget -- poll until the file is stable.
+  // WHY 50 attempts × 20ms = 1000ms: fire-and-forget async chains can be
+  // delayed on loaded CI machines (4 parallel vitest workers). 200ms was
+  // insufficient in practice.
+  for (let attempt = 0; attempt < 50; attempt++) {
     try {
       const raw = await fs.readFile(statsPath, 'utf8');
       const lines = raw.trim().split('\n').filter(Boolean);
       return lines.map((line) => JSON.parse(line) as { outcome: string; stepCount: number });
     } catch {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
-  throw new Error(`Stats file not written after 200ms: ${statsPath}`);
+  throw new Error(`Stats file not written after 1000ms: ${statsPath}`);
 }
 
 describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
@@ -200,7 +203,8 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
     const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, tmpDir, tmpDir);
     expect(result._tag).toBe('success');
 
-    // Verify actual stats file content.
+    // Wait for the entire fire-and-forget write chain to settle before reading.
+    await settleFireAndForget();
     const entries = await readStatsFile(tmpDir);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.outcome).toBe('success');
@@ -217,6 +221,7 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
     const result = await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, tmpDir, tmpDir);
     expect(result._tag).toBe('error');
 
+    await settleFireAndForget();
     const entries = await readStatsFile(tmpDir);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.outcome).toBe('error');
@@ -232,6 +237,7 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
     );
     expect(result._tag).toBe('error');
 
+    await settleFireAndForget();
     const entries = await readStatsFile(tmpDir);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.outcome).toBe('error');

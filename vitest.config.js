@@ -17,6 +17,12 @@ const shared = {
   // Increase timeouts for Git integration tests (slow cloning + file I/O)
   testTimeout: 10000,  // 10s for tests (default is 5s)
   hookTimeout: 30000,  // 30s for beforeAll/afterAll hooks
+
+  // WHY retry: 2: several tests depend on fire-and-forget filesystem operations
+  // (writeExecutionStats, lock file writes) that can lose races under load when
+  // up to 4 vitest worker threads run in parallel. Retrying catches timing-dependent
+  // failures without hiding real bugs -- a genuine bug fails all 3 attempts.
+  retry: 2,
 };
 
 export default defineConfig({

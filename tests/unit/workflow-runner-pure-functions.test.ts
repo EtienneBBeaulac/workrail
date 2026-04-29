@@ -19,12 +19,15 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { tmpPath } from '../helpers/platform.js';
 import {
   tagToStatsOutcome,
   buildAgentClient,
   evaluateStuckSignals,
   createSessionState,
   buildSessionContext,
+  buildSessionResult,
+  buildAgentCallbacks,
   sidecardLifecycleFor,
   DAEMON_SOUL_DEFAULT,
   DEFAULT_SESSION_TIMEOUT_MINUTES,
@@ -562,6 +565,165 @@ describe('buildSessionContext', () => {
     expect(result1.initialPrompt).toBe(result2.initialPrompt);
     expect(result1.sessionTimeoutMs).toBe(result2.sessionTimeoutMs);
     expect(result1.maxTurns).toBe(result2.maxTurns);
+  });
+});
+
+// ── buildAgentCallbacks ───────────────────────────────────────────────────────
+
+describe('buildAgentCallbacks', () => {
+  it('returns an object with all five callback keys', () => {
+    const state = createSessionState('ct_test');
+    const callbacks = buildAgentCallbacks('sess-1', state, 'claude-sonnet-4-6', undefined, 3);
+    expect(typeof callbacks.onLlmTurnStarted).toBe('function');
+    expect(typeof callbacks.onLlmTurnCompleted).toBe('function');
+    expect(typeof callbacks.onToolCallStarted).toBe('function');
+    expect(typeof callbacks.onToolCallCompleted).toBe('function');
+    expect(typeof callbacks.onToolCallFailed).toBe('function');
+  });
+
+  it('onToolCallStarted pushes to state.lastNToolCalls', () => {
+    const state = createSessionState('ct_test');
+    const callbacks = buildAgentCallbacks('sess-1', state, 'model', undefined, 3);
+    callbacks.onToolCallStarted?.({ toolName: 'Bash', argsSummary: '{}' });
+    expect(state.lastNToolCalls).toHaveLength(1);
+    expect(state.lastNToolCalls[0]).toEqual({ toolName: 'Bash', argsSummary: '{}' });
+  });
+
+  it('onToolCallStarted caps ring buffer at stuckRepeatThreshold', () => {
+    const state = createSessionState('ct_test');
+    const callbacks = buildAgentCallbacks('sess-1', state, 'model', undefined, 3);
+    callbacks.onToolCallStarted?.({ toolName: 'A', argsSummary: '1' });
+    callbacks.onToolCallStarted?.({ toolName: 'B', argsSummary: '2' });
+    callbacks.onToolCallStarted?.({ toolName: 'C', argsSummary: '3' });
+    callbacks.onToolCallStarted?.({ toolName: 'D', argsSummary: '4' }); // 4th should evict 1st
+    expect(state.lastNToolCalls).toHaveLength(3);
+    expect(state.lastNToolCalls[0]?.toolName).toBe('B');
+    expect(state.lastNToolCalls[2]?.toolName).toBe('D');
+  });
+});
+
+// ── buildSessionResult ────────────────────────────────────────────────────────
+//
+// Tests the four result paths: stuck, timeout, error, success.
+// These mirror the truth table from worktrain-daemon-invariants.md invariants 1.1-1.5.
+
+function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger {
+  return {
+    workflowId: 'wr.coding-task',
+    goal: 'test goal',
+    workspacePath: tmpPath('workspace'),
+    ...overrides,
+  };
+}
+
+describe('buildSessionResult', () => {
+  const SESSION_ID = 'sess_test123';
+
+  it('returns _tag: stuck when stuckReason is set (stuck takes priority over timeout)', () => {
+    const state = createSessionState('ct_test');
+    state.stuckReason = 'repeated_tool_call';
+    state.timeoutReason = 'wall_clock'; // both set -- stuck wins
+    const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('stuck');
+    if (result._tag === 'stuck') {
+      expect(result.reason).toBe('repeated_tool_call');
+      expect(result.stopReason).toBe('aborted');
+    }
+  });
+
+  it('stuck result includes issueSummaries when present', () => {
+    const state = createSessionState('ct_test');
+    state.stuckReason = 'no_progress';
+    state.issueSummaries = ['issue 1', 'issue 2'];
+    const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('stuck');
+    if (result._tag === 'stuck') {
+      expect(result.issueSummaries).toEqual(['issue 1', 'issue 2']);
+    }
+  });
+
+  it('returns _tag: timeout when timeoutReason is set and stuckReason is null', () => {
+    const state = createSessionState('ct_test');
+    state.timeoutReason = 'wall_clock';
+    const trigger = makeTrigger({ agentConfig: { maxSessionMinutes: 30 } });
+    const result = buildSessionResult(state, 'stop', undefined, trigger, SESSION_ID, undefined);
+    expect(result._tag).toBe('timeout');
+    if (result._tag === 'timeout') {
+      expect(result.reason).toBe('wall_clock');
+      expect(result.message).toContain('30 minutes');
+      expect(result.stopReason).toBe('aborted');
+    }
+  });
+
+  it('returns _tag: timeout for max_turns with correct message', () => {
+    const state = createSessionState('ct_test');
+    state.timeoutReason = 'max_turns';
+    const trigger = makeTrigger({ agentConfig: { maxTurns: 100 } });
+    const result = buildSessionResult(state, 'stop', undefined, trigger, SESSION_ID, undefined);
+    expect(result._tag).toBe('timeout');
+    if (result._tag === 'timeout') {
+      expect(result.reason).toBe('max_turns');
+      expect(result.message).toContain('100 turns');
+    }
+  });
+
+  it('returns _tag: error when stopReason is error', () => {
+    const state = createSessionState('ct_test');
+    const result = buildSessionResult(state, 'error', 'agent crashed', makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('error');
+    if (result._tag === 'error') {
+      expect(result.message).toBe('agent crashed');
+      expect(result.lastStepNotes).toContain('WORKTRAIN_STUCK');
+    }
+  });
+
+  it('returns _tag: error when errorMessage is set even with stopReason stop', () => {
+    const state = createSessionState('ct_test');
+    const result = buildSessionResult(state, 'stop', 'unexpected error', makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('error');
+  });
+
+  it('returns _tag: success on clean stop', () => {
+    const state = createSessionState('ct_test');
+    state.isComplete = true;
+    state.lastStepNotes = 'final notes';
+    const result = buildSessionResult(state, 'end_turn', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('success');
+    if (result._tag === 'success') {
+      expect(result.stopReason).toBe('end_turn');
+      expect(result.lastStepNotes).toBe('final notes');
+    }
+  });
+
+  it('success result includes sessionWorkspacePath and sessionId when worktree present', () => {
+    const state = createSessionState('ct_test');
+    const worktreePath = tmpPath('worktree-abc');
+    const result = buildSessionResult(state, 'end_turn', undefined, makeTrigger(), SESSION_ID, worktreePath);
+    expect(result._tag).toBe('success');
+    if (result._tag === 'success') {
+      expect(result.sessionWorkspacePath).toBe(worktreePath);
+      expect(result.sessionId).toBe(SESSION_ID);
+    }
+  });
+
+  it('success result omits sessionWorkspacePath when no worktree', () => {
+    const state = createSessionState('ct_test');
+    const result = buildSessionResult(state, 'end_turn', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('success');
+    if (result._tag === 'success') {
+      expect(result.sessionWorkspacePath).toBeUndefined();
+      expect(result.sessionId).toBeUndefined();
+    }
+  });
+
+  it('success result threads botIdentity from trigger', () => {
+    const state = createSessionState('ct_test');
+    const trigger = makeTrigger({ botIdentity: { name: 'bot', email: 'bot@example.com' } });
+    const result = buildSessionResult(state, 'end_turn', undefined, trigger, SESSION_ID, undefined);
+    expect(result._tag).toBe('success');
+    if (result._tag === 'success') {
+      expect(result.botIdentity).toEqual({ name: 'bot', email: 'bot@example.com' });
+    }
   });
 });
 
