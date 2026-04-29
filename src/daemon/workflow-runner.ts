@@ -53,6 +53,7 @@ import { evaluateRecovery } from './session-recovery-policy.js';
 import { writeStatsSummary } from './stats-summary.js';
 import { injectPendingSteps } from './turn-end/step-injector.js';
 import { flushConversation } from './turn-end/conversation-flusher.js';
+import { type SessionScope, DefaultFileStateTracker } from './session-scope.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -4345,15 +4346,21 @@ function constructTools(
   apiKey: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
-  emitter: DaemonEventEmitter | undefined,
-  abortRegistry: AbortRegistry | undefined,
-  onAdvance: (stepText: string, continueToken: string) => void,
-  onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
-  maxIssueSummaries: number,
+  scope: SessionScope,
 ): readonly AgentTool[] {
-  const { state, sessionId: sid, sessionWorkspacePath, readFileState, spawnCurrentDepth, spawnMaxDepth } = session;
-  // Alias for readability -- workrailSessionId is read-only after buildPreAgentSession
-  const workrailSid = state.workrailSessionId;
+  const { state, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth } = session;
+  const { fileTracker, onAdvance, onComplete, emitter, abortRegistry, maxIssueSummaries } = scope;
+  const sid = scope.sessionId;
+  // WHY from scope (not state directly): SessionScope is the typed boundary for what
+  // constructTools() is allowed to see. Passing state directly would leak all mutable
+  // session fields to the tool layer; scope captures only the subset tools need.
+  const workrailSid = scope.workrailSessionId;
+  // WHY toMap(): tool factories (makeReadTool, makeWriteTool, makeEditTool) accept
+  // Map<string, ReadFileState> directly. Their public signatures cannot change because
+  // tests call them directly with Maps. toMap() is defined on the FileStateTracker
+  // interface and returns the same Map instance the tracker uses internally, so
+  // read-before-write checks remain valid across all tool invocations.
+  const readFileStateMap = fileTracker.toMap();
 
   return [
     makeCompleteStepTool(
@@ -4375,11 +4382,11 @@ function constructTools(
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
     // must target the isolated worktree, not the main checkout.
     makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeReadTool(readFileState, schemas, sid, emitter, workrailSid),
-    makeWriteTool(readFileState, schemas, sid, emitter, workrailSid),
+    makeReadTool(readFileStateMap, schemas, sid, emitter, workrailSid),
+    makeWriteTool(readFileStateMap, schemas, sid, emitter, workrailSid),
     makeGlobTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeGrepTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeEditTool(sessionWorkspacePath, readFileState, schemas, sid, emitter, workrailSid),
+    makeEditTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
     makeReportIssueTool(sid, emitter, workrailSid, undefined, (summary: string) => {
       if (state.issueSummaries.length < maxIssueSummaries) {
         state.issueSummaries.push(summary);
@@ -4733,7 +4740,22 @@ export async function runWorkflow(
 
   // ---- Schemas + tool construction ----
   const schemas = getSchemas();
-  const tools = constructTools(session, ctx, apiKey, schemas, emitter, abortRegistry, onAdvance, onComplete, MAX_ISSUE_SUMMARIES);
+  // WHY SessionScope: bundles all per-session tool dependencies into a single typed
+  // object instead of individual positional params. Follows the TurnEndSubscriberContext
+  // and FinalizationContext patterns. fileTracker wraps session.readFileState in the
+  // FileStateTracker interface while preserving the same Map instance for tool factories.
+  const scope: SessionScope = {
+    fileTracker: new DefaultFileStateTracker(session.readFileState),
+    onAdvance,
+    onComplete,
+    workrailSessionId: state.workrailSessionId,
+    emitter,
+    sessionId,
+    workflowId: trigger.workflowId,
+    abortRegistry,
+    maxIssueSummaries: MAX_ISSUE_SUMMARIES,
+  };
+  const tools = constructTools(session, ctx, apiKey, schemas, scope);
 
   // ---- I/O phase: load context (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init
