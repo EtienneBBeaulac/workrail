@@ -458,6 +458,106 @@ describe('Interpreter: decision trace output', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// BUG REGRESSION: sequential artifact_contract while loops
+//
+// Two artifact_contract while loops running sequentially in the same session.
+// Loop-1 exits with { decision: stop }. That stop artifact sits in the session
+// history (truthEvents). When loop-2 starts, collectArtifactsForEvaluation
+// passes ALL session history artifacts to interpreter.next(). findLoopControlArtifact
+// finds loop-1's stale stop and exits loop-2 immediately on iteration 0.
+//
+// This is the root cause of Phase 7 being silently skipped in wr.coding-task
+// when taskComplexity=Large (Phase 2 and Phase 4 are sequential while loops;
+// Phase 7 is the third sequential while loop).
+//
+// The fix must scope artifacts to the current loop instance.
+// ---------------------------------------------------------------------------
+
+function buildSequentialTwoLoopWorkflow(): WorkflowDefinition {
+  return {
+    id: 'sequential-loops-test',
+    name: 'Sequential Loops Test',
+    description: 'Two sequential artifact_contract while loops',
+    version: '1.0.0',
+    steps: [
+      {
+        id: 'loop-1',
+        type: 'loop',
+        title: 'Loop 1',
+        loop: { type: 'while', maxIterations: 3, conditionSource: { kind: 'artifact_contract', contractRef: LOOP_CONTROL_CONTRACT_REF, loopId: 'loop-1' } },
+        body: [
+          {
+            id: 'loop-1-body',
+            title: 'Loop 1 Body',
+            prompt: 'Do loop 1 work',
+            requireConfirmation: false,
+            outputContract: { contractRef: LOOP_CONTROL_CONTRACT_REF },
+          },
+        ],
+      },
+      {
+        id: 'loop-2',
+        type: 'loop',
+        title: 'Loop 2',
+        loop: { type: 'while', maxIterations: 3, conditionSource: { kind: 'artifact_contract', contractRef: LOOP_CONTROL_CONTRACT_REF, loopId: 'loop-2' } },
+        body: [
+          {
+            id: 'loop-2-body',
+            title: 'Loop 2 Body',
+            prompt: 'Do loop 2 work',
+            requireConfirmation: false,
+            outputContract: { contractRef: LOOP_CONTROL_CONTRACT_REF },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe('BUG: sequential artifact_contract while loops -- stale stop from loop-1 must not affect loop-2', () => {
+  const interpreter = new WorkflowInterpreter();
+  const compiled = compileWorkflow(buildSequentialTwoLoopWorkflow());
+
+  // Directly construct the state after loop-1 has exited.
+  // When loop-1 exits (condition no longer met), the interpreter marks 'loop-1'
+  // as completed in the state.completed array and pops the loop frame.
+  // This is the state shape from workflow-interpreter.ts:355: completed: [...state.completed, frame.loopId]
+  const stateAfterLoop1Exited: ExecutionState = {
+    kind: 'running',
+    completed: ['loop-1'],
+    loopStack: [],
+    pendingStep: undefined,
+  };
+
+  it('BUG: loop-2 should enter despite stale stop artifact from loop-1', () => {
+    // The stale stop artifact is in the session history (all artifacts from truthEvents).
+    // When loop-2 calls shouldEnterIteration(0), it gets this artifact from
+    // collectArtifactsForEvaluation and findLoopControlArtifact finds the stop.
+    // EXPECTED: loop-2-body is selected (loop-2 enters -- stale artifact ignored)
+    // ACTUAL (bug): isComplete = true (loop-2 exits immediately due to stale stop)
+    const staleArtifacts = [{ kind: 'wr.loop_control', loopId: 'loop-1', decision: 'stop' }];
+    const result = interpreter.next(compiled, stateAfterLoop1Exited, {}, staleArtifacts);
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      // THIS IS THE FAILING ASSERTION -- loop-2 should enter, not complete
+      expect(result.value.isComplete).toBe(false);
+      expect(result.value.next?.stepInstanceId.stepId).toBe('loop-2-body');
+    }
+  });
+
+  it('loop-2 enters correctly when no stale artifacts (baseline sanity check)', () => {
+    // Without stale artifacts, loop-2 correctly enters on first iteration.
+    const result = interpreter.next(compiled, stateAfterLoop1Exited, {}, []);
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.isComplete).toBe(false);
+      expect(result.value.next?.stepInstanceId.stepId).toBe('loop-2-body');
+    }
+  });
+});
+
 describe('findLoopControlArtifact: latest artifact wins', () => {
   it('uses the most recent artifact when multiple artifacts exist for the same loopId', () => {
     // Simulates: iteration 0 produced 'continue', iteration 1 produced 'stop'.
