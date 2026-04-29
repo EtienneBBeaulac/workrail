@@ -987,3 +987,142 @@ Commit: `refactor(engine): extract functional core from runWorkflow() for testab
 `planConfidenceBand`: High
 `estimatedPRCount`: 1
 `followUpTickets`: []
+
+---
+---
+
+# Implementation Plan: SessionScope and FileStateTracker
+
+*Generated: 2026-04-28 | Workflow: wr.coding-task | Branch: refactor/etienneb/session-scope*
+
+---
+
+## 1. Problem Statement
+
+In `src/daemon/workflow-runner.ts`, `constructTools()` receives a raw `Map<string, ReadFileState>` (from `session.readFileState`) and five other per-session callback/config params as positional arguments. The raw Map is implicit shared state handed to every tool factory. This plan encapsulates it behind a typed interface (`FileStateTracker`) and bundles all per-session tool dependencies into a single `SessionScope` object.
+
+## 2. Acceptance Criteria
+
+1. `src/daemon/session-scope.ts` exists and exports `FileStateTracker` (interface), `DefaultFileStateTracker` (class), `SessionScope` (interface).
+2. `constructTools()` signature changes to `(session, ctx, apiKey, schemas, scope: SessionScope)` -- no longer takes `emitter`, `abortRegistry`, `onAdvance`, `onComplete`, `maxIssueSummaries` as positional params.
+3. `runWorkflow()` constructs a `SessionScope` before calling `constructTools()`.
+4. Tool factory signatures (`makeReadTool`, `makeWriteTool`, `makeEditTool`) are unchanged.
+5. `ReadFileState` type stays in `workflow-runner.ts`.
+6. `npm run build` exits 0.
+7. `npx vitest run` exits 0 -- all 365 tests pass.
+
+## 3. Non-Goals
+
+- Do NOT change `makeReadTool`, `makeWriteTool`, `makeEditTool`, or any other tool factory signatures.
+- Do NOT move `ReadFileState` type out of `workflow-runner.ts`.
+- Do NOT rename `constructTools`.
+- Do NOT change any behavior -- pure interface extraction and DI refactor.
+
+## 4. Philosophy-Driven Constraints
+
+- **Immutability by default**: all `SessionScope` fields are `readonly`.
+- **Explicit DI**: per-session dependencies injected via `SessionScope`, not positional params.
+- **Prefer explicit domain types**: `FileStateTracker` replaces raw `Map<string, ReadFileState>`.
+- **Document why not what**: WHY comments on `toMap()` and `SessionScope` fields, following `TurnEndSubscriberContext` pattern.
+- **YAGNI**: no speculative changes beyond what is specified.
+
+## 5. Invariants
+
+- I1: `DefaultFileStateTracker.toMap()` returns `this._map` (same instance) -- required for read-before-write checks to work correctly.
+- I2: `constructTools()` must not be exported (it was not exported before; it must not become exported).
+- I3: Tool factory signatures unchanged -- tests call them directly with `Map<string, ReadFileState>`.
+- I4: `ReadFileState` stays exported from `workflow-runner.ts`.
+
+## 6. Selected Approach + Rationale
+
+**FileStateTracker interface + DefaultFileStateTracker (with toMap() getter) + SessionScope bundle**
+
+`SessionScope` contains: `fileTracker`, `onAdvance`, `onComplete`, `workrailSessionId`, `emitter`, `sessionId`, `workflowId`, `abortRegistry`, `maxIssueSummaries`.
+
+`constructTools()` signature: `(session, ctx, apiKey, schemas, scope: SessionScope)`.
+
+Inside `constructTools()`: extracts `scope.fileTracker.toMap()` and passes it to tool factories unchanged.
+
+**Runner-up**: Raw Map in SessionScope -- rejected because task explicitly requires `FileStateTracker`.
+
+**Architecture rationale**: Follows `TurnEndSubscriberContext` and `FinalizationContext` patterns exactly. `toMap()` is the only seam and it is contained (constructTools is not exported).
+
+## 7. Vertical Slices
+
+### Slice 1: Create `src/daemon/session-scope.ts`
+
+**File**: `src/daemon/session-scope.ts` (new)
+
+Contents:
+- Import `ReadFileState` from `./workflow-runner.js`
+- Import `DaemonEventEmitter` from `./daemon-events.js`
+- Import `AbortRegistry` from `./workflow-runner.js`
+- `FileStateTracker` interface with `recordRead`, `getReadState`, `hasBeenRead` methods
+- `DefaultFileStateTracker` class implementing `FileStateTracker`:
+  - `private readonly _map = new Map<string, ReadFileState>()`
+  - `recordRead(path, content, isPartialView)`: calls `_map.set()`
+  - `getReadState(path)`: calls `_map.get()`
+  - `hasBeenRead(path)`: calls `_map.has()`
+  - `toMap()`: returns `this._map` (with WHY comment)
+- `SessionScope` interface with all required fields as `readonly`
+
+**Done when**: Build clean. File exists with correct exports.
+
+### Slice 2: Update `constructTools()` in `workflow-runner.ts`
+
+**File**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. Import `SessionScope` from `./session-scope.js`
+2. Change `constructTools()` signature to `(session, ctx, apiKey, schemas, scope: SessionScope)`
+3. Inside `constructTools()`: extract needed values from `scope.*`
+4. Pass `scope.fileTracker.toMap()` to `makeReadTool`, `makeWriteTool`, `makeEditTool`
+
+**Done when**: Build clean. constructTools() uses scope.
+
+### Slice 3: Update call site in `runWorkflow()`
+
+**File**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. Import `DefaultFileStateTracker` from `./session-scope.js`
+2. Create `DefaultFileStateTracker` at call site wrapping `session.readFileState`
+3. Construct `scope: SessionScope` with `fileTracker` + other values
+4. Update `constructTools()` call to pass `scope`
+
+Note: Keep `readFileState` on `PreAgentSession` unchanged (initialized in `buildPreAgentSession()`). Just wrap it at the call site.
+
+**Done when**: Build clean. All tests pass.
+
+## 8. Test Design
+
+No new tests required. Verification: `npx vitest run` (365 tests must pass). The existing file-tools tests (`workflow-runner-file-tools.test.ts`) call tool factories directly with Maps -- these must still pass unchanged.
+
+## 9. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| toMap() returns different Map than _map | Very Low | High | DefaultFileStateTracker.toMap() returns `this._map` directly |
+| Circular import (session-scope imports from workflow-runner) | Low | Low | Check: workflow-runner imports session-scope (one direction only) |
+
+## 10. PR Packaging Strategy
+
+Single PR. Branch: `refactor/etienneb/session-scope`.
+Commit: `refactor(engine): introduce SessionScope and FileStateTracker for tool layer`
+
+## 11. Philosophy Alignment per Slice
+
+| Slice | Principle | Status |
+|-------|-----------|--------|
+| 1 (session-scope.ts) | Explicit domain types | Satisfied -- FileStateTracker replaces raw Map |
+| 1 (session-scope.ts) | Immutability by default | Satisfied -- readonly SessionScope fields |
+| 1 (session-scope.ts) | Document why not what | Satisfied -- WHY comment on toMap() |
+| 2 (constructTools) | Explicit DI | Satisfied -- scope passed explicitly |
+| 3 (call site) | YAGNI | Satisfied -- readFileState kept on PreAgentSession, wrapped at call site |
+| All | Architectural fix over patch | Satisfied -- makes implicit shared state explicit |
+
+---
+`unresolvedUnknownCount`: 0
+`planConfidenceBand`: High
+`estimatedPRCount`: 1
+`followUpTickets`: ["future: update tool factory signatures to take FileStateTracker instead of Map"]
