@@ -23,12 +23,9 @@
  */
 
 import * as crypto from 'node:crypto';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SteerRegistry, AbortRegistry } from '../daemon/workflow-runner.js';
-import { DAEMON_SESSIONS_DIR } from '../daemon/workflow-runner.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
@@ -38,8 +35,8 @@ import type {
   WebhookEvent,
   ContextMappingEntry,
 } from './types.js';
-import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecFn } from './delivery-action.js';
+import { runDeliveryPipeline, DEFAULT_DELIVERY_PIPELINE } from './delivery-pipeline.js';
 import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
@@ -282,13 +279,15 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
 /**
  * Run post-workflow delivery if autoCommit is enabled for this trigger.
  *
- * Parses the structured handoff artifact from lastStepNotes and calls runDelivery().
+ * Delegates to runDeliveryPipeline() with DEFAULT_DELIVERY_PIPELINE after validating
+ * the three preconditions that must hold for delivery to proceed.
+ *
  * All errors are logged and discarded -- delivery is best-effort and must never affect
  * the workflow's success/failure state.
  *
  * WHY module-level function (not class method): pure helper shared by route() and
  * dispatch() without coupling to TriggerRouter's private state. Delivery logic
- * belongs in delivery-action.ts; this is just the wiring.
+ * belongs in delivery-pipeline.ts; this is just the wiring.
  *
  * @param triggerId - Used in log messages for traceability
  * @param trigger - Source of workspacePath, autoCommit, autoOpenPR flags
@@ -316,124 +315,7 @@ async function maybeRunDelivery(
     return;
   }
 
-  // Parse the structured handoff artifact from the agent's final step notes
-  const parseResult = parseHandoffArtifact(result.lastStepNotes);
-  if (parseResult.kind === 'err') {
-    console.warn(
-      `[TriggerRouter] Delivery skipped: triggerId=${triggerId} -- ` +
-      `handoff artifact not parseable: ${parseResult.error}. ` +
-      `Ensure the workflow's final step produces a JSON block with commitType, filesChanged, etc.`,
-    );
-    return;
-  }
-
-  // Use sessionWorkspacePath when available (worktree sessions must commit from the worktree,
-  // not from the main checkout). Fall back to trigger.workspacePath for 'none' sessions.
-  // WHY: the agent's changes live in the worktree. git add/commit/push must run there.
-  const deliveryCwd = result.sessionWorkspacePath ?? trigger.workspacePath;
-
-  const deliveryResult = await runDelivery(
-    parseResult.value,
-    deliveryCwd,
-    {
-      autoCommit: trigger.autoCommit,
-      autoOpenPR: trigger.autoOpenPR,
-      // secretScan: pass trigger value (undefined = use default true in runDelivery).
-      // WHY ?? true not needed here: runDelivery checks flags.secretScan !== false,
-      // so undefined is equivalent to true. Passing trigger.secretScan preserves the
-      // explicit false from triggers.yml without needing a default here.
-      secretScan: trigger.secretScan ?? true,
-      // Attribution: triggerId and workflowId are used in the PR body footer so operators
-      // can trace the PR back to the trigger and workflow that produced it.
-      triggerId,
-      workflowId: trigger.workflowId,
-      // Per-command git identity: threaded from WorkflowRunSuccess.botIdentity (which was
-      // set from trigger.botIdentity in runWorkflow). Avoids writing to the shared .git/config.
-      ...(result.botIdentity !== undefined ? { botIdentity: result.botIdentity } : {}),
-      // Branch assertion: verify HEAD matches expected branch before git push.
-      // Only meaningful for worktree sessions -- 'none' sessions use trigger.workspacePath.
-      // WHY result.sessionId (not split from path): sessionId is threaded directly through
-      // WorkflowRunSuccess to avoid fragile path-parsing that couples branch naming convention
-      // to the calling code. See WorkflowRunSuccess.sessionId for the full rationale.
-      ...(trigger.branchStrategy === 'worktree' && result.sessionWorkspacePath
-        ? {
-            sessionId: result.sessionId ?? '',
-            branchPrefix: trigger.branchPrefix ?? 'worktrain/',
-          }
-        : {}),
-    },
-    execFn,
-  );
-
-  switch (deliveryResult._tag) {
-    case 'committed':
-      console.log(
-        `[TriggerRouter] Delivery committed: triggerId=${triggerId} sha=${deliveryResult.sha}`,
-      );
-      break;
-    case 'pr_opened':
-      console.log(
-        `[TriggerRouter] Delivery PR opened: triggerId=${triggerId} url=${deliveryResult.url}`,
-      );
-      break;
-    case 'skipped':
-      console.log(
-        `[TriggerRouter] Delivery skipped: triggerId=${triggerId} reason=${deliveryResult.reason}`,
-      );
-      break;
-    case 'error':
-      console.warn(
-        `[TriggerRouter] Delivery error: triggerId=${triggerId} phase=${deliveryResult.phase} ` +
-        `details=${deliveryResult.details}`,
-      );
-      break;
-  }
-
-  // Worktree cleanup on success: remove the isolated worktree after delivery completes.
-  //
-  // WHY here (not in runWorkflow()): delivery (git add, commit, push, gh pr create) all
-  // run inside the worktree. The worktree must exist until delivery finishes. Removing it
-  // inside runWorkflow() before delivery would break the delivery path.
-  //
-  // WHY after delivery regardless of deliveryResult._tag: the worktree's purpose is to
-  // serve the session. Once delivery has been attempted (success or error), the worktree
-  // has served its purpose and should be cleaned up to avoid disk accumulation.
-  //
-  // WHY best-effort (catch + log): cleanup failure must never affect the workflow result.
-  // A non-removable worktree will be reaped by runStartupRecovery() after 24h.
-  if (trigger.branchStrategy === 'worktree' && result.sessionWorkspacePath) {
-    try {
-      await execFn('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', result.sessionWorkspacePath], { cwd: trigger.workspacePath, timeout: 60_000 });
-      console.log(
-        `[TriggerRouter] Worktree removed: triggerId=${triggerId} path=${result.sessionWorkspacePath}`,
-      );
-    } catch (err: unknown) {
-      console.warn(
-        `[TriggerRouter] Could not remove worktree: triggerId=${triggerId} ` +
-        `path=${result.sessionWorkspacePath}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    // WHY here (not in runWorkflow()): this is the safe deletion point for the session
-    // sidecar after delivery and worktree removal are complete. Deleting the sidecar in
-    // runWorkflow() before returning would leave the worktree invisible to
-    // runStartupRecovery() if the daemon crashes between runWorkflow() returning and this
-    // point. The sidecar must outlive the runWorkflow() return for worktree sessions.
-    // For non-autoCommit sessions this block is unreachable (early return above); startup
-    // recovery handles sidecar cleanup for those sessions.
-    // NOTE: countActiveSessions() counts sidecars, so this brief inflation during delivery
-    // is intentional and semantically correct (the session is still completing).
-    if (result.sessionId !== undefined) {
-      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${result.sessionId}.json`)).catch(() => {});
-      // WHY: conversation file must be cleaned up here alongside the sidecar for worktree sessions.
-      // workflow-runner.ts only deletes it for non-worktree (direct) sessions; worktree sessions
-      // defer both sidecar and conversation file deletion to this point after delivery completes.
-      await fs.unlink(path.join(DAEMON_SESSIONS_DIR, `${result.sessionId}-conversation.jsonl`)).catch(() => {});
-      console.log(
-        `[TriggerRouter] Session sidecar removed: triggerId=${triggerId} sessionId=${result.sessionId}`,
-      );
-    }
-  }
+  await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, trigger, execFn, triggerId);
 }
 
 
