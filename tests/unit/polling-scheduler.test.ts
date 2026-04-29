@@ -744,6 +744,25 @@ describe('PollingScheduler.forcePoll', () => {
 // ---------------------------------------------------------------------------
 
 describe('doPollGitHubQueue dispatch loop protection', () => {
+  beforeEach(async () => {
+    // Re-establish loadQueueConfig mock after vi.clearAllMocks() may have cleared it.
+    // WHY: vi.clearAllMocks() clears mockResolvedValue; each test block needs its own setup.
+    const { loadQueueConfig } = await import('../../src/trigger/github-queue-config.js');
+    vi.mocked(loadQueueConfig).mockResolvedValue({
+      kind: 'ok',
+      value: {
+        type: 'assignee',
+        user: 'worktrain-etienneb',
+        repo: 'acme/my-project',
+        token: 'test-token',
+        pollIntervalSeconds: 300,
+        maxTotalConcurrentSessions: 3,
+        maxDispatchAttempts: 3,
+        excludeLabels: [],
+      },
+    });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
   });
