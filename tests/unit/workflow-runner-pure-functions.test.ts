@@ -410,6 +410,21 @@ function makeSessionTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowT
 }
 
 /**
+ * Thin wrapper around buildSessionContext that passes trigger.workspacePath as
+ * effectiveWorkspacePath, representing branchStrategy:'none' (no worktree) sessions.
+ * WHY a wrapper: avoids threading trigger.workspacePath through every single test call
+ * while keeping the required-parameter enforcement on the real function.
+ */
+function callBuildSessionContext(
+  trigger: WorkflowTrigger,
+  context: ContextBundle,
+  firstStepPrompt: string,
+  effectiveWorkspacePath?: string,
+): ReturnType<typeof buildSessionContext> {
+  return buildSessionContext(trigger, context, firstStepPrompt, effectiveWorkspacePath ?? trigger.workspacePath);
+}
+
+/**
  * Helper to build a minimal ContextBundle for buildSessionContext tests.
  *
  * WHY a helper (not inline construction): mirrors the old makeInputs() pattern
@@ -438,14 +453,14 @@ describe('buildSessionContext', () => {
   // ---- System prompt ----
 
   it('system prompt contains the soul content', () => {
-    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeContextBundle({
+    const { systemPrompt } = callBuildSessionContext(makeSessionTrigger(), makeContextBundle({
       soulContent: 'custom-soul-content-marker',
     }), 'Step 1: Do the work.');
     expect(systemPrompt).toContain('custom-soul-content-marker');
   });
 
   it('system prompt contains workspace context when present', () => {
-    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeContextBundle({
+    const { systemPrompt } = callBuildSessionContext(makeSessionTrigger(), makeContextBundle({
       workspaceContext: '## Agent Rules\n- Use TypeScript strict mode',
     }), 'Step 1: Do the work.');
     expect(systemPrompt).toContain('## Workspace Context (from AGENTS.md / CLAUDE.md)');
@@ -454,7 +469,7 @@ describe('buildSessionContext', () => {
   });
 
   it('system prompt omits workspace context section when workspaceContext is null', () => {
-    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeContextBundle({
+    const { systemPrompt } = callBuildSessionContext(makeSessionTrigger(), makeContextBundle({
       workspaceContext: null,
     }), 'Step 1: Do the work.');
     expect(systemPrompt).not.toContain('## Workspace Context');
@@ -463,7 +478,7 @@ describe('buildSessionContext', () => {
   // ---- Initial prompt ----
 
   it('initial prompt contains the first step prompt', () => {
-    const { initialPrompt } = buildSessionContext(makeSessionTrigger(), makeContextBundle(),
+    const { initialPrompt } = callBuildSessionContext(makeSessionTrigger(), makeContextBundle(),
       'unique-first-step-marker-12345',
     );
     expect(initialPrompt).toContain('unique-first-step-marker-12345');
@@ -473,7 +488,7 @@ describe('buildSessionContext', () => {
     const trigger = makeSessionTrigger({
       context: { task: 'implement-oauth', priority: 'high' },
     });
-    const { initialPrompt } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { initialPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(initialPrompt).toContain('Trigger context:');
     expect(initialPrompt).toContain('"task"');
     expect(initialPrompt).toContain('"implement-oauth"');
@@ -483,12 +498,12 @@ describe('buildSessionContext', () => {
 
   it('initial prompt omits context JSON block when trigger.context is absent', () => {
     const trigger = makeSessionTrigger(); // no context field
-    const { initialPrompt } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { initialPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(initialPrompt).not.toContain('Trigger context:');
   });
 
   it('initial prompt contains the closing directive to call complete_step', () => {
-    const { initialPrompt } = buildSessionContext(makeSessionTrigger(), makeContextBundle(), 'Step 1: Do the work.');
+    const { initialPrompt } = callBuildSessionContext(makeSessionTrigger(), makeContextBundle(), 'Step 1: Do the work.');
     expect(initialPrompt).toContain(
       'Complete all step work, then call complete_step with your notes to advance.',
     );
@@ -500,7 +515,7 @@ describe('buildSessionContext', () => {
     });
     // referenceUrls appear in the system prompt, not the initial prompt
     // (they are injected by buildSystemPrompt via trigger.referenceUrls)
-    const { systemPrompt } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { systemPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(systemPrompt).toContain('## Reference documents');
     expect(systemPrompt).toContain('https://example.com/spec.md');
     expect(systemPrompt).toContain('https://example.com/design.md');
@@ -512,13 +527,13 @@ describe('buildSessionContext', () => {
     const trigger = makeSessionTrigger({
       agentConfig: { maxSessionMinutes: 45 },
     });
-    const { sessionTimeoutMs } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { sessionTimeoutMs } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(sessionTimeoutMs).toBe(45 * 60 * 1000);
   });
 
   it('sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MINUTES * 60 * 1000 when agentConfig absent', () => {
     const trigger = makeSessionTrigger(); // no agentConfig
-    const { sessionTimeoutMs } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { sessionTimeoutMs } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(sessionTimeoutMs).toBe(DEFAULT_SESSION_TIMEOUT_MINUTES * 60 * 1000);
   });
 
@@ -526,20 +541,20 @@ describe('buildSessionContext', () => {
     const trigger = makeSessionTrigger({
       agentConfig: { maxTurns: 50 },
     });
-    const { maxTurns } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { maxTurns } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(maxTurns).toBe(50);
   });
 
   it('maxTurns = DEFAULT_MAX_TURNS when agentConfig.maxTurns is absent', () => {
     const trigger = makeSessionTrigger(); // no agentConfig
-    const { maxTurns } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { maxTurns } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(maxTurns).toBe(DEFAULT_MAX_TURNS);
   });
 
   // ---- Session recap in system prompt ----
 
   it('session recap appears in system prompt when sessionNotes is non-empty', () => {
-    const { systemPrompt } = buildSessionContext(makeSessionTrigger(), makeContextBundle({
+    const { systemPrompt } = callBuildSessionContext(makeSessionTrigger(), makeContextBundle({
       sessionNotes: ['Prior step note: found 3 bugs.', 'Step 2: fixed all 3.'],
     }), 'Step 1: Do the work.');
     // buildSessionRecap wraps notes in <workrail_session_state>
@@ -552,9 +567,40 @@ describe('buildSessionContext', () => {
     const trigger = makeSessionTrigger({
       context: { assembledContextSummary: 'prior-session-diff-summary' },
     });
-    const { systemPrompt } = buildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
+    const { systemPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
     expect(systemPrompt).toContain('## Prior Context');
     expect(systemPrompt).toContain('prior-session-diff-summary');
+  });
+
+  // ---- Worktree workspace path injection (Issue #880) ----
+
+  it('system prompt names trigger.workspacePath when sessionWorkspacePath is absent', () => {
+    const trigger = makeSessionTrigger();
+    const { systemPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1.');
+    expect(systemPrompt).toContain(`## Workspace: ${trigger.workspacePath}`);
+    expect(systemPrompt).not.toContain('Worktree session scope');
+  });
+
+  it('system prompt names the worktree path when sessionWorkspacePath differs from trigger.workspacePath', () => {
+    const trigger = makeSessionTrigger();
+    const worktreePath = '/Users/test/.workrail/worktrees/session-abc123';
+    const { systemPrompt } = buildSessionContext(trigger, makeContextBundle(), 'Step 1.', worktreePath);
+    expect(systemPrompt).toContain(`## Workspace: ${worktreePath}`);
+    expect(systemPrompt).not.toContain(`## Workspace: ${trigger.workspacePath}`);
+  });
+
+  it('system prompt adds worktree scope boundary when sessionWorkspacePath differs from trigger.workspacePath', () => {
+    const trigger = makeSessionTrigger();
+    const worktreePath = '/Users/test/.workrail/worktrees/session-abc123';
+    const { systemPrompt } = buildSessionContext(trigger, makeContextBundle(), 'Step 1.', worktreePath);
+    expect(systemPrompt).toContain('Worktree session scope');
+    expect(systemPrompt).toContain(`Do not access, read, or modify the main checkout at \`${trigger.workspacePath}\``);
+  });
+
+  it('does not add worktree scope boundary when sessionWorkspacePath equals trigger.workspacePath', () => {
+    const trigger = makeSessionTrigger();
+    const { systemPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1.');
+    expect(systemPrompt).not.toContain('Worktree session scope');
   });
 
   // ---- Purity guarantee ----
@@ -572,8 +618,8 @@ describe('buildSessionContext', () => {
     });
     const firstStepPrompt = 'Do the work';
 
-    const result1 = buildSessionContext(trigger, bundle, firstStepPrompt);
-    const result2 = buildSessionContext(trigger, bundle, firstStepPrompt);
+    const result1 = callBuildSessionContext(trigger, bundle, firstStepPrompt);
+    const result2 = callBuildSessionContext(trigger, bundle, firstStepPrompt);
 
     expect(result1.systemPrompt).toBe(result2.systemPrompt);
     expect(result1.initialPrompt).toBe(result2.initialPrompt);

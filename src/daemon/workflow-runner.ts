@@ -1975,13 +1975,23 @@ export function buildSessionRecap(notes: readonly string[]): string {
  *   provides the hardcoded default if the file was absent).
  * @param workspaceContext - Combined workspace context from CLAUDE.md / AGENTS.md,
  *   or null if no workspace context files were found.
+ * @param effectiveWorkspacePath - The workspace path the agent must work in.
+ *   Callers compute this as: sessionWorkspacePath ?? trigger.workspacePath.
+ *   Required (not optional) so the type system enforces the caller makes an explicit
+ *   decision -- there is no silent fallback to trigger.workspacePath inside this function.
+ *   WHY a separate parameter (not derived from trigger): trigger.workspacePath is always
+ *   the main checkout. The worktree path is only known after worktree creation in
+ *   buildPreAgentSession(). Passing it explicitly keeps this function pure and testable.
  */
 export function buildSystemPrompt(
   trigger: WorkflowTrigger,
   sessionState: string,
   soulContent: string,
   workspaceContext: string | null,
+  effectiveWorkspacePath: string,
 ): string {
+  const isWorktreeSession = effectiveWorkspacePath !== trigger.workspacePath;
+
   const lines = [
     BASE_SYSTEM_PROMPT,
     '',
@@ -1990,8 +2000,18 @@ export function buildSystemPrompt(
     '## Agent Rules and Philosophy',
     soulContent,
     '',
-    `## Workspace: ${trigger.workspacePath}`,
+    `## Workspace: ${effectiveWorkspacePath}`,
   ];
+
+  // When running in a worktree, add an explicit scope boundary so the agent never
+  // accidentally reads roadmap docs, runs git log on main, or modifies the main checkout.
+  // WHY: without this, the agent may drift to the main checkout for "context" (git log,
+  // planning docs, roadmap) which (1) pollutes the session with coordinator work and
+  // (2) can mutate the main checkout. This note is a hard constraint, not guidance.
+  if (isWorktreeSession) {
+    lines.push('');
+    lines.push(`**Worktree session scope:** Your workspace is the isolated git worktree at \`${effectiveWorkspacePath}\`. Do not access, read, or modify the main checkout at \`${trigger.workspacePath}\`. Do not read planning docs, roadmap files, or backlog files. All Bash commands, file reads, and file writes must stay within your worktree path.`);
+  }
 
   // Inject workspace context (CLAUDE.md / AGENTS.md) when available.
   // WHY: these files define repo-specific coding conventions, commit style, and
@@ -2664,12 +2684,17 @@ export interface SessionContext {
  * @param context - The ContextBundle from DefaultContextLoader.loadSession().
  * @param firstStepPrompt - The first step's pending prompt from executeStartWorkflow
  *   or the pre-allocated AllocatedSession.
+ * @param effectiveWorkspacePath - The workspace path the agent must work in.
+ *   Callers compute this as: sessionWorkspacePath ?? trigger.workspacePath.
+ *   Required so the type system forces callers to make an explicit decision.
+ *   Passed through to buildSystemPrompt() -- see that function's docs for details.
  * @returns SessionContext containing systemPrompt, initialPrompt, and session limits.
  */
 export function buildSessionContext(
   trigger: WorkflowTrigger,
   context: import('./context-loader.js').ContextBundle,
   firstStepPrompt: string,
+  effectiveWorkspacePath: string,
 ): SessionContext {
   // ---- Flatten ContextBundle to the primitives buildSystemPrompt expects ----
   // WHY flatten here (not in DefaultContextLoader): buildSystemPrompt() is a stable
@@ -2688,7 +2713,7 @@ export function buildSessionContext(
   // and referenceUrls from trigger.context and trigger.referenceUrls directly;
   // the authoritative values flow through trigger.
   const sessionState = buildSessionRecap(sessionNotes);
-  const systemPrompt = buildSystemPrompt(trigger, sessionState, context.soulContent, workspaceContext);
+  const systemPrompt = buildSystemPrompt(trigger, sessionState, context.soulContent, workspaceContext, effectiveWorkspacePath);
 
   // ---- Initial prompt ----
   // WHY no continueToken in the initial prompt: the daemon uses complete_step which
@@ -3379,10 +3404,17 @@ async function buildAgentReadySession(
   // buildSessionContext() is synchronous and pure -- it assembles the system
   // prompt, initial prompt, and session limits from the loaded data and trigger config.
   // WHY separated from I/O: makes prompt assembly testable without any fs or LLM mocking.
+  // WHY effectiveWorkspacePath (not sessionWorkspacePath directly): buildSessionContext
+  // requires a string, not string|undefined. The caller resolves the value here so the
+  // type system enforces an explicit decision -- there is no silent fallback inside the
+  // function. For worktree sessions, effectiveWorkspacePath is the isolated worktree;
+  // for branchStrategy:'none', it equals trigger.workspacePath.
+  const effectiveWorkspacePath = sessionWorkspacePath ?? trigger.workspacePath;
   const sessionCtx = buildSessionContext(
     trigger,
     contextBundle,
     firstStepPrompt || 'No step content available',
+    effectiveWorkspacePath,
   );
 
   // ---- Observability callbacks for AgentLoop ----

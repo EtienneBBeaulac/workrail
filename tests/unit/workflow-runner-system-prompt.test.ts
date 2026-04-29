@@ -24,7 +24,7 @@ const baseTrigger: WorkflowTrigger = {
 describe('buildSystemPrompt()', () => {
   describe('base structure', () => {
     it('always contains the agent identity, tools, and execution contract', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).toContain('You are WorkRail Auto');
       expect(prompt).toContain('## Your tools');
@@ -32,7 +32,7 @@ describe('buildSystemPrompt()', () => {
     });
 
     it('always contains the workspace path', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).toContain('## Workspace: /Users/test/my-project');
     });
@@ -44,7 +44,7 @@ describe('buildSystemPrompt()', () => {
     });
 
     it('injects empty session state tag when session state is empty', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).toContain('<workrail_session_state></workrail_session_state>');
     });
@@ -52,20 +52,20 @@ describe('buildSystemPrompt()', () => {
 
   describe('soul content injection (Feature 1)', () => {
     it('always includes ## Agent Rules and Philosophy section', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).toContain('## Agent Rules and Philosophy');
     });
 
     it('injects the default soul content when provided', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).toContain(DAEMON_SOUL_DEFAULT);
     });
 
     it('injects custom soul content when provided', () => {
       const customSoul = 'Always write TypeScript. Never use any.';
-      const prompt = buildSystemPrompt(baseTrigger, '', customSoul, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', customSoul, null, baseTrigger.workspacePath);
 
       expect(prompt).toContain('## Agent Rules and Philosophy');
       expect(prompt).toContain(customSoul);
@@ -74,7 +74,7 @@ describe('buildSystemPrompt()', () => {
 
     it('soul section appears before the workspace line', () => {
       const customSoul = 'custom-soul-marker';
-      const prompt = buildSystemPrompt(baseTrigger, '', customSoul, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', customSoul, null, baseTrigger.workspacePath);
 
       const soulIdx = prompt.indexOf('## Agent Rules and Philosophy');
       const workspaceIdx = prompt.indexOf('## Workspace:');
@@ -87,7 +87,7 @@ describe('buildSystemPrompt()', () => {
 
   describe('workspace context injection (Feature 2)', () => {
     it('omits workspace context section when workspaceContext is null', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).not.toContain('## Workspace Context');
     });
@@ -125,7 +125,7 @@ describe('buildSystemPrompt()', () => {
 
   describe('reference URLs section', () => {
     it('omits reference documents section when no URLs provided', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).not.toContain('## Reference documents');
     });
@@ -135,7 +135,7 @@ describe('buildSystemPrompt()', () => {
         ...baseTrigger,
         referenceUrls: ['https://example.com/spec.md', 'https://example.com/design.md'],
       };
-      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null, trigger.workspacePath);
 
       expect(prompt).toContain('## Reference documents');
       expect(prompt).toContain('https://example.com/spec.md');
@@ -148,7 +148,7 @@ describe('buildSystemPrompt()', () => {
         referenceUrls: ['https://example.com/spec.md'],
       };
       const context = 'workspace-context-marker';
-      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, context);
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, context, trigger.workspacePath);
 
       const contextIdx = prompt.indexOf('## Workspace Context');
       const refsIdx = prompt.indexOf('## Reference documents');
@@ -167,7 +167,7 @@ describe('buildSystemPrompt()', () => {
       };
       const customSoul = 'Follow TDD strictly.';
       const context = '### CLAUDE.md\nUse TypeScript strict mode.';
-      const prompt = buildSystemPrompt(trigger, 'state-abc', customSoul, context);
+      const prompt = buildSystemPrompt(trigger, 'state-abc', customSoul, context, trigger.workspacePath);
 
       // All sections present
       expect(prompt).toContain('## Agent Rules and Philosophy');
@@ -190,13 +190,93 @@ describe('buildSystemPrompt()', () => {
     });
   });
 
+  describe('worktree session scoping (Issue #880)', () => {
+    const mainCheckoutPath = '/Users/test/my-project';
+    const worktreePath = '/Users/test/.workrail/worktrees/session-abc123';
+
+    it('uses the provided path in the workspace heading (branchStrategy:none -- same path as trigger)', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, mainCheckoutPath);
+
+      expect(prompt).toContain(`## Workspace: ${mainCheckoutPath}`);
+    });
+
+    it('does NOT add scope boundary when effectiveWorkspacePath equals trigger.workspacePath', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, mainCheckoutPath);
+
+      expect(prompt).toContain(`## Workspace: ${mainCheckoutPath}`);
+      expect(prompt).not.toContain('Worktree session scope');
+    });
+
+    it('uses worktree path in the workspace heading for a worktree session', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, worktreePath);
+
+      expect(prompt).toContain(`## Workspace: ${worktreePath}`);
+      expect(prompt).not.toContain(`## Workspace: ${mainCheckoutPath}`);
+    });
+
+    it('adds the worktree scope boundary note for a worktree session', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, worktreePath);
+
+      expect(prompt).toContain('Worktree session scope');
+      expect(prompt).toContain(worktreePath);
+      expect(prompt).toContain(mainCheckoutPath);
+    });
+
+    it('scope boundary note explicitly forbids accessing the main checkout', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, worktreePath);
+
+      expect(prompt).toContain(`Do not access, read, or modify the main checkout at \`${mainCheckoutPath}\``);
+    });
+
+    it('scope boundary note explicitly forbids reading planning/roadmap/backlog docs', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, worktreePath);
+
+      expect(prompt).toContain('Do not read planning docs, roadmap files, or backlog files');
+    });
+
+    it('does NOT add scope boundary note when effectiveWorkspacePath equals trigger.workspacePath (none strategy)', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, mainCheckoutPath);
+
+      expect(prompt).not.toContain('Worktree session scope');
+    });
+
+    it('scope boundary note appears immediately after the workspace heading', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, worktreePath);
+
+      const workspaceIdx = prompt.indexOf(`## Workspace: ${worktreePath}`);
+      const scopeIdx = prompt.indexOf('Worktree session scope');
+      const workspaceContextIdx = prompt.indexOf('## Workspace Context');
+
+      expect(workspaceIdx).toBeGreaterThan(-1);
+      expect(scopeIdx).toBeGreaterThan(-1);
+      // scope note comes after the workspace heading
+      expect(scopeIdx).toBeGreaterThan(workspaceIdx);
+      // if workspace context is present, scope note comes before it
+      if (workspaceContextIdx !== -1) {
+        expect(scopeIdx).toBeLessThan(workspaceContextIdx);
+      }
+    });
+
+    it('workspace context is still injected after the scope boundary for worktree sessions', () => {
+      const context = 'workspace-context-marker';
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, context, worktreePath);
+
+      const scopeIdx = prompt.indexOf('Worktree session scope');
+      const contextIdx = prompt.indexOf('## Workspace Context');
+
+      expect(scopeIdx).toBeGreaterThan(-1);
+      expect(contextIdx).toBeGreaterThan(-1);
+      expect(contextIdx).toBeGreaterThan(scopeIdx);
+    });
+  });
+
   describe('prior context injection (F1)', () => {
     it('injects ## Prior Context section when assembledContextSummary is a non-empty string', () => {
       const trigger: WorkflowTrigger = {
         ...baseTrigger,
         context: { assembledContextSummary: 'prior-context-marker' },
       };
-      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null, trigger.workspacePath);
 
       expect(prompt).toContain('## Prior Context');
       expect(prompt).toContain('prior-context-marker');
@@ -208,7 +288,7 @@ describe('buildSystemPrompt()', () => {
         context: { assembledContextSummary: 'prior-context-marker' },
         referenceUrls: ['https://example.com/spec.md'],
       };
-      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null, trigger.workspacePath);
 
       const priorCtxIdx = prompt.indexOf('## Prior Context');
       const refsIdx = prompt.indexOf('## Reference documents');
@@ -219,7 +299,7 @@ describe('buildSystemPrompt()', () => {
     });
 
     it('omits ## Prior Context when assembledContextSummary is absent', () => {
-      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
 
       expect(prompt).not.toContain('## Prior Context');
     });
@@ -229,7 +309,7 @@ describe('buildSystemPrompt()', () => {
         ...baseTrigger,
         context: { assembledContextSummary: 42 },
       };
-      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null);
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null, trigger.workspacePath);
 
       expect(prompt).not.toContain('## Prior Context');
     });
