@@ -798,11 +798,10 @@ export class TriggerRouter {
     // Cross-path suppression only applies when both paths produce the same key.
     {
       const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
-      if (this._deduplicator.shouldSkip(dedupeKey)) {
+      if (this._deduplicator.checkAndRecord(dedupeKey)) {
         console.log(`[TriggerRouter] Skipping duplicate route dispatch: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
         return { _tag: 'enqueued', triggerId: trigger.id };
       }
-      this._deduplicator.record(dedupeKey);
     }
 
     // Emit trigger_fired: the webhook was accepted and validated.
@@ -954,11 +953,10 @@ export class TriggerRouter {
       // dispatchAdaptivePipeline uses goal::workspace.
       // Cross-path suppression only applies when both paths produce the same key.
       const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
-      if (this._deduplicator.shouldSkip(dedupeKey)) {
+      if (this._deduplicator.checkAndRecord(dedupeKey)) {
         console.log(`[TriggerRouter] Skipping duplicate dispatch: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
         return workflowTrigger.workflowId;
       }
-      this._deduplicator.record(dedupeKey);
     } else {
       console.log(`[TriggerRouter] Pre-allocated session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
     }
@@ -1104,7 +1102,7 @@ export class TriggerRouter {
     // fire-and-forget and do not branch on outcome.kind, so the impurity is harmless.
     // A 'skipped' variant would require widening PipelineOutcome, which is scope creep.
     const dedupeKey = `${goal}::${workspace}`;
-    if (this._deduplicator.shouldSkip(dedupeKey)) {
+    if (this._deduplicator.checkAndRecord(dedupeKey)) {
       console.log(
         `[TriggerRouter] Skipping duplicate adaptive dispatch: goal="${goal.slice(0, 60)}" ` +
         `(already dispatched within 30s)`,
@@ -1117,7 +1115,6 @@ export class TriggerRouter {
         },
       };
     }
-    this._deduplicator.record(dedupeKey);
 
     const opts: AdaptivePipelineOpts = {
       goal,
