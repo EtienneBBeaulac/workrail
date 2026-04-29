@@ -71,6 +71,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Upgrade npm (match lockfile job -- fixes emnapi cpu-filter bug)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm ci --ignore-scripts
 
@@ -133,6 +136,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Upgrade npm (match lockfile job -- fixes emnapi cpu-filter bug)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm ci --ignore-scripts
 
@@ -157,6 +163,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Upgrade npm (match lockfile job -- fixes emnapi cpu-filter bug)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm ci --ignore-scripts
@@ -200,7 +209,7 @@ jobs:
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -210,6 +219,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Upgrade npm (match lockfile job -- fixes emnapi cpu-filter bug)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -224,7 +236,7 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     continue-on-error: true
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -234,6 +246,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Upgrade npm (match lockfile job -- fixes emnapi cpu-filter bug)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -254,7 +269,6 @@ jobs:
   # ============================================================================
   verify-generated:
     name: Verify Generated Artifacts
-  
     runs-on: ubuntu-latest
 
     steps:
@@ -266,6 +280,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Upgrade npm (match lockfile job -- fixes emnapi cpu-filter bug)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm ci --ignore-scripts
@@ -291,6 +308,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Upgrade npm (fixes emnapi cpu-filter bug on Linux)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -358,7 +378,7 @@ jobs:
         os: [ "ubuntu-latest", "macos-latest", "windows-latest" ]
         node-version: [ "20", "22.14.0" ]
       fail-fast: false
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -368,6 +388,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
+
+      - name: Upgrade npm (fixes emnapi cpu-filter bug on Linux)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -418,6 +441,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Upgrade npm (fixes emnapi cpu-filter bug on Linux)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -466,6 +492,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
+
+      - name: Upgrade npm (fixes emnapi cpu-filter bug on Linux)
+        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
