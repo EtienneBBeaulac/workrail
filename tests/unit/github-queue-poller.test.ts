@@ -559,4 +559,97 @@ describe('checkIdempotency', () => {
     const status = await checkIdempotency(42, tmpDir);
     expect(status).toBe('clear');
   });
+
+  it('returns clear for sidecar with expired TTL and attemptCount (backward compat)', async () => {
+    // A sidecar with dispatchedAt=0 ttlMs=0 (written by incrementSidecarAttemptCount)
+    // should still return 'clear' from checkIdempotency -- the attempt count does not affect TTL.
+    const sidecar = {
+      issueNumber: 42,
+      triggerId: 'queue-trigger',
+      dispatchedAt: 0,
+      ttlMs: 0,
+      attemptCount: 2,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+
+    const status = await checkIdempotency(42, tmpDir);
+    expect(status).toBe('clear');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readSidecarAttemptCount tests
+// ---------------------------------------------------------------------------
+
+import { readSidecarAttemptCount } from '../../src/trigger/adapters/github-queue-poller.js';
+
+describe('readSidecarAttemptCount', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wt-attempt-count-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns 0 when no sidecar exists', async () => {
+    const count = await readSidecarAttemptCount(42, tmpDir);
+    expect(count).toBe(0);
+  });
+
+  it('returns 0 when sessions dir does not exist', async () => {
+    const nonExistentDir = path.join(tmpDir, 'does-not-exist');
+    const count = await readSidecarAttemptCount(42, nonExistentDir);
+    expect(count).toBe(0);
+  });
+
+  it('returns 0 on malformed sidecar JSON', async () => {
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), '{ not valid json }', 'utf8');
+    const count = await readSidecarAttemptCount(42, tmpDir);
+    expect(count).toBe(0);
+  });
+
+  it('returns 0 when sidecar has no attemptCount field (legacy sidecar)', async () => {
+    // Sidecars written before this fix have no attemptCount field.
+    // They should be treated as attempt count 0 (first-time dispatch after this feature is deployed).
+    const legacySidecar = {
+      issueNumber: 42,
+      triggerId: 'queue-trigger',
+      dispatchedAt: 0,
+      ttlMs: 0,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(legacySidecar), 'utf8');
+    const count = await readSidecarAttemptCount(42, tmpDir);
+    expect(count).toBe(0);
+  });
+
+  it('returns attemptCount when sidecar has the field', async () => {
+    const sidecar = {
+      issueNumber: 42,
+      triggerId: 'queue-trigger',
+      dispatchedAt: 0,
+      ttlMs: 0,
+      attemptCount: 3,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+    const count = await readSidecarAttemptCount(42, tmpDir);
+    expect(count).toBe(3);
+  });
+
+  it('returns 0 when attemptCount is non-integer (corrupt data)', async () => {
+    const sidecar = { issueNumber: 42, triggerId: 'queue-trigger', dispatchedAt: 0, ttlMs: 0, attemptCount: 'two' };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+    const count = await readSidecarAttemptCount(42, tmpDir);
+    expect(count).toBe(0);
+  });
+
+  it('returns 0 for a different issue number (only reads own sidecar)', async () => {
+    const sidecar = { issueNumber: 99, triggerId: 'queue-trigger', dispatchedAt: 0, ttlMs: 0, attemptCount: 5 };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-99.json'), JSON.stringify(sidecar), 'utf8');
+    // Issue 42 has no sidecar -- should return 0
+    const count = await readSidecarAttemptCount(42, tmpDir);
+    expect(count).toBe(0);
+  });
 });

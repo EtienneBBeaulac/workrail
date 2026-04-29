@@ -30,7 +30,7 @@ import type { TriggerRouter } from './trigger-router.js';
 import type { PolledEventStore } from './polled-event-store.js';
 import { pollGitLabMRs, type FetchFn, type GitLabMR } from './adapters/gitlab-poller.js';
 import { pollGitHubIssues, pollGitHubPRs, type GitHubIssue, type GitHubPR } from './adapters/github-poller.js';
-import { pollGitHubQueueIssues, inferMaturity, checkIdempotency, type GitHubQueueIssue, type FetchFn as QueueFetchFn } from './adapters/github-queue-poller.js';
+import { pollGitHubQueueIssues, inferMaturity, checkIdempotency, readSidecarAttemptCount, type GitHubQueueIssue, type FetchFn as QueueFetchFn } from './adapters/github-queue-poller.js';
 import { loadQueueConfig } from './github-queue-config.js';
 import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
 import type { PipelineOutcome } from '../coordinators/adaptive-pipeline.js';
@@ -38,6 +38,7 @@ import { DISCOVERY_TIMEOUT_MS } from '../coordinators/adaptive-pipeline.js';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -540,6 +541,23 @@ export class PollingScheduler {
     }
 
     const top = candidates[0]!;
+
+    // Dispatch loop protection: check attempt count BEFORE dispatching.
+    // readSidecarAttemptCount() returns 0 if no sidecar exists (first attempt) or on any
+    // read error (non-blocking -- see QueueIssueSidecar docs for asymmetric defaults).
+    const previousAttemptCount = await readSidecarAttemptCount(top.issue.number, sessionsDir);
+    if (previousAttemptCount >= queueConfig.maxDispatchAttempts) {
+      const msg = `Issue #${top.issue.number} "${top.issue.title}" has been attempted ${previousAttemptCount} time(s) (limit: ${queueConfig.maxDispatchAttempts}). Pausing dispatch. Human action required.`;
+      console.warn(`[QueuePoll] dispatch_cap_reached #${top.issue.number} attempts=${previousAttemptCount} limit=${queueConfig.maxDispatchAttempts}`);
+      await appendQueuePollLog({ event: 'task_skipped', issueNumber: top.issue.number, title: top.issue.title, reason: 'dispatch_cap_reached', attemptCount: previousAttemptCount, limit: queueConfig.maxDispatchAttempts, ts: new Date().toISOString() });
+      // Fire-and-forget cap actions: outbox write, GitHub label, GitHub comment.
+      // Dispatch skip is unconditional regardless of whether these succeed.
+      void postCapActions(top.issue, triggerId, previousAttemptCount, queueConfig, sessionsDir, this.fetchFn as QueueFetchFn | undefined);
+      console.log(`[QueuePoll] cycle complete (cap) skipped=${skipped.length + candidates.length} elapsed=${Date.now() - cycleStart}ms`);
+      return;
+    }
+    const attemptCount = previousAttemptCount + 1;
+
     const upstreamSpecUrl = extractUpstreamSpecUrl(top.issue.body);
 
     const taskCandidate: TaskCandidate = {
@@ -602,12 +620,18 @@ export class PollingScheduler {
     // across restarts so checkIdempotency() can detect active queue sessions even after crash.
     // TTL = DISCOVERY_TIMEOUT_MS + 60s: if the daemon crashes mid-run, the sidecar expires
     // naturally after this window and the issue becomes eligible for re-dispatch (RC3 fix).
+    //
+    // attemptCount starts at 1 on first dispatch and persists across TTL expiry.
+    // On success: sidecar deleted. On failure: incremented and rewritten (not deleted).
+    // Restart resets the count via clearQueueIssueSidecars() on daemon startup.
+    // See QueueIssueSidecar interface for the dual-purpose design rationale.
     const sidecarPath = path.join(sessionsDir, `queue-issue-${top.issue.number}.json`);
     const sidecarContent = JSON.stringify({
       issueNumber: top.issue.number,
       triggerId,
       dispatchedAt: Date.now(),
       ttlMs: DISCOVERY_TIMEOUT_MS + 60_000,
+      attemptCount,
     }, null, 2);
     void fs.writeFile(sidecarPath, sidecarContent, 'utf8').catch((e: unknown) => {
       console.warn(`[QueuePoll] Failed to write sidecar for issue #${top.issue.number}: ${e instanceof Error ? e.message : String(e)}`);
@@ -637,8 +661,10 @@ export class PollingScheduler {
       .catch(() => {
         this.dispatchingIssues.delete(issueNumber);
         console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=error`);
-        // Delete sidecar on error (pipeline rejected).
-        void fs.unlink(sidecarPath).catch(() => {});
+        // On failure: increment attemptCount and rewrite sidecar (do NOT delete).
+        // WHY: keeping the sidecar preserves the attempt count across TTL expiry so the
+        // dispatch loop protection can detect repeated failures. See QueueIssueSidecar.
+        void incrementSidecarAttemptCount(sidecarPath, issueNumber, triggerId);
       });
     console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
 
@@ -868,4 +894,161 @@ function describeMaturityReason(maturity: 'idea' | 'specced' | 'ready'): string 
     case 'specced': return 'has acceptance criteria or checklist';
     case 'idea': return 'maturity=idea, no upstream spec';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch loop protection helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Increment the attemptCount in an existing sidecar file.
+ *
+ * Called from the .catch() handler of dispatchAdaptivePipeline() to record that
+ * a dispatch attempt failed. The sidecar is rewritten with a new dispatchedAt=now
+ * and ttlMs=0 (expired immediately) so that checkIdempotency() will return 'clear'
+ * on the next poll cycle, allowing the attempt count to be checked.
+ *
+ * Fire-and-forget: errors are swallowed and logged; a failed write means the count
+ * is not incremented, which is acceptable (one extra dispatch may occur).
+ */
+async function incrementSidecarAttemptCount(
+  sidecarPath: string,
+  issueNumber: number,
+  triggerId: string,
+): Promise<void> {
+  // Read the current sidecar to get the existing attemptCount
+  let existingCount = 0;
+  try {
+    const content = await fs.readFile(sidecarPath, 'utf8');
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (typeof parsed['attemptCount'] === 'number' && parsed['attemptCount'] >= 0) {
+      existingCount = parsed['attemptCount'] as number;
+    }
+  } catch {
+    // File missing or malformed -- start from 0
+  }
+
+  const newContent = JSON.stringify({
+    issueNumber,
+    triggerId,
+    // Set dispatchedAt=0 and ttlMs=0 so checkIdempotency() returns 'clear' immediately.
+    // The sidecar is kept solely as a failure counter -- the TTL lock has no meaning here.
+    dispatchedAt: 0,
+    ttlMs: 0,
+    attemptCount: existingCount + 1,
+  }, null, 2);
+
+  try {
+    await fs.mkdir(path.dirname(sidecarPath), { recursive: true });
+    await fs.writeFile(sidecarPath, newContent, 'utf8');
+    console.log(`[QueuePoll] sidecar-increment #${issueNumber} attempts=${existingCount + 1}`);
+  } catch (e: unknown) {
+    console.warn(
+      `[QueuePoll] Failed to increment sidecar for issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
+/**
+ * Post cap-exceeded actions when an issue reaches maxDispatchAttempts.
+ *
+ * Actions (all fire-and-forget, non-fatal):
+ * 1. Write entry to ~/.workrail/outbox.jsonl (human notification)
+ * 2. Apply 'worktrain:needs-human' label to the GitHub issue
+ * 3. Post a comment explaining the issue was paused
+ *
+ * Each action is independent -- failure of one does not prevent the others.
+ * The dispatch skip is handled by the caller and is unconditional.
+ *
+ * WHY 'worktrain:needs-human' label must pre-exist: auto-creating labels on the
+ * first cap is a scope expansion. Operators who use the queue feature are expected
+ * to create this label on their repos. If absent, the API returns 422 and we log
+ * a warning.
+ */
+async function postCapActions(
+  issue: GitHubQueueIssue,
+  triggerId: string,
+  attemptCount: number,
+  queueConfig: import('./github-queue-config.js').GitHubQueueConfig,
+  sessionsDir: string,
+  fetchFn?: QueueFetchFn,
+): Promise<void> {
+  const msg = `WorkTrain paused dispatching issue #${issue.number} "${issue.title}" after ${attemptCount} failed attempt(s) (limit: ${queueConfig.maxDispatchAttempts}). Remove the 'worktrain:needs-human' label or restart the daemon to retry.`;
+
+  // 1. Write outbox notification
+  const outboxPath = path.join(os.homedir(), '.workrail', 'outbox.jsonl');
+  const outboxEntry = JSON.stringify({
+    id: randomUUID(),
+    message: msg,
+    timestamp: new Date().toISOString(),
+  });
+  try {
+    await fs.mkdir(path.dirname(outboxPath), { recursive: true });
+    await fs.appendFile(outboxPath, outboxEntry + '\n', 'utf8');
+  } catch (e: unknown) {
+    // Non-fatal: outbox write failure -- log to console so the operator still sees the notification
+    console.warn(
+      `[QueuePoll] cap_actions: failed to write outbox for issue #${issue.number}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    console.warn(`[QueuePoll] cap_notification #${issue.number}: ${msg}`);
+  }
+
+  // 2 & 3. GitHub API calls require a fetchFn and a token
+  if (!fetchFn) {
+    console.warn(`[QueuePoll] cap_actions: no fetchFn available, skipping GitHub label/comment for issue #${issue.number}`);
+    return;
+  }
+
+  const [owner, repo] = queueConfig.repo.split('/');
+  if (!owner || !repo) {
+    console.warn(`[QueuePoll] cap_actions: could not parse repo '${queueConfig.repo}', skipping GitHub actions`);
+    return;
+  }
+
+  const headers = {
+    'Authorization': `Bearer ${queueConfig.token}`,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type': 'application/json',
+  };
+
+  // 2. Apply 'worktrain:needs-human' label
+  const labelUrl = `https://api.github.com/repos/${owner}/${repo}/issues/${issue.number}/labels`;
+  try {
+    const labelResp = await fetchFn(labelUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ labels: ['worktrain:needs-human'] }),
+    });
+    if (!labelResp.ok) {
+      const status = labelResp.status;
+      if (status === 422) {
+        console.warn(
+          `[QueuePoll] cap_actions: 'worktrain:needs-human' label does not exist on ${queueConfig.repo}. ` +
+          `Create it manually to enable label-based human reset.`,
+        );
+      } else {
+        console.warn(`[QueuePoll] cap_actions: failed to apply label on issue #${issue.number}: HTTP ${status}`);
+      }
+    }
+  } catch (e: unknown) {
+    console.warn(`[QueuePoll] cap_actions: error applying label on issue #${issue.number}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // 3. Post comment
+  const commentUrl = `https://api.github.com/repos/${owner}/${repo}/issues/${issue.number}/comments`;
+  const commentBody = `WorkTrain paused dispatching this issue after **${attemptCount}** failed attempt(s) (limit: ${queueConfig.maxDispatchAttempts}).\n\nTo retry, either:\n- Remove the \`worktrain:needs-human\` label and restart the daemon\n- Close and reopen this issue\n\nTriggerId: \`${triggerId}\``;
+  try {
+    const commentResp = await fetchFn(commentUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ body: commentBody }),
+    });
+    if (!commentResp.ok) {
+      console.warn(`[QueuePoll] cap_actions: failed to post comment on issue #${issue.number}: HTTP ${commentResp.status}`);
+    }
+  } catch (e: unknown) {
+    console.warn(`[QueuePoll] cap_actions: error posting comment on issue #${issue.number}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
 }

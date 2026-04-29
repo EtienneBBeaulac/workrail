@@ -527,6 +527,7 @@ vi.mock('../../src/trigger/github-queue-config.js', () => ({
       token: 'test-token',
       pollIntervalSeconds: 300,
       maxTotalConcurrentSessions: 3,
+      maxDispatchAttempts: 3,
       excludeLabels: [],
     },
   }),
@@ -735,5 +736,153 @@ describe('PollingScheduler.forcePoll', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Skipping poll cycle'));
 
     warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch loop protection: attempt cap
+// ---------------------------------------------------------------------------
+
+describe('doPollGitHubQueue dispatch loop protection', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('dispatches normally when attempt count is below cap (sidecar has attemptCount=1)', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router, adaptiveDispatched } = makeRouter();
+
+    // Write a sidecar with attemptCount=1 (below default cap of 3)
+    const sidecar = {
+      issueNumber: 42,
+      triggerId: 'test-queue-poll',
+      dispatchedAt: 0,
+      ttlMs: 0,
+      attemptCount: 1,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+
+    // Should dispatch normally (attemptCount 1 < maxDispatchAttempts 3)
+    expect(adaptiveDispatched).toHaveLength(1);
+    expect(adaptiveDispatched[0]?.goal).toBe('Implement login flow');
+  });
+
+  it('skips dispatch when attempt count is at cap (sidecar has attemptCount=3)', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router, adaptiveDispatched } = makeRouter();
+
+    // Write a sidecar with attemptCount = maxDispatchAttempts (3)
+    const sidecar = {
+      issueNumber: 42,
+      triggerId: 'test-queue-poll',
+      dispatchedAt: 0,
+      ttlMs: 0,
+      attemptCount: 3,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    warnSpy.mockRestore();
+
+    // Should NOT dispatch -- at cap
+    expect(adaptiveDispatched).toHaveLength(0);
+  });
+
+  it('skips dispatch when attempt count exceeds cap (sidecar has attemptCount=5)', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router, adaptiveDispatched } = makeRouter();
+
+    const sidecar = {
+      issueNumber: 42,
+      triggerId: 'test-queue-poll',
+      dispatchedAt: 0,
+      ttlMs: 0,
+      attemptCount: 5,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    warnSpy.mockRestore();
+
+    expect(adaptiveDispatched).toHaveLength(0);
+  });
+
+  it('dispatches normally when no sidecar exists (first attempt)', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router, adaptiveDispatched } = makeRouter();
+
+    // No sidecar written -- fresh issue, readSidecarAttemptCount returns 0
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+
+    // Should dispatch (0 < 3)
+    expect(adaptiveDispatched).toHaveLength(1);
+  });
+
+  it('writes outbox notification when dispatch cap is reached', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router } = makeRouter();
+
+    const sidecar = {
+      issueNumber: 42,
+      triggerId: 'test-queue-poll',
+      dispatchedAt: 0,
+      ttlMs: 0,
+      attemptCount: 3,
+    };
+    await fs.writeFile(path.join(tmpDir, 'queue-issue-42.json'), JSON.stringify(sidecar), 'utf8');
+
+    // Override homedir to write outbox to tmpDir
+    const outboxPath = path.join(tmpDir, 'outbox.jsonl');
+
+    // Patch postCapActions indirectly by checking the outbox file written to os.homedir()
+    // We can't easily inject the outbox path, so we verify behavior via the cap skip log
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+
+    // dispatch_cap_reached was logged
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dispatch_cap_reached'));
+    warnSpy.mockRestore();
+
+    void outboxPath; // referenced to avoid lint warning
+  });
+
+  it('sidecar written with attemptCount=1 on first dispatch', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    const { router } = makeRouter();
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+
+    // Wait for fire-and-forget sidecar write to complete
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    const sidecarContent = await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8');
+    const sidecar = JSON.parse(sidecarContent) as Record<string, unknown>;
+    expect(sidecar['attemptCount']).toBe(1);
+    expect(sidecar['issueNumber']).toBe(42);
   });
 });

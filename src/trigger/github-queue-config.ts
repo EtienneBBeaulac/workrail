@@ -101,6 +101,17 @@ export interface GitHubQueueConfig {
    * Defaults to 'worktrain@users.noreply.github.com' when absent.
    */
   readonly botEmail?: string;
+  /**
+   * Maximum number of dispatch attempts per issue before the daemon stops retrying.
+   * When attemptCount >= maxDispatchAttempts, the poller skips the issue and writes
+   * a notification to ~/.workrail/outbox.jsonl.
+   * Default: 3. Must be a positive integer if configured.
+   *
+   * WHY this is in queue-config.json (not config.json): all WorkTrain daemon queue
+   * configuration lives in queue-config.json. The issue spec mentions 'config.json'
+   * generically; we follow the existing file convention here.
+   */
+  readonly maxDispatchAttempts: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +238,17 @@ export async function loadQueueConfig(
     maxTotalConcurrentSessions = rawMaxConcurrent;
   }
 
+  // maxDispatchAttempts: max retry attempts before an issue is permanently suppressed.
+  // Default: 3. Must be a positive integer.
+  const rawMaxDispatchAttempts = q['maxDispatchAttempts'];
+  let maxDispatchAttempts = 3;
+  if (rawMaxDispatchAttempts !== undefined) {
+    if (typeof rawMaxDispatchAttempts !== 'number' || !Number.isInteger(rawMaxDispatchAttempts) || rawMaxDispatchAttempts <= 0) {
+      return err('config.queue.maxDispatchAttempts must be a positive integer');
+    }
+    maxDispatchAttempts = rawMaxDispatchAttempts;
+  }
+
   // Optional array fields
   const rawExcludeLabels = q['excludeLabels'];
   let excludeLabels: readonly string[] = [];
@@ -282,6 +304,7 @@ export async function loadQueueConfig(
     ...(workOnAll ? { workOnAll } : {}),
     pollIntervalSeconds,
     maxTotalConcurrentSessions,
+    maxDispatchAttempts,
     excludeLabels,
     repo: rawRepo.trim(),
     token: resolvedToken,

@@ -86,6 +86,38 @@ export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 export const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.workrail', 'daemon-sessions');
 
 // ---------------------------------------------------------------------------
+// QueueIssueSidecar: the shape of queue-issue-<N>.json files
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape of the sidecar file written before each dispatch of a queue issue.
+ *
+ * WHY dual-purpose design:
+ * The sidecar serves two separate concerns:
+ *   1. Active-dispatch lock (TTL-based): `dispatchedAt + ttlMs > Date.now()` indicates
+ *      a session is currently in flight. Used by checkIdempotency().
+ *   2. Failure counter (persistent): `attemptCount` increments on each failed dispatch.
+ *      Survives TTL expiry. Only reset by daemon restart (clearQueueIssueSidecars()) or
+ *      manual sidecar deletion.
+ *
+ * These two fields have intentionally different lifecycles -- the lock expires,
+ * the counter persists. This is documented here to prevent future confusion.
+ */
+export interface QueueIssueSidecar {
+  readonly issueNumber: number;
+  readonly triggerId: string;
+  readonly dispatchedAt: number;
+  readonly ttlMs: number;
+  /**
+   * Number of times this issue has been dispatched (including the current dispatch).
+   * Value is 1 on the first dispatch, incremented on each failure.
+   * On success: sidecar is deleted (not incremented).
+   * On daemon restart: sidecar is deleted unconditionally by clearQueueIssueSidecars().
+   */
+  readonly attemptCount: number;
+}
+
+// ---------------------------------------------------------------------------
 // Rate limit check (same pattern as github-poller.ts)
 // ---------------------------------------------------------------------------
 
@@ -276,6 +308,13 @@ export function inferMaturity(body: string): 'idea' | 'specced' | 'ready' {
 // checkIdempotency: per-issue idempotency check via session file scan
 //
 // Conservative default: any parse error -> 'active' (never dispatch on uncertainty)
+//
+// NOTE on asymmetric conservative defaults (checkIdempotency vs readSidecarAttemptCount):
+// - checkIdempotency returns 'active' on error: conservative to prevent double-dispatch
+// - readSidecarAttemptCount returns 0 on error: non-blocking because a read error means
+//   we cannot confirm the issue is over-limit; one extra dispatch is preferable to
+//   permanently suppressing a valid issue due to a disk read error.
+// Both defaults are intentional and correct for their respective purposes.
 // ---------------------------------------------------------------------------
 
 /**
@@ -286,10 +325,14 @@ export function inferMaturity(body: string): 'idea' | 'specced' | 'ready' {
  * 1. Queue-issue sidecar file (`queue-issue-<issueNumber>.json`):
  *    Written by polling-scheduler.ts before dispatch; deleted on pipeline completion.
  *    Provides cross-restart idempotency for the dispatch window (RC3 fix).
- *    Sidecar format: `{ issueNumber, triggerId, dispatchedAt, ttlMs }`.
+ *    Sidecar format: see QueueIssueSidecar interface.
  *    If found and `dispatchedAt + ttlMs > Date.now()`: return 'active' (not expired).
  *    If found and expired: return 'clear' (pipeline window elapsed; eligible for re-dispatch).
  *    On any read/parse error for the sidecar: return 'active' (conservative).
+ *
+ *    NOTE: after this function returns 'clear', doPollGitHubQueue() calls
+ *    readSidecarAttemptCount() separately to check if the attempt cap has been reached.
+ *    These are two distinct checks with intentionally asymmetric conservative defaults.
  *
  * 2. Regular session files (all other `*.json` files):
  *    Written by persistTokens() -- contain `{ continueToken, checkpointToken, ts }`.
@@ -395,6 +438,61 @@ export async function checkIdempotency(
   }
 
   return 'clear';
+}
+
+// ---------------------------------------------------------------------------
+// readSidecarAttemptCount: read previous attempt count from an expired sidecar
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the previous attempt count from a queue-issue sidecar file.
+ *
+ * Called AFTER `checkIdempotency()` returns 'clear' (i.e. the sidecar TTL has expired
+ * or the sidecar doesn't exist) to determine if this issue has been attempted too many
+ * times already.
+ *
+ * Conservative default: 0 (not active).
+ * WHY 0 on error (asymmetric from checkIdempotency):
+ *   - checkIdempotency() returns 'active' on error -- conservative to prevent double-dispatch
+ *   - readSidecarAttemptCount() returns 0 on error -- non-blocking because a failed read
+ *     means we cannot confirm the issue is over-limit; one extra dispatch is preferable
+ *     to permanently suppressing a valid issue due to a disk read error.
+ *
+ * @param issueNumber - The GitHub issue number to check
+ * @param sessionsDir - Path to daemon-sessions directory (injectable for testing)
+ */
+export async function readSidecarAttemptCount(
+  issueNumber: number,
+  sessionsDir: string = DEFAULT_SESSIONS_DIR,
+): Promise<number> {
+  const sidecarFilePath = path.join(sessionsDir, `queue-issue-${issueNumber}.json`);
+  try {
+    const content = await fs.readFile(sidecarFilePath, 'utf8');
+    const parsed: unknown = JSON.parse(content);
+    if (typeof parsed !== 'object' || parsed === null) {
+      console.warn(`[QueuePoller] Malformed sidecar for issue #${issueNumber}: expected object`);
+      return 0;
+    }
+    const sidecar = parsed as Record<string, unknown>;
+    const attemptCount = sidecar['attemptCount'];
+    if (typeof attemptCount === 'number' && Number.isInteger(attemptCount) && attemptCount >= 0) {
+      return attemptCount;
+    }
+    // Sidecar exists but missing or invalid attemptCount field -- treat as 0
+    // (could be a legacy sidecar written before this field was added)
+    return 0;
+  } catch (e: unknown) {
+    const nodeErr = e as NodeJS.ErrnoException;
+    if (nodeErr.code === 'ENOENT') {
+      // No sidecar -- first time we've seen this issue
+      return 0;
+    }
+    // Unexpected read error -- log and default to 0 (non-blocking)
+    console.warn(
+      `[QueuePoller] Could not read sidecar attempt count for issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
