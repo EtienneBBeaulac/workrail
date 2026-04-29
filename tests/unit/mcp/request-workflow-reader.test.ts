@@ -714,3 +714,102 @@ describe('filterRememberedRootsForWorkspace', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// isWorkrailPackageDir guard -- walk skips workrail package checkouts
+// ---------------------------------------------------------------------------
+
+describe('discoverRootedWorkflowDirectories -- workrail package dir guard', () => {
+  afterEach(() => clearWalkCacheForTesting());
+
+  function makeWorkrailCheckout(dir: string): void {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'package.json'),
+      JSON.stringify({ name: '@exaudeus/workrail', version: '1.0.0' }),
+      'utf8',
+    );
+    // Add a workflows/ dir with a wr.* ID to simulate the real problem
+    const workflowsDir = path.join(dir, 'workflows');
+    fs.mkdirSync(workflowsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workflowsDir, 'wr.coding-task.json'),
+      JSON.stringify({ id: 'wr.coding-task', name: 'Coding Task', version: '1.0.0',
+        description: 'test', steps: [{ id: 's1', title: 'S1', prompt: 'Do it' }] }),
+      'utf8',
+    );
+  }
+
+  it('skips a remembered root that is itself a workrail package checkout', async () => {
+    const workrailCheckout = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-pkg-root-'));
+    try {
+      makeWorkrailCheckout(workrailCheckout);
+      const { discovered } = await discoverRootedWorkflowDirectories([workrailCheckout]);
+      // The workflows/ dir inside the checkout must NOT be discovered
+      expect(discovered).toHaveLength(0);
+    } finally {
+      fs.rmSync(workrailCheckout, { recursive: true, force: true });
+    }
+  });
+
+  it('skips a workrail checkout nested inside a broader remembered root', async () => {
+    const broadRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-pkg-nested-'));
+    try {
+      // broad-root/
+      //   projects/
+      //     workrail/   <-- workrail checkout, should be skipped
+      //       package.json  (name: @exaudeus/workrail)
+      //       workflows/wr.coding-task.json
+      //     other-project/
+      //       .workrail/workflows/  <-- should still be discovered
+      const workrailCheckout = path.join(broadRoot, 'projects', 'workrail');
+      makeWorkrailCheckout(workrailCheckout);
+
+      const otherWorkflowsDir = path.join(broadRoot, 'projects', 'other-project', '.workrail', 'workflows');
+      fs.mkdirSync(otherWorkflowsDir, { recursive: true });
+
+      const { discovered } = await discoverRootedWorkflowDirectories([broadRoot]);
+
+      // workrail checkout workflows/ must NOT appear
+      expect(discovered).not.toContain(path.resolve(workrailCheckout, 'workflows'));
+      // other project's .workrail/workflows SHOULD appear
+      expect(discovered).toContain(path.resolve(otherWorkflowsDir));
+    } finally {
+      fs.rmSync(broadRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not skip a directory with a different package name', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-pkg-other-'));
+    try {
+      const projectDir = path.join(tempRoot, 'my-project');
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectDir, 'package.json'),
+        JSON.stringify({ name: 'some-other-package', version: '1.0.0' }),
+        'utf8',
+      );
+      const workflowsDir = path.join(projectDir, '.workrail', 'workflows');
+      fs.mkdirSync(workflowsDir, { recursive: true });
+
+      const { discovered } = await discoverRootedWorkflowDirectories([tempRoot]);
+      expect(discovered).toContain(path.resolve(workflowsDir));
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not skip a directory with no package.json', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wr-pkg-none-'));
+    try {
+      const projectDir = path.join(tempRoot, 'my-project');
+      const workflowsDir = path.join(projectDir, '.workrail', 'workflows');
+      fs.mkdirSync(workflowsDir, { recursive: true });
+
+      const { discovered } = await discoverRootedWorkflowDirectories([tempRoot]);
+      expect(discovered).toContain(path.resolve(workflowsDir));
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});

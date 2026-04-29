@@ -193,10 +193,9 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
       expect(report.isValid).toBe(true); // Warning, not error
     });
 
-    it('2a. Non-wr.* bundled workflow vs project source → bundled wins (development-mode regression)', () => {
-      // Regression: when workrail runs from its own source repo, the project
-      // path equals the bundled workflows directory. Both sources register the
-      // same workflow files. The resolution layer must keep kind:'bundled'.
+    it('2a. wr.* bundled workflow vs project source → bundled wins (namespace protection)', () => {
+      // Bundled wins because the ID is wr.* -- the reserved namespace for canonical
+      // WorkRail workflows. Project sources cannot shadow wr.* bundled workflows.
       const bundledWf = wf(def('wr.coding-task'), createBundledSource());
       const projectWf = wf(def('wr.coding-task'), createProjectDirectorySource('/path/to/workrail/workflows'));
 
@@ -207,13 +206,33 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
 
       const resolved = resolveWorkflowCandidates(candidates, new Map());
 
-      // Bundled source wins even though the workflow ID does not start with 'wr.'
       expect(resolved).toHaveLength(1);
       expect(resolved[0]!.workflow.source.kind).toBe('bundled');
       expect(resolved[0]!.resolvedBy.kind).toBe('bundled_protected');
       if (resolved[0]!.resolvedBy.kind === 'bundled_protected') {
         expect(resolved[0]!.resolvedBy.bundledSourceRef).toBe(0);
         expect(resolved[0]!.resolvedBy.attemptedShadowRefs).toEqual([1]);
+      }
+    });
+
+    it('2a2. Non-wr.* bundled workflow vs project source → project wins (source_priority)', () => {
+      // Non-wr.* bundled workflows are NOT protected -- project sources can override
+      // them via normal source_priority. Only the wr.* namespace is reserved.
+      const bundledWf = wf(def('my-workflow'), createBundledSource());
+      const projectWf = wf(def('my-workflow'), createProjectDirectorySource('/path/to/project/workflows'));
+
+      const candidates = [
+        { sourceRef: 0 as SourceRef, workflows: [bundledWf] },
+        { sourceRef: 1 as SourceRef, workflows: [projectWf] },
+      ];
+
+      const resolved = resolveWorkflowCandidates(candidates, new Map());
+
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]!.resolvedBy.kind).toBe('source_priority');
+      if (resolved[0]!.resolvedBy.kind === 'source_priority') {
+        expect(resolved[0]!.resolvedBy.winnerRef).toBe(1);
+        expect(resolved[0]!.resolvedBy.shadowedRefs).toEqual([0]);
       }
     });
 
@@ -920,9 +939,8 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
         expect(unique[0]!.resolvedBy.sourceRef).toBe(0);
       }
 
-      // Test source_priority (bundled vs user — user wins via normal priority)
-      // Note: bundled vs project now triggers bundled_protected (see test 2a/2c).
-      // Use user source here to demonstrate normal source_priority ordering.
+      // Test source_priority: non-wr.* bundled vs user — user wins via normal priority.
+      // wr.* bundled workflows are protected (see tests 2, 2a, 2c); non-wr.* are not.
       const priority = resolveWorkflowCandidates(
         [
           { sourceRef: 0, workflows: [wf(def('wf'), createBundledSource())] },
