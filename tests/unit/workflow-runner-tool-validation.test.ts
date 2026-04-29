@@ -89,11 +89,11 @@ describe('Write tool validation', () => {
   });
 
   it('throws when content is missing', async () => {
-    await expectThrows(tool.execute.bind(tool), { filePath: '/tmp/f' }, 'Write: content');
+    await expectThrows(tool.execute.bind(tool), { filePath: tmpPath('test-file') }, 'Write: content');
   });
 
   it('throws when content is not a string', async () => {
-    await expectThrows(tool.execute.bind(tool), { filePath: '/tmp/f', content: null }, 'Write: content');
+    await expectThrows(tool.execute.bind(tool), { filePath: tmpPath('test-file'), content: null }, 'Write: content');
   });
 });
 
@@ -125,11 +125,11 @@ describe('Edit tool validation', () => {
   });
 
   it('throws when old_string is missing', async () => {
-    await expectThrows(tool.execute.bind(tool), { file_path: '/tmp/f', new_string: 'b' }, 'Edit: old_string');
+    await expectThrows(tool.execute.bind(tool), { file_path: tmpPath('test-file'), new_string: 'b' }, 'Edit: old_string');
   });
 
   it('throws when new_string is missing', async () => {
-    await expectThrows(tool.execute.bind(tool), { file_path: '/tmp/f', old_string: 'a' }, 'Edit: new_string');
+    await expectThrows(tool.execute.bind(tool), { file_path: tmpPath('test-file'), old_string: 'a' }, 'Edit: new_string');
   });
 });
 
