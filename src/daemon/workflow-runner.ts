@@ -520,8 +520,21 @@ export type SessionSource =
  * can wrap with this helper; new callers construct SessionSource directly.
  * When _preAllocatedStartResponse is set, maps the full schema response to
  * the narrower AllocatedSession shape (only the fields runWorkflow actually uses).
+ *
+ * WHY triggerSource parameter: _preAllocatedStartResponse is set by both daemon
+ * (TriggerRouter.dispatch, spawnSession) and console (console-routes.ts HTTP dispatch).
+ * Hardcoding 'daemon' would misattribute console-dispatched sessions. Callers must
+ * pass the correct source explicitly.
+ *
+ * WHY AllocatedSession omits preferences/nextIntent/nextCall:
+ * Those fields are unused by runWorkflow() -- only continueToken, checkpointToken,
+ * pending.prompt, and isComplete matter for session initialization. Narrowing here
+ * prevents future callers from accidentally depending on schema fields that may change.
  */
-export function sessionSourceFromTrigger(trigger: WorkflowTrigger): SessionSource {
+export function sessionSourceFromTrigger(
+  trigger: WorkflowTrigger,
+  triggerSource: 'daemon' | 'mcp' = 'daemon',
+): SessionSource {
   if (trigger._preAllocatedStartResponse !== undefined) {
     const r = trigger._preAllocatedStartResponse;
     return {
@@ -529,10 +542,13 @@ export function sessionSourceFromTrigger(trigger: WorkflowTrigger): SessionSourc
       trigger,
       session: {
         continueToken: r.continueToken ?? '',
+        // WHY string | null | undefined: the Zod schema uses .optional() (no null),
+        // but the module convention at line ~2707 normalises absent to null via ?? null.
+        // Preserving undefined here keeps the wrapper lossless; consumers normalise downstream.
         checkpointToken: r.checkpointToken,
         firstStepPrompt: r.pending?.prompt ?? '',
         isComplete: r.isComplete,
-        triggerSource: 'daemon',
+        triggerSource,
       },
     };
   }
