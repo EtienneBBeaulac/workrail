@@ -54,6 +54,7 @@ import { writeStatsSummary } from './stats-summary.js';
 import { injectPendingSteps } from './turn-end/step-injector.js';
 import { flushConversation } from './turn-end/conversation-flusher.js';
 import { type SessionScope, DefaultFileStateTracker } from './session-scope.js';
+import { DefaultContextLoader } from './context-loader.js';
 // Tool factories -- extracted to individual files under src/daemon/tools/.
 // Imported for use by constructTools() in this file, and re-exported for backward
 // compatibility (tests and other callers import from workflow-runner.ts).
@@ -2540,23 +2541,6 @@ export async function finalizeSession(
 // ---------------------------------------------------------------------------
 
 /**
- * Pre-loaded I/O results passed into buildSessionContext().
- * Each field is the result of a specific I/O operation that the shell performs
- * before calling buildSessionContext(). Keeping these separate makes the I/O
- * boundary explicit and the pure function testable without any I/O setup.
- */
-export interface SessionContextInputs {
-  /** Result of loadDaemonSoul() */
-  readonly soulContent: string;
-  /** Result of loadWorkspaceContext() -- null if no context files found */
-  readonly workspaceContext: string | null;
-  /** Result of loadSessionNotes() -- empty array if none */
-  readonly sessionNotes: readonly string[];
-  /** The first step's pending prompt from executeStartWorkflow / _preAllocatedStartResponse */
-  readonly firstStepPrompt: string;
-}
-
-/**
  * Everything the agent loop needs, produced by buildSessionContext().
  * Pure value -- no I/O, no closures, no mutable state.
  */
@@ -2568,28 +2552,42 @@ export interface SessionContext {
 }
 
 /**
- * Build the session configuration from pre-loaded I/O results.
+ * Build the session configuration from a ContextBundle and the first step prompt.
  *
  * This function is intentionally synchronous and pure -- all I/O (soul file,
  * workspace context, session notes) is resolved by the caller before invoking
  * this function. WHY: keeps the function unit-testable by passing pre-loaded
- * strings directly, without requiring any I/O or mocking in tests.
+ * values directly, without requiring any I/O or mocking in tests.
  *
  * @param trigger - The workflow trigger (provides agentConfig limits and context).
- * @param inputs - Pre-loaded I/O results (soul content, workspace context, etc.).
+ * @param context - The ContextBundle from DefaultContextLoader.loadSession().
+ * @param firstStepPrompt - The first step's pending prompt from executeStartWorkflow
+ *   or _preAllocatedStartResponse.
  * @returns SessionContext containing systemPrompt, initialPrompt, and session limits.
  */
 export function buildSessionContext(
   trigger: WorkflowTrigger,
-  inputs: SessionContextInputs,
+  context: import('./context-loader.js').ContextBundle,
+  firstStepPrompt: string,
 ): SessionContext {
+  // ---- Flatten ContextBundle to the primitives buildSystemPrompt expects ----
+  // WHY flatten here (not in DefaultContextLoader): buildSystemPrompt() is a stable
+  // pure function that predates ContextBundle. Flattening at the call site in
+  // buildSessionContext() keeps DefaultContextLoader decoupled from the prompt layer.
+  // workspaceRules[0].content: v1 always has at most one element (the aggregate from
+  // loadWorkspaceContext). The ?? null pattern converts undefined to null correctly
+  // since optional chaining returns undefined, not null.
+  const workspaceContext: string | null = context.workspaceRules[0]?.content ?? null;
+  // sessionHistory.map: restores the flat string[] that buildSessionRecap expects.
+  // nodeId/stepId are discarded here -- they are unused in v1.
+  const sessionNotes: readonly string[] = context.sessionHistory.map((n) => n.content);
+
   // ---- System prompt ----
   // buildSystemPrompt() is synchronous and pure. It reads assembledContextSummary
-  // and referenceUrls from trigger.context and trigger.referenceUrls directly,
-  // so the SessionContextInputs fields for those are supplementary documentation
-  // of what the trigger carries; the authoritative values flow through trigger.
-  const sessionState = buildSessionRecap(inputs.sessionNotes);
-  const systemPrompt = buildSystemPrompt(trigger, sessionState, inputs.soulContent, inputs.workspaceContext);
+  // and referenceUrls from trigger.context and trigger.referenceUrls directly;
+  // the authoritative values flow through trigger.
+  const sessionState = buildSessionRecap(sessionNotes);
+  const systemPrompt = buildSystemPrompt(trigger, sessionState, context.soulContent, workspaceContext);
 
   // ---- Initial prompt ----
   // WHY no continueToken in the initial prompt: the daemon uses complete_step which
@@ -2605,7 +2603,7 @@ export function buildSessionContext(
     : '';
 
   const initialPrompt =
-    inputs.firstStepPrompt +
+    firstStepPrompt +
     contextJson +
     '\n\nComplete all step work, then call complete_step with your notes to advance.';
 
@@ -3284,35 +3282,39 @@ export async function runWorkflow(
   // time and is not mutable after. All loads are best-effort; errors are
   // logged but never abort the session.
   //
-  // loadSessionNotes decodes startContinueToken to get the WorkRail sessionId,
-  // then reads the session store for prior step notes. For fresh sessions (no
-  // node_output_appended events yet), this returns [] and sessionState is ''.
+  // Phase 1 (loadBase): soul + workspace -- both are independent of the WorkRail
+  // session token. loadBase injects loadDaemonSoul and loadWorkspaceContext, which
+  // run concurrently inside DefaultContextLoader.loadBase().
+  //
+  // Phase 2 (loadSession): session notes -- requires startContinueToken to decode
+  // the WorkRail sessionId for the session store lookup. For fresh sessions (no
+  // node_output_appended events yet), loadSessionNotes returns [] and sessionState is ''.
   // For checkpoint-resumed sessions, it returns prior step notes for continuity.
+  //
   // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
   // not before. Populating the system prompt at construction time is the correct
   // pre-step-1 injection point.
+  //
   // trigger.soulFile is already cascade-resolved by trigger-store.ts:
   //   trigger soulFile -> workspace soulFile -> undefined (global fallback in loadDaemonSoul)
-  // NOTE: use trigger.workspacePath (not sessionWorkspacePath) for context loading.
+  //
+  // NOTE: DefaultContextLoader.loadBase uses trigger.workspacePath (not sessionWorkspacePath).
   // For worktree sessions, the context files (CLAUDE.md / AGENTS.md) live in the
   // main checkout, not the isolated worktree. The worktree only contains the agent's
-  // working changes.
-  const [soulContent, workspaceContext, sessionNotes] = await Promise.all([
-    loadDaemonSoul(trigger.soulFile),
-    loadWorkspaceContext(trigger.workspacePath),
-    startContinueToken ? loadSessionNotes(startContinueToken, ctx) : Promise.resolve([] as readonly string[]),
-  ]);
+  // working changes. See DefaultContextLoader.loadBase() WHY comment.
+  const contextLoader = new DefaultContextLoader(loadDaemonSoul, loadWorkspaceContext, loadSessionNotes, ctx);
+  const baseCtx = await contextLoader.loadBase(trigger);
+  const contextBundle = await contextLoader.loadSession(startContinueToken, baseCtx);
 
   // ---- Pure phase: build session configuration from pre-loaded I/O ----
   // buildSessionContext() is synchronous and pure -- it assembles the system
   // prompt, initial prompt, and session limits from the loaded data and trigger config.
   // WHY separated from I/O: makes prompt assembly testable without any fs or LLM mocking.
-  const sessionCtx = buildSessionContext(trigger, {
-    soulContent,
-    workspaceContext,
-    sessionNotes,
-    firstStepPrompt: firstStep.pending?.prompt ?? 'No step content available',
-  });
+  const sessionCtx = buildSessionContext(
+    trigger,
+    contextBundle,
+    firstStep.pending?.prompt ?? 'No step content available',
+  );
 
   // ---- Observability callbacks for AgentLoop ----
   const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD);
