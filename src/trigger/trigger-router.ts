@@ -41,6 +41,7 @@ import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
 import { runAdaptivePipeline } from '../coordinators/adaptive-pipeline.js';
+import { DispatchDeduplicator } from './dispatch-deduplicator.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -419,16 +420,15 @@ export class TriggerRouter {
    * number of unique keys dispatched in the last 30s -- always a small number
    * in practice.
    *
-   * IMPORTANT: This map is shared across route(), dispatch(), and
-   * dispatchAdaptivePipeline(). Any new dispatch path added to this class
-   * MUST include the dedup check (cleanup-on-entry + check + set) before
-   * calling queue.enqueue(). Omitting it from a new path silently re-opens
-   * the duplicate-pipeline bug on that path.
+   * Shared across route(), dispatch(), and dispatchAdaptivePipeline().
+   * The compile-time dependency on DispatchDeduplicator ensures new dispatch
+   * methods cannot bypass dedup by omission -- they must call the injected
+   * instance to compile.
    *
-   * @see dispatchAdaptivePipeline
+   * @see DispatchDeduplicator
    * @see ADAPTIVE_DEDUPE_TTL_MS
    */
-  private readonly _recentAdaptiveDispatches = new Map<string, number>();
+  private readonly _deduplicator: DispatchDeduplicator;
 
   /**
    * TTL for adaptive dispatch deduplication: 30 seconds.
@@ -504,6 +504,12 @@ export class TriggerRouter {
      * @see dispatchAdaptivePipeline
      */
     modeExecutors?: ModeExecutors,
+    /**
+     * Optional deduplicator for dispatch dedup guard.
+     * When absent, defaults to a new DispatchDeduplicator with ADAPTIVE_DEDUPE_TTL_MS.
+     * Inject in tests to control TTL or observe dedup behavior.
+     */
+    deduplicator?: DispatchDeduplicator,
   ) {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
@@ -512,6 +518,7 @@ export class TriggerRouter {
     this.abortRegistry = abortRegistry;
     this._coordinatorDeps = coordinatorDeps;
     this._modeExecutors = modeExecutors;
+    this._deduplicator = deduplicator ?? new DispatchDeduplicator(TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS);
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -666,25 +673,16 @@ export class TriggerRouter {
     // - The goal must be fully resolved (goalTemplate interpolation happens above).
     // - No trigger_fired event is emitted for deduped dispatches -- consistent with
     //   the dispatchCondition guard which also returns before the emitter call.
-    // WHY shared map (_recentAdaptiveDispatches): prevents duplicate dispatches within
-    // the same 30s window. Key format differs by path: route/dispatch use
-    // workflowId::goal::workspace; dispatchAdaptivePipeline uses goal::workspace.
+    // WHY shared deduplicator: prevents duplicate dispatches within the same 30s window.
+    // Key format differs by path: route/dispatch use workflowId::goal::workspace;
+    // dispatchAdaptivePipeline uses goal::workspace.
     // Cross-path suppression only applies when both paths produce the same key.
     {
       const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
-      const now = Date.now();
-      // Cleanup-on-entry: purge stale entries before checking/inserting.
-      for (const [key, ts] of this._recentAdaptiveDispatches) {
-        if (now - ts >= TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
-          this._recentAdaptiveDispatches.delete(key);
-        }
-      }
-      const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
-      if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+      if (this._deduplicator.checkAndRecord(dedupeKey)) {
         console.log(`[TriggerRouter] Skipping duplicate route dispatch: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
         return { _tag: 'enqueued', triggerId: trigger.id };
       }
-      this._recentAdaptiveDispatches.set(dedupeKey, now);
     }
 
     // Emit trigger_fired: the webhook was accepted and validated.
@@ -831,24 +829,15 @@ export class TriggerRouter {
     // explicitly intends to start this session. Skip the dedup block entirely.
     if (workflowTrigger._preAllocatedStartResponse === undefined) {
       // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
-      // WHY shared map (_recentAdaptiveDispatches): prevents duplicate dispatches within
-      // the same 30s window. Key format differs by path: route/dispatch use
-      // workflowId::goal::workspace; dispatchAdaptivePipeline uses goal::workspace.
+      // WHY shared deduplicator: prevents duplicate dispatches within the same 30s window.
+      // Key format differs by path: route/dispatch use workflowId::goal::workspace;
+      // dispatchAdaptivePipeline uses goal::workspace.
       // Cross-path suppression only applies when both paths produce the same key.
       const dedupeKey = `${workflowTrigger.workflowId}::${workflowTrigger.goal}::${workflowTrigger.workspacePath}`;
-      const now = Date.now();
-      // Cleanup-on-entry: purge stale entries before checking/inserting.
-      for (const [key, ts] of this._recentAdaptiveDispatches) {
-        if (now - ts >= TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
-          this._recentAdaptiveDispatches.delete(key);
-        }
-      }
-      const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
-      if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+      if (this._deduplicator.checkAndRecord(dedupeKey)) {
         console.log(`[TriggerRouter] Skipping duplicate dispatch: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}" (already dispatched within 30s)`);
         return workflowTrigger.workflowId;
       }
-      this._recentAdaptiveDispatches.set(dedupeKey, now);
     } else {
       console.log(`[TriggerRouter] Pre-allocated session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
     }
@@ -994,19 +983,7 @@ export class TriggerRouter {
     // fire-and-forget and do not branch on outcome.kind, so the impurity is harmless.
     // A 'skipped' variant would require widening PipelineOutcome, which is scope creep.
     const dedupeKey = `${goal}::${workspace}`;
-    const now = Date.now();
-
-    // Cleanup-on-entry: purge stale entries before checking/inserting.
-    // WHY cleanup-on-entry (not a background timer): avoids async state, keeps the
-    // implementation deterministic and trivially testable with vi.useFakeTimers().
-    for (const [key, ts] of this._recentAdaptiveDispatches) {
-      if (now - ts >= TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
-        this._recentAdaptiveDispatches.delete(key);
-      }
-    }
-
-    const lastDispatch = this._recentAdaptiveDispatches.get(dedupeKey);
-    if (lastDispatch !== undefined && now - lastDispatch < TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS) {
+    if (this._deduplicator.checkAndRecord(dedupeKey)) {
       console.log(
         `[TriggerRouter] Skipping duplicate adaptive dispatch: goal="${goal.slice(0, 60)}" ` +
         `(already dispatched within 30s)`,
@@ -1019,8 +996,6 @@ export class TriggerRouter {
         },
       };
     }
-
-    this._recentAdaptiveDispatches.set(dedupeKey, now);
 
     const opts: AdaptivePipelineOpts = {
       goal,
