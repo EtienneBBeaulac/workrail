@@ -428,7 +428,7 @@ describe('subscriber behavior: repeated_tool_call signal', () => {
       agentConfig: { stuckAbortPolicy: 'abort' },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     // The subscriber should have called agent.abort() and set stuckReason.
     expect(result._tag).toBe('stuck');
@@ -455,7 +455,7 @@ describe('subscriber behavior: repeated_tool_call signal', () => {
     // The session ends with end_turn (isComplete was never set, so _tag = 'error'
     // due to stopReason='end_turn' without isComplete -- actually 'success' since
     // stopReason is 'end_turn' and no error message. Let's verify the result is NOT stuck.
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     // With notify_only, stuck is NOT triggered even though the signal fired.
     expect(result._tag).not.toBe('stuck');
@@ -485,7 +485,7 @@ describe('subscriber behavior: no_progress signal', () => {
       },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('stuck');
     if (result._tag === 'stuck') {
@@ -513,7 +513,7 @@ describe('subscriber behavior: no_progress signal', () => {
       },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     // evaluateStuckSignals() fired no_progress, but the subscriber's
     // noProgressAbortEnabled gate suppressed the abort.
@@ -544,7 +544,7 @@ describe('subscriber behavior: no_progress signal', () => {
         },
       });
 
-      const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+      const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
       // With notify_only, session continues (not stuck).
       expect(result._tag).not.toBe('stuck');
@@ -577,7 +577,7 @@ describe('subscriber behavior: stuck takes priority over timeout', () => {
       },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     // stuckReason was set (no_progress), so _tag is 'stuck' even if timeoutReason was also set.
     expect(result._tag).toBe('stuck');
@@ -657,7 +657,7 @@ describe('stats file content: agent-loop paths', () => {
       .mockResolvedValueOnce(makeContinueOkResponse({ isComplete: true }));
 
     const trigger = makeTrigger();
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('success');
 
@@ -699,7 +699,7 @@ describe('stats file content: agent-loop paths', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (MockAgentLoop as any)._nextScript = [];
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('error');
 
@@ -720,7 +720,7 @@ describe('stats file content: agent-loop paths', () => {
       agentConfig: { stuckAbortPolicy: 'abort' },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('stuck');
 
@@ -748,7 +748,7 @@ describe('stats file content: agent-loop paths', () => {
       },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('timeout');
     if (result._tag === 'timeout') {
@@ -798,7 +798,7 @@ describe('sidecar lifecycle: agent-loop paths', () => {
 
     const trigger = makeTrigger(); // no branchStrategy (defaults to 'none')
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('success');
     // Sidecar must be deleted on success (non-worktree).
@@ -827,7 +827,7 @@ describe('sidecar lifecycle: agent-loop paths', () => {
       makeTrigger(),
       FAKE_CTX,
       FAKE_API_KEY,
-      undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined,
       statsDir, sessionsDir,
     );
 
@@ -848,7 +848,7 @@ describe('sidecar lifecycle: agent-loop paths', () => {
       agentConfig: { stuckAbortPolicy: 'abort' },
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('stuck');
     // Sidecar MUST be deleted on stuck path (was a bug before finalizeSession).
@@ -935,7 +935,7 @@ describe('turn_end subscriber: step injection and exit', () => {
       .mockResolvedValueOnce(makeContinueOkResponse({ isComplete: true }));
 
     const trigger = makeTrigger();
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     expect(result._tag).toBe('success');
 
@@ -963,7 +963,7 @@ describe('turn_end subscriber: step injection and exit', () => {
     );
 
     const trigger = makeTrigger();
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, statsDir, sessionsDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, statsDir, sessionsDir);
 
     // Clean success -- isComplete was set, no abort.
     expect(result._tag).toBe('success');

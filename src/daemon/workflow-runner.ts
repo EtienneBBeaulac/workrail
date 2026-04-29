@@ -55,6 +55,8 @@ import { injectPendingSteps } from './turn-end/step-injector.js';
 import { flushConversation } from './turn-end/conversation-flusher.js';
 import { type SessionScope, DefaultFileStateTracker } from './session-scope.js';
 import { DefaultContextLoader } from './context-loader.js';
+import { ActiveSessionSet } from './active-sessions.js';
+import type { SessionHandle } from './active-sessions.js';
 // Tool factories -- extracted to individual files under src/daemon/tools/.
 // Imported for use by constructTools() in this file, and re-exported for backward
 // compatibility (tests and other callers import from workflow-runner.ts).
@@ -2423,6 +2425,8 @@ export interface PreAgentSession {
   readonly agentClient: Anthropic | AnthropicBedrock;
   readonly modelId: string;
   readonly startMs: number;
+  /** Session handle from ActiveSessionSet. Undefined when no activeSessionSet injected. */
+  readonly handle?: SessionHandle;
 }
 
 /**
@@ -2650,7 +2654,7 @@ export async function buildPreAgentSession(
   sessionsDir: string,
   emitter: DaemonEventEmitter | undefined,
   daemonRegistry: DaemonRegistry | undefined,
-  steerRegistry: SteerRegistry | undefined,
+  activeSessionSet: ActiveSessionSet | undefined,
 ): Promise<PreAgentSessionResult> {
   // ---- Model setup ----
   let agentClient: Anthropic | AnthropicBedrock;
@@ -2795,9 +2799,10 @@ export async function buildPreAgentSession(
   // having registered. This means no cleanup is needed on those paths.
   // steer and daemon registries are registered here; abort registry is registered in
   // runWorkflow() AFTER agent construction (agent binding required).
+  let handle: SessionHandle | undefined;
   if (state.workrailSessionId !== null) {
     daemonRegistry?.register(state.workrailSessionId, trigger.workflowId);
-    steerRegistry?.set(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
+    handle = activeSessionSet?.register(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
   }
 
   // ---- Single-step completion (must check AFTER registry setup) ----
@@ -2811,7 +2816,7 @@ export async function buildPreAgentSession(
     emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(state.workrailSessionId) });
     if (state.workrailSessionId !== null) {
       daemonRegistry?.unregister(state.workrailSessionId, 'completed');
-      steerRegistry?.delete(state.workrailSessionId);
+      handle?.dispose();
     }
     writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'success', 0);
     return {
@@ -2844,6 +2849,7 @@ export async function buildPreAgentSession(
       agentClient,
       modelId,
       startMs,
+      ...(handle !== undefined ? { handle } : {}),
     },
   };
 }
@@ -2872,7 +2878,7 @@ function constructTools(
   scope: SessionScope,
 ): readonly AgentTool[] {
   const { state, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth } = session;
-  const { fileTracker, onAdvance, onComplete, emitter, abortRegistry, maxIssueSummaries } = scope;
+  const { fileTracker, onAdvance, onComplete, emitter, activeSessionSet, maxIssueSummaries } = scope;
   const sid = scope.sessionId;
   // WHY from scope (not state directly): SessionScope is the typed boundary for what
   // constructTools() is allowed to see. Passing state directly would leak all mutable
@@ -2925,7 +2931,7 @@ function constructTools(
       runWorkflow,
       schemas,
       emitter,
-      abortRegistry,
+      activeSessionSet,
     ),
     makeSignalCoordinatorTool(sid, emitter, workrailSid),
   ];
@@ -3184,8 +3190,7 @@ export async function runWorkflow(
   apiKey: string,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
-  steerRegistry?: SteerRegistry,
-  abortRegistry?: AbortRegistry,
+  activeSessionSet?: ActiveSessionSet,
   // Injectable for testing -- defaults to DAEMON_STATS_DIR and DAEMON_SESSIONS_DIR.
   // WHY: enables unit tests to verify stats file content and sidecar lifecycle
   // without touching real ~/.workrail/data or ~/.workrail/daemon-sessions directories.
@@ -3229,12 +3234,13 @@ export async function runWorkflow(
   // completion) and { kind: 'ready', session } when the agent loop should run.
   const preResult = await buildPreAgentSession(
     trigger, ctx, apiKey, sessionId, startMs,
-    statsDir, sessionsDir, emitter, daemonRegistry, steerRegistry,
+    statsDir, sessionsDir, emitter, daemonRegistry, activeSessionSet,
   );
   if (preResult.kind === 'complete') {
     return preResult.result;
   }
   const session = preResult.session;
+  const handle = session.handle;
 
   // Extract session fields needed in the agent loop phase.
   // readFileState, spawnCurrentDepth, spawnMaxDepth are consumed by constructTools.
@@ -3272,7 +3278,7 @@ export async function runWorkflow(
     emitter,
     sessionId,
     workflowId: trigger.workflowId,
-    abortRegistry,
+    activeSessionSet,
     maxIssueSummaries: MAX_ISSUE_SUMMARIES,
   };
   const tools = constructTools(session, ctx, apiKey, schemas, scope);
@@ -3341,25 +3347,12 @@ export async function runWorkflow(
       : {}),
   });
 
-  // ---- AbortRegistry: register abort callback now that agent is initialized ----
-  // WHY registered here (not before context loading): the closure `() => agent.abort()`
-  // references `agent`, which is declared with `const` above. Registering before `agent`
-  // is initialized would be a TDZ (Temporal Dead Zone) hazard -- the shutdown handler
-  // could call the callback on an early-exit path where `agent` was never assigned,
-  // throwing a ReferenceError. Registering here, after `const agent = new AgentLoop(...)`,
-  // guarantees the binding is initialized at the point of registration.
-  //
-  // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
-  // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
-  // agent directly.
-  //
-  // Registration gap: steerRegistry is registered ~336 lines earlier (before context loading).
-  // This abort registration happens after context loading completes, so there is a ~200-500ms
-  // window where SIGTERM will not abort this session. Sessions in that window run to completion
-  // or hit the wall-clock timeout. Accepted tradeoff -- see worktrain-daemon-invariants.md 3.4.
-  if (state.workrailSessionId !== null) {
-    abortRegistry?.set(state.workrailSessionId, () => { agent.abort(); });
-  }
+  // ---- Wire abort capability into the session handle ----
+  // setAgent() closes the TDZ gap: the handle was registered before AgentLoop existed;
+  // now that agent is constructed, setAgent() wires in the abort callback.
+  // abort() before setAgent() is a safe no-op, so SIGTERM during context loading
+  // does not crash -- the session just runs to completion or hits the wall-clock timeout.
+  handle?.setAgent(agent);
 
   // ---- Session limits (wall-clock timeout + max-turn limit) ----
   // Provided by buildSessionContext() -- resolved from trigger.agentConfig with
@@ -3464,18 +3457,10 @@ export async function runWorkflow(
     // already-fired or undefined handle is a safe no-op.
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
     // Deregister steer callback so the HTTP endpoint returns 404 for completed sessions.
-    // WHY in finally: must run even on error or abort -- stale registry entries would make
-    // the endpoint return 200 (calling the closed-over callback) on a dead session.
-    if (state.workrailSessionId !== null) {
-      steerRegistry?.delete(state.workrailSessionId);
-    }
-    // Deregister abort callback so the shutdown handler does not call abort() on a session
-    // that has already exited. WHY synchronous / WHY in finally: same rationale as steerRegistry
-    // above. The drain window in the shutdown handler polls abortRegistry.size to determine
-    // when all sessions have completed cleanup -- this delete is the signal that cleanup is done.
-    if (state.workrailSessionId !== null) {
-      abortRegistry?.delete(state.workrailSessionId);
-    }
+    // Dispose the session handle: deregisters from ActiveSessionSet so steer() stops
+    // working and abortRegistry.size decrements (shutdown drain window terminates).
+    // WHY in finally: must run even on error or abort.
+    handle?.dispose();
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
 
   }

@@ -964,7 +964,7 @@ export function mountConsoleRoutes(
       apiKey ?? '',
       undefined,   // daemonRegistry -- not available in this path
       undefined,   // emitter -- not available in this path
-      undefined,   // steer callbacks -- not applicable in standalone console
+      undefined,   // activeSessionSet -- not applicable in standalone console
     ).then((result) => {
       if (result._tag === 'success') {
         console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);

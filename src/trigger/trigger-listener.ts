@@ -26,7 +26,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import { loadTriggerConfigFromFile, buildTriggerIndex } from './trigger-store.js';
 import type { TriggerStoreError } from './trigger-store.js';
 import { TriggerRouter, type RunWorkflowFn } from './trigger-router.js';
-import type { SteerRegistry, AbortRegistry } from '../daemon/workflow-runner.js';
+import { ActiveSessionSet } from '../daemon/active-sessions.js';
 import { loadWorkrailConfigFile, loadWorkspacesFromConfigFile } from '../config/config-file.js';
 import { NotificationService } from './notification-service.js';
 import { runWorkflow, runStartupRecovery } from '../daemon/workflow-runner.js';
@@ -68,17 +68,10 @@ export interface TriggerListenerHandle {
    */
   readonly router: TriggerRouter;
   /**
-   * The steer registry shared with TriggerRouter.
-   * Used during daemon shutdown to emit session_aborted events for in-flight sessions.
+   * The active session set shared with TriggerRouter.
+   * Used during daemon shutdown to emit session_aborted events and abort all in-flight sessions.
    */
-  readonly steerRegistry: SteerRegistry;
-  /**
-   * The abort registry shared with TriggerRouter.
-   * Call each value to abort the corresponding in-flight AgentLoop.
-   * Used during daemon shutdown to stop all sessions immediately.
-   * Poll size to 0 to detect when all sessions have completed cleanup.
-   */
-  readonly abortRegistry: AbortRegistry;
+  readonly activeSessionSet: ActiveSessionSet;
   /**
    * The PollingScheduler instance created by this listener.
    * Used to manage the polling loop lifecycle (start/stop).
@@ -385,16 +378,9 @@ export async function startTriggerListener(
     : undefined;
 
   // Create the steer registry for coordinator injection via POST /sessions/:id/steer.
-  // WHY created here (not in TriggerRouter): trigger-listener.ts is the composition root
-  // that wires TriggerRouter and the console route layer together. Both need the SAME registry instance
-  // so the HTTP endpoint dispatches to callbacks registered by TriggerRouter's sessions.
-  const steerRegistry: SteerRegistry = new Map();
-
-  // Create the abort registry for graceful shutdown on SIGTERM/SIGINT.
-  // WHY created here (not in TriggerRouter): same composition-root rationale as steerRegistry.
-  // The shutdown handler in cli-worktrain.ts reads handle.abortRegistry and calls each
-  // abort callback to stop all in-flight AgentLoop instances simultaneously.
-  const abortRegistry: AbortRegistry = new Map();
+  // WHY created here (not in TriggerRouter): trigger-listener.ts is the composition root.
+  // Both TriggerRouter and the console route layer (steer HTTP endpoint) need the SAME instance.
+  const activeSessionSet = new ActiveSessionSet();
 
   // ---------------------------------------------------------------------------
   // Adaptive coordinator deps: wire real implementations for dispatchAdaptivePipeline.
@@ -454,7 +440,7 @@ export async function startTriggerListener(
 
   // Create router and Express app
   const runWorkflowFn: RunWorkflowFn = options.runWorkflowFn ?? runWorkflow;
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, steerRegistry, abortRegistry, coordinatorDeps, modeExecutors);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, activeSessionSet, coordinatorDeps, modeExecutors);
   // Bind the router's dispatch function so spawnSession can dispatch in-process.
   // WHY after construction: coordinatorDeps must be created before TriggerRouter (it's
   // a constructor arg), so dispatch can only be bound after the router exists.
@@ -531,8 +517,7 @@ export async function startTriggerListener(
       resolve({
         port: actualPort,
         router,
-        steerRegistry,
-        abortRegistry,
+        activeSessionSet,
         scheduler: pollingScheduler,
         stop: async () => {
           // Stop polling BEFORE closing the HTTP server to prevent dispatch()

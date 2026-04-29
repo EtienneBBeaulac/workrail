@@ -19,7 +19,8 @@
  * time and do not create module-level cycles.
  */
 
-import type { ReadFileState, AbortRegistry } from './workflow-runner.js';
+import type { ReadFileState } from './workflow-runner.js';
+import type { ActiveSessionSet } from './active-sessions.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 
 // ---------------------------------------------------------------------------
@@ -183,7 +184,7 @@ export interface SessionScope {
    * Used by `spawn_agent` to register/deregister child sessions.
    * May be undefined if graceful shutdown is not enabled.
    */
-  readonly abortRegistry: AbortRegistry | undefined;
+  readonly activeSessionSet: ActiveSessionSet | undefined;
 
   /**
    * Maximum number of issue summaries to collect during this session.

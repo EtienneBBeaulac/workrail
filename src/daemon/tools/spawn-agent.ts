@@ -14,7 +14,8 @@ import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
 // WHY import type: runWorkflow is passed as a parameter (runWorkflowFn), not called
 // directly. The type reference is erased at compile time -- no runtime circular dep.
-import type { runWorkflow, ChildWorkflowRunResult, AbortRegistry } from '../workflow-runner.js';
+import type { runWorkflow, ChildWorkflowRunResult } from '../workflow-runner.js';
+import type { ActiveSessionSet } from '../active-sessions.js';
 
 /**
  * Factory for the `spawn_agent` tool, which lets a parent session delegate sub-tasks
@@ -44,7 +45,7 @@ import type { runWorkflow, ChildWorkflowRunResult, AbortRegistry } from '../work
  * @param runWorkflowFn - Injected runWorkflow function (allows testing without real LLM calls).
  * @param schemas - Plain JSON Schema map from getSchemas().
  * @param emitter - Optional event emitter for structured lifecycle events.
- * @param abortRegistry - Registry for abort callbacks (used for graceful shutdown).
+ * @param activeSessionSet - Session registry for abort callbacks (graceful shutdown).
  */
 export function makeSpawnAgentTool(
   sessionId: string,
@@ -57,7 +58,7 @@ export function makeSpawnAgentTool(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   emitter?: DaemonEventEmitter,
-  abortRegistry?: AbortRegistry,
+  activeSessionSet?: ActiveSessionSet,
 ): AgentTool {
   return {
     name: 'spawn_agent',
@@ -181,8 +182,7 @@ export function makeSpawnAgentTool(
         apiKey,
         undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
         emitter,
-        undefined, // steerRegistry: child sessions are not steerable by coordinator
-        abortRegistry, // WHY: thread abort registry so child sessions are abortable on SIGTERM
+        activeSessionSet, // WHY: thread session set so child sessions are abortable on SIGTERM
       ) as ChildWorkflowRunResult;
       // WHY cast to ChildWorkflowRunResult: runWorkflow() returns WorkflowRunResult (4 variants)
       // for TriggerRouter compatibility, but structurally only produces success/error/timeout.
