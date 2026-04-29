@@ -313,6 +313,12 @@ const cleanupWorktreeStage: DeliveryStage = {
  * to this point after delivery completes.
  *
  * Only runs when branchStrategy === 'worktree' and sessionId is present.
+ *
+ * WHY sessionId guard (not sessionWorkspacePath): sessionId and sessionWorkspacePath
+ * are co-present -- both are set or both are absent for worktree sessions (see
+ * WorkflowRunSuccess in workflow-runner.ts). Gating on sessionId is equivalent to
+ * gating on sessionWorkspacePath for the deletion case; sessionId is what we need
+ * to construct the file path.
  */
 const deleteSidecarStage: DeliveryStage = {
   name: 'deleteSidecar',
