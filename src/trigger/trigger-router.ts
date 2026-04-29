@@ -25,7 +25,7 @@
 import * as crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SessionSource } from '../daemon/workflow-runner.js';
 import type { ActiveSessionSet } from '../daemon/active-sessions.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
@@ -94,6 +94,9 @@ export type RunWorkflowFn = (
   daemonRegistry?: import('../v2/infra/in-memory/daemon-registry/index.js').DaemonRegistry,
   emitter?: DaemonEventEmitter,
   activeSessionSet?: ActiveSessionSet,
+  _statsDir?: string,
+  _sessionsDir?: string,
+  source?: SessionSource,
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------
@@ -811,12 +814,12 @@ export class TriggerRouter {
    *
    * @returns The workflowId that was dispatched.
    */
-  dispatch(workflowTrigger: WorkflowTrigger): string {
+  dispatch(workflowTrigger: WorkflowTrigger, source?: SessionSource): string {
     // Pre-allocated session: executeStartWorkflow already created the session in the store.
     // Deduplication must not apply here -- dropping this dispatch would zombie the session.
-    // The presence of _preAllocatedStartResponse is authoritative evidence that the caller
-    // explicitly intends to start this session. Skip the dedup block entirely.
-    if (workflowTrigger._preAllocatedStartResponse === undefined) {
+    // A pre_allocated SessionSource is authoritative evidence that the caller explicitly
+    // intends to start this session. Skip the dedup block entirely.
+    if (source?.kind !== 'pre_allocated') {
       // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
       // WHY shared deduplicator: prevents duplicate dispatches within the same 30s window.
       // Key format differs by path: route/dispatch use workflowId::goal::workspace;
@@ -844,7 +847,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this._activeSessionSet);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this._activeSessionSet, undefined, undefined, source);
       } finally {
         this.semaphore.release();
       }

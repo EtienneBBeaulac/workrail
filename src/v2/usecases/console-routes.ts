@@ -24,6 +24,7 @@ import { isDevMode } from '../../mcp/dev-mode.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 // TODO: runWorkflow is imported from src/daemon/ -- remaining coupling to address when browser dispatch is redesigned
 import { runWorkflow } from '../../daemon/workflow-runner.js';
+import type { SessionSource, AllocatedSession } from '../../daemon/workflow-runner.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
@@ -905,8 +906,8 @@ export function mountConsoleRoutes(
     //
     // WHY executeStartWorkflow() here instead of inside runWorkflow(): runWorkflow()
     // calls executeStartWorkflow() internally. To avoid double-session-creation,
-    // we pass the pre-allocated response via WorkflowTrigger._preAllocatedStartResponse.
-    // runWorkflow() skips its own executeStartWorkflow() call when this field is set.
+    // we pass the pre-allocated response as a SessionSource to runWorkflow().
+    // runWorkflow() skips its own executeStartWorkflow() call when source.kind === 'pre_allocated'.
     // ---------------------------------------------------------------------------
     const startResult = await executeStartWorkflow(
       { workflowId, workspacePath, goal },
@@ -957,7 +958,15 @@ export function mountConsoleRoutes(
     }
 
     // Direct fire-and-forget: no queue serialization in this path.
-    const trigger = { workflowId, goal, workspacePath, context, _preAllocatedStartResponse: startResponse };
+    const trigger = { workflowId, goal, workspacePath, context };
+    const allocatedSession: AllocatedSession = {
+      continueToken: startResponse.continueToken ?? '',
+      checkpointToken: startResponse.checkpointToken,
+      firstStepPrompt: startResponse.pending?.prompt ?? '',
+      isComplete: startResponse.isComplete,
+      triggerSource: 'mcp',
+    };
+    const source: SessionSource = { kind: 'pre_allocated', trigger, session: allocatedSession };
     void runWorkflow(
       trigger,
       v2ToolContext,
@@ -965,6 +974,9 @@ export function mountConsoleRoutes(
       undefined,   // daemonRegistry -- not available in this path
       undefined,   // emitter -- not available in this path
       undefined,   // activeSessionSet -- not applicable in standalone console
+      undefined,   // _statsDir -- use default
+      undefined,   // _sessionsDir -- use default
+      source,
     ).then((result) => {
       if (result._tag === 'success') {
         console.log(`[ConsoleRoutes] Auto dispatch completed: workflowId=${workflowId} stopReason=${result.stopReason}`);

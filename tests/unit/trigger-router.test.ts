@@ -28,6 +28,7 @@ import type { TriggerDefinition, WebhookEvent } from '../../src/trigger/types.js
 import { asTriggerId } from '../../src/trigger/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 import type { NotificationService } from '../../src/trigger/notification-service.js';
+import type { SessionSource, AllocatedSession } from '../../src/daemon/workflow-runner.js';
 import { tmpPath } from '../helpers/platform.js';
 
 // ---------------------------------------------------------------------------
@@ -1928,9 +1929,9 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TriggerRouter.dispatch: _preAllocatedStartResponse dedup bypass
+// TriggerRouter.dispatch: pre_allocated SessionSource dedup bypass
 //
-// Verifies that dispatch() with _preAllocatedStartResponse set bypasses the
+// Verifies that dispatch() with a pre_allocated SessionSource bypasses the
 // 30s dedup window and calls runWorkflowFn, even when the same goal+workspace
 // was recently dispatched via dispatchAdaptivePipeline().
 //
@@ -1938,9 +1939,12 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
 // dispatchAdaptivePipeline() primes _recentAdaptiveDispatches with the same
 // goal::workspace key. Without the bypass, dispatch() returns early and the
 // pre-allocated session zombies in the store forever.
+//
+// A9 migration: source is now passed as second arg to dispatch() rather than
+// as WorkflowTrigger._preAllocatedStartResponse (field removed).
 // ---------------------------------------------------------------------------
 
-describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
+describe('TriggerRouter.dispatch pre_allocated SessionSource bypass', () => {
   /**
    * Minimal fake AdaptiveCoordinatorDeps for priming the dedup map via
    * dispatchAdaptivePipeline(). Only the fields called before executor dispatch
@@ -1973,15 +1977,15 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     vi.useRealTimers();
   });
 
-  it('dispatch() with _preAllocatedStartResponse bypasses dedup and calls runWorkflowFn', async () => {
+  it('dispatch() with pre_allocated SessionSource bypasses dedup and calls runWorkflowFn', async () => {
     // WHY: proves the fix for the zombie-session bug. The dedup map contains goal::workspace
-    // from a prior dispatch. dispatch() with _preAllocatedStartResponse must bypass the dedup
+    // from a prior dispatch. dispatch() with a pre_allocated SessionSource must bypass the dedup
     // check and call runWorkflowFn. Without the fix, runWorkflowFn is never called (dedup fires)
     // and the pre-allocated session zombies in the store.
     //
     // Scenario:
-    // 1. First dispatch() (no preAlloc) -- primes _recentAdaptiveDispatches['goal::workspace']
-    // 2. Second dispatch() (with preAlloc) -- must bypass dedup and call runWorkflowFn
+    // 1. First dispatch() (no source) -- primes _recentAdaptiveDispatches['goal::workspace']
+    // 2. Second dispatch() (with pre_allocated source) -- must bypass dedup and call runWorkflowFn
     //
     // NOTE: We prime the dedup map via dispatch() rather than dispatchAdaptivePipeline()
     // to avoid async complexity with fake timers. The bug fires whenever the map has the key,
@@ -1993,31 +1997,34 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     const goal = trigger.goal;
     const workspace = trigger.workspacePath;
 
-    // Step 1: First dispatch (no preAlloc) -- primes the dedup map AND calls runWorkflowFn (1st call)
+    // Step 1: First dispatch (no source) -- primes the dedup map AND calls runWorkflowFn (1st call)
     router.dispatch({ workflowId: trigger.workflowId, goal, workspacePath: workspace, context: {} });
 
-    // Step 2: Second dispatch WITH _preAllocatedStartResponse -- must bypass dedup (2nd call)
-    router.dispatch({
-      workflowId: trigger.workflowId,
-      goal,
-      workspacePath: workspace,
-      context: {},
-      _preAllocatedStartResponse: {} as Parameters<typeof router.dispatch>[0]['_preAllocatedStartResponse'],
-    });
+    // Step 2: Second dispatch WITH pre_allocated SessionSource -- must bypass dedup (2nd call)
+    const preAllocTrigger = { workflowId: trigger.workflowId, goal, workspacePath: workspace, context: {} };
+    const allocatedSession: AllocatedSession = {
+      continueToken: 'ct_test',
+      checkpointToken: undefined,
+      firstStepPrompt: '',
+      isComplete: false,
+      triggerSource: 'daemon',
+    };
+    const source: SessionSource = { kind: 'pre_allocated', trigger: preAllocTrigger, session: allocatedSession };
+    router.dispatch(preAllocTrigger, source);
 
     // Wait for the async queue to drain
     await new Promise<void>((r) => setTimeout(r, 20));
 
     // Both dispatches must have reached runWorkflowFn:
-    // - dispatch 1 (no preAlloc, first in window): primed map, called runWorkflowFn
-    // - dispatch 2 (with preAlloc): bypassed dedup map, called runWorkflowFn
+    // - dispatch 1 (no source, first in window): primed map, called runWorkflowFn
+    // - dispatch 2 (with pre_allocated source): bypassed dedup map, called runWorkflowFn
     // Total: exactly 2 calls
     expect(calls).toHaveLength(2);
     expect(calls[0]?.goal).toBe(goal);
     expect(calls[1]?.goal).toBe(goal);
   });
 
-  it('dispatch() WITHOUT _preAllocatedStartResponse is NOT suppressed by a prior dispatchAdaptivePipeline', async () => {
+  it('dispatch() without a pre_allocated source is NOT suppressed by a prior dispatchAdaptivePipeline', async () => {
     // WHY: since the dedup key for dispatch() now includes workflowId
     // (`${workflowId}::${goal}::${workspace}`) while dispatchAdaptivePipeline() uses
     // `${goal}::${workspace}`, the two paths no longer share dedup keys.
@@ -2053,7 +2060,7 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     // Advance by 10s (within 30s TTL)
     vi.advanceTimersByTime(10_000);
 
-    // dispatch() WITHOUT _preAllocatedStartResponse -- must NOT be suppressed because
+    // dispatch() without pre_allocated source -- must NOT be suppressed because
     // dispatch() uses `${workflowId}::${goal}::${workspace}` as its dedup key
     router.dispatch({
       workflowId: trigger.workflowId,
@@ -2078,10 +2085,10 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     logSpy.mockRestore();
   });
 
-  it('dispatch() WITHOUT _preAllocatedStartResponse deduplicates a repeat dispatch() within 30s', async () => {
+  it('dispatch() without pre_allocated source deduplicates a repeat dispatch() within 30s', async () => {
     // WHY: proves the dedup check still fires for normal dispatch() calls (without
-    // _preAllocatedStartResponse) when a prior dispatch() has the same workflowId+goal+workspace.
-    // This ensures the preAlloc bypass only applies to pre-allocated sessions, not all dispatch()s.
+    // a pre_allocated source) when a prior dispatch() has the same workflowId+goal+workspace.
+    // This ensures the bypass only applies to pre-allocated sessions, not all dispatch()s.
     vi.useFakeTimers();
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -2098,7 +2105,7 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
     // Advance by 10s (within 30s TTL)
     vi.advanceTimersByTime(10_000);
 
-    // Second dispatch() WITHOUT _preAllocatedStartResponse -- dedup must fire
+    // Second dispatch() without pre_allocated source -- dedup must fire
     router.dispatch({
       workflowId: trigger.workflowId,
       goal,

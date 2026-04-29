@@ -14,7 +14,7 @@ import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
 // WHY import type: runWorkflow is passed as a parameter (runWorkflowFn), not called
 // directly. The type reference is erased at compile time -- no runtime circular dep.
-import type { runWorkflow, ChildWorkflowRunResult } from '../workflow-runner.js';
+import type { runWorkflow, ChildWorkflowRunResult, SessionSource, AllocatedSession } from '../workflow-runner.js';
 import type { ActiveSessionSet } from '../active-sessions.js';
 
 /**
@@ -162,27 +162,40 @@ export function makeSpawnAgentTool(
       // a global Semaphore. Calling it from inside a running session would deadlock.
       // Direct await runWorkflow() is naturally blocking -- the parent's AgentLoop is paused
       // inside execute() until the child completes (AgentLoop.execute() is sequential).
+      const childTrigger = {
+        workflowId: String(params.workflowId),
+        goal: String(params.goal),
+        workspacePath: String(params.workspacePath),
+        context: params.context as Readonly<Record<string, unknown>> | undefined,
+        // WHY spawnDepth: child session constructs its own spawn_agent tool at depth+1.
+        // This is the mechanism by which depth limits propagate through the tree.
+        spawnDepth: currentDepth + 1,
+        // WHY parentSessionId: threads the parent link through runWorkflow -> executeStartWorkflow
+        // for context_set injection (alongside the session_created.data written above).
+        parentSessionId: thisWorkrailSessionId,
+      };
+      // WHY SessionSource: the session is already created above. runWorkflow() MUST NOT
+      // call executeStartWorkflow() again (invariant). SessionSource replaces the removed
+      // WorkflowTrigger._preAllocatedStartResponse field (A9 migration).
+      const r = startResult.value.response;
+      const childAllocatedSession: AllocatedSession = {
+        continueToken: r.continueToken ?? '',
+        checkpointToken: r.checkpointToken,
+        firstStepPrompt: r.pending?.prompt ?? '',
+        isComplete: r.isComplete,
+        triggerSource: 'daemon',
+      };
+      const childSource: SessionSource = { kind: 'pre_allocated', trigger: childTrigger, session: childAllocatedSession };
       const childResult = await runWorkflowFn(
-        {
-          workflowId: String(params.workflowId),
-          goal: String(params.goal),
-          workspacePath: String(params.workspacePath),
-          context: params.context as Readonly<Record<string, unknown>> | undefined,
-          // WHY spawnDepth: child session constructs its own spawn_agent tool at depth+1.
-          // This is the mechanism by which depth limits propagate through the tree.
-          spawnDepth: currentDepth + 1,
-          // WHY parentSessionId: threads the parent link through runWorkflow -> executeStartWorkflow
-          // for context_set injection (alongside the session_created.data written above).
-          parentSessionId: thisWorkrailSessionId,
-          // WHY _preAllocatedStartResponse: the session is already created above.
-          // runWorkflow() MUST NOT call executeStartWorkflow() again (invariant).
-          _preAllocatedStartResponse: startResult.value.response,
-        },
+        childTrigger,
         ctx,
         apiKey,
         undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
         emitter,
         activeSessionSet, // WHY: thread session set so child sessions are abortable on SIGTERM
+        undefined, // _statsDir: use default
+        undefined, // _sessionsDir: use default
+        childSource,
       ) as ChildWorkflowRunResult;
       // WHY cast to ChildWorkflowRunResult: runWorkflow() returns WorkflowRunResult (4 variants)
       // for TriggerRouter compatibility, but structurally only produces success/error/timeout.
