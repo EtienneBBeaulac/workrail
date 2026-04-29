@@ -481,6 +481,23 @@ export interface AllocatedSession {
    * place so the wire-up is a one-liner when that work is done.
    */
   readonly triggerSource: 'daemon' | 'mcp';
+  /**
+   * Effective workspace path for this session -- the directory the agent should work in.
+   *
+   * WHY here (not on WorkflowTrigger): the recovery path sets branchStrategy:'none' to
+   * suppress worktree re-creation, but the agent still needs to work in the existing
+   * worktree. If we set trigger.workspacePath = worktreePath, then buildSystemPrompt()'s
+   * isWorktreeSession check (effectiveWorkspacePath !== trigger.workspacePath) always
+   * evaluates false and the scope boundary paragraph is never injected.
+   *
+   * Carrying the effective path here lets buildPreAgentSession() override sessionWorkspacePath
+   * without changing trigger.workspacePath, so the comparison in buildSystemPrompt() stays
+   * correct for both fresh and recovered worktree sessions.
+   *
+   * Only set by the crash recovery path. Normal allocations leave this undefined and
+   * buildPreAgentSession() derives sessionWorkspacePath from trigger as usual.
+   */
+  readonly sessionWorkspacePath?: string;
 }
 
 /**
@@ -1163,18 +1180,30 @@ export async function runStartupRecovery(
             firstStepPrompt: rehydrated.pending.prompt ?? '',
             isComplete: rehydrated.isComplete,
             triggerSource: 'daemon',
+            // Pass the effective workspace path so buildPreAgentSession() can override
+            // sessionWorkspacePath for recovered worktree sessions. Without this, the
+            // recovery trigger has workspacePath=worktreePath (so the agent uses the
+            // correct directory) but isWorktreeSession evaluates false (no scope boundary).
+            // See AllocatedSession.sessionWorkspacePath for the full rationale.
+            ...(session.worktreePath !== undefined
+              ? { sessionWorkspacePath: session.worktreePath }
+              : {}),
           };
 
-          // Determine effective workspace: use the worktree path if the session had one
-          // (already verified to exist above), otherwise use the original workspacePath.
-          const effectiveWorkspacePath = session.worktreePath ?? session.workspacePath!;
           // Suppress worktree re-creation: the worktree already exists (or was never created).
           const branchStrategy: 'none' = 'none';
 
+          // WHY workspacePath = session.workspacePath (main checkout), not session.worktreePath:
+          // buildSystemPrompt() determines isWorktreeSession by comparing effectiveWorkspacePath
+          // against trigger.workspacePath. If both are set to the worktree path, isWorktreeSession
+          // is always false and the scope boundary paragraph is never injected. Setting
+          // trigger.workspacePath to the original main checkout preserves the comparison,
+          // and sessionWorkspacePath (from session.worktreePath) flows through buildPreAgentSession
+          // as the actual workspace the agent uses.
           const recoveredTrigger: WorkflowTrigger = {
             workflowId: session.workflowId!,
             goal: session.goal ?? 'Resumed session (crash recovery)',
-            workspacePath: effectiveWorkspacePath,
+            workspacePath: session.workspacePath!,
             branchStrategy,
           };
           const recoverySource: SessionSource = {
@@ -2885,6 +2914,17 @@ export async function buildPreAgentSession(
   // ---- Worktree isolation ----
   let sessionWorkspacePath = trigger.workspacePath;
   let sessionWorktreePath: string | undefined;
+
+  // Override sessionWorkspacePath for crash-recovered worktree sessions.
+  // WHY: the recovery path sets branchStrategy:'none' (suppress re-creation) but the
+  // agent still needs to work in the existing worktree. AllocatedSession.sessionWorkspacePath
+  // carries the worktree path; trigger.workspacePath stays as the main checkout so that
+  // buildSystemPrompt()'s isWorktreeSession check (effectiveWorkspacePath !== trigger.workspacePath)
+  // evaluates correctly and the scope boundary paragraph is injected.
+  if (effectiveSource.kind === 'pre_allocated' && effectiveSource.session.sessionWorkspacePath !== undefined) {
+    sessionWorkspacePath = effectiveSource.session.sessionWorkspacePath;
+    sessionWorktreePath = effectiveSource.session.sessionWorkspacePath;
+  }
 
   if (trigger.branchStrategy === 'worktree') {
     const branchPrefix = trigger.branchPrefix ?? 'worktrain/';
