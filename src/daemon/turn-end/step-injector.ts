@@ -4,7 +4,7 @@ import type { SessionState } from '../workflow-runner.js';
  * Drain `state.pendingSteerParts` and inject the combined message into the
  * next agent turn via `agent.steer()`.
  *
- * Pure effect: mutates `state.pendingSteerParts` (clears the array) and calls
+ * Side effects: mutates `state.pendingSteerParts` (clears the array) and calls
  * `agent.steer()`. Does nothing when the queue is empty or the session is
  * complete.
  *

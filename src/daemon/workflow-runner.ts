@@ -53,7 +53,6 @@ import { evaluateRecovery } from './session-recovery-policy.js';
 import { writeStatsSummary } from './stats-summary.js';
 import { injectPendingSteps } from './turn-end/step-injector.js';
 import { flushConversation } from './turn-end/conversation-flusher.js';
-import { detectStuck } from './turn-end/detect-stuck.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -4462,7 +4461,7 @@ export function buildTurnEndSubscriber(
     // Track turns for stuck detection.
     ctx.state.turnCount++;
 
-    const signal = detectStuck(ctx.state, ctx.stuckConfig);
+    const signal = evaluateStuckSignals(ctx.state, ctx.stuckConfig);
 
     if (signal !== null) {
       if (signal.kind === 'max_turns_exceeded') {
