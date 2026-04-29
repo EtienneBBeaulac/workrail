@@ -877,10 +877,14 @@ describe('doPollGitHubQueue dispatch loop protection', () => {
     const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
 
-    // Wait for fire-and-forget sidecar write to complete
-    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    // Poll until the fire-and-forget sidecar write completes (up to 2s).
+    // WHY waitFor: a fixed sleep is flaky on slow CI runners.
+    const sidecarPath = path.join(tmpDir, 'queue-issue-42.json');
+    await vi.waitFor(async () => {
+      await fs.access(sidecarPath);
+    }, { timeout: 2000, interval: 20 });
 
-    const sidecarContent = await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8');
+    const sidecarContent = await fs.readFile(sidecarPath, 'utf8');
     const sidecar = JSON.parse(sidecarContent) as Record<string, unknown>;
     expect(sidecar['attemptCount']).toBe(1);
     expect(sidecar['issueNumber']).toBe(42);
@@ -902,11 +906,16 @@ describe('doPollGitHubQueue dispatch loop protection', () => {
     const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
     await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
 
-    // Wait for fire-and-forget sidecar write AND the failure handler to complete
-    await new Promise<void>((resolve) => setTimeout(resolve, 200));
-
-    const sidecarContent = await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8');
-    const sidecar = JSON.parse(sidecarContent) as Record<string, unknown>;
+    // Poll until the failure handler's sidecar rewrite completes (up to 2s).
+    // WHY waitFor: the failure handler is fire-and-forget; fixed sleeps are flaky on CI.
+    const sidecarPath = path.join(tmpDir, 'queue-issue-42.json');
+    let sidecar: Record<string, unknown> = {};
+    await vi.waitFor(async () => {
+      const content = await fs.readFile(sidecarPath, 'utf8');
+      sidecar = JSON.parse(content) as Record<string, unknown>;
+      // The failure handler writes ttlMs=0; wait until we see the final state.
+      expect(sidecar['ttlMs']).toBe(0);
+    }, { timeout: 2000, interval: 20 });
 
     // Should be 1 (the attemptCount recorded at dispatch), not 2 (which would happen
     // if the failure handler re-read the sidecar and added 1 again).
