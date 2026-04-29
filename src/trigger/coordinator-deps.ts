@@ -101,6 +101,10 @@ export function createCoordinatorDeps(
 
   return {
     setDispatch(fn: (trigger: WorkflowTrigger) => void): void {
+      if (dispatch !== null) {
+        process.stderr.write('[WARN coordinator-deps] setDispatch() called more than once -- ignoring reassignment\n');
+        return;
+      }
       dispatch = fn;
     },
 
