@@ -3404,7 +3404,7 @@ async function buildAgentReadySession(
 async function runAgentLoop(
   session: AgentReadySession,
   trigger: WorkflowTrigger,
-  sessionsDir: string,
+  conversationPath: string,
 ): Promise<SessionOutcome> {
   const { agent, preAgentSession, sessionCtx, sessionId, handle } = session;
   const { state } = preAgentSession;
@@ -3432,7 +3432,8 @@ async function runAgentLoop(
   // WHY initialized to 0: the first turn_end flush includes the initial user message
   // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
   // WHY fire-and-forget: write failures must never affect the agent loop.
-  const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
+  // WHY conversationPath as parameter: computed once in runWorkflow() and shared with
+  // the finalizationCtx so both use the identical path, eliminating duplicate formula.
   // WHY lastFlushedRef as object: the mutable counter must be shared by reference
   // between the turn_end subscriber (via buildTurnEndSubscriber) and the finally block
   // final flush below. A primitive let cannot be shared by reference across a closure boundary.
@@ -3513,9 +3514,8 @@ async function runAgentLoop(
     // and mutate the closed-over timeoutReason variable. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-    // Deregister steer callback so the HTTP endpoint returns 404 for completed sessions.
     // Dispose the session handle: deregisters from ActiveSessionSet so steer() stops
-    // working and abortRegistry.size decrements (shutdown drain window terminates).
+    // working and activeSessionSet.size decrements (shutdown drain window terminates).
     // WHY in finally: must run even on error or abort.
     handle?.dispose();
     console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
@@ -3617,7 +3617,8 @@ export async function runWorkflow(
   );
 
   // ---- Agent loop phase: run prompt loop to completion ----
-  const outcome = await runAgentLoop(readySession, trigger, sessionsDir);
+  const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
+  const outcome = await runAgentLoop(readySession, trigger, conversationPath);
 
   // Map SessionOutcome back to the raw stopReason/errorMessage that buildSessionResult expects.
   const stopReason = outcome.kind === 'aborted' ? 'error' : outcome.stopReason;
@@ -3625,7 +3626,6 @@ export async function runWorkflow(
 
   // ---- Build finalization context (shared across all result paths) ----
   const { state, sessionWorktreePath } = readySession.preAgentSession;
-  const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
   const finalizationCtx: FinalizationContext = {
     sessionId,
     workrailSessionId: state.workrailSessionId,
