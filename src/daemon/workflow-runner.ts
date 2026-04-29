@@ -25,7 +25,7 @@ import 'reflect-metadata';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { exec, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { glob as tinyGlob } from 'tinyglobby';
 import { randomUUID } from 'node:crypto';
@@ -78,7 +78,6 @@ export {
   makeSignalCoordinatorTool,
 };
 
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
