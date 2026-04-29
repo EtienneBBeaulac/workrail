@@ -51,6 +51,9 @@ import { ok, err } from '../runtime/result.js';
 import type { Result } from '../runtime/result.js';
 import { evaluateRecovery } from './session-recovery-policy.js';
 import { writeStatsSummary } from './stats-summary.js';
+import { injectPendingSteps } from './turn-end/step-injector.js';
+import { flushConversation } from './turn-end/conversation-flusher.js';
+import { detectStuck } from './turn-end/detect-stuck.js';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -4459,7 +4462,7 @@ export function buildTurnEndSubscriber(
     // Track turns for stuck detection.
     ctx.state.turnCount++;
 
-    const signal = evaluateStuckSignals(ctx.state, ctx.stuckConfig);
+    const signal = detectStuck(ctx.state, ctx.stuckConfig);
 
     if (signal !== null) {
       if (signal.kind === 'max_turns_exceeded') {
@@ -4493,17 +4496,10 @@ export function buildTurnEndSubscriber(
     }
 
     // Conversation history: delta-append after each turn.
-    const currentMessages = ctx.agent.state.messages;
-    const newMessages = currentMessages.slice(ctx.lastFlushedRef.count);
-    ctx.lastFlushedRef.count = currentMessages.length;
-    void appendConversationMessages(ctx.conversationPath, newMessages).catch(() => {});
+    flushConversation(ctx.agent.state.messages, ctx.lastFlushedRef, ctx.conversationPath, appendConversationMessages);
 
     // Steer injection: drain pendingSteerParts into the next turn.
-    if (ctx.state.pendingSteerParts.length > 0 && !ctx.state.isComplete) {
-      const joined = ctx.state.pendingSteerParts.join('\n\n');
-      ctx.state.pendingSteerParts.length = 0;
-      ctx.agent.steer(buildUserMessage(joined));
-    }
+    injectPendingSteps(ctx.state, ctx.agent);
   };
 }
 
