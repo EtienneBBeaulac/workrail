@@ -4500,6 +4500,129 @@ export function buildTurnEndSubscriber(
 }
 
 // ---------------------------------------------------------------------------
+// buildAgentCallbacks -- observability callback wiring
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the AgentLoopCallbacks that wire daemon event emission to the agent loop.
+ *
+ * Pure: no I/O, no side effects -- each callback calls emitter?.emit() which is
+ * fire-and-forget (void, errors swallowed by AgentLoop's try/catch guards).
+ * onToolCallStarted also updates the stuck-detection ring buffer in state.
+ */
+export function buildAgentCallbacks(
+  sessionId: string,
+  state: SessionState,
+  modelId: string,
+  emitter: DaemonEventEmitter | undefined,
+  stuckRepeatThreshold: number,
+): AgentLoopCallbacks {
+  return {
+    onLlmTurnStarted: ({ messageCount }) => {
+      emitter?.emit({ kind: 'llm_turn_started', sessionId, messageCount, modelId, ...withWorkrailSession(state.workrailSessionId) });
+    },
+    onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
+      emitter?.emit({ kind: 'llm_turn_completed', sessionId, stopReason, outputTokens, inputTokens, toolNamesRequested, ...withWorkrailSession(state.workrailSessionId) });
+    },
+    onToolCallStarted: ({ toolName, argsSummary }) => {
+      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(state.workrailSessionId) });
+      // WHY here: fires synchronously before tool.execute() so the ring buffer reflects
+      // the most recent tool calls at turn_end check time. Bounded at stuckRepeatThreshold.
+      state.lastNToolCalls.push({ toolName, argsSummary });
+      if (state.lastNToolCalls.length > stuckRepeatThreshold) state.lastNToolCalls.shift();
+    },
+    onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
+      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(state.workrailSessionId) });
+    },
+    onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
+      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(state.workrailSessionId) });
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// buildSessionResult -- pure result construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the WorkflowRunResult for the completed session.
+ *
+ * Pure: reads state and trigger config, produces a typed result value.
+ * Does NOT call finalizeSession -- the caller is responsible for that.
+ *
+ * WHY pure: the result-building logic is deterministic from its inputs.
+ * Extracting it makes the mapping from session state to result type
+ * independently readable and testable.
+ */
+export function buildSessionResult(
+  state: Readonly<SessionState>,
+  stopReason: string,
+  errorMessage: string | undefined,
+  trigger: WorkflowTrigger,
+  sessionId: string,
+  sessionWorktreePath: string | undefined,
+): WorkflowRunResult {
+  // Stuck takes priority over timeout (invariant 1.4).
+  if (state.stuckReason !== null) {
+    return {
+      _tag: 'stuck',
+      workflowId: trigger.workflowId,
+      reason: state.stuckReason,
+      message: `Session aborted: stuck heuristic fired (${state.stuckReason})`,
+      stopReason: 'aborted',
+      ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
+    };
+  }
+
+  if (state.timeoutReason !== null) {
+    const limitDescription = state.timeoutReason === 'wall_clock'
+      ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
+      : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
+    return {
+      _tag: 'timeout',
+      workflowId: trigger.workflowId,
+      reason: state.timeoutReason,
+      message: `Workflow ${state.timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
+      stopReason: 'aborted',
+    };
+  }
+
+  if (stopReason === 'error' || errorMessage) {
+    const errMsg = errorMessage ?? 'Agent stopped with error reason';
+    const lastToolCalled = state.lastNToolCalls.length > 0 ? state.lastNToolCalls[state.lastNToolCalls.length - 1] : null;
+    const stuckMarker = `\n\nWORKTRAIN_STUCK: ${JSON.stringify({
+      reason: 'session_error',
+      error: errMsg.slice(0, 500),
+      workflowId: trigger.workflowId,
+      sessionId,
+      turnCount: state.turnCount,
+      stepAdvanceCount: state.stepAdvanceCount,
+      ...(lastToolCalled !== null && { lastToolCalled }),
+      ...(state.issueSummaries.length > 0 && { issueSummaries: state.issueSummaries }),
+    })}`;
+    return {
+      _tag: 'error',
+      workflowId: trigger.workflowId,
+      message: errMsg,
+      stopReason,
+      lastStepNotes: stuckMarker,
+    };
+  }
+
+  // Success
+  return {
+    _tag: 'success',
+    workflowId: trigger.workflowId,
+    stopReason,
+    ...(state.lastStepNotes !== undefined ? { lastStepNotes: state.lastStepNotes } : {}),
+    ...(state.lastStepArtifacts !== undefined ? { lastStepArtifacts: state.lastStepArtifacts } : {}),
+    ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
+    ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
+    ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -4645,49 +4768,7 @@ export async function runWorkflow(
   });
 
   // ---- Observability callbacks for AgentLoop ----
-  // Wire structured event emission for LLM turns and tool calls.
-  // WHY callbacks not direct emitter: AgentLoop is decoupled from DaemonEventEmitter.
-  // Each callback calls emitter?.emit() which is fire-and-forget (void, errors swallowed).
-  // The try/catch guards inside AgentLoop ensure callbacks never crash the loop.
-  const agentCallbacks: AgentLoopCallbacks = {
-    onLlmTurnStarted: ({ messageCount }) => {
-      emitter?.emit({
-        kind: 'llm_turn_started',
-        sessionId,
-        messageCount,
-        modelId,
-        ...withWorkrailSession(state.workrailSessionId),
-      });
-    },
-    onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
-      emitter?.emit({
-        kind: 'llm_turn_completed',
-        sessionId,
-        stopReason,
-        outputTokens,
-        inputTokens,
-        toolNamesRequested,
-        ...withWorkrailSession(state.workrailSessionId),
-      });
-    },
-    onToolCallStarted: ({ toolName, argsSummary }) => {
-      emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(state.workrailSessionId) });
-      // Update the stuck-detection ring buffer.
-      // WHY here: this callback fires synchronously before tool.execute() so the
-      // ring buffer always reflects the most recent tool calls at turn_end check time.
-      // WHY bounded by STUCK_REPEAT_THRESHOLD: O(1) space, no history accumulation.
-      state.lastNToolCalls.push({ toolName, argsSummary });
-      if (state.lastNToolCalls.length > STUCK_REPEAT_THRESHOLD) {
-        state.lastNToolCalls.shift();
-      }
-    },
-    onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
-      emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(state.workrailSessionId) });
-    },
-    onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
-      emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(state.workrailSessionId) });
-    },
-  };
+  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD);
 
   // ---- AgentLoop (one per runWorkflow() call, not reused) ----
   // WHY AgentLoop instead of pi-agent-core's Agent: AgentLoop is the first-party
@@ -4865,86 +4946,10 @@ export async function runWorkflow(
     workflowId: trigger.workflowId,
   };
 
-  // ---- Stuck result (repeated_tool_call or no_progress abort) ----
-  // Checked before timeoutReason: if both somehow fired (same-turn race), stuck
-  // is the more specific signal and takes priority over the generic wall-clock timeout.
-  // In practice, the max_turns path sets timeoutReason = 'max_turns' and returns early
-  // (before stuck checks run) so the race only applies to wall_clock.
-  if (state.stuckReason !== null) {
-    const result: WorkflowRunResult = {
-      _tag: 'stuck',
-      workflowId: trigger.workflowId,
-      reason: state.stuckReason,
-      message: `Session aborted: stuck heuristic fired (${state.stuckReason})`,
-      stopReason: 'aborted',
-      ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
-    };
-    await finalizeSession(result, finalizationCtx);
-    return result;
-  }
-
-  // ---- Timeout result (wall-clock or max-turn limit) ----
-  if (state.timeoutReason !== null) {
-    const limitDescription = state.timeoutReason === 'wall_clock'
-      ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
-      : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
-    const result: WorkflowRunResult = {
-      _tag: 'timeout',
-      workflowId: trigger.workflowId,
-      reason: state.timeoutReason,
-      message: `Workflow ${state.timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
-      stopReason: 'aborted',
-    };
-    await finalizeSession(result, finalizationCtx);
-    return result;
-  }
-
-  // ---- Error result ----
-  if (stopReason === 'error' || errorMessage) {
-    const errMsg = errorMessage ?? 'Agent stopped with error reason';
-    // Append a structured stuck marker so coordinator scripts can detect and act on it.
-    // WHY: parseable by worktrain coordinator scripts without LLM involvement --
-    // scripts-over-agent for routing decisions.
-    const lastToolCalled = state.lastNToolCalls.length > 0 ? state.lastNToolCalls[state.lastNToolCalls.length - 1] : null;
-    const stuckMarker = `\n\nWORKTRAIN_STUCK: ${JSON.stringify({
-      reason: 'session_error',
-      error: errMsg.slice(0, 500),
-      workflowId: trigger.workflowId,
-      sessionId,
-      turnCount: state.turnCount,
-      stepAdvanceCount: state.stepAdvanceCount,
-      ...(lastToolCalled !== null && { lastToolCalled }),
-      ...(state.issueSummaries.length > 0 && { issueSummaries: state.issueSummaries }),
-    })}`;
-    const result: WorkflowRunResult = {
-      _tag: 'error',
-      workflowId: trigger.workflowId,
-      message: errMsg,
-      stopReason,
-      lastStepNotes: stuckMarker,
-    };
-    await finalizeSession(result, finalizationCtx);
-    return result;
-  }
-
-  // ---- Success result ----
-  // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
-  // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
-  // finishes. TriggerRouter.maybeRunDelivery() is the sole success-path worktree removal.
-  const result: WorkflowRunResult = {
-    _tag: 'success',
-    workflowId: trigger.workflowId,
-    stopReason,
-    ...(state.lastStepNotes !== undefined ? { lastStepNotes: state.lastStepNotes } : {}),
-    ...(state.lastStepArtifacts !== undefined ? { lastStepArtifacts: state.lastStepArtifacts } : {}),
-    // WHY sessionWorkspacePath: trigger-router.ts reads this to use the correct working
-    // directory for delivery (git add, commit, push, gh pr create).
-    ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
-    // WHY sessionId: trigger-router.ts reads this for branch assertion before git push.
-    ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
-    // WHY botIdentity: trigger-router.ts passes this to delivery-action.ts for per-command git identity.
-    ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
-  };
+  // ---- Build and finalize result ----
+  // buildSessionResult() is pure -- it reads state and trigger config, produces the result.
+  // finalizeSession() handles all I/O: event emission, registry cleanup, stats, sidecar deletion.
+  const result = buildSessionResult(state, stopReason, errorMessage, trigger, sessionId, sessionWorktreePath);
   await finalizeSession(result, finalizationCtx);
   return result;
 }
