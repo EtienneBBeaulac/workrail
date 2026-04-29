@@ -200,7 +200,7 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
       } as never,
     });
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, tmpDir, tmpDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, tmpDir, tmpDir);
     expect(result._tag).toBe('success');
 
     // Wait for the entire fire-and-forget write chain to settle before reading.
@@ -218,7 +218,7 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
       error: { kind: 'workflow_not_found', message: 'workflow not found' },
     });
 
-    const result = await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, tmpDir, tmpDir);
+    const result = await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, tmpDir, tmpDir);
     expect(result._tag).toBe('error');
 
     await settleFireAndForget();
@@ -233,7 +233,7 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
       makeTrigger({ agentConfig: { model: 'badformat' } }),
       FAKE_CTX,
       FAKE_API_KEY,
-      undefined, undefined, undefined, undefined, tmpDir, tmpDir,
+      undefined, undefined, undefined, tmpDir, tmpDir,
     );
     expect(result._tag).toBe('error');
 

@@ -1802,8 +1802,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       undefined, // maxConcurrentSessions
       undefined, // emitter
       undefined, // notificationService
-      undefined, // steerRegistry
-      undefined, // abortRegistry
+      undefined, // activeSessionSet
       FAKE_DEPS,
       executors,
     );
@@ -1855,8 +1854,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       undefined,
       undefined,
       undefined,
-      undefined, // steerRegistry
-      undefined, // abortRegistry
+      undefined, // activeSessionSet
       FAKE_DEPS,
       executors,
     );
@@ -1905,8 +1903,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       undefined,
       undefined,
       undefined,
-      undefined, // steerRegistry
-      undefined, // abortRegistry
+      undefined, // activeSessionSet
       FAKE_DEPS,
       executors,
     );
@@ -2042,8 +2039,7 @@ describe('TriggerRouter.dispatch _preAllocatedStartResponse bypass', () => {
       undefined,
       undefined,
       undefined,
-      undefined, // steerRegistry
-      undefined, // abortRegistry
+      undefined, // activeSessionSet
       FAKE_DEPS_FOR_BYPASS,
       executors,
     );

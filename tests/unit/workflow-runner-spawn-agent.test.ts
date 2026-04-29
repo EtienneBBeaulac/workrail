@@ -436,25 +436,25 @@ describe('makeSpawnAgentTool() result mapping', () => {
     expect(parsed.artifacts).toEqual([]);
   });
 
-  it('threads abortRegistry through to child runWorkflowFn (F2: child sessions abortable on SIGTERM)', async () => {
-    // Verifies that makeSpawnAgentTool passes abortRegistry to the child runWorkflowFn call.
+  it('threads activeSessionSet through to child runWorkflowFn (F2: child sessions abortable on SIGTERM)', async () => {
+    // Verifies that makeSpawnAgentTool passes activeSessionSet to the child runWorkflowFn call.
     // Without this, child sessions created via spawn_agent are invisible to the shutdown handler
     // and cannot be aborted on SIGTERM.
-    const abortRegistry = new Map<string, () => void>();
-    let capturedAbortRegistry: unknown;
+    const { ActiveSessionSet } = await import('../../src/daemon/active-sessions.js');
+    const activeSessionSet = new ActiveSessionSet();
+    let capturedSessionSet: unknown;
 
-    // The stub captures the abortRegistry argument (7th positional param of runWorkflow:
-    // trigger, ctx, apiKey, daemonRegistry, emitter, steerRegistry, abortRegistry).
+    // The stub captures the activeSessionSet argument (6th positional param of runWorkflow:
+    // trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet).
     const runWorkflowStub: typeof import('../../src/daemon/workflow-runner.js').runWorkflow = async (
       _trigger,
       _ctx,
       _apiKey,
       _daemonRegistry,
       _emitter,
-      _steerRegistry,
-      capturedReg,
+      capturedSet,
     ) => {
-      capturedAbortRegistry = capturedReg;
+      capturedSessionSet = capturedSet;
       return {
         _tag: 'success',
         workflowId: 'test-workflow',
@@ -474,12 +474,12 @@ describe('makeSpawnAgentTool() result mapping', () => {
       runWorkflowStub as any,
       FAKE_SCHEMAS,
       undefined, // emitter
-      abortRegistry,
+      activeSessionSet,
     );
 
     await tool.execute('call-1', FAKE_PARAMS);
 
-    // The abortRegistry passed to makeSpawnAgentTool MUST be forwarded to the child session.
-    expect(capturedAbortRegistry).toBe(abortRegistry);
+    // The activeSessionSet passed to makeSpawnAgentTool MUST be forwarded to the child session.
+    expect(capturedSessionSet).toBe(activeSessionSet);
   });
 });

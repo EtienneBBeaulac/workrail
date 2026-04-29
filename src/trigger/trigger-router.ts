@@ -25,7 +25,8 @@
 import * as crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SteerRegistry, AbortRegistry } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed } from '../daemon/workflow-runner.js';
+import type { ActiveSessionSet } from '../daemon/active-sessions.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';
 import { KeyedAsyncQueue } from '../v2/infra/in-memory/keyed-async-queue/index.js';
@@ -92,8 +93,7 @@ export type RunWorkflowFn = (
   apiKey: string,
   daemonRegistry?: import('../v2/infra/in-memory/daemon-registry/index.js').DaemonRegistry,
   emitter?: DaemonEventEmitter,
-  steerRegistry?: SteerRegistry,
-  abortRegistry?: AbortRegistry,
+  activeSessionSet?: ActiveSessionSet,
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------
@@ -395,8 +395,7 @@ export class TriggerRouter {
   private readonly _maxConcurrentSessions: number;
   private readonly emitter: DaemonEventEmitter | undefined;
   private readonly notificationService: NotificationService | undefined;
-  private readonly steerRegistry: SteerRegistry | undefined;
-  private readonly abortRegistry: AbortRegistry | undefined;
+  private readonly _activeSessionSet: ActiveSessionSet | undefined;
   private readonly _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
 
@@ -469,20 +468,11 @@ export class TriggerRouter {
      */
     notificationService?: NotificationService,
     /**
-     * Optional steer registry for coordinator injection via POST /sessions/:id/steer.
-     * When provided, daemon sessions register a steer callback on start and deregister
-     * on completion. The HTTP endpoint dispatches to the registered callback.
-     * When absent, the steer endpoint returns 404 for all sessions handled by this router.
+     * Optional active session set for steer injection and graceful shutdown.
+     * Replaces the former SteerRegistry + AbortRegistry pair.
+     * When absent, steer endpoint returns 404 and SIGTERM does not abort sessions.
      */
-    steerRegistry?: SteerRegistry,
-    /**
-     * Optional abort registry for graceful daemon shutdown.
-     * When provided, daemon sessions register an abort callback on start and deregister
-     * on completion. The shutdown handler calls all registered callbacks to abort every
-     * in-flight AgentLoop simultaneously, then waits for sessions to finish cleanup.
-     * When absent, SIGTERM does not abort in-flight sessions (they run to completion).
-     */
-    abortRegistry?: AbortRegistry,
+    activeSessionSet?: ActiveSessionSet,
     /**
      * Optional adaptive coordinator dependencies for in-process pipeline dispatch.
      * When provided, dispatchAdaptivePipeline() uses these as default deps.
@@ -514,8 +504,7 @@ export class TriggerRouter {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
     this.notificationService = notificationService;
-    this.steerRegistry = steerRegistry;
-    this.abortRegistry = abortRegistry;
+    this._activeSessionSet = activeSessionSet;
     this._coordinatorDeps = coordinatorDeps;
     this._modeExecutors = modeExecutors;
     this._deduplicator = deduplicator ?? new DispatchDeduplicator(TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS);
@@ -717,7 +706,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry, this.abortRegistry);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this._activeSessionSet);
       } finally {
         this.semaphore.release();
       }
@@ -855,7 +844,7 @@ export class TriggerRouter {
       await this.semaphore.acquire();
       let result: WorkflowRunResult;
       try {
-        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this.steerRegistry, this.abortRegistry);
+        result = await this.runWorkflowFn(workflowTrigger, this.ctx, this.apiKey, undefined, this.emitter, this._activeSessionSet);
       } finally {
         this.semaphore.release();
       }
