@@ -997,6 +997,10 @@ export async function runStartupRecovery(
   _countStepAdvancesFn: typeof countOrphanStepAdvances = countOrphanStepAdvances,
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
   _runWorkflowFn: typeof runWorkflow = runWorkflow,
+  // WHY last / default '': adding after all injectable params keeps every existing call
+  // site valid without positional changes. Production passes the key from startTriggerListener;
+  // tests that don't exercise the resume path can omit it.
+  apiKey: string = '',
 ): Promise<void> {
   // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
   // WHY first: queue-issue cleanup is independent of session state and must
@@ -1210,7 +1214,7 @@ export async function runStartupRecovery(
           void _runWorkflowFn(
             recoveredTrigger,
             ctx!,
-            process.env['ANTHROPIC_API_KEY'] ?? '',
+            apiKey,
           ).then((result) => {
             console.log(
               `[WorkflowRunner] Startup recovery: resumed session ${session.sessionId} completed: ${result._tag}`,
