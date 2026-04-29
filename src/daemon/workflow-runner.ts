@@ -2204,6 +2204,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       _toolCallId: string,
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.command !== 'string' || !params.command) throw new Error('Bash: command must be a non-empty string');
       console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
       const cwd = params.cwd ?? workspacePath;
@@ -2309,6 +2310,7 @@ export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas:
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Read: filePath must be a non-empty string');
       const filePath: string = params.filePath;
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
 
@@ -2364,6 +2366,8 @@ export function makeWriteTool(readFileState: Map<string, ReadFileState>, schemas
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Write: filePath must be a non-empty string');
+      if (typeof params.content !== 'string') throw new Error('Write: content must be a string');
       const filePath: string = params.filePath;
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
 
@@ -2423,6 +2427,7 @@ export function makeGlobTool(workspacePath: string, schemas: Record<string, any>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.pattern !== 'string' || !params.pattern) throw new Error('Glob: pattern must be a non-empty string');
       const pattern: string = params.pattern;
       const searchRoot: string = params.path ?? workspacePath;
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Glob', summary: pattern.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
@@ -2487,6 +2492,7 @@ export function makeGrepTool(workspacePath: string, schemas: Record<string, any>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.pattern !== 'string' || !params.pattern) throw new Error('Grep: pattern must be a non-empty string');
       const pattern: string = params.pattern;
       const searchPath: string = params.path ?? workspacePath;
       const outputMode: string = params.output_mode ?? 'files_with_matches';
@@ -2574,6 +2580,9 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.file_path !== 'string' || !params.file_path) throw new Error('Edit: file_path must be a non-empty string');
+      if (typeof params.old_string !== 'string') throw new Error('Edit: old_string must be a string');
+      if (typeof params.new_string !== 'string') throw new Error('Edit: new_string must be a string');
       const rawFilePath: string = params.file_path;
       const absoluteFilePath = path.isAbsolute(rawFilePath)
         ? rawFilePath
@@ -2744,6 +2753,9 @@ export function makeSpawnAgentTool(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.workflowId !== 'string' || !params.workflowId) throw new Error('spawn_agent: workflowId must be a non-empty string');
+      if (typeof params.goal !== 'string' || !params.goal) throw new Error('spawn_agent: goal must be a non-empty string');
+      if (typeof params.workspacePath !== 'string' || !params.workspacePath) throw new Error('spawn_agent: workspacePath must be a non-empty string');
       console.log(`[WorkflowRunner] Tool: spawn_agent sessionId=${sessionId} workflowId=${String(params.workflowId)} depth=${currentDepth}/${maxDepth}`);
       emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent', summary: `${String(params.workflowId)} depth=${currentDepth}`, ...withWorkrailSession(thisWorkrailSessionId) });
 
@@ -3078,6 +3090,9 @@ export function makeReportIssueTool(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.kind !== 'string' || !params.kind) throw new Error('report_issue: kind must be a non-empty string');
+      if (typeof params.severity !== 'string' || !params.severity) throw new Error('report_issue: severity must be a non-empty string');
+      if (typeof params.summary !== 'string' || !params.summary) throw new Error('report_issue: summary must be a non-empty string');
       const record: IssueRecord = {
         sessionId,
         kind: params.kind as IssueRecord['kind'],
@@ -3238,6 +3253,7 @@ export function makeSignalCoordinatorTool(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+      if (typeof params.signalKind !== 'string' || !params.signalKind) throw new Error('signal_coordinator: signalKind must be a non-empty string');
       const signalId = 'sig_' + randomUUID().replace(/-/g, '').slice(0, 8);
       const signalKind = String(params.signalKind ?? 'progress');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -4376,6 +4392,114 @@ function constructTools(
 }
 
 // ---------------------------------------------------------------------------
+// buildTurnEndSubscriber -- turn_end event handler factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Dependencies for the turn_end subscriber.
+ *
+ * WHY a named interface: makes the dependency surface of the subscriber
+ * explicit and visible at the call site in runWorkflow(). All mutations
+ * (state, lastFlushedRef) are explicit -- the subscriber is intentionally
+ * impure and this interface documents that impurity.
+ */
+export interface TurnEndSubscriberContext {
+  readonly agent: AgentLoop;
+  /** Mutable session state -- subscriber increments turnCount and reads stuck signals. */
+  readonly state: SessionState;
+  readonly stuckConfig: StuckConfig;
+  readonly sessionId: string;
+  readonly workflowId: string;
+  readonly emitter: DaemonEventEmitter | undefined;
+  readonly conversationPath: string;
+  /**
+   * Mutable counter for conversation flush tracking.
+   * WHY an object (not a primitive): allows the counter to be shared by reference
+   * across multiple turns without re-creating the closure.
+   */
+  readonly lastFlushedRef: { count: number };
+  readonly stuckRepeatThreshold: number;
+}
+
+/**
+ * Build the turn_end subscriber for the agent loop.
+ *
+ * Returns a subscriber function that handles: tool_error emission, stuck
+ * detection, conversation history flush, and steer injection.
+ *
+ * WHY a named factory (not inline in runWorkflow): separates the subscription
+ * logic from the session setup, making both independently readable.
+ *
+ * WHY intentionally impure: the subscriber mutates ctx.state (turnCount,
+ * stuckReason, timeoutReason, pendingSteerParts) and ctx.lastFlushedRef.count.
+ * These mutations are the subscriber's job -- this impurity is by design.
+ */
+export function buildTurnEndSubscriber(
+  ctx: TurnEndSubscriberContext,
+): (event: AgentEvent) => Promise<void> {
+  return async (event: AgentEvent): Promise<void> => {
+    if (event.type !== 'turn_end') return;
+
+    // Emit tool_error events for any tool results that reported isError=true.
+    for (const toolResult of event.toolResults) {
+      if (toolResult.isError) {
+        const errorText = toolResult.result?.content[0]?.text ?? 'tool error';
+        ctx.emitter?.emit({ kind: 'tool_error', sessionId: ctx.sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200), ...withWorkrailSession(ctx.state.workrailSessionId) });
+      }
+    }
+
+    // Track turns for stuck detection.
+    ctx.state.turnCount++;
+
+    const signal = evaluateStuckSignals(ctx.state, ctx.stuckConfig);
+
+    if (signal !== null) {
+      if (signal.kind === 'max_turns_exceeded') {
+        ctx.state.timeoutReason = 'max_turns';
+        ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'timeout_imminent', detail: 'Max-turn limit reached', ...withWorkrailSession(ctx.state.workrailSessionId) });
+        ctx.agent.abort();
+        return;
+      } else if (signal.kind === 'repeated_tool_call') {
+        ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'repeated_tool_call', detail: `Same tool+args called ${ctx.stuckRepeatThreshold} times: ${signal.toolName}`, toolName: signal.toolName, argsSummary: signal.argsSummary, ...withWorkrailSession(ctx.state.workrailSessionId) });
+        void writeStuckOutboxEntry({ workflowId: ctx.workflowId, reason: 'repeated_tool_call', ...(ctx.state.issueSummaries.length > 0 ? { issueSummaries: [...ctx.state.issueSummaries] } : {}) });
+        if (ctx.stuckConfig.stuckAbortPolicy !== 'notify_only' && ctx.state.stuckReason === null && ctx.state.timeoutReason === null) {
+          ctx.state.stuckReason = 'repeated_tool_call';
+          ctx.agent.abort();
+          return;
+        }
+      } else if (signal.kind === 'no_progress') {
+        ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'no_progress', detail: `${signal.turnCount} turns used, 0 step advances (${signal.maxTurns} turn limit)`, ...withWorkrailSession(ctx.state.workrailSessionId) });
+        if (ctx.stuckConfig.noProgressAbortEnabled) {
+          void writeStuckOutboxEntry({ workflowId: ctx.workflowId, reason: 'no_progress', ...(ctx.state.issueSummaries.length > 0 ? { issueSummaries: [...ctx.state.issueSummaries] } : {}) });
+          if (ctx.stuckConfig.stuckAbortPolicy !== 'notify_only' && ctx.state.stuckReason === null && ctx.state.timeoutReason === null) {
+            ctx.state.stuckReason = 'no_progress';
+            ctx.agent.abort();
+            return;
+          }
+        }
+      } else if (signal.kind === 'timeout_imminent') {
+        ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'timeout_imminent', detail: `${signal.timeoutReason === 'wall_clock' ? 'Wall-clock timeout' : 'Max-turn limit'} reached`, ...withWorkrailSession(ctx.state.workrailSessionId) });
+      } else {
+        assertNever(signal);
+      }
+    }
+
+    // Conversation history: delta-append after each turn.
+    const currentMessages = ctx.agent.state.messages;
+    const newMessages = currentMessages.slice(ctx.lastFlushedRef.count);
+    ctx.lastFlushedRef.count = currentMessages.length;
+    void appendConversationMessages(ctx.conversationPath, newMessages).catch(() => {});
+
+    // Steer injection: drain pendingSteerParts into the next turn.
+    if (ctx.state.pendingSteerParts.length > 0 && !ctx.state.isComplete) {
+      const joined = ctx.state.pendingSteerParts.join('\n\n');
+      ctx.state.pendingSteerParts.length = 0;
+      ctx.agent.steer(buildUserMessage(joined));
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -4629,139 +4753,26 @@ export async function runWorkflow(
   // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
   // WHY fire-and-forget: write failures must never affect the agent loop.
   const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
-  let lastFlushedMessageCount = 0;
+  // WHY lastFlushedRef as object: the mutable counter must be shared by reference
+  // between the turn_end subscriber (via buildTurnEndSubscriber) and the finally block
+  // final flush below. A primitive let cannot be shared by reference across a closure boundary.
+  const lastFlushedRef = { count: 0 };
 
   // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
   // Using steer() NOT followUp(): steer fires after each tool batch inside the
   // inner loop; followUp fires only when the agent would otherwise stop
   // (adding an extra LLM turn per workflow step).
-  const unsubscribe = agent.subscribe(async (event: AgentEvent) => {
-    if (event.type !== 'turn_end') return;
-
-    // Emit tool_error events for any tool results that reported isError=true.
-    for (const toolResult of event.toolResults) {
-      if (toolResult.isError) {
-        const errorText = toolResult.result?.content[0]?.text ?? 'tool error';
-        emitter?.emit({ kind: 'tool_error', sessionId, toolName: toolResult.toolName, error: errorText.slice(0, 200), ...withWorkrailSession(state.workrailSessionId) });
-      }
-    }
-
-    // Track turns for stuck detection.
-    state.turnCount++;
-
-    // ---- Stuck detection: evaluate signals via pure function ----
-    // evaluateStuckSignals() is pure -- it reads state and config, no I/O.
-    // The subscriber handles all effects (abort, emit, outbox) based on the signal.
-    const signal = evaluateStuckSignals(state, stuckConfig);
-
-    if (signal !== null) {
-      // kind: 'max_turns_exceeded' -- this turn is the termination turn.
-      // WHY return early: no steer injection on this turn (aborting).
-      if (signal.kind === 'max_turns_exceeded') {
-        state.timeoutReason = 'max_turns';
-        emitter?.emit({
-          kind: 'agent_stuck',
-          sessionId,
-          reason: 'timeout_imminent',
-          detail: 'Max-turn limit reached',
-          ...withWorkrailSession(state.workrailSessionId),
-        });
-        agent.abort();
-        return;
-      }
-
-      // kind: 'repeated_tool_call' -- Signal 1.
-      else if (signal.kind === 'repeated_tool_call') {
-        emitter?.emit({
-          kind: 'agent_stuck',
-          sessionId,
-          reason: 'repeated_tool_call',
-          detail: `Same tool+args called ${STUCK_REPEAT_THRESHOLD} times: ${signal.toolName}`,
-          toolName: signal.toolName,
-          argsSummary: signal.argsSummary,
-          ...withWorkrailSession(state.workrailSessionId),
-        });
-        // Outbox notification fires regardless of abort policy.
-        void writeStuckOutboxEntry({
-          workflowId: trigger.workflowId,
-          reason: 'repeated_tool_call',
-          ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
-        });
-        if (stuckConfig.stuckAbortPolicy !== 'notify_only' && state.stuckReason === null && state.timeoutReason === null) {
-          state.stuckReason = 'repeated_tool_call';
-          agent.abort();
-          return;
-        }
-      }
-
-      // kind: 'no_progress' -- Signal 2.
-      else if (signal.kind === 'no_progress') {
-        emitter?.emit({
-          kind: 'agent_stuck',
-          sessionId,
-          reason: 'no_progress',
-          detail: `${signal.turnCount} turns used, 0 step advances (${signal.maxTurns} turn limit)`,
-          ...withWorkrailSession(state.workrailSessionId),
-        });
-        if (stuckConfig.noProgressAbortEnabled) {
-          void writeStuckOutboxEntry({
-            workflowId: trigger.workflowId,
-            reason: 'no_progress',
-            ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
-          });
-          if (stuckConfig.stuckAbortPolicy !== 'notify_only' && state.stuckReason === null && state.timeoutReason === null) {
-            state.stuckReason = 'no_progress';
-            agent.abort();
-            return;
-          }
-        }
-      }
-
-      // kind: 'timeout_imminent' -- Signal 3.
-      // WHY observational: the abort was triggered by the wall-clock timeout Promise;
-      // Signal 3 is a last-chance notification, not a new abort.
-      else if (signal.kind === 'timeout_imminent') {
-        emitter?.emit({
-          kind: 'agent_stuck',
-          sessionId,
-          reason: 'timeout_imminent',
-          detail: `${signal.timeoutReason === 'wall_clock' ? 'Wall-clock timeout' : 'Max-turn limit'} reached`,
-          ...withWorkrailSession(state.workrailSessionId),
-        });
-      }
-
-      // Exhaustiveness guard: adding a new StuckSignal kind without handling it here
-      // will cause a TypeScript compile error.
-      else {
-        assertNever(signal);
-      }
-    }
-
-    // ---- Conversation history: delta-append after each turn ----
-    // Flush any new messages since the last turn_end. Delta append (not full rewrite)
-    // keeps total I/O linear in turn count. Fire-and-forget: a write failure must never
-    // affect the session. lastFlushedMessageCount is updated synchronously so no
-    // second turn_end can double-flush the same messages.
-    const currentMessages = agent.state.messages;
-    const newMessages = currentMessages.slice(lastFlushedMessageCount);
-    lastFlushedMessageCount = currentMessages.length;
-    void appendConversationMessages(conversationPath, newMessages).catch(() => {});
-
-    // If step-advance parts are queued and workflow is not yet complete, inject them.
-    // WHY join with \n\n: each part is a full step prompt or context block. A blank
-    // line between them gives the LLM a clear visual separation without merging content.
-    // WHY drain-and-clear before steer: clearing the array synchronously before calling
-    // steer() prevents a second turn_end (fired after steer injects a message) from
-    // re-injecting stale parts if a concurrent tool were somehow to add to the array --
-    // though sequential tool execution makes this a theoretical concern only.
-    if (state.pendingSteerParts.length > 0 && !state.isComplete) {
-      const joined = state.pendingSteerParts.join('\n\n');
-      state.pendingSteerParts.length = 0;
-      agent.steer(buildUserMessage(joined));
-    }
-    // If isComplete, do not call steer() -- agent exits naturally on next turn
-    // when there are no tool calls and no queued steering messages.
-  });
+  const unsubscribe = agent.subscribe(buildTurnEndSubscriber({
+    agent,
+    state,
+    stuckConfig,
+    sessionId,
+    workflowId: trigger.workflowId,
+    emitter,
+    conversationPath,
+    lastFlushedRef,
+    stuckRepeatThreshold: STUCK_REPEAT_THRESHOLD,
+  }));
 
   let stopReason = 'stop';
   let errorMessage: string | undefined;
@@ -4815,7 +4826,7 @@ export async function runWorkflow(
     // Catch any remaining messages not covered by the last turn_end (e.g. error
     // messages appended by _appendErrorMessage() after an API error or abort).
     // Fire-and-forget: write failures in finally must never propagate.
-    const remainingMessages = agent.state.messages.slice(lastFlushedMessageCount);
+    const remainingMessages = agent.state.messages.slice(lastFlushedRef.count);
     void appendConversationMessages(conversationPath, remainingMessages).catch(() => {});
 
     // Cancel the wall-clock timer so it does not fire after successful completion
