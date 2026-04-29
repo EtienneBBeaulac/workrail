@@ -885,4 +885,34 @@ describe('doPollGitHubQueue dispatch loop protection', () => {
     expect(sidecar['attemptCount']).toBe(1);
     expect(sidecar['issueNumber']).toBe(42);
   });
+
+  it('on failure, sidecar retains attemptCount from dispatch (no double-increment)', async () => {
+    // WHY this test: recordFailedAttempt must write the SAME attemptCount that was
+    // recorded at dispatch time, not read-and-add-1. A double-increment would cause
+    // maxDispatchAttempts=N to give only ceil(N/2) actual dispatches.
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+
+    // Router whose dispatchAdaptivePipeline always rejects
+    const { router } = makeRouter();
+    const failingDispatch = vi.fn().mockRejectedValue(new Error('pipeline failed'));
+    (router as unknown as Record<string, unknown>)['dispatchAdaptivePipeline'] = failingDispatch;
+
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+
+    // Wait for fire-and-forget sidecar write AND the failure handler to complete
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+    const sidecarContent = await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8');
+    const sidecar = JSON.parse(sidecarContent) as Record<string, unknown>;
+
+    // Should be 1 (the attemptCount recorded at dispatch), not 2 (which would happen
+    // if the failure handler re-read the sidecar and added 1 again).
+    expect(sidecar['attemptCount']).toBe(1);
+    // TTL zeroed so next poll cycle can check the count immediately
+    expect(sidecar['ttlMs']).toBe(0);
+    expect(sidecar['dispatchedAt']).toBe(0);
+  });
 });

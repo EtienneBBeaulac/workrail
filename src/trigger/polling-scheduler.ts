@@ -547,7 +547,6 @@ export class PollingScheduler {
     // read error (non-blocking -- see QueueIssueSidecar docs for asymmetric defaults).
     const previousAttemptCount = await readSidecarAttemptCount(top.issue.number, sessionsDir);
     if (previousAttemptCount >= queueConfig.maxDispatchAttempts) {
-      const msg = `Issue #${top.issue.number} "${top.issue.title}" has been attempted ${previousAttemptCount} time(s) (limit: ${queueConfig.maxDispatchAttempts}). Pausing dispatch. Human action required.`;
       console.warn(`[QueuePoll] dispatch_cap_reached #${top.issue.number} attempts=${previousAttemptCount} limit=${queueConfig.maxDispatchAttempts}`);
       await appendQueuePollLog({ event: 'task_skipped', issueNumber: top.issue.number, title: top.issue.title, reason: 'dispatch_cap_reached', attemptCount: previousAttemptCount, limit: queueConfig.maxDispatchAttempts, ts: new Date().toISOString() });
       // Fire-and-forget cap actions: outbox write, GitHub label, GitHub comment.
@@ -661,10 +660,13 @@ export class PollingScheduler {
       .catch(() => {
         this.dispatchingIssues.delete(issueNumber);
         console.log(`[QueuePoll] in-flight-clear #${issueNumber} reason=error`);
-        // On failure: increment attemptCount and rewrite sidecar (do NOT delete).
-        // WHY: keeping the sidecar preserves the attempt count across TTL expiry so the
-        // dispatch loop protection can detect repeated failures. See QueueIssueSidecar.
-        void incrementSidecarAttemptCount(sidecarPath, issueNumber, triggerId);
+        // On failure: rewrite sidecar with the SAME attemptCount recorded at dispatch
+        // time, zeroed TTL so checkIdempotency() clears immediately on the next poll.
+        // WHY NOT incrementSidecarAttemptCount: that function re-reads and adds 1, which
+        // would double-count (the sidecar was already written with previousAttemptCount+1
+        // at dispatch time). Using attemptCount directly gives exactly N dispatches for
+        // maxDispatchAttempts=N.
+        void recordFailedAttempt(sidecarPath, issueNumber, triggerId, attemptCount);
       });
     console.log(`[QueuePoll] dispatched via adaptivePipeline goal="${workflowTrigger.goal.slice(0, 80)}"`);
 
@@ -901,33 +903,25 @@ function describeMaturityReason(maturity: 'idea' | 'specced' | 'ready'): string 
 // ---------------------------------------------------------------------------
 
 /**
- * Increment the attemptCount in an existing sidecar file.
+ * Record a failed dispatch attempt by rewriting the sidecar with the given
+ * attemptCount and a zeroed TTL so checkIdempotency() returns 'clear' immediately.
  *
- * Called from the .catch() handler of dispatchAdaptivePipeline() to record that
- * a dispatch attempt failed. The sidecar is rewritten with a new dispatchedAt=now
- * and ttlMs=0 (expired immediately) so that checkIdempotency() will return 'clear'
- * on the next poll cycle, allowing the attempt count to be checked.
+ * WHY the caller passes attemptCount (not read-and-increment here):
+ * The sidecar was already written at dispatch start with attemptCount = previousCount + 1.
+ * If this function re-read the sidecar and added 1 again, each failure would advance
+ * the stored count by 2, making maxDispatchAttempts=N give only ceil(N/2) actual
+ * dispatches. Passing the already-computed value keeps the semantics exact:
+ * maxDispatchAttempts=N gives exactly N dispatches.
  *
  * Fire-and-forget: errors are swallowed and logged; a failed write means the count
- * is not incremented, which is acceptable (one extra dispatch may occur).
+ * is not persisted, which is acceptable (one extra dispatch may occur).
  */
-async function incrementSidecarAttemptCount(
+async function recordFailedAttempt(
   sidecarPath: string,
   issueNumber: number,
   triggerId: string,
+  attemptCount: number,
 ): Promise<void> {
-  // Read the current sidecar to get the existing attemptCount
-  let existingCount = 0;
-  try {
-    const content = await fs.readFile(sidecarPath, 'utf8');
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (typeof parsed['attemptCount'] === 'number' && parsed['attemptCount'] >= 0) {
-      existingCount = parsed['attemptCount'] as number;
-    }
-  } catch {
-    // File missing or malformed -- start from 0
-  }
-
   const newContent = JSON.stringify({
     issueNumber,
     triggerId,
@@ -935,16 +929,16 @@ async function incrementSidecarAttemptCount(
     // The sidecar is kept solely as a failure counter -- the TTL lock has no meaning here.
     dispatchedAt: 0,
     ttlMs: 0,
-    attemptCount: existingCount + 1,
+    attemptCount,
   }, null, 2);
 
   try {
     await fs.mkdir(path.dirname(sidecarPath), { recursive: true });
     await fs.writeFile(sidecarPath, newContent, 'utf8');
-    console.log(`[QueuePoll] sidecar-increment #${issueNumber} attempts=${existingCount + 1}`);
+    console.log(`[QueuePoll] sidecar-failure-recorded #${issueNumber} attempts=${attemptCount}`);
   } catch (e: unknown) {
     console.warn(
-      `[QueuePoll] Failed to increment sidecar for issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+      `[QueuePoll] Failed to record failed attempt for issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 }
