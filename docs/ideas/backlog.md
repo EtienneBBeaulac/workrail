@@ -105,9 +105,9 @@ The `wr.coding-task` workflow has too much overhead for pure refactors (design r
 
 ### runWorkflow() functional core refactor -- Phase 2 (Apr 24, 2026)
 
-**Status: idea** | Priority: medium
+**Status: done** | Shipped in PR #830 (Apr 29, 2026)
 
-Phase 1 landed in PR #818: extracted `tagToStatsOutcome`, `buildAgentClient`, `evaluateStuckSignals`, `SessionState`, and `finalizeSession`. `runWorkflow()` is still ~880 lines with I/O and pure logic interleaved in the setup phase.
+Phase 1 landed in PR #818: extracted `tagToStatsOutcome`, `buildAgentClient`, `evaluateStuckSignals`, `SessionState`, and `finalizeSession`. Phase 2 landed in PR #830:
 
 **What remains:**
 
@@ -137,14 +137,19 @@ function buildSessionContext(
 
 The shell then does:
 1. All I/O in sequence: `loadDaemonSoul`, `loadWorkspaceContext`, `loadSessionNotes`, `git worktree add`, `executeStartWorkflow`, `parseContinueTokenOrFail`, `persistTokens`
-2. One pure call: `buildSessionContext(trigger, client, modelId, soul, ctx, notes, state, ...)`
-3. Run the agent loop with the returned config
+**What Phase 2 delivered (PR #830):**
+- `PreAgentSession` interface + `PreAgentSessionResult` discriminated union -- all early-exit paths type-enforced
+- `buildPreAgentSession()` -- all pre-agent I/O extracted; steer+daemon registries registered after all failing I/O (FM1 invariant)
+- `constructTools()` -- explicitly impure named function, `state` as explicit parameter
+- `persistTokens()` returns `Promise<Result<void, PersistTokensError>>` using `src/runtime/result.ts`
+- `sidecardLifecycleFor()` pure function with `assertNever` exhaustiveness
+- TDZ hazard fixed: `abortRegistry.set()` now registered after `const agent = new AgentLoop()`
 
-**Why this matters:** `buildSessionContext` would be unit-testable without any filesystem, LLM, or session store. The system prompt assembly, tool list construction, and session limit calculation are currently untestable in isolation. This is the biggest remaining testability gap.
-
-**Prerequisite:** Phase 1 (PR #818) -- done. `SessionState` already exists and can be passed in.
-
-**Scope:** Single file (`src/daemon/workflow-runner.ts`). New exports: `buildSessionContext`, `SessionContext`. No public API changes.
+**Still deferred (not in Phase 2):**
+- `CriticalEffect<T>` for `persistTokens` callers -- requires changing return type + all tool factory call sites
+- `StateRef` mutation wrapper
+- Zod tool param validation at LLM boundary
+- `wr.refactoring` workflow (see backlog entry above)
 
 ---
 
@@ -1090,6 +1095,7 @@ WorkTrain is a persistent background daemon that initiates workflows autonomousl
 - `worktrain init` soul setup
 - Per-trigger crash safety (`persistTokens`)
 - Worktree orphan cleanup on delivery failure
+- runWorkflow() Phase 2 architecture (PR #830): `PreAgentSession`/`buildPreAgentSession`, `constructTools`, `persistTokens` Result type, `sidecardLifecycleFor` pure function, TDZ hazard fix for abort registry
 
 ### WorkRail engine / MCP features
 
@@ -1097,6 +1103,7 @@ WorkTrain is a persistent background daemon that initiates workflows autonomousl
 
 - Assessment gates v1 with consequences
 - Loop control -- all four types (`while`, `until`, `for`, `forEach`) implemented
+- Fix: sequential `artifact_contract` while loops -- stale stop artifacts from earlier loops no longer contaminate later loops (PR #830). Root cause: `collectArtifactsForEvaluation()` passed full session history to `interpreter.next()`; fix passes only `inputArtifacts` (current step's submitted artifacts).
 - Subagent guidance feature
 - References system (local file refs)
 - Routine/templateCall injection
@@ -1140,6 +1147,14 @@ The agent is expensive, inconsistent, and slow. Scripts are free, deterministic,
 ### Metrics outcome validation
 
 **Status: done** -- `checkContextBudget` validates `metrics_outcome` enum (PR f0a1822a). SHA validation (Gap 3 above) is still open.
+
+### wr.coding-task architecture enforcement + retrospective (v1.3.0)
+
+**Status: done** -- shipped in PR #830 (Apr 29, 2026)
+
+- Phase 0 architecture alignment check: agent scans candidate files and names philosophy violations explicitly by function name; captures `architectureViolations` and `architectureStartsFromScratch`
+- Phase 1c conditional fragment: when `architectureStartsFromScratch = true`, blocks adapting existing violations as valid design candidates
+- Phase 8 post-implementation retrospective: runs for all tasks (no complexity gate); four practical questions applicable to any task; requires 2-4 concrete observations with explicit disposition
 
 ---
 
