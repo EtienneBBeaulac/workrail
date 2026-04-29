@@ -140,10 +140,12 @@ export function parseLoopControlArtifact(artifact: unknown): LoopControlArtifact
  *
  * Matching rules:
  * - Any valid wr.loop_control artifact matches regardless of loopId value.
- * - Nested loops are not supported, so there is at most one active loop.
  * - The agent-supplied loopId (if present) is preserved in the returned artifact
  *   for tracing but does NOT affect matching. This prevents infinite loops caused
  *   by agents copying the wrong ID from prompts/banners.
+ * - The caller is responsible for passing only artifacts relevant to the current
+ *   decision context (i.e. the current step's submitted artifacts). Passing
+ *   historical session artifacts causes sequential loops to contaminate each other.
  *
  * @param artifacts - Array of unknown artifacts (chronological order)
  * @returns The most recent valid loop control artifact or null

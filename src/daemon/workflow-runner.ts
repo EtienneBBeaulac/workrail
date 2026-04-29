@@ -47,6 +47,8 @@ import type { ResultAsync } from 'neverthrow';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
+import { ok, err } from '../runtime/result.js';
+import type { Result } from '../runtime/result.js';
 import { evaluateRecovery } from './session-recovery-policy.js';
 import { writeStatsSummary } from './stats-summary.js';
 
@@ -764,6 +766,17 @@ export interface OrphanedSession {
  *   (recovered sessions use daemon defaults per pitch no-gos).
  *   Old sidecars lacking these fields fall through to discard on the next daemon start.
  */
+/**
+ * Error shape for a persistTokens failure.
+ * WHY its own type (not a generic string): the code field lets callers
+ * distinguish filesystem errors (ENOSPC, EPERM) from logic errors without
+ * string parsing.
+ */
+export interface PersistTokensError {
+  readonly code: string;
+  readonly message: string;
+}
+
 async function persistTokens(
   sessionId: string,
   continueToken: string,
@@ -774,28 +787,34 @@ async function persistTokens(
     readonly goal: string;
     readonly workspacePath: string;
   },
-): Promise<void> {
-  await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+): Promise<Result<void, PersistTokensError>> {
+  try {
+    await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
 
-  const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
-  const state = JSON.stringify(
-    {
-      continueToken,
-      checkpointToken,
-      ts: Date.now(),
-      ...(worktreePath !== undefined ? { worktreePath } : {}),
-      ...(recoveryContext !== undefined ? {
-        workflowId: recoveryContext.workflowId,
-        goal: recoveryContext.goal,
-        workspacePath: recoveryContext.workspacePath,
-      } : {}),
-    },
-    null,
-    2,
-  );
-  const tmp = `${sessionPath}.tmp`;
-  await fs.writeFile(tmp, state, 'utf8');
-  await fs.rename(tmp, sessionPath);
+    const sessionPath = path.join(DAEMON_SESSIONS_DIR, `${sessionId}.json`);
+    const state = JSON.stringify(
+      {
+        continueToken,
+        checkpointToken,
+        ts: Date.now(),
+        ...(worktreePath !== undefined ? { worktreePath } : {}),
+        ...(recoveryContext !== undefined ? {
+          workflowId: recoveryContext.workflowId,
+          goal: recoveryContext.goal,
+          workspacePath: recoveryContext.workspacePath,
+        } : {}),
+      },
+      null,
+      2,
+    );
+    const tmp = `${sessionPath}.tmp`;
+    await fs.writeFile(tmp, state, 'utf8');
+    await fs.rename(tmp, sessionPath);
+    return ok(undefined);
+  } catch (e: unknown) {
+    const nodeErr = e as NodeJS.ErrnoException;
+    return err({ code: nodeErr.code ?? 'UNKNOWN', message: nodeErr.message ?? String(e) });
+  }
 }
 
 /**
@@ -1869,7 +1888,13 @@ export function makeContinueWorkflowTool(
       const checkpointToken = out.checkpointToken ?? null;
       const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? continueToken;
       if (persistToken) {
-        await persistTokens(sessionId, persistToken, checkpointToken);
+        const persistResult = await persistTokens(sessionId, persistToken, checkpointToken);
+        // WHY log-and-continue (not throw): a persist failure degrades crash recovery but
+        // the session is still live and the LLM has the token in memory. Killing the session
+        // here loses in-progress work. Invariant 4.3: onAdvance/onTokenUpdate must still fire.
+        if (persistResult.kind === 'err') {
+          console.warn(`[WorkflowRunner] persistTokens failed (continue_workflow): ${persistResult.error.code} -- ${persistResult.error.message}`);
+        }
       }
 
       // WHY: when the engine returns a blocked response, the step did NOT advance.
@@ -2074,7 +2099,12 @@ export function makeCompleteStepTool(
       // advances to this retry token -- the original session token is consumed.
       const persistToken = (out.kind === 'blocked' ? out.nextCall?.params.continueToken : undefined) ?? newContinueToken;
       if (persistToken) {
-        await persistTokens(sessionId, persistToken, checkpointToken);
+        const persistResult = await persistTokens(sessionId, persistToken, checkpointToken);
+        // WHY log-and-continue (not throw): a persist failure degrades crash recovery but
+        // the session is still live. Invariant 4.3: onAdvance/onTokenUpdate must still fire.
+        if (persistResult.kind === 'err') {
+          console.warn(`[WorkflowRunner] persistTokens failed (complete_step): ${persistResult.error.code} -- ${persistResult.error.message}`);
+        }
       }
 
       // WHY onTokenUpdate on blocked: the next complete_step call must inject the
@@ -3464,6 +3494,57 @@ export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | '
 }
 
 /**
+ * Sidecar lifecycle decision for a completed runWorkflow() session.
+ *
+ * WHY a discriminated union: the two outcomes have categorically different
+ * cleanup owners. 'delete_now' means runWorkflow() (via finalizeSession) deletes
+ * the sidecar before returning. 'retain_for_delivery' means TriggerRouter.maybeRunDelivery()
+ * deletes it after git delivery completes -- runWorkflow() must NOT delete it.
+ */
+export type SidecarLifecycle =
+  | { readonly kind: 'delete_now' }
+  | { readonly kind: 'retain_for_delivery' };
+
+/**
+ * Determine the correct sidecar lifecycle action for a completed session.
+ *
+ * Pure: no I/O, no side effects, deterministic.
+ *
+ * Rules (from worktrain-daemon-invariants.md section 2.2):
+ * - success + worktree: retain -- delivery (git push, gh pr create) runs in the
+ *   worktree after runWorkflow() returns; sidecar must outlive this function.
+ * - all other outcomes and branch strategies: delete immediately.
+ *
+ * WHY delivery_failed hits assertNever: runWorkflow() never produces delivery_failed
+ * (invariant 1.2). If it ever does, a compile error here forces the caller to handle it.
+ */
+export function sidecardLifecycleFor(
+  tag: WorkflowRunResult['_tag'],
+  branchStrategy: WorkflowTrigger['branchStrategy'],
+): SidecarLifecycle {
+  switch (tag) {
+    case 'success':
+      return branchStrategy === 'worktree'
+        ? { kind: 'retain_for_delivery' }
+        : { kind: 'delete_now' };
+    case 'error':
+    case 'timeout':
+    case 'stuck':
+      return { kind: 'delete_now' };
+    case 'delivery_failed':
+      // WHY throw: delivery_failed is in WorkflowRunResult but is never produced by
+      // runWorkflow() directly (invariant 1.2). This case is unreachable in production.
+      // Explicit handling (not assertNever) so the default: branch remains typed as never,
+      // making the assertNever guard work for future WorkflowRunResult variants.
+      throw new Error(`sidecardLifecycleFor: delivery_failed is not a valid input (invariant 1.2)`);
+    default:
+      // WHY assertNever: if a new WorkflowRunResult._tag variant is added without updating
+      // this function, the compiler breaks here and forces handling.
+      return assertNever(tag);
+  }
+}
+
+/**
  * Build the Anthropic (or AnthropicBedrock) client and resolve the model ID.
  *
  * Pure: no I/O. Reads only the trigger config and process.env.
@@ -3757,6 +3838,52 @@ function writeExecutionStats(
 // Imperative shell helper: session finalization
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Two-phase session construction
+// ---------------------------------------------------------------------------
+
+/**
+ * All state produced by the pre-agent I/O phase of runWorkflow().
+ *
+ * WHY a named interface: makes the phase boundary explicit. Everything in this
+ * struct was established before `new AgentLoop()` -- the agent binding is NOT
+ * included here. The abort registry is registered AFTER agent construction,
+ * using `session.workrailSessionId` as the key.
+ *
+ * WHY `state` is mutable and included here: tool factory closures must observe
+ * live token updates (getCurrentToken reads state.currentContinueToken at call
+ * time). Making state an explicit field documents the intentional impurity
+ * rather than hiding it in ambient scope.
+ */
+export interface PreAgentSession {
+  readonly sessionId: string;
+  readonly workrailSessionId: string | null;
+  readonly continueToken: string;
+  readonly checkpointToken: string | null;
+  readonly sessionWorkspacePath: string;
+  readonly sessionWorktreePath: string | undefined;
+  readonly firstStep: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  readonly state: SessionState;           // mutable; explicit to document impurity
+  readonly spawnCurrentDepth: number;
+  readonly spawnMaxDepth: number;
+  readonly readFileState: Map<string, ReadFileState>;
+  readonly agentClient: Anthropic | AnthropicBedrock;
+  readonly modelId: string;
+  readonly startMs: number;
+}
+
+/**
+ * Result of the pre-agent I/O phase.
+ *
+ * 'ready'    -- agent loop should run; `session` holds all pre-agent state.
+ * 'complete' -- session ended before the agent loop started (instant completion,
+ *               model error, start failure, worktree failure, persist failure).
+ *               `result` is the final WorkflowRunResult to return from runWorkflow().
+ */
+export type PreAgentSessionResult =
+  | { readonly kind: 'ready'; readonly session: PreAgentSession }
+  | { readonly kind: 'complete'; readonly result: WorkflowRunResult };
+
 /**
  * Context for finalizing a completed runWorkflow() session.
  * Passed from runWorkflow() to finalizeSession() after the agent loop exits.
@@ -3830,16 +3957,20 @@ export async function finalizeSession(
   writeExecutionStats(ctx.statsDir, ctx.sessionId, ctx.workflowId, ctx.startMs, outcome, ctx.stepAdvanceCount);
 
   // ---- 4. Sidecar deletion ----
-  // Rules (invariants doc section 2.2):
-  // - success + worktree: do NOT delete (TriggerRouter.maybeRunDelivery handles it after delivery)
-  // - success + non-worktree: delete
-  // - error: delete
-  // - timeout: delete
-  // - stuck: delete (FIX: pre-existing bug -- stuck path previously did not delete the sidecar)
-  // - delivery_failed: runWorkflow() never produces this, but handled for exhaustiveness
-  const isWorktreeSuccess = result._tag === 'success' && ctx.branchStrategy === 'worktree';
-  if (!isWorktreeSuccess) {
-    await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+  // Decision is delegated to sidecardLifecycleFor() -- see that function and
+  // worktrain-daemon-invariants.md section 2.2 for the full rules.
+  // WHY assertNever is in sidecardLifecycleFor: if WorkflowRunResult gains a new
+  // variant, the compiler breaks there and forces the caller to handle it here.
+  const lifecycle = sidecardLifecycleFor(result._tag, ctx.branchStrategy);
+  switch (lifecycle.kind) {
+    case 'delete_now':
+      await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+      break;
+    case 'retain_for_delivery':
+      // TriggerRouter.maybeRunDelivery() deletes the sidecar after delivery completes.
+      break;
+    default:
+      assertNever(lifecycle);
   }
 
   // ---- 5. Conversation file deletion ----
@@ -3938,6 +4069,313 @@ export function buildSessionContext(
 }
 
 // ---------------------------------------------------------------------------
+// buildPreAgentSession -- pre-agent I/O phase
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute all I/O required before the agent loop can start.
+ *
+ * Handles: model validation, executeStartWorkflow (or pre-allocated response),
+ * token decode, initial persistTokens, worktree creation (with second
+ * persistTokens for worktreePath), and registry setup.
+ *
+ * WHY registry ordering: steer and daemon registries are registered LAST --
+ * after all potentially-failing I/O (executeStartWorkflow, persistTokens,
+ * worktree creation). This guarantees that any error path returning
+ * { kind: 'complete' } before registration has nothing to clean up.
+ *
+ * WHY pure + I/O separation: the caller (runWorkflow) provides sessionId and
+ * startMs so that timing and identity are consistent across both phases.
+ *
+ * Returns { kind: 'complete', result } for all early-exit cases.
+ * Returns { kind: 'ready', session } when the agent loop should run.
+ */
+export async function buildPreAgentSession(
+  trigger: WorkflowTrigger,
+  ctx: V2ToolContext,
+  apiKey: string,
+  sessionId: string,
+  startMs: number,
+  statsDir: string,
+  sessionsDir: string,
+  emitter: DaemonEventEmitter | undefined,
+  daemonRegistry: DaemonRegistry | undefined,
+  steerRegistry: SteerRegistry | undefined,
+): Promise<PreAgentSessionResult> {
+  // ---- Model setup ----
+  let agentClient: Anthropic | AnthropicBedrock;
+  let modelId: string;
+  try {
+    ({ agentClient, modelId } = buildAgentClient(trigger, apiKey, process.env));
+    if (trigger.agentConfig?.model) {
+      console.log(`[WorkflowRunner] Model: ${modelId} (override from agentConfig.model)`);
+    } else {
+      const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+      if (usesBedrock) {
+        console.log(`[WorkflowRunner] Model: ${modelId} (amazon-bedrock, detected from AWS env)`);
+      } else {
+        console.log(`[WorkflowRunner] Model: ${modelId} (anthropic direct). Set agentConfig.model or AWS env vars to use Bedrock.`);
+      }
+    }
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
+    return { kind: 'complete', result: { _tag: 'error', workflowId: trigger.workflowId, message, stopReason: 'error' } };
+  }
+
+  // ---- Session state ----
+  const state = createSessionState('');
+
+  // ---- executeStartWorkflow (or pre-allocated) ----
+  let firstStep: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  if (trigger._preAllocatedStartResponse !== undefined) {
+    firstStep = trigger._preAllocatedStartResponse;
+  } else {
+    const startResult = await executeStartWorkflow(
+      { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
+      ctx,
+      { is_autonomous: 'true', workspacePath: trigger.workspacePath },
+    );
+    if (startResult.isErr()) {
+      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
+      return {
+        kind: 'complete',
+        result: {
+          _tag: 'error',
+          workflowId: trigger.workflowId,
+          message: `start_workflow failed: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
+          stopReason: 'error',
+        },
+      };
+    }
+    firstStep = startResult.value.response;
+  }
+
+  const continueToken = firstStep.continueToken ?? '';
+  const checkpointToken = firstStep.checkpointToken ?? null;
+  state.currentContinueToken = continueToken;
+
+  // ---- Decode WorkRail session ID ----
+  if (continueToken) {
+    const decoded = await parseContinueTokenOrFail(continueToken, ctx.v2.tokenCodecPorts, ctx.v2.tokenAliasStore);
+    if (decoded.isOk()) {
+      state.workrailSessionId = decoded.value.sessionId;
+    } else {
+      console.error(
+        `[WorkflowRunner] Error: could not decode WorkRail session ID from continueToken -- isLive and liveActivity will not work. Reason: ${decoded.error.message}`,
+      );
+    }
+  }
+
+  // ---- Initial persistTokens (crash safety) ----
+  if (continueToken) {
+    const persistResult = await persistTokens(sessionId, continueToken, checkpointToken, undefined, {
+      workflowId: trigger.workflowId,
+      goal: trigger.goal,
+      workspacePath: trigger.workspacePath,
+    });
+    if (persistResult.kind === 'err') {
+      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
+      return {
+        kind: 'complete',
+        result: {
+          _tag: 'error',
+          workflowId: trigger.workflowId,
+          message: `Initial token persist failed: ${persistResult.error.code} -- ${persistResult.error.message}`,
+          stopReason: 'error',
+        },
+      };
+    }
+  }
+
+  // ---- Worktree isolation ----
+  let sessionWorkspacePath = trigger.workspacePath;
+  let sessionWorktreePath: string | undefined;
+
+  if (trigger.branchStrategy === 'worktree') {
+    const branchPrefix = trigger.branchPrefix ?? 'worktrain/';
+    const baseBranch = trigger.baseBranch ?? 'main';
+    sessionWorkspacePath = path.join(WORKTREES_DIR, sessionId);
+    sessionWorktreePath = sessionWorkspacePath;
+
+    try {
+      await fs.mkdir(WORKTREES_DIR, { recursive: true });
+      await execFileAsync('git', ['-C', trigger.workspacePath, 'fetch', 'origin', baseBranch]);
+      await execFileAsync('git', [
+        '-C', trigger.workspacePath,
+        'worktree', 'add',
+        sessionWorkspacePath,
+        '-b', `${branchPrefix}${sessionId}`,
+        `origin/${baseBranch}`,
+      ]);
+
+      const worktreePersistResult = await persistTokens(
+        sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
+        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath },
+      );
+      if (worktreePersistResult.kind === 'err') {
+        console.error(`[WorkflowRunner] Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
+        try { await execFileAsync('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', sessionWorkspacePath]); } catch { /* best effort */ }
+        writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
+        return {
+          kind: 'complete',
+          result: {
+            _tag: 'error',
+            workflowId: trigger.workflowId,
+            message: `Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`,
+            stopReason: 'error',
+          },
+        };
+      }
+
+      console.log(`[WorkflowRunner] Worktree created: sessionId=${sessionId} branch=${branchPrefix}${sessionId} path=${sessionWorkspacePath}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
+      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
+      return {
+        kind: 'complete',
+        result: { _tag: 'error', workflowId: trigger.workflowId, message: `Worktree creation failed: ${errMsg}`, stopReason: 'error' },
+      };
+    }
+  }
+
+  // ---- Registry setup (AFTER all potentially-failing I/O -- FM1 invariant) ----
+  // WHY registered last: any error path before this point returns 'complete' without
+  // having registered. This means no cleanup is needed on those paths.
+  // steer and daemon registries are registered here; abort registry is registered in
+  // runWorkflow() AFTER agent construction (agent binding required).
+  if (state.workrailSessionId !== null) {
+    daemonRegistry?.register(state.workrailSessionId, trigger.workflowId);
+    steerRegistry?.set(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
+  }
+
+  // ---- Single-step completion (must check AFTER registry setup) ----
+  // WHY after registration: the session is observable in the console from this point.
+  // A session that completes immediately should still appear as 'completed' not 'not found'.
+  if (firstStep.isComplete) {
+    const lifecycle = sidecardLifecycleFor('success', trigger.branchStrategy);
+    if (lifecycle.kind === 'delete_now') {
+      await fs.unlink(path.join(sessionsDir, `${sessionId}.json`)).catch(() => {});
+    }
+    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(state.workrailSessionId) });
+    if (state.workrailSessionId !== null) {
+      daemonRegistry?.unregister(state.workrailSessionId, 'completed');
+      steerRegistry?.delete(state.workrailSessionId);
+    }
+    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'success', 0);
+    return {
+      kind: 'complete',
+      result: {
+        _tag: 'success',
+        workflowId: trigger.workflowId,
+        stopReason: 'stop',
+        ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
+        ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
+        ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
+      },
+    };
+  }
+
+  return {
+    kind: 'ready',
+    session: {
+      sessionId,
+      workrailSessionId: state.workrailSessionId,
+      continueToken,
+      checkpointToken,
+      sessionWorkspacePath,
+      sessionWorktreePath,
+      firstStep,
+      state,
+      spawnCurrentDepth: trigger.spawnDepth ?? 0,
+      spawnMaxDepth: trigger.agentConfig?.maxSubagentDepth ?? 3,
+      readFileState: new Map<string, ReadFileState>(),
+      agentClient,
+      modelId,
+      startMs,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// constructTools -- explicitly impure tool construction
+// ---------------------------------------------------------------------------
+
+/**
+ * Construct the tool list for a daemon agent session.
+ *
+ * WHY a named function (not inline in runWorkflow): makes the intentional impurity
+ * visible at the call site. This function is NOT pure -- the tool closures reference
+ * `session.state` (mutable) and `onAdvance`/`onComplete` (side-effecting callbacks).
+ * Passing these as explicit parameters documents the impurity rather than hiding it.
+ *
+ * WHY not exported: this is an internal construction detail. Tests exercise tool
+ * behavior through runWorkflow() integration paths.
+ */
+function constructTools(
+  session: PreAgentSession,
+  ctx: V2ToolContext,
+  apiKey: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  schemas: Record<string, any>,
+  emitter: DaemonEventEmitter | undefined,
+  abortRegistry: AbortRegistry | undefined,
+  onAdvance: (stepText: string, continueToken: string) => void,
+  onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
+  maxIssueSummaries: number,
+): readonly AgentTool[] {
+  const { state, sessionId: sid, sessionWorkspacePath, readFileState, spawnCurrentDepth, spawnMaxDepth } = session;
+  // Alias for readability -- workrailSessionId is read-only after buildPreAgentSession
+  const workrailSid = state.workrailSessionId;
+
+  return [
+    makeCompleteStepTool(
+      sid,
+      ctx,
+      () => state.currentContinueToken,
+      onAdvance,
+      onComplete,
+      // WHY onTokenUpdate: on a blocked response, the engine returns a retryContinueToken.
+      // This callback updates state.currentContinueToken so the next complete_step call
+      // injects the correct retry token.
+      (t: string) => { state.currentContinueToken = t; },
+      schemas,
+      executeContinueWorkflow,
+      emitter,
+      workrailSid,
+    ),
+    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid),
+    // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
+    // must target the isolated worktree, not the main checkout.
+    makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
+    makeReadTool(readFileState, schemas, sid, emitter, workrailSid),
+    makeWriteTool(readFileState, schemas, sid, emitter, workrailSid),
+    makeGlobTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
+    makeGrepTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
+    makeEditTool(sessionWorkspacePath, readFileState, schemas, sid, emitter, workrailSid),
+    makeReportIssueTool(sid, emitter, workrailSid, undefined, (summary: string) => {
+      if (state.issueSummaries.length < maxIssueSummaries) {
+        state.issueSummaries.push(summary);
+      }
+    }),
+    makeSpawnAgentTool(
+      sid,
+      ctx,
+      apiKey,
+      workrailSid ?? '',
+      spawnCurrentDepth,
+      spawnMaxDepth,
+      runWorkflow,
+      schemas,
+      emitter,
+      abortRegistry,
+    ),
+    makeSignalCoordinatorTool(sid, emitter, workrailSid),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -4003,48 +4441,25 @@ export async function runWorkflow(
     workspacePath: trigger.workspacePath,
   });
 
-  // ---- Client and model setup ----
-  // Use pure buildAgentClient() to select model and construct the API client.
-  // Throws on invalid model format; we catch and return _tag: 'error'.
-  // WHY try/catch here (not Result type): buildAgentClient is specified to throw
-  // for simplicity. The outer catch converts to the errors-as-data boundary.
-  let agentClient: Anthropic | AnthropicBedrock;
-  let modelId: string;
-
-  try {
-    ({ agentClient, modelId } = buildAgentClient(trigger, apiKey, process.env));
-    if (trigger.agentConfig?.model) {
-      // Log the model override for observability (same log pattern as before).
-      console.log(`[WorkflowRunner] Model: ${modelId} (override from agentConfig.model)`);
-    } else {
-      const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
-      if (usesBedrock) {
-        console.log(`[WorkflowRunner] Model: ${modelId} (amazon-bedrock, detected from AWS env)`);
-      } else {
-        console.log(`[WorkflowRunner] Model: ${modelId} (anthropic direct). Set agentConfig.model or AWS env vars to use Bedrock.`);
-      }
-    }
-  } catch (err: unknown) {
-    // Registration has not happened yet at this point (happens after executeStartWorkflow + decode).
-    const message = err instanceof Error ? err.message : String(err);
-    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
-    return {
-      _tag: 'error',
-      workflowId: trigger.workflowId,
-      message,
-      stopReason: 'error',
-    };
+  // ---- Pre-agent I/O phase ----
+  // All setup (model validation, start_workflow, token decode, persistTokens,
+  // worktree creation, registry setup) is delegated to buildPreAgentSession().
+  // This function returns { kind: 'complete', result } for all early-exit cases
+  // (model error, start failure, worktree failure, persist failure, single-step
+  // completion) and { kind: 'ready', session } when the agent loop should run.
+  const preResult = await buildPreAgentSession(
+    trigger, ctx, apiKey, sessionId, startMs,
+    statsDir, sessionsDir, emitter, daemonRegistry, steerRegistry,
+  );
+  if (preResult.kind === 'complete') {
+    return preResult.result;
   }
+  const session = preResult.session;
 
-  // ---- Session state ----
-  // All mutable session variables are collected into a single SessionState object.
-  // Closures (onAdvance, onComplete, steer callback, turn_end subscriber) capture `state`
-  // by reference and mutate it. See SessionState interface for field documentation.
-  //
-  // WHY createSessionState with empty token: startContinueToken is not yet known
-  // (executeStartWorkflow has not been called). The token is set on state via
-  // state.currentContinueToken = startContinueToken after executeStartWorkflow returns.
-  const state = createSessionState('');
+  // Extract session fields needed in the agent loop phase.
+  // readFileState, spawnCurrentDepth, spawnMaxDepth are consumed by constructTools.
+  const { state, firstStep, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = session;
+  const startContinueToken = session.continueToken;
 
   const MAX_ISSUE_SUMMARIES = 10;
   const STUCK_REPEAT_THRESHOLD = 3;
@@ -4052,13 +4467,8 @@ export async function runWorkflow(
   const onAdvance = (stepText: string, continueToken: string): void => {
     state.pendingSteerParts.push(stepText);
     state.stepAdvanceCount++;
-    // WHY update state.currentContinueToken here: complete_step injects the token from
-    // this closure variable. After each successful advance, the engine returns a new
-    // continueToken for the next step.
     state.currentContinueToken = continueToken;
-    // Heartbeat on each step advance -- the session is alive and making progress.
     if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
-    // Emit step_advanced event with workrailSessionId for liveActivity correlation.
     emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
   };
 
@@ -4066,383 +4476,14 @@ export async function runWorkflow(
     state.isComplete = true;
     state.lastStepNotes = notes;
     state.lastStepArtifacts = artifacts;
+    state.stepAdvanceCount++;
+    if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
+    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
   };
 
-  // ---- Start workflow directly (daemon-owned, no LLM round-trip) ----
-  // WHY: the daemon has all required context (workflowId, workspacePath, goal) at
-  // startup. Calling executeStartWorkflow() here avoids one full LLM turn per session
-  // and ensures tokens are persisted to disk BEFORE the agent loop begins (crash safety).
-  // The LLM receives the first step's content as its initial prompt instead of being
-  // told to call a start_workflow tool.
-  //
-  // If _preAllocatedStartResponse is provided (set by the dispatch HTTP handler when
-  // the session was pre-created synchronously to return a session ID to the caller),
-  // skip executeStartWorkflow() to avoid creating a duplicate session. The session
-  // and its initial events are already written to the store.
-  let firstStep: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
-  if (trigger._preAllocatedStartResponse !== undefined) {
-    firstStep = trigger._preAllocatedStartResponse;
-  } else {
-    const startResult = await executeStartWorkflow(
-      { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
-      ctx,
-      // Mark this session as autonomous so isAutonomous is derivable from the event log.
-      // workspacePath is written into the context_set event so the console can group daemon
-      // sessions by workspace even when workspace anchor resolution produces empty observations.
-      { is_autonomous: 'true', workspacePath: trigger.workspacePath },
-    );
-
-    if (startResult.isErr()) {
-      // Registration has not happened yet (happens after token decode below).
-      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
-      return {
-        _tag: 'error',
-        workflowId: trigger.workflowId,
-        message: `start_workflow failed: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
-        stopReason: 'error',
-      };
-    }
-    firstStep = startResult.value.response;
-  }
-
-  const startContinueToken = firstStep.continueToken ?? '';
-  const startCheckpointToken = firstStep.checkpointToken ?? null;
-
-  // ---- Initialize session state with the start token ----
-  // Now that we have the start token, set it on the state object.
-  // onAdvance will update state.currentContinueToken on each step advance.
-  // INVARIANT: state.currentContinueToken is always updated AFTER persistTokens()
-  // is called, so a crash can recover the correct token from the persisted state file.
-  state.currentContinueToken = startContinueToken;
-
-  // ---- Decode WorkRail session ID from the continueToken ----
-  // WHY: daemonRegistry.register() and daemon event emitter both need the WorkRail
-  // session ID (e.g. 'sess_abc123') so ConsoleService can correlate them with session
-  // store entries. The process-local UUID (sessionId above) is useless for this lookup.
-  //
-  // The decode uses parseContinueTokenOrFail() -- same pattern as loadSessionNotes().
-  // On decode failure: log an error and proceed without registry/emitter correlation.
-  // The session still runs correctly; isLive and liveActivity just won't work for
-  // this session (an unusual internal error since the token just came from executeStartWorkflow).
-  //
-  // WHY assigned to state.workrailSessionId (not a local let): all closures (onAdvance,
-  // steer callback, tool factories) capture `state` by reference. By the time the agent
-  // loop calls them, state.workrailSessionId is already populated.
-  if (startContinueToken) {
-    const decoded = await parseContinueTokenOrFail(
-      startContinueToken,
-      ctx.v2.tokenCodecPorts,
-      ctx.v2.tokenAliasStore,
-    );
-    if (decoded.isOk()) {
-      state.workrailSessionId = decoded.value.sessionId;
-    } else {
-      console.error(
-        `[WorkflowRunner] Error: could not decode WorkRail session ID from continueToken -- isLive and liveActivity will not work for this session. Reason: ${decoded.error.message}`,
-      );
-    }
-  }
-
-  // ---- DaemonRegistry: register session with WorkRail session ID ----
-  // WHY: ConsoleService.loadSessionSummary() looks up the registry by WorkRail session ID
-  // (not the process-local UUID). Using the WorkRail session ID here ensures isLive works.
-  // INVARIANT: register() is called at most once per runWorkflow() call. The early-exit
-  // paths above (model validation failure, start_workflow failure) happen before this point.
-  if (state.workrailSessionId !== null) {
-    daemonRegistry?.register(state.workrailSessionId, trigger.workflowId);
-  }
-
-  // ---- SteerRegistry: register steer callback for coordinator injection ----
-  // The steer callback pushes text onto state.pendingSteerParts; it is drained by the
-  // turn_end subscriber and delivered to the agent via agent.steer().
-  //
-  // WHY registered here (not at top of function): state.workrailSessionId is the registry key.
-  // It is only available after parseContinueTokenOrFail() succeeds above.
-  //
-  // Registration gap: there is a ~50ms window between session creation
-  // (executeStartWorkflow()) and this registration call. A coordinator that calls
-  // POST /api/v2/sessions/:sessionId/steer in that window receives 404. Coordinators
-  // should retry once on 404 during session start-up.
-  if (state.workrailSessionId !== null) {
-    steerRegistry?.set(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
-  }
-
-  // ---- AbortRegistry: register abort callback for graceful shutdown ----
-  // The abort callback calls agent.abort(), which cancels any in-flight LLM API call
-  // and signals the agent loop to exit. Called by the daemon shutdown handler on
-  // SIGTERM/SIGINT to abort all in-flight sessions simultaneously.
-  //
-  // WHY registered here (not at top of function): same as SteerRegistry -- state.workrailSessionId
-  // is the registry key and is only available after parseContinueTokenOrFail() succeeds.
-  //
-  // WHY registered BEFORE AgentLoop construction: ensures the registry entry exists if SIGTERM
-  // fires during the context-loading phase (soul + workspace + session notes) between this point
-  // and the `const agent = new AgentLoop(...)` call below. The shutdown handler can safely call
-  // the callback at any point after registration.
-  //
-  // IMPORTANT: Any early-return path between this registration and `const agent = new AgentLoop`
-  // below MUST explicitly delete both steerRegistry and abortRegistry entries. Failing to do so
-  // leaves stale callbacks that will throw a TDZ ReferenceError when the shutdown handler fires
-  // (because `agent` is declared with `const` later in this scope and is never initialized on
-  // those paths).
-  //
-  // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
-  // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
-  // agent directly.
-  //
-  // Registration gap: same ~50ms window as SteerRegistry. A session started in this window
-  // will not receive abort() from the shutdown handler. Acceptable -- same accepted tradeoff.
-  if (state.workrailSessionId !== null) {
-    abortRegistry?.set(state.workrailSessionId, () => { agent.abort(); });
-  }
-
-  // Crash safety: persist tokens before starting the agent loop. A crash between
-  // this point and the first continue_workflow call leaves a recoverable state file.
-  // WHY recoveryContext here: this is the first persistTokens() call -- it establishes
-  // the sidecar with the three fields (workflowId, goal, workspacePath) needed for
-  // runStartupRecovery() to reconstruct a WorkflowTrigger on the next daemon start.
-  if (startContinueToken) {
-    await persistTokens(sessionId, startContinueToken, startCheckpointToken, undefined, {
-      workflowId: trigger.workflowId,
-      goal: trigger.goal,
-      workspacePath: trigger.workspacePath,
-    });
-  }
-
-  // ---- Worktree isolation (Issue #627) ----
-  // When branchStrategy === 'worktree', create an isolated git worktree for this session.
-  // All tool factories and agent file operations use sessionWorkspacePath (the worktree),
-  // NOT trigger.workspacePath (the main checkout). trigger.workspacePath is used only
-  // for git -C operations that target the repo itself (fetch, worktree add, worktree remove).
-  //
-  // WHY after persistTokens(): the sidecar must exist before worktree creation. If the
-  // process crashes after worktree creation but before the sidecar is updated with
-  // worktreePath, the orphan is untracked. Writing the sidecar first and then re-writing
-  // it with worktreePath minimizes this window.
-  //
-  // WHY sessionWorkspacePath is a let: the value is trigger.workspacePath for 'none'
-  // strategy, but derived at runtime for 'worktree' strategy. Using let avoids conditional
-  // branching at every call site.
-  let sessionWorkspacePath = trigger.workspacePath;
-  let sessionWorktreePath: string | undefined;
-
-  if (trigger.branchStrategy === 'worktree') {
-    const branchPrefix = trigger.branchPrefix ?? 'worktrain/';
-    const baseBranch = trigger.baseBranch ?? 'main';
-    sessionWorkspacePath = path.join(WORKTREES_DIR, sessionId);
-    sessionWorktreePath = sessionWorkspacePath;
-
-    try {
-      // Create the worktrees root directory if it doesn't exist.
-      await fs.mkdir(WORKTREES_DIR, { recursive: true });
-
-      // Pre-flight: verify git fetch works (auth check).
-      // WHY -C trigger.workspacePath: all git operations target the main repo,
-      // not the (not-yet-existing) worktree.
-      await execFileAsync('git', ['-C', trigger.workspacePath, 'fetch', 'origin', baseBranch]);
-
-      // Create the isolated worktree at sessionWorkspacePath.
-      // The branch name is unique per session, preventing concurrent sessions
-      // from clobbering each other.
-      await execFileAsync('git', [
-        '-C', trigger.workspacePath,
-        'worktree', 'add',
-        sessionWorkspacePath,
-        '-b', `${branchPrefix}${sessionId}`,
-        `origin/${baseBranch}`,
-      ]);
-
-      // Persist worktreePath immediately after creation (crash safety).
-      // WHY call persistTokens again: the initial call above does not include worktreePath.
-      // Re-calling with all 5 args is intentional -- it is the only way to update
-      // the sidecar with the worktreePath using the atomic temp-rename pattern.
-      // WHY unconditional (no `if (startContinueToken)` guard): if startContinueToken is falsy,
-      // skipping this call leaves worktreePath untracked in the sidecar. An untracked worktree
-      // is an orphan that startup recovery cannot find or reap. Writing '' as token fallback
-      // is acceptable -- startup recovery clears malformed sidecars regardless of token value.
-      // WHY recoveryContext repeated: the sidecar is fully rewritten on each persistTokens() call
-      // (atomic temp-rename). All fields must be present on every write.
-      await persistTokens(sessionId, startContinueToken ?? state.currentContinueToken, startCheckpointToken, sessionWorktreePath, {
-        workflowId: trigger.workflowId,
-        goal: trigger.goal,
-        workspacePath: trigger.workspacePath,
-      });
-
-      console.log(
-        `[WorkflowRunner] Worktree created: sessionId=${sessionId} ` +
-        `branch=${branchPrefix}${sessionId} path=${sessionWorkspacePath}`,
-      );
-    } catch (err: unknown) {
-      // Worktree creation failed -- return an error. The session sidecar was written
-      // without worktreePath, so startup recovery will clean it up normally.
-      // No worktree cleanup needed here: git worktree add is atomic; if it fails,
-      // no worktree is registered with git.
-      const errMsg = err instanceof Error ? err.message : String(err);
-      console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
-      emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'error', detail: errMsg.slice(0, 200), ...withWorkrailSession(state.workrailSessionId) });
-      if (state.workrailSessionId !== null) daemonRegistry?.unregister(state.workrailSessionId, 'failed');
-      // Clean up registry entries: agent was never constructed, so these callbacks are stale.
-      // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
-      // ReferenceError because `agent` is declared later in this function scope.
-      if (state.workrailSessionId !== null) {
-        steerRegistry?.delete(state.workrailSessionId);
-        abortRegistry?.delete(state.workrailSessionId);
-      }
-      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
-      return {
-        _tag: 'error',
-        workflowId: trigger.workflowId,
-        message: `Worktree creation failed: ${errMsg}`,
-        stopReason: 'error',
-      };
-    }
-  }
-
-  // Bot identity: trigger.botIdentity is passed through WorkflowRunSuccess so that
-  // delivery-action.ts can use per-command `-c user.name=X -c user.email=Y` git flags.
-  //
-  // WHY per-command (not git config): git config --local writes to the shared .git/config,
-  // which is shared across all worktrees of the same repo. In parallel sessions, last writer
-  // wins and silently stomps other sessions' identities. Per-command -c flags scope identity
-  // to a single command and have no persistent side effects.
-  //
-  // WHY threaded through WorkflowRunSuccess (not called here): the delivery step (git commit)
-  // happens in delivery-action.ts after runWorkflow() returns. Passing botIdentity through the
-  // result type keeps delivery-action.ts self-contained and avoids race conditions from writing
-  // to shared git config during the agent loop.
-
-  // Edge case: workflow completes immediately on start (single-step workflow with
-  // no pending continuation). Return success without creating an Agent.
-  if (firstStep.isComplete) {
-    // WHY no worktree removal here: delivery (git add, commit, push, gh pr create) runs in
-    // trigger-router.ts AFTER runWorkflow() returns. The worktree must exist until delivery
-    // finishes. trigger-router.ts maybeRunDelivery() is the sole success-path removal.
-    //
-    // WHY conditional sidecar deletion: for worktree sessions, the sidecar must outlive
-    // this return so maybeRunDelivery() in trigger-router.ts can remove the worktree and
-    // then delete the sidecar. Deleting here would leave the worktree invisible to
-    // runStartupRecovery() if the daemon crashes before maybeRunDelivery() runs.
-    // Non-worktree sessions have no delivery cleanup gap and can delete immediately.
-    // NOTE: countActiveSessions() counts sidecars, so worktree sessions briefly inflate
-    // the active count during delivery (seconds). This is semantically correct.
-    if (trigger.branchStrategy !== 'worktree') {
-      await fs.unlink(path.join(sessionsDir, `${sessionId}.json`)).catch(() => {});
-    }
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(state.workrailSessionId) });
-    if (state.workrailSessionId !== null) daemonRegistry?.unregister(state.workrailSessionId, 'completed');
-    // Clean up registry entries: agent was never constructed, so these callbacks are stale.
-    // Without cleanup, the shutdown handler would call the abort callback and hit a TDZ
-    // ReferenceError because `agent` is declared later in this function scope.
-    if (state.workrailSessionId !== null) {
-      steerRegistry?.delete(state.workrailSessionId);
-      abortRegistry?.delete(state.workrailSessionId);
-    }
-    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'success', 0); // stepCount=0: agent loop never ran; stepAdvanceCount tracks loop advances only
-    return {
-      _tag: 'success',
-      workflowId: trigger.workflowId,
-      stopReason: 'stop',
-      ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
-      ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
-      // WHY botIdentity here: even single-step workflows that complete immediately (no agent loop)
-      // go through delivery. The delivery step needs botIdentity for per-command git identity.
-      ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
-    };
-  }
-
-  // ---- Schemas ----
+  // ---- Schemas + tool construction ----
   const schemas = getSchemas();
-
-  // ---- Tools ----
-  // start_workflow is NOT in this list: the daemon calls executeStartWorkflow()
-  // directly above so the LLM cannot call it again.
-  //
-  // WHY complete_step is listed before continue_workflow: the preferred tool for
-  // daemon sessions is complete_step -- it hides the continueToken from the LLM
-  // and eliminates TOKEN_BAD_SIGNATURE errors from token mangling. continue_workflow
-  // is kept for backward compatibility but is marked deprecated in its description.
-  // The LLM should prefer complete_step as directed by the system prompt.
-  //
-  // WHY spawn_agent is listed after report_issue: it is a rarely-used orchestration
-  // tool. Placing it after the common tools (complete_step, Bash, Read, Write) reduces
-  // the chance the LLM reaches for it prematurely.
-
-  // ---- spawn_agent depth parameters ----
-  // WHY read at construction time: trigger.spawnDepth is set by the parent session's
-  // makeSpawnAgentTool when it calls runWorkflow() for the child. Root sessions have
-  // spawnDepth = undefined (defaults to 0). The maxSubagentDepth comes from trigger.agentConfig
-  // or falls back to 3. These values are captured once here; the factory uses them for all
-  // spawn_agent calls in this session's lifetime.
-  const spawnCurrentDepth = trigger.spawnDepth ?? 0;
-  const spawnMaxDepth = trigger.agentConfig?.maxSubagentDepth ?? 3;
-
-  // Session-scoped file read state. Passed by DI into Read, Write, and Edit tools to
-  // enforce the read-before-write invariant and detect file modification between read and write.
-  // WHY here (not module-level): each runWorkflow() call gets its own Map -- no cross-session
-  // contamination. The Map is disposed when runWorkflow() returns.
-  const readFileState = new Map<string, ReadFileState>();
-
-  const tools: AgentTool[] = [
-    makeCompleteStepTool(
-      sessionId,
-      ctx,
-      () => state.currentContinueToken,
-      onAdvance,
-      onComplete,
-      // WHY onTokenUpdate: on a blocked response, the engine returns a retryContinueToken.
-      // This callback updates state.currentContinueToken so the next complete_step call
-      // injects the correct retry token. This is the second (and only other) write
-      // path for currentContinueToken alongside onAdvance above.
-      (t: string) => { state.currentContinueToken = t; },
-      schemas,
-      executeContinueWorkflow,
-      emitter,
-      state.workrailSessionId,
-    ),
-    makeContinueWorkflowTool(sessionId, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, state.workrailSessionId),
-    // WHY sessionWorkspacePath (not trigger.workspacePath): when branchStrategy === 'worktree',
-    // all agent file operations must target the isolated worktree, not the main checkout.
-    // For 'none' strategy, sessionWorkspacePath === trigger.workspacePath (no difference).
-    makeBashTool(sessionWorkspacePath, schemas, sessionId, emitter, state.workrailSessionId),
-    makeReadTool(readFileState, schemas, sessionId, emitter, state.workrailSessionId),
-    makeWriteTool(readFileState, schemas, sessionId, emitter, state.workrailSessionId),
-    makeGlobTool(sessionWorkspacePath, schemas, sessionId, emitter, state.workrailSessionId),
-    makeGrepTool(sessionWorkspacePath, schemas, sessionId, emitter, state.workrailSessionId),
-    makeEditTool(sessionWorkspacePath, readFileState, schemas, sessionId, emitter, state.workrailSessionId),
-    makeReportIssueTool(sessionId, emitter, state.workrailSessionId, undefined, (summary: string) => {
-      // Accumulate issue summaries for WORKTRAIN_STUCK marker.
-      // WHY cap: bounds memory on pathological sessions.
-      if (state.issueSummaries.length < MAX_ISSUE_SUMMARIES) {
-        state.issueSummaries.push(summary);
-      }
-    }),
-    // WHY spawn_agent: enables native WorkRail child session delegation from workflow steps.
-    // The tool is always available in the tool list; the depth check inside execute() is the
-    // enforcement boundary. workrailSessionId is the parent -- it becomes parentSessionId in
-    // the child session's event log.
-    // WHY fallback to empty string when state.workrailSessionId is null: a null workrailSessionId
-    // means the token decode failed earlier (unusual internal error). The child will still be created,
-    // but parentSessionId in the event log will be ''. This is acceptable -- the session runs
-    // correctly; only the parent-child link in the DAG view will be missing.
-    makeSpawnAgentTool(
-      sessionId,
-      ctx,
-      apiKey,
-      state.workrailSessionId ?? '',
-      spawnCurrentDepth,
-      spawnMaxDepth,
-      runWorkflow,
-      schemas,
-      emitter,
-      abortRegistry, // WHY: thread abort registry so child sessions are abortable on SIGTERM
-    ),
-    // WHY signal_coordinator is listed last: it is a mid-step observability tool,
-    // not a control-flow tool. Placing it after the primary workflow tools ensures
-    // the LLM reaches for complete_step / Bash / Read / Write before considering
-    // coordinator signals. The depth limit inside spawn_agent is a stricter
-    // enforcement boundary; signal_coordinator has no such guard.
-    makeSignalCoordinatorTool(sessionId, emitter, state.workrailSessionId),
-  ];
+  const tools = constructTools(session, ctx, apiKey, schemas, emitter, abortRegistry, onAdvance, onComplete, MAX_ISSUE_SUMMARIES);
 
   // ---- I/O phase: load context (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init
@@ -4545,6 +4586,26 @@ export async function runWorkflow(
       ? { maxTokens: trigger.agentConfig.maxOutputTokens }
       : {}),
   });
+
+  // ---- AbortRegistry: register abort callback now that agent is initialized ----
+  // WHY registered here (not before context loading): the closure `() => agent.abort()`
+  // references `agent`, which is declared with `const` above. Registering before `agent`
+  // is initialized would be a TDZ (Temporal Dead Zone) hazard -- the shutdown handler
+  // could call the callback on an early-exit path where `agent` was never assigned,
+  // throwing a ReferenceError. Registering here, after `const agent = new AgentLoop(...)`,
+  // guarantees the binding is initialized at the point of registration.
+  //
+  // WHY () => agent.abort() (not agent itself): the registry value is an opaque callback,
+  // consistent with SteerRegistry pattern. The shutdown handler never needs to inspect the
+  // agent directly.
+  //
+  // Registration gap: steerRegistry is registered ~336 lines earlier (before context loading).
+  // This abort registration happens after context loading completes, so there is a ~200-500ms
+  // window where SIGTERM will not abort this session. Sessions in that window run to completion
+  // or hit the wall-clock timeout. Accepted tradeoff -- see worktrain-daemon-invariants.md 3.4.
+  if (state.workrailSessionId !== null) {
+    abortRegistry?.set(state.workrailSessionId, () => { agent.abort(); });
+  }
 
   // ---- Session limits (wall-clock timeout + max-turn limit) ----
   // Provided by buildSessionContext() -- resolved from trigger.agentConfig with

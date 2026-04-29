@@ -23,7 +23,6 @@ import { WorkflowInterpreter } from '../../../application/services/workflow-inte
 import { checkRecommendationExceedance } from '../../../v2/durable-core/domain/recommendation-warnings.js';
 import type { InternalError } from '../v2-error-mapping.js';
 import { toV1ExecutionState, fromV1ExecutionState } from '../v2-state-conversion.js';
-import { collectArtifactsForEvaluation } from '../v2-context-budget.js';
 import {
   buildGapEvents,
   buildRecommendationWarningEvents,
@@ -117,10 +116,14 @@ export function buildSuccessOutcome(args: {
     return errAsync({ kind: 'advance_apply_failed', message: advanced.error.message } as const);
   }
 
-  const artifactsForEval = collectArtifactsForEvaluation({
-    truthEvents: truth.events,
-    inputArtifacts: inputOutput?.artifacts ?? [],
-  });
+  // WHY only inputArtifacts (not truth.events): interpreter.next() evaluates the current
+  // decision -- e.g. whether a while loop should continue. For artifact_contract loops, the
+  // exit-decision comes from the step that just completed; its artifact is always in
+  // inputOutput.artifacts (the current continue_workflow call). Historical truth.events
+  // artifacts are from previous steps and previous loops -- passing them caused sequential
+  // artifact_contract while loops to be contaminated by stale stop decisions from earlier loops.
+  // The pure interpreter should receive only what is relevant to the current decision.
+  const artifactsForEval = inputOutput?.artifacts ?? [];
   const nextRes = interpreter.next(compiledWf.value, advanced.value, v.mergedContext, artifactsForEval);
   if (nextRes.isErr()) {
     // Distinguish missing context (recoverable, agent can fix) from other errors (system failures).

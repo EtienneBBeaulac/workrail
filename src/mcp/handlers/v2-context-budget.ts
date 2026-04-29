@@ -267,28 +267,3 @@ export function checkContextBudget(args: { readonly tool: ContextToolNameV2; rea
   return { ok: true };
 }
 
-// ── Artifact Collection ───────────────────────────────────────────────
-
-import type { DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
-
-/**
- * Collect artifacts for loop evaluation from durable events + current input.
- * Deterministic: eventIndex order, then current attempt appended.
- */
-export function collectArtifactsForEvaluation(args: {
-  readonly truthEvents: readonly DomainEventV1[];
-  readonly inputArtifacts: readonly unknown[];
-}): readonly unknown[] {
-  const collected: unknown[] = [];
-
-  for (const e of args.truthEvents) {
-    if (e.kind !== EVENT_KIND.NODE_OUTPUT_APPENDED) continue;
-    if (e.data.outputChannel !== OUTPUT_CHANNEL.ARTIFACT) continue;
-    if (e.data.payload.payloadKind !== PAYLOAD_KIND.ARTIFACT_REF) continue;
-    const payload = e.data.payload as typeof e.data.payload & { content?: unknown };
-    if (payload.content === undefined) continue;
-    collected.push(payload.content);
-  }
-
-  return [...collected, ...args.inputArtifacts];
-}
