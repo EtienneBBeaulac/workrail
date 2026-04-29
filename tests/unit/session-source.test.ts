@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sessionSourceFromTrigger } from '../../src/daemon/workflow-runner.js';
-import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import type { SessionSource, AllocatedSession, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
 
 const BASE_TRIGGER: WorkflowTrigger = {
   workflowId: 'wr.coding-task',
@@ -8,86 +7,45 @@ const BASE_TRIGGER: WorkflowTrigger = {
   workspacePath: '/workspace',
 };
 
-describe('sessionSourceFromTrigger', () => {
-  it('returns allocate when _preAllocatedStartResponse is absent', () => {
-    const src = sessionSourceFromTrigger(BASE_TRIGGER);
+const ALLOCATED_SESSION: AllocatedSession = {
+  continueToken: 'ct_abc',
+  checkpointToken: 'ckpt_abc',
+  firstStepPrompt: 'step 1',
+  isComplete: false,
+  triggerSource: 'daemon',
+};
+
+describe('SessionSource discriminated union', () => {
+  it('allocate variant carries trigger', () => {
+    const src: SessionSource = { kind: 'allocate', trigger: BASE_TRIGGER };
     expect(src.kind).toBe('allocate');
     expect(src.trigger).toBe(BASE_TRIGGER);
   });
 
-  it('returns pre_allocated when _preAllocatedStartResponse is set', () => {
-    const trigger: WorkflowTrigger = {
-      ...BASE_TRIGGER,
-      _preAllocatedStartResponse: {
-        continueToken: 'ct_abc',
-        checkpointToken: 'ckpt_abc',
-        isComplete: false,
-        pending: { prompt: 'step 1 prompt', stepId: 's1' },
-        preferences: undefined,
-        nextIntent: undefined,
-        nextCall: undefined,
-      },
-    };
-    const src = sessionSourceFromTrigger(trigger);
+  it('pre_allocated variant carries trigger and session', () => {
+    const src: SessionSource = { kind: 'pre_allocated', trigger: BASE_TRIGGER, session: ALLOCATED_SESSION };
     expect(src.kind).toBe('pre_allocated');
     if (src.kind !== 'pre_allocated') return;
     expect(src.session.continueToken).toBe('ct_abc');
-    expect(src.session.checkpointToken).toBe('ckpt_abc');
-    expect(src.session.firstStepPrompt).toBe('step 1 prompt');
-    expect(src.session.isComplete).toBe(false);
     expect(src.session.triggerSource).toBe('daemon');
   });
 
-  it('defaults triggerSource to daemon', () => {
-    const trigger: WorkflowTrigger = {
-      ...BASE_TRIGGER,
-      _preAllocatedStartResponse: {
-        continueToken: 'ct_x',
-        isComplete: false,
-        pending: { prompt: 'p', stepId: 's' },
-        preferences: undefined,
-        nextIntent: undefined,
-        nextCall: undefined,
-      },
-    };
-    const src = sessionSourceFromTrigger(trigger);
-    if (src.kind !== 'pre_allocated') throw new Error('expected pre_allocated');
-    expect(src.session.triggerSource).toBe('daemon');
+  it('TypeScript discriminant narrows correctly', () => {
+    const src: SessionSource = { kind: 'pre_allocated', trigger: BASE_TRIGGER, session: ALLOCATED_SESSION };
+    // This test documents that the union is exhaustive -- a switch on src.kind
+    // with both arms compiles without a default case.
+    let seen: string | undefined;
+    switch (src.kind) {
+      case 'allocate': seen = 'allocate'; break;
+      case 'pre_allocated': seen = 'pre_allocated'; break;
+    }
+    expect(seen).toBe('pre_allocated');
   });
 
-  it('respects explicit triggerSource mcp', () => {
-    const trigger: WorkflowTrigger = {
-      ...BASE_TRIGGER,
-      _preAllocatedStartResponse: {
-        continueToken: 'ct_y',
-        isComplete: false,
-        pending: { prompt: 'p', stepId: 's' },
-        preferences: undefined,
-        nextIntent: undefined,
-        nextCall: undefined,
-      },
-    };
-    const src = sessionSourceFromTrigger(trigger, 'mcp');
-    if (src.kind !== 'pre_allocated') throw new Error('expected pre_allocated');
-    expect(src.session.triggerSource).toBe('mcp');
-  });
-
-  it('handles absent continueToken with empty string fallback', () => {
-    const trigger: WorkflowTrigger = {
-      ...BASE_TRIGGER,
-      _preAllocatedStartResponse: {
-        continueToken: undefined,
-        isComplete: true,
-        pending: undefined,
-        preferences: undefined,
-        nextIntent: undefined,
-        nextCall: undefined,
-      },
-    };
-    const src = sessionSourceFromTrigger(trigger);
-    if (src.kind !== 'pre_allocated') throw new Error('expected pre_allocated');
-    expect(src.session.continueToken).toBe('');
-    expect(src.session.firstStepPrompt).toBe('');
-    expect(src.session.isComplete).toBe(true);
+  it('AllocatedSession triggerSource distinguishes daemon from mcp', () => {
+    const daemonSession: AllocatedSession = { ...ALLOCATED_SESSION, triggerSource: 'daemon' };
+    const mcpSession: AllocatedSession = { ...ALLOCATED_SESSION, triggerSource: 'mcp' };
+    expect(daemonSession.triggerSource).toBe('daemon');
+    expect(mcpSession.triggerSource).toBe('mcp');
   });
 });

@@ -84,7 +84,7 @@ vi.mock('../../src/v2/projections/node-outputs.js', () => ({
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-import { runWorkflow, finalizeSession, type WorkflowTrigger, type FinalizationContext } from '../../src/daemon/workflow-runner.js';
+import { runWorkflow, finalizeSession, type WorkflowTrigger, type FinalizationContext, type SessionSource, type AllocatedSession } from '../../src/daemon/workflow-runner.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -132,6 +132,24 @@ function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger 
     workspacePath: tmpPath('test-workspace'),
     ...overrides,
   };
+}
+
+/**
+ * Build a pre_allocated SessionSource for instant-completion tests.
+ *
+ * WHY: replaces the removed WorkflowTrigger._preAllocatedStartResponse field.
+ * Callers that need to simulate "session already created" pass this as the
+ * last (source) parameter to runWorkflow().
+ */
+function makeInstantCompleteSource(trigger: WorkflowTrigger): SessionSource {
+  const session: AllocatedSession = {
+    continueToken: '',      // empty -> persistTokens() is skipped (if-guard)
+    checkpointToken: undefined,
+    firstStepPrompt: '',
+    isComplete: true,
+    triggerSource: 'daemon',
+  };
+  return { kind: 'pre_allocated', trigger, session };
 }
 
 // ── Test setup ────────────────────────────────────────────────────────────────
@@ -188,19 +206,10 @@ async function readStatsFile(statsDir: string): Promise<Array<{ outcome: string;
 
 describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
   it('instant completion produces _tag=success → statsOutcome=success (file verified)', async () => {
-    const trigger = makeTrigger({
-      _preAllocatedStartResponse: {
-        isComplete: true,
-        continueToken: undefined as never,
-        checkpointToken: undefined,
-        pending: null,
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'complete' as const,
-        nextCall: null,
-      } as never,
-    });
+    const trigger = makeTrigger();
+    const source = makeInstantCompleteSource(trigger);
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, tmpDir, tmpDir);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, tmpDir, tmpDir, source);
     expect(result._tag).toBe('success');
 
     // Wait for the entire fire-and-forget write chain to settle before reading.
@@ -248,19 +257,10 @@ describe('execution stats: _tag contract (input to tagToStatsOutcome)', () => {
 
 describe('result type invariants', () => {
   it('instant completion returns _tag=success', async () => {
-    const trigger = makeTrigger({
-      _preAllocatedStartResponse: {
-        isComplete: true,
-        continueToken: undefined as never,
-        checkpointToken: undefined,
-        pending: null,
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'complete' as const,
-        nextCall: null,
-      } as never,
-    });
+    const trigger = makeTrigger();
+    const source = makeInstantCompleteSource(trigger);
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, undefined, source);
     expect(result._tag).toBe('success');
   });
 
@@ -305,19 +305,10 @@ describe('result type invariants', () => {
 
 describe('outcome completeness: no unknown for any defined exit path', () => {
   it('instant completion exit path does not produce outcome=unknown', async () => {
-    const trigger = makeTrigger({
-      _preAllocatedStartResponse: {
-        isComplete: true,
-        continueToken: undefined as never,
-        checkpointToken: undefined,
-        pending: null,
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'complete' as const,
-        nextCall: null,
-      } as never,
-    });
+    const trigger = makeTrigger();
+    const source = makeInstantCompleteSource(trigger);
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, undefined, source);
     // The result _tag must be a defined outcome, not a fallback
     expect(['success', 'error', 'timeout', 'stuck']).toContain(result._tag);
     expect(result._tag).not.toBe('unknown' as never);
@@ -397,22 +388,13 @@ describe('_tag to stats outcome mapping (documented contract)', () => {
 
 describe('sidecar lifecycle invariants (documented for refactor)', () => {
   it('instant completion returns _tag=success (no sidecar write, no cleanup needed)', async () => {
-    // continueToken=undefined → persistTokens() is skipped → no sidecar to clean up
-    const trigger = makeTrigger({
-      _preAllocatedStartResponse: {
-        isComplete: true,
-        continueToken: undefined as never,
-        checkpointToken: undefined,
-        pending: null,
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'complete' as const,
-        nextCall: null,
-      } as never,
-    });
+    // continueToken='' → persistTokens() is skipped → no sidecar to clean up
+    const trigger = makeTrigger();
+    const source = makeInstantCompleteSource(trigger);
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, undefined, source);
     expect(result._tag).toBe('success');
-    // Invariant: no sidecar was written because continueToken was undefined.
+    // Invariant: no sidecar was written because continueToken was empty.
     // The cleanup phase need not (and cannot) delete a file that was never created.
   });
 
@@ -461,19 +443,10 @@ describe('stepCount in stats', () => {
   it('instant completion records stepCount=0 (agent loop never ran)', async () => {
     // For pre-agent-loop exits, stepAdvanceCount is 0 since onAdvance() was never called
     // This is documented: stepCount=0 means "agent loop never ran; stepAdvanceCount tracks loop advances only"
-    const trigger = makeTrigger({
-      _preAllocatedStartResponse: {
-        isComplete: true,
-        continueToken: undefined as never,
-        checkpointToken: undefined,
-        pending: null,
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'complete' as const,
-        nextCall: null,
-      } as never,
-    });
+    const trigger = makeTrigger();
+    const source = makeInstantCompleteSource(trigger);
 
-    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY);
+    const result = await runWorkflow(trigger, FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, undefined, undefined, source);
     expect(result._tag).toBe('success');
     // stepCount=0 is correct and intentional for instant completion
     // (the workflow was already done; no agent steps were needed)

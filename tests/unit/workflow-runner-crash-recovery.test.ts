@@ -543,9 +543,21 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
 
     const runWorkflowTriggers: import('../../src/daemon/workflow-runner.js').WorkflowTrigger[] = [];
     const capturedApiKeys: string[] = [];
-    const fakeRunWorkflow = async (trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger, _ctx: unknown, key: string) => {
+    const capturedSources: (import('../../src/daemon/workflow-runner.js').SessionSource | undefined)[] = [];
+    const fakeRunWorkflow = async (
+      trigger: import('../../src/daemon/workflow-runner.js').WorkflowTrigger,
+      _ctx: unknown,
+      key: string,
+      _daemonRegistry?: unknown,
+      _emitter?: unknown,
+      _activeSessionSet?: unknown,
+      _statsDir?: unknown,
+      _sessionsDir?: unknown,
+      source?: import('../../src/daemon/workflow-runner.js').SessionSource,
+    ) => {
       runWorkflowTriggers.push(trigger);
       capturedApiKeys.push(key);
+      capturedSources.push(source);
       return { _tag: 'success', workflowId: trigger.workflowId, stopReason: 'done' } as import('../../src/daemon/workflow-runner.js').WorkflowRunResult;
     };
 
@@ -565,8 +577,12 @@ describe('runStartupRecovery() with ctx -- resume and discard paths', () => {
     expect(runWorkflowTriggers[0]!.goal).toBe('Implement feature X');
     expect(runWorkflowTriggers[0]!.workspacePath).toBe('/some/workspace');
     expect(runWorkflowTriggers[0]!.branchStrategy).toBe('none');
-    expect(runWorkflowTriggers[0]!._preAllocatedStartResponse).toBeDefined();
-    expect(runWorkflowTriggers[0]!._preAllocatedStartResponse?.continueToken).toBe('ct_fake_rehydrated');
+    // SessionSource replaces the removed _preAllocatedStartResponse field (A9 migration)
+    expect(capturedSources[0]).toBeDefined();
+    expect(capturedSources[0]?.kind).toBe('pre_allocated');
+    if (capturedSources[0]?.kind === 'pre_allocated') {
+      expect(capturedSources[0].session.continueToken).toBe('ct_fake_rehydrated');
+    }
     // apiKey is forwarded to runWorkflow -- a regression here would pass all other assertions silently
     expect(capturedApiKeys[0]).toBe('test-api-key');
 

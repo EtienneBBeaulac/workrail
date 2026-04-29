@@ -371,26 +371,6 @@ export interface WorkflowTrigger {
     readonly noProgressAbortEnabled?: boolean;
   };
   /**
-   * Pre-allocated session start result from a caller that already called executeStartWorkflow().
-   *
-   * WHY: The dispatch HTTP handler and the spawn_agent tool both call executeStartWorkflow()
-   * synchronously so they can obtain a session ID before the agent loop starts. They pass
-   * the resulting response here so runWorkflow() skips its own executeStartWorkflow() call
-   * and starts the agent loop from the pre-created session.
-   *
-   * INVARIANT: When set, runWorkflow() MUST NOT call executeStartWorkflow() again.
-   * The session is already created -- calling it again would create a duplicate session.
-   *
-   * WHY store the full response (not just the continueToken): runWorkflow() uses
-   * `response.pending?.prompt` to build the initial LLM prompt and `response.isComplete`
-   * to detect single-step workflows that complete immediately. Both are needed.
-   *
-   * WHY underscore prefix: signals this is an internal implementation detail, not
-   * a user-facing field. Script authors do not set this -- it is set only by the
-   * dispatch HTTP handler or the spawn_agent tool.
-   */
-  readonly _preAllocatedStartResponse?: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
-  /**
    * WorkRail session ID of the parent session that spawned this one.
    *
    * WHY: Written to the `session_created` event in the session store so the parent-child
@@ -403,7 +383,7 @@ export interface WorkflowTrigger {
    *
    * NOTE: This field is not read by runWorkflow() directly. The actual parentSessionId
    * write to session_created.data is performed by makeSpawnAgentTool's executeStartWorkflow()
-   * call (via internalContext). runWorkflow() uses _preAllocatedStartResponse for child
+   * call (via internalContext). runWorkflow() receives a pre_allocated SessionSource for child
    * sessions and skips its own executeStartWorkflow() call. This field exists for
    * documentation purposes and potential future use.
    */
@@ -481,10 +461,10 @@ export interface WorkflowTrigger {
  * Used when the caller needs the session ID synchronously (console dispatch,
  * spawnSession, crash recovery).
  *
- * WHY this type: replaces the implicit contract encoded in
- * WorkflowTrigger._preAllocatedStartResponse with an explicit, named type.
- * Callers that pre-allocate a session now hold an AllocatedSession value
- * rather than an ad-hoc optional field on WorkflowTrigger.
+ * WHY this type: replaces the former implicit contract encoded in the
+ * removed WorkflowTrigger._preAllocatedStartResponse field with an explicit,
+ * named type. Callers that pre-allocate a session now hold an AllocatedSession
+ * value passed via SessionSource rather than an ad-hoc optional field.
  */
 export interface AllocatedSession {
   /** Continue token from executeStartWorkflow response. */
@@ -493,67 +473,28 @@ export interface AllocatedSession {
   /** First step prompt from the session. May be empty if isComplete. */
   readonly firstStepPrompt: string;
   readonly isComplete: boolean;
-  /** Source of this session (daemon trigger or MCP client). */
+  /**
+   * Source of this session (daemon trigger or MCP client).
+   * WHY stored here: feeds the "Session trigger source attribution" backlog item --
+   * writing this to the run_started event makes daemon vs MCP attribution permanent
+   * and queryable from the event log. Not yet wired to the event; the field is in
+   * place so the wire-up is a one-liner when that work is done.
+   */
   readonly triggerSource: 'daemon' | 'mcp';
 }
 
 /**
  * Explicit discriminated union for session creation source.
  *
- * WHY: replaces the _preAllocatedStartResponse optional escape-hatch on
+ * WHY: replaces the former _preAllocatedStartResponse optional escape-hatch on
  * WorkflowTrigger with a typed discriminant that makes the two paths explicit.
  * 'allocate' -> buildPreAgentSession calls executeStartWorkflow internally.
  * 'pre_allocated' -> executeStartWorkflow was already called by the caller.
- *
- * MIGRATION: existing code still uses WorkflowTrigger._preAllocatedStartResponse
- * directly. New callers should construct SessionSource directly. Existing callers
- * can use sessionSourceFromTrigger() to adapt a legacy WorkflowTrigger.
  */
 export type SessionSource =
   | { readonly kind: 'allocate'; readonly trigger: WorkflowTrigger }
   | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession };
 
-/**
- * Convert a legacy WorkflowTrigger to a SessionSource.
- *
- * WHY: allows gradual migration -- callers that still use WorkflowTrigger
- * can wrap with this helper; new callers construct SessionSource directly.
- * When _preAllocatedStartResponse is set, maps the full schema response to
- * the narrower AllocatedSession shape (only the fields runWorkflow actually uses).
- *
- * WHY triggerSource parameter: _preAllocatedStartResponse is set by both daemon
- * (TriggerRouter.dispatch, spawnSession) and console (console-routes.ts HTTP dispatch).
- * Hardcoding 'daemon' would misattribute console-dispatched sessions. Callers must
- * pass the correct source explicitly.
- *
- * WHY AllocatedSession omits preferences/nextIntent/nextCall:
- * Those fields are unused by runWorkflow() -- only continueToken, checkpointToken,
- * pending.prompt, and isComplete matter for session initialization. Narrowing here
- * prevents future callers from accidentally depending on schema fields that may change.
- */
-export function sessionSourceFromTrigger(
-  trigger: WorkflowTrigger,
-  triggerSource: 'daemon' | 'mcp' = 'daemon',
-): SessionSource {
-  if (trigger._preAllocatedStartResponse !== undefined) {
-    const r = trigger._preAllocatedStartResponse;
-    return {
-      kind: 'pre_allocated',
-      trigger,
-      session: {
-        continueToken: r.continueToken ?? '',
-        // WHY string | null | undefined: the Zod schema uses .optional() (no null),
-        // but the module convention at line ~2707 normalises absent to null via ?? null.
-        // Preserving undefined here keeps the wrapper lossless; consumers normalise downstream.
-        checkpointToken: r.checkpointToken,
-        firstStepPrompt: r.pending?.prompt ?? '',
-        isComplete: r.isComplete,
-        triggerSource,
-      },
-    };
-  }
-  return { kind: 'allocate', trigger };
-}
 
 /** Successful completion of a workflow run. */
 export interface WorkflowRunSuccess {
@@ -1005,7 +946,7 @@ export async function readAllDaemonSessions(
  *   count advance_recorded events in the WorkRail session event log, and apply
  *   the binary evaluateRecovery() policy:
  *   - stepAdvances >= 1 -> attempt resume: rehydrate via executeContinueWorkflow, reconstruct
- *     WorkflowTrigger with _preAllocatedStartResponse, call runWorkflow fire-and-forget.
+ *     WorkflowTrigger with a pre_allocated SessionSource, call runWorkflow fire-and-forget.
  *     Falls through to discard if sidecar lacks recovery context fields (backward compat),
  *     if the worktree directory is gone, if rehydrate fails, or if the session is complete.
  *   - stepAdvances === 0 -> discard (sidecar deleted; issue re-dispatched)
@@ -1211,21 +1152,17 @@ export async function runStartupRecovery(
             break;
           }
 
-          // Build the _preAllocatedStartResponse adapter.
-          // WHY: runWorkflow() uses _preAllocatedStartResponse to skip executeStartWorkflow()
-          // (preventing a duplicate session). V2ContinueWorkflowOutputSchema 'ok' variant and
-          // V2StartWorkflowOutputSchema share the fields we care about: continueToken,
-          // checkpointToken, isComplete, pending, preferences, nextIntent, nextCall.
-          // V2StartWorkflowOutputSchema has optional staleRoots/warnings not present here --
-          // they are optional so their absence is correct.
-          const preAllocated: import('zod').infer<typeof V2StartWorkflowOutputSchema> = {
+          // Build a SessionSource to pass to runWorkflow() so it skips executeStartWorkflow().
+          // WHY SessionSource (not _preAllocatedStartResponse): _preAllocatedStartResponse was
+          // removed from WorkflowTrigger in A9. SessionSource is the typed replacement.
+          // V2ContinueWorkflowOutputSchema 'ok' variant shares the fields we care about with
+          // AllocatedSession: continueToken, checkpointToken, isComplete, and pending.prompt.
+          const recoveryAllocatedSession: AllocatedSession = {
             continueToken: rehydrated.continueToken ?? '',
             checkpointToken: rehydrated.checkpointToken,
+            firstStepPrompt: rehydrated.pending.prompt ?? '',
             isComplete: rehydrated.isComplete,
-            pending: rehydrated.pending,
-            preferences: rehydrated.preferences,
-            nextIntent: rehydrated.nextIntent, // 'rehydrate_only' from rehydrate call; runWorkflow() does not read this field
-            nextCall: rehydrated.nextCall,
+            triggerSource: 'daemon',
           };
 
           // Determine effective workspace: use the worktree path if the session had one
@@ -1239,7 +1176,11 @@ export async function runStartupRecovery(
             goal: session.goal ?? 'Resumed session (crash recovery)',
             workspacePath: effectiveWorkspacePath,
             branchStrategy,
-            _preAllocatedStartResponse: preAllocated,
+          };
+          const recoverySource: SessionSource = {
+            kind: 'pre_allocated',
+            trigger: recoveredTrigger,
+            session: recoveryAllocatedSession,
           };
 
           console.log(
@@ -1258,6 +1199,12 @@ export async function runStartupRecovery(
             recoveredTrigger,
             ctx!,
             apiKey,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            recoverySource,
           ).then((result) => {
             console.log(
               `[WorkflowRunner] Startup recovery: resumed session ${session.sessionId} completed: ${result._tag}`,
@@ -2500,7 +2447,15 @@ export interface PreAgentSession {
   readonly checkpointToken: string | null;
   readonly sessionWorkspacePath: string;
   readonly sessionWorktreePath: string | undefined;
-  readonly firstStep: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
+  /**
+   * The first step's pending prompt text.
+   *
+   * WHY string (not the full V2StartWorkflowOutputSchema): only the prompt text
+   * is needed downstream (buildSessionContext, buildAgentReadySession). Narrowing
+   * to a string here prevents future callers from accidentally depending on
+   * schema fields that may change, and removes the dependency on the Zod type.
+   */
+  readonly firstStepPrompt: string;
   readonly state: SessionState;           // mutable; explicit to document impurity
   readonly spawnCurrentDepth: number;
   readonly spawnMaxDepth: number;
@@ -2708,7 +2663,7 @@ export interface SessionContext {
  * @param trigger - The workflow trigger (provides agentConfig limits and context).
  * @param context - The ContextBundle from DefaultContextLoader.loadSession().
  * @param firstStepPrompt - The first step's pending prompt from executeStartWorkflow
- *   or _preAllocatedStartResponse.
+ *   or the pre-allocated AllocatedSession.
  * @returns SessionContext containing systemPrompt, initialPrompt, and session limits.
  */
 export function buildSessionContext(
@@ -2783,6 +2738,10 @@ export function buildSessionContext(
  * WHY pure + I/O separation: the caller (runWorkflow) provides sessionId and
  * startMs so that timing and identity are consistent across both phases.
  *
+ * @param source - Optional session source. When provided with kind 'pre_allocated',
+ *   executeStartWorkflow is skipped (the caller already allocated the session).
+ *   When absent or kind 'allocate', executeStartWorkflow is called internally.
+ *
  * Returns { kind: 'complete', result } for all early-exit cases.
  * Returns { kind: 'ready', session } when the agent loop should run.
  */
@@ -2797,6 +2756,7 @@ export async function buildPreAgentSession(
   emitter: DaemonEventEmitter | undefined,
   daemonRegistry: DaemonRegistry | undefined,
   activeSessionSet: ActiveSessionSet | undefined,
+  source?: SessionSource,
 ): Promise<PreAgentSessionResult> {
   // ---- Model setup ----
   let agentClient: Anthropic | AnthropicBedrock;
@@ -2822,10 +2782,22 @@ export async function buildPreAgentSession(
   // ---- Session state ----
   const state = createSessionState('');
 
-  // ---- executeStartWorkflow (or pre-allocated) ----
-  let firstStep: import('zod').infer<typeof V2StartWorkflowOutputSchema>;
-  if (trigger._preAllocatedStartResponse !== undefined) {
-    firstStep = trigger._preAllocatedStartResponse;
+  // ---- executeStartWorkflow (or pre-allocated via SessionSource) ----
+  // WHY SessionSource: replaces the removed WorkflowTrigger._preAllocatedStartResponse
+  // field (A9 migration). Callers that pre-allocate a session pass source.kind === 'pre_allocated';
+  // callers that want buildPreAgentSession to allocate pass 'allocate' or omit source entirely.
+  let continueToken: string;
+  let checkpointToken: string | null;
+  let firstStepPrompt: string;
+  let isComplete: boolean;
+
+  const effectiveSource = source ?? { kind: 'allocate' as const, trigger };
+  if (effectiveSource.kind === 'pre_allocated') {
+    const s = effectiveSource.session;
+    continueToken = s.continueToken;
+    checkpointToken = s.checkpointToken ?? null;
+    firstStepPrompt = s.firstStepPrompt;
+    isComplete = s.isComplete;
   } else {
     const startResult = await executeStartWorkflow(
       { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
@@ -2844,11 +2816,12 @@ export async function buildPreAgentSession(
         },
       };
     }
-    firstStep = startResult.value.response;
+    const r = startResult.value.response;
+    continueToken = r.continueToken ?? '';
+    checkpointToken = r.checkpointToken ?? null;
+    firstStepPrompt = r.pending?.prompt ?? '';
+    isComplete = r.isComplete;
   }
-
-  const continueToken = firstStep.continueToken ?? '';
-  const checkpointToken = firstStep.checkpointToken ?? null;
   state.currentContinueToken = continueToken;
 
   // ---- Decode WorkRail session ID ----
@@ -2950,7 +2923,7 @@ export async function buildPreAgentSession(
   // ---- Single-step completion (must check AFTER registry setup) ----
   // WHY after registration: the session is observable in the console from this point.
   // A session that completes immediately should still appear as 'completed' not 'not found'.
-  if (firstStep.isComplete) {
+  if (isComplete) {
     const lifecycle = sidecardLifecycleFor('success', trigger.branchStrategy);
     if (lifecycle.kind === 'delete_now') {
       await fs.unlink(path.join(sessionsDir, `${sessionId}.json`)).catch(() => {});
@@ -2983,7 +2956,7 @@ export async function buildPreAgentSession(
       checkpointToken,
       sessionWorkspacePath,
       sessionWorktreePath,
-      firstStep,
+      firstStepPrompt,
       state,
       spawnCurrentDepth: trigger.spawnDepth ?? 0,
       spawnMaxDepth: trigger.agentConfig?.maxSubagentDepth ?? 3,
@@ -3333,7 +3306,7 @@ async function buildAgentReadySession(
   daemonRegistry: DaemonRegistry | undefined,
   activeSessionSet: ActiveSessionSet | undefined,
 ): Promise<AgentReadySession> {
-  const { state, firstStep, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = preAgentSession;
+  const { state, firstStepPrompt, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = preAgentSession;
   const startContinueToken = preAgentSession.continueToken;
   const handle = preAgentSession.handle;
 
@@ -3409,7 +3382,7 @@ async function buildAgentReadySession(
   const sessionCtx = buildSessionContext(
     trigger,
     contextBundle,
-    firstStep.pending?.prompt ?? 'No step content available',
+    firstStepPrompt || 'No step content available',
   );
 
   // ---- Observability callbacks for AgentLoop ----
@@ -3649,6 +3622,16 @@ export async function runWorkflow(
   // without touching real ~/.workrail/data or ~/.workrail/daemon-sessions directories.
   _statsDir?: string,
   _sessionsDir?: string,
+  /**
+   * Optional pre-allocated session source.
+   *
+   * WHY: replaces WorkflowTrigger._preAllocatedStartResponse (removed in A9).
+   * Callers that pre-allocate a session (console dispatch, coordinator spawnSession,
+   * spawn_agent, crash recovery) pass kind: 'pre_allocated' so buildPreAgentSession
+   * skips its own executeStartWorkflow() call. Callers that want the default flow
+   * (allocate internally) pass kind: 'allocate' or omit this parameter entirely.
+   */
+  source?: SessionSource,
 ): Promise<WorkflowRunResult> {
   // ---- Resolved dirs (injectable for tests) ----
   const statsDir = _statsDir ?? DAEMON_STATS_DIR;
@@ -3688,6 +3671,7 @@ export async function runWorkflow(
   const preResult = await buildPreAgentSession(
     trigger, ctx, apiKey, sessionId, startMs,
     statsDir, sessionsDir, emitter, daemonRegistry, activeSessionSet,
+    source,
   );
   if (preResult.kind === 'complete') {
     return preResult.result;

@@ -26,7 +26,7 @@ import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { createContextAssembler } from '../context-assembly/index.js';
 import { createListRecentSessions } from '../context-assembly/infra.js';
-import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, SessionSource, AllocatedSession } from '../daemon/workflow-runner.js';
 import type { ConsoleService } from '../v2/usecases/console-service.js';
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,7 @@ export interface CoordinatorDepsWithDispatch extends AdaptiveCoordinatorDeps {
    * `router.dispatch.bind(router)`. Until this is called, spawnSession() returns
    * a typed error rather than crashing.
    */
-  setDispatch(dispatch: (trigger: WorkflowTrigger) => void): void;
+  setDispatch(dispatch: (trigger: WorkflowTrigger, source?: SessionSource) => void): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,10 +97,10 @@ export function createCoordinatorDeps(
 
   // Mutable dispatch function. Null until setDispatch() is called.
   // WHY let (not const): assigned by setDispatch(), which is called after TriggerRouter construction.
-  let dispatch: ((trigger: WorkflowTrigger) => void) | null = null;
+  let dispatch: ((trigger: WorkflowTrigger, source?: SessionSource) => void) | null = null;
 
   return {
-    setDispatch(fn: (trigger: WorkflowTrigger) => void): void {
+    setDispatch(fn: (trigger: WorkflowTrigger, source?: SessionSource) => void): void {
       if (dispatch !== null) {
         process.stderr.write('[WARN coordinator-deps] setDispatch() called more than once -- ignoring reassignment\n');
         return;
@@ -121,15 +121,15 @@ export function createCoordinatorDeps(
       // is running correctly (the daemon already validated credentials at startup).
       // Calling executeStartWorkflow + router.dispatch() directly bypasses the
       // redundant credential check and eliminates the HTTP roundtrip.
-      // This mirrors the pattern used in console-routes.ts:810-863 (the HTTP handler
-      // uses this same flow: executeStartWorkflow -> _preAllocatedStartResponse -> dispatch).
+      // This mirrors the pattern used in console-routes.ts (the HTTP handler
+      // uses this same flow: executeStartWorkflow -> SessionSource -> dispatch).
       if (dispatch === null) {
         return { kind: 'err' as const, error: 'in-process router not initialized -- coordinator deps not ready' };
       }
 
       // Step 1: Allocate a session in the store synchronously.
-      // WHY _preAllocatedStartResponse: runWorkflow() skips its own executeStartWorkflow()
-      // call when this field is set, preventing double session creation.
+      // WHY SessionSource: runWorkflow() skips its own executeStartWorkflow() call when
+      // a pre_allocated SessionSource is passed, preventing double session creation.
       const startResult = await executeStartWorkflow(
         { workflowId, workspacePath: workspace, goal },
         ctx,
@@ -143,13 +143,13 @@ export function createCoordinatorDeps(
       const startContinueToken = startResult.value.response.continueToken;
       if (!startContinueToken) {
         // Workflow completed immediately (single-step); no agent loop session needed.
-        // Use workflowId as fallback handle (matches console-routes.ts:854-856 behavior).
+        // Use workflowId as fallback handle (matches console-routes.ts behavior).
         return { kind: 'ok' as const, value: workflowId };
       }
 
       // Step 2: Decode the session ID from the continueToken.
       // WHY parseContinueTokenOrFail: V2StartWorkflowOutputSchema does not expose sessionId
-      // directly (to avoid a breaking schema change). Same approach as console-routes.ts:837-851.
+      // directly (to avoid a breaking schema change). Same approach as console-routes.ts.
       const tokenResult = await parseContinueTokenOrFail(
         startContinueToken,
         ctx.v2.tokenCodecPorts,
@@ -164,18 +164,26 @@ export function createCoordinatorDeps(
       const sessionHandle = tokenResult.value.sessionId;
 
       // Step 3: Enqueue the agent loop via TriggerRouter's queue and semaphore.
-      // Pass _preAllocatedStartResponse so runWorkflow() skips executeStartWorkflow().
       // WHY agentConfig forwarded: coordinator sets per-phase timeouts (e.g. 55m for discovery)
       // that exceed DEFAULT_SESSION_TIMEOUT_MINUTES=30. Without forwarding, sessions die at 30m
       // and the coordinator's phase budget is never consumed (discovery-loop-fix, RC1).
-      dispatch({
+      const trigger: WorkflowTrigger = {
         workflowId,
         goal,
         workspacePath: workspace,
         context,
         ...(agentConfig !== undefined ? { agentConfig } : {}),
-        _preAllocatedStartResponse: startResult.value.response,
-      });
+      };
+      const r = startResult.value.response;
+      const allocatedSession: AllocatedSession = {
+        continueToken: r.continueToken ?? '',
+        checkpointToken: r.checkpointToken,
+        firstStepPrompt: r.pending?.prompt ?? '',
+        isComplete: r.isComplete,
+        triggerSource: 'daemon',
+      };
+      const source: SessionSource = { kind: 'pre_allocated', trigger, session: allocatedSession };
+      dispatch(trigger, source);
 
       return { kind: 'ok' as const, value: sessionHandle };
     },
