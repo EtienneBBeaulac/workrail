@@ -989,6 +989,10 @@ export async function readAllDaemonSessions(
  * @param _runWorkflowFn - Injectable runWorkflow implementation for testing.
  *   Used in the resume path to start a new agent loop from the current step.
  *   Defaults to the real runWorkflow(). Passed as fire-and-forget in production.
+ * @param apiKey - Anthropic API key forwarded to runWorkflow() on the resume path.
+ *   Injected by the caller (startTriggerListener) rather than read from process.env
+ *   so this function stays boundary-clean. Defaults to '' for tests that do not
+ *   exercise the resume path.
  */
 export async function runStartupRecovery(
   sessionsDir: string = DAEMON_SESSIONS_DIR,
