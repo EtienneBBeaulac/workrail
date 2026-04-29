@@ -250,10 +250,30 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
       expect(report.isValid).toBe(false); // Hard error
     });
 
-    it('2c. Bundled workflow vs user/custom/git source → user/custom/git wins (normal priority)', () => {
-      // Bundled protection only applies to project sources, not user/custom/git.
-      // User, custom, and git sources should still override bundled via normal
-      // source_priority ordering (they appear later in the source list).
+    it('2c. Bundled wr.* workflow vs user/custom/git source → bundled wins (namespace protection)', () => {
+      // Bundled protection applies to ALL non-bundled sources for wr.* IDs.
+      // User, custom, and git sources cannot shadow wr.* bundled workflows.
+      const bundledWf = wf(def('wr.my-workflow'), createBundledSource());
+      const userWf = wf(def('wr.my-workflow'), createUserDirectorySource('/home/user/.workrail/workflows'));
+
+      const candidates = [
+        { sourceRef: 0 as SourceRef, workflows: [bundledWf] },
+        { sourceRef: 1 as SourceRef, workflows: [userWf] },
+      ];
+
+      const resolved = resolveWorkflowCandidates(candidates, new Map());
+
+      // Bundled wins via bundled_protected (wr.* namespace is reserved)
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]!.resolvedBy.kind).toBe('bundled_protected');
+      if (resolved[0]!.resolvedBy.kind === 'bundled_protected') {
+        expect(resolved[0]!.resolvedBy.bundledSourceRef).toBe(0);
+      }
+    });
+
+    it('2d. Non-wr.* bundled workflow vs user/custom/git source → user/custom/git wins (normal priority)', () => {
+      // Bundled protection only applies to wr.* IDs. Non-wr.* bundled workflows
+      // can be overridden by user/custom/git sources via normal source_priority.
       const bundledWf = wf(def('my-workflow'), createBundledSource());
       const userWf = wf(def('my-workflow'), createUserDirectorySource('/home/user/.workrail/workflows'));
 
@@ -264,7 +284,7 @@ describe('Phase 5: God-Tier Validation Regression Tests', () => {
 
       const resolved = resolveWorkflowCandidates(candidates, new Map());
 
-      // User source wins via normal source_priority (bundled protection does not activate)
+      // User source wins via normal source_priority
       expect(resolved).toHaveLength(1);
       expect(resolved[0]!.resolvedBy.kind).toBe('source_priority');
       if (resolved[0]!.resolvedBy.kind === 'source_priority') {

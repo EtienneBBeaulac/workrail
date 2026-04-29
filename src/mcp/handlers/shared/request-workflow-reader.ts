@@ -439,6 +439,10 @@ interface RootDiscoveryResult {
 async function discoverWorkflowDirectoriesUnderRoot(rootPath: string): Promise<RootDiscoveryResult> {
   const discoveredPaths: string[] = [];
   try {
+    // Skip remembered roots that are workrail package checkouts. Their
+    // workflows/ dir contains wr.* IDs that would be discovered as a custom
+    // source and fail namespace validation in all other workspaces.
+    if (await isWorkrailPackageDir(rootPath)) return { discovered: [], stale: false };
     await walkForRootedWorkflowDirectories(rootPath, discoveredPaths);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -454,6 +458,12 @@ async function walkForRootedWorkflowDirectories(
   discoveredPaths: string[],
   depth = 0,
 ): Promise<void> {
+  // Skip workrail package checkouts at any depth. Their workflows/ dir contains
+  // wr.* IDs which would be discovered as a custom source and fail namespace
+  // validation in all other workspaces. Check is skipped at depth=0 since
+  // discoverWorkflowDirectoriesUnderRoot already checked the root.
+  if (depth > 0 && await isWorkrailPackageDir(currentDirectory)) return;
+
   const entries = await fs.readdir(currentDirectory, { withFileTypes: true });
   const sortedEntries = [...entries].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -491,6 +501,19 @@ async function walkForRootedWorkflowDirectories(
 
 function shouldSkipDirectory(name: string): boolean {
   return SKIP_DIRS.has(name);
+}
+
+// WHY: the workrail repo itself contains a workflows/ directory with wr.* IDs.
+// If that repo (or any ancestor) is in the remembered-roots store, the walker
+// would discover it as a custom source, causing wr.* validation failures everywhere.
+async function isWorkrailPackageDir(dirPath: string): Promise<boolean> {
+  try {
+    const pkgJson = await fs.readFile(path.join(dirPath, 'package.json'), 'utf-8');
+    const pkg = JSON.parse(pkgJson) as { name?: unknown };
+    return pkg.name === '@exaudeus/workrail';
+  } catch {
+    return false;
+  }
 }
 
 async function isDirectory(targetPath: string): Promise<boolean> {

@@ -137,34 +137,29 @@ export function resolveWorkflowCandidates(
     } else {
       // Multiple sources — apply priority rules.
       //
-      // Bundled protection: a workflow from a 'bundled' source wins over any
-      // 'project' source that carries the same ID.
+      // Bundled protection: for wr.* workflows, the bundled source always wins
+      // over any non-bundled source carrying the same ID.
       //
-      // This covers two cases:
-      //   1. wr.* namespace — canonical WorkRail workflows that must not be
-      //      shadowed by user-authored workflows with the same ID.
-      //   2. Any bundled workflow when the project path accidentally equals the
-      //      bundled workflows directory (e.g. running workrail from its own
-      //      source repo during development). Without this rule the higher-
-      //      priority project source would overwrite the bundled one, making
-      //      every bundled workflow appear as kind:'project' in the console.
+      // The wr.* namespace is reserved for canonical WorkRail workflows. No
+      // user-authored source (project, custom, user, git, remote) may shadow
+      // them. Previously only 'project' was blocked; 'custom' sources fell
+      // through to source_priority and won, then failed validateWorkflowIdForLoad
+      // because the wr.* namespace is bundled-only. This caused all bundled
+      // workflows to appear in validationWarnings from any workspace that had the
+      // workrail repo in its remembered-roots.
       //
-      // Only project sources are blocked — user, custom, git, and remote
-      // sources still follow normal source_priority ordering.
+      // Non-wr.* bundled workflows follow normal source_priority so that users
+      // can legitimately override them with their own versions.
       const bundledSource = sources.find(s => s.workflow.source.kind === 'bundled');
-      const projectShadowers = bundledSource
-        ? sources.filter(s => s !== bundledSource && s.workflow.source.kind === 'project')
+      const isWrNamespace = id.startsWith('wr.');
+      const nonBundledShadowers = bundledSource && isWrNamespace
+        ? sources.filter(s => s !== bundledSource)
         : [];
 
-      if (bundledSource && projectShadowers.length > 0) {
-        // Bundled source beats project sources.
-        // Any remaining non-project, non-bundled sources (user, custom, git,
-        // remote) are also treated as shadowers for reporting purposes — they
-        // didn't win, but they are not the reason bundled was protected.
+      if (bundledSource && nonBundledShadowers.length > 0) {
+        // Bundled source beats all other sources for wr.* workflows.
         const { sourceRef: bundledRef, workflow } = bundledSource;
-        const attemptedShadowRefs = sources
-          .filter(s => s !== bundledSource)
-          .map(s => s.sourceRef);
+        const attemptedShadowRefs = nonBundledShadowers.map(s => s.sourceRef);
 
         const variantResolution = variantResolutions.get(id)?.get(bundledRef);
         resolved.push({
