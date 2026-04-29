@@ -74,6 +74,22 @@ Agent writes a complete handoff block (commitType, prTitle, prBody, filesChanged
 The autonomous workflow runner (`worktrain daemon`). Completely separate from the MCP server -- calls the engine directly in-process.
 
 
+### Daemon architecture: remaining migrations (Apr 29, 2026)
+
+**Status: partial** | A9 shipped Apr 29, 2026.
+
+Track A (A1-A9) shipped and the `SessionSource` migration is complete. `WorkflowTrigger._preAllocatedStartResponse` is gone.
+
+**Remaining items:**
+
+- `CriticalEffect<T>` / `ObservabilityEffect` type distinction -- categorize side effects in `runAgentLoop` and finalization as either crash-relevant or observability-only
+- `StateRef` mutation wrapper -- replace direct `state.pendingSteerParts.push()` mutations with an explicit mutation API
+- Zod tool param validation -- replace manual `typeof` checks in tool factories with Zod schema validation (requires `zodToJsonSchema` or maintaining two sources of truth for param schemas)
+- `createCoordinatorDeps` unit tests -- extraction in B3 improved testability; cover `spawnSession`, `awaitSessions`, `getAgentResult` at minimum
+- Wire `AllocatedSession.triggerSource` to the `run_started` event for session attribution (one-liner once the event schema field is added -- see "Session trigger source attribution" entry below)
+
+---
+
 ### `wr.refactoring` workflow (Apr 28, 2026)
 
 **Status: idea** | Priority: medium
@@ -103,59 +119,35 @@ The `wr.coding-task` workflow has too much overhead for pure refactors (design r
 
 ---
 
-### runWorkflow() functional core refactor -- Phase 2 (Apr 24, 2026)
+### runWorkflow() functional core refactor -- Phases 2-4 (Apr 24-29, 2026)
 
-**Status: done** | Shipped in PR #830 (Apr 29, 2026)
+**Status: done** | Phases 2-3 shipped Apr 29, 2026. Phase 4 (A1-A8) shipped Apr 29, 2026.
 
-Phase 1 landed in PR #818: extracted `tagToStatsOutcome`, `buildAgentClient`, `evaluateStuckSignals`, `SessionState`, and `finalizeSession`. Phase 2 landed in PR #830:
+Phase 1 (PR #818): `tagToStatsOutcome`, `buildAgentClient`, `evaluateStuckSignals`, `SessionState`, `finalizeSession`.
+Phase 2 (PR #830): `PreAgentSession`/`PreAgentSessionResult`, `buildPreAgentSession`, `constructTools`, `persistTokens` Result type, TDZ fix.
+Phase 3 (PRs #835, #837): `buildTurnEndSubscriber`, `buildAgentCallbacks`, `buildSessionResult`. runWorkflow() body: 539 → 308 lines.
 
-**What remains:**
+**Phase 4 (Track A, PRs #839-#861, Apr 29, 2026):**
+- A1: `runStartupRecovery` apiKey injected as parameter (removes process.env read)
+- A2: Turn-end collaborators extracted to `src/daemon/turn-end/` (`step-injector`, `detect-stuck`, `conversation-flusher`)
+- A3: `SessionScope` + `FileStateTracker` -- typed tool-layer contract, raw Map encapsulated (#843)
+- A4: All 11 tool factories extracted to `src/daemon/tools/` -- workflow-runner.ts -1,500 lines (#851)
+- A5: `ContextLoader` + `ContextBundle` -- two-phase context assembly, parallelized with pre-agent session setup (#855)
+- A6: `ActiveSessionSet` + `SessionHandle` -- replaces `SteerRegistry` + `AbortRegistry` dual Maps; closes TDZ hazard (#856)
+- A7: `buildAgentReadySession` + `runAgentLoop` extracted -- runWorkflow() body: 302 → 92 lines (#859)
+- A8: `SessionSource` discriminated union + `AllocatedSession` -- typed vocabulary for `_preAllocatedStartResponse` migration (#861)
+- A9: Full `SessionSource` migration -- `WorkflowTrigger._preAllocatedStartResponse` removed; all 4 call sites construct `SessionSource` directly; `runWorkflow()` accepts `source?: SessionSource` (#869)
 
-**Extract `buildSessionConfig(trigger, loadedCtx) -> SessionConfig`** -- a pure function that takes already-loaded context (soul content, workspace context string, session notes array -- all loaded by I/O before the call) and returns everything the agent loop needs: system prompt, tool list, session limits, model/client config. Currently this logic is scattered through the setup phase alongside the I/O calls that load the data.
+**Also shipped (Track B, PRs #846-#848):**
+- B1: `DispatchDeduplicator` -- compile-enforced dedup contract, replaces verbal MUST comment
+- B2: `DeliveryPipeline` + `DeliveryStage` -- staged delivery, preempts accretion in trigger-router.ts
+- B3: `createCoordinatorDeps` + `setDispatch` -- extracted from 900-line trigger-listener.ts; circular dep fixed
 
-```typescript
-interface SessionContext {
-  readonly systemPrompt: string;
-  readonly tools: readonly AgentTool[];
-  readonly sessionTimeoutMs: number;
-  readonly maxTurns: number;
-  readonly initialPrompt: string;
-  readonly agentCallbacks: AgentLoopCallbacks;
-}
+**Unit tests added (PRs #863-#865):** `DefaultFileStateTracker` (15), `DefaultContextLoader` (12), `ActiveSessionSet`/`SessionHandle` (11).
 
-function buildSessionContext(
-  trigger: WorkflowTrigger,
-  agentClient: AgentClientInterface,
-  modelId: string,
-  soulContent: string,           // already loaded by loadDaemonSoul()
-  workspaceContext: string | null, // already loaded by loadWorkspaceContext()
-  sessionNotes: readonly string[], // already loaded by loadSessionNotes()
-  state: SessionState,
-  // ... tool factories, schemas, etc.
-): SessionContext
-```
+**Total workflow-runner.ts reduction: ~4,955 → ~2,800 lines (44%).**
 
-The shell then does:
-1. All I/O in sequence: `loadDaemonSoul`, `loadWorkspaceContext`, `loadSessionNotes`, `git worktree add`, `executeStartWorkflow`, `parseContinueTokenOrFail`, `persistTokens`
-**What Phase 2 delivered (PR #830):**
-- `PreAgentSession` interface + `PreAgentSessionResult` discriminated union -- all early-exit paths type-enforced
-- `buildPreAgentSession()` -- all pre-agent I/O extracted; steer+daemon registries registered after all failing I/O (FM1 invariant)
-- `constructTools()` -- explicitly impure named function, `state` as explicit parameter
-- `persistTokens()` returns `Promise<Result<void, PersistTokensError>>` using `src/runtime/result.ts`
-- `sidecardLifecycleFor()` pure function with `assertNever` exhaustiveness
-- TDZ hazard fixed: `abortRegistry.set()` now registered after `const agent = new AgentLoop()`
-
-**Phase 3 (PRs #835, #837)** continued the refactor:
-- `buildTurnEndSubscriber()` extracted -- runWorkflow() body: 539 → 426 lines
-- Tool param validation at LLM boundary (8 tool factories)
-- `buildAgentCallbacks()` + `buildSessionResult()` pure functions -- body: 426 → 308 lines
-- Test flakiness fix: `settleFireAndForget()` + `retry: 2` in vitest config
-
-**Still deferred:**
-- `CriticalEffect<T>` / `ObservabilityEffect` type distinction
-- `StateRef` mutation wrapper
-- Zod tool param validation (replacing manual typeof checks -- requires zodToJsonSchema or two sources of truth)
-- `wr.refactoring` workflow (see backlog entry above)
+**Follow-on:** `wr.refactoring` workflow (see backlog entry above). Remaining items in "Daemon architecture: remaining migrations" entry below.
 
 ---
 
@@ -623,6 +615,29 @@ The stdio/HTTP MCP server that Claude Code (and other MCP clients) connect to. M
 
 ## Console
 
+### Task picker mode: browse and launch available work (Apr 29, 2026)
+
+**Status: idea** | Priority: high
+
+**Problem:** Once WorkTrain is configured (workspace set up, triggers.yml written, daemon running), there is still no easy way to say "run this workflow now" from the console. Dispatch requires knowing the API or writing a webhook. The console has a dispatch endpoint but no UI to drive it.
+
+**Vision:** A console panel that lists the triggers already configured in triggers.yml and lets the user click one to fire it immediately -- without leaving the browser, without touching the API, without writing YAML.
+
+**How it works:**
+1. Console calls `GET /api/v2/triggers` to list all triggers loaded by the daemon.
+2. User sees a list: trigger ID, workflow, goal, last-fired timestamp. Clicks "Run".
+3. Console POSTs to `/api/v2/auto/dispatch` (already implemented) with the trigger's workflowId + goal + workspace.
+4. New session appears in the session list immediately. User watches the DAG advance live.
+5. On completion: outcome, PR link (if opened), and step notes all visible in the same panel.
+
+**What this is not:** An onboarding wizard or zero-setup flow -- the daemon and environment must already be configured. This is a dispatch surface for *already-configured* users who want to trigger work without using the CLI or waiting for a webhook.
+
+**Why it matters:** Makes the console a control plane, not just a read-only viewer. The daemon gains a "run this now" button. Users get to watch the agent work in real time, which builds confidence before trusting it on unattended tasks.
+
+**Dependency:** `GET /api/v2/triggers` endpoint (returns the live trigger index -- may need to be added). `POST /api/v2/auto/dispatch` already exists. No new daemon work required.
+
+---
+
 ### Console interactivity and liveliness
 
 **Status: idea** | Priority: medium
@@ -732,6 +747,14 @@ A workflow that aggregates activity across git history, GitLab/GitHub MRs and re
 ---
 
 ## Platform Vision (longer-term)
+
+### Inspiration: openclaw (Apr 29, 2026)
+
+**Source:** https://github.com/openclaw/openclaw
+
+openclaw is worth studying deeply before building out the platform layer. Draw inspiration from it when designing: multi-agent orchestration patterns, coordinator architecture, context packaging for subagents, task queue and dispatch models, and the overall shape of an autonomous engineering platform. Review it before making architectural decisions on any of the Platform Vision items below.
+
+---
 
 ### Knowledge graph for agent context
 
@@ -1089,8 +1112,7 @@ WorkTrain is a persistent background daemon that initiates workflows autonomousl
 - Bot identity (`botIdentity`) and acting-as-user support
 - Dynamic model selection (`agentConfig.model`)
 - macOS notifications
-- SteerRegistry + mid-session injection
-- AbortRegistry + SIGTERM graceful shutdown
+- `ActiveSessionSet` + mid-session steer injection + SIGTERM graceful shutdown (replaces SteerRegistry + AbortRegistry)
 - `maxOutputTokens` per trigger, `maxQueueDepth` with HTTP 429
 - Crash recovery Phase B
 - `daemon-soul.md` / workspace context injection
@@ -1103,6 +1125,7 @@ WorkTrain is a persistent background daemon that initiates workflows autonomousl
 - Worktree orphan cleanup on delivery failure
 - runWorkflow() Phase 2 architecture (PR #830): `PreAgentSession`/`buildPreAgentSession`, `constructTools`, `persistTokens` Result type, `sidecardLifecycleFor` pure function, TDZ hazard fix for abort registry
 - runWorkflow() Phase 3 architecture (PRs #835, #837): `buildTurnEndSubscriber` (539→426 lines), tool param validation at LLM boundary (8 factories), `buildAgentCallbacks` + `buildSessionResult` pure functions (426→308 lines), test flakiness fix (settleFireAndForget + retry:2)
+- runWorkflow() Phase 4 / Track A+B architecture (PRs #839-#869, Apr 29, 2026): six-layer daemon decomposition -- `SessionScope`+`FileStateTracker`, tool extraction to `src/daemon/tools/`, `ContextLoader`+`ContextBundle`, `ActiveSessionSet`+`SessionHandle` (TDZ fix), `buildAgentReadySession`+`runAgentLoop`, `SessionSource`+`AllocatedSession`+full `_preAllocatedStartResponse` removal, `DispatchDeduplicator`, `DeliveryPipeline`, `createCoordinatorDeps`. workflow-runner.ts: 4,955 → 2,800 lines (44%). 38 new unit tests for new abstractions. `ActiveSessionSet` replaces `SteerRegistry`+`AbortRegistry`.
 
 ### WorkRail engine / MCP features
 
