@@ -1188,3 +1188,14 @@ The agent is expensive, inconsistent, and slow. Scripts are free, deterministic,
 
 ---
 
+### Worktree and branch lifecycle management
+
+WorkTrain has no tooling to surface the state of worktrees and branches relative to main. Doing this manually today requires running git commands across every registered worktree, cross-referencing merged PR lists, and inspecting each branch's unique commits to determine if the work landed. Pain points observed in practice:
+
+- Worktrees persist after their branch's PR is squash-merged -- no signal that they are safe to delete
+- No inventory of which branches have genuinely unmerged work vs. fully superseded content
+- Abandoned in-progress branches have no attached context about why they were abandoned or what state they were in
+- Daemon-spawned worktrees under `~/.workrail/worktrees/` are opaque -- no indication of which session created them or whether cleanup is safe
+
+---
+
