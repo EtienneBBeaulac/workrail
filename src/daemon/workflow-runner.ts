@@ -2441,6 +2441,65 @@ export type PreAgentSessionResult =
   | { readonly kind: 'ready'; readonly session: PreAgentSession }
   | { readonly kind: 'complete'; readonly result: WorkflowRunResult };
 
+// ---------------------------------------------------------------------------
+// AgentReadySession -- fully constructed pre-loop state
+// ---------------------------------------------------------------------------
+
+/**
+ * Fully constructed pre-loop state -- everything runAgentLoop() needs.
+ *
+ * Produced by buildAgentReadySession() after context loading and tool
+ * construction complete. Holds all pre-loop immutable values so that
+ * runAgentLoop() has no knowledge of the setup steps.
+ *
+ * WHY a named interface (not an anonymous object): follows the established
+ * FinalizationContext / TurnEndSubscriberContext / SessionScope pattern of
+ * making dependency surfaces explicit and readable at the call site.
+ */
+export interface AgentReadySession {
+  /** Pre-agent state from buildPreAgentSession() -- includes mutable SessionState. */
+  readonly preAgentSession: PreAgentSession;
+  /** Loaded context bundle (soul + workspace + session notes). */
+  readonly contextBundle: import('./context-loader.js').ContextBundle;
+  /** Per-session tool dependency bundle. */
+  readonly scope: SessionScope;
+  /** Constructed tool list for the agent. */
+  readonly tools: readonly AgentTool[];
+  /** Assembled session config (system prompt, initial prompt, limits). */
+  readonly sessionCtx: SessionContext;
+  /** Session handle from ActiveSessionSet. Undefined when no activeSessionSet injected. */
+  readonly handle: import('./active-sessions.js').SessionHandle | undefined;
+  /** Process-local session UUID (keys the sidecar file and conversation JSONL). */
+  readonly sessionId: string;
+  /** Workflow ID from the trigger. */
+  readonly workflowId: string;
+  /** Worktree path when branchStrategy === 'worktree', otherwise undefined. */
+  readonly worktreePath: string | undefined;
+  /** Constructed AgentLoop instance, ready to receive prompt(). */
+  readonly agent: AgentLoop;
+  /** Repeat threshold for stuck-detection heuristic. */
+  readonly stuckRepeatThreshold: number;
+}
+
+// ---------------------------------------------------------------------------
+// SessionOutcome -- terminal agent states before delivery and cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal state of the agent loop, returned by runAgentLoop().
+ *
+ * Represents what the agent loop's own exit signal was, NOT the final
+ * session outcome (which is determined by buildSessionResult() reading
+ * state.stuckReason and state.timeoutReason after the loop exits).
+ *
+ * WHY a discriminated union (not raw strings): follows explicit-domain-types
+ * philosophy. The two variants map directly to the two code paths through
+ * the agent loop's try/catch block.
+ */
+export type SessionOutcome =
+  | { readonly kind: 'completed'; readonly stopReason: string; readonly errorMessage?: string }
+  | { readonly kind: 'aborted'; readonly errorMessage?: string };
+
 /**
  * Context for finalizing a completed runWorkflow() session.
  * Passed from runWorkflow() to finalizeSession() after the agent loop exits.
@@ -3162,6 +3221,317 @@ export function buildSessionResult(
 }
 
 // ---------------------------------------------------------------------------
+// buildAgentReadySession -- context loading + tool construction + AgentLoop setup
+// ---------------------------------------------------------------------------
+
+/**
+ * Construct everything the agent loop needs, given a PreAgentSession.
+ *
+ * This function handles: onAdvance/onComplete callback construction, tool
+ * construction via SessionScope, context loading (soul + workspace + session
+ * notes via DefaultContextLoader), session config assembly (buildSessionContext),
+ * AgentLoop construction, and wiring the abort callback into the session handle.
+ *
+ * WHY a named function (not inline in runWorkflow): makes the setup phase
+ * independently readable and testable. The boundary is clean: everything from
+ * after buildPreAgentSession() returns 'ready' up to and including
+ * handle?.setAgent(agent) belongs here.
+ *
+ * WHY not pure: constructs closures (onAdvance, onComplete) that capture and
+ * mutate session.state. This impurity is documented via the SessionScope pattern.
+ */
+async function buildAgentReadySession(
+  preAgentSession: PreAgentSession,
+  trigger: WorkflowTrigger,
+  ctx: V2ToolContext,
+  apiKey: string,
+  sessionId: string,
+  emitter: DaemonEventEmitter | undefined,
+  daemonRegistry: DaemonRegistry | undefined,
+  activeSessionSet: ActiveSessionSet | undefined,
+): Promise<AgentReadySession> {
+  const { state, firstStep, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = preAgentSession;
+  const startContinueToken = preAgentSession.continueToken;
+  const handle = preAgentSession.handle;
+
+  const MAX_ISSUE_SUMMARIES = 10;
+  const STUCK_REPEAT_THRESHOLD = 3;
+
+  const onAdvance = (stepText: string, continueToken: string): void => {
+    state.pendingSteerParts.push(stepText);
+    state.stepAdvanceCount++;
+    state.currentContinueToken = continueToken;
+    if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
+    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
+  };
+
+  const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
+    state.isComplete = true;
+    state.lastStepNotes = notes;
+    state.lastStepArtifacts = artifacts;
+  };
+
+  // ---- Schemas + tool construction ----
+  const schemas = getSchemas();
+  // WHY SessionScope: bundles all per-session tool dependencies into a single typed
+  // object instead of individual positional params. Follows the TurnEndSubscriberContext
+  // and FinalizationContext patterns. fileTracker wraps session.readFileState in the
+  // FileStateTracker interface while preserving the same Map instance for tool factories.
+  const scope: SessionScope = {
+    fileTracker: new DefaultFileStateTracker(preAgentSession.readFileState),
+    onAdvance,
+    onComplete,
+    workrailSessionId: state.workrailSessionId,
+    emitter,
+    sessionId,
+    workflowId: trigger.workflowId,
+    activeSessionSet,
+    maxIssueSummaries: MAX_ISSUE_SUMMARIES,
+  };
+  const tools = constructTools(preAgentSession, ctx, apiKey, schemas, scope);
+
+  // ---- I/O phase: load context (soul + workspace + session notes) ----
+  // WHY: load before Agent construction -- the system prompt is set at init
+  // time and is not mutable after. All loads are best-effort; errors are
+  // logged but never abort the session.
+  //
+  // Phase 1 (loadBase): soul + workspace -- both are independent of the WorkRail
+  // session token. loadBase injects loadDaemonSoul and loadWorkspaceContext, which
+  // run concurrently inside DefaultContextLoader.loadBase().
+  //
+  // Phase 2 (loadSession): session notes -- requires startContinueToken to decode
+  // the WorkRail sessionId for the session store lookup. For fresh sessions (no
+  // node_output_appended events yet), loadSessionNotes returns [] and sessionState is ''.
+  // For checkpoint-resumed sessions, it returns prior step notes for continuity.
+  //
+  // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
+  // not before. Populating the system prompt at construction time is the correct
+  // pre-step-1 injection point.
+  //
+  // trigger.soulFile is already cascade-resolved by trigger-store.ts:
+  //   trigger soulFile -> workspace soulFile -> undefined (global fallback in loadDaemonSoul)
+  //
+  // NOTE: DefaultContextLoader.loadBase uses trigger.workspacePath (not sessionWorkspacePath).
+  // For worktree sessions, the context files (CLAUDE.md / AGENTS.md) live in the
+  // main checkout, not the isolated worktree. The worktree only contains the agent's
+  // working changes. See DefaultContextLoader.loadBase() WHY comment.
+  const contextLoader = new DefaultContextLoader(loadDaemonSoul, loadWorkspaceContext, loadSessionNotes, ctx);
+  const baseCtx = await contextLoader.loadBase(trigger);
+  const contextBundle = await contextLoader.loadSession(startContinueToken, baseCtx);
+
+  // ---- Pure phase: build session configuration from pre-loaded I/O ----
+  // buildSessionContext() is synchronous and pure -- it assembles the system
+  // prompt, initial prompt, and session limits from the loaded data and trigger config.
+  // WHY separated from I/O: makes prompt assembly testable without any fs or LLM mocking.
+  const sessionCtx = buildSessionContext(
+    trigger,
+    contextBundle,
+    firstStep.pending?.prompt ?? 'No step content available',
+  );
+
+  // ---- Observability callbacks for AgentLoop ----
+  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD);
+
+  // ---- AgentLoop (one per runWorkflow() call, not reused) ----
+  // WHY AgentLoop instead of pi-agent-core's Agent: AgentLoop is the first-party
+  // replacement that uses @anthropic-ai/sdk directly, eliminating the private npm
+  // package dependency. The client (Anthropic or AnthropicBedrock) is injected --
+  // AgentLoop has no knowledge of API keys or AWS credentials.
+  const agent = new AgentLoop({
+    systemPrompt: sessionCtx.systemPrompt,
+    modelId,
+    tools,
+    client: agentClient,
+    // Sequential execution: continue_workflow must complete before Bash begins
+    // on the next step. Workflow tools have ordering requirements.
+    toolExecution: 'sequential',
+    callbacks: agentCallbacks,
+    // WHY: per-trigger token ceiling configured in agentConfig.maxOutputTokens.
+    // When absent, AgentLoop defaults to 8192 (unchanged behavior).
+    // The value is passed through as-is; the Anthropic API enforces model-specific limits.
+    ...(trigger.agentConfig?.maxOutputTokens !== undefined
+      ? { maxTokens: trigger.agentConfig.maxOutputTokens }
+      : {}),
+  });
+
+  // ---- Wire abort capability into the session handle ----
+  // setAgent() closes the TDZ gap: the handle was registered before AgentLoop existed;
+  // now that agent is constructed, setAgent() wires in the abort callback.
+  // abort() before setAgent() is a safe no-op, so SIGTERM during context loading
+  // does not crash -- the session just runs to completion or hits the wall-clock timeout.
+  handle?.setAgent(agent);
+
+  return {
+    preAgentSession,
+    contextBundle,
+    scope,
+    tools,
+    sessionCtx,
+    handle,
+    sessionId,
+    workflowId: trigger.workflowId,
+    worktreePath: sessionWorktreePath,
+    agent,
+    stuckRepeatThreshold: STUCK_REPEAT_THRESHOLD,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// runAgentLoop -- agent prompt loop with timeout, stuck detection, and cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the agent prompt loop to completion (or timeout/error).
+ *
+ * Handles: stuck-detection config, conversation history persistence,
+ * turn-end subscription, wall-clock timeout, and the try/catch/finally
+ * lifecycle (conversation flush, timeout cancel, handle disposal).
+ *
+ * Returns a SessionOutcome describing the loop's raw exit signal. The final
+ * session outcome (stuck vs timeout vs success) is determined by
+ * buildSessionResult() reading state.stuckReason and state.timeoutReason
+ * after this function returns.
+ *
+ * WHY a named function (not inline in runWorkflow): makes the agent loop
+ * independently readable. The boundary is clean: everything from stuckConfig
+ * setup through handle?.dispose() in finally belongs here.
+ *
+ * WHY intentionally impure: mutates session.preAgentSession.state (turnCount,
+ * stuckReason, timeoutReason, stepAdvanceCount, pendingSteerParts) via the
+ * turn_end subscriber and tool callbacks. This impurity is by design and is
+ * documented in the SessionState interface.
+ */
+async function runAgentLoop(
+  session: AgentReadySession,
+  trigger: WorkflowTrigger,
+  conversationPath: string,
+): Promise<SessionOutcome> {
+  const { agent, preAgentSession, sessionCtx, sessionId, handle } = session;
+  const { state } = preAgentSession;
+  const { emitter } = session.scope;
+  const { stuckRepeatThreshold } = session;
+
+  // ---- Session limits (wall-clock timeout + max-turn limit) ----
+  // Provided by buildSessionContext() -- resolved from trigger.agentConfig with
+  // hardcoded defaults as fallback. Destructured here for clarity.
+  const { sessionTimeoutMs, maxTurns } = sessionCtx;
+
+  // ---- Stuck detection configuration ----
+  // WHY resolved here: these are read-only trigger config values. They do not change
+  // during the session and should not be re-computed on every turn_end invocation.
+  const stuckConfig: StuckConfig = {
+    maxTurns,
+    stuckAbortPolicy: trigger.agentConfig?.stuckAbortPolicy ?? 'abort',
+    noProgressAbortEnabled: trigger.agentConfig?.noProgressAbortEnabled ?? false,
+    stuckRepeatThreshold,
+  };
+
+  // ---- Conversation history persistence ----
+  // Per-session JSONL file written incrementally after each turn_end and flushed
+  // in the finally block. Each line is a JSON.stringify(AgentInternalMessage).
+  // WHY initialized to 0: the first turn_end flush includes the initial user message
+  // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
+  // WHY fire-and-forget: write failures must never affect the agent loop.
+  // WHY conversationPath as parameter: computed once in runWorkflow() and shared with
+  // the finalizationCtx so both use the identical path, eliminating duplicate formula.
+  // WHY lastFlushedRef as object: the mutable counter must be shared by reference
+  // between the turn_end subscriber (via buildTurnEndSubscriber) and the finally block
+  // final flush below. A primitive let cannot be shared by reference across a closure boundary.
+  const lastFlushedRef = { count: 0 };
+
+  // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
+  // Using steer() NOT followUp(): steer fires after each tool batch inside the
+  // inner loop; followUp fires only when the agent would otherwise stop
+  // (adding an extra LLM turn per workflow step).
+  const unsubscribe = agent.subscribe(buildTurnEndSubscriber({
+    agent,
+    state,
+    stuckConfig,
+    sessionId,
+    workflowId: trigger.workflowId,
+    emitter,
+    conversationPath,
+    lastFlushedRef,
+    stuckRepeatThreshold,
+  }));
+
+  let stopReason = 'stop';
+  let errorMessage: string | undefined;
+  // WHY hoisted: timeoutHandle must be accessible in the finally block to cancel the
+  // timer on successful completion. Promise constructor callbacks are synchronous
+  // (ES6 spec), so timeoutHandle is always assigned before the await resolves.
+  // The undefined initial value is required by TypeScript types; the undefined guard
+  // in finally is defensive (technically unreachable in a spec-compliant JS engine).
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    // ---- Whole-workflow timeout ----
+    // If the agent loop does not complete within sessionTimeoutMs, abort the agent
+    // and propagate a timeout through the existing error-handling path.
+    // agent.abort() is idempotent -- AgentLoop sets activeRun to null after abort.
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        if (state.timeoutReason === null) {
+          state.timeoutReason = 'wall_clock';
+        }
+        reject(new Error('Workflow timed out'));
+      }, sessionTimeoutMs);
+    });
+    console.log(`[WorkflowRunner] Agent loop started: sessionId=${sessionId} workflowId=${trigger.workflowId} modelId=${preAgentSession.modelId}`);
+    await Promise.race([agent.prompt(buildUserMessage(sessionCtx.initialPrompt)), timeoutPromise])
+      .catch((err: unknown) => {
+        agent.abort();
+        throw err;
+      });
+
+    // Extract stop reason from the last assistant message.
+    // Note: findLast is ES2023; use a reverse-scan loop for ES2020 compat.
+    const messages = agent.state.messages;
+    let lastAssistant: (typeof messages[number] & { role: 'assistant' }) | undefined;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if ('role' in m && m.role === 'assistant') {
+        lastAssistant = m as typeof lastAssistant;
+        break;
+      }
+    }
+    stopReason = lastAssistant?.stopReason ?? 'stop';
+    errorMessage = lastAssistant?.errorMessage;
+
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+    stopReason = 'error';
+  } finally {
+    unsubscribe();
+    // ---- Conversation history: final flush ----
+    // Catch any remaining messages not covered by the last turn_end (e.g. error
+    // messages appended by _appendErrorMessage() after an API error or abort).
+    // Fire-and-forget: write failures in finally must never propagate.
+    const remainingMessages = agent.state.messages.slice(lastFlushedRef.count);
+    void appendConversationMessages(conversationPath, remainingMessages).catch(() => {});
+
+    // Cancel the wall-clock timer so it does not fire after successful completion
+    // and mutate the closed-over timeoutReason variable. clearTimeout on an
+    // already-fired or undefined handle is a safe no-op.
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    // Dispose the session handle: deregisters from ActiveSessionSet so steer() stops
+    // working and activeSessionSet.size decrements (shutdown drain window terminates).
+    // WHY in finally: must run even on error or abort.
+    handle?.dispose();
+    console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
+  }
+
+  // Map raw loop exit to the SessionOutcome discriminated union.
+  // WHY 'aborted' when stopReason === 'error': the catch block always sets stopReason
+  // to 'error' on any thrown error (timeout, API error, abort). This is the only
+  // condition under which the loop exits via the catch path.
+  if (stopReason === 'error') {
+    return { kind: 'aborted', errorMessage };
+  }
+  return { kind: 'completed', stopReason, errorMessage };
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -3239,233 +3609,23 @@ export async function runWorkflow(
   if (preResult.kind === 'complete') {
     return preResult.result;
   }
-  const session = preResult.session;
-  const handle = session.handle;
 
-  // Extract session fields needed in the agent loop phase.
-  // readFileState, spawnCurrentDepth, spawnMaxDepth are consumed by constructTools.
-  const { state, firstStep, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = session;
-  const startContinueToken = session.continueToken;
-
-  const MAX_ISSUE_SUMMARIES = 10;
-  const STUCK_REPEAT_THRESHOLD = 3;
-
-  const onAdvance = (stepText: string, continueToken: string): void => {
-    state.pendingSteerParts.push(stepText);
-    state.stepAdvanceCount++;
-    state.currentContinueToken = continueToken;
-    if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
-    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
-  };
-
-  const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
-    state.isComplete = true;
-    state.lastStepNotes = notes;
-    state.lastStepArtifacts = artifacts;
-  };
-
-  // ---- Schemas + tool construction ----
-  const schemas = getSchemas();
-  // WHY SessionScope: bundles all per-session tool dependencies into a single typed
-  // object instead of individual positional params. Follows the TurnEndSubscriberContext
-  // and FinalizationContext patterns. fileTracker wraps session.readFileState in the
-  // FileStateTracker interface while preserving the same Map instance for tool factories.
-  const scope: SessionScope = {
-    fileTracker: new DefaultFileStateTracker(session.readFileState),
-    onAdvance,
-    onComplete,
-    workrailSessionId: state.workrailSessionId,
-    emitter,
-    sessionId,
-    workflowId: trigger.workflowId,
-    activeSessionSet,
-    maxIssueSummaries: MAX_ISSUE_SUMMARIES,
-  };
-  const tools = constructTools(session, ctx, apiKey, schemas, scope);
-
-  // ---- I/O phase: load context (soul + workspace + session notes) ----
-  // WHY: load before Agent construction -- the system prompt is set at init
-  // time and is not mutable after. All loads are best-effort; errors are
-  // logged but never abort the session.
-  //
-  // Phase 1 (loadBase): soul + workspace -- both are independent of the WorkRail
-  // session token. loadBase injects loadDaemonSoul and loadWorkspaceContext, which
-  // run concurrently inside DefaultContextLoader.loadBase().
-  //
-  // Phase 2 (loadSession): session notes -- requires startContinueToken to decode
-  // the WorkRail sessionId for the session store lookup. For fresh sessions (no
-  // node_output_appended events yet), loadSessionNotes returns [] and sessionState is ''.
-  // For checkpoint-resumed sessions, it returns prior step notes for continuity.
-  //
-  // WHY system prompt instead of agent.steer(): steer() fires AFTER LLM responses,
-  // not before. Populating the system prompt at construction time is the correct
-  // pre-step-1 injection point.
-  //
-  // trigger.soulFile is already cascade-resolved by trigger-store.ts:
-  //   trigger soulFile -> workspace soulFile -> undefined (global fallback in loadDaemonSoul)
-  //
-  // NOTE: DefaultContextLoader.loadBase uses trigger.workspacePath (not sessionWorkspacePath).
-  // For worktree sessions, the context files (CLAUDE.md / AGENTS.md) live in the
-  // main checkout, not the isolated worktree. The worktree only contains the agent's
-  // working changes. See DefaultContextLoader.loadBase() WHY comment.
-  const contextLoader = new DefaultContextLoader(loadDaemonSoul, loadWorkspaceContext, loadSessionNotes, ctx);
-  const baseCtx = await contextLoader.loadBase(trigger);
-  const contextBundle = await contextLoader.loadSession(startContinueToken, baseCtx);
-
-  // ---- Pure phase: build session configuration from pre-loaded I/O ----
-  // buildSessionContext() is synchronous and pure -- it assembles the system
-  // prompt, initial prompt, and session limits from the loaded data and trigger config.
-  // WHY separated from I/O: makes prompt assembly testable without any fs or LLM mocking.
-  const sessionCtx = buildSessionContext(
-    trigger,
-    contextBundle,
-    firstStep.pending?.prompt ?? 'No step content available',
+  // ---- Agent-ready phase: context loading + tool construction + AgentLoop setup ----
+  const readySession = await buildAgentReadySession(
+    preResult.session, trigger, ctx, apiKey, sessionId,
+    emitter, daemonRegistry, activeSessionSet,
   );
 
-  // ---- Observability callbacks for AgentLoop ----
-  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD);
-
-  // ---- AgentLoop (one per runWorkflow() call, not reused) ----
-  // WHY AgentLoop instead of pi-agent-core's Agent: AgentLoop is the first-party
-  // replacement that uses @anthropic-ai/sdk directly, eliminating the private npm
-  // package dependency. The client (Anthropic or AnthropicBedrock) is injected --
-  // AgentLoop has no knowledge of API keys or AWS credentials.
-  const agent = new AgentLoop({
-    systemPrompt: sessionCtx.systemPrompt,
-    modelId,
-    tools,
-    client: agentClient,
-    // Sequential execution: continue_workflow must complete before Bash begins
-    // on the next step. Workflow tools have ordering requirements.
-    toolExecution: 'sequential',
-    callbacks: agentCallbacks,
-    // WHY: per-trigger token ceiling configured in agentConfig.maxOutputTokens.
-    // When absent, AgentLoop defaults to 8192 (unchanged behavior).
-    // The value is passed through as-is; the Anthropic API enforces model-specific limits.
-    ...(trigger.agentConfig?.maxOutputTokens !== undefined
-      ? { maxTokens: trigger.agentConfig.maxOutputTokens }
-      : {}),
-  });
-
-  // ---- Wire abort capability into the session handle ----
-  // setAgent() closes the TDZ gap: the handle was registered before AgentLoop existed;
-  // now that agent is constructed, setAgent() wires in the abort callback.
-  // abort() before setAgent() is a safe no-op, so SIGTERM during context loading
-  // does not crash -- the session just runs to completion or hits the wall-clock timeout.
-  handle?.setAgent(agent);
-
-  // ---- Session limits (wall-clock timeout + max-turn limit) ----
-  // Provided by buildSessionContext() -- resolved from trigger.agentConfig with
-  // hardcoded defaults as fallback. Destructured here for clarity.
-  const { sessionTimeoutMs, maxTurns } = sessionCtx;
-
-  // ---- Stuck detection configuration ----
-  // WHY resolved here: these are read-only trigger config values. They do not change
-  // during the session and should not be re-computed on every turn_end invocation.
-  const stuckConfig: StuckConfig = {
-    maxTurns,
-    stuckAbortPolicy: trigger.agentConfig?.stuckAbortPolicy ?? 'abort',
-    noProgressAbortEnabled: trigger.agentConfig?.noProgressAbortEnabled ?? false,
-    stuckRepeatThreshold: STUCK_REPEAT_THRESHOLD,
-  };
-
-  // ---- Conversation history persistence ----
-  // Per-session JSONL file written incrementally after each turn_end and flushed
-  // in the finally block. Each line is a JSON.stringify(AgentInternalMessage).
-  // WHY initialized to 0: the first turn_end flush includes the initial user message
-  // (appended in prompt() before _runLoop() starts) as well as the first LLM response.
-  // WHY fire-and-forget: write failures must never affect the agent loop.
+  // ---- Agent loop phase: run prompt loop to completion ----
   const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
-  // WHY lastFlushedRef as object: the mutable counter must be shared by reference
-  // between the turn_end subscriber (via buildTurnEndSubscriber) and the finally block
-  // final flush below. A primitive let cannot be shared by reference across a closure boundary.
-  const lastFlushedRef = { count: 0 };
+  const outcome = await runAgentLoop(readySession, trigger, conversationPath);
 
-  // ---- Event subscription: steer() for step injection + turn-limit enforcement ----
-  // Using steer() NOT followUp(): steer fires after each tool batch inside the
-  // inner loop; followUp fires only when the agent would otherwise stop
-  // (adding an extra LLM turn per workflow step).
-  const unsubscribe = agent.subscribe(buildTurnEndSubscriber({
-    agent,
-    state,
-    stuckConfig,
-    sessionId,
-    workflowId: trigger.workflowId,
-    emitter,
-    conversationPath,
-    lastFlushedRef,
-    stuckRepeatThreshold: STUCK_REPEAT_THRESHOLD,
-  }));
-
-  let stopReason = 'stop';
-  let errorMessage: string | undefined;
-  // WHY hoisted: timeoutHandle must be accessible in the finally block to cancel the
-  // timer on successful completion. Promise constructor callbacks are synchronous
-  // (ES6 spec), so timeoutHandle is always assigned before the await resolves.
-  // The undefined initial value is required by TypeScript types; the undefined guard
-  // in finally is defensive (technically unreachable in a spec-compliant JS engine).
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-  try {
-    // ---- Whole-workflow timeout ----
-    // If the agent loop does not complete within sessionTimeoutMs, abort the agent
-    // and propagate a timeout through the existing error-handling path.
-    // agent.abort() is idempotent -- AgentLoop sets activeRun to null after abort.
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        if (state.timeoutReason === null) {
-          state.timeoutReason = 'wall_clock';
-        }
-        reject(new Error('Workflow timed out'));
-      }, sessionTimeoutMs);
-    });
-    console.log(`[WorkflowRunner] Agent loop started: sessionId=${sessionId} workflowId=${trigger.workflowId} modelId=${modelId}`);
-    await Promise.race([agent.prompt(buildUserMessage(sessionCtx.initialPrompt)), timeoutPromise])
-      .catch((err: unknown) => {
-        agent.abort();
-        throw err;
-      });
-
-    // Extract stop reason from the last assistant message.
-    // Note: findLast is ES2023; use a reverse-scan loop for ES2020 compat.
-    const messages = agent.state.messages;
-    let lastAssistant: (typeof messages[number] & { role: 'assistant' }) | undefined;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if ('role' in m && m.role === 'assistant') {
-        lastAssistant = m as typeof lastAssistant;
-        break;
-      }
-    }
-    stopReason = lastAssistant?.stopReason ?? 'stop';
-    errorMessage = lastAssistant?.errorMessage;
-
-  } catch (err) {
-    errorMessage = err instanceof Error ? err.message : String(err);
-    stopReason = 'error';
-  } finally {
-    unsubscribe();
-    // ---- Conversation history: final flush ----
-    // Catch any remaining messages not covered by the last turn_end (e.g. error
-    // messages appended by _appendErrorMessage() after an API error or abort).
-    // Fire-and-forget: write failures in finally must never propagate.
-    const remainingMessages = agent.state.messages.slice(lastFlushedRef.count);
-    void appendConversationMessages(conversationPath, remainingMessages).catch(() => {});
-
-    // Cancel the wall-clock timer so it does not fire after successful completion
-    // and mutate the closed-over timeoutReason variable. clearTimeout on an
-    // already-fired or undefined handle is a safe no-op.
-    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
-    // Deregister steer callback so the HTTP endpoint returns 404 for completed sessions.
-    // Dispose the session handle: deregisters from ActiveSessionSet so steer() stops
-    // working and abortRegistry.size decrements (shutdown drain window terminates).
-    // WHY in finally: must run even on error or abort.
-    handle?.dispose();
-    console.log(`[WorkflowRunner] Agent loop ended: sessionId=${sessionId} stopReason=${stopReason}${errorMessage ? ` error=${errorMessage.slice(0, 120)}` : ''}`);
-
-  }
+  // Map SessionOutcome back to the raw stopReason/errorMessage that buildSessionResult expects.
+  const stopReason = outcome.kind === 'aborted' ? 'error' : outcome.stopReason;
+  const errorMessage = outcome.errorMessage;
 
   // ---- Build finalization context (shared across all result paths) ----
+  const { state, sessionWorktreePath } = readySession.preAgentSession;
   const finalizationCtx: FinalizationContext = {
     sessionId,
     workrailSessionId: state.workrailSessionId,
