@@ -473,7 +473,13 @@ export interface AllocatedSession {
   /** First step prompt from the session. May be empty if isComplete. */
   readonly firstStepPrompt: string;
   readonly isComplete: boolean;
-  /** Source of this session (daemon trigger or MCP client). */
+  /**
+   * Source of this session (daemon trigger or MCP client).
+   * WHY stored here: feeds the "Session trigger source attribution" backlog item --
+   * writing this to the run_started event makes daemon vs MCP attribution permanent
+   * and queryable from the event log. Not yet wired to the event; the field is in
+   * place so the wire-up is a one-liner when that work is done.
+   */
   readonly triggerSource: 'daemon' | 'mcp';
 }
 
@@ -489,24 +495,6 @@ export type SessionSource =
   | { readonly kind: 'allocate'; readonly trigger: WorkflowTrigger }
   | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession };
 
-/**
- * Wrap a WorkflowTrigger in a SessionSource with kind 'allocate'.
- *
- * WHY kept: retained for backward-compat and any callers that hold a bare
- * WorkflowTrigger and want a typed SessionSource without constructing one
- * manually. Now always returns kind: 'allocate' because
- * WorkflowTrigger._preAllocatedStartResponse has been removed (A9 migration).
- * Callers that need pre_allocated should construct SessionSource directly.
- *
- * @param trigger - The workflow trigger to wrap.
- * @param _triggerSource - Ignored. Kept for call-site backward compatibility.
- */
-export function sessionSourceFromTrigger(
-  trigger: WorkflowTrigger,
-  _triggerSource?: 'daemon' | 'mcp',
-): SessionSource {
-  return { kind: 'allocate', trigger };
-}
 
 /** Successful completion of a workflow run. */
 export interface WorkflowRunSuccess {
