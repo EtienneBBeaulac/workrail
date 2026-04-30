@@ -50,11 +50,12 @@ export function handleAdvanceIntent(args: {
   readonly tokenCodecPorts: TokenCodecPorts;
   readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
   readonly sha256: Sha256PortV2;
+  readonly gitSnapshot: import('../../../v2/ports/git-snapshot.port.js').GitSnapshotPortV2;
   readonly aliasStore: import('../../../v2/ports/token-alias-store.port.js').TokenAliasStorePortV2;
   readonly entropy: import('../../../v2/ports/random-entropy.port.js').RandomEntropyPortV2;
   readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
-  const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256, aliasStore, entropy, cleanResponseFormat } = args;
+  const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256, gitSnapshot, aliasStore, entropy, cleanResponseFormat } = args;
 
   const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
 
@@ -211,6 +212,7 @@ export function handleAdvanceIntent(args: {
               sessionStore,
               sha256,
               idFactory,
+              gitSnapshot,
               lockedIndex,
             }).andThen(() =>
               sessionStore

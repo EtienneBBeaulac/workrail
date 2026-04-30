@@ -18,6 +18,26 @@ See the scoring rubric in the "Agent-assisted backlog prioritization" entry (Wor
 
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
+### wr.coding-task implementation loop does not exit when slices complete (Apr 30, 2026)
+
+**Status: bug** | Priority: high
+
+**Score: 13** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
+
+The `wr.coding-task` workflow's implementation loop (up to 20 passes) does not exit when all slices are complete. The `wr.loop_control` stop artifact is emitted correctly but the loop decision gate never fires because `currentSlice.name` remains `[unset]` -- the engine is not tracking which slice is current across passes. The loop ran 8 passes before eventually exiting on its own. 
+
+This means: (1) every coding task session wastes passes doing no work, (2) the agent cannot confidently signal completion, (3) total session turn count is inflated, increasing cost and timeout risk.
+
+**Root cause**: the `slices` array is stored in context but the engine does not advance a `currentSliceIndex` counter -- or the counter is not being surfaced to the step as `currentSlice.name`. The `wr.loop_control` artifact is evaluated at the loop decision step, but that step only fires when the engine recognizes it's at the end of a pass. With `currentSlice.name = [unset]`, the recognition fails.
+
+**Things to hash out:**
+- Is the bug in the workflow JSON (slices not wired to currentSlice tracking), in the engine (loop_control artifact evaluation), or in the way context variables are threaded between passes?
+- Does the issue affect all loops with `wr.loop_control`, or only the implementation loop in `wr.coding-task` specifically?
+- Is there a workaround agents can use today (e.g. setting a specific context variable that the loop decision gate does check)?
+- Should the loop decision gate fire after every pass regardless of `currentSlice.name` state, or only when the slice tracking is valid?
+
+---
+
 ### Intent gap: agent builds what it understood, not what the user meant (Apr 30, 2026)
 
 **Status: idea** | Priority: high
@@ -1638,6 +1658,32 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 ---
 
 ## Workflow Library
+
+### Automatic root cause analysis when MR review finds issues post-coding (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+When an MR review session (run by a WorkTrain agent) finds issues in a coding session's output, WorkTrain should automatically investigate why the coding agent missed it and determine whether the workflow, the prompts, or the process can be improved.
+
+**Two distinct triggers:**
+
+1. **WorkTrain MR review finds something**: after a WorkTrain review session produces findings, the coordinator should automatically spawn an analysis session asking: why did the coding agent produce code with this issue? Was it a workflow gap (missing verification step, insufficient scrutiny at a phase), a prompt gap (the agent wasn't told to check this), or a context gap (the agent didn't have the information needed)?
+
+2. **Human finds something post-review**: when a human reviewer comments on or requests changes to a PR that already passed WorkTrain's review, this is doubly significant -- it means both the coding agent AND the review agent missed it. WorkTrain should automatically investigate why both missed it and whether the review workflow has a systematic blind spot.
+
+**Why this matters**: every finding that slips through is a signal about a workflow or process gap. Today that signal is lost. Capturing it systematically and feeding it back into workflow improvement closes the quality loop.
+
+**Things to hash out:**
+- How does WorkTrain detect that a human has commented on a PR post-review? This requires monitoring the PR for new review activity after WorkTrain's session completed -- either webhook events or polling.
+- What does the analysis session actually produce? A structured finding about the gap? A concrete proposal for workflow improvement? Both?
+- Who reviews the analysis output before it becomes a workflow change? Auto-applying workflow changes based on analysis is risky.
+- How do you distinguish "the workflow is fine but this was a genuinely hard edge case" from "the workflow has a systematic gap"? A single miss doesn't prove a gap; multiple misses of the same kind do.
+- Should the analysis result feed directly into `workflow-effectiveness-assessment`, or is it a separate concern?
+- For the "coding agent missed it" case: is the right fix to change the coding workflow, or to make the review workflow more adversarial?
+
+---
 
 ### Workflow previewer for compiled and runtime behavior
 

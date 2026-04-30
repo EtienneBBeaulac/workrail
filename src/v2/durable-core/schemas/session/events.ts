@@ -342,6 +342,25 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       }
     }),
   }),
+  /**
+   * delivery_recorded: appended by the delivery pipeline after a successful git commit.
+   *
+   * WHY a separate event (not amending run_completed): the event log is append-only.
+   * run_completed fires before delivery. delivery_recorded fires after git commit succeeds.
+   * The session-metrics projection reads this event and uses its shas preferentially over
+   * agentCommitShas from run_completed.
+   *
+   * WHY shas is an array: a session could in principle produce multiple commits (though
+   * in practice autoCommit produces exactly one). The array is consistent with agentCommitShas.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('delivery_recorded'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      shas: z.array(z.string()),
+      prUrl: z.string().optional(),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;

@@ -30,6 +30,13 @@ import { DAEMON_SESSIONS_DIR } from '../daemon/workflow-runner.js';
 import type { TriggerDefinition } from './types.js';
 import type { ExecFn, HandoffArtifact } from './delivery-action.js';
 import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
+import type { ExecutionSessionGateV2 } from '../v2/usecases/execution-session-gate.js';
+import type { SessionEventLogAppendStorePortV2 } from '../v2/ports/session-event-log-store.port.js';
+import { EVENT_KIND } from '../v2/durable-core/constants.js';
+import { asSessionId } from '../v2/durable-core/ids/index.js';
+import { buildSessionIndex } from '../v2/durable-core/session-index.js';
+import { asSortedEventLog } from '../v2/durable-core/sorted-event-log.js';
+import { okAsync } from 'neverthrow';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,6 +72,7 @@ export interface DeliveryStage {
     trigger: TriggerDefinition,
     execFn: ExecFn,
     ctx: PipelineContext,
+    deps?: DeliveryPipelineDeps,
   ): Promise<DeliveryStageOutcome>;
 }
 
@@ -81,6 +89,26 @@ export interface DeliveryStage {
  */
 export interface PipelineContext {
   handoffArtifact?: HandoffArtifact;
+  /** SHA produced by gitDeliveryStage on successful commit. Set for write-back. */
+  commitSha?: string;
+  /** PR URL produced by gitDeliveryStage when autoOpenPR is true. Set for write-back. */
+  prUrl?: string;
+}
+
+/**
+ * Optional session store dependencies for the delivery pipeline.
+ *
+ * When present, enables recordCommitShasStage to append a delivery_recorded event
+ * to the session event log after a successful git commit.
+ *
+ * WHY optional: the delivery pipeline runs in the daemon context which may not always
+ * have session store access (e.g. test contexts). When absent, write-back is silently
+ * skipped -- never an error.
+ */
+export interface DeliveryPipelineDeps {
+  readonly gate: ExecutionSessionGateV2;
+  readonly sessionStore: SessionEventLogAppendStorePortV2 & import('../v2/ports/session-event-log-store.port.js').SessionEventLogReadonlyStorePortV2;
+  readonly idFactory: { readonly mintEventId: () => string };
 }
 
 // ---------------------------------------------------------------------------
@@ -106,12 +134,13 @@ export async function runDeliveryPipeline(
   trigger: TriggerDefinition,
   execFn: ExecFn,
   triggerId: string,
+  deps?: DeliveryPipelineDeps,
 ): Promise<void> {
   const ctx: PipelineContext = {};
 
   try {
     for (const stage of stages) {
-      const outcome = await stage.run(result, trigger, execFn, ctx);
+      const outcome = await stage.run(result, trigger, execFn, ctx, deps);
       if (outcome.kind === 'stop') {
         console.log(
           `[DeliveryPipeline] Stage "${stage.name}" stopped pipeline: triggerId=${triggerId} reason=${outcome.reason}`,
@@ -228,11 +257,14 @@ const gitDeliveryStage: DeliveryStage = {
         console.log(
           `[DeliveryPipeline] Delivery committed: triggerId=${trigger.id} sha=${deliveryResult.sha}`,
         );
+        ctx.commitSha = deliveryResult.sha;
         break;
       case 'pr_opened':
         console.log(
-          `[DeliveryPipeline] Delivery PR opened: triggerId=${trigger.id} url=${deliveryResult.url}`,
+          `[DeliveryPipeline] Delivery PR opened: triggerId=${trigger.id} url=${deliveryResult.url} sha=${deliveryResult.sha}`,
         );
+        ctx.commitSha = deliveryResult.sha;
+        ctx.prUrl = deliveryResult.url;
         break;
       case 'skipped':
         console.log(
@@ -267,6 +299,74 @@ const gitDeliveryStage: DeliveryStage = {
  *
  * Only runs when branchStrategy === 'worktree' and sessionWorkspacePath is present.
  */
+/**
+ * Stage 2b: Record commit SHAs into the session event log after delivery.
+ *
+ * WHY after gitDeliveryStage: commit SHAs only exist after git commit succeeds.
+ * The engine's run_completed event fires before delivery -- it cannot know the SHAs.
+ * This stage bridges the gap: the delivery layer appends a delivery_recorded event
+ * with the authoritative SHA derived from git commit output.
+ *
+ * WHY best-effort (always return continue): SHA attribution is observability data.
+ * A write-back failure must never block worktree cleanup or sidecar deletion.
+ *
+ * WHY gates on sessionId + commitSha + deps: non-worktree sessions, skipped deliveries,
+ * and contexts without session store access all skip silently -- no error.
+ */
+const recordCommitShasStage: DeliveryStage = {
+  name: 'recordCommitShas',
+  async run(result, _trigger, _execFn, ctx, deps) {
+    const { sessionId } = result;
+    if (!sessionId || !ctx.commitSha || !deps) {
+      return { kind: 'continue' };
+    }
+
+    try {
+      const sid = asSessionId(sessionId);
+      const shas = [ctx.commitSha];
+      const prUrl = ctx.prUrl;
+
+      await deps.gate.withHealthySessionLock(sid, (lock) =>
+        deps.sessionStore.load(sid).andThen((truth) => {
+          const sortedResult = asSortedEventLog(truth.events);
+          if (sortedResult.isErr()) {
+            return okAsync(undefined as void);
+          }
+          const index = buildSessionIndex(sortedResult.value);
+          const runCompleted = truth.events.find(e => e.kind === 'run_completed');
+          const runId = runCompleted?.scope.runId;
+          if (!runId) {
+            return okAsync(undefined as void);
+          }
+          const event = {
+            v: 1 as const,
+            eventId: deps.idFactory.mintEventId(),
+            eventIndex: index.nextEventIndex,
+            sessionId,
+            kind: EVENT_KIND.DELIVERY_RECORDED,
+            dedupeKey: `delivery-recorded:${sessionId}:${runId}`,
+            scope: { runId },
+            data: { shas, ...(prUrl ? { prUrl } : {}) },
+            timestampMs: Date.now(),
+          };
+          return deps.sessionStore.append(lock, { events: [event], snapshotPins: [] });
+        })
+      ).match(
+        () => {
+          console.log(`[DeliveryPipeline] Commit SHAs recorded: sessionId=${sessionId} shas=${shas.join(',')}`);
+        },
+        (err) => {
+          console.warn(`[DeliveryPipeline] Could not record commit SHAs: sessionId=${sessionId} err=${JSON.stringify(err)}`);
+        },
+      );
+    } catch (err: unknown) {
+      console.warn(`[DeliveryPipeline] Unexpected error in recordCommitShasStage: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return { kind: 'continue' };
+  },
+};
+
 const cleanupWorktreeStage: DeliveryStage = {
   name: 'cleanupWorktree',
   async run(result, trigger, execFn, _ctx) {
@@ -347,16 +447,18 @@ const deleteSidecarStage: DeliveryStage = {
  * with autoCommit enabled.
  *
  * Stage order matters:
- * 1. parseHandoffStage -- sets ctx.handoffArtifact; stops pipeline on failure
- * 2. gitDeliveryStage  -- reads ctx.handoffArtifact; commits and optionally opens PR
- * 3. cleanupWorktreeStage -- removes the worktree (worktree sessions only)
- * 4. deleteSidecarStage -- removes sidecar + conversation file (worktree sessions only)
+ * 1. parseHandoffStage      -- sets ctx.handoffArtifact; stops pipeline on failure
+ * 2. gitDeliveryStage       -- commits and optionally opens PR; sets ctx.commitSha
+ * 2b. recordCommitShasStage -- appends delivery_recorded event to session log (best-effort)
+ * 3. cleanupWorktreeStage   -- removes the worktree (worktree sessions only)
+ * 4. deleteSidecarStage     -- removes sidecar + conversation file (worktree sessions only)
  *
  * Future stages are additive: add a new DeliveryStage, add it to this array.
  */
 export const DEFAULT_DELIVERY_PIPELINE: readonly DeliveryStage[] = [
   parseHandoffStage,
   gitDeliveryStage,
+  recordCommitShasStage,
   cleanupWorktreeStage,
   deleteSidecarStage,
 ];

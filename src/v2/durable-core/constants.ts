@@ -274,6 +274,7 @@ export const EVENT_KIND = {
   DIVERGENCE_RECORDED: 'divergence_recorded',
   DECISION_TRACE_APPENDED: 'decision_trace_appended',
   RUN_COMPLETED: 'run_completed',
+  DELIVERY_RECORDED: 'delivery_recorded',
 } as const;
 
 export type EventKindV1 = typeof EVENT_KIND[keyof typeof EVENT_KIND];

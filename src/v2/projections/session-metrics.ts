@@ -135,8 +135,21 @@ export function projectSessionMetricsV2(
     }
   }
 
-  // Use agent-reported metrics_commit_shas as override when present;
-  // otherwise fall back to what run_completed.data.agentCommitShas provided.
+  // Precedence for commit SHAs (highest to lowest):
+  // 1. delivery_recorded event shas -- authoritative; derived from git commit output by delivery pipeline
+  // 2. metrics_commit_shas context_set key -- agent-reported (deprecated; kept for old sessions)
+  // 3. agentCommitShas from run_completed -- always empty since PR #903; kept for projection completeness
+  let deliveryShas: string[] = [];
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.DELIVERY_RECORDED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const shasRaw = e.data.shas;
+    if (Array.isArray(shasRaw)) {
+      deliveryShas = shasRaw.filter((s): s is string => typeof s === 'string');
+    }
+    break; // first delivery_recorded by event order wins
+  }
+
   const commitShasRaw = metricsContext['metrics_commit_shas'];
   const metricCommitShas: string[] = [];
   if (Array.isArray(commitShasRaw)) {
@@ -144,7 +157,10 @@ export function projectSessionMetricsV2(
       if (typeof sha === 'string') metricCommitShas.push(sha);
     }
   }
-  const finalAgentCommitShas = metricCommitShas.length > 0 ? metricCommitShas : agentCommitShas;
+  const finalAgentCommitShas =
+    deliveryShas.length > 0 ? deliveryShas :
+    metricCommitShas.length > 0 ? metricCommitShas :
+    agentCommitShas;
 
   const filesChangedRaw = metricsContext['metrics_files_changed'];
   const filesChanged =
@@ -158,12 +174,17 @@ export function projectSessionMetricsV2(
   const linesRemoved =
     typeof linesRemovedRaw === 'number' && Number.isFinite(linesRemovedRaw) ? linesRemovedRaw : null;
 
+  // If delivery_recorded provides SHAs, upgrade captureConfidence to 'high'
+  // regardless of what run_completed reported.
+  const finalCaptureConfidence: 'high' | 'none' =
+    deliveryShas.length > 0 ? 'high' : captureConfidence;
+
   return {
     startGitSha,
     endGitSha,
     gitBranch,
     agentCommitShas: finalAgentCommitShas,
-    captureConfidence,
+    captureConfidence: finalCaptureConfidence,
     durationMs,
     outcome,
     prNumbers,

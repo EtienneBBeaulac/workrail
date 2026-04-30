@@ -93,6 +93,7 @@ export interface AdvanceCorePorts {
     readonly mintNodeId: () => NodeId;
     readonly mintEventId: () => string;
   };
+  readonly gitSnapshot: import('../../../v2/ports/git-snapshot.port.js').GitSnapshotPortV2;
 }
 
 // ── Grouped parameter interfaces (reduce arg-bag in outcome builders) ─
@@ -159,7 +160,7 @@ export function executeAdvanceCore(args: {
   readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { mode, truth, sessionId, runId, attemptId, workflowHash, inputContext, inputOutput, lock, pinnedWorkflow, ports } = args;
-  const { snapshotStore, sessionStore, sha256, idFactory } = ports;
+  const { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot } = ports;
   const currentNodeId = nodeIdOf(mode);
   const snap = snapshotOf(mode);
   const engineState = snap.enginePayload.engineState;
@@ -233,7 +234,7 @@ export function executeAdvanceCore(args: {
       // Use effectiveReasons (post-guardrail) as the single source of truth.
       // Note: evaluation_error is never-downgradable, so reasons = effectiveReasons here.
       const computed: ComputedAdvanceResults = { reasons: effectiveReasons, outputRequirement, validation: evalValidation };
-      const portsLocal: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
+      const portsLocal: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot };
 
       return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports: portsLocal, lockedIndex: args.lockedIndex });
     }
@@ -288,7 +289,7 @@ export function executeAdvanceCore(args: {
 
     const ctx: AdvanceContext = { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep };
     const computed: ComputedAdvanceResults = { reasons, outputRequirement, validation: effectiveValidation };
-    const ports: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory };
+    const ports: AdvanceCorePorts = { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot };
 
     // ── 5. Blocked path ─────────────────────────────────────────────────
 

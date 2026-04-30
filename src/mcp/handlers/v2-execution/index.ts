@@ -1,5 +1,6 @@
 import type { ToolContext, ToolResult, V2ToolContext } from '../../types.js';
 import { success, requireV2Context } from '../../types.js';
+import { NullGitSnapshotV2 } from '../../../v2/ports/git-snapshot.port.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
 import {
@@ -169,7 +170,7 @@ export function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: V2ToolContext
 ): RA<ContinueWorkflowResult, ContinueWorkflowError> {
-  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory, tokenAliasStore, entropy } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory, tokenAliasStore, entropy, gitSnapshot } = ctx.v2;
 
   // Check context budget (synchronous, early guard)
   const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
@@ -242,6 +243,7 @@ export function executeContinueWorkflow(
               tokenCodecPorts,
               idFactory,
               sha256,
+              gitSnapshot: gitSnapshot ?? new NullGitSnapshotV2(),
               aliasStore: tokenAliasStore,
               entropy,
               cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
