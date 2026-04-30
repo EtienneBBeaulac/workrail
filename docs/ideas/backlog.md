@@ -3,6 +3,8 @@
 Workflow and feature ideas worth capturing but not yet planned or designed.
 For historical narrative and sprint journals, see `docs/history/worktrain-journal.md`.
 
+**Before reading this backlog, read the vision:** `docs/vision.md` -- what WorkTrain is, what success looks like, and the principles every decision is held against. Every item in this backlog should serve that vision. If it doesn't, it shouldn't be here.
+
 **To see a sorted priority view, run:**
 ```bash
 npm run backlog                                       # full list, grouped by blocked/unblocked

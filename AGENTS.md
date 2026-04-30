@@ -175,6 +175,8 @@ The WorkRail Console is a browser-based dashboard for inspecting workflow sessio
 
 Do not duplicate information that already exists in a doc. Instead, point agents and readers to the right file. For the full documentation index, see `docs/README.md`.
 
+**Read this first:** `docs/vision.md` -- what WorkTrain is, what success looks like, and the principles every decision is held against. Every agent operating in this repo should read this before doing any work. It is short.
+
 ### Planning system
 
 The planning system follows a graduation path: ideas -> roadmap -> tickets -> execution.
