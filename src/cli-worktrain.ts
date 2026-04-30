@@ -43,6 +43,7 @@ import {
   type Priority,
 } from './cli/commands/index.js';
 import { writeStatsSummary } from './daemon/stats-summary.js';
+import type { ChildSessionResult } from './coordinators/types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1294,6 +1295,9 @@ runCommand
         goal: string,
         workspace: string,
         context?: Readonly<Record<string, unknown>>,
+        // CLI path does not support agentConfig -- sessions use daemon default timeouts.
+        _agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
+        parentSessionId?: string,
       ) => {
         const url = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
         try {
@@ -1305,6 +1309,7 @@ runCommand
               goal,
               workspacePath: workspace,
               ...(context !== undefined ? { context } : {}),
+              ...(parentSessionId !== undefined ? { parentSessionId } : {}),
             }),
             signal: AbortSignal.timeout(30_000),
           });
@@ -1525,6 +1530,147 @@ runCommand
           );
           return emptyResult;
         }
+      },
+
+      getChildSessionResult: async (handle: string, _coordinatorSessionId?: string): Promise<ChildSessionResult> => {
+        // HTTP-based implementation for the CLI review command.
+        // Queries the console server once to read the terminal session status,
+        // then calls getAgentResult for notes and artifacts on success.
+        const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
+        try {
+          const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
+          if (!sessionRes.ok) {
+            return { kind: 'failed', reason: 'error', message: `Session fetch HTTP ${sessionRes.status}` };
+          }
+          const sessionBody = await sessionRes.json() as Record<string, unknown>;
+          const data = sessionBody['data'] as Record<string, unknown> | null | undefined;
+          const runs = (data?.['runs'] ?? sessionBody['runs']) as Array<Record<string, unknown>> | null | undefined;
+          const runStatus = runs?.[0]?.['status'] as string | null | undefined;
+
+          if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
+            // Reuse the getAgentResult implementation defined above in this closure.
+            // WHY: the deps object literal is being constructed; we cannot call sibling
+            // methods directly. Re-fetching the session detail is cheap and correct here.
+            const agentResult = await (async () => {
+              const empty = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
+              try {
+                const tipNodeId = (runs?.[0]?.['preferredTipNodeId'] as string | null | undefined) ?? null;
+                if (!tipNodeId) return empty;
+                const allNodes = (runs?.[0]?.['nodes'] as Array<Record<string, unknown>> | null | undefined) ?? [];
+                const allNodeIds = allNodes
+                  .map((n) => n['nodeId'] as string | undefined)
+                  .filter((id): id is string => typeof id === 'string' && id !== '');
+                const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
+                let recap: string | null = null;
+                const collectedArtifacts: unknown[] = [];
+                for (const nodeId of nodeIdsToFetch) {
+                  try {
+                    const nodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}/nodes/${encodeURIComponent(nodeId)}`;
+                    const nodeRes = await globalThis.fetch(nodeUrl, { signal: AbortSignal.timeout(30_000) });
+                    if (!nodeRes.ok) continue;
+                    const nodeBody = await nodeRes.json() as Record<string, unknown>;
+                    const nodeData = nodeBody['data'] as Record<string, unknown> | null | undefined;
+                    if (nodeId === tipNodeId) recap = (nodeData?.['recapMarkdown'] as string | null) ?? null;
+                    const artifacts = (nodeData?.['artifacts'] as unknown[]) ?? [];
+                    if (artifacts.length > 0) collectedArtifacts.push(...artifacts);
+                  } catch { continue; }
+                }
+                return { recapMarkdown: recap, artifacts: collectedArtifacts as readonly unknown[] };
+              } catch { return empty; }
+            })();
+            return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
+          }
+
+          if (runStatus === 'blocked') {
+            return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
+          }
+
+          if (runStatus === null || runStatus === undefined) {
+            return { kind: 'timed_out', message: `Child session ${handle.slice(0, 16)} has no terminal run status` };
+          }
+
+          return { kind: 'timed_out', message: `Child session ${handle.slice(0, 16)} is in state '${runStatus}'` };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { kind: 'failed', reason: 'error', message: `Exception in getChildSessionResult: ${msg}` };
+        }
+      },
+
+      // CLI-based spawnAndAwait: dispatches via HTTP /api/v2/auto/dispatch.
+      // Sequential single-child only. For batch, use spawnSession + awaitSessions + getChildSessionResult.
+      spawnAndAwait: async (
+        workflowId: string,
+        goal: string,
+        workspace: string,
+        opts?: {
+          readonly coordinatorSessionId?: string;
+          readonly timeoutMs?: number;
+          // agentConfig not supported via CLI HTTP path -- daemon uses its own trigger defaults.
+          readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>;
+        },
+      ): Promise<ChildSessionResult> => {
+        // Step 1: Spawn via HTTP dispatch.
+        const spawnUrl = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
+        let handle: string;
+        try {
+          const response = await globalThis.fetch(spawnUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workflowId,
+              goal,
+              workspacePath: workspace,
+              ...(opts?.coordinatorSessionId !== undefined ? { parentSessionId: opts.coordinatorSessionId } : {}),
+            }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          const body = await response.json() as Record<string, unknown>;
+          if (!response.ok) {
+            const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
+            return { kind: 'failed', reason: 'error', message: `Spawn HTTP error: ${errMsg}` };
+          }
+          const sessionId = (body['data'] as Record<string, unknown> | null)?.['sessionId'] as string | null | undefined
+            ?? body['sessionId'] as string | null | undefined;
+          if (!sessionId) {
+            return { kind: 'failed', reason: 'error', message: 'Spawn response missing sessionId' };
+          }
+          handle = sessionId;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { kind: 'failed', reason: 'error', message: `Exception spawning session: ${msg}` };
+        }
+
+        // Step 2: Poll until terminal or timeout.
+        const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+        const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+        const POLL_INTERVAL_MS = 5_000;
+        const deadline = Date.now() + timeoutMs;
+        let timedOut = false;
+
+        while (Date.now() < deadline) {
+          try {
+            const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
+            const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(10_000) });
+            if (sessionRes.ok) {
+              const body = await sessionRes.json() as Record<string, unknown>;
+              const data = body['data'] as Record<string, unknown> | null | undefined;
+              const runs = (data?.['runs'] ?? body['runs']) as Array<Record<string, unknown>> | null | undefined;
+              const status = runs?.[0]?.['status'] as string | null | undefined;
+              if (status === 'complete' || status === 'complete_with_gaps' || status === 'blocked') {
+                break;
+              }
+            }
+          } catch { /* continue polling */ }
+          await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
+
+        if (Date.now() >= deadline) timedOut = true;
+        if (timedOut) {
+          return { kind: 'timed_out', message: `Session ${handle.slice(0, 16)} timed out after ${timeoutMs}ms` };
+        }
+
+        // Step 3: Read terminal result including notes and artifacts via getChildSessionResult.
+        return deps.getChildSessionResult(handle, opts?.coordinatorSessionId);
       },
 
       listOpenPRs: async (workspace: string) => {

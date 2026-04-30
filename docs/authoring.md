@@ -761,6 +761,28 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 
 ## Artifacts and planning surfaces
+### coordinator-result-artifact-schema
+- **Level**: required
+- **Status**: active
+- **Scope**: artifact.coordinator-result
+- **Rule**: When a workflow step signals coordinator phase completion, emit a `wr.coordinator_result` artifact with exactly 4 fields: `outcome` (enum: success|failed|timed_out|await_degraded), `summary` (string), `sessionId` (string), `error` (string|null). No additional fields allowed.
+- **Why**: Coordinators read this artifact to determine whether to proceed, retry, or escalate. Extra fields pollute the schema boundary and break forward compatibility. The 4-field constraint is a hard limit, not a guideline.
+- **Enforced by**: advisory
+
+**Checks**
+- Exactly 4 fields present: outcome, summary, sessionId, error.
+- outcome is one of: success, failed, timed_out, await_degraded.
+- error is string|null -- null when outcome is success, non-null string when outcome is failed.
+- No workflow-specific fields (prUrl, branchName, commitSha, etc.) in wr.coordinator_result. Those belong in workflow-specific artifacts.
+
+**Anti-patterns**
+- Adding prUrl, branchName, or commitSha to wr.coordinator_result
+- Using a free-form notes string instead of the typed outcome enum
+- Omitting sessionId (required for coordinator tracing and console parent-child display)
+
+**Source refs**
+- `src/coordinators/types.ts` (runtime) — ChildSessionResult discriminated union -- the runtime type that wr.coordinator_result maps to.
+
 ### artifact-canonicality
 - **Level**: recommended
 - **Status**: active
@@ -913,6 +935,7 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `artifact.plan`: Implementation-planning artifacts
 - `artifact.spec`: Behavior/specification artifacts
 - `artifact.verification`: Verification or handoff artifacts
+- `artifact.coordinator-result`: wr.coordinator_result artifact emitted by coordinator-phase workflows to signal phase completion to the coordinator
 - `delegation.context-packet`: Structured context passed to subagents
 - `delegation.result-envelope`: Structured result shape returned by subagents
 - `legacy.patterns`: Older authoring patterns that should now be discouraged or avoided

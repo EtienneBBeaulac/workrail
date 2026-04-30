@@ -28,6 +28,7 @@ import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { AwaitResult, SessionResult } from '../cli/commands/worktrain-await.js';
+import type { ChildSessionResult } from './types.js';
 import {
   ReviewVerdictArtifactV1Schema,
   isReviewVerdictArtifact,
@@ -136,6 +137,10 @@ export interface CoordinatorDeps {
    *
    * The optional 4th arg passes assembled context (e.g. git diff summary, prior session
    * notes) that gets injected into the session's system prompt before turn 1.
+   *
+   * The optional 6th arg `parentSessionId` records the coordinator session ID in the
+   * child session's event log so the parent-child relationship is durable and queryable.
+   * Omit for root sessions (no parent). Optional for backwards compatibility.
    */
   readonly spawnSession: (
     workflowId: string,
@@ -143,6 +148,7 @@ export interface CoordinatorDeps {
     workspace: string,
     context?: Readonly<Record<string, unknown>>,
     agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
+    parentSessionId?: string,
   ) => Promise<Result<string, string>>;
 
   /**
@@ -180,6 +186,67 @@ export interface CoordinatorDeps {
   readonly getAgentResult: (
     sessionHandle: string,
   ) => Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }>;
+
+  /**
+   * Map a completed session handle to a typed ChildSessionResult.
+   *
+   * WHY on CoordinatorDeps (not a free function):
+   * Requires access to ConsoleService for session status polling and artifact
+   * retrieval. Injecting it here keeps coordinator logic free of direct I/O imports.
+   *
+   * Call sequence:
+   * 1. If ConsoleService is unavailable -> return `kind: 'await_degraded'`
+   * 2. Query ConsoleService.getSessionDetail(handle) once (expects terminal session)
+   * 3. Map terminal status to ChildSessionResult outcome
+   * 4. Call getAgentResult(handle) for notes and artifacts on success
+   * 5. Return the mapped result
+   *
+   * INVARIANT: this method does NOT call awaitSessions. The caller must call
+   * awaitSessions first to ensure the session has reached a terminal state.
+   * Calling getChildSessionResult on a still-running session is undefined behavior.
+   *
+   * @param handle - Session handle returned by spawnSession
+   * @param coordinatorSessionId - Optional coordinator session ID for tracing
+   */
+  readonly getChildSessionResult: (
+    handle: string,
+    coordinatorSessionId?: string,
+  ) => Promise<ChildSessionResult>;
+
+  /**
+   * Sequential convenience wrapper: spawn a session, wait for it to complete,
+   * then return a typed ChildSessionResult.
+   *
+   * WHY sequential single-child only:
+   * This method spawns ONE child session and waits for it before returning.
+   * For batch/parallel patterns (spawning multiple children and awaiting all),
+   * use the manual composition: `spawnSession` N times -> `awaitSessions(handles)`
+   * -> `getChildSessionResult` per handle. spawnAndAwait is not suitable for batch use.
+   *
+   * Composition: spawnSession -> awaitSessions([handle]) -> getChildSessionResult(handle)
+   *
+   * @param workflowId - Workflow to run in the child session
+   * @param goal - Goal string for the child session
+   * @param workspace - Absolute path to the workspace
+   * @param opts.coordinatorSessionId - Parent coordinator session ID for tracing
+   * @param opts.timeoutMs - Timeout in milliseconds (default: CHILD_SESSION_TIMEOUT_MS)
+   */
+  readonly spawnAndAwait: (
+    workflowId: string,
+    goal: string,
+    workspace: string,
+    opts?: {
+      readonly coordinatorSessionId?: string;
+      readonly timeoutMs?: number;
+      /** Per-session agent loop budget. Distinct from timeoutMs (coordinator polling patience). */
+      readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>;
+      /**
+       * To pass assembled context to the child session, use manual composition:
+       * spawnSession -> awaitSessions -> getChildSessionResult.
+       * spawnAndAwait does not accept context directly.
+       */
+    },
+  ) => Promise<ChildSessionResult>;
 
   /**
    * List open PRs in the workspace via gh CLI.
