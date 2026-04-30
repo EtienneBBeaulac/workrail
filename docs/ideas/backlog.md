@@ -14,7 +14,23 @@ npm run backlog -- --help                            # all options
 ```
 
 Each item has a score line: `**Score: N** | Cor:N Cap:N Eff:N Lev:N Con:N | Blocked: ...`
-See the scoring rubric in the "Agent-assisted backlog prioritization" entry (WorkTrain Daemon section).
+
+**When adding a new backlog item, score it using this rubric.** Five dimensions, each 1-3. Score = sum (max 15).
+
+| Dimension | 3 | 2 | 1 |
+|---|---|---|---|
+| **Correctness** | Silent wrong output, crash, or skipped safety gate | Degraded behavior, misleading output, test coverage gap | No effect on correctness |
+| **Capability** | Meaningfully expands what WorkTrain can do or who can use it | Reduces friction for an *active* use case today | Polish, internal quality, or nothing anyone is actively blocked by right now |
+| **Effort** (inverted) | Hours to a day or two | A few days to a week | Weeks or longer, significant design work needed first |
+| **Leverage** | Prerequisite for multiple other items | Enables one or two downstream items | Standalone, nothing depends on it |
+| **Confidence** | Clear problem, clear direction, just needs implementation | Problem is clear, but has open questions to hash out first | Still needs discovery or design before work can begin |
+
+**Blocked flag:** annotate with *what* the item is blocked by -- "Blocked: needs knowledge graph" vs "Blocked: needs dispatchCondition" carry very different timelines. Blocked items are listed separately regardless of score.
+
+**Scoring notes:**
+- Score the first actionable phase, not the full vision. Phase 1 = two days of work should not score Effort 1 just because Phase 3 is months away.
+- Tiebreaker at equal score: prefer the item that makes the next item easier to execute.
+- Capability 2 = reduces friction for an *active* use case today (not something hypothetical).
 
 ---
 
