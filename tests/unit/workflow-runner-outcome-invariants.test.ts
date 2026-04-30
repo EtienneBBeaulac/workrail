@@ -14,12 +14,8 @@
  * - 'unknown' NEVER appears in stats for a completed session
  * - stepCount is correct at each exit path
  *
- * NOTE: Direct stats file verification is limited here because DAEMON_STATS_DIR
- * is a module-level constant that cannot be injected without a refactor.
- * The planned functional-core/imperative-shell refactor will make statsDir
- * injectable, enabling full stats file assertions. Until then, the _tag tests
- * document the mapping that MUST hold and serve as the refactor safety net.
- * See: tagToStatsOutcome mapping tests below.
+ * Stats file content is verified directly using the injectable _statsDir parameter
+ * on runWorkflow(). Tests pass tmpDir and read execution-stats.jsonl after completion.
  *
  * ### Sidecar (crash-recovery) invariants
  * - Sidecar is deleted on success (non-worktree)
@@ -57,10 +53,12 @@ const {
   mockExecuteStartWorkflow,
   mockExecuteContinueWorkflow,
   mockParseContinueTokenOrFail,
+  mockPersistTokens,
 } = vi.hoisted(() => ({
   mockExecuteStartWorkflow: vi.fn(),
   mockExecuteContinueWorkflow: vi.fn(),
   mockParseContinueTokenOrFail: vi.fn(),
+  mockPersistTokens: vi.fn(),
 }));
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
@@ -81,6 +79,16 @@ vi.mock('../../src/mcp/handlers/v2-token-ops.js', () => ({
 vi.mock('../../src/v2/projections/node-outputs.js', () => ({
   projectNodeOutputsV2: vi.fn().mockReturnValue({ isOk: () => false, isErr: () => true, error: { code: 'NO_EVENTS', message: 'stub' } }),
 }));
+
+// Mock persistTokens so we can force failure for early-exit path tests.
+// Default: succeeds (returns ok). Override per-test for failure scenarios.
+vi.mock('../../src/daemon/tools/_shared.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/daemon/tools/_shared.js')>();
+  return {
+    ...original,
+    persistTokens: mockPersistTokens,
+  };
+});
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
@@ -103,6 +111,26 @@ const FAKE_CONTINUE_TOKEN = 'ct_fakecontinuetoken12345678901';
 const FAKE_CHECKPOINT_TOKEN = null;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** A minimal start response where the workflow has a pending first step (agent loop needed). */
+function makePendingStartResponse() {
+  return {
+    isOk: () => true,
+    isErr: () => false,
+    value: {
+      response: {
+        kind: 'ok' as const,
+        continueToken: FAKE_CONTINUE_TOKEN,
+        checkpointToken: FAKE_CHECKPOINT_TOKEN,
+        isComplete: false,
+        pending: { prompt: 'Step 1: Do the work.' },
+        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
+        nextIntent: 'advance' as const,
+        nextCall: null,
+      },
+    },
+  };
+}
 
 /** A minimal start response where the workflow is already complete. */
 function makeCompleteStartResponse() {
@@ -162,6 +190,7 @@ beforeEach(async () => {
   mockExecuteStartWorkflow.mockReset();
   mockExecuteContinueWorkflow.mockReset();
   mockParseContinueTokenOrFail.mockReset();
+  mockPersistTokens.mockReset();
 
   // Default: token decode returns a fake session ID (used for DaemonRegistry)
   mockParseContinueTokenOrFail.mockReturnValue({
@@ -169,6 +198,9 @@ beforeEach(async () => {
     isErr: () => false,
     value: { sessionId: 'sess_test123' },
   });
+
+  // Default: persistTokens succeeds
+  mockPersistTokens.mockResolvedValue({ kind: 'ok', value: undefined });
 });
 
 afterEach(async () => {
@@ -715,4 +747,57 @@ describe('finalizeSession: stats file content (outcome and stepCount)', () => {
       }
     });
   }
+});
+
+// ── Early-exit paths: persist failure and worktree failure write stats ────────
+//
+// These tests verify that the early-exit paths introduced in buildPreAgentSession
+// -- which now return { kind: 'complete' } to runWorkflow() for unified cleanup
+// via finalizeSession() -- correctly write stats and return _tag=error.
+//
+// Prior to the FC/IS refactor, these paths called writeExecutionStats() inline.
+// After the refactor, they return to runWorkflow() which calls finalizeSession().
+// These tests are the regression guard for that unification.
+
+describe('early-exit paths: finalizeSession called for all failure paths', () => {
+  it('persistTokens failure produces _tag=error and writes statsOutcome=error', async () => {
+    // Arrange: executeStartWorkflow succeeds with a real token, triggering persistTokens.
+    mockExecuteStartWorkflow.mockResolvedValue(makePendingStartResponse());
+    // Force persistTokens to fail.
+    mockPersistTokens.mockResolvedValue({
+      kind: 'err',
+      error: { code: 'EACCES', message: 'permission denied' },
+    });
+
+    const result = await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, tmpDir, tmpDir);
+
+    expect(result._tag).toBe('error');
+    if (result._tag === 'error') {
+      expect(result.message).toContain('Initial token persist failed');
+    }
+
+    await settleFireAndForget();
+    const entries = await readStatsFile(tmpDir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.outcome).toBe('error');
+    expect(entries[0]!.stepCount).toBe(0);
+    expect(entries[0]!.outcome).not.toBe('unknown');
+  });
+
+  it('persistTokens failure does not leave a sidecar on disk', async () => {
+    // persistTokens fails before any sidecar is durably written (the write itself fails).
+    // No orphan sidecar should remain for crash recovery to find.
+    mockExecuteStartWorkflow.mockResolvedValue(makePendingStartResponse());
+    mockPersistTokens.mockResolvedValue({
+      kind: 'err',
+      error: { code: 'ENOSPC', message: 'no space left on device' },
+    });
+
+    await runWorkflow(makeTrigger(), FAKE_CTX, FAKE_API_KEY, undefined, undefined, undefined, tmpDir, tmpDir);
+
+    // The sessionsDir (tmpDir) should have no .json sidecar files.
+    const files = await fs.readdir(tmpDir);
+    const sidecars = files.filter((f) => f.endsWith('.json'));
+    expect(sidecars).toHaveLength(0);
+  });
 });

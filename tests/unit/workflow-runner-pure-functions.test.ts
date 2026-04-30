@@ -29,11 +29,12 @@ import {
   buildSessionResult,
   buildAgentCallbacks,
   sidecardLifecycleFor,
+  setTerminalSignal,
   DAEMON_SOUL_DEFAULT,
   DEFAULT_SESSION_TIMEOUT_MINUTES,
   DEFAULT_MAX_TURNS,
 } from '../../src/daemon/workflow-runner.js';
-import type { SessionState, StuckConfig } from '../../src/daemon/workflow-runner.js';
+import type { SessionState, StuckConfig, TerminalSignal } from '../../src/daemon/workflow-runner.js';
 import type { WorkflowRunResult, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
 import type { ContextBundle } from '../../src/daemon/context-loader.js';
 
@@ -152,8 +153,7 @@ describe('createSessionState', () => {
     expect(state.lastNToolCalls).toEqual([]);
     expect(state.issueSummaries).toEqual([]);
     expect(state.pendingSteerParts).toEqual([]);
-    expect(state.stuckReason).toBeNull();
-    expect(state.timeoutReason).toBeNull();
+    expect(state.terminalSignal).toBeNull();
     expect(state.turnCount).toBe(0);
   });
 
@@ -191,30 +191,30 @@ function makeConfig(overrides: Partial<StuckConfig> = {}): StuckConfig {
 describe('evaluateStuckSignals', () => {
   // ---- max_turns_exceeded ----
 
-  it('returns max_turns_exceeded when turnCount reaches maxTurns and no timeout set', () => {
-    const state = makeState({ turnCount: 100, timeoutReason: null });
+  it('returns max_turns_exceeded when turnCount reaches maxTurns and no terminal signal set', () => {
+    const state = makeState({ turnCount: 100, terminalSignal: null });
     const config = makeConfig({ maxTurns: 100 });
     const signal = evaluateStuckSignals(state, config);
     expect(signal?.kind).toBe('max_turns_exceeded');
   });
 
   it('does not return max_turns_exceeded when turnCount < maxTurns', () => {
-    const state = makeState({ turnCount: 99, timeoutReason: null });
+    const state = makeState({ turnCount: 99, terminalSignal: null });
     const config = makeConfig({ maxTurns: 100 });
     const signal = evaluateStuckSignals(state, config);
     expect(signal?.kind).not.toBe('max_turns_exceeded');
   });
 
-  it('does not return max_turns_exceeded when timeoutReason is already set', () => {
-    const state = makeState({ turnCount: 100, timeoutReason: 'wall_clock' });
+  it('does not return max_turns_exceeded when timeout terminalSignal is already set', () => {
+    const state = makeState({ turnCount: 100, terminalSignal: { kind: 'timeout', reason: 'wall_clock' } });
     const config = makeConfig({ maxTurns: 100 });
     const signal = evaluateStuckSignals(state, config);
-    // Should return timeout_imminent instead (timeoutReason is set)
+    // Should return timeout_imminent instead (terminalSignal is set)
     expect(signal?.kind).not.toBe('max_turns_exceeded');
   });
 
   it('does not check max_turns when maxTurns is 0', () => {
-    const state = makeState({ turnCount: 9999, timeoutReason: null });
+    const state = makeState({ turnCount: 9999, terminalSignal: null });
     const config = makeConfig({ maxTurns: 0 });
     const signal = evaluateStuckSignals(state, config);
     expect(signal).toBeNull();
@@ -298,8 +298,8 @@ describe('evaluateStuckSignals', () => {
 
   // ---- timeout_imminent (Signal 3) ----
 
-  it('returns timeout_imminent when timeoutReason is set', () => {
-    const state = makeState({ timeoutReason: 'wall_clock', turnCount: 5, lastNToolCalls: [] });
+  it('returns timeout_imminent when timeout terminalSignal is set', () => {
+    const state = makeState({ terminalSignal: { kind: 'timeout', reason: 'wall_clock' }, turnCount: 5, lastNToolCalls: [] });
     const signal = evaluateStuckSignals(state, makeConfig());
     expect(signal?.kind).toBe('timeout_imminent');
     if (signal?.kind === 'timeout_imminent') {
@@ -307,8 +307,8 @@ describe('evaluateStuckSignals', () => {
     }
   });
 
-  it('returns timeout_imminent for max_turns timeoutReason', () => {
-    const state = makeState({ timeoutReason: 'max_turns', turnCount: 5, lastNToolCalls: [] });
+  it('returns timeout_imminent for max_turns timeout terminalSignal', () => {
+    const state = makeState({ terminalSignal: { kind: 'timeout', reason: 'max_turns' }, turnCount: 5, lastNToolCalls: [] });
     const signal = evaluateStuckSignals(state, makeConfig());
     expect(signal?.kind).toBe('timeout_imminent');
     if (signal?.kind === 'timeout_imminent') {
@@ -327,8 +327,7 @@ describe('evaluateStuckSignals', () => {
         { toolName: 'Read', argsSummary: '{"filePath":"/foo"}' },
         { toolName: 'Bash', argsSummary: '{"command":"pwd"}' },
       ],
-      stuckReason: null,
-      timeoutReason: null,
+      terminalSignal: null,
     });
     const signal = evaluateStuckSignals(state, makeConfig());
     expect(signal).toBeNull();
@@ -343,7 +342,7 @@ describe('evaluateStuckSignals', () => {
     const repeatCall = { toolName: 'Bash', argsSummary: '{"command":"ls"}' };
     const state = makeState({
       turnCount: 100,
-      timeoutReason: null,
+      terminalSignal: null,
       lastNToolCalls: [repeatCall, repeatCall, repeatCall],
     });
     const signal = evaluateStuckSignals(state, makeConfig({ maxTurns: 100 }));
@@ -679,10 +678,11 @@ function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger 
 describe('buildSessionResult', () => {
   const SESSION_ID = 'sess_test123';
 
-  it('returns _tag: stuck when stuckReason is set (stuck takes priority over timeout)', () => {
+  it('returns _tag: stuck when stuck terminalSignal is set (stuck takes priority over timeout via first-writer-wins)', () => {
+    // setTerminalSignal enforces first-writer-wins: stuck was set first, so timeout attempt is a no-op.
     const state = createSessionState('ct_test');
-    state.stuckReason = 'repeated_tool_call';
-    state.timeoutReason = 'wall_clock'; // both set -- stuck wins
+    setTerminalSignal(state, { kind: 'stuck', reason: 'repeated_tool_call' });
+    setTerminalSignal(state, { kind: 'timeout', reason: 'wall_clock' }); // no-op: stuck already set
     const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
     expect(result._tag).toBe('stuck');
     if (result._tag === 'stuck') {
@@ -693,7 +693,7 @@ describe('buildSessionResult', () => {
 
   it('stuck result includes issueSummaries when present', () => {
     const state = createSessionState('ct_test');
-    state.stuckReason = 'no_progress';
+    setTerminalSignal(state, { kind: 'stuck', reason: 'no_progress' });
     state.issueSummaries = ['issue 1', 'issue 2'];
     const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
     expect(result._tag).toBe('stuck');
@@ -702,9 +702,9 @@ describe('buildSessionResult', () => {
     }
   });
 
-  it('returns _tag: timeout when timeoutReason is set and stuckReason is null', () => {
+  it('returns _tag: timeout when timeout terminalSignal is set', () => {
     const state = createSessionState('ct_test');
-    state.timeoutReason = 'wall_clock';
+    setTerminalSignal(state, { kind: 'timeout', reason: 'wall_clock' });
     const trigger = makeTrigger({ agentConfig: { maxSessionMinutes: 30 } });
     const result = buildSessionResult(state, 'stop', undefined, trigger, SESSION_ID, undefined);
     expect(result._tag).toBe('timeout');
@@ -717,7 +717,7 @@ describe('buildSessionResult', () => {
 
   it('returns _tag: timeout for max_turns with correct message', () => {
     const state = createSessionState('ct_test');
-    state.timeoutReason = 'max_turns';
+    setTerminalSignal(state, { kind: 'timeout', reason: 'max_turns' });
     const trigger = makeTrigger({ agentConfig: { maxTurns: 100 } });
     const result = buildSessionResult(state, 'stop', undefined, trigger, SESSION_ID, undefined);
     expect(result._tag).toBe('timeout');
@@ -848,33 +848,30 @@ describe('sidecardLifecycleFor', () => {
 // ── Stall detection: buildAgentCallbacks.onStallDetected + buildSessionResult ──
 
 describe('stall detection: buildAgentCallbacks.onStallDetected', () => {
-  it('onStallDetected sets state.stuckReason to stall', () => {
+  it('onStallDetected sets terminalSignal to stuck/stall', () => {
     const state = createSessionState('ct_test');
-    expect(state.stuckReason).toBeNull();
+    expect(state.terminalSignal).toBeNull();
 
     const callbacks = buildAgentCallbacks('sess-stall', state, 'claude-test', undefined, 3);
 
     // Fire the stall callback directly (simulates timer firing in AgentLoop).
     callbacks.onStallDetected?.();
 
-    expect(state.stuckReason).toBe('stall');
+    expect(state.terminalSignal).toEqual({ kind: 'stuck', reason: 'stall' });
   });
 
-  it('onStallDetected does NOT overwrite a prior stuckReason', () => {
-    // If stuckReason was already set (e.g. repeated_tool_call fired first),
-    // buildAgentCallbacks does NOT guard against this -- state.stuckReason is a simple
-    // assignment. The guard is in AgentLoop (the !this._aborted check). This test
-    // documents the expected behavior: the last writer wins at the state level.
-    // In production, the !this._aborted guard in AgentLoop prevents double-fire.
+  it('onStallDetected does NOT overwrite a prior stuck terminalSignal (first-writer-wins)', () => {
+    // WHY: setTerminalSignal enforces first-writer-wins. If repeated_tool_call fired first,
+    // the stall timer is a silent no-op. This is the bug fix: previously stall would
+    // overwrite the prior reason (no guard in the callback). Now the setter enforces it.
     const state = createSessionState('ct_test');
-    state.stuckReason = 'repeated_tool_call';
+    setTerminalSignal(state, { kind: 'stuck', reason: 'repeated_tool_call' });
 
     const callbacks = buildAgentCallbacks('sess-stall', state, 'claude-test', undefined, 3);
     callbacks.onStallDetected?.();
 
-    // onStallDetected overwrites stuckReason (guard is in AgentLoop, not in callbacks).
-    // This is acceptable because the !this._aborted guard prevents double-fire in practice.
-    expect(state.stuckReason).toBe('stall');
+    // prior signal preserved -- setTerminalSignal first-writer-wins.
+    expect(state.terminalSignal).toEqual({ kind: 'stuck', reason: 'repeated_tool_call' });
   });
 
   it('onStallDetected emits agent_stuck event with reason stall', () => {
@@ -899,9 +896,9 @@ describe('stall detection: buildAgentCallbacks.onStallDetected', () => {
 describe('stall detection: buildSessionResult with reason stall', () => {
   const SESSION_ID = 'sess_stall_test';
 
-  it('returns _tag: stuck with reason stall when stuckReason is stall', () => {
+  it('returns _tag: stuck with reason stall when terminalSignal is stuck/stall', () => {
     const state = createSessionState('ct_test');
-    state.stuckReason = 'stall';
+    setTerminalSignal(state, { kind: 'stuck', reason: 'stall' });
     const result = buildSessionResult(state, 'error', undefined, makeTrigger(), SESSION_ID, undefined);
     expect(result._tag).toBe('stuck');
     if (result._tag === 'stuck') {
@@ -910,14 +907,41 @@ describe('stall detection: buildSessionResult with reason stall', () => {
     }
   });
 
-  it('stall takes priority over timeout (stuck wins)', () => {
+  it('stall takes priority over timeout (stuck wins via first-writer-wins)', () => {
+    // stuck was set first; subsequent timeout attempt is a no-op.
     const state = createSessionState('ct_test');
-    state.stuckReason = 'stall';
-    state.timeoutReason = 'wall_clock';
+    setTerminalSignal(state, { kind: 'stuck', reason: 'stall' });
+    setTerminalSignal(state, { kind: 'timeout', reason: 'wall_clock' }); // no-op
     const result = buildSessionResult(state, 'error', undefined, makeTrigger(), SESSION_ID, undefined);
     expect(result._tag).toBe('stuck');
     if (result._tag === 'stuck') {
       expect(result.reason).toBe('stall');
     }
+  });
+});
+
+// ── setTerminalSignal ─────────────────────────────────────────────────────────
+
+describe('setTerminalSignal', () => {
+  it('sets terminalSignal when null and returns true', () => {
+    const state = createSessionState('ct_test');
+    expect(state.terminalSignal).toBeNull();
+    const result = setTerminalSignal(state, { kind: 'stuck', reason: 'repeated_tool_call' });
+    expect(result).toBe(true);
+    expect(state.terminalSignal).toEqual({ kind: 'stuck', reason: 'repeated_tool_call' });
+  });
+
+  it('first-writer-wins: second call with different signal is no-op and returns false', () => {
+    const state = createSessionState('ct_test');
+    expect(setTerminalSignal(state, { kind: 'stuck', reason: 'no_progress' })).toBe(true);
+    expect(setTerminalSignal(state, { kind: 'timeout', reason: 'wall_clock' })).toBe(false);
+    expect(state.terminalSignal).toEqual({ kind: 'stuck', reason: 'no_progress' });
+  });
+
+  it('first-writer-wins: second call with same kind is also no-op and returns false', () => {
+    const state = createSessionState('ct_test');
+    expect(setTerminalSignal(state, { kind: 'timeout', reason: 'wall_clock' })).toBe(true);
+    expect(setTerminalSignal(state, { kind: 'timeout', reason: 'max_turns' })).toBe(false);
+    expect(state.terminalSignal).toEqual({ kind: 'timeout', reason: 'wall_clock' });
   });
 });
