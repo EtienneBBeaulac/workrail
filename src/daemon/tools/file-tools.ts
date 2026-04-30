@@ -13,7 +13,7 @@ import type { ReadFileState } from '../workflow-runner.js';
 import { READ_SIZE_CAP_BYTES, findActualString, withWorkrailSession } from './_shared.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeReadTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
   return {
     name: 'Read',
     description:
@@ -30,6 +30,11 @@ export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas:
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Read: filePath must be a non-empty string');
       const filePath: string = params.filePath;
+      // Enforce workspace boundary: prevent reads outside the workspace
+      const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.join(workspacePath, filePath);
+      if (!absoluteFilePath.startsWith(workspacePath)) {
+        throw new Error(`Read target is outside the workspace: ${filePath}`);
+      }
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
 
       // Block device paths to prevent reads from infinite streams
@@ -69,7 +74,7 @@ export function makeReadTool(readFileState: Map<string, ReadFileState>, schemas:
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeWriteTool(readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeWriteTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
   return {
     name: 'Write',
     description:
@@ -87,6 +92,11 @@ export function makeWriteTool(readFileState: Map<string, ReadFileState>, schemas
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Write: filePath must be a non-empty string');
       if (typeof params.content !== 'string') throw new Error('Write: content must be a string');
       const filePath: string = params.filePath;
+      // Enforce workspace boundary: prevent writes outside the workspace
+      const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.join(workspacePath, filePath);
+      if (!absoluteFilePath.startsWith(workspacePath)) {
+        throw new Error(`Write target is outside the workspace: ${filePath}`);
+      }
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
 
       // Staleness guard: only for existing files. New files bypass the check entirely.

@@ -70,7 +70,7 @@ describe('Bash tool validation', () => {
 });
 
 describe('Read tool validation', () => {
-  const tool = makeReadTool(readFileState, fakeSchemas);
+  const tool = makeReadTool(workspacePath, readFileState, fakeSchemas);
 
   it('throws when filePath is missing', async () => {
     await expectThrows(tool.execute.bind(tool), {}, 'Read: filePath');
@@ -82,7 +82,7 @@ describe('Read tool validation', () => {
 });
 
 describe('Write tool validation', () => {
-  const tool = makeWriteTool(readFileState, fakeSchemas);
+  const tool = makeWriteTool(workspacePath, readFileState, fakeSchemas);
 
   it('throws when filePath is missing', async () => {
     await expectThrows(tool.execute.bind(tool), { content: 'x' }, 'Write: filePath');

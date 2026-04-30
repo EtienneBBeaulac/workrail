@@ -3091,8 +3091,8 @@ function constructTools(
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
     // must target the isolated worktree, not the main checkout.
     makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeReadTool(readFileStateMap, schemas, sid, emitter, workrailSid),
-    makeWriteTool(readFileStateMap, schemas, sid, emitter, workrailSid),
+    makeReadTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
+    makeWriteTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
     makeGlobTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeGrepTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeEditTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),

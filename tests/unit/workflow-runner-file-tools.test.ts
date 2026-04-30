@@ -73,7 +73,7 @@ describe('makeReadTool()', () => {
     await fs.writeFile(filePath, 'line one\nline two\nline three', 'utf8');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeReadTool(readFileState, stubSchemas);
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
     const result = await tool.execute('test-id', { filePath });
 
     const text = (result.content[0] as { type: string; text: string }).text;
@@ -87,7 +87,7 @@ describe('makeReadTool()', () => {
     await fs.writeFile(filePath, 'a\nb\nc\nd\ne', 'utf8');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeReadTool(readFileState, stubSchemas);
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
     // Read lines 2-3 (offset=1 means start at line 2, limit=2 means 2 lines)
     const result = await tool.execute('test-id', { filePath, offset: 1, limit: 2 });
 
@@ -106,7 +106,7 @@ describe('makeReadTool()', () => {
     await fs.writeFile(filePath, lines, 'utf8');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeReadTool(readFileState, stubSchemas);
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
     await expect(tool.execute('test-id', { filePath })).rejects.toThrow(/too large/i);
   });
 
@@ -118,7 +118,7 @@ describe('makeReadTool()', () => {
     await fs.writeFile(filePath, lines, 'utf8');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeReadTool(readFileState, stubSchemas);
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
     // offset and limit are provided -- size cap must be skipped
     const result = await tool.execute('test-id', { filePath, offset: 0, limit: 5 });
 
@@ -134,13 +134,23 @@ describe('makeReadTool()', () => {
     await fs.writeFile(filePath, 'hello\nworld', 'utf8');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeReadTool(readFileState, stubSchemas);
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
     await tool.execute('test-id', { filePath });
 
     expect(readFileState.has(filePath)).toBe(true);
     const state = readFileState.get(filePath)!;
     expect(state.content).toBe('hello\nworld');
     expect(state.timestamp).toBeGreaterThan(0);
+  });
+
+  it('rejects paths outside the workspace', async () => {
+    const outsidePath = path.join(os.tmpdir(), `wr-outside-${randomUUID()}`, 'secret.txt');
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
+    await expect(
+      tool.execute('test-id', { filePath: outsidePath }),
+    ).rejects.toThrow(/outside the workspace/i);
   });
 });
 
@@ -153,7 +163,7 @@ describe('makeWriteTool()', () => {
     const filePath = path.join(testDir, 'new-file.txt');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeWriteTool(readFileState, stubSchemas);
+    const tool = makeWriteTool(testDir, readFileState, stubSchemas);
     const result = await tool.execute('test-id', { filePath, content: 'hello world' });
 
     const text = (result.content[0] as { type: string; text: string }).text;
@@ -167,7 +177,7 @@ describe('makeWriteTool()', () => {
     await fs.writeFile(filePath, 'original content', 'utf8');
 
     const readFileState = new Map<string, ReadFileState>();
-    const tool = makeWriteTool(readFileState, stubSchemas);
+    const tool = makeWriteTool(testDir, readFileState, stubSchemas);
     await expect(
       tool.execute('test-id', { filePath, content: 'new content' }),
     ).rejects.toThrow(/has not been read/i);
@@ -181,10 +191,24 @@ describe('makeWriteTool()', () => {
     const readFileState = new Map<string, ReadFileState>();
     readFileState.set(filePath, { content: 'original content', timestamp: 1000, isPartialView: false });
 
-    const tool = makeWriteTool(readFileState, stubSchemas);
+    const tool = makeWriteTool(testDir, readFileState, stubSchemas);
     await expect(
       tool.execute('test-id', { filePath, content: 'new content' }),
     ).rejects.toThrow(/modified since/i);
+  });
+
+  it('rejects paths outside the workspace', async () => {
+    const outsideDir = path.join(os.tmpdir(), `wr-outside-${randomUUID()}`);
+    const outsidePath = path.join(outsideDir, 'secret.txt');
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeWriteTool(testDir, readFileState, stubSchemas);
+    await expect(
+      tool.execute('test-id', { filePath: outsidePath, content: 'should not be written' }),
+    ).rejects.toThrow(/outside the workspace/i);
+
+    // Verify the file was never created
+    await expect(fs.access(outsidePath)).rejects.toThrow();
   });
 });
 
