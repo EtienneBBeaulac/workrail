@@ -71,6 +71,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
 
@@ -83,10 +86,6 @@ jobs:
   lockfile:
     name: Lockfile Stable
     runs-on: ubuntu-latest
-    # Advisory only -- lockfile drift (e.g. from npm version differences across
-    # platforms) should not block PRs. The check still runs and uploads a
-    # regenerated lockfile artifact when drift is detected.
-    continue-on-error: true
 
     steps:
       - name: Checkout code
@@ -98,8 +97,8 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
-      - name: Upgrade npm (fix lockfile cpu-filter bug present in npm <11.3.0)
-        run: npm install -g npm@^11.11.1 --ignore-scripts
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
 
       - name: Regenerate lockfile (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -137,6 +136,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
 
@@ -161,6 +163,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -215,6 +220,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -238,6 +246,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -270,6 +281,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
 
@@ -294,6 +308,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -372,6 +389,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -420,6 +440,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -470,6 +493,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
+      - name: Enable corepack (pins npm to version declared in packageManager)
+        run: corepack enable npm
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -514,12 +540,13 @@ jobs:
           echo "## CI Success Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Lockfile: advisory only (continue-on-error -- does not block merge)
-          if [[ "${{ needs.lockfile.result }}" == "success" ]]; then
-            echo "- Lockfile Stable: PASSED" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- Lockfile Stable: ADVISORY (drift detected -- see artifact)" >> $GITHUB_STEP_SUMMARY
+          # Check lockfile (hard gate -- corepack guarantees same npm version everywhere)
+          if [[ "${{ needs.lockfile.result }}" != "success" ]]; then
+            echo "- Lockfile Stable: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Lockfile is not stable -- run 'npm install' locally and commit package-lock.json"
+            exit 1
           fi
+          echo "- Lockfile Stable: PASSED" >> $GITHUB_STEP_SUMMARY
 
           # Check build-artifact
           if [[ "${{ needs.build-artifact.result }}" != "success" ]]; then
