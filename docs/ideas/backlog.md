@@ -18,6 +18,26 @@ See the scoring rubric in the "Agent-assisted backlog prioritization" entry (Wor
 
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
+### wr.coding-task implementation loop does not exit when slices complete (Apr 30, 2026)
+
+**Status: bug** | Priority: high
+
+**Score: 13** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
+
+The `wr.coding-task` workflow's implementation loop (up to 20 passes) does not exit when all slices are complete. The `wr.loop_control` stop artifact is emitted correctly but the loop decision gate never fires because `currentSlice.name` remains `[unset]` -- the engine is not tracking which slice is current across passes. The loop ran 8 passes before eventually exiting on its own. 
+
+This means: (1) every coding task session wastes passes doing no work, (2) the agent cannot confidently signal completion, (3) total session turn count is inflated, increasing cost and timeout risk.
+
+**Root cause**: the `slices` array is stored in context but the engine does not advance a `currentSliceIndex` counter -- or the counter is not being surfaced to the step as `currentSlice.name`. The `wr.loop_control` artifact is evaluated at the loop decision step, but that step only fires when the engine recognizes it's at the end of a pass. With `currentSlice.name = [unset]`, the recognition fails.
+
+**Things to hash out:**
+- Is the bug in the workflow JSON (slices not wired to currentSlice tracking), in the engine (loop_control artifact evaluation), or in the way context variables are threaded between passes?
+- Does the issue affect all loops with `wr.loop_control`, or only the implementation loop in `wr.coding-task` specifically?
+- Is there a workaround agents can use today (e.g. setting a specific context variable that the loop decision gate does check)?
+- Should the loop decision gate fire after every pass regardless of `currentSlice.name` state, or only when the slice tracking is valid?
+
+---
+
 ### Intent gap: agent builds what it understood, not what the user meant (Apr 30, 2026)
 
 **Status: idea** | Priority: high
