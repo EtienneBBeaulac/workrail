@@ -1034,6 +1034,31 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### WorkTrain as the canonical workflow author -- MCP as a derived runtime (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+Today workflows are authored once and expected to work identically in both runtimes: the WorkRail MCP server (human-in-the-loop, Claude Code) and the WorkTrain daemon (fully autonomous, coordinator-driven). In practice they don't -- a workflow authored for human use has `requireConfirmation` gates that block autonomous execution, step prompts that assume the human is reading them, and phase structures that assume a single continuous session. Conversely, a workflow good for autonomous use has no natural pause points, produces typed structured outputs that humans find hard to read mid-session, and chains phases that a human might want to interrupt.
+
+The current response is to author separate "agentic variants" (`wr.coding-task` vs `coding-task-workflow.agentic.v2`). This is the wrong direction: it creates duplicate maintenance burden, improvements to one don't propagate to the other, and it means there is no single source of truth for what a workflow does.
+
+There should be one version of each workflow, not two. Improvements to one should benefit the other automatically. The self-improvement loop WorkTrain runs on its own workflows should produce better workflows for everyone, not just daemon sessions. The question is how to structure authorship and any adaptation layer so this is possible without forcing workflows into an awkward compromise that works poorly in both contexts.
+
+**What this enables:** WorkTrain can autonomously improve workflows using `wr.workflow-for-workflows`, and those improvements automatically benefit MCP users. The self-improvement loop produces better workflows for everyone, not just daemon sessions. Workflow quality compounds because there is only one version to improve.
+
+**Relationship to existing entries:**
+- "Workflow runtime adapter: one spec, two runtimes" (Shared/Engine) is a narrower version of this idea focused on parallelism and `requireConfirmation` gates. This entry is about the authoring philosophy and source-of-truth question, not just the adapter mechanics.
+- `wr.workflow-for-workflows` is how WorkTrain improves workflows autonomously -- this entry determines what it improves toward.
+
+**Things to hash out:**
+- What does the MCP conversion layer actually do? Adding pause points is straightforward. Adapting output formats (structured JSON → human-readable prose) may require active LLM translation, not just structural transformation.
+- Some workflow steps are genuinely different between runtimes -- a step that spawns parallel child sessions in the daemon doesn't have a clean MCP equivalent. Does the conversion layer skip those, simulate them sequentially, or require the author to declare a fallback?
+- If WorkTrain is the authoring target, existing workflows authored for MCP need migration. What is the migration path and who does it -- the author, WorkTrain itself, or a one-time script?
+- How do `requireConfirmation` gates fit? In the daemon they are removed or auto-satisfied by the coordinator. In MCP they pause for the human. Does the workflow declare them or does the conversion layer infer them?
+- Is the conversion layer purely structural (rearranging/omitting steps) or does it require understanding the semantic intent of each step?
+
 
 ### Improve commit SHA gathering consistency in wr.coding-task
 
@@ -2437,6 +2462,27 @@ A workflow that aggregates activity across git history, GitLab/GitHub MRs and re
 ---
 
 ## Platform Vision (longer-term)
+
+### Move backlog to a dedicated worktrain-meta repo with version control (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: no
+
+The backlog (`docs/ideas/backlog.md`) lives in the code repo. Every feature branch has its own version. Ideas added mid-session on a feature branch are held hostage until that PR merges. If two branches modify the backlog simultaneously, merge conflicts occur. There is no single authoritative place to capture an idea that immediately applies everywhere.
+
+A dedicated `worktrain-meta` repo (e.g. `~/git/personal/worktrain-meta/`) would hold the backlog as the only concern. No feature branches -- ideas are committed directly to main. Full git history preserved. No code PR ever touches it.
+
+Done means: an operator or agent can add a backlog idea from any branch or context, commit directly, and it is immediately visible on all other branches and in all other sessions.
+
+**Note on format:** when this migration happens, one-file-per-item with YAML frontmatter becomes viable. Frontmatter makes scores, status, dates, and blocked-by machine-readable without prose parsing. The `npm run backlog` script would read frontmatter instead of regex-parsing Score lines. This is the right time to adopt that format -- in the current single-file structure frontmatter would require a custom delimiter scheme, but one-file-per-item makes it natural.
+
+**Things to hash out:**
+- Should the worktrain-meta repo also hold the roadmap docs, now-next-later, open-work-inventory? Or just the backlog?
+- How do subagents spawned in a worktree find the backlog? They need a configured path, not relative to the code workspace.
+- When native structured backlog operations are built (SQLite), does the storage backend live in worktrain-meta (git-tracked history) or `~/.workrail/data/` (local queryable)? Both have merit.
+
+---
 
 ### Invocable routines: dispatch an existing routine directly as a task (Apr 30, 2026)
 
