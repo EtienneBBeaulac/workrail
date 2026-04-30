@@ -169,7 +169,7 @@ export function executeContinueWorkflow(
   input: V2ContinueWorkflowInput,
   ctx: V2ToolContext
 ): RA<ContinueWorkflowResult, ContinueWorkflowError> {
-  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory, tokenAliasStore, entropy } = ctx.v2;
+  const { gate, sessionStore, snapshotStore, pinnedStore, sha256, tokenCodecPorts, idFactory, tokenAliasStore, entropy, gitSnapshot } = ctx.v2;
 
   // Check context budget (synchronous, early guard)
   const ctxCheck = checkContextBudget({ tool: 'continue_workflow', context: input.context });
@@ -242,6 +242,7 @@ export function executeContinueWorkflow(
               tokenCodecPorts,
               idFactory,
               sha256,
+              gitSnapshot: gitSnapshot ?? { resolveEndSnapshot: async () => ({ endSha: null, commitShas: [] }) },
               aliasStore: tokenAliasStore,
               entropy,
               cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,

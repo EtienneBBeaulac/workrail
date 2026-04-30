@@ -90,9 +90,10 @@ export function advanceAndRecord(args: {
   readonly sessionStore: import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogAppendStorePortV2 & import('../../../v2/ports/session-event-log-store.port.js').SessionEventLogReadonlyStorePortV2;
   readonly sha256: Sha256PortV2;
   readonly idFactory: { readonly mintNodeId: () => NodeId; readonly mintEventId: () => string };
+  readonly gitSnapshot: import('../../../v2/ports/git-snapshot.port.js').GitSnapshotPortV2;
   readonly lockedIndex: SessionIndex;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
-  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, sha256, idFactory } = args;
+  const { truth, sessionId, runId, nodeId, attemptId, workflowHash, dedupeKey, inputContext, inputOutput, lock, pinnedWorkflow, snapshotStore, sessionStore, sha256, idFactory, gitSnapshot } = args;
 
   // Enforce invariants: do not record advance attempts for unknown nodes.
   // Use the pre-built lockedIndex instead of rescanning truth.events.
@@ -145,7 +146,7 @@ export function advanceAndRecord(args: {
         mode: { kind: 'retry', blockedNodeId: nodeId, blockedSnapshot: snap },
         truth, sessionId, runId, attemptId, workflowHash, dedupeKey,
         inputContext, inputOutput, lock, pinnedWorkflow,
-        ports: { snapshotStore, sessionStore, sha256, idFactory },
+        ports: { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot },
         lockedIndex: args.lockedIndex,
       });
     }
@@ -155,7 +156,7 @@ export function advanceAndRecord(args: {
       mode: { kind: 'fresh', sourceNodeId: nodeId, snapshot: snap },
       truth, sessionId, runId, attemptId, workflowHash, dedupeKey,
       inputContext, inputOutput, lock, pinnedWorkflow,
-      ports: { snapshotStore, sessionStore, sha256, idFactory },
+      ports: { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot },
       lockedIndex: args.lockedIndex,
     });
   });

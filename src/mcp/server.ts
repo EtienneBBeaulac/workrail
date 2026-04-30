@@ -28,6 +28,7 @@ import { normalizeV1WorkflowToPinnedSnapshot } from '../v2/read-only/v1-to-v2-sh
 import type { WorkflowCompiler } from '../application/services/workflow-compiler.js';
 import type { ValidationEngine } from '../application/services/validation-engine.js';
 import { LocalWorkspaceAnchorV2 } from '../v2/infra/local/workspace-anchor/index.js';
+import { LocalGitSnapshotV2 } from '../v2/infra/local/git-snapshot/index.js';
 import { WorkspaceRootsManager, type RootsReader } from './workspace-roots-manager.js';
 import { LocalDirectoryListingV2 } from '../v2/infra/local/directory-listing/index.js';
 import { LocalSessionSummaryProviderV2 } from '../v2/infra/local/session-summary-provider/index.js';
@@ -175,6 +176,7 @@ export async function createToolContext(): Promise<ToolContext> {
         // with a snapshot of the current MCP client roots (see transport entry points).
         resolvedRootUris: [],
         workspaceResolver: new LocalWorkspaceAnchorV2(process.cwd()),
+        gitSnapshot: new LocalGitSnapshotV2(),
         dataDir,
         directoryListing,
         sessionSummaryProvider: new LocalSessionSummaryProviderV2({

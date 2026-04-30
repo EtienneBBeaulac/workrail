@@ -3,8 +3,6 @@
  * Handles the path when an advance succeeds (not blocked).
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
@@ -36,8 +34,6 @@ import type { ValidatedAdvanceInputs } from './input-validation.js';
 import { buildAndAppendPlan, buildNotesOutputs, buildArtifactOutputs } from './event-builders.js';
 import { buildAssessmentRecordedEvent } from '../../../v2/durable-core/domain/assessment-recorded-event-builder.js';
 
-const execFileAsync = promisify(execFile);
-
 /**
  * Read a string observation value from the session event log.
  * Returns null if no matching observation_recorded event is found.
@@ -53,22 +49,6 @@ function readObservation(events: readonly DomainEventV1[], key: string): string 
     return e.data.value.value;
   }
   return null;
-}
-
-/**
- * Resolve endGitSha by running `git rev-parse HEAD` in repoRoot.
- * Best-effort: returns null on any failure (git not found, not a git repo, timeout).
- * WHY 2000ms timeout: sessions complete in the MCP response path; a slow git call
- * should not add more than 2s of latency to session completion.
- */
-async function resolveEndGitSha(repoRoot: string | null): Promise<string | null> {
-  if (!repoRoot) return null;
-  try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, timeout: 2000 });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
 }
 
 
@@ -94,7 +74,7 @@ export function buildSuccessOutcome(args: {
   const { mode, v, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash, inputOutput, pinnedWorkflow, engineState, pendingStep } = args.ctx;
   const { reasons, outputRequirement, validation } = args.computed;
-  const { snapshotStore, sessionStore, sha256, idFactory } = ports;
+  const { snapshotStore, sessionStore, sha256, idFactory, gitSnapshot } = ports;
 
   // Compile + interpret
   const compiler = new WorkflowCompiler();
@@ -282,16 +262,14 @@ export function buildSuccessOutcome(args: {
       const durationMs = (firstTs !== undefined && lastTs !== undefined) ? (lastTs - firstTs) : undefined;
 
       return RA.fromPromise(
-        resolveEndGitSha(repoRoot),
+        gitSnapshot.resolveEndSnapshot(repoRoot, startGitSha),
         (e) => ({ kind: 'advance_apply_failed' as const, message: String(e) }),
-      ).andThen((endGitSha) => {
-        // WHY agentCommitShas is always empty: agents cannot reliably report which commits
-        // are new vs existing. The startGitSha..endGitSha range in run_completed is the
-        // authoritative boundary; consumers that need the commit list derive it from those
-        // two fields via `git log startGitSha..endGitSha --format=%H` at query time.
-        // Agents no longer participate in SHA tracking.
-        const agentCommitShas: string[] = [];
-        const captureConfidence: 'high' | 'none' = 'none';
+      ).andThen(({ endSha: endGitSha, commitShas }) => {
+        // WHY GitSnapshotPortV2 instead of direct execFile: git I/O belongs behind a port.
+        // The port runs git rev-parse HEAD and git log --no-merges --first-parent in parallel,
+        // capturing both the end SHA and the branch-local commits produced during this session.
+        const agentCommitShas: readonly string[] = commitShas;
+        const captureConfidence: 'high' | 'none' = agentCommitShas.length > 0 ? 'high' : 'none';
         extraEventsToAppend.push(buildRunCompletedEvent({
           sessionId: String(sessionId),
           runId: String(runId),

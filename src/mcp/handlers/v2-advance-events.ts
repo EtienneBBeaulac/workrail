@@ -262,7 +262,7 @@ export function buildRunCompletedEvent(args: {
   readonly startGitSha: string | null;
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
-  readonly agentCommitShas: string[];
+  readonly agentCommitShas: readonly string[];
   readonly captureConfidence: 'high' | 'none';
   readonly durationMs: number | undefined;
   readonly idFactory: AdvanceCorePorts['idFactory'];
@@ -278,7 +278,7 @@ export function buildRunCompletedEvent(args: {
       startGitSha,
       endGitSha,
       gitBranch,
-      agentCommitShas,
+      agentCommitShas: [...agentCommitShas],
       captureConfidence,
       ...(durationMs !== undefined ? { durationMs } : {}),
     },

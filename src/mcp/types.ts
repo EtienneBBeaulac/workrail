@@ -31,6 +31,7 @@ import type { ValidationPipelineDepsPhase1a } from '../application/services/work
 import type { TokenAliasStorePortV2 } from '../v2/ports/token-alias-store.port.js';
 import type { RandomEntropyPortV2 } from '../v2/ports/random-entropy.port.js';
 import type { RememberedRootsStorePortV2 } from '../v2/ports/remembered-roots-store.port.js';
+import type { GitSnapshotPortV2 } from '../v2/ports/git-snapshot.port.js';
 import type { ManagedSourceStorePortV2 } from '../v2/ports/managed-source-store.port.js';
 
 // Note: JsonValue type is imported from output-schemas.js above
@@ -240,6 +241,10 @@ export interface V2Dependencies {
   // Workspace identity resolver (optional, graceful degradation).
   // Uses resolvedRootUris[0] when available, falls back to process.cwd().
   readonly workspaceResolver?: WorkspaceContextResolverPortV2;
+
+  // Git snapshot port for capturing end-state (endSha + commitShas) at session completion.
+  // Optional: degrades gracefully to null/[] when absent.
+  readonly gitSnapshot?: GitSnapshotPortV2;
 
   // Directory-level operations (resume session needs session enumeration)
   readonly dataDir?: DataDirPortV2;
