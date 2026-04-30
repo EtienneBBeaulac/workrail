@@ -770,3 +770,232 @@ describe('AgentLoop callbacks', () => {
     expect(lastMsg?.role).toBe('assistant');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stall detection tests
+// ---------------------------------------------------------------------------
+
+/**
+ * A FakeAnthropicClient that resolves the Nth call immediately but hangs
+ * forever on the (N+1)th call. Used to simulate a tool execution hang:
+ * the first LLM call completes (triggering tool execution), but the loop
+ * never makes a second LLM call because the tool is stuck.
+ *
+ * For stall detection tests: stallTimeoutMs fires BETWEEN the first LLM
+ * call starting (timer reset) and the second LLM call starting (which
+ * never happens because the loop is "stuck in tool execution" simulated
+ * by never calling the resolve of the hung promise).
+ *
+ * Strategy: the first LLM call responds with a tool_use response. The
+ * stall timer fires before the second LLM call can be made (simulating
+ * a hanging tool.execute()). In the test, vi.useFakeTimers() + advanceTimersByTime
+ * fires the stall timer.
+ */
+class HangingAnthropicClient implements AgentClientInterface {
+  private _callCount = 0;
+  private _immediateResponses: Anthropic.Message[];
+  public abortCalled = false;
+
+  constructor(immediateResponses: Anthropic.Message[]) {
+    this._immediateResponses = [...immediateResponses];
+  }
+
+  messages = {
+    create: async (
+      _params: Anthropic.MessageCreateParamsNonStreaming,
+      options?: { signal?: AbortSignal },
+    ): Promise<Anthropic.Message> => {
+      this._callCount++;
+      const response = this._immediateResponses.shift();
+      if (response !== undefined) {
+        return response;
+      }
+      // No more immediate responses -- hang until AbortSignal fires.
+      return new Promise<Anthropic.Message>((_resolve, reject) => {
+        if (options?.signal) {
+          options.signal.addEventListener('abort', () => {
+            reject(new Error('AbortError'));
+          });
+        }
+      });
+    },
+  };
+
+  get callCount(): number { return this._callCount; }
+}
+
+describe('AgentLoop stall detection', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stall timer fires and aborts the loop when no new LLM call starts within stallTimeoutMs', async () => {
+    // Strategy: the second LLM call hangs (HangingAnthropicClient falls through to a
+    // promise that only resolves when the AbortSignal fires). This simulates the real
+    // scenario: first LLM call succeeds (tool_use response), tool executes instantly,
+    // SECOND LLM call hangs. The stall timer fires before the second LLM call can
+    // complete, calling abort() which unblocks the hanging create() promise.
+    //
+    // WHY test with a hanging LLM call (not a hanging tool): tool.execute() is not
+    // interrupted by AbortSignal -- the agent loop awaits the tool's promise directly.
+    // Hanging the LLM call allows the AbortSignal to unblock it cleanly.
+    const tool = makeTool('bash');
+    // First LLM call: returns tool_use. Second LLM call: hangs until AbortSignal fires.
+    const client = new HangingAnthropicClient([makeToolUseMessage('bash', 'tool-1')]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [tool],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: 5000, // 5 seconds
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    // Start the loop. First LLM call returns tool_use; tool executes; second LLM call hangs.
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance fake timers past the stall timeout. The stall timer fires, calling
+    // abort() which resolves the hanging create() promise with an AbortError.
+    await vi.advanceTimersByTimeAsync(6000);
+
+    // The loop should exit.
+    await promptPromise;
+
+    expect(stallDetectedSpy).toHaveBeenCalledOnce();
+    // Loop should have made 2 LLM calls: first returned tool_use, second hung until abort.
+    expect(client.callCount).toBe(2);
+
+    // Exit reason should be 'error' (abort path).
+    const messages = agent.state.messages;
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant') as
+      | { role: 'assistant'; stopReason: string; errorMessage?: string }
+      | undefined;
+    expect(lastAssistant?.stopReason).toBe('error');
+  });
+
+  it('stall timer is cleared on normal loop completion (no spurious abort)', async () => {
+    // The loop completes normally (end_turn). The stall timer should be cleared.
+    // After the loop exits, advancing timers should NOT fire abort.
+    const client = new FakeAnthropicClient([makeEndTurnMessage('Done.')]);
+    const stallDetectedSpy = vi.fn();
+    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: 5000,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    // Loop completed. Now advance timers well past stallTimeoutMs.
+    await vi.advanceTimersByTimeAsync(10000);
+
+    // onStallDetected should NOT have been called.
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+    // Restore the spy to avoid test pollution.
+    abortSpy.mockRestore();
+  });
+
+  it('stall timer resets on each LLM turn (no false positive on slow-but-progressing loop)', async () => {
+    // The loop makes multiple LLM calls. Each call resets the stall timer.
+    // The timer should NOT fire between calls if they are spaced within stallTimeoutMs.
+    const tool = makeTool('bash');
+    const client = new FakeAnthropicClient([
+      makeToolUseMessage('bash', 'tool-1'), // first turn: tool_use
+      makeEndTurnMessage('Done.'),          // second turn: end_turn
+    ]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [tool],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: 10000, // 10 seconds
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    // Start the loop. The first LLM call will return a tool_use.
+    // We advance timers by less than stallTimeoutMs (simulating a fast tool),
+    // then the second LLM call fires (resetting the timer), then end_turn.
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance 5s -- less than the 10s stall timeout. Timer should not fire.
+    await vi.advanceTimersByTimeAsync(5000);
+
+    // Let the loop finish.
+    await promptPromise;
+
+    // No stall should have fired.
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+    expect(client.callCount).toBe(2);
+  });
+
+  it('prior abort suppresses stall detection (guard condition)', async () => {
+    // If abort() is called before the stall timer fires, onStallDetected should NOT
+    // be called (because _aborted is already true when the timer fires).
+    const stallDetectedSpy = vi.fn();
+    const client = new HangingAnthropicClient([]); // hangs immediately
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: 5000,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance 1s (not yet stall timeout) then call abort() manually.
+    await vi.advanceTimersByTimeAsync(1000);
+    agent.abort();
+
+    // Now advance past the stall timeout.
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await promptPromise;
+
+    // onStallDetected should NOT have been called because _aborted was true.
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+  });
+
+  it('stall detection is disabled when stallTimeoutMs is not provided', async () => {
+    // No stallTimeoutMs -- the timer should never be set.
+    const stallDetectedSpy = vi.fn();
+    const tool = makeTool('bash');
+    const client = new HangingAnthropicClient([makeToolUseMessage('bash', 'tool-1')]);
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [tool],
+      client,
+      modelId: 'claude-test',
+      // No stallTimeoutMs -- stall detection disabled
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance far past any reasonable stall timeout.
+    await vi.advanceTimersByTimeAsync(300_000); // 5 minutes
+
+    // Since the loop hangs (HangingAnthropicClient), force-abort to unblock.
+    agent.abort();
+    await promptPromise;
+
+    // onStallDetected should NOT have been called -- stall detection was disabled.
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+  });
+});

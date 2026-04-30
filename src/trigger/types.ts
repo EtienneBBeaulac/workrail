@@ -473,6 +473,19 @@ export interface TriggerDefinition {
      * Default: false.
      */
     readonly noProgressAbortEnabled?: boolean;
+    /**
+     * Number of seconds without a new LLM API call before the agent loop is
+     * considered stalled and aborted with WorkflowRunStuck { reason: 'stall' }.
+     *
+     * A stall occurs when a tool call hangs (network timeout, file lock, silent
+     * deadlock) -- the loop is inside tool execution and never calls the LLM again.
+     * Without this timer, the session holds its queue slot for up to maxSessionMinutes.
+     *
+     * Default: 120 seconds (DEFAULT_STALL_TIMEOUT_SECONDS in workflow-runner.ts).
+     * Must be a positive integer (>= 1). Value of 0 is invalid -- omit the field
+     * to use the default.
+     */
+    readonly stallTimeoutSeconds?: number;
   };
 
   /**

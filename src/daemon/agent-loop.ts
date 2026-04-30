@@ -152,6 +152,19 @@ export interface AgentLoopCallbacks {
    */
   readonly onLlmTurnStarted?: (info: { readonly messageCount: number; readonly modelId: string }) => void;
   /**
+   * Called when the stall timer fires: no LLM API call started within stallTimeoutMs.
+   *
+   * WHY a callback (not a return value): the timer fires asynchronously outside the
+   * normal turn flow. The caller needs to set daemon-specific state (stuckReason='stall')
+   * before the loop exits. A callback keeps AgentLoop decoupled from daemon types while
+   * giving the caller the signal it needs.
+   *
+   * WHY on AgentLoopCallbacks (not a separate option): callbacks is the established
+   * extension channel for all AgentLoop lifecycle signals. Adding it here follows the
+   * same pattern as onLlmTurnStarted, onToolCallStarted, etc.
+   */
+  readonly onStallDetected?: () => void;
+  /**
    * Called immediately after client.messages.create() resolves successfully.
    * @param info.stopReason - The stop_reason from the API response.
    * @param info.outputTokens - Actual output token count from the API response.
@@ -218,6 +231,23 @@ export interface AgentLoopOptions {
    * field on options).
    */
   readonly callbacks?: AgentLoopCallbacks;
+  /**
+   * Maximum milliseconds between consecutive LLM API call starts before the loop
+   * is considered stalled and aborted.
+   *
+   * The timer resets each time client.messages.create() is about to be called
+   * (just before onLlmTurnStarted fires). If no new LLM call starts within this
+   * window, the loop is stuck inside a tool execution (tool hung, network timeout,
+   * file lock) and is aborted.
+   *
+   * When undefined (the default), stall detection is disabled.
+   * Must be > 0 to enable -- values <= 0 are silently ignored.
+   *
+   * WHY injected here (not hardcoded): keeps AgentLoop decoupled from daemon-specific
+   * defaults. The caller (workflow-runner.ts) is responsible for supplying the
+   * correct timeout from trigger configuration.
+   */
+  readonly stallTimeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +274,14 @@ export class AgentLoop {
    * valid AbortController signal.
    */
   private _aborted = false;
+  /**
+   * Handle for the per-turn stall detection timer. Set just before each
+   * client.messages.create() call; cleared when the next LLM call starts
+   * (resetting the window) and in prompt()'s finally block (preventing a
+   * post-completion fire). Undefined when stall detection is disabled or
+   * no timer is currently active.
+   */
+  private _stallTimerHandle: ReturnType<typeof setTimeout> | undefined = undefined;
 
   constructor(options: AgentLoopOptions) {
     this._options = options;
@@ -340,6 +378,14 @@ export class AgentLoop {
       await this._runLoop();
     } finally {
       this._isRunning = false;
+      // Clear the stall timer on loop exit. WHY: the timer must be cancelled when
+      // the loop exits cleanly (end_turn, abort, or API error) to prevent it from
+      // firing after the loop has already completed and calling abort() again.
+      // clearTimeout on undefined is a safe no-op.
+      if (this._stallTimerHandle !== undefined) {
+        clearTimeout(this._stallTimerHandle);
+        this._stallTimerHandle = undefined;
+      }
     }
   }
 
@@ -348,7 +394,7 @@ export class AgentLoop {
   // ---------------------------------------------------------------------------
 
   private async _runLoop(): Promise<void> {
-    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks } = this._options;
+    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs } = this._options;
 
     while (true) {
       // Check abort before each LLM call.
@@ -370,6 +416,32 @@ export class AgentLoop {
         description: t.description,
         input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
       }));
+
+      // Reset the stall detection timer before each LLM call.
+      // WHY here (before onLlmTurnStarted): this is the per-turn heartbeat point.
+      // Clearing the previous handle and setting a new one ensures the window is
+      // measured from the START of each LLM call attempt. If no new LLM call starts
+      // within stallTimeoutMs, the loop is stuck inside _executeTools() (a tool hung)
+      // and should be aborted.
+      // WHY stallTimeoutMs > 0 guard: prevents misconfigured zero values from
+      // causing immediate abort on the next tick.
+      if (stallTimeoutMs !== undefined && stallTimeoutMs > 0) {
+        if (this._stallTimerHandle !== undefined) {
+          clearTimeout(this._stallTimerHandle);
+        }
+        this._stallTimerHandle = setTimeout(() => {
+          // Guard against firing when a prior abort was already registered.
+          // WHY: if the loop was aborted by shutdown or max-turns before the stall
+          // timer fires, we must not overwrite the abort reason with 'stall'.
+          // Single-threaded JS ensures no race between this check and the callback.
+          if (!this._aborted) {
+            this.abort();
+            // WHY try/catch: fire-and-forget invariant -- a throwing callback must
+            // never crash the timer callback.
+            try { callbacks?.onStallDetected?.(); } catch { /* swallow */ }
+          }
+        }, stallTimeoutMs);
+      }
 
       // Emit llm_turn_started before the API call.
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback

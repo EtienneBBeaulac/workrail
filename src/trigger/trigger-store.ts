@@ -102,7 +102,7 @@ interface ParsedTriggerRaw {
   // Note: maxSessionMinutes, maxTurns, and maxOutputTokens are stored as raw strings here because
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
-  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string };
+  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string; stallTimeoutSeconds?: string };
   maxQueueDepth?: string;  // numeric string; parsed and validated in validateAndResolveTrigger
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
@@ -325,7 +325,7 @@ function parseTriggersYaml(
         // agentConfig is a sub-object block with scalar string values.
         // Baseline indent: lineIndent (indent of the "agentConfig:" key line).
         lineIndex++;
-        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string } = {};
+        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string; stallTimeoutSeconds?: string } = {};
         while (lineIndex < lines.length) {
           const acLine = lines[lineIndex];
           if (acLine === undefined) break;
@@ -355,6 +355,7 @@ function parseTriggersYaml(
             else if (acKey === 'maxTurns') agentConfig.maxTurns = acValueResult.value;
             else if (acKey === 'maxOutputTokens') agentConfig.maxOutputTokens = acValueResult.value;
             else if (acKey === 'stuckAbortPolicy') agentConfig.stuckAbortPolicy = acValueResult.value;
+            else if (acKey === 'stallTimeoutSeconds') agentConfig.stallTimeoutSeconds = acValueResult.value;
           }
           lineIndex++;
         }
@@ -890,13 +891,30 @@ function validateAndResolveTrigger(
       stuckAbortPolicy = rawSap;
     }
 
-    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || maxOutputTokens !== undefined || stuckAbortPolicy !== undefined) {
+    let stallTimeoutSeconds: number | undefined;
+    if (raw.agentConfig.stallTimeoutSeconds !== undefined) {
+      // WHY Number.isInteger: same rationale as maxSessionMinutes -- prevents silently
+      // accepting floats (1.5 would be rounded to 1, changing behavior unexpectedly).
+      const asNumber = Number(raw.agentConfig.stallTimeoutSeconds);
+      if (!Number.isInteger(asNumber) || asNumber <= 0) {
+        // WHY invalid_field_value not missing_field: the field IS present -- its value is invalid.
+        return err({
+          kind: 'invalid_field_value',
+          field: 'agentConfig.stallTimeoutSeconds (must be a positive integer)',
+          triggerId: rawId,
+        });
+      }
+      stallTimeoutSeconds = asNumber;
+    }
+
+    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || maxOutputTokens !== undefined || stuckAbortPolicy !== undefined || stallTimeoutSeconds !== undefined) {
       agentConfig = {
         ...(model !== undefined ? { model } : {}),
         ...(maxSessionMinutes !== undefined ? { maxSessionMinutes } : {}),
         ...(maxTurns !== undefined ? { maxTurns } : {}),
         ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
         ...(stuckAbortPolicy !== undefined ? { stuckAbortPolicy } : {}),
+        ...(stallTimeoutSeconds !== undefined ? { stallTimeoutSeconds } : {}),
       };
     }
   }

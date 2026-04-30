@@ -1126,3 +1126,193 @@ Commit: `refactor(engine): introduce SessionScope and FileStateTracker for tool 
 `planConfidenceBand`: High
 `estimatedPRCount`: 1
 `followUpTickets`: ["future: update tool factory signatures to take FileStateTracker instead of Map"]
+---
+---
+
+# Implementation Plan: AgentLoop Stall Detection (Issue #895)
+
+*Generated: 2026-04-28 | Workflow: wr.coding-task | Branch: fix/etienneb/stall-detection-895*
+
+---
+
+## 1. Problem Statement
+
+When a tool call hangs (network timeout, file lock, silent deadlock), the `AgentLoop._runLoop()` stops making LLM API calls but holds its queue slot for up to the configured `maxSessionMinutes` (up to 55-65 minutes by default). No event is emitted, no early detection fires. The operator has no visibility that the session is stuck in a tool execution.
+
+## 2. Acceptance Criteria
+
+1. A session where no `client.messages.create()` call starts within `stallTimeoutSeconds` is aborted.
+2. Default `stallTimeoutSeconds` = 120 (2 minutes), overridable via `agentConfig.stallTimeoutSeconds` in triggers.yml.
+3. Result type is `WorkflowRunStuck` with `reason: 'stall'` (new variant).
+4. `DaemonEventEmitter` emits `agent_stuck` event with `reason: 'stall'` on detection.
+5. `AgentLoop` stays decoupled from daemon-specific types (timer injected as `stallTimeoutMs?: number`).
+6. `npx vitest run` passes; new tests cover the stall abort path.
+
+## 3. Non-Goals
+
+- Do NOT add tool-execution level timeout (that's a per-tool concern, not AgentLoop scope).
+- Do NOT change `maxSessionMinutes` semantics (wall-clock global timeout stays as-is).
+- Do NOT modify the WorkRail v2 engine or MCP server.
+- Do NOT add retry policy or escalation logic for stall events.
+- Do NOT add per-tool stall detection (only per-LLM-turn gap is in scope).
+
+## 4. Philosophy-Driven Constraints
+
+- **DI-for-boundaries**: `stallTimeoutMs` injected via `AgentLoopOptions` (not hardcoded in AgentLoop).
+- **Immutability by default**: all new fields are `readonly`.
+- **Exhaustiveness everywhere**: all three discriminated unions extended with `'stall'`.
+- **Errors are data**: `onStallDetected` sets `state.stuckReason = 'stall'`, no throw.
+- **Compose with small pure functions**: `buildAgentCallbacks()` stays pure; `evaluateStuckSignals()` unchanged.
+- **YAGNI**: only `stallTimeoutSeconds` added -- no retry/escalation/stall coordinator hooks.
+
+## 5. Invariants
+
+- I1: `AgentLoop` imports no daemon-specific types.
+- I2: Default stall timeout is 120 seconds (`DEFAULT_STALL_TIMEOUT_SECONDS = 120` in workflow-runner.ts).
+- I3: Timer resets when `onLlmTurnStarted` fires (just before each `client.messages.create()` call).
+- I4: Timer is cleared in `prompt()`'s finally block (prevents post-completion abort).
+- I5: Timer only set if `stallTimeoutMs !== undefined && stallTimeoutMs > 0` (guard against misconfiguration).
+- I6: `onStallDetected` callback wrapped in try/catch (fire-and-forget invariant).
+- I7: `WorkflowRunStuck.reason` union: `'repeated_tool_call' | 'no_progress' | 'stall'`.
+- I8: `SessionState.stuckReason` union: `'repeated_tool_call' | 'no_progress' | 'stall' | null`.
+- I9: `AgentStuckEvent.reason` union: `'repeated_tool_call' | 'no_progress' | 'timeout_imminent' | 'stall'`.
+- I10: Timer guard -- `if (!this._aborted)` in timer callback prevents stall from overwriting a prior abort reason.
+
+## 6. Selected Approach + Rationale
+
+**Candidate A: Timer inside `_runLoop()` + `onStallDetected` callback on `AgentLoopCallbacks`**
+
+Add:
+- `stallTimeoutMs?: number` to `AgentLoopOptions`
+- `onStallDetected?: () => void` to `AgentLoopCallbacks`
+
+In `_runLoop()`: before each `client.messages.create()` call (where `onLlmTurnStarted` already fires), clear any previous stall timer and set a new one. When the timer fires: (1) check `!this._aborted`, (2) call `this.abort()`, (3) call `callbacks?.onStallDetected?.()`. Clear in `prompt()`'s finally.
+
+In `workflow-runner.ts`: `buildAgentCallbacks()` wires `onStallDetected` to set `state.stuckReason = 'stall'` and emit `agent_stuck` with `reason: 'stall'`.
+
+**Runner-up**: Candidate B (timer in `buildAgentCallbacks()` closure) -- rejected because it makes `buildAgentCallbacks()` stateful (violates compose-with-small-pure-functions and immutability).
+
+**Architecture rationale**: Timer ownership at the source (`_runLoop()` where stalls happen), clean DI via existing `AgentLoopCallbacks` channel, no daemon imports in AgentLoop.
+
+## 7. Vertical Slices
+
+### Slice 1: Extend type unions (workflow-runner.ts + daemon-events.ts)
+
+**Files**: `src/daemon/workflow-runner.ts`, `src/daemon/daemon-events.ts`
+
+Changes:
+1. `WorkflowRunStuck.reason`: change `'repeated_tool_call' | 'no_progress'` to `'repeated_tool_call' | 'no_progress' | 'stall'`
+2. `SessionState.stuckReason`: change `'repeated_tool_call' | 'no_progress' | null` to `'repeated_tool_call' | 'no_progress' | 'stall' | null`
+3. `AgentStuckEvent.reason`: change `'repeated_tool_call' | 'no_progress' | 'timeout_imminent'` to `'repeated_tool_call' | 'no_progress' | 'timeout_imminent' | 'stall'`
+4. Add `DEFAULT_STALL_TIMEOUT_SECONDS = 120` constant in workflow-runner.ts alongside `DEFAULT_SESSION_TIMEOUT_MINUTES` and `DEFAULT_MAX_TURNS`
+5. Add `stallTimeoutSeconds?: number` to `WorkflowTrigger.agentConfig`
+
+**Done when**: Build clean. No test regressions.
+
+### Slice 2: AgentLoop timer implementation (agent-loop.ts)
+
+**File**: `src/daemon/agent-loop.ts`
+
+Changes:
+1. Add `stallTimeoutMs?: number` to `AgentLoopOptions` (readonly, optional, documented)
+2. Add `onStallDetected?: () => void` to `AgentLoopCallbacks` (readonly, optional, documented)
+3. Add `private _stallTimerHandle: ReturnType<typeof setTimeout> | undefined = undefined` to `AgentLoop`
+4. In `_runLoop()`, just before `callbacks?.onLlmTurnStarted?.(...)` (line ~377): clear previous timer + set new timer (only if `stallTimeoutMs > 0`)
+5. Timer callback: guard `if (!this._aborted)`, call `this.abort()`, call `try { callbacks?.onStallDetected?.() } catch {}`
+6. In `prompt()`'s finally block: `if (this._stallTimerHandle !== undefined) { clearTimeout(this._stallTimerHandle); this._stallTimerHandle = undefined; }`
+
+**Done when**: Build clean. AgentLoop has stall timer support.
+
+### Slice 3: Wire stall detection in workflow-runner.ts
+
+**Files**: `src/daemon/workflow-runner.ts`
+
+Changes:
+1. Add `stallTimeoutSeconds` threaded from `WorkflowTrigger.agentConfig` through `buildSessionContext()` to return value
+2. In `buildAgentCallbacks()`: add `onStallDetected` to returned callbacks object; handler sets `state.stuckReason = 'stall'`, emits `agent_stuck` with `reason: 'stall'`
+3. In `buildSessionContext()` return type: add `stallTimeoutMs: number | undefined`
+4. In the AgentLoop construction site: pass `stallTimeoutMs` to `AgentLoopOptions`
+
+**Done when**: Build clean. `stallTimeoutMs` flows end-to-end from trigger config to AgentLoop.
+
+### Slice 4: Trigger-store validation
+
+**File**: `src/trigger/trigger-store.ts`
+
+Changes:
+1. Add `stallTimeoutSeconds?: string` to raw agentConfig parsed type
+2. Add `stallTimeoutSeconds` to the `agentConfig` parsing block (follow `stuckAbortPolicy` pattern)
+3. Validate `stallTimeoutSeconds >= 1` (positive integer, same as `maxTurns` validation)
+4. Pass parsed `stallTimeoutSeconds` into `TriggerDefinition.agentConfig`
+
+**Done when**: Build clean. `agentConfig.stallTimeoutSeconds` parseable in triggers.yml.
+
+### Slice 5: Tests
+
+**Files**:
+- `tests/unit/agent-loop.test.ts` -- new describe block for stall detection
+- `tests/unit/workflow-runner-agent-loop.test.ts` -- new test for WorkflowRunStuck reason='stall'
+
+Test cases for `agent-loop.test.ts`:
+1. Stall timer fires and aborts: use FakeAnthropicClient with a hanging promise + vi.useFakeTimers(); advance timer by stallTimeoutMs; verify abort was called
+2. Stall timer resets on each LLM call: 2 LLM calls, timer advances partway between calls, no abort; advance past stallTimeoutMs from 2nd call, abort fires
+3. Stall timer cleared on normal completion: loop completes normally; advance timer by stallTimeoutMs*2; no abort
+4. `onStallDetected` called when stall fires
+5. Prior abort suppresses stall detection (`!this._aborted` guard)
+
+Test cases for `workflow-runner-agent-loop.test.ts`:
+1. Stall abort produces `WorkflowRunStuck` with `reason: 'stall'`
+2. `agent_stuck` event emitted with `reason: 'stall'`
+
+**Done when**: All new tests pass. `npx vitest run` exits 0.
+
+## 8. Test Design
+
+**AgentLoop stall tests** (agent-loop.test.ts):
+- Use `vi.useFakeTimers()` in beforeEach, `vi.useRealTimers()` in afterEach
+- FakeAnthropicClient with a promise that never resolves (hangs tool execution): `messages.create: async () => new Promise(() => {})` for the second call
+- Or: use FakeAnthropicClient with `stallTimeoutMs = 50` (small value), advance timers
+
+Actually simpler: since `_runLoop()` sets the stall timer just before `client.messages.create()`, a short stallTimeoutMs (e.g. 50ms) + `vi.advanceTimersByTime(50)` fires the stall during the first LLM call.
+
+For "reset on each LLM call" test: use a FakeAnthropicClient that resolves after multiple calls; advance timers strategically.
+
+**WorkflowRunStuck 'stall' test** (workflow-runner-agent-loop.test.ts):
+- Extend existing FakeAgentLoop to support a 'stall' script turn type
+- Or: trigger stall by setting `stallTimeoutSeconds: 0.05` (50ms) and using fake timers in runWorkflow integration test
+
+## 9. Risk Register
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Stall timer fires after normal completion | Low | Low | Timer cleared in `prompt()` finally block (I4) |
+| `stallTimeoutMs = 0` misconfiguration | Low | High | `stallTimeoutMs > 0` guard in `_runLoop()` (I5); validate in trigger-store.ts |
+| `onStallDetected` throws | Very Low | Low | try/catch in timer callback (I6) |
+| Stall fires when prior abort was active | Very Low | Low | `!this._aborted` guard (I10) |
+| `assertNever` misses new `stuckReason = 'stall'` | None | N/A | TypeScript union extension + compiler catches at build |
+
+## 10. PR Packaging Strategy
+
+Single PR. Branch: `fix/etienneb/stall-detection-895`.
+Commit: `fix(daemon): detect and abort stalled agent loops after stallTimeoutSeconds`
+
+## 11. Philosophy Alignment per Slice
+
+| Slice | Principle | Status |
+|---|---|---|
+| 1 (Type unions) | Exhaustiveness everywhere | Satisfied -- all three unions extended |
+| 1 (Type unions) | Make illegal states unrepresentable | Satisfied -- closed union, not open string |
+| 2 (AgentLoop) | DI-for-boundaries | Satisfied -- stallTimeoutMs injected, not hardcoded |
+| 2 (AgentLoop) | Immutability by default | Satisfied -- all new fields readonly |
+| 2 (AgentLoop) | Errors are data | Satisfied -- onStallDetected sets data, no throw |
+| 3 (workflow-runner) | Compose with small pure functions | Satisfied -- buildAgentCallbacks() stays pure |
+| 3 (workflow-runner) | Document why not what | Satisfied -- WHY comments on timer reset/clear points |
+| 4 (trigger-store) | Validate at boundaries | Satisfied -- stallTimeoutSeconds validated at parse time |
+| 5 (Tests) | Prefer fakes over mocks | Satisfied -- FakeAnthropicClient, vi.useFakeTimers |
+| All | YAGNI | Satisfied -- no retry/escalation, just detect and abort |
+
+---
+`unresolvedUnknownCount`: 0
+`planConfidenceBand`: High
+`estimatedPRCount`: 1
+`followUpTickets`: ["#895 follow-up: per-tool execution timeout (separate issue)"]

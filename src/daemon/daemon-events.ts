@@ -355,8 +355,10 @@ export interface AgentStuckEvent {
    * - repeated_tool_call: same tool + same args called 3+ times in a row
    * - no_progress: 80%+ of turns used with 0 step advances
    * - timeout_imminent: wall-clock timeout fired (session already aborting)
+   * - stall: no LLM API call started within stallTimeoutSeconds (default 120s);
+   *   the loop was stuck inside a tool execution that never completed
    */
-  readonly reason: 'repeated_tool_call' | 'no_progress' | 'timeout_imminent';
+  readonly reason: 'repeated_tool_call' | 'no_progress' | 'timeout_imminent' | 'stall';
   /** Human-readable description of why stuck was detected. */
   readonly detail: string;
   /** The tool name that was called repeatedly (present for repeated_tool_call). */

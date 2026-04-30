@@ -129,6 +129,21 @@ export const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
  */
 export const DEFAULT_MAX_TURNS = 200;
 
+/**
+ * Default number of seconds without a new LLM API call before the agent loop
+ * is considered stalled and aborted.
+ *
+ * WHY 120 seconds: a legitimate tool call (bash, git, file I/O) should complete
+ * well within 120s. A tool call that runs longer than 2 minutes with no LLM
+ * activity is almost certainly hung (network timeout, file lock, deadlock).
+ * 120s provides a generous buffer for slow operations while catching real stalls
+ * before they consume 55-65 minutes of wall-clock time.
+ *
+ * This default is used when no agentConfig.stallTimeoutSeconds is configured.
+ * Per-trigger overrides are set via triggers.yml agentConfig.stallTimeoutSeconds.
+ */
+export const DEFAULT_STALL_TIMEOUT_SECONDS = 120;
+
 // DAEMON_SESSIONS_DIR is re-exported from './tools/_shared.js' at the top of this file.
 
 /**
@@ -369,6 +384,19 @@ export interface WorkflowTrigger {
      * this to true for workflows where zero advances at 80% turns is always a bug.
      */
     readonly noProgressAbortEnabled?: boolean;
+    /**
+     * Number of seconds without a new LLM API call before the agent loop is
+     * considered stalled and aborted.
+     *
+     * A stall occurs when a tool call hangs (network timeout, file lock, silent
+     * deadlock) -- the loop is inside _executeTools() and never calls
+     * client.messages.create() again. Without this timer, the session holds its
+     * queue slot for up to maxSessionMinutes (up to 55-65 minutes).
+     *
+     * See DEFAULT_STALL_TIMEOUT_SECONDS for the default (120 seconds).
+     * Per-trigger overrides are set via triggers.yml agentConfig.stallTimeoutSeconds.
+     */
+    readonly stallTimeoutSeconds?: number;
   };
   /**
    * WorkRail session ID of the parent session that spawned this one.
@@ -642,8 +670,10 @@ export interface WorkflowRunStuck {
    *   times in a row.
    * - 'no_progress': 80%+ of turns used with 0 step advances. Only fires when
    *   noProgressAbortEnabled: true is set in agentConfig (default: false).
+   * - 'stall': no LLM API call started within stallTimeoutSeconds (default 120).
+   *   Indicates a tool call hung without completing or timing out at the tool level.
    */
-  readonly reason: 'repeated_tool_call' | 'no_progress';
+  readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall';
   readonly message: string;
   /** Always 'aborted' -- the agent loop was stopped via agent.abort(). */
   readonly stopReason: string;
@@ -1863,7 +1893,7 @@ function getSchemas(): Record<string, any> {
  */
 async function writeStuckOutboxEntry(opts: {
   workflowId: string;
-  reason: 'repeated_tool_call' | 'no_progress';
+  reason: 'repeated_tool_call' | 'no_progress' | 'stall';
   issueSummaries?: readonly string[];
 }): Promise<void> {
   try {
@@ -2291,8 +2321,13 @@ export interface SessionState {
    * Which stuck heuristic fired first, or null if none has fired.
    * Set synchronously before agent.abort() so the result path can read it.
    * First writer wins -- subsequent signals are ignored.
+   *
+   * WHY 'stall' is included: the stall timer fires outside the turn_end subscriber
+   * (it fires when no LLM call starts within stallTimeoutSeconds). The timer callback
+   * sets this field before calling agent.abort() so buildSessionResult() can produce
+   * WorkflowRunStuck { reason: 'stall' } rather than a generic error.
    */
-  stuckReason: 'repeated_tool_call' | 'no_progress' | null;
+  stuckReason: 'repeated_tool_call' | 'no_progress' | 'stall' | null;
   /**
    * Which timeout limit fired first, or null if none has fired.
    * Set synchronously before agent.abort() so the result path can read it.
@@ -2699,6 +2734,13 @@ export interface SessionContext {
   readonly initialPrompt: string;
   readonly sessionTimeoutMs: number;
   readonly maxTurns: number;
+  /**
+   * Per-turn stall detection timeout in milliseconds.
+   * Undefined when stall detection is disabled (agentConfig.stallTimeoutSeconds absent
+   * and DEFAULT_STALL_TIMEOUT_SECONDS applied, converting to ms). Passed directly to
+   * AgentLoopOptions.stallTimeoutMs.
+   */
+  readonly stallTimeoutMs: number;
 }
 
 /**
@@ -2769,8 +2811,10 @@ export function buildSessionContext(
   const sessionTimeoutMs =
     (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
   const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
+  const stallTimeoutMs =
+    (trigger.agentConfig?.stallTimeoutSeconds ?? DEFAULT_STALL_TIMEOUT_SECONDS) * 1000;
 
-  return { systemPrompt, initialPrompt, sessionTimeoutMs, maxTurns };
+  return { systemPrompt, initialPrompt, sessionTimeoutMs, maxTurns, stallTimeoutMs };
 }
 
 // ---------------------------------------------------------------------------
@@ -3256,6 +3300,26 @@ export function buildAgentCallbacks(
     onToolCallFailed: ({ toolName, durationMs, errorMessage }) => {
       emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(state.workrailSessionId) });
     },
+    onStallDetected: () => {
+      // WHY set stuckReason before emitting: buildSessionResult() reads stuckReason
+      // after the loop exits. Setting it here (in the timer callback, synchronously
+      // before abort() resolves) ensures the correct reason is recorded even if the
+      // abort path completes before the next turn_end fires.
+      state.stuckReason = 'stall';
+      emitter?.emit({
+        kind: 'agent_stuck',
+        sessionId,
+        reason: 'stall',
+        detail: `No LLM API call started within the stall timeout window. Last tool calls: ${state.lastNToolCalls.map((c) => c.toolName).join(', ') || 'none'}`,
+        ...withWorkrailSession(state.workrailSessionId),
+      });
+      // Write stuck outbox entry so coordinator can route the stalled session.
+      void writeStuckOutboxEntry({
+        workflowId: sessionId,
+        reason: 'stall',
+        ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
+      });
+    },
   };
 }
 
@@ -3480,6 +3544,12 @@ async function buildAgentReadySession(
     ...(trigger.agentConfig?.maxOutputTokens !== undefined
       ? { maxTokens: trigger.agentConfig.maxOutputTokens }
       : {}),
+    // WHY: stallTimeoutMs from sessionCtx is always defined (buildSessionContext uses
+    // DEFAULT_STALL_TIMEOUT_SECONDS as fallback). Passing it unconditionally enables
+    // stall detection for all sessions. To disable stall detection, set
+    // agentConfig.stallTimeoutSeconds to 0 in triggers.yml -- the AgentLoop silently
+    // ignores stallTimeoutMs <= 0 values.
+    stallTimeoutMs: sessionCtx.stallTimeoutMs,
   });
 
   // ---- Wire abort capability into the session handle ----
