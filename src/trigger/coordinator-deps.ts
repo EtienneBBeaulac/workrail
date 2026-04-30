@@ -22,6 +22,7 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { V2ToolContext } from '../mcp/types.js';
 import type { AdaptiveCoordinatorDeps } from '../coordinators/adaptive-pipeline.js';
+import type { ChildSessionResult } from '../coordinators/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { createContextAssembler } from '../context-assembly/index.js';
@@ -99,6 +100,128 @@ export function createCoordinatorDeps(
   // WHY let (not const): assigned by setDispatch(), which is called after TriggerRouter construction.
   let dispatch: ((trigger: WorkflowTrigger, source?: SessionSource) => void) | null = null;
 
+  // Shared implementation for reading notes and artifacts from a completed session.
+  // WHY extracted (not inlined in getAgentResult and getChildSessionResult separately):
+  // Both methods need this logic. Extracting it avoids duplication and allows
+  // getChildSessionResult to call it without a self-reference problem in the
+  // factory object literal.
+  async function fetchAgentResult(
+    sessionHandle: string,
+  ): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> {
+    const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
+
+    if (consoleService === null) {
+      return emptyResult;
+    }
+
+    try {
+      const detailResult = await consoleService.getSessionDetail(sessionHandle);
+      if (detailResult.isErr()) return emptyResult;
+
+      const run = detailResult.value.runs[0];
+      if (!run) return emptyResult;
+
+      const tipNodeId = run.preferredTipNodeId;
+      if (!tipNodeId) return emptyResult;
+
+      const allNodeIds = run.nodes
+        .map((n) => n.nodeId)
+        .filter((id): id is string => typeof id === 'string' && id !== '');
+      const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
+
+      let recap: string | null = null;
+      const collectedArtifacts: unknown[] = [];
+
+      for (const nodeId of nodeIdsToFetch) {
+        try {
+          const nodeResult = await consoleService.getNodeDetail(sessionHandle, nodeId);
+          if (nodeResult.isErr()) continue;
+          if (nodeId === tipNodeId) recap = nodeResult.value.recapMarkdown;
+          if (nodeResult.value.artifacts.length > 0) collectedArtifacts.push(...nodeResult.value.artifacts);
+        } catch { continue; }
+      }
+
+      return { recapMarkdown: recap, artifacts: collectedArtifacts };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      process.stderr.write(`[WARN coord:reason=exception handle=${sessionHandle.slice(0, 16)}] fetchAgentResult: ${msg}\n`);
+      return emptyResult;
+    }
+  }
+
+  // Shared implementation for mapping a terminal session handle to ChildSessionResult.
+  // WHY extracted: both getChildSessionResult and spawnAndAwait need this logic.
+  // spawnAndAwait calls this after its inline awaitSessions loop; getChildSessionResult
+  // calls it directly (the caller is responsible for calling awaitSessions first).
+  async function fetchChildSessionResult(
+    handle: string,
+    coordinatorSessionId?: string,
+  ): Promise<ChildSessionResult> {
+    if (consoleService === null) {
+      process.stderr.write(
+        `[WARN coord:reason=await_degraded handle=${handle.slice(0, 16)}${coordinatorSessionId ? ' parent=' + coordinatorSessionId.slice(0, 16) : ''}] fetchChildSessionResult: ConsoleService unavailable\n`,
+      );
+      return {
+        kind: 'await_degraded',
+        message: 'ConsoleService unavailable -- cannot read child session outcome',
+      };
+    }
+
+    let runStatus: string | null = null;
+    try {
+      const detailResult = await consoleService.getSessionDetail(handle);
+      if (detailResult.isErr()) {
+        process.stderr.write(
+          `[WARN coord:reason=getSessionDetail_failed handle=${handle.slice(0, 16)}] fetchChildSessionResult: ${String(detailResult.error)}\n`,
+        );
+        return {
+          kind: 'failed',
+          reason: 'error',
+          message: `Could not read session detail: ${String(detailResult.error)}`,
+        };
+      }
+      const run = detailResult.value.runs[0];
+      runStatus = run?.status ?? null;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      process.stderr.write(
+        `[WARN coord:reason=exception handle=${handle.slice(0, 16)}] fetchChildSessionResult getSessionDetail: ${msg}\n`,
+      );
+      return { kind: 'failed', reason: 'error', message: `Exception reading session detail: ${msg}` };
+    }
+
+    if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
+      const agentResult = await fetchAgentResult(handle);
+      return {
+        kind: 'success',
+        notes: agentResult.recapMarkdown,
+        artifacts: agentResult.artifacts,
+      };
+    }
+
+    if (runStatus === 'blocked') {
+      return {
+        kind: 'failed',
+        reason: 'stuck',
+        message: `Child session ${handle.slice(0, 16)} reached blocked state`,
+      };
+    }
+
+    if (runStatus === null) {
+      return {
+        kind: 'timed_out',
+        message: `Child session ${handle.slice(0, 16)} has no terminal run status (likely timed out)`,
+      };
+    }
+
+    // 'in_progress' or 'dormant': not yet terminal.
+    // Should not happen if awaitSessions was called first, but handle defensively.
+    return {
+      kind: 'timed_out',
+      message: `Child session ${handle.slice(0, 16)} is still in state '${runStatus}' -- awaitSessions may not have been called`,
+    };
+  }
+
   return {
     setDispatch(fn: (trigger: WorkflowTrigger, source?: SessionSource) => void): void {
       if (dispatch !== null) {
@@ -114,6 +237,7 @@ export function createCoordinatorDeps(
       workspace: string,
       context?: Readonly<Record<string, unknown>>,
       agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
+      parentSessionId?: string,
     ) => {
       // WHY in-process (not HTTP): the coordinator runs inside the daemon process.
       // POSTing to /api/v2/auto/dispatch would go out-of-process to itself, hitting
@@ -130,10 +254,18 @@ export function createCoordinatorDeps(
       // Step 1: Allocate a session in the store synchronously.
       // WHY SessionSource: runWorkflow() skips its own executeStartWorkflow() call when
       // a pre_allocated SessionSource is passed, preventing double session creation.
+      // WHY parentSessionId in internalContext: executeStartWorkflow reads it from
+      // internalContext and writes it to the session_created event's data field so the
+      // parent-child relationship is durable in the event log.
       const startResult = await executeStartWorkflow(
         { workflowId, workspacePath: workspace, goal },
         ctx,
-        { is_autonomous: 'true', workspacePath: workspace, triggerSource: 'daemon' },
+        {
+          is_autonomous: 'true',
+          workspacePath: workspace,
+          triggerSource: 'daemon',
+          ...(parentSessionId !== undefined ? { parentSessionId } : {}),
+        },
       );
       if (startResult.isErr()) {
         const detail = `${startResult.error.kind}${'message' in startResult.error ? ': ' + (startResult.error as { message: string }).message : ''}`;
@@ -285,49 +417,162 @@ export function createCoordinatorDeps(
       };
     },
 
+    // WHY delegates to fetchAgentResult: see comment above fetchAgentResult definition.
+    // getAgentResult behavior is unchanged -- this is a pure refactor to extract shared logic.
+    // WHY delegates to fetchAgentResult: see comment above fetchAgentResult definition.
     getAgentResult: async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
-      const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
+      return fetchAgentResult(sessionHandle);
+    },
 
-      if (consoleService === null) {
-        return emptyResult;
+    // WHY delegates to fetchChildSessionResult: see comment on fetchChildSessionResult above.
+    // The caller (spawnAndAwait or manual batch pattern) is responsible for calling awaitSessions
+    // first. getChildSessionResult does not poll -- it reads the terminal status once.
+    getChildSessionResult: async (
+      handle: string,
+      coordinatorSessionId?: string,
+    ): Promise<ChildSessionResult> => {
+      return fetchChildSessionResult(handle, coordinatorSessionId);
+    },
+
+    // WHY thin wrapper (not more logic): spawnAndAwait is sequential single-child only.
+    // For batch/parallel patterns, callers use spawnSession N times -> awaitSessions(handles)
+    // -> getChildSessionResult(handle) per handle. See interface JSDoc for details.
+    //
+    // WHY spawnAndAwait does not call sibling methods by name:
+    // In a factory object literal, sibling methods cannot reference each other during
+    // construction. spawnAndAwait accesses the closure variables (dispatch, ctx, etc.)
+    // directly, mirroring the sub-steps of spawnSession and getChildSessionResult.
+    // The spawnSession steps are reproduced here rather than calling this.spawnSession.
+    spawnAndAwait: async (
+      workflowId: string,
+      goal: string,
+      workspace: string,
+      opts?: {
+        readonly coordinatorSessionId?: string;
+        readonly timeoutMs?: number;
+      },
+    ): Promise<ChildSessionResult> => {
+      // Default timeout: 15 minutes. Hardcoded to mirror CHILD_SESSION_TIMEOUT_MS in
+      // pr-review.ts without importing from it (to avoid a circular dep).
+      const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+      const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+      const coordinatorSessionId = opts?.coordinatorSessionId;
+
+      // Step 1: Spawn the child session (mirrors spawnSession logic).
+      if (dispatch === null) {
+        return {
+          kind: 'failed',
+          reason: 'error',
+          message: 'spawnAndAwait: in-process router not initialized (setDispatch not called)',
+        };
       }
 
-      try {
-        const detailResult = await consoleService.getSessionDetail(sessionHandle);
-        if (detailResult.isErr()) return emptyResult;
+      const startResult = await executeStartWorkflow(
+        { workflowId, workspacePath: workspace, goal },
+        ctx,
+        {
+          is_autonomous: 'true',
+          workspacePath: workspace,
+          triggerSource: 'daemon',
+          ...(coordinatorSessionId !== undefined ? { parentSessionId: coordinatorSessionId } : {}),
+        },
+      );
+      if (startResult.isErr()) {
+        const detail = `${startResult.error.kind}${'message' in startResult.error ? ': ' + (startResult.error as { message: string }).message : ''}`;
+        return { kind: 'failed', reason: 'error', message: `Session creation failed: ${detail}` };
+      }
 
-        const run = detailResult.value.runs[0];
-        if (!run) return emptyResult;
+      const startContinueToken = startResult.value.response.continueToken;
+      let handle: string;
 
-        const tipNodeId = run.preferredTipNodeId;
-        if (!tipNodeId) return emptyResult;
+      if (!startContinueToken) {
+        // Workflow completed immediately (single-step); use workflowId as fallback handle.
+        handle = workflowId;
+      } else {
+        const tokenResult = await parseContinueTokenOrFail(
+          startContinueToken,
+          ctx.v2.tokenCodecPorts,
+          ctx.v2.tokenAliasStore,
+        );
+        if (tokenResult.isErr()) {
+          return {
+            kind: 'failed',
+            reason: 'error',
+            message: `Internal error: could not extract session handle from new session: ${tokenResult.error.message}`,
+          };
+        }
+        handle = tokenResult.value.sessionId;
 
-        const allNodeIds = run.nodes.map((n) => n.nodeId).filter((id): id is string => typeof id === 'string' && id !== '');
-        const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
+        // Enqueue the agent loop.
+        const trigger: import('../daemon/workflow-runner.js').WorkflowTrigger = {
+          workflowId,
+          goal,
+          workspacePath: workspace,
+        };
+        const r = startResult.value.response;
+        const allocatedSession: import('../daemon/workflow-runner.js').AllocatedSession = {
+          continueToken: r.continueToken ?? '',
+          checkpointToken: r.checkpointToken,
+          firstStepPrompt: r.pending?.prompt ?? '',
+          isComplete: r.isComplete,
+          triggerSource: 'daemon',
+        };
+        const source: import('../daemon/workflow-runner.js').SessionSource = {
+          kind: 'pre_allocated',
+          trigger,
+          session: allocatedSession,
+        };
+        dispatch(trigger, source);
+      }
 
-        let recap: string | null = null;
-        const collectedArtifacts: unknown[] = [];
+      // Step 2: Wait for the child session to reach a terminal state.
+      const awaitResult = await (async () => {
+        const POLL_INTERVAL_MS = 3_000;
 
-        for (const nodeId of nodeIdsToFetch) {
-          try {
-            const nodeResult = await consoleService.getNodeDetail(sessionHandle, nodeId);
-            if (nodeResult.isErr()) continue;
-
-            if (nodeId === tipNodeId) {
-              recap = nodeResult.value.recapMarkdown;
-            }
-            if (nodeResult.value.artifacts.length > 0) {
-              collectedArtifacts.push(...nodeResult.value.artifacts);
-            }
-          } catch { continue; }
+        if (consoleService === null) {
+          return null; // signals await_degraded
         }
 
-        return { recapMarkdown: recap, artifacts: collectedArtifacts };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        process.stderr.write(`[WARN coord:reason=exception handle=${sessionHandle.slice(0, 16)}] getAgentResult: ${msg}\n`);
-        return emptyResult;
+        const startMs = Date.now();
+        const pending = new Set([handle]);
+        while (pending.size > 0) {
+          const elapsed = Date.now() - startMs;
+          if (elapsed >= timeoutMs) break;
+
+          for (const h of [...pending]) {
+            try {
+              const detail = await consoleService.getSessionDetail(h);
+              if (detail.isErr()) continue;
+              const run = detail.value.runs[0];
+              if (!run) continue;
+              const status = run.status;
+              if (status === 'complete' || status === 'complete_with_gaps') {
+                pending.delete(h);
+              } else if (status === 'blocked') {
+                pending.delete(h);
+              }
+            } catch {
+              pending.delete(h);
+            }
+          }
+
+          if (pending.size > 0) {
+            await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+          }
+        }
+        return handle; // timed out if still pending; getChildSessionResult handles it
+      })();
+
+      if (awaitResult === null) {
+        // consoleService was null -- return await_degraded directly.
+        return {
+          kind: 'await_degraded',
+          message: 'ConsoleService unavailable -- cannot await child session outcome',
+        };
       }
+
+      // Step 3: Read the terminal result (single status check + artifact extraction).
+      return fetchChildSessionResult(handle, coordinatorSessionId);
     },
 
     listOpenPRs: async (workspace: string) => {

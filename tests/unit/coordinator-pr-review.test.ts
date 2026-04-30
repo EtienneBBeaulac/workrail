@@ -544,6 +544,12 @@ function makeFakeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps
     joinPath: (...parts) => parts.filter(Boolean).join('/').replace(/\/+/g, '/'),
     nowIso: () => '2026-04-18T00:00:00.000Z',
     generateId: () => 'test-uuid-drain',
+    getChildSessionResult: async (_handle, _coordinatorSessionId) => {
+      return { kind: 'success' as const, notes: 'APPROVE -- no issues found.', artifacts: [] };
+    },
+    spawnAndAwait: async (_workflowId, _goal, _workspace, _opts) => {
+      return { kind: 'success' as const, notes: 'APPROVE -- no issues found.', artifacts: [] };
+    },
     ...overrides,
   };
 

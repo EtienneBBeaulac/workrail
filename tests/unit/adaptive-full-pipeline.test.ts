@@ -98,6 +98,8 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     pollForPR: vi.fn().mockResolvedValue('https://github.com/org/repo/pull/42'),
     postToOutbox: vi.fn().mockResolvedValue(undefined),
     pollOutboxAck: vi.fn().mockResolvedValue('acked'),
+    getChildSessionResult: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
+    spawnAndAwait: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
     ...overrides,
   };
 }
