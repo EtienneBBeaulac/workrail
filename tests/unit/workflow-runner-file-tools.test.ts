@@ -152,6 +152,28 @@ describe('makeReadTool()', () => {
       tool.execute('test-id', { filePath: outsidePath }),
     ).rejects.toThrow(/outside the workspace/i);
   });
+
+  it('rejects dotdot traversal that escapes the workspace', async () => {
+    // /workspace/../../../etc/passwd passes a naive startsWith check
+    const traversalPath = path.join(testDir, '..', '..', 'etc', 'passwd');
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
+    await expect(
+      tool.execute('test-id', { filePath: traversalPath }),
+    ).rejects.toThrow(/outside the workspace/i);
+  });
+
+  it('rejects prefix-sibling directories', async () => {
+    // /workspace-evil passes a naive startsWith('/workspace') check
+    const siblingPath = testDir + '-evil' + path.sep + 'secret.txt';
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeReadTool(testDir, readFileState, stubSchemas);
+    await expect(
+      tool.execute('test-id', { filePath: siblingPath }),
+    ).rejects.toThrow(/outside the workspace/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -209,6 +231,26 @@ describe('makeWriteTool()', () => {
 
     // Verify the file was never created
     await expect(fs.access(outsidePath)).rejects.toThrow();
+  });
+
+  it('rejects dotdot traversal that escapes the workspace', async () => {
+    const traversalPath = path.join(testDir, '..', '..', 'etc', 'passwd');
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeWriteTool(testDir, readFileState, stubSchemas);
+    await expect(
+      tool.execute('test-id', { filePath: traversalPath, content: 'pwned' }),
+    ).rejects.toThrow(/outside the workspace/i);
+  });
+
+  it('rejects prefix-sibling directories', async () => {
+    const siblingPath = testDir + '-evil' + path.sep + 'file.txt';
+
+    const readFileState = new Map<string, ReadFileState>();
+    const tool = makeWriteTool(testDir, readFileState, stubSchemas);
+    await expect(
+      tool.execute('test-id', { filePath: siblingPath, content: 'should not write' }),
+    ).rejects.toThrow(/outside the workspace/i);
   });
 });
 

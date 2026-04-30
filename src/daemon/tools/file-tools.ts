@@ -12,6 +12,29 @@ import type { DaemonEventEmitter } from '../daemon-events.js';
 import type { ReadFileState } from '../workflow-runner.js';
 import { READ_SIZE_CAP_BYTES, findActualString, withWorkrailSession } from './_shared.js';
 
+/**
+ * Resolve a (possibly relative) file path against workspacePath and verify it
+ * stays within the workspace.
+ *
+ * WHY path.normalize + path.sep suffix:
+ * - path.normalize resolves '..' segments, defeating traversal attacks like
+ *   '/workspace/../../../etc/passwd' which would pass a naive startsWith check.
+ * - The trailing path.sep ensures prefix-sibling directories like '/workspace-evil'
+ *   don't pass the check for workspacePath '/workspace'.
+ *
+ * Returns the normalized absolute path on success, or throws with a clear message.
+ */
+function resolveWithinWorkspace(filePath: string, workspacePath: string, toolName: string): string {
+  const absolute = path.isAbsolute(filePath) ? filePath : path.join(workspacePath, filePath);
+  const normalizedWorkspace = path.normalize(workspacePath) + path.sep;
+  const normalizedTarget = path.normalize(absolute);
+  // Allow the workspace root itself (normalizedTarget === normalizedWorkspace without the sep)
+  if (normalizedTarget !== path.normalize(workspacePath) && !normalizedTarget.startsWith(normalizedWorkspace)) {
+    throw new Error(`${toolName} target is outside the workspace: ${filePath}`);
+  }
+  return normalizedTarget;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function makeReadTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
   return {
@@ -29,12 +52,7 @@ export function makeReadTool(workspacePath: string, readFileState: Map<string, R
       params: any,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Read: filePath must be a non-empty string');
-      const filePath: string = params.filePath;
-      // Enforce workspace boundary: prevent reads outside the workspace
-      const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.join(workspacePath, filePath);
-      if (!absoluteFilePath.startsWith(workspacePath)) {
-        throw new Error(`Read target is outside the workspace: ${filePath}`);
-      }
+      const filePath: string = resolveWithinWorkspace(params.filePath, workspacePath, 'Read');
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
 
       // Block device paths to prevent reads from infinite streams
@@ -91,12 +109,7 @@ export function makeWriteTool(workspacePath: string, readFileState: Map<string, 
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Write: filePath must be a non-empty string');
       if (typeof params.content !== 'string') throw new Error('Write: content must be a string');
-      const filePath: string = params.filePath;
-      // Enforce workspace boundary: prevent writes outside the workspace
-      const absoluteFilePath = path.isAbsolute(filePath) ? filePath : path.join(workspacePath, filePath);
-      if (!absoluteFilePath.startsWith(workspacePath)) {
-        throw new Error(`Write target is outside the workspace: ${filePath}`);
-      }
+      const filePath: string = resolveWithinWorkspace(params.filePath, workspacePath, 'Write');
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
 
       // Staleness guard: only for existing files. New files bypass the check entirely.
@@ -159,15 +172,7 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
       if (typeof params.file_path !== 'string' || !params.file_path) throw new Error('Edit: file_path must be a non-empty string');
       if (typeof params.old_string !== 'string') throw new Error('Edit: old_string must be a string');
       if (typeof params.new_string !== 'string') throw new Error('Edit: new_string must be a string');
-      const rawFilePath: string = params.file_path;
-      const absoluteFilePath = path.isAbsolute(rawFilePath)
-        ? rawFilePath
-        : path.join(workspacePath, rawFilePath);
-      // Enforce workspace boundary: prevent edits outside the workspace
-      if (!absoluteFilePath.startsWith(workspacePath)) {
-        throw new Error(`Edit target is outside the workspace: ${rawFilePath}`);
-      }
-      const filePath: string = absoluteFilePath;
+      const filePath: string = resolveWithinWorkspace(params.file_path, workspacePath, 'Edit');
       const oldString: string = params.old_string;
       const newString: string = params.new_string;
       const replaceAll: boolean = params.replace_all ?? false;
