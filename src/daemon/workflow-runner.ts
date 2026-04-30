@@ -3145,7 +3145,7 @@ function constructTools(
   scope: SessionScope,
 ): readonly AgentTool[] {
   const { state, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth } = session;
-  const { fileTracker, onAdvance, onComplete, emitter, activeSessionSet, maxIssueSummaries } = scope;
+  const { fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported, emitter, activeSessionSet } = scope;
   const sid = scope.sessionId;
   // WHY from scope (not state directly): SessionScope is the typed boundary for what
   // constructTools() is allowed to see. Passing state directly would leak all mutable
@@ -3168,7 +3168,7 @@ function constructTools(
       // WHY onTokenUpdate: on a blocked response, the engine returns a retryContinueToken.
       // This callback updates state.currentContinueToken so the next complete_step call
       // injects the correct retry token.
-      (t: string) => { state.currentContinueToken = t; },
+      onTokenUpdate,
       schemas,
       executeContinueWorkflow,
       emitter,
@@ -3183,11 +3183,7 @@ function constructTools(
     makeGlobTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeGrepTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeEditTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
-    makeReportIssueTool(sid, emitter, workrailSid, undefined, (summary: string) => {
-      if (state.issueSummaries.length < maxIssueSummaries) {
-        state.issueSummaries.push(summary);
-      }
-    }),
+    makeReportIssueTool(sid, emitter, workrailSid, undefined, onIssueReported),
     makeSpawnAgentTool(
       sid,
       ctx,
@@ -3523,12 +3519,18 @@ async function buildAgentReadySession(
     fileTracker: new DefaultFileStateTracker(preAgentSession.readFileState),
     onAdvance,
     onComplete,
+    onTokenUpdate: (t: string) => { state.currentContinueToken = t; },
+    onIssueReported: (summary: string) => {
+      if (state.issueSummaries.length < MAX_ISSUE_SUMMARIES) {
+        state.issueSummaries.push(summary);
+      }
+    },
+    onSteer: (text: string) => { state.pendingSteerParts.push(text); },
     workrailSessionId: state.workrailSessionId,
     emitter,
     sessionId,
     workflowId: trigger.workflowId,
     activeSessionSet,
-    maxIssueSummaries: MAX_ISSUE_SUMMARIES,
   };
   const tools = constructTools(preAgentSession, ctx, apiKey, schemas, scope);
 

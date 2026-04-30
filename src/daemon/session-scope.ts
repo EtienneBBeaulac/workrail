@@ -158,6 +158,39 @@ export interface SessionScope {
   readonly onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void;
 
   /**
+   * Called by `complete_step` / `continue_workflow` when the engine returns a
+   * retryContinueToken on a blocked node response. Updates the current token so
+   * the next tool call injects the correct retry token.
+   *
+   * WHY in scope (not inline lambda in constructTools): moves the direct
+   * `state.currentContinueToken = t` write out of an anonymous inline closure
+   * and into the typed SessionScope boundary. The write surface is now explicit
+   * and named rather than hidden inside constructTools.
+   */
+  readonly onTokenUpdate: (continueToken: string) => void;
+
+  /**
+   * Called by `report_issue` tool to record a structured issue summary in the
+   * session's ring buffer. Capped at maxIssueSummaries entries.
+   *
+   * WHY in scope (not inline lambda in constructTools): same rationale as
+   * onTokenUpdate -- moves a direct `state.issueSummaries.push()` write out of
+   * an anonymous inline closure and into the typed SessionScope boundary.
+   */
+  readonly onIssueReported: (summary: string) => void;
+
+  /**
+   * Called by the steer endpoint (ActiveSessionSet) when the coordinator injects
+   * text into the running session. Appends to the pending steer parts queue.
+   *
+   * WHY in scope (not inline lambda in buildPreAgentSession): moves the direct
+   * `state.pendingSteerParts.push()` write from an anonymous closure registered
+   * with ActiveSessionSet into the typed SessionScope boundary. The steer
+   * registration in buildPreAgentSession now calls scope.onSteer(text).
+   */
+  readonly onSteer: (text: string) => void;
+
+  /**
    * The WorkRail session ID (decoded from the continue token), or null if the
    * session has not yet been started.
    */
@@ -186,9 +219,4 @@ export interface SessionScope {
    */
   readonly activeSessionSet: ActiveSessionSet | undefined;
 
-  /**
-   * Maximum number of issue summaries to collect during this session.
-   * Passed to `report_issue` tool construction.
-   */
-  readonly maxIssueSummaries: number;
 }
