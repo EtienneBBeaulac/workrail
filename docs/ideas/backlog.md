@@ -34,6 +34,33 @@ Each item has a score line: `**Score: N** | Cor:N Cap:N Eff:N Lev:N Con:N | Bloc
 
 ---
 
+**How to write a backlog item.** Every entry should follow this shape:
+
+```
+### Title (Date)
+
+**Status: idea | bug | partial | done** | Priority: high/medium/low
+
+**Score: N** | Cor:N Cap:N Eff:N Lev:N Con:N | Blocked: no / yes (blocked by X)
+
+[2-4 sentences stating the problem plainly. What is wrong or missing? Why does it matter?
+No proposed solutions here -- just the problem.]
+
+**Things to hash out:**
+- [Open question that needs a decision before design can begin]
+- [Another open question -- constraint, tradeoff, interaction with other systems]
+- [Keep these honest -- don't fill this section with questions you already know the answer to]
+```
+
+**Rules for writing entries:**
+- **State the problem, not the solution.** "There is no way to invoke a routine directly" not "We should add a `worktrain invoke` command."
+- **No steering.** Don't tell future implementers how to build it. Capture what needs to exist, not how to make it exist.
+- **Things to hash out = genuine open questions.** Only include questions that actually need to be answered before design can start. If you know the answer, state it in the problem description.
+- **Relationships matter.** If this item depends on another, or would be superseded by another, name it explicitly.
+- **Be specific about what "done" looks like** when it's not obvious -- e.g. "done means an operator can invoke any routine by name from the CLI without writing a workflow."
+
+---
+
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
 ### wr.coding-task implementation loop does not exit when slices complete (Apr 30, 2026)
@@ -1006,6 +1033,31 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 ## Shared / Engine
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
+
+### WorkTrain as the canonical workflow author -- MCP as a derived runtime (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+Today workflows are authored once and expected to work identically in both runtimes: the WorkRail MCP server (human-in-the-loop, Claude Code) and the WorkTrain daemon (fully autonomous, coordinator-driven). In practice they don't -- a workflow authored for human use has `requireConfirmation` gates that block autonomous execution, step prompts that assume the human is reading them, and phase structures that assume a single continuous session. Conversely, a workflow good for autonomous use has no natural pause points, produces typed structured outputs that humans find hard to read mid-session, and chains phases that a human might want to interrupt.
+
+The current response is to author separate "agentic variants" (`wr.coding-task` vs `coding-task-workflow.agentic.v2`). This is the wrong direction: it creates duplicate maintenance burden, improvements to one don't propagate to the other, and it means there is no single source of truth for what a workflow does.
+
+There should be one version of each workflow, not two. Improvements to one should benefit the other automatically. The self-improvement loop WorkTrain runs on its own workflows should produce better workflows for everyone, not just daemon sessions. The question is how to structure authorship and any adaptation layer so this is possible without forcing workflows into an awkward compromise that works poorly in both contexts.
+
+**What this enables:** WorkTrain can autonomously improve workflows using `wr.workflow-for-workflows`, and those improvements automatically benefit MCP users. The self-improvement loop produces better workflows for everyone, not just daemon sessions. Workflow quality compounds because there is only one version to improve.
+
+**Relationship to existing entries:**
+- "Workflow runtime adapter: one spec, two runtimes" (Shared/Engine) is a narrower version of this idea focused on parallelism and `requireConfirmation` gates. This entry is about the authoring philosophy and source-of-truth question, not just the adapter mechanics.
+- `wr.workflow-for-workflows` is how WorkTrain improves workflows autonomously -- this entry determines what it improves toward.
+
+**Things to hash out:**
+- What does the MCP conversion layer actually do? Adding pause points is straightforward. Adapting output formats (structured JSON → human-readable prose) may require active LLM translation, not just structural transformation.
+- Some workflow steps are genuinely different between runtimes -- a step that spawns parallel child sessions in the daemon doesn't have a clean MCP equivalent. Does the conversion layer skip those, simulate them sequentially, or require the author to declare a fallback?
+- If WorkTrain is the authoring target, existing workflows authored for MCP need migration. What is the migration path and who does it -- the author, WorkTrain itself, or a one-time script?
+- How do `requireConfirmation` gates fit? In the daemon they are removed or auto-satisfied by the coordinator. In MCP they pause for the human. Does the workflow declare them or does the conversion layer infer them?
+- Is the conversion layer purely structural (rearranging/omitting steps) or does it require understanding the semantic intent of each step?
 
 
 ### Improve commit SHA gathering consistency in wr.coding-task
@@ -2411,38 +2463,70 @@ A workflow that aggregates activity across git history, GitLab/GitHub MRs and re
 
 ## Platform Vision (longer-term)
 
-### Lightweight agents for repeat tasks that don't need a full workflow (Apr 30, 2026)
+### Move backlog to a dedicated worktrain-meta repo with version control (Apr 30, 2026)
 
 **Status: idea** | Priority: high
 
-**Score: 12** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: no
 
-Not every task warrants a full WorkRail workflow. A full `wr.coding-task` session has discovery, shaping, multiple implementation phases, review, and verification. But many useful tasks are lighter: answer a question about the codebase, generate a standup summary, explain a recent change, do a quick impact analysis before a real task starts, check whether a PR is safe to merge, scan for stale TODOs, summarize what changed this week.
+The backlog (`docs/ideas/backlog.md`) lives in the code repo. Every feature branch has its own version. Ideas added mid-session on a feature branch are held hostage until that PR merges. If two branches modify the backlog simultaneously, merge conflicts occur. There is no single authoritative place to capture an idea that immediately applies everywhere.
 
-These tasks share a shape: they need a capable agent with full workspace context, but they don't need a structured multi-step workflow with output contracts and phase gating. Running a full workflow for them is wasteful and slow. Not supporting them at all means the operator has to do these things manually or context-switch to Claude Code.
+A dedicated `worktrain-meta` repo (e.g. `~/git/personal/worktrain-meta/`) would hold the backlog as the only concern. No feature branches -- ideas are committed directly to main. Full git history preserved. No code PR ever touches it.
 
-**The idea:** a library of **lightweight agents** -- short-lived, purpose-built, invokable by name -- that handle repeat operational tasks without spinning up a full session. Similar in concept to Claude Code skills or shell aliases, but with workspace awareness and structured outputs.
+Done means: an operator or agent can add a backlog idea from any branch or context, commit directly, and it is immediately visible on all other branches and in all other sessions.
 
-Examples:
-- `worktrain ask "why does the session store use a manifest file?"` -- answers a codebase question using the knowledge graph
-- `worktrain explain pr/908` -- summarizes what a PR changed and why, in plain language
-- `worktrain check-stale` -- lists sessions older than N hours that haven't advanced
-- `worktrain diff-since "last week"` -- summarizes what shipped and what changed
-- `worktrain impact src/trigger/coordinator-deps.ts` -- lists what would break if this file changed
-
-**Key design tension:** these agents need workspace context (codebase understanding, session history) but shouldn't be expensive or slow. The knowledge graph is the enabler -- a well-indexed workspace means an agent can answer "what calls this function?" in seconds rather than spending 10 minutes reading files.
-
-**Relationship to existing ideas:**
-- `worktrain talk` (interactive ideation) is a heavyweight version of this -- a full conversational session. Lightweight agents are the stateless, single-purpose complement.
-- Standup status generator is one specific instance of this pattern.
-- Periodic analysis agents (weekly code health scan, etc.) are the scheduled variant.
+**Note on format:** when this migration happens, one-file-per-item with YAML frontmatter becomes viable. Frontmatter makes scores, status, dates, and blocked-by machine-readable without prose parsing. The `npm run backlog` script would read frontmatter instead of regex-parsing Score lines. This is the right time to adopt that format -- in the current single-file structure frontmatter would require a custom delimiter scheme, but one-file-per-item makes it natural.
 
 **Things to hash out:**
-- What is the invocation surface? CLI commands? Webhook triggers? Console buttons? All three?
-- How does a lightweight agent get workspace context efficiently without running full discovery? This depends on the knowledge graph being built and indexed.
-- Should lightweight agents be user-extensible (operator writes their own) or only built-in? If extensible, what is the authoring format -- a workflow JSON, a TypeScript function, a prompt template?
-- What is the output contract? Some agents produce structured data (JSON), some produce prose. How does the caller know which to expect?
-- Where does the boundary between a lightweight agent and a short `wr.coding-task` session lie? A task that seems quick might reveal complexity mid-run. How does a lightweight agent escalate to a full workflow when needed?
+- Should the worktrain-meta repo also hold the roadmap docs, now-next-later, open-work-inventory? Or just the backlog?
+- How do subagents spawned in a worktree find the backlog? They need a configured path, not relative to the code workspace.
+- When native structured backlog operations are built (SQLite), does the storage backend live in worktrain-meta (git-tracked history) or `~/.workrail/data/` (local queryable)? Both have merit.
+
+---
+
+### Invocable routines: dispatch an existing routine directly as a task (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:1 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+WorkRail has a routines system (`workflows/routines/`) for reusable workflow fragments. But routines can only be used embedded inside a larger workflow -- there is no way to invoke a routine directly as a standalone task. Many useful repeat tasks are process-shaped (same steps every time, structured output) and could be expressed as short 1-2 step workflows or existing routines. Today an operator who wants to run "context gathering" or "hypothesis challenge" on demand has to either build a wrapper workflow or do it manually.
+
+There is no dispatch surface for standalone routine invocation. Done means: an operator can invoke any routine by name from the CLI or a trigger, and the result is durable in the session store.
+
+**Relationship to existing ideas:** this is one half of the lightweight agents gap (the process-shaped half). The ad-hoc query half is a separate entry below.
+
+**Things to hash out:**
+- Should this be a new CLI command (`worktrain invoke <routineId> --goal "..."`) or a trigger type, or both?
+- Do routines need output contracts defined before they can be invoked standalone, or is free-form output acceptable?
+- How does the session store record a routine-only run vs a full workflow run? Should they be distinguished?
+
+---
+
+### Ad-hoc query agents: answer questions about the workspace without a full workflow (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: yes (needs knowledge graph for efficient context)
+
+There is a class of tasks that are question-shaped rather than process-shaped: "why does the session store use a manifest file?", "what would break if I changed this function?", "summarize what shipped this week." These don't have fixed steps, don't produce structured output contracts, and don't benefit from workflow phase gating. Running a full `wr.coding-task` session for them wastes 10 minutes on overhead. Not supporting them means the operator has to context-switch to Claude Code or do them manually.
+
+These tasks need a capable agent with workspace context but no workflow structure. They are stateless, single-purpose, and short-lived.
+
+Examples of what this enables:
+- `worktrain ask "why does the session store use a manifest file?"`
+- `worktrain explain pr/908`
+- `worktrain impact src/trigger/coordinator-deps.ts`
+- `worktrain diff-since "last week"`
+
+Done means: an operator can ask a natural-language question about the workspace and get a grounded answer within seconds, without starting a full session.
+
+**Relationship to existing ideas:** `worktrain talk` (interactive ideation) is the conversational, stateful version of this. Standup status generator is a scheduled instance of the same pattern. Invocable routines (entry above) are the process-shaped complement. This entry covers the unstructured query case.
+
+**Things to hash out:**
+- Without the knowledge graph, these queries require full file-scanning on every invocation -- too slow to be useful. Is there a minimum viable version before the KG is built, or does this wait?
+- What is the boundary between "this is a quick query" and "this actually needs a full discovery session"? Who decides -- the operator, or WorkTrain itself?
+- Should outputs be ephemeral (printed to terminal, not stored) or durable (in session store)? Durability adds value for audit but adds overhead.
 
 ---
 
