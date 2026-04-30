@@ -3279,6 +3279,7 @@ export function buildAgentCallbacks(
   modelId: string,
   emitter: DaemonEventEmitter | undefined,
   stuckRepeatThreshold: number,
+  workflowId?: string,
 ): AgentLoopCallbacks {
   return {
     onLlmTurnStarted: ({ messageCount }) => {
@@ -3314,8 +3315,11 @@ export function buildAgentCallbacks(
         ...withWorkrailSession(state.workrailSessionId),
       });
       // Write stuck outbox entry so coordinator can route the stalled session.
+      // WHY workflowId ?? sessionId: workflowId is always provided by buildPreAgentReadySession
+      // call site (passed from trigger.workflowId). The fallback to sessionId maintains
+      // backward compat with any test/caller that omits the optional param.
       void writeStuckOutboxEntry({
-        workflowId: sessionId,
+        workflowId: workflowId ?? sessionId,
         reason: 'stall',
         ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
       });
@@ -3522,7 +3526,7 @@ async function buildAgentReadySession(
   );
 
   // ---- Observability callbacks for AgentLoop ----
-  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD);
+  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD, trigger.workflowId);
 
   // ---- AgentLoop (one per runWorkflow() call, not reused) ----
   // WHY AgentLoop instead of pi-agent-core's Agent: AgentLoop is the first-party
