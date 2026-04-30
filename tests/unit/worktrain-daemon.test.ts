@@ -98,6 +98,9 @@ function buildFakeDeps(overrides: Partial<WorktrainDaemonCommandDeps> = {}): Wor
     exec: defaultExec,
     print: (line) => printed.push(line),
     sleep: async () => undefined,
+    // Default: health endpoint responds 200 immediately.
+    // Override in specific tests to simulate timeout (return null) or custom port checks.
+    httpGet: async (_url: string): Promise<number | null> => 200,
 
     ...overrides,
   };
@@ -419,7 +422,7 @@ describe('worktrain daemon --start', () => {
     expect(startCall?.args[1]).toBe('io.worktrain.daemon');
   });
 
-  it('returns success with PID when daemon starts successfully', async () => {
+  it('returns success when health endpoint responds 200', async () => {
     const deps = buildFakeDeps();
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
@@ -427,7 +430,7 @@ describe('worktrain daemon --start', () => {
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
-      expect(result.output?.message).toContain('PID 42');
+      expect(result.output?.message).toContain('Daemon started successfully');
     }
   });
 
@@ -457,6 +460,46 @@ describe('worktrain daemon --start', () => {
     if (result.kind === 'failure') {
       expect(result.output.message).toContain('macOS');
     }
+  });
+
+  it('returns failure when health endpoint never responds (daemon crashed)', async () => {
+    // Simulate daemon crash: httpGet always returns null (connection refused).
+    const deps = buildFakeDeps({
+      httpGet: async (_url: string): Promise<number | null> => null,
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+
+    expect(result.kind).toBe('failure');
+    if (result.kind === 'failure') {
+      // Should mention the log path so operator knows where to look.
+      expect(result.output.message).toContain('5 seconds');
+    }
+  });
+
+  it('uses WORKRAIL_TRIGGER_PORT env var for health endpoint URL', async () => {
+    const capturedUrls: string[] = [];
+    const deps = buildFakeDeps({
+      env: {
+        ...{
+          AWS_PROFILE: 'test-profile',
+          WORKRAIL_TRIGGERS_ENABLED: 'true',
+          HOME: '/Users/test',
+          PATH: '/usr/local/bin:/usr/bin:/bin',
+        },
+        WORKRAIL_TRIGGER_PORT: '9999',
+      },
+      httpGet: async (url: string): Promise<number | null> => {
+        capturedUrls.push(url);
+        return 200;
+      },
+    });
+    deps.files.set(PLIST_PATH, { content: '<plist />' });
+
+    await executeWorktrainDaemonCommand(deps, { start: true });
+
+    expect(capturedUrls.some((url) => url.includes(':9999'))).toBe(true);
   });
 });
 

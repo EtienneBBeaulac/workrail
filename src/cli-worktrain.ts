@@ -361,6 +361,22 @@ program
         },
         print: (line: string) => console.log(line),
         sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+        httpGet: async (url: string): Promise<number | null> => {
+          // WHY: the health check in runStart() needs to make an HTTP GET to the
+          // daemon's /health endpoint. We use Node's built-in http module here
+          // so there is no extra dependency. Errors (ECONNREFUSED, timeout, etc.)
+          // return null -- the caller handles null as "not yet up".
+          const { get } = await import('http');
+          return new Promise((resolve) => {
+            const req = get(url, { timeout: 1000 }, (res) => {
+              // Consume response body to free the socket.
+              res.resume();
+              resolve(res.statusCode ?? null);
+            });
+            req.on('error', () => resolve(null));
+            req.on('timeout', () => { req.destroy(); resolve(null); });
+          });
+        },
         startDaemon: async () => {
           // Load .env again as defense-in-depth: this callback may be invoked
           // from paths other than the daemon action handler in the future.
