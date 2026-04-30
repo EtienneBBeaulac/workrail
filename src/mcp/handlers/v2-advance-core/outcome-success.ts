@@ -71,6 +71,7 @@ async function resolveEndGitSha(repoRoot: string | null): Promise<string | null>
   }
 }
 
+
 type PartialEvent = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
 /** The toNodeKind to use when the advance succeeds (not blocked). */
@@ -275,20 +276,6 @@ export function buildSuccessOutcome(args: {
       const startGitSha = readObservation(truth.events, 'git_head_sha');
       const gitBranch = readObservation(truth.events, 'git_branch');
 
-      // Extract agent-reported commit SHAs from the last context_set with metrics_commit_shas.
-      // WHY last: agents accumulate the full list on each step; the last value is authoritative.
-      let agentCommitShas: string[] = [];
-      for (const e of truth.events) {
-        if (e.kind !== 'context_set') continue;
-        const ctx = (e.data as Record<string, unknown>)['context'];
-        if (ctx && typeof ctx === 'object' && !Array.isArray(ctx)) {
-          const shas = (ctx as Record<string, unknown>)['metrics_commit_shas'];
-          if (Array.isArray(shas) && shas.every(s => typeof s === 'string')) {
-            agentCommitShas = shas as string[];
-          }
-        }
-      }
-
       // durationMs: first event timestampMs to last event timestampMs.
       const firstTs = truth.events[0]?.timestampMs;
       const lastTs = truth.events[truth.events.length - 1]?.timestampMs;
@@ -298,7 +285,13 @@ export function buildSuccessOutcome(args: {
         resolveEndGitSha(repoRoot),
         (e) => ({ kind: 'advance_apply_failed' as const, message: String(e) }),
       ).andThen((endGitSha) => {
-        const captureConfidence: 'high' | 'none' = agentCommitShas.length > 0 ? 'high' : 'none';
+        // WHY agentCommitShas is always empty: agents cannot reliably report which commits
+        // are new vs existing. The startGitSha..endGitSha range in run_completed is the
+        // authoritative boundary; consumers that need the commit list derive it from those
+        // two fields via `git log startGitSha..endGitSha --format=%H` at query time.
+        // Agents no longer participate in SHA tracking.
+        const agentCommitShas: string[] = [];
+        const captureConfidence: 'high' | 'none' = 'none';
         extraEventsToAppend.push(buildRunCompletedEvent({
           sessionId: String(sessionId),
           runId: String(runId),

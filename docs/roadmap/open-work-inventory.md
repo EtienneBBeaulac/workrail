@@ -345,6 +345,18 @@ For explicit status on the major older planning docs themselves, see `docs/roadm
   - output categorization (did / doing / blockers) and configurable format
 - **Source doc**: `docs/ideas/backlog.md`
 
+### Multi-site pattern omission detection in MR review
+
+- **Status**: parked idea, needs design
+- **Problem**: the `wr.mr-review` workflow does not reliably catch omission bugs where a change extends a multi-site pattern but fails to update all expression sites. Examples: adding a new artifact type to one loop but missing three other loops that enumerate the same set; adding a new CLI subcommand but missing the help text, the tab-completion registry, and the docs page. In typed languages this is caught at compile time via exhaustive pattern matching. In dynamic codebases (bash, Python, config-driven systems) there is no compiler -- the omission is invisible in the diff because the un-updated sites are simply absent.
+- **Why the current workflow misses it**: reviewer families (`correctness_invariants`, `patterns_architecture`, etc.) focus on what is in the diff. Omission sites are not in the diff by definition. The `missed_issue_hunter` prompt is open-ended and does not include a systematic "find sibling expression sites" sub-task. Phase 0b's scope gate relies on acceptance criteria from the ticket, which are often absent for internal tooling changes.
+- **Proposed fix**: add a general "multi-site pattern extension" detection pass, not specific to any codebase or pattern type. The structural fingerprint: the diff adds something to a list, loop, switch, registry, or schema -- and that enumerable set has sibling instances elsewhere in the codebase that were not touched. Detection algorithm: (1) identify what was added in the diff, (2) search the codebase for other files containing the existing members of the same set, (3) flag unmodified files that enumerate those members as candidate omission sites. This is a grep-based mechanical check that works in any language or toolchain. The result feeds the fact packet and `missed_issue_hunter` as a first-class sub-task.
+- **Key design questions**:
+  - where in the workflow this detection should run (Phase 0 classification, Phase 2 fact packet build, or as a mandatory `missed_issue_hunter` sub-task)
+  - how to avoid false positives when the same string appears in unrelated contexts (e.g. the word "docs" in a README vs. a loop enumerating artifact types)
+  - whether this should be a standalone routine (like `routine-context-gathering`) that can be invoked from multiple workflows
+- **Source**: observed during `feat/scripts-artifact-type` MR review in common-ground (April 2026) -- `consolidate.sh`, `make rollback`, and `make list-installed` were not updated because none contained the diff's changed files, and no reviewer family checked for sibling enumeration sites
+
 ### Derived / overlay workflows for bundled workflow specialization
 
 - **Status**: parked idea, related to platform vision (future phase)
