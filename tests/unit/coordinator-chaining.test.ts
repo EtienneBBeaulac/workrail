@@ -63,7 +63,10 @@ describe('ChildSessionResult type', () => {
   });
 
   it('failed variant accepts all reason values', () => {
-    const reasons = ['error', 'stuck', 'delivery_failed'] as const;
+    // delivery_failed is intentionally excluded: coordinator-spawned sessions have no
+    // callbackUrl and cannot produce WorkflowDeliveryFailed. The type says exactly
+    // what can happen; coordinator callers never need to handle delivery_failed.
+    const reasons = ['error', 'stuck'] as const;
     for (const reason of reasons) {
       const result: ChildSessionResult = {
         kind: 'failed',
@@ -218,20 +221,6 @@ describe('getChildSessionResult outcome mapping', () => {
     }
   });
 
-  it('delivery_failed reason maps to kind:failed not kind:success', () => {
-    // delivery_failed is a variant of ChildSessionResult.kind=failed.
-    // This test verifies the invariant: delivery_failed must never map to success.
-    const result: ChildSessionResult = {
-      kind: 'failed',
-      reason: 'delivery_failed',
-      message: 'Webhook delivery failed for session abc123',
-    };
-    expect(result.kind).toBe('failed');
-    expect(result.kind).not.toBe('success');
-    if (result.kind === 'failed') {
-      expect(result.reason).toBe('delivery_failed');
-    }
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

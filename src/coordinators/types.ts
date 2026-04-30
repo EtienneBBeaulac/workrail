@@ -10,9 +10,15 @@
  *
  * Design invariants:
  * - ChildSessionResult is a discriminated union -- all switch statements must be exhaustive.
- * - delivery_failed maps to kind:'failed', NEVER kind:'success'.
  * - await_degraded is distinct from failed -- it signals infrastructure unavailability,
  *   not a child session failure. Coordinators must handle it separately from failed.
+ *
+ * WHY delivery_failed is NOT a reason variant here:
+ * Sessions spawned via spawnSession/spawnAndAwait construct a WorkflowTrigger with no
+ * callbackUrl. WorkflowDeliveryFailed is produced by TriggerRouter only when a callbackUrl
+ * POST fails -- a code path that is unreachable for coordinator-spawned sessions.
+ * spawn_agent uses ChildWorkflowRunResult (which also excludes delivery_failed) for the
+ * same reason. The type says exactly what can happen; delivery_failed cannot happen here.
  */
 
 /**
@@ -24,8 +30,8 @@
  * unrepresentable at compile time and forces exhaustive handling at every switch.
  *
  * Variants:
- * - success: child session ran to completion without delivery failure
- * - failed: child session reached a terminal failure state (blocked, stuck, or delivery failed)
+ * - success: child session ran to completion
+ * - failed: child session reached a terminal failure state (blocked or stuck)
  * - timed_out: coordinator gave up waiting; child may still be running
  * - await_degraded: the await infrastructure was unavailable (ConsoleService null);
  *   child session was never polled -- outcome is unknown
@@ -44,9 +50,8 @@ export type ChildSessionResult =
        * Reason for failure:
        * - error: unexpected error (blocked session, ConsoleService error, etc.)
        * - stuck: session reached a blocked/stuck terminal state
-       * - delivery_failed: webhook delivery to the child session failed
        */
-      readonly reason: 'error' | 'stuck' | 'delivery_failed';
+      readonly reason: 'error' | 'stuck';
       readonly message: string;
     }
   | {
