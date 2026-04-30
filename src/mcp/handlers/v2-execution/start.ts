@@ -255,11 +255,13 @@ export function buildInitialEvents(args: {
         workflowHash,
         workflowSourceKind,
         workflowSourceRef,
-        // WHY extracted from internalContext (not a public input field): the public
+        // WHY extracted from extraContext (not a public input field): the public
         // V2StartWorkflowInput schema stays unchanged. The daemon passes 'daemon' via
-        // internalContext; MCP sessions omit it and the field is undefined (backward compat).
-        ...(internalContext?.['triggerSource'] === 'daemon' || internalContext?.['triggerSource'] === 'mcp'
-          ? { triggerSource: internalContext['triggerSource'] as 'daemon' | 'mcp' }
+        // extraContext; MCP sessions pass 'mcp'. extraContext is the parameter name
+        // in buildInitialEvents -- internalContext is the name in executeStartWorkflow
+        // which forwards it as extraContext when calling buildInitialEvents.
+        ...(extraContext?.['triggerSource'] === 'daemon' || extraContext?.['triggerSource'] === 'mcp'
+          ? { triggerSource: extraContext['triggerSource'] as 'daemon' | 'mcp' }
           : {}),
       },
     },

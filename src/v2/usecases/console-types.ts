@@ -189,6 +189,10 @@ export interface ConsoleSessionDetail {
    * Used by the diff-summary endpoint to run git diff in the correct directory.
    */
   readonly repoRoot: string | null;
+  /** Whether this session was started by the WorkTrain daemon or a human via MCP.
+   * Same backfill logic as ConsoleSessionSummary: old sessions without the field
+   * default to 'daemon' when isAutonomous is true, 'mcp' otherwise. */
+  readonly triggerSource: 'daemon' | 'mcp';
 }
 
 // ---------------------------------------------------------------------------
