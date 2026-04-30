@@ -63,32 +63,28 @@ No proposed solutions here -- just the problem.]
 
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
-### wr.coding-task implementation loop does not exit when slices complete (Apr 30, 2026)
+### wr.coding-task forEach loop exposes broken agent-facing state (Apr 30, 2026)
 
 **Status: bug** | Priority: high
 
 **Score: 13** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
 
-The `wr.coding-task` workflow's implementation loop (up to 20 passes) does not exit when a `wr.loop_control` stop artifact is emitted. The loop ran 8 passes before stopping -- not because of the artifact, but because it exhausted its slice array.
+The `phase-6-implement-slices` loop (forEach over `slices`) ran correctly mechanically -- it iterated all 8 slices and stopped. But the agent-facing representation was broken in ways that violate WorkRail's promise of consistency and determinism:
 
-**Root cause (confirmed by investigation)**: `phase-6-implement-slices` is a `forEach` loop, not a `while`/`until` loop with `artifact_contract`. The `wr.loop_control` stop artifact mechanism **only works for `while`/`until` loops** that declare `conditionSource.kind = artifact_contract`. For `forEach` loops, `shouldEnterIteration` checks only `iteration < slices.length` -- artifacts passed to `interpreter.next()` are never consulted. Confirmed in `workflow-interpreter.ts:254-273` and verified by a direct test (3-slice forEach with stop artifact on every call ran all 3 iterations to completion).
+1. **`currentSlice.name` showed `[unset]`** -- the agent was inside a forEach loop over `slices` with `itemVar: "currentSlice"`, but the template variable wasn't being projected into sessionContext before rendering. The agent couldn't see which slice it was on. This is an engine rendering issue in `buildLoopRenderContext` / `prompt-renderer.ts`.
 
-**Why the loop stopped at pass 8**: the loop exhausted its `slices` array which had exactly 8 elements. `metrics_outcome = success` appearing at pass 8 was a coincidence.
+2. **Agent emitted `wr.loop_control` artifacts that had no effect** -- the forEach loop silently ignores these. The agent did useless work the engine discarded without signaling that this was happening. A correct system should either prevent the agent from emitting artifacts that can't affect the loop, or tell the agent explicitly that artifact-based exit isn't available in this loop type.
 
-**`currentSlice.name` showing `[unset]`**: secondary issue. `buildLoopRenderContext` in `prompt-renderer.ts:190-197` requires `sessionContext['slices']` to be an array at render time. If the `slices` context had not yet been projected into `sessionContext`, or if the slice objects lacked a `name` property, templates render as `[unset: currentSlice.name]`.
+3. **Loop presented as "Pass N of 20" not "Slice 3 of 8"** -- the framing confused the agent about what was happening. The agent should be told it's iterating over concrete slices, not burning through a budget.
 
-**Three fix directions:**
-1. **Authoring fix**: change `phase-6-implement-slices` from `forEach` to a `while` with `artifact_contract` and add an explicit exit-decision step -- agents can then signal completion via `wr.loop_control`
-2. **Engine feature**: add early-exit support to `forEach` loops when a `wr.loop_control` stop artifact is emitted
-3. **Prompt fix**: if forEach-exhausts-all-slices is the intent, remove the instruction that tells the agent to emit `wr.loop_control` artifacts
-
-**Lean toward fix 1 (authoring fix)**: the intent of the implementation loop is that the agent drives it -- it should be able to stop early when all slices are complete. Fix 3 (always exhaust all slices) would waste turns. Fix 2 (engine feature) adds complexity to the engine for a single workflow's benefit. Fix 1 requires re-authoring `phase-6-implement-slices` as a `while` loop with an exit-decision step, which `wr.workflow-for-workflows` can do.
+The forEach loop *worked* but the agent experience was wrong. This matters because WorkRail's value is that agents should not be confused about their own loop state. An agent that emits useless artifacts, can't see its own iteration variable, and misunderstands whether the loop is progress-based or budget-based is not operating under the deterministic, correct framework WorkRail promises.
 
 **GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/920
 
 **Things to hash out:**
-- Confirm: should the agent always be able to exit early, or are there cases where running all slices regardless is correct?
-- Does the `currentSlice.name = [unset]` secondary bug get fixed by the authoring fix (because slices become properly tracked in a while loop), or does it need a separate fix in `prompt-renderer.ts`?
+- Is `currentSlice.name = [unset]` a bug in `buildLoopRenderContext` (engine fix needed), or is it a workflow authoring issue (the slices array items don't have a `name` property)?
+- Should the engine prevent agents from emitting `wr.loop_control` artifacts inside forEach loops, or simply document that they have no effect?
+- Should forEach loops surface iteration progress ("slice 3 of 8") differently than while loops ("pass 3 of 20") in the step header text?
 
 ---
 
