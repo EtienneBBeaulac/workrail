@@ -2655,7 +2655,7 @@ export interface AgentReadySession {
  *
  * Represents what the agent loop's own exit signal was, NOT the final
  * session outcome (which is determined by buildSessionResult() reading
- * state.stuckReason and state.timeoutReason after the loop exits).
+ * state.terminalSignal after the loop exits).
  *
  * WHY a discriminated union (not raw strings): follows explicit-domain-types
  * philosophy. The two variants map directly to the two code paths through
@@ -3244,7 +3244,7 @@ export interface TurnEndSubscriberContext {
  * logic from the session setup, making both independently readable.
  *
  * WHY intentionally impure: the subscriber mutates ctx.state (turnCount,
- * stuckReason, timeoutReason, pendingSteerParts) and ctx.lastFlushedRef.count.
+ * terminalSignal via setTerminalSignal, pendingSteerParts) and ctx.lastFlushedRef.count.
  * These mutations are the subscriber's job -- this impurity is by design.
  */
 export function buildTurnEndSubscriber(
@@ -3644,15 +3644,14 @@ async function buildAgentReadySession(
  *
  * Returns a SessionOutcome describing the loop's raw exit signal. The final
  * session outcome (stuck vs timeout vs success) is determined by
- * buildSessionResult() reading state.stuckReason and state.timeoutReason
- * after this function returns.
+ * buildSessionResult() reading state.terminalSignal after this function returns.
  *
  * WHY a named function (not inline in runWorkflow): makes the agent loop
  * independently readable. The boundary is clean: everything from stuckConfig
  * setup through handle?.dispose() in finally belongs here.
  *
  * WHY intentionally impure: mutates session.preAgentSession.state (turnCount,
- * stuckReason, timeoutReason, stepAdvanceCount, pendingSteerParts) via the
+ * terminalSignal via setTerminalSignal, stepAdvanceCount, pendingSteerParts) via the
  * turn_end subscriber and tool callbacks. This impurity is by design and is
  * documented in the SessionState interface.
  */
@@ -3764,7 +3763,7 @@ async function runAgentLoop(
     void appendConversationMessages(conversationPath, remainingMessages).catch(() => {});
 
     // Cancel the wall-clock timer so it does not fire after successful completion
-    // and mutate the closed-over timeoutReason variable. clearTimeout on an
+    // and call setTerminalSignal unnecessarily. clearTimeout on an
     // already-fired or undefined handle is a safe no-op.
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
     // Dispose the session handle: deregisters from ActiveSessionSet so steer() stops

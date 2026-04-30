@@ -155,8 +155,8 @@ export interface AgentLoopCallbacks {
    * Called when the stall timer fires: no LLM API call started within stallTimeoutMs.
    *
    * WHY a callback (not a return value): the timer fires asynchronously outside the
-   * normal turn flow. The caller needs to set daemon-specific state (stuckReason='stall')
-   * before the loop exits. A callback keeps AgentLoop decoupled from daemon types while
+   * normal turn flow. The caller needs to set daemon-specific terminal state before
+   * the loop exits. A callback keeps AgentLoop decoupled from daemon types while
    * giving the caller the signal it needs.
    *
    * WHY on AgentLoopCallbacks (not a separate option): callbacks is the established
