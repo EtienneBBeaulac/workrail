@@ -6,11 +6,21 @@ WorkTrain is an autonomous software development daemon. It runs continuously in 
 
 The operator's job is to configure what WorkTrain works on and what rules it follows. WorkTrain's job is to do the actual work, autonomously, reliably, and correctly.
 
+## The self-improvement loop
+
+WorkTrain builds WorkTrain. This is not a metaphor -- it is the intended operating mode and the ultimate test of whether the system works.
+
+WorkTrain runs the workrail repository as one of its own workspaces. It picks up tickets from the workrail GitHub issue queue, runs the full pipeline (discovery, shaping, coding, review, fix, merge), and ships improvements to itself. Every feature built into WorkTrain is a feature WorkTrain could have built using its own infrastructure. Every bug fixed in WorkTrain is a bug WorkTrain found in itself.
+
+This creates a direct feedback loop: if WorkTrain's development pipeline is flawed, it will produce flawed changes to itself and catch them in review. If its context injection is thin, it will miss things in its own codebase that a well-briefed agent would catch. The quality of WorkTrain's output is the quality of WorkTrain.
+
+The self-improvement loop is not fully operational today. The pieces -- coordinator session chaining, full development pipeline, spec as ground truth, living work context -- are being built. But it is the north star. If WorkTrain cannot build WorkTrain well, it cannot be trusted to build anything else.
+
 ## What success looks like
 
 An operator assigns a ticket to WorkTrain in the morning. By the time they check in, there is a merged PR, a closed ticket, and a summary of what was done and why. They did not intervene between phases. Nothing surprising happened that required their attention.
 
-WorkTrain earns trust over time by doing this correctly, repeatedly, at scale -- not just for one-off tasks but as the default mode of software development.
+WorkTrain earns trust over time by doing this correctly, repeatedly, at scale -- not just for one-off tasks but as the default mode of software development. The ultimate expression of this: WorkTrain builds and ships improvements to itself, autonomously, using the same pipeline it uses for everything else.
 
 ## What WorkTrain is not
 
