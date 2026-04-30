@@ -82,10 +82,13 @@ The `wr.coding-task` workflow's implementation loop (up to 20 passes) does not e
 2. **Engine feature**: add early-exit support to `forEach` loops when a `wr.loop_control` stop artifact is emitted
 3. **Prompt fix**: if forEach-exhausts-all-slices is the intent, remove the instruction that tells the agent to emit `wr.loop_control` artifacts
 
+**Lean toward fix 1 (authoring fix)**: the intent of the implementation loop is that the agent drives it -- it should be able to stop early when all slices are complete. Fix 3 (always exhaust all slices) would waste turns. Fix 2 (engine feature) adds complexity to the engine for a single workflow's benefit. Fix 1 requires re-authoring `phase-6-implement-slices` as a `while` loop with an exit-decision step, which `wr.workflow-for-workflows` can do.
+
+**GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/920
+
 **Things to hash out:**
-- Which fix direction is correct depends on the intended behavior: should the agent be able to stop the loop early (fix 1 or 2), or should it always run all slices (fix 3)?
-- If fix 2 (engine feature), does early-exit from forEach affect the `currentSlice` render context in a way that could cause confusion?
-- Does fix 1 require re-authoring the workflow through `wr.workflow-for-workflows`, or is it a targeted JSON edit?
+- Confirm: should the agent always be able to exit early, or are there cases where running all slices regardless is correct?
+- Does the `currentSlice.name = [unset]` secondary bug get fixed by the authoring fix (because slices become properly tracked in a while loop), or does it need a separate fix in `prompt-renderer.ts`?
 
 ---
 
@@ -188,6 +191,8 @@ This is categorically different from bugs (the agent implemented the right thing
 - Agent makes a local fix when the user wanted an architectural change
 - Agent's implementation is technically correct but violates unstated invariants the user assumed were obvious
 
+**Done looks like:** a WorkTrain session that receives an ambiguous or underspecified task either (a) states its interpretation explicitly before acting and the coordinator can gate on approval, or (b) has access to enough prior context (from the knowledge graph or living work context) that the interpretation is reliably correct. A session that builds the wrong thing well should be detectable before it merges, not after.
+
 **Things to hash out:**
 - Where in the workflow should intent validation happen? Before the agent writes any code (Phase 0), the agent should be required to state its interpretation back in plain English. The user (or a validation step) confirms or corrects it before implementation begins. But this requires a human confirmation gate -- does that break the autonomous use case?
 - For fully autonomous sessions (no human in the loop), is there a way to detect a likely intent gap before the agent commits? Signals might include: the task description is short or vague, the agent's interpretation involves a significant architectural decision, the agent is about to delete or restructure existing code.
@@ -217,6 +222,8 @@ This is exactly what happened with the commit SHA change: setting `agentCommitSh
 - Agent's change passes all tests but the tests don't cover the degraded behavior
 - Agent notes a downstream impact in session notes but does not block, escalate, or file a follow-up ticket
 - **Agent reframes a bug as "a key tradeoff to document."** This is a specific and common failure: the agent detects a real problem it caused, correctly identifies that it's a problem, and instead of filing it as a bug or escalating, reclassifies it as an "accepted design decision" or "known limitation" in documentation. The bug is real. Documenting it is not fixing it. This pattern actively buries bugs.
+
+**Done looks like:** when an agent makes a change that degrades something outside its scope, it surfaces the degradation explicitly before the PR merges -- either by blocking (filing a follow-up issue as a condition of the current PR merging) or escalating to the coordinator for a decision. A PR that silently buries a regression in a comment or documentation should not pass review.
 
 **Things to hash out:**
 - How does an agent distinguish "acceptable tradeoff within scope" from "collateral damage that must be escalated"? The line is fuzzy and context-dependent. A hard rule ("never degrade existing behavior") is too strict for refactors; a soft heuristic ("if it affects other code, escalate") is too broad.
@@ -357,6 +364,8 @@ Alternative: if `spawnSession`/`spawnAndAwait` child sessions genuinely cannot h
 `spawnAndAwait` in `coordinator-deps.ts` contains an inline polling loop (~90 lines) that duplicates the logic in `awaitSessions`. The WHY comment explains a real construction-time constraint: object literals cannot reference sibling methods by name during construction. But this constraint applies to methods on the returned object -- it does not apply to closure-level functions, which are already used for `fetchAgentResult` and `fetchChildSessionResult`.
 
 **Fix:** extract a `pollUntilTerminal(handles: string[], timeoutMs: number): Promise<'completed' | 'timed_out' | 'degraded'>` closure-level function (before the `return {}` block). Have both `awaitSessions` and `spawnAndAwait` call it. This eliminates the duplication without violating the construction-time constraint.
+
+**GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/921
 
 ---
 

@@ -54,9 +54,9 @@ Not every roadmap item must become a ticket immediately.
 
 ## Status ownership
 
-**Status lives in exactly two places**: `docs/roadmap/open-work-inventory.md` and `docs/roadmap/now-next-later.md`.
+**Status lives in `docs/ideas/backlog.md`**. Each entry has a `Status:` line (idea / partial / done / bug). Use `npm run backlog` to see a scored, sorted view.
 
-Plan docs in `docs/plans/` describe **design and intent** -- not current status. When work ships, update the roadmap docs, not the plan doc. Plan docs that carry their own status blocks create a second source of truth that drifts.
+Plan docs in `docs/plans/` describe **design and intent** -- not current status. When work ships, update the backlog entry status, not the plan doc.
 
 ## Rules of thumb
 
@@ -95,10 +95,7 @@ Existing feature-specific plans in `docs/plans/` still matter. Treat them as **f
 
 ## Starting points
 
-- `docs/ideas/backlog.md`
-- `docs/roadmap/now-next-later.md`
-- `docs/roadmap/open-work-inventory.md`
-- `docs/roadmap/legacy-planning-status.md`
-- `docs/planning/docs-taxonomy-and-migration-plan.md`
-- `docs/tickets/README.md`
-- `docs/tickets/next-up.md`
+- `docs/vision.md` -- what WorkTrain is and where it's going (read this first)
+- `docs/ideas/backlog.md` -- the backlog (`npm run backlog` for priority view)
+- `docs/roadmap/legacy-planning-status.md` -- status map for older planning docs
+- `docs/tickets/next-up.md` -- scratch space for near-term tickets

@@ -1,6 +1,11 @@
 # Next Up
 
-Groomed near-term tickets. Check `docs/roadmap/now-next-later.md` first for the current priority ordering.
+Scratch space for grooming near-term tickets before they become GitHub issues.
+For the current priority ordering, run `npm run backlog -- --min-score 11 --unblocked-only` or see `docs/ideas/backlog.md`.
+
+---
+
+> The tickets below are historical. Active work is tracked via GitHub issues and the backlog.
 
 ---
 
