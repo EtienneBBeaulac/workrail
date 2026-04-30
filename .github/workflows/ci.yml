@@ -71,6 +71,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
 
@@ -78,14 +81,13 @@ jobs:
         run: node scripts/ci-policy-check.js
 
   # ============================================================================
-  # REQUIRED: Lockfile is stable under npm ci
+  # REQUIRED: Lockfile is stable under npm install
   # ============================================================================
   lockfile:
     name: Lockfile Stable
     runs-on: ubuntu-latest
-    # Advisory only -- lockfile drift (e.g. from npm version differences across
-    # platforms) should not block PRs. The check still runs and uploads a
-    # regenerated lockfile artifact when drift is detected.
+    # Advisory only -- lockfile drift should not block PRs. The check still runs
+    # and uploads a regenerated lockfile artifact when drift is detected.
     continue-on-error: true
 
     steps:
@@ -98,8 +100,8 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
-      - name: Upgrade npm (fix lockfile cpu-filter bug present in npm <11.3.0)
-        run: npm install -g npm@^11.11.1 --ignore-scripts
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Regenerate lockfile (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -137,6 +139,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
 
@@ -161,6 +166,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -215,6 +223,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -238,6 +249,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -270,6 +284,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
 
@@ -294,6 +311,9 @@ jobs:
         with:
           node-version: 22.14.0
           cache: 'npm'
+
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -372,6 +392,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -421,6 +444,9 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -459,7 +485,7 @@ jobs:
         # Slim matrix on PRs (Node 22 only), full matrix on main
         node-version: ${{ github.event_name == 'pull_request' && fromJSON('["22.14.0"]') || fromJSON('["20", "22.14.0"]') }}
       fail-fast: false
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -469,6 +495,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
+
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Install dependencies
         run: npm install --ignore-scripts

@@ -24,15 +24,14 @@ jobs:
           node-version: 22.14.0
           cache: 'npm'
 
-      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1
-      - name: Upgrade npm (Trusted Publishing)
-        run: |
-          npm --version
-          npm install -g npm@11.6.2
-          npm --version
+      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1.
+      # corepack reads the packageManager field from package.json and activates
+      # the correct npm version, reliably shadowing the bundled npm in PATH.
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Install dependencies (no lifecycle scripts)
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: semantic-release dry-run
         env:
@@ -41,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Mirror the real release job: use the upgraded global npm and avoid
+          # Mirror the real release job: use the corepack-activated npm and avoid
           # PATH shadowing from ./node_modules/.bin when invoking semantic-release.
           export PATH="$(echo "$PATH" | tr ':' '\n' | awk '!/\/node_modules\/\.bin/' | paste -sd ':' -)"
           hash -r

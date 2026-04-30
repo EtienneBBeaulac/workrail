@@ -144,6 +144,7 @@
     "vite": "^8.0.10",
     "vitest": "^3.2.4"
   },
+  "packageManager": "npm@11.11.1",
   "engines": {
     "node": ">=20",
     "npm": ">=11.11.1"

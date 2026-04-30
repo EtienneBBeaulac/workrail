@@ -82,15 +82,14 @@ jobs:
           # Align with npm trusted publishing reference setup
           registry-url: https://registry.npmjs.org
 
-      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1
-      - name: Upgrade npm (Trusted Publishing)
-        run: |
-          npm --version
-          npm install -g npm@11.6.2
-          npm --version
+      # npm Trusted Publishing (OIDC) requires npm >= 11.5.1.
+      # corepack reads the packageManager field from package.json and activates
+      # the correct npm version, reliably shadowing the bundled npm in PATH.
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Download build artifact (dist/)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -133,9 +132,9 @@ jobs:
           # the app token (which has bypass permission) is used, not GITHUB_TOKEN.
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
-          # Ensure we use the upgraded global npm (OIDC requires npm >= 11.5.1).
-          # npx prepends ./node_modules/.bin to PATH, which can shadow the global npm
-          # with a bundled npm package version that does not support trusted publishing.
+          # Ensure we use the corepack-activated npm (OIDC requires npm >= 11.5.1).
+          # npx prepends ./node_modules/.bin to PATH, which can shadow the corepack
+          # shim with a bundled npm package version that does not support trusted publishing.
           export PATH="$(echo "$PATH" | tr ':' '\n' | awk '!/\/node_modules\/\.bin/' | paste -sd ':' -)"
           hash -r
 
