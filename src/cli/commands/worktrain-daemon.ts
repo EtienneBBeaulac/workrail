@@ -84,6 +84,12 @@ const CAPTURED_ENV_VARS = [
   'USER',
   'PATH',
 
+  // Trigger webhook listener port (default 3200). Must be in plist so the
+  // daemon and the --start health check both use the same port. Without this,
+  // a user with WORKRAIL_TRIGGER_PORT set in their shell would poll the wrong
+  // port during --start and get a false "daemon did not respond" failure.
+  'WORKRAIL_TRIGGER_PORT',
+
   // WorkRail developer overrides (useful for local dev installs)
   'WORKRAIL_DEV',
   'WORKRAIL_LOG_LEVEL',
