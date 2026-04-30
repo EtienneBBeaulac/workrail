@@ -276,3 +276,104 @@ describe('v2 fs/promises boundary enforcement', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Daemon SessionState mutation invariants
+// ---------------------------------------------------------------------------
+//
+// These tests enforce structural invariants introduced by the TerminalSignal
+// refactor and the SessionScope capability boundary work:
+//
+// 1. state.terminalSignal must only be written through setTerminalSignal().
+//    Direct assignment (`state.terminalSignal = ...`) bypasses first-writer-wins
+//    and can corrupt the stuck/timeout priority invariant.
+//
+// 2. constructTools() must not reference `session.state` or `state.` directly.
+//    All SessionState access must go through SessionScope's typed callbacks and
+//    getter fields. This enforces the capability boundary: tool factories get
+//    only the operations they need, not the full mutable state object.
+
+describe('Daemon SessionState mutation invariants', () => {
+  const WORKFLOW_RUNNER = path.join(__dirname, '../../src/daemon/workflow-runner.ts');
+  const SET_TERMINAL_SIGNAL_FN = 'setTerminalSignal';
+
+  it('state.terminalSignal is only assigned inside setTerminalSignal()', () => {
+    const content = fs.readFileSync(WORKFLOW_RUNNER, 'utf-8');
+    const lines = content.split('\n');
+
+    const violations: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      // Match `state.terminalSignal =` (assignment, not comparison)
+      if (/\bstate\.terminalSignal\s*=(?!=)/.test(line)) {
+        // Only allowed inside the setTerminalSignal function body:
+        // scan backwards to find the nearest enclosing function signature.
+        let inSetterFn = false;
+        for (let j = i; j >= 0; j--) {
+          if (lines[j]!.includes(`export function ${SET_TERMINAL_SIGNAL_FN}`)) {
+            inSetterFn = true;
+            break;
+          }
+          // Stop at any other function boundary
+          if (j < i && /^(?:export\s+)?(?:async\s+)?function\b/.test(lines[j]!.trim())) {
+            break;
+          }
+        }
+        if (!inSetterFn) {
+          violations.push(`  line ${i + 1}: ${line.trim()}`);
+        }
+      }
+    }
+
+    if (violations.length > 0) {
+      expect.fail(
+        `Direct state.terminalSignal assignment found outside setTerminalSignal():\n` +
+        violations.join('\n') +
+        `\n\nUse setTerminalSignal(state, signal) to preserve first-writer-wins invariant.`,
+      );
+    }
+  });
+
+  it('constructTools() does not reference state or session.state directly', () => {
+    const content = fs.readFileSync(WORKFLOW_RUNNER, 'utf-8');
+
+    // Extract constructTools function body
+    const fnStart = content.indexOf('\nfunction constructTools(');
+    expect(fnStart).toBeGreaterThan(-1);
+
+    // Find the closing brace by counting brace depth
+    let depth = 0;
+    let fnEnd = -1;
+    let inFn = false;
+    for (let i = fnStart; i < content.length; i++) {
+      if (content[i] === '{') { depth++; inFn = true; }
+      else if (content[i] === '}') {
+        depth--;
+        if (inFn && depth === 0) { fnEnd = i; break; }
+      }
+    }
+    expect(fnEnd).toBeGreaterThan(fnStart);
+
+    const fnBody = content.slice(fnStart, fnEnd + 1);
+    const bodyLines = fnBody.split('\n');
+
+    const violations: string[] = [];
+    for (let i = 0; i < bodyLines.length; i++) {
+      const line = bodyLines[i]!;
+      // Skip comments
+      if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
+      // Match session.state or bare state. access
+      if (/\bsession\.state\b|\bstate\./.test(line)) {
+        violations.push(`  line ${i + 1}: ${line.trim()}`);
+      }
+    }
+
+    if (violations.length > 0) {
+      expect.fail(
+        `constructTools() references state directly:\n` +
+        violations.join('\n') +
+        `\n\nAll SessionState access must go through SessionScope callbacks and getters.`,
+      );
+    }
+  });
+});

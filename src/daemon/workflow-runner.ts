@@ -3129,45 +3129,44 @@ export async function buildPreAgentSession(
  * Construct the tool list for a daemon agent session.
  *
  * WHY a named function (not inline in runWorkflow): makes the intentional impurity
- * visible at the call site. This function is NOT pure -- the tool closures reference
- * `session.state` (mutable) and `onAdvance`/`onComplete` (side-effecting callbacks).
- * Passing these as explicit parameters documents the impurity rather than hiding it.
+ * visible at the call site. The tool closures reference side-effecting callbacks
+ * (onAdvance, onComplete, onTokenUpdate, onIssueReported) from scope.
+ *
+ * WHY scope-only (no PreAgentSession): scope is the complete typed boundary for
+ * everything constructTools needs. Removing PreAgentSession eliminates the last
+ * direct coupling between constructTools and SessionState -- no field on state is
+ * read or written here. All values come from scope's explicit, named fields.
  *
  * WHY not exported: this is an internal construction detail. Tests exercise tool
  * behavior through runWorkflow() integration paths.
  */
 function constructTools(
-  session: PreAgentSession,
   ctx: V2ToolContext,
   apiKey: string,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   scope: SessionScope,
 ): readonly AgentTool[] {
-  const { state, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth } = session;
-  const { fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported, emitter, activeSessionSet } = scope;
+  const {
+    fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported,
+    getCurrentToken, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth,
+    emitter, activeSessionSet,
+  } = scope;
   const sid = scope.sessionId;
-  // WHY from scope (not state directly): SessionScope is the typed boundary for what
-  // constructTools() is allowed to see. Passing state directly would leak all mutable
-  // session fields to the tool layer; scope captures only the subset tools need.
   const workrailSid = scope.workrailSessionId;
   // WHY toMap(): tool factories (makeReadTool, makeWriteTool, makeEditTool) accept
   // Map<string, ReadFileState> directly. Their public signatures cannot change because
-  // tests call them directly with Maps. toMap() is defined on the FileStateTracker
-  // interface and returns the same Map instance the tracker uses internally, so
-  // read-before-write checks remain valid across all tool invocations.
+  // tests call them directly with Maps. toMap() returns the same Map instance the
+  // tracker uses internally, so read-before-write checks remain valid.
   const readFileStateMap = fileTracker.toMap();
 
   return [
     makeCompleteStepTool(
       sid,
       ctx,
-      () => state.currentContinueToken,
+      getCurrentToken,
       onAdvance,
       onComplete,
-      // WHY onTokenUpdate: on a blocked response, the engine returns a retryContinueToken.
-      // This callback updates state.currentContinueToken so the next complete_step call
-      // injects the correct retry token.
       onTokenUpdate,
       schemas,
       executeContinueWorkflow,
@@ -3526,13 +3525,17 @@ async function buildAgentReadySession(
       }
     },
     onSteer: (text: string) => { state.pendingSteerParts.push(text); },
+    getCurrentToken: () => state.currentContinueToken,
+    sessionWorkspacePath,
+    spawnCurrentDepth: preAgentSession.spawnCurrentDepth,
+    spawnMaxDepth: preAgentSession.spawnMaxDepth,
     workrailSessionId: state.workrailSessionId,
     emitter,
     sessionId,
     workflowId: trigger.workflowId,
     activeSessionSet,
   };
-  const tools = constructTools(preAgentSession, ctx, apiKey, schemas, scope);
+  const tools = constructTools(ctx, apiKey, schemas, scope);
 
   // ---- I/O phase: load context (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init

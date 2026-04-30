@@ -186,9 +186,43 @@ export interface SessionScope {
    * WHY in scope (not inline lambda in buildPreAgentSession): moves the direct
    * `state.pendingSteerParts.push()` write from an anonymous closure registered
    * with ActiveSessionSet into the typed SessionScope boundary. The steer
-   * registration in buildPreAgentSession now calls scope.onSteer(text).
+   * registration in buildPreAgentSession calls scope.onSteer(text).
    */
   readonly onSteer: (text: string) => void;
+
+  /**
+   * Read the current session token. Called by `complete_step` at execute time
+   * to inject the correct token without needing a direct reference to SessionState.
+   *
+   * WHY a getter function (not a plain string): the token is updated after each
+   * step advance (onTokenUpdate) and blocked-node retry. A getter ensures the
+   * tool always reads the latest value rather than a snapshot captured at
+   * construction time.
+   *
+   * WHY in scope: eliminates the last direct reference to `session.state` inside
+   * constructTools. With this field, constructTools only needs scope + ctx + apiKey
+   * + schemas -- it no longer depends on PreAgentSession at all.
+   */
+  readonly getCurrentToken: () => string;
+
+  /**
+   * Absolute path to the workspace directory the agent must work in.
+   * For worktree sessions this is the isolated worktree path; for non-worktree
+   * sessions it equals trigger.workspacePath.
+   */
+  readonly sessionWorkspacePath: string;
+
+  /**
+   * Current spawn depth of this session in the spawn_agent tree.
+   * Root sessions have depth 0. Each spawn_agent call increments by 1.
+   */
+  readonly spawnCurrentDepth: number;
+
+  /**
+   * Maximum allowed spawn depth. spawn_agent returns a typed error when
+   * currentDepth >= maxDepth without spawning.
+   */
+  readonly spawnMaxDepth: number;
 
   /**
    * The WorkRail session ID (decoded from the continue token), or null if the
