@@ -1295,6 +1295,7 @@ runCommand
         goal: string,
         workspace: string,
         context?: Readonly<Record<string, unknown>>,
+        // CLI path does not support agentConfig -- sessions use daemon default timeouts.
         _agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
         parentSessionId?: string,
       ) => {
@@ -1601,7 +1602,12 @@ runCommand
         workflowId: string,
         goal: string,
         workspace: string,
-        opts?: { readonly coordinatorSessionId?: string; readonly timeoutMs?: number },
+        opts?: {
+          readonly coordinatorSessionId?: string;
+          readonly timeoutMs?: number;
+          // agentConfig not supported via CLI HTTP path -- daemon uses its own trigger defaults.
+          readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>;
+        },
       ): Promise<ChildSessionResult> => {
         // Step 1: Spawn via HTTP dispatch.
         const spawnUrl = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
@@ -1663,26 +1669,8 @@ runCommand
           return { kind: 'timed_out', message: `Session ${handle.slice(0, 16)} timed out after ${timeoutMs}ms` };
         }
 
-        // Step 3: Read terminal result.
-        // Reuse getChildSessionResult via a direct call (safe here because deps is fully
-        // constructed and we're in a runtime call, not construction time).
-        const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
-        try {
-          const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!sessionRes.ok) return { kind: 'failed', reason: 'error', message: `Session fetch HTTP ${sessionRes.status}` };
-          const sessionBody = await sessionRes.json() as Record<string, unknown>;
-          const data = sessionBody['data'] as Record<string, unknown> | null | undefined;
-          const runs = (data?.['runs'] ?? sessionBody['runs']) as Array<Record<string, unknown>> | null | undefined;
-          const runStatus = runs?.[0]?.['status'] as string | null | undefined;
-          if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
-            return { kind: 'success', notes: null, artifacts: [] };
-          }
-          if (runStatus === 'blocked') return { kind: 'failed', reason: 'stuck', message: `Session ${handle.slice(0, 16)} blocked` };
-          return { kind: 'timed_out', message: `Session ${handle.slice(0, 16)} in state '${runStatus ?? 'unknown'}'` };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return { kind: 'failed', reason: 'error', message: `Exception reading final status: ${msg}` };
-        }
+        // Step 3: Read terminal result including notes and artifacts via getChildSessionResult.
+        return deps.getChildSessionResult(handle, opts?.coordinatorSessionId);
       },
 
       listOpenPRs: async (workspace: string) => {

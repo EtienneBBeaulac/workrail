@@ -450,6 +450,7 @@ export function createCoordinatorDeps(
       opts?: {
         readonly coordinatorSessionId?: string;
         readonly timeoutMs?: number;
+        readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>;
       },
     ): Promise<ChildSessionResult> => {
       // Default timeout: 15 minutes. Hardcoded to mirror CHILD_SESSION_TIMEOUT_MS in
@@ -457,6 +458,7 @@ export function createCoordinatorDeps(
       const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
       const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const coordinatorSessionId = opts?.coordinatorSessionId;
+      const agentConfig = opts?.agentConfig;
 
       // Step 1: Spawn the child session (mirrors spawnSession logic).
       if (dispatch === null) {
@@ -508,6 +510,7 @@ export function createCoordinatorDeps(
           workflowId,
           goal,
           workspacePath: workspace,
+          ...(agentConfig !== undefined ? { agentConfig } : {}),
         };
         const r = startResult.value.response;
         const allocatedSession: import('../daemon/workflow-runner.js').AllocatedSession = {

@@ -238,6 +238,13 @@ export interface CoordinatorDeps {
     opts?: {
       readonly coordinatorSessionId?: string;
       readonly timeoutMs?: number;
+      /** Per-session agent loop budget. Distinct from timeoutMs (coordinator polling patience). */
+      readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>;
+      /**
+       * To pass assembled context to the child session, use manual composition:
+       * spawnSession -> awaitSessions -> getChildSessionResult.
+       * spawnAndAwait does not accept context directly.
+       */
     },
   ) => Promise<ChildSessionResult>;
 
