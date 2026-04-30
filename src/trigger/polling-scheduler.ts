@@ -852,9 +852,10 @@ async function countActiveSessions(sessionsDir: string): Promise<number> {
 
 /**
  * Maximum size of queue-poll.jsonl before rotation.
- * When the file reaches this size, it is renamed to queue-poll.jsonl.1
- * (overwriting any existing backup) and a fresh log file is started.
+ * When the file reaches this size, the .1 backup shifts to .2 (oldest deleted),
+ * the current file renames to .1, and a fresh log file is started.
  * WHY 10 MB: conservative cap holding ~5 weeks of history at 5-minute polling intervals.
+ * Two backup files gives ~10 weeks total retention.
  */
 const MAX_QUEUE_POLL_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
