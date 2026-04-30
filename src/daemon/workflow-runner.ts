@@ -731,46 +731,6 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Workflow
 export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck;
 
 /**
- * Registry mapping WorkRail session IDs to steer callbacks.
- *
- * Used by the HTTP steer endpoint (POST /api/v2/sessions/:sessionId/steer) to inject
- * text into a running daemon session's next agent turn. When a session starts, it
- * registers a callback; when it ends, it deregisters. The HTTP handler calls the
- * callback directly -- JavaScript's single-threaded event loop makes this safe without
- * any locking (the HTTP handler and the turn_end subscriber cannot interleave).
- *
- * WHY a named type alias (not a class): three trivial operations (set, delete, get/call)
- * don't warrant a class. The Map is the correct data structure; the alias names the
- * domain concept at all call sites.
- *
- * WHY (text: string) => void and not a richer type: the steer callback is a one-way
- * push into the pending steer queue. The HTTP layer handles response serialization;
- * the registry is purely a dispatch table. For v2, consider adding a signalId for
- * request/response correlation (see design-review-findings-mid-session-signaling.md).
- *
- * Daemon-only: this registry is only populated by daemon sessions. MCP-mode sessions
- * do not register callbacks -- the HTTP endpoint returns 404 for their session IDs.
- * TODO(v2): Extend to MCP-mode sessions if mid-step injection proves necessary.
- */
-export type SteerRegistry = Map<string, (text: string) => void>;
-
-/**
- * Registry mapping WorkRail session IDs to abort callbacks.
- * Each runWorkflow() call registers () => agent.abort() on session start
- * and deregisters on completion. The shutdown handler calls all callbacks
- * to abort every in-flight AgentLoop simultaneously.
- *
- * WHY alongside SteerRegistry: mirrors the same composition-root injection
- * pattern. Both are constructed in trigger-listener.ts (the composition root),
- * injected through TriggerRouter -> runWorkflow(), and returned on
- * TriggerListenerHandle so the shutdown handler can drain them.
- *
- * Daemon-only: only populated by daemon sessions. MCP-mode sessions do not
- * register callbacks.
- */
-export type AbortRegistry = Map<string, () => void>;
-
-/**
  * A session file found in DAEMON_SESSIONS_DIR during startup recovery.
  *
  * Each active runWorkflow() call writes a per-session file to DAEMON_SESSIONS_DIR.
@@ -2346,7 +2306,7 @@ export interface SessionState {
   /**
    * The WorkRail sess_* ID decoded from the continueToken after executeStartWorkflow.
    * Starts null; populated by parseContinueTokenOrFail(). Used to key DaemonRegistry,
-   * SteerRegistry, AbortRegistry, and event emission.
+   * ActiveSessionSet, and event emission.
    */
   workrailSessionId: string | null;
   /**
@@ -2604,7 +2564,24 @@ export interface PreAgentSession {
  */
 export type PreAgentSessionResult =
   | { readonly kind: 'ready'; readonly session: PreAgentSession }
-  | { readonly kind: 'complete'; readonly result: WorkflowRunResult };
+  | {
+      readonly kind: 'complete';
+      readonly result: WorkflowRunResult;
+      /**
+       * WorkRail session ID, decoded from the continueToken.
+       * Present when executeStartWorkflow succeeded and the token was decoded --
+       * needed by runWorkflow() to build a FinalizationContext for early-exit paths
+       * so finalizeSession() can unregister from DaemonRegistry correctly.
+       * Null for paths that exit before token decode (model error, start failure).
+       */
+      readonly workrailSessionId: string | null;
+      /**
+       * Session handle from ActiveSessionSet, if registered.
+       * Present only for the single-step completion path (registered before isComplete check).
+       * Null for all error paths (never registered).
+       */
+      readonly handle: SessionHandle | undefined;
+    };
 
 // ---------------------------------------------------------------------------
 // AgentReadySession -- fully constructed pre-loop state
@@ -2916,8 +2893,7 @@ export async function buildPreAgentSession(
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
-    return { kind: 'complete', result: { _tag: 'error', workflowId: trigger.workflowId, message, stopReason: 'error' } };
+    return { kind: 'complete', result: { _tag: 'error', workflowId: trigger.workflowId, message, stopReason: 'error' }, workrailSessionId: null, handle: undefined };
   }
 
   // ---- Session state ----
@@ -2946,7 +2922,6 @@ export async function buildPreAgentSession(
       { is_autonomous: 'true', workspacePath: trigger.workspacePath, triggerSource: 'daemon' },
     );
     if (startResult.isErr()) {
-      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         kind: 'complete',
         result: {
@@ -2955,6 +2930,8 @@ export async function buildPreAgentSession(
           message: `start_workflow failed: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
           stopReason: 'error',
         },
+        workrailSessionId: null,
+        handle: undefined,
       };
     }
     const r = startResult.value.response;
@@ -2985,7 +2962,6 @@ export async function buildPreAgentSession(
       workspacePath: trigger.workspacePath,
     });
     if (persistResult.kind === 'err') {
-      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         kind: 'complete',
         result: {
@@ -2994,6 +2970,8 @@ export async function buildPreAgentSession(
           message: `Initial token persist failed: ${persistResult.error.code} -- ${persistResult.error.message}`,
           stopReason: 'error',
         },
+        workrailSessionId: state.workrailSessionId,
+        handle: undefined,
       };
     }
   }
@@ -3037,7 +3015,6 @@ export async function buildPreAgentSession(
       if (worktreePersistResult.kind === 'err') {
         console.error(`[WorkflowRunner] Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
         try { await execFileAsync('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', sessionWorkspacePath]); } catch { /* best effort */ }
-        writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
         return {
           kind: 'complete',
           result: {
@@ -3046,6 +3023,8 @@ export async function buildPreAgentSession(
             message: `Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`,
             stopReason: 'error',
           },
+          workrailSessionId: state.workrailSessionId,
+          handle: undefined,
         };
       }
 
@@ -3053,10 +3032,11 @@ export async function buildPreAgentSession(
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : String(e);
       console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
-      writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);
       return {
         kind: 'complete',
         result: { _tag: 'error', workflowId: trigger.workflowId, message: `Worktree creation failed: ${errMsg}`, stopReason: 'error' },
+        workrailSessionId: state.workrailSessionId,
+        handle: undefined,
       };
     }
   }
@@ -3076,16 +3056,6 @@ export async function buildPreAgentSession(
   // WHY after registration: the session is observable in the console from this point.
   // A session that completes immediately should still appear as 'completed' not 'not found'.
   if (isComplete) {
-    const lifecycle = sidecardLifecycleFor('success', trigger.branchStrategy);
-    if (lifecycle.kind === 'delete_now') {
-      await fs.unlink(path.join(sessionsDir, `${sessionId}.json`)).catch(() => {});
-    }
-    emitter?.emit({ kind: 'session_completed', sessionId, workflowId: trigger.workflowId, outcome: 'success', detail: 'stop', ...withWorkrailSession(state.workrailSessionId) });
-    if (state.workrailSessionId !== null) {
-      daemonRegistry?.unregister(state.workrailSessionId, 'completed');
-      handle?.dispose();
-    }
-    writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'success', 0);
     return {
       kind: 'complete',
       result: {
@@ -3096,6 +3066,8 @@ export async function buildPreAgentSession(
         ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
         ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
       },
+      workrailSessionId: state.workrailSessionId,
+      handle,
     };
   }
 
@@ -3875,6 +3847,26 @@ export async function runWorkflow(
     source,
   );
   if (preResult.kind === 'complete') {
+    // Early-exit paths (model error, start failure, persist failure, worktree failure,
+    // instant single-step completion) all go through finalizeSession so stats, sidecar
+    // deletion, event emission, and registry cleanup happen in one place.
+    // conversationPath is not meaningful for early exits but FinalizationContext requires it;
+    // the path will never exist so the deletion attempt in finalizeSession is a silent no-op.
+    const earlyCtx: FinalizationContext = {
+      sessionId,
+      workrailSessionId: preResult.workrailSessionId,
+      startMs,
+      stepAdvanceCount: 0,
+      branchStrategy: trigger.branchStrategy,
+      statsDir,
+      sessionsDir,
+      conversationPath: path.join(sessionsDir, `${sessionId}-conversation.jsonl`),
+      emitter,
+      daemonRegistry,
+      workflowId: trigger.workflowId,
+    };
+    preResult.handle?.dispose();
+    await finalizeSession(preResult.result, earlyCtx);
     return preResult.result;
   }
 
