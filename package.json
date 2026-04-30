@@ -50,6 +50,7 @@
     "validate:workflow-discovery": "node scripts/validate-workflow-discovery.js",
     "validate:feature-coverage": "node scripts/validate-feature-coverage.js",
     "validate:authoring-coverage": "node scripts/validate-authoring-coverage.js",
+    "backlog": "npx ts-node --project scripts/tsconfig.json scripts/backlog-priority.ts",
     "precommit": "npm run validate:registry",
     "preinstall": "node -e \"const v=parseInt(process.versions.node.split('.')[0],10); if(v<20){console.error('WorkRail requires Node.js >=20. Current: '+process.versions.node+'\\nPlease upgrade: https://nodejs.org/'); process.exit(1);}\"",
     "dev:mcp": "pkill -f \"$(pwd)/dist/mcp-server.js\" 2>/dev/null; sleep 0.5; WORKRAIL_TRANSPORT=http WORKRAIL_ENABLE_SESSION_TOOLS=true node dist/mcp-server.js",

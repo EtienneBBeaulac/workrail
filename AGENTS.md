@@ -180,11 +180,13 @@ Do not duplicate information that already exists in a doc. Instead, point agents
 The planning system follows a graduation path: ideas -> roadmap -> tickets -> execution.
 
 - `docs/planning/README.md` -- how the planning system works, the layers, and rules of thumb
-- `docs/ideas/backlog.md` -- raw ideas and feature thoughts (low-friction inbox)
+- `docs/ideas/backlog.md` -- raw ideas and feature thoughts (low-friction inbox); each item has a priority score
 - `docs/roadmap/now-next-later.md` -- lightweight cross-cutting roadmap (what is active, what is next, what is later)
 - `docs/roadmap/open-work-inventory.md` -- consolidated list of all partial, unimplemented, and parked work with status and source doc references
 - `docs/tickets/next-up.md` -- groomed near-term tickets with acceptance criteria
 - `docs/roadmap/legacy-planning-status.md` -- status map for older planning docs
+
+**Backlog priority view:** run `npm run backlog` to see a sorted, filtered list of backlog items by score. Use `npm run backlog -- --min-score 11 --unblocked-only` to see the top unblocked items ready to work on. Run `npm run backlog -- --help` for all options. The script is at `scripts/backlog-priority.ts`.
 
 **Keep planning docs current.** These documents are living artifacts, not write-once references. Update them as work happens:
 - When starting a feature: mark the relevant item as active in `now-next-later.md` and `open-work-inventory.md`
