@@ -91,6 +91,8 @@ export interface PipelineContext {
   handoffArtifact?: HandoffArtifact;
   /** SHA produced by gitDeliveryStage on successful commit. Set for write-back. */
   commitSha?: string;
+  /** PR URL produced by gitDeliveryStage when autoOpenPR is true. Set for write-back. */
+  prUrl?: string;
 }
 
 /**
@@ -262,6 +264,7 @@ const gitDeliveryStage: DeliveryStage = {
           `[DeliveryPipeline] Delivery PR opened: triggerId=${trigger.id} url=${deliveryResult.url} sha=${deliveryResult.sha}`,
         );
         ctx.commitSha = deliveryResult.sha;
+        ctx.prUrl = deliveryResult.url;
         break;
       case 'skipped':
         console.log(
@@ -321,6 +324,7 @@ const recordCommitShasStage: DeliveryStage = {
     try {
       const sid = asSessionId(sessionId);
       const shas = [ctx.commitSha];
+      const prUrl = ctx.prUrl;
 
       await deps.gate.withHealthySessionLock(sid, (lock) =>
         deps.sessionStore.load(sid).andThen((truth) => {
@@ -342,7 +346,7 @@ const recordCommitShasStage: DeliveryStage = {
             kind: EVENT_KIND.DELIVERY_RECORDED,
             dedupeKey: `delivery-recorded:${sessionId}:${runId}`,
             scope: { runId },
-            data: { shas },
+            data: { shas, ...(prUrl ? { prUrl } : {}) },
             timestampMs: Date.now(),
           };
           return deps.sessionStore.append(lock, { events: [event], snapshotPins: [] });
