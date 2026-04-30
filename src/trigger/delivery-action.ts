@@ -128,7 +128,7 @@ export interface DeliveryFlags {
  */
 export type DeliveryResult =
   | { readonly _tag: 'committed'; readonly sha: string }
-  | { readonly _tag: 'pr_opened'; readonly url: string }
+  | { readonly _tag: 'pr_opened'; readonly url: string; readonly sha: string }
   | { readonly _tag: 'skipped'; readonly reason: string }
   | {
       readonly _tag: 'error';
@@ -742,7 +742,7 @@ export async function runDelivery(
   // Extract PR URL from gh output (typically the last line)
   const prUrl = prStdout.trim().split('\n').at(-1)?.trim() ?? '';
 
-  return { _tag: 'pr_opened', url: prUrl };
+  return { _tag: 'pr_opened', url: prUrl, sha };
 }
 
 // ---------------------------------------------------------------------------

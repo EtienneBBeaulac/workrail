@@ -1639,6 +1639,32 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 
 ## Workflow Library
 
+### Automatic root cause analysis when MR review finds issues post-coding (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+When an MR review session (run by a WorkTrain agent) finds issues in a coding session's output, WorkTrain should automatically investigate why the coding agent missed it and determine whether the workflow, the prompts, or the process can be improved.
+
+**Two distinct triggers:**
+
+1. **WorkTrain MR review finds something**: after a WorkTrain review session produces findings, the coordinator should automatically spawn an analysis session asking: why did the coding agent produce code with this issue? Was it a workflow gap (missing verification step, insufficient scrutiny at a phase), a prompt gap (the agent wasn't told to check this), or a context gap (the agent didn't have the information needed)?
+
+2. **Human finds something post-review**: when a human reviewer comments on or requests changes to a PR that already passed WorkTrain's review, this is doubly significant -- it means both the coding agent AND the review agent missed it. WorkTrain should automatically investigate why both missed it and whether the review workflow has a systematic blind spot.
+
+**Why this matters**: every finding that slips through is a signal about a workflow or process gap. Today that signal is lost. Capturing it systematically and feeding it back into workflow improvement closes the quality loop.
+
+**Things to hash out:**
+- How does WorkTrain detect that a human has commented on a PR post-review? This requires monitoring the PR for new review activity after WorkTrain's session completed -- either webhook events or polling.
+- What does the analysis session actually produce? A structured finding about the gap? A concrete proposal for workflow improvement? Both?
+- Who reviews the analysis output before it becomes a workflow change? Auto-applying workflow changes based on analysis is risky.
+- How do you distinguish "the workflow is fine but this was a genuinely hard edge case" from "the workflow has a systematic gap"? A single miss doesn't prove a gap; multiple misses of the same kind do.
+- Should the analysis result feed directly into `workflow-effectiveness-assessment`, or is it a separate concern?
+- For the "coding agent missed it" case: is the right fix to change the coding workflow, or to make the review workflow more adversarial?
+
+---
+
 ### Workflow previewer for compiled and runtime behavior
 
 **Status: idea** | Priority: medium

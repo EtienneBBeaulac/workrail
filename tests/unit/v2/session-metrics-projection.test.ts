@@ -368,4 +368,62 @@ describe('projectSessionMetricsV2', () => {
     expect(result.captureConfidence).toBe('none');
     expect(result.durationMs).toBeUndefined();
   });
+
+  it('9. delivery_recorded shas take precedence over agentCommitShas and metrics_commit_shas', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2, captureConfidence: 'none' }),
+      makeContextSetEvent({
+        runId: 'run_1',
+        eventIndex: 3,
+        context: { metrics_commit_shas: ['old_sha_from_agent'] },
+      }),
+      // delivery_recorded appended after run_completed -- highest precedence
+      {
+        v: 1,
+        eventId: 'evt_delivery',
+        eventIndex: 4,
+        sessionId: 'sess_1',
+        kind: 'delivery_recorded',
+        dedupeKey: 'delivery-recorded:sess_1:run_1',
+        scope: { runId: 'run_1' },
+        data: { shas: ['authoritative_sha_from_git'] },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    expect(result.agentCommitShas).toEqual(['authoritative_sha_from_git']);
+    expect(result.captureConfidence).toBe('high');
+  });
+
+  it('10. delivery_recorded for wrong runId is ignored', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2, captureConfidence: 'none' }),
+      {
+        v: 1,
+        eventId: 'evt_delivery',
+        eventIndex: 3,
+        sessionId: 'sess_1',
+        kind: 'delivery_recorded',
+        dedupeKey: 'delivery-recorded:sess_1:run_2',
+        scope: { runId: 'run_2' }, // different runId
+        data: { shas: ['unrelated_sha'] },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    expect(result.agentCommitShas).toEqual([]);
+    expect(result.captureConfidence).toBe('none');
+  });
 });

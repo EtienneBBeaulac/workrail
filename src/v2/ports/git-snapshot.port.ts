@@ -42,3 +42,16 @@ export interface GitSnapshotPortV2 {
     startSha: string | null,
   ): Promise<GitEndSnapshot>;
 }
+
+/**
+ * Null object implementation of GitSnapshotPortV2.
+ *
+ * WHY in the port file (not infra): null objects implement the port interface and
+ * must be importable from any layer including MCP handlers, which cannot import
+ * from v2/infra/ (composition root discipline). The port file is visible to all layers.
+ */
+export class NullGitSnapshotV2 implements GitSnapshotPortV2 {
+  async resolveEndSnapshot(): Promise<GitEndSnapshot> {
+    return { endSha: null, commitShas: [] };
+  }
+}

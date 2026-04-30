@@ -1,5 +1,6 @@
 import type { ToolContext, ToolResult, V2ToolContext } from '../../types.js';
 import { success, requireV2Context } from '../../types.js';
+import { NullGitSnapshotV2 } from '../../../v2/ports/git-snapshot.port.js';
 import type { V2ContinueWorkflowInput, V2StartWorkflowInput } from '../../v2/tools.js';
 import { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
 import {
@@ -242,7 +243,7 @@ export function executeContinueWorkflow(
               tokenCodecPorts,
               idFactory,
               sha256,
-              gitSnapshot: gitSnapshot ?? { resolveEndSnapshot: async () => ({ endSha: null, commitShas: [] }) },
+              gitSnapshot: gitSnapshot ?? new NullGitSnapshotV2(),
               aliasStore: tokenAliasStore,
               entropy,
               cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,

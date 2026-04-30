@@ -65,6 +65,7 @@ describe('event-kinds-closed-set: event kind discriminated union is exhaustive',
     'divergence_recorded',
     'decision_trace_appended',
     'run_completed',
+    'delivery_recorded',
   ] as const;
 
   interface TestCase {
@@ -212,6 +213,16 @@ describe('event-kinds-closed-set: event kind discriminated union is exhaustive',
         agentCommitShas: ['abc123'],
         captureConfidence: 'high',
         durationMs: 12345,
+      },
+      expectValid: true,
+    },
+
+    {
+      kind: 'delivery_recorded',
+      scope: { runId: 'run_123' },
+      data: {
+        shas: ['abc123def456'],
+        prUrl: 'https://github.com/owner/repo/pull/42',
       },
       expectValid: true,
     },
@@ -875,6 +886,7 @@ describe('schema-additive-within-version: event kind additions are locked', () =
       'divergence_recorded',
       'decision_trace_appended',
       'run_completed',
+      'delivery_recorded',
     ];
 
     currentKinds.forEach((kind) => {

@@ -303,6 +303,7 @@ async function maybeRunDelivery(
   trigger: TriggerDefinition,
   result: WorkflowRunResult,
   execFn: ExecFn,
+  deps?: import('./delivery-pipeline.js').DeliveryPipelineDeps,
 ): Promise<void> {
   // Only deliver on success with autoCommit enabled
   if (result._tag !== 'success') return;
@@ -318,7 +319,7 @@ async function maybeRunDelivery(
   }
   if (trigger.autoCommit !== true) return;
 
-  await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, trigger, execFn, triggerId);
+  await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, trigger, execFn, triggerId, deps);
 }
 
 
@@ -792,7 +793,10 @@ export class TriggerRouter {
       // Post-workflow delivery: runs after the workflow result is logged.
       // Best-effort -- errors are logged and discarded, never change the workflow result.
       // Use originalResult (not result) so callbackUrl failure does not skip autoCommit.
-      await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn);
+      const deliveryDeps = this.ctx.v2
+        ? { gate: this.ctx.v2.gate, sessionStore: this.ctx.v2.sessionStore, idFactory: this.ctx.v2.idFactory }
+        : undefined;
+      await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn, deliveryDeps);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
