@@ -2261,6 +2261,55 @@ export function buildAgentClient(
 }
 
 // ---------------------------------------------------------------------------
+// TerminalSignal: typed terminal state replacing dual nullable fields
+// ---------------------------------------------------------------------------
+
+/**
+ * The terminal signal that ended a workflow session.
+ *
+ * WHY a discriminated union (not stuckReason + timeoutReason separately):
+ * Two independent nullable fields that must never both be set is a textbook
+ * "illegal state representable" violation. This union makes stuck AND timeout
+ * simultaneously structurally impossible -- only one terminal signal can exist.
+ *
+ * WHY first-writer-wins via setTerminalSignal(): invariant 1.4 (stuck > timeout
+ * priority) is enforced structurally rather than by convention. The first caller
+ * to set the signal wins; all later attempts are silent no-ops. This replaces
+ * scattered `if (state.stuckReason === null)` guards.
+ */
+export type TerminalSignal =
+  | { readonly kind: 'stuck'; readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall' }
+  | { readonly kind: 'timeout'; readonly reason: 'wall_clock' | 'max_turns' };
+
+/**
+ * Set the terminal signal for a session (first-writer-wins).
+ *
+ * WHY first-writer-wins: invariant 1.4 requires stuck to take priority over
+ * timeout. Rather than requiring every mutation site to check the current value,
+ * this setter enforces the invariant in one place. The first signal set is the
+ * authoritative terminal reason; all subsequent calls are no-ops.
+ *
+ * WHY returns boolean: callers that want to abort only when they were the first
+ * writer can branch on the return value instead of reading back the field.
+ * Avoids the fragile `state.terminalSignal?.reason === X` pattern at call sites.
+ *
+ * WHY a plain function (not a class method): SessionState is a plain object.
+ * A free function keeps the mutation surface explicit without introducing a
+ * class wrapper. The convention is: only call setTerminalSignal() -- never
+ * write state.terminalSignal directly.
+ *
+ * @returns true if the signal was set (this call was the first writer), false if
+ *   a prior signal already existed (this call was a no-op).
+ */
+export function setTerminalSignal(state: SessionState, signal: TerminalSignal): boolean {
+  if (state.terminalSignal === null) {
+    state.terminalSignal = signal;
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Session state: explicit mutable record
 // ---------------------------------------------------------------------------
 
@@ -2318,22 +2367,17 @@ export interface SessionState {
    */
   pendingSteerParts: string[];
   /**
-   * Which stuck heuristic fired first, or null if none has fired.
-   * Set synchronously before agent.abort() so the result path can read it.
-   * First writer wins -- subsequent signals are ignored.
+   * Terminal signal for this session, or null if none has fired.
    *
-   * WHY 'stall' is included: the stall timer fires outside the turn_end subscriber
-   * (it fires when no LLM call starts within stallTimeoutSeconds). The timer callback
-   * sets this field before calling agent.abort() so buildSessionResult() can produce
-   * WorkflowRunStuck { reason: 'stall' } rather than a generic error.
+   * WHY a single discriminated union (not separate stuckReason + timeoutReason):
+   * Two independent nullable fields encoded invariant 1.4 (stuck > timeout) via
+   * convention. This field makes the illegal state (stuck AND timeout simultaneously)
+   * structurally impossible. Only one terminal signal can exist per session.
+   *
+   * INVARIANT: write only through setTerminalSignal() -- never assign directly.
+   * setTerminalSignal() is first-writer-wins; subsequent calls are silent no-ops.
    */
-  stuckReason: 'repeated_tool_call' | 'no_progress' | 'stall' | null;
-  /**
-   * Which timeout limit fired first, or null if none has fired.
-   * Set synchronously before agent.abort() so the result path can read it.
-   * First writer wins -- subsequent triggers are ignored.
-   */
-  timeoutReason: 'wall_clock' | 'max_turns' | null;
+  terminalSignal: TerminalSignal | null;
   /** Number of complete LLM response turns since the agent loop started. */
   turnCount: number;
 }
@@ -2355,8 +2399,7 @@ export function createSessionState(initialToken: string): SessionState {
     lastNToolCalls: [],
     issueSummaries: [],
     pendingSteerParts: [],
-    stuckReason: null,
-    timeoutReason: null,
+    terminalSignal: null,
     turnCount: 0,
   };
 }
@@ -2418,7 +2461,7 @@ export type StuckSignal =
 export function evaluateStuckSignals(state: Readonly<SessionState>, config: StuckConfig): StuckSignal | null {
   // Signal: max_turns exceeded -- this turn is the termination turn.
   // WHY evaluated first: the subscriber returns early on this signal (no steer injection).
-  if (config.maxTurns > 0 && state.turnCount >= config.maxTurns && state.timeoutReason === null) {
+  if (config.maxTurns > 0 && state.turnCount >= config.maxTurns && state.terminalSignal === null) {
     return { kind: 'max_turns_exceeded' };
   }
 
@@ -2452,8 +2495,8 @@ export function evaluateStuckSignals(state: Readonly<SessionState>, config: Stuc
   // Signal 3: wall-clock timeout already firing (session is aborting).
   // WHY observational: the abort was triggered by the timeout Promise rejection,
   // not by this signal. Signal 3 is a last-chance notification, not a new abort.
-  if (state.timeoutReason !== null) {
-    return { kind: 'timeout_imminent', timeoutReason: state.timeoutReason };
+  if (state.terminalSignal?.kind === 'timeout') {
+    return { kind: 'timeout_imminent', timeoutReason: state.terminalSignal.reason };
   }
 
   return null;
@@ -3225,26 +3268,28 @@ export function buildTurnEndSubscriber(
 
     if (signal !== null) {
       if (signal.kind === 'max_turns_exceeded') {
-        ctx.state.timeoutReason = 'max_turns';
+        setTerminalSignal(ctx.state, { kind: 'timeout', reason: 'max_turns' });
         ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'timeout_imminent', detail: 'Max-turn limit reached', ...withWorkrailSession(ctx.state.workrailSessionId) });
         ctx.agent.abort();
         return;
       } else if (signal.kind === 'repeated_tool_call') {
         ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'repeated_tool_call', detail: `Same tool+args called ${ctx.stuckRepeatThreshold} times: ${signal.toolName}`, toolName: signal.toolName, argsSummary: signal.argsSummary, ...withWorkrailSession(ctx.state.workrailSessionId) });
         void writeStuckOutboxEntry({ workflowId: ctx.workflowId, reason: 'repeated_tool_call', ...(ctx.state.issueSummaries.length > 0 ? { issueSummaries: [...ctx.state.issueSummaries] } : {}) });
-        if (ctx.stuckConfig.stuckAbortPolicy !== 'notify_only' && ctx.state.stuckReason === null && ctx.state.timeoutReason === null) {
-          ctx.state.stuckReason = 'repeated_tool_call';
-          ctx.agent.abort();
-          return;
+        if (ctx.stuckConfig.stuckAbortPolicy !== 'notify_only') {
+          if (setTerminalSignal(ctx.state, { kind: 'stuck', reason: 'repeated_tool_call' })) {
+            ctx.agent.abort();
+            return;
+          }
         }
       } else if (signal.kind === 'no_progress') {
         ctx.emitter?.emit({ kind: 'agent_stuck', sessionId: ctx.sessionId, reason: 'no_progress', detail: `${signal.turnCount} turns used, 0 step advances (${signal.maxTurns} turn limit)`, ...withWorkrailSession(ctx.state.workrailSessionId) });
         if (ctx.stuckConfig.noProgressAbortEnabled) {
           void writeStuckOutboxEntry({ workflowId: ctx.workflowId, reason: 'no_progress', ...(ctx.state.issueSummaries.length > 0 ? { issueSummaries: [...ctx.state.issueSummaries] } : {}) });
-          if (ctx.stuckConfig.stuckAbortPolicy !== 'notify_only' && ctx.state.stuckReason === null && ctx.state.timeoutReason === null) {
-            ctx.state.stuckReason = 'no_progress';
-            ctx.agent.abort();
-            return;
+          if (ctx.stuckConfig.stuckAbortPolicy !== 'notify_only') {
+            if (setTerminalSignal(ctx.state, { kind: 'stuck', reason: 'no_progress' })) {
+              ctx.agent.abort();
+              return;
+            }
           }
         }
       } else if (signal.kind === 'timeout_imminent') {
@@ -3302,11 +3347,13 @@ export function buildAgentCallbacks(
       emitter?.emit({ kind: 'tool_call_failed', sessionId, toolName, durationMs, errorMessage, ...withWorkrailSession(state.workrailSessionId) });
     },
     onStallDetected: () => {
-      // WHY set stuckReason before emitting: buildSessionResult() reads stuckReason
+      // WHY setTerminalSignal before emitting: buildSessionResult() reads terminalSignal
       // after the loop exits. Setting it here (in the timer callback, synchronously
       // before abort() resolves) ensures the correct reason is recorded even if the
       // abort path completes before the next turn_end fires.
-      state.stuckReason = 'stall';
+      // WHY setTerminalSignal (not direct write): first-writer-wins -- if repeated_tool_call
+      // or no_progress already fired, we preserve the prior signal rather than overwriting it.
+      setTerminalSignal(state, { kind: 'stuck', reason: 'stall' });
       emitter?.emit({
         kind: 'agent_stuck',
         sessionId,
@@ -3349,29 +3396,35 @@ export function buildSessionResult(
   sessionId: string,
   sessionWorktreePath: string | undefined,
 ): WorkflowRunResult {
-  // Stuck takes priority over timeout (invariant 1.4).
-  if (state.stuckReason !== null) {
-    return {
-      _tag: 'stuck',
-      workflowId: trigger.workflowId,
-      reason: state.stuckReason,
-      message: `Session aborted: stuck heuristic fired (${state.stuckReason})`,
-      stopReason: 'aborted',
-      ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
-    };
-  }
-
-  if (state.timeoutReason !== null) {
-    const limitDescription = state.timeoutReason === 'wall_clock'
-      ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
-      : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
-    return {
-      _tag: 'timeout',
-      workflowId: trigger.workflowId,
-      reason: state.timeoutReason,
-      message: `Workflow ${state.timeoutReason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
-      stopReason: 'aborted',
-    };
+  // Terminal signal: stuck takes priority over timeout (invariant 1.4 -- structurally
+  // enforced by setTerminalSignal's first-writer-wins; this switch handles the result).
+  if (state.terminalSignal !== null) {
+    const signal = state.terminalSignal;
+    if (signal.kind === 'stuck') {
+      return {
+        _tag: 'stuck',
+        workflowId: trigger.workflowId,
+        reason: signal.reason,
+        message: `Session aborted: stuck heuristic fired (${signal.reason})`,
+        stopReason: 'aborted',
+        ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
+      };
+    }
+    if (signal.kind === 'timeout') {
+      const limitDescription = signal.reason === 'wall_clock'
+        ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
+        : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
+      return {
+        _tag: 'timeout',
+        workflowId: trigger.workflowId,
+        reason: signal.reason,
+        message: `Workflow ${signal.reason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
+        stopReason: 'aborted',
+      };
+    }
+    // WHY assertNever: if TerminalSignal gains a new kind variant, the compiler
+    // forces this function to handle it before the code will compile.
+    return assertNever(signal);
   }
 
   if (stopReason === 'error' || errorMessage) {
@@ -3673,9 +3726,7 @@ async function runAgentLoop(
     // agent.abort() is idempotent -- AgentLoop sets activeRun to null after abort.
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(() => {
-        if (state.timeoutReason === null) {
-          state.timeoutReason = 'wall_clock';
-        }
+        setTerminalSignal(state, { kind: 'timeout', reason: 'wall_clock' });
         reject(new Error('Workflow timed out'));
       }, sessionTimeoutMs);
     });
