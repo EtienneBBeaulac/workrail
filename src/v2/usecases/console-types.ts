@@ -48,6 +48,12 @@ export interface ConsoleSessionSummary {
   /** True when the session was started by the WorkRail autonomous daemon.
    * Durable: derived from context_set event with is_autonomous: 'true'. */
   readonly isAutonomous: boolean;
+  /**
+   * Whether this session was started by the WorkTrain daemon or a human via MCP.
+   * Always non-optional at this layer. Old sessions without the field in their
+   * run_started event are backfilled: 'daemon' when isAutonomous is true, 'mcp' otherwise.
+   */
+  readonly triggerSource: 'daemon' | 'mcp';
   /** True when the daemon event log for today contains a session_started event for this
    * session but no session_completed event. Derived from disk -- survives console restarts.
    * False on any read error (safe default). */

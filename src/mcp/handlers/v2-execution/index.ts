@@ -84,7 +84,7 @@ export async function handleV2StartWorkflow(
   const rememberedRootFailure = await rememberExplicitWorkspaceRoot(input.workspacePath, guard.ctx.v2.rememberedRootsStore);
   if (rememberedRootFailure) return rememberedRootFailure;
 
-  return executeStartWorkflow(input, guard.ctx).match(
+  return executeStartWorkflow(input, guard.ctx, { triggerSource: 'mcp' }).match(
     (result) => success(attachV2ExecutionRenderMetadata({
       response: result.response,
       lifecycle: 'start',

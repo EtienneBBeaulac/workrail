@@ -1042,6 +1042,20 @@ function projectSessionSummary(
     );
   })();
 
+  // Derive triggerSource from run_started events. Always non-optional at this layer:
+  // old sessions without the field are backfilled using isAutonomous as a proxy.
+  const triggerSource = ((): 'daemon' | 'mcp' => {
+    if (sortedEventsRes.isOk()) {
+      for (const e of sortedEventsRes.value) {
+        if (e.kind === 'run_started' && e.data.triggerSource !== undefined) {
+          return e.data.triggerSource;
+        }
+      }
+    }
+    // Backfill: sessions predating this field -- daemon sessions had is_autonomous: 'true'.
+    return isAutonomous ? 'daemon' : 'mcp';
+  })();
+
   const metrics = projectSessionMetricsV2(events);
 
   const runs = Object.values(dag.runsById);
@@ -1067,6 +1081,7 @@ function projectSessionSummary(
       repoRoot,
       lastModifiedMs,
       isAutonomous,
+      triggerSource,
       isLive,
       parentSessionId,
       metrics,
@@ -1124,6 +1139,7 @@ function projectSessionSummary(
     repoRoot,
     lastModifiedMs,
     isAutonomous,
+    triggerSource,
     isLive,
     parentSessionId,
     metrics,

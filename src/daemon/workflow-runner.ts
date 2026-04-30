@@ -2856,7 +2856,7 @@ export async function buildPreAgentSession(
     const startResult = await executeStartWorkflow(
       { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
       ctx,
-      { is_autonomous: 'true', workspacePath: trigger.workspacePath },
+      { is_autonomous: 'true', workspacePath: trigger.workspacePath, triggerSource: 'daemon' },
     );
     if (startResult.isErr()) {
       writeExecutionStats(statsDir, sessionId, trigger.workflowId, startMs, 'error', 0);

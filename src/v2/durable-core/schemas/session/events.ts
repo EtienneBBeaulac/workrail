@@ -68,6 +68,14 @@ const RunStartedDataV1Schema = z.object({
   workflowHash: workflowHashSchema,
   workflowSourceKind: WorkflowSourceKindSchema,
   workflowSourceRef: z.string().min(1),
+  /**
+   * Whether this session was started by the WorkTrain daemon or a human via MCP.
+   * Optional for backward compatibility with sessions created before this field existed.
+   * WHY: the only reliable way to distinguish daemon-initiated sessions from human-initiated
+   * ones is at start time. Every session-level metric (ROI, cost attribution, success rate
+   * by source) is ambiguous without this. Durable in the event log and queryable forever.
+   */
+  triggerSource: z.enum(['daemon', 'mcp']).optional(),
 });
 
 /**
