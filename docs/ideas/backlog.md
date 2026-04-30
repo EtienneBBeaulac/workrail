@@ -2411,6 +2411,32 @@ A workflow that aggregates activity across git history, GitLab/GitHub MRs and re
 
 ## Platform Vision (longer-term)
 
+### Self-restart after shipping changes to itself (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: yes (needs self-improvement loop operational)
+
+If WorkTrain can build and ship changes to itself autonomously, the natural next step is that it also restarts itself with those changes. Today, after a WorkTrain daemon session ships a change to the workrail repo, the daemon continues running the old binary. The operator has to manually run `worktrain daemon --stop && worktrain daemon --start` to pick up the new version. In a self-improving system running overnight, this is a human intervention point that should not exist.
+
+**What this requires:**
+1. After a session that modifies WorkTrain itself merges to main, the daemon detects it was running on this repo
+2. The daemon rebuilds (`npm run build`) and restarts itself cleanly -- completing any in-flight sessions first, then performing a graceful restart with the new binary
+3. After restart, the daemon logs what changed so the operator can review
+
+This is related to the "daemon binary stale after rebuild" P0 gap, but goes further: not just warning about staleness, but actually handling the upgrade cycle automatically.
+
+**Why this matters for the self-improvement loop:** if WorkTrain ships 5 improvements to itself in a day but the operator has to manually restart it 5 times, the loop isn't truly autonomous. Full autonomy requires the restart to be part of the pipeline.
+
+**Things to hash out:**
+- What triggers the restart check? After every merge to main that touches `src/`? After a successful `npm run build`? On a heartbeat that detects binary staleness?
+- How does the daemon ensure in-flight sessions complete before restarting? Does it drain the active session set or hard-stop?
+- What is the rollback path if the new binary fails to start (startup crash, broken build)? The daemon needs to detect this and either roll back or alert the operator.
+- Should the restart happen immediately or at a configurable "quiet period" (e.g. 2am) to avoid disrupting active sessions during the day?
+- Self-modification is inherently risky -- a buggy change to the daemon's restart logic could make the daemon unable to restart at all. What safeguards prevent this?
+
+---
+
 ### WorkTrain as a first-class project participant: ideal backlog and planning capabilities (Apr 30, 2026)
 
 **Status: idea** | Priority: high (long-term)
