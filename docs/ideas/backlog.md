@@ -24,76 +24,23 @@ See the scoring rubric in the "Agent-assisted backlog prioritization" entry (Wor
 
 **Score: 13** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
 
-The `wr.coding-task` workflow's implementation loop (up to 20 passes) does not exit when all slices are complete. The `wr.loop_control` stop artifact is emitted correctly but the loop decision gate never fires because `currentSlice.name` remains `[unset]` -- the engine is not tracking which slice is current across passes. The loop ran 8 passes before eventually exiting on its own. 
+The `wr.coding-task` workflow's implementation loop (up to 20 passes) does not exit when a `wr.loop_control` stop artifact is emitted. The loop ran 8 passes before stopping -- not because of the artifact, but because it exhausted its slice array.
 
-This means: (1) every coding task session wastes passes doing no work, (2) the agent cannot confidently signal completion, (3) total session turn count is inflated, increasing cost and timeout risk.
+**Root cause (confirmed by investigation)**: `phase-6-implement-slices` is a `forEach` loop, not a `while`/`until` loop with `artifact_contract`. The `wr.loop_control` stop artifact mechanism **only works for `while`/`until` loops** that declare `conditionSource.kind = artifact_contract`. For `forEach` loops, `shouldEnterIteration` checks only `iteration < slices.length` -- artifacts passed to `interpreter.next()` are never consulted. Confirmed in `workflow-interpreter.ts:254-273` and verified by a direct test (3-slice forEach with stop artifact on every call ran all 3 iterations to completion).
 
-**Root cause**: the `slices` array is stored in context but the engine does not advance a `currentSliceIndex` counter -- or the counter is not being surfaced to the step as `currentSlice.name`. The `wr.loop_control` artifact is evaluated at the loop decision step, but that step only fires when the engine recognizes it's at the end of a pass. With `currentSlice.name = [unset]`, the recognition fails.
+**Why the loop stopped at pass 8**: the loop exhausted its `slices` array which had exactly 8 elements. `metrics_outcome = success` appearing at pass 8 was a coincidence.
 
-**Things to hash out:**
-- Is the bug in the workflow JSON (slices not wired to currentSlice tracking), in the engine (loop_control artifact evaluation), or in the way context variables are threaded between passes?
-- Does the issue affect all loops with `wr.loop_control`, or only the implementation loop in `wr.coding-task` specifically?
-- Is there a workaround agents can use today (e.g. setting a specific context variable that the loop decision gate does check)?
-- Should the loop decision gate fire after every pass regardless of `currentSlice.name` state, or only when the slice tracking is valid?
+**`currentSlice.name` showing `[unset]`**: secondary issue. `buildLoopRenderContext` in `prompt-renderer.ts:190-197` requires `sessionContext['slices']` to be an array at render time. If the `slices` context had not yet been projected into `sessionContext`, or if the slice objects lacked a `name` property, templates render as `[unset: currentSlice.name]`.
 
----
-
-### Intent gap: agent builds what it understood, not what the user meant (Apr 30, 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
-
-This is one of the most fundamental failure modes for autonomous WorkTrain sessions and a blocker for production viability. An agent receives a task description, forms an interpretation of what's needed, and executes flawlessly against that interpretation -- but the interpretation was wrong. The code is correct for what the agent thought was asked. It is not what the user actually wanted. The user only discovers this after reviewing the PR, sometimes after it has already merged.
-
-This is categorically different from bugs (the agent implemented the right thing incorrectly) and scope creep (the agent did extra things). This is the agent solving the wrong problem well.
-
-**Why it's hard:** the agent's interpretation feels reasonable from the task description. The user's description was ambiguous, underspecified, or relied on context the agent didn't have. Neither party made an obvious mistake -- the gap is structural.
-
-**Known manifestations:**
-- Agent fixes the symptom instead of the root cause because the task description named the symptom
-- Agent implements feature X when the user wanted feature Y that happens to use X
-- Agent interprets "add support for Z" as extending the existing system when the user wanted a new abstraction
-- Agent makes a local fix when the user wanted an architectural change
-- Agent's implementation is technically correct but violates unstated invariants the user assumed were obvious
+**Three fix directions:**
+1. **Authoring fix**: change `phase-6-implement-slices` from `forEach` to a `while` with `artifact_contract` and add an explicit exit-decision step -- agents can then signal completion via `wr.loop_control`
+2. **Engine feature**: add early-exit support to `forEach` loops when a `wr.loop_control` stop artifact is emitted
+3. **Prompt fix**: if forEach-exhausts-all-slices is the intent, remove the instruction that tells the agent to emit `wr.loop_control` artifacts
 
 **Things to hash out:**
-- Where in the workflow should intent validation happen? Before the agent writes any code (Phase 0), the agent should be required to state its interpretation back in plain English. The user (or a validation step) confirms or corrects it before implementation begins. But this requires a human confirmation gate -- does that break the autonomous use case?
-- For fully autonomous sessions (no human in the loop), is there a way to detect a likely intent gap before the agent commits? Signals might include: the task description is short or vague, the agent's interpretation involves a significant architectural decision, the agent is about to delete or restructure existing code.
-- What is the right escalation path when the agent detects ambiguity itself? Currently `report_issue` handles task obstacles; there is no structured way for the agent to surface "I am not sure I understood this correctly" before acting.
-- The `wr.shaping` workflow exists precisely to close this gap for planned features -- the issue is urgent/reactive tasks that skip shaping entirely. How do we get intent validation without requiring a full shaping pass for every small task?
-- Can historical session notes help? If previous sessions have established what "X" means in this codebase (design decisions, naming conventions, architectural invariants), injecting that context before Phase 0 reduces the gap. This points toward the knowledge graph and persistent project memory as partial solutions.
-- Should WorkTrain have an explicit "confirm interpretation" step as a configurable option per trigger? A `requireIntentConfirmation: true` flag on the trigger that blocks autonomous start until the operator approves the agent's stated interpretation via the console or CLI.
-
----
-
-### Scope rationalization: agent silently accepts collateral damage (Apr 30, 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
-
-When an agent makes a change that breaks or degrades something outside its immediate task scope, it often recognizes the impact but rationalizes it as acceptable because "that's not in scope for this task." The reasoning feels locally valid -- the agent was asked to do X, X is done correctly, the side effect on Y is noted but deprioritized. This produces a PR that is correct for X and silently broken for Y.
-
-This is exactly what happened with the commit SHA change: setting `agentCommitShas` to always empty correctly fixes the faked SHA bug, but degrades the console's SHA display for all sessions going forward. A scoped agent might note "this makes the console show empty SHAs" and proceed anyway because fixing the console display is "a separate ticket."
-
-**Why this is insidious:** the agent's reasoning is locally coherent. It did not make a mistake within its scope. The problem is that autonomous agents operating in isolation cannot always see when a locally correct change has unacceptable global consequences -- and even when they can see it, they lack a good mechanism to stop, escalate, and surface the impact rather than proceeding.
-
-**Known manifestations:**
-- Agent correctly fixes a bug but the fix changes a public API contract, breaking callers it didn't check
-- Agent refactors a module for clarity but silently changes behavior in an edge case it considered minor
-- Agent adds a feature but disables or degrades an existing feature as a side effect, judging the tradeoff acceptable on its own
-- Agent's change passes all tests but the tests don't cover the degraded behavior
-- Agent notes a downstream impact in session notes but does not block, escalate, or file a follow-up ticket
-- **Agent reframes a bug as "a key tradeoff to document."** This is a specific and common failure: the agent detects a real problem it caused, correctly identifies that it's a problem, and instead of filing it as a bug or escalating, reclassifies it as an "accepted design decision" or "known limitation" in documentation. The bug is real. Documenting it is not fixing it. This pattern actively buries bugs.
-
-**Things to hash out:**
-- How does an agent distinguish "acceptable tradeoff within scope" from "collateral damage that must be escalated"? The line is fuzzy and context-dependent. A hard rule ("never degrade existing behavior") is too strict for refactors; a soft heuristic ("if it affects other code, escalate") is too broad.
-- Should the agent be required to enumerate side effects as part of the verification phase, and should the coordinator review that list before merging? This is the proof record concept applied to impact assessment rather than just correctness.
-- What is the right mechanism for the agent to pause and escalate? Currently `report_issue` is for task obstacles; `signal_coordinator` is for coordinator events. There is no structured "I need a decision on whether this tradeoff is acceptable" signal.
-- Test coverage is the obvious mitigation -- if Y has tests, the agent's change would fail them. But not everything has tests, and agents can rationalize skipping test runs for "unrelated" paths.
-- Is there a way to detect likely collateral damage statically before the agent acts? A pre-commit check that measures what changed beyond the declared `filesChanged` list, for example, could surface unexpected side effects automatically.
-- The knowledge graph and architectural invariant rules (pattern and architecture validation) are partial solutions -- they can flag when a change violates a declared constraint. But they only work for constraints that have been explicitly codified.
+- Which fix direction is correct depends on the intended behavior: should the agent be able to stop the loop early (fix 1 or 2), or should it always run all slices (fix 3)?
+- If fix 2 (engine feature), does early-exit from forEach affect the `currentSlice` render context in a way that could cause confusion?
+- Does fix 1 require re-authoring the workflow through `wr.workflow-for-workflows`, or is it a targeted JSON edit?
 
 ---
 
@@ -177,8 +124,96 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Intent gap: agent builds what it understood, not what the user meant (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+This is one of the most fundamental failure modes for autonomous WorkTrain sessions and a blocker for production viability. An agent receives a task description, forms an interpretation of what's needed, and executes flawlessly against that interpretation -- but the interpretation was wrong. The code is correct for what the agent thought was asked. It is not what the user actually wanted. The user only discovers this after reviewing the PR, sometimes after it has already merged.
+
+This is categorically different from bugs (the agent implemented the right thing incorrectly) and scope creep (the agent did extra things). This is the agent solving the wrong problem well.
+
+**Why it's hard:** the agent's interpretation feels reasonable from the task description. The user's description was ambiguous, underspecified, or relied on context the agent didn't have. Neither party made an obvious mistake -- the gap is structural.
+
+**Known manifestations:**
+- Agent fixes the symptom instead of the root cause because the task description named the symptom
+- Agent implements feature X when the user wanted feature Y that happens to use X
+- Agent interprets "add support for Z" as extending the existing system when the user wanted a new abstraction
+- Agent makes a local fix when the user wanted an architectural change
+- Agent's implementation is technically correct but violates unstated invariants the user assumed were obvious
+
+**Things to hash out:**
+- Where in the workflow should intent validation happen? Before the agent writes any code (Phase 0), the agent should be required to state its interpretation back in plain English. The user (or a validation step) confirms or corrects it before implementation begins. But this requires a human confirmation gate -- does that break the autonomous use case?
+- For fully autonomous sessions (no human in the loop), is there a way to detect a likely intent gap before the agent commits? Signals might include: the task description is short or vague, the agent's interpretation involves a significant architectural decision, the agent is about to delete or restructure existing code.
+- What is the right escalation path when the agent detects ambiguity itself? Currently `report_issue` handles task obstacles; there is no structured way for the agent to surface "I am not sure I understood this correctly" before acting.
+- The `wr.shaping` workflow exists precisely to close this gap for planned features -- the issue is urgent/reactive tasks that skip shaping entirely. How do we get intent validation without requiring a full shaping pass for every small task?
+- Can historical session notes help? If previous sessions have established what "X" means in this codebase (design decisions, naming conventions, architectural invariants), injecting that context before Phase 0 reduces the gap. This points toward the knowledge graph and persistent project memory as partial solutions.
+- Should WorkTrain have an explicit "confirm interpretation" step as a configurable option per trigger? A `requireIntentConfirmation: true` flag on the trigger that blocks autonomous start until the operator approves the agent's stated interpretation via the console or CLI.
+
+---
+
+### Scope rationalization: agent silently accepts collateral damage (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+When an agent makes a change that breaks or degrades something outside its immediate task scope, it often recognizes the impact but rationalizes it as acceptable because "that's not in scope for this task." The reasoning feels locally valid -- the agent was asked to do X, X is done correctly, the side effect on Y is noted but deprioritized. This produces a PR that is correct for X and silently broken for Y.
+
+This is exactly what happened with the commit SHA change: setting `agentCommitShas` to always empty correctly fixes the faked SHA bug, but degrades the console's SHA display for all sessions going forward. A scoped agent might note "this makes the console show empty SHAs" and proceed anyway because fixing the console display is "a separate ticket."
+
+**Why this is insidious:** the agent's reasoning is locally coherent. It did not make a mistake within its scope. The problem is that autonomous agents operating in isolation cannot always see when a locally correct change has unacceptable global consequences -- and even when they can see it, they lack a good mechanism to stop, escalate, and surface the impact rather than proceeding.
+
+**Known manifestations:**
+- Agent correctly fixes a bug but the fix changes a public API contract, breaking callers it didn't check
+- Agent refactors a module for clarity but silently changes behavior in an edge case it considered minor
+- Agent adds a feature but disables or degrades an existing feature as a side effect, judging the tradeoff acceptable on its own
+- Agent's change passes all tests but the tests don't cover the degraded behavior
+- Agent notes a downstream impact in session notes but does not block, escalate, or file a follow-up ticket
+- **Agent reframes a bug as "a key tradeoff to document."** This is a specific and common failure: the agent detects a real problem it caused, correctly identifies that it's a problem, and instead of filing it as a bug or escalating, reclassifies it as an "accepted design decision" or "known limitation" in documentation. The bug is real. Documenting it is not fixing it. This pattern actively buries bugs.
+
+**Things to hash out:**
+- How does an agent distinguish "acceptable tradeoff within scope" from "collateral damage that must be escalated"? The line is fuzzy and context-dependent. A hard rule ("never degrade existing behavior") is too strict for refactors; a soft heuristic ("if it affects other code, escalate") is too broad.
+- Should the agent be required to enumerate side effects as part of the verification phase, and should the coordinator review that list before merging? This is the proof record concept applied to impact assessment rather than just correctness.
+- What is the right mechanism for the agent to pause and escalate? Currently `report_issue` is for task obstacles; `signal_coordinator` is for coordinator events. There is no structured "I need a decision on whether this tradeoff is acceptable" signal.
+- Test coverage is the obvious mitigation -- if Y has tests, the agent's change would fail them. But not everything has tests, and agents can rationalize skipping test runs for "unrelated" paths.
+- Is there a way to detect likely collateral damage statically before the agent acts? A pre-commit check that measures what changed beyond the declared `filesChanged` list, for example, could surface unexpected side effects automatically.
+- The knowledge graph and architectural invariant rules (pattern and architecture validation) are partial solutions -- they can flag when a change violates a declared constraint. But they only work for constraints that have been explicitly codified.
+
+---
+
 The autonomous workflow runner (`worktrain daemon`). Completely separate from the MCP server -- calls the engine directly in-process.
 
+
+### Subagent context package: project vision and task goal baked into spawning (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+When WorkTrain spawns a subagent today, the operator (or the main agent) must manually write out all context: what the project is, what WorkTrain's vision is, what the task is trying to accomplish, what documents exist, what the end goal is. Subagents know nothing -- no conversation history, no project familiarity, no awareness of the vision. If the context briefing is thin or missing, the subagent works in the dark and produces generic output.
+
+Two things need to be baked into the spawning infrastructure:
+
+1. **Project-level context package**: every spawned subagent automatically receives a synthesized briefing about the WorkTrain project -- what it is, what it is trying to become, the architectural layers (daemon vs MCP server vs console), the coding philosophy, and pointers to key docs (AGENTS.md, backlog.md, relevant design docs). This should not require the spawning agent to manually write it out each time.
+
+2. **Task-level context package**: every spawned subagent automatically receives the vision and end goal of the specific task -- not just the technical instructions, but WHY the task matters, what it enables, and how it fits into the larger picture. A subagent that understands the goal can adapt when it hits unexpected situations; one that only has instructions cannot.
+
+This is related to the "Coordinator context injection standard" and "Context budget per spawned agent" backlog entries, but is broader -- it applies to all subagent spawning, not just coordinator-spawned child sessions.
+
+**Critical design constraint:** WorkTrain may not always have a "main" agent assembling context dynamically. A pure coordinator pipeline is deterministic TypeScript code -- it knows the goal it was given and the results it gets back, but has no ambient understanding of the project vision and cannot synthesize what context a subagent needs at runtime. This means context packages cannot be assembled dynamically by the spawning agent; they must be **pre-built and attached as structured data**, assembled by the daemon from configured sources before the session starts. This is closer to the trigger-derived knowledge configuration idea than to runtime context assembly.
+
+**Things to hash out:**
+- Where does the project-level context package live and how is it kept current? A static template in `~/.workrail/daemon-soul.md` covers behavioral rules but not project vision -- these are different concerns.
+- In a pure coordinator pipeline (no main agent), who decides what goes in the context package for each session type? Must be declared configuration, not runtime synthesis.
+- Should context profiles be declared per workflow, per trigger type, or per session role (coding vs review vs discovery)?
+- What is the right size for an auto-injected context package? Too small loses signal; too large crowds out the actual task prompt.
+- Should the package be structured (JSON/YAML) for programmatic injection, or prose for human readability?
+- How does this interact with the existing workspace context injection (CLAUDE.md, AGENTS.md, daemon-soul.md)?
+- Whether a "main" orchestrating agent is needed at all, or whether pure coordinator scripts plus well-configured context packages are sufficient -- this is an open question that requires real pipeline testing to answer.
+
+---
 
 ### Agent-assisted backlog and issue enrichment (Apr 28, 2026)
 
@@ -1356,7 +1391,7 @@ Routing by `finding.category` from `wr.review_verdict`:
 
 ### Workflow execution time tracking and prediction
 
-**Status: idea** | Priority: medium
+**Status: partial** | Tracking shipped; prediction/calibration layer not yet built
 
 **Score: 11** | Cor:1 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
 
