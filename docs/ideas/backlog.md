@@ -34,33 +34,6 @@ Each item has a score line: `**Score: N** | Cor:N Cap:N Eff:N Lev:N Con:N | Bloc
 
 ---
 
-**How to write a backlog item.** Every entry should follow this shape:
-
-```
-### Title (Date)
-
-**Status: idea | bug | partial | done** | Priority: high/medium/low
-
-**Score: N** | Cor:N Cap:N Eff:N Lev:N Con:N | Blocked: no / yes (blocked by X)
-
-[2-4 sentences stating the problem plainly. What is wrong or missing? Why does it matter?
-No proposed solutions here -- just the problem.]
-
-**Things to hash out:**
-- [Open question that needs a decision before design can begin]
-- [Another open question -- constraint, tradeoff, interaction with other systems]
-- [Keep these honest -- don't fill this section with questions you already know the answer to]
-```
-
-**Rules for writing entries:**
-- **State the problem, not the solution.** "There is no way to invoke a routine directly" not "We should add a `worktrain invoke` command."
-- **No steering.** Don't tell future implementers how to build it. Capture what needs to exist, not how to make it exist.
-- **Things to hash out = genuine open questions.** Only include questions that actually need to be answered before design can start. If you know the answer, state it in the problem description.
-- **Relationships matter.** If this item depends on another, or would be superseded by another, name it explicitly.
-- **Be specific about what "done" looks like** when it's not obvious -- e.g. "done means an operator can invoke any routine by name from the CLI without writing a workflow."
-
----
-
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
 ### wr.coding-task implementation loop does not exit when slices complete (Apr 30, 2026)
@@ -2437,52 +2410,6 @@ A workflow that aggregates activity across git history, GitLab/GitHub MRs and re
 ---
 
 ## Platform Vision (longer-term)
-
-### Invocable routines: dispatch an existing routine directly as a task (Apr 30, 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 12** | Cor:1 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
-
-WorkRail has a routines system (`workflows/routines/`) for reusable workflow fragments. But routines can only be used embedded inside a larger workflow -- there is no way to invoke a routine directly as a standalone task. Many useful repeat tasks are process-shaped (same steps every time, structured output) and could be expressed as short 1-2 step workflows or existing routines. Today an operator who wants to run "context gathering" or "hypothesis challenge" on demand has to either build a wrapper workflow or do it manually.
-
-There is no dispatch surface for standalone routine invocation. Done means: an operator can invoke any routine by name from the CLI or a trigger, and the result is durable in the session store.
-
-**Relationship to existing ideas:** this is one half of the lightweight agents gap (the process-shaped half). The ad-hoc query half is a separate entry below.
-
-**Things to hash out:**
-- Should this be a new CLI command (`worktrain invoke <routineId> --goal "..."`) or a trigger type, or both?
-- Do routines need output contracts defined before they can be invoked standalone, or is free-form output acceptable?
-- How does the session store record a routine-only run vs a full workflow run? Should they be distinguished?
-
----
-
-### Ad-hoc query agents: answer questions about the workspace without a full workflow (Apr 30, 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: yes (needs knowledge graph for efficient context)
-
-There is a class of tasks that are question-shaped rather than process-shaped: "why does the session store use a manifest file?", "what would break if I changed this function?", "summarize what shipped this week." These don't have fixed steps, don't produce structured output contracts, and don't benefit from workflow phase gating. Running a full `wr.coding-task` session for them wastes 10 minutes on overhead. Not supporting them means the operator has to context-switch to Claude Code or do them manually.
-
-These tasks need a capable agent with workspace context but no workflow structure. They are stateless, single-purpose, and short-lived.
-
-Examples of what this enables:
-- `worktrain ask "why does the session store use a manifest file?"`
-- `worktrain explain pr/908`
-- `worktrain impact src/trigger/coordinator-deps.ts`
-- `worktrain diff-since "last week"`
-
-Done means: an operator can ask a natural-language question about the workspace and get a grounded answer within seconds, without starting a full session.
-
-**Relationship to existing ideas:** `worktrain talk` (interactive ideation) is the conversational, stateful version of this. Standup status generator is a scheduled instance of the same pattern. Invocable routines (entry above) are the process-shaped complement. This entry covers the unstructured query case.
-
-**Things to hash out:**
-- Without the knowledge graph, these queries require full file-scanning on every invocation -- too slow to be useful. Is there a minimum viable version before the KG is built, or does this wait?
-- What is the boundary between "this is a quick query" and "this actually needs a full discovery session"? Who decides -- the operator, or WorkTrain itself?
-- Should outputs be ephemeral (printed to terminal, not stored) or durable (in session store)? Durability adds value for audit but adds overhead.
-
----
 
 ### Self-restart after shipping changes to itself (Apr 30, 2026)
 
