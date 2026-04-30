@@ -283,6 +283,38 @@ Five dimensions, each scored 1-3. Score = sum (max 15). Items marked **Blocked**
 
 ---
 
+### `delivery_failed` unreachable in `getChildSessionResult` -- type promises more than code delivers (Apr 30, 2026)
+
+**Status: bug** | Priority: medium
+
+**Score: 10** | Cor:3 Cap:1 Eff:2 Lev:2 Con:2 | Blocked: no
+
+`ChildSessionResult` has `reason: 'delivery_failed'` as a variant of `kind: 'failed'`. However `fetchChildSessionResult` in `coordinator-deps.ts` reads session status through `ConsoleService.getSessionDetail`, which returns statuses like `complete`/`blocked`/`in_progress` -- it never returns a `delivery_failed` status. `delivery_failed` is a `TriggerRouter`-level concept (callbackUrl POST failure) that is not stored as a session status in the event log. Child sessions spawned via `spawnSession`/`spawnAndAwait` have no `callbackUrl` and cannot produce it through this code path.
+
+The result: coordinators using `getChildSessionResult` can never observe `reason: 'delivery_failed'`, even though the type says they might. This violates the "make illegal states unrepresentable" principle -- the type union promises a variant the implementation cannot produce on this path.
+
+**Architectural fix (not a comment):** surface `delivery_failed` through session status. When `TriggerRouter` records a `delivery_failed` outcome, write a corresponding session event or status that `ConsoleService.getSessionDetail` returns. Then `fetchChildSessionResult` can map it correctly. This closes the gap between what the type promises and what the infrastructure delivers.
+
+Alternative: if `spawnSession`/`spawnAndAwait` child sessions genuinely cannot have `delivery_failed` outcomes by design, remove `reason: 'delivery_failed'` from `ChildSessionResult` entirely and document that it only exists in `spawn_agent`'s direct outcome mapping.
+
+**Things to hash out:**
+- Should `delivery_failed` be surfaced through ConsoleService (requires touching session status storage), or removed from `ChildSessionResult` since the `spawnSession` path provably cannot produce it?
+- If surfaced: what event or field in the session store carries this status, and how does ConsoleService project it?
+
+---
+
+### `spawnAndAwait` duplicates ~90 lines of polling logic from `awaitSessions` (Apr 30, 2026)
+
+**Status: tech debt** | Priority: low
+
+**Score: 8** | Cor:1 Cap:1 Eff:2 Lev:1 Con:3 | Blocked: no
+
+`spawnAndAwait` in `coordinator-deps.ts` contains an inline polling loop (~90 lines) that duplicates the logic in `awaitSessions`. The WHY comment explains a real construction-time constraint: object literals cannot reference sibling methods by name during construction. But this constraint applies to methods on the returned object -- it does not apply to closure-level functions, which are already used for `fetchAgentResult` and `fetchChildSessionResult`.
+
+**Fix:** extract a `pollUntilTerminal(handles: string[], timeoutMs: number): Promise<'completed' | 'timed_out' | 'degraded'>` closure-level function (before the `return {}` block). Have both `awaitSessions` and `spawnAndAwait` call it. This eliminates the duplication without violating the construction-time constraint.
+
+---
+
 ### Daemon architecture: remaining migrations (Apr 29, 2026)
 
 **Status: partial** | A9 shipped Apr 29, 2026.
@@ -1869,9 +1901,13 @@ A proof record contains: `prNumber`, `goal`, `verificationChain` (array of `{ ki
 
 ### Scripts-first coordinator: avoid the main agent wherever possible (Apr 15, 2026)
 
-**Status: idea** | Priority: high
+**Status: partial** | Foundation shipped PR #908 (Apr 30, 2026)
 
 **Score: 12** | Cor:1 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+**What shipped:** `ChildSessionResult` discriminated union, `getChildSessionResult()`, `spawnAndAwait()`, `parentSessionId` threading, `wr.coordinator_result` artifact schema. The typed coordinator primitives that enable in-process coordinator scripts are now available.
+
+**What's still needed:** the actual coordinator scripts (full development pipeline, bug-fix coordinator, grooming coordinator) and the `worktrain spawn`/`await` CLI commands that wrap these primitives for shell scripts.
 
 **The insight:** In a coordinator workflow, the main agent spends most of its time on mechanical work -- reading PR lists, checking CI status, deciding whether findings are blocking, sequencing merges. That's all deterministic logic. An LLM is expensive, slow, and inconsistent for deterministic work.
 
@@ -2038,7 +2074,7 @@ WorkTrain notices things without being asked. After a batch of work lands, it sc
 
 ### Native multi-agent orchestration: coordinator sessions + session DAG (Apr 15, 2026)
 
-**Status: idea** | Priority: high
+**Status: partial** | Typed primitives shipped PR #908 (Apr 30, 2026)
 
 **Score: 10** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
 
