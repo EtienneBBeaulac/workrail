@@ -858,24 +858,71 @@ async function countActiveSessions(sessionsDir: string): Promise<number> {
  */
 const MAX_QUEUE_POLL_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-// NOTE: rotation path not covered by unit tests -- mocking os.homedir() requires
-// test infrastructure changes not currently in place.
-async function appendQueuePollLog(entry: Record<string, unknown>): Promise<void> {
-  const logPath = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl');
+/**
+ * Rotate a log file when it exceeds maxBytes.
+ *
+ * Rotation scheme (2-file cap):
+ *   logPath.2 -- deleted if it exists (oldest backup)
+ *   logPath.1 -- renamed to logPath.2
+ *   logPath   -- renamed to logPath.1 (caller then creates a fresh logPath)
+ *
+ * WHY 2-file cap: balances history retention against unbounded growth. A single
+ * .1 backup keeps ~5 weeks of data before rotation; two backups give ~10 weeks.
+ * More than 2 files would require numbered-suffix logic that adds complexity with
+ * little operational value for a diagnostic log.
+ *
+ * Best-effort: errors are swallowed and logged as warnings so the caller can
+ * always proceed to append even if rotation fails.
+ *
+ * Exported so other append helpers (outbox.jsonl, signals/<id>.jsonl, etc.)
+ * can reuse this logic without duplicating it.
+ */
+export async function rotateLogFile(logPath: string, maxBytes: number): Promise<void> {
   try {
+    const stat = await fs.stat(logPath);
+    if (stat.size < maxBytes) return; // below threshold -- nothing to do
+
+    // Delete .2 to enforce 2-file cap before shifting files down
+    const backup2 = logPath + '.2';
     try {
-      const stat = await fs.stat(logPath);
-      if (stat.size >= MAX_QUEUE_POLL_FILE_SIZE) {
-        // Rotate: rename current log to .1 (overwrites any existing backup),
-        // then let the appendFile below create a fresh log file.
-        await fs.rename(logPath, logPath + '.1');
-      }
+      await fs.unlink(backup2);
     } catch {
-      // File does not exist yet or stat/rename failed -- proceed to append.
-      // On ENOENT: appendFile will create the file. On other errors: log entry
-      // will still be written to the existing (potentially oversized) file,
-      // and console.warn is emitted by the outer catch if appendFile itself fails.
+      // ENOENT is expected when no .2 exists -- silently skip
     }
+
+    // Shift .1 -> .2, then current -> .1
+    // WHY rename not copy: atomic on same filesystem, no partial-write risk
+    const backup1 = logPath + '.1';
+    try {
+      await fs.rename(backup1, backup2);
+    } catch {
+      // ENOENT if no .1 yet -- silently skip (first rotation)
+    }
+
+    await fs.rename(logPath, backup1);
+  } catch (e) {
+    // stat() failed (ENOENT: file does not exist yet) or final rename failed.
+    // Either way, log a warning and let the caller proceed with append.
+    // On ENOENT the file will be created fresh by appendFile -- no rotation needed.
+    const isEnoent = e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT';
+    if (!isEnoent) {
+      console.warn(`[rotateLogFile] Failed to rotate ${logPath}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
+/**
+ * Append a JSON-line entry to the queue-poll log, rotating if the file exceeds
+ * MAX_QUEUE_POLL_FILE_SIZE.
+ *
+ * logPath is injectable for testing; defaults to ~/.workrail/queue-poll.jsonl.
+ */
+async function appendQueuePollLog(
+  entry: Record<string, unknown>,
+  logPath: string = path.join(os.homedir(), '.workrail', 'queue-poll.jsonl'),
+): Promise<void> {
+  try {
+    await rotateLogFile(logPath, MAX_QUEUE_POLL_FILE_SIZE);
     await fs.appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
   } catch (e) {
     console.warn(`[QueuePoll] Failed to write queue-poll.jsonl: ${e instanceof Error ? e.message : String(e)}`);

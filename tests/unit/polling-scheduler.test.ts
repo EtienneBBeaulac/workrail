@@ -16,13 +16,18 @@
  * - forcePoll: returns wrong_provider for non-queue triggers
  * - forcePoll: runs one cycle and returns cycleRan=true when no poll in flight
  * - forcePoll: returns cycleRan=false when skip-cycle guard fires
+ * - rotateLogFile: does nothing when file is below threshold
+ * - rotateLogFile: rotates when file reaches threshold (rename to .1)
+ * - rotateLogFile: enforces 2-file cap (deletes .2 before shifting .1 -> .2)
+ * - rotateLogFile: does not throw when file does not exist (ENOENT)
+ * - rotateLogFile: logs warning on unexpected rotation failure (not ENOENT)
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import { PollingScheduler } from '../../src/trigger/polling-scheduler.js';
+import { PollingScheduler, rotateLogFile } from '../../src/trigger/polling-scheduler.js';
 import { PolledEventStore } from '../../src/trigger/polled-event-store.js';
 import type { TriggerDefinition } from '../../src/trigger/types.js';
 import { asTriggerId } from '../../src/trigger/types.js';
@@ -936,5 +941,120 @@ describe('doPollGitHubQueue dispatch loop protection', () => {
     // attemptCount=2 < maxDispatchAttempts=3, so dispatch should proceed
     expect(adaptiveDispatched).toHaveLength(1);
     expect(adaptiveDispatched[0]?.goal).toBe('Implement login flow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rotateLogFile helper
+// ---------------------------------------------------------------------------
+
+describe('rotateLogFile', () => {
+  it('does nothing when the file is below the size threshold', async () => {
+    const tmpDir = await makeTmpDir();
+    const logPath = path.join(tmpDir, 'test.jsonl');
+
+    // Write content well below the 10 MB threshold
+    await fs.writeFile(logPath, 'entry\n'.repeat(10), 'utf8');
+
+    await rotateLogFile(logPath, 10 * 1024 * 1024);
+
+    // Original file still exists and unchanged; no .1 created
+    const exists = await fs.stat(logPath).then(() => true).catch(() => false);
+    expect(exists).toBe(true);
+    const backup1Exists = await fs.stat(logPath + '.1').then(() => true).catch(() => false);
+    expect(backup1Exists).toBe(false);
+  });
+
+  it('rotates when the file reaches the threshold (renames current to .1)', async () => {
+    const tmpDir = await makeTmpDir();
+    const logPath = path.join(tmpDir, 'test.jsonl');
+    const originalContent = 'a'.repeat(100);
+
+    await fs.writeFile(logPath, originalContent, 'utf8');
+
+    // Threshold of 50 bytes -- file is 100 bytes, should rotate
+    await rotateLogFile(logPath, 50);
+
+    // Original file is gone (renamed to .1)
+    const originalExists = await fs.stat(logPath).then(() => true).catch(() => false);
+    expect(originalExists).toBe(false);
+
+    // .1 exists with the original content
+    const backup1Content = await fs.readFile(logPath + '.1', 'utf8');
+    expect(backup1Content).toBe(originalContent);
+  });
+
+  it('enforces 2-file cap: deletes .2 before shifting .1 to .2 and current to .1', async () => {
+    const tmpDir = await makeTmpDir();
+    const logPath = path.join(tmpDir, 'test.jsonl');
+
+    // Set up: current file (oversized), .1 (first backup), .2 (second backup -- must be deleted)
+    await fs.writeFile(logPath, 'current'.repeat(20), 'utf8');
+    await fs.writeFile(logPath + '.1', 'backup1', 'utf8');
+    await fs.writeFile(logPath + '.2', 'backup2_to_be_deleted', 'utf8');
+
+    await rotateLogFile(logPath, 10); // threshold of 10 bytes -- triggers rotation
+
+    // .2 was deleted and replaced by old .1 content
+    const backup2Content = await fs.readFile(logPath + '.2', 'utf8');
+    expect(backup2Content).toBe('backup1');
+
+    // .1 now holds what was the current file
+    const backup1Content = await fs.readFile(logPath + '.1', 'utf8');
+    expect(backup1Content).toBe('current'.repeat(20));
+
+    // Original file is gone
+    const originalExists = await fs.stat(logPath).then(() => true).catch(() => false);
+    expect(originalExists).toBe(false);
+  });
+
+  it('does not throw when the file does not exist (ENOENT -- fresh start)', async () => {
+    const tmpDir = await makeTmpDir();
+    const logPath = path.join(tmpDir, 'nonexistent.jsonl');
+
+    // Should resolve without throwing -- ENOENT is silently swallowed
+    await expect(rotateLogFile(logPath, 100)).resolves.toBeUndefined();
+  });
+
+  it('logs a warning on unexpected rotation failure (not ENOENT)', async () => {
+    // WHY real filesystem instead of vi.spyOn(fs, 'rename'):
+    // node:fs/promises is an ESM module with non-configurable exports.
+    // vi.spyOn() cannot patch it at runtime -- only vi.mock() (module-level) can,
+    // but that would affect all tests in this file which rely on real I/O.
+    //
+    // Instead, we trigger EISDIR naturally: if backup1 (.1) exists as a non-empty
+    // directory, rename(current_file, .1) fails with EISDIR, which is caught by
+    // the outer try/catch and logged as a warning (not silently swallowed like ENOENT).
+    const tmpDir = await makeTmpDir();
+    const logPath = path.join(tmpDir, 'test.jsonl');
+
+    // Write an oversized file (above threshold of 10 bytes)
+    await fs.writeFile(logPath, 'x'.repeat(200), 'utf8');
+
+    // Trigger EISDIR on the final rename(logPath, .1) by making both .1 and .2
+    // non-empty directories.
+    //
+    // rotateLogFile's rotation sequence:
+    //   1. unlink(.2)         -- inner try/catch -- fails EISDIR, silently swallowed
+    //   2. rename(.1, .2)     -- inner try/catch -- fails ENOTEMPTY (.2 non-empty dir), swallowed
+    //   3. rename(logPath, .1) -- outer try/catch -- fails EISDIR (.1 still non-empty dir)
+    //
+    // Step 3 is caught by the outer catch, which logs the warning because EISDIR != ENOENT.
+    const backup1 = logPath + '.1';
+    await fs.mkdir(path.join(backup1, 'subdir'), { recursive: true });
+    await fs.writeFile(path.join(backup1, 'marker'), 'marker', 'utf8');
+    const backup2 = logPath + '.2';
+    await fs.mkdir(path.join(backup2, 'subdir'), { recursive: true });
+    await fs.writeFile(path.join(backup2, 'marker'), 'marker2', 'utf8');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await rotateLogFile(logPath, 10);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[rotateLogFile] Failed to rotate'),
+    );
+
+    warnSpy.mockRestore();
   });
 });
