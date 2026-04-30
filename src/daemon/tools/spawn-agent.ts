@@ -119,7 +119,7 @@ export function makeSpawnAgentTool(
         // stays unchanged. parentSessionId is extracted in buildInitialEvents() to populate
         // session_created.data (typed, durable, DAG-queryable).
         // is_autonomous: 'true' marks the child as a daemon-owned session.
-        { is_autonomous: 'true', workspacePath: String(params.workspacePath), parentSessionId: thisWorkrailSessionId },
+        { is_autonomous: 'true', workspacePath: String(params.workspacePath), parentSessionId: thisWorkrailSessionId, triggerSource: 'daemon' },
       );
 
       if (startResult.isErr()) {

@@ -133,7 +133,7 @@ export function createCoordinatorDeps(
       const startResult = await executeStartWorkflow(
         { workflowId, workspacePath: workspace, goal },
         ctx,
-        { is_autonomous: 'true', workspacePath: workspace },
+        { is_autonomous: 'true', workspacePath: workspace, triggerSource: 'daemon' },
       );
       if (startResult.isErr()) {
         const detail = `${startResult.error.kind}${'message' in startResult.error ? ': ' + (startResult.error as { message: string }).message : ''}`;

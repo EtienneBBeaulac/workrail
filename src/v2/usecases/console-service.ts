@@ -1042,6 +1042,20 @@ function projectSessionSummary(
     );
   })();
 
+  // Derive triggerSource from run_started events. Always non-optional at this layer:
+  // old sessions without the field are backfilled using isAutonomous as a proxy.
+  const triggerSource = ((): 'daemon' | 'mcp' => {
+    if (sortedEventsRes.isOk()) {
+      for (const e of sortedEventsRes.value) {
+        if (e.kind === 'run_started' && e.data.triggerSource !== undefined) {
+          return e.data.triggerSource;
+        }
+      }
+    }
+    // Backfill: sessions predating this field -- daemon sessions had is_autonomous: 'true'.
+    return isAutonomous ? 'daemon' : 'mcp';
+  })();
+
   const metrics = projectSessionMetricsV2(events);
 
   const runs = Object.values(dag.runsById);
@@ -1067,6 +1081,7 @@ function projectSessionSummary(
       repoRoot,
       lastModifiedMs,
       isAutonomous,
+      triggerSource,
       isLive,
       parentSessionId,
       metrics,
@@ -1124,6 +1139,7 @@ function projectSessionSummary(
     repoRoot,
     lastModifiedMs,
     isAutonomous,
+    triggerSource,
     isLive,
     parentSessionId,
     metrics,
@@ -1148,11 +1164,27 @@ function projectSessionDetail(
   const sortedEventsRes = asSortedEventLog(events);
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
 
+  // Derive triggerSource from run_started events (same backfill logic as projectSessionSummary).
+  const detailTriggerSource = ((): 'daemon' | 'mcp' => {
+    if (sortedEventsRes.isOk()) {
+      for (const e of sortedEventsRes.value) {
+        if (e.kind === 'run_started' && e.data.triggerSource !== undefined) {
+          return e.data.triggerSource;
+        }
+      }
+    }
+    const contextRes = sortedEventsRes.isOk() ? projectRunContextV2(sortedEventsRes.value) : err(sortedEventsRes.error as never);
+    const isAutonomous = contextRes.isOk() && Object.values(contextRes.value.byRunId).some(
+      (runCtx) => runCtx.context['is_autonomous'] === 'true',
+    );
+    return isAutonomous ? 'daemon' : 'mcp';
+  })();
+
   const dagRes = projectRunDagV2(events);
   if (dagRes.isErr()) {
     // metrics and repoRoot are null here as placeholders; the caller (getSessionDetail)
     // always overrides these with the actual computed values via spread.
-    return { sessionId, sessionTitle, health: sessionHealth, runs: [], metrics: null, repoRoot: null };
+    return { sessionId, sessionTitle, health: sessionHealth, runs: [], metrics: null, repoRoot: null, triggerSource: detailTriggerSource };
   }
 
   const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
@@ -1241,7 +1273,7 @@ function projectSessionDetail(
 
   // metrics and repoRoot are null here as placeholders; the caller (getSessionDetail)
   // always overrides these with the actual computed values via spread.
-  return { sessionId, sessionTitle, health: sessionHealth, runs, metrics: null, repoRoot: null };
+  return { sessionId, sessionTitle, health: sessionHealth, runs, metrics: null, repoRoot: null, triggerSource: detailTriggerSource };
 }
 
 /**

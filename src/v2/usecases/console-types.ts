@@ -48,6 +48,12 @@ export interface ConsoleSessionSummary {
   /** True when the session was started by the WorkRail autonomous daemon.
    * Durable: derived from context_set event with is_autonomous: 'true'. */
   readonly isAutonomous: boolean;
+  /**
+   * Whether this session was started by the WorkTrain daemon or a human via MCP.
+   * Always non-optional at this layer. Old sessions without the field in their
+   * run_started event are backfilled: 'daemon' when isAutonomous is true, 'mcp' otherwise.
+   */
+  readonly triggerSource: 'daemon' | 'mcp';
   /** True when the daemon event log for today contains a session_started event for this
    * session but no session_completed event. Derived from disk -- survives console restarts.
    * False on any read error (safe default). */
@@ -183,6 +189,10 @@ export interface ConsoleSessionDetail {
    * Used by the diff-summary endpoint to run git diff in the correct directory.
    */
   readonly repoRoot: string | null;
+  /** Whether this session was started by the WorkTrain daemon or a human via MCP.
+   * Same backfill logic as ConsoleSessionSummary: old sessions without the field
+   * default to 'daemon' when isAutonomous is true, 'mcp' otherwise. */
+  readonly triggerSource: 'daemon' | 'mcp';
 }
 
 // ---------------------------------------------------------------------------
