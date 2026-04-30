@@ -65,11 +65,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js (toolchain)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -92,14 +91,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js (toolchain)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
-
-      - name: Upgrade npm (fix lockfile cpu-filter bug present in npm <11.3.0)
-        run: npm install -g npm@^11.11.1 --ignore-scripts
 
       - name: Regenerate lockfile (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -131,11 +126,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js (toolchain)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -156,11 +150,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js (toolchain)
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -209,11 +202,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -233,11 +225,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -264,11 +255,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies (no lifecycle scripts)
         run: npm install --ignore-scripts
@@ -289,11 +279,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -366,11 +355,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -415,11 +403,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: 22.14.0
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -464,11 +451,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Setup Node.js with npm>=11
+        uses: ./.github/actions/setup-npm
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install --ignore-scripts

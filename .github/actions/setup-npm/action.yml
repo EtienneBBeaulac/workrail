@@ -1,0 +1,30 @@
+name: Setup Node.js with npm>=11
+description: >
+  Wraps actions/setup-node and upgrades npm to >=11.11.1.
+  Required because Node 22.14.0 ships npm@10.9.2 which has a cpu-filter
+  bug (fixed in npm@11.3.0) that rejects lockfiles with optional packages
+  filtered by cpu/os (e.g. @rolldown/binding-wasm32-wasi used by vite).
+inputs:
+  node-version:
+    description: Node.js version to install
+    required: false
+    default: '22.14.0'
+  cache:
+    description: Package manager cache ('npm', 'yarn', 'pnpm', or '')
+    required: false
+    default: 'npm'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js ${{ inputs.node-version }}
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.cache }}
+
+    - name: Upgrade npm (fix cpu-filter bug present in npm <11.3.0)
+      shell: bash
+      run: |
+        npm install -g npm@^11.11.1
+        npm --version
