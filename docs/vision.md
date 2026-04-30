@@ -46,14 +46,60 @@ Most autonomous coding agents are single-session: they get a task, they work on 
 5. **Observable by default** -- every decision visible in the session store and console
 6. **Overnight-safe** -- the system must work while the operator is asleep
 
+## Quality standards WorkTrain holds itself to
+
+WorkTrain does not ship work it is not confident in. Specifically:
+
+- Review findings are addressed before merge -- no "I'll file a ticket for this later" on findings that block
+- Tests pass. If tests were broken before the task started, that is noted explicitly, not silently ignored
+- A PR that triggered the escalating review chain (Critical finding → re-review → re-review) never auto-merges without human approval
+- If WorkTrain makes a change that degrades something outside its immediate scope, it surfaces that -- it does not document collateral damage as "a known tradeoff" and move on
+- When WorkTrain is wrong about something, it acknowledges it explicitly in the session notes so the next session starts with accurate context
+
+## How WorkTrain handles uncertainty and mistakes
+
+WorkTrain will make mistakes. The system is designed around this:
+
+- When an agent is uncertain about the task intent, it states its interpretation explicitly before acting. The coordinator can pause and surface this to the operator rather than proceeding on a wrong assumption.
+- Mistakes produce structured findings in the session store. The demo repo feedback loop and per-run retrospective are how WorkTrain learns from patterns of failure and improves its workflows over time.
+- "That's out of scope for this task" is not a valid reason to proceed past something that is genuinely wrong. Scope is for routing work, not for suppressing correctness.
+
+## The operator relationship
+
+The operator configures what WorkTrain works on (triggers, workflows, workspace rules) and sets the boundaries within which it operates. WorkTrain decides autonomously how to do the work.
+
+WorkTrain pauses and surfaces to the operator when:
+- It encounters genuine ambiguity about what the task is asking for
+- A finding is Critical and requires explicit human approval before merging
+- A child session fails in a way that exhausts automated retries
+- Something unexpected happened that the coordinator's routing logic does not cover
+
+WorkTrain does not pause for: implementation decisions within a well-specified task, routine review findings it can fix autonomously, or any decision that fits within the rules the operator already configured.
+
+This boundary is still being tested and refined through real usage. Where exactly "genuine ambiguity" begins is an open question.
+
 ## What is still being built
 
 WorkTrain is not finished. The vision above is where it is going, not where it is today. Key pieces still in progress:
 
-- **Living work context** -- shared knowledge document that accumulates across all phases so every agent starts informed (`docs/ideas/backlog.md`: "Living work context")
+- **Living work context** -- shared knowledge store that accumulates across all phases so every agent starts informed (`docs/ideas/backlog.md`: "Living work context")
 - **Coordinator pipeline templates** -- actual coordinator scripts for full development pipeline, bug-fix, grooming (`docs/ideas/backlog.md`: "Scripts-first coordinator")
 - **`worktrain spawn`/`await` CLI** -- CLI surface for coordinator scripts
 - **Knowledge graph** -- per-workspace structural understanding so agents skip discovery on repeated tasks
 - **Spec as ground truth** -- wiring `wr.shaping` output into coordinator dispatch so coding/review agents work from the same spec
 
 For the current prioritized list, see `npm run backlog` or `docs/ideas/backlog.md`.
+
+## Open questions
+
+These are genuinely unresolved. Any agent operating in this system should know they exist and not assume they are answered.
+
+- **Does WorkTrain need a main orchestrating agent?** The vision calls for pure coordinator scripts with zero LLM routing turns. But when something unexpected happens mid-pipeline -- a child session returns an ambiguous result, a finding doesn't fit expected categories -- a deterministic script either fails or ignores it. Whether a thin "judgment agent" is needed at the coordinator level, or whether well-designed typed contracts make it unnecessary, is an empirical question that requires real pipeline testing to answer.
+
+- **Where exactly is the operator boundary?** The rules above are directionally right but have fuzzy edges. "Genuine ambiguity" is not yet precisely defined. This will sharpen through real usage and failure modes, not through upfront design.
+
+- **How does WorkTrain know when it doesn't understand something?** An agent that mis-understands a task produces code that's correct for its interpretation but wrong for the operator's intent. Detecting this before implementation begins -- via explicit intent confirmation, pattern matching against prior sessions, or something else -- is an open problem. See `docs/ideas/backlog.md`: "Intent gap".
+
+- **What is the right granularity of tasks?** WorkTrain is being designed for ticket-sized work. Whether it handles epics (by decomposing them), hotfixes (by moving fast and deferring thoroughness), and architectural changes (which may require multiple sessions across multiple days) the same way is untested.
+
+- **Is "document" the right abstraction for the living work context?** A flat document implies agents read it linearly. Agents need to query it selectively -- the coding agent wants constraints relevant to a specific decision, the review agent wants what the coding agent said about a specific module. A structured knowledge store (typed facts, queryable by topic) may be more useful than a document. See `docs/ideas/backlog.md`: "Living work context".
