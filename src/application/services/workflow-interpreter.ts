@@ -268,6 +268,36 @@ export class WorkflowInterpreter {
                 message: `forEach loop '${loopCompiled.loop.id}' requires array context['${itemsVar}']`,
               });
             }
+
+            // WHY shape check at iteration 0: when the body uses {{itemVar.field}}
+            // but the array contains primitives (strings, numbers), every iteration
+            // renders [unset: itemVar.field] silently. Detecting this at loop entry
+            // gives the agent an actionable error before any broken work is done.
+            if (iteration === 0 && raw.length > 0) {
+              const itemVar = loopCompiled.loop.loop.itemVar || 'currentItem';
+              const dotPathToken = `{{${itemVar}.`;
+              // Check if any body step prompt uses dot-path access on itemVar.
+              const bodyUsesDotPath = body.some((step) => {
+                const prompt = (step as WorkflowStepDefinition).prompt ?? '';
+                return prompt.includes(dotPathToken);
+              });
+              if (bodyUsesDotPath) {
+                // All items are primitives -- none are plain objects.
+                const firstItem = raw[0];
+                if (firstItem === null || typeof firstItem !== 'object' || Array.isArray(firstItem)) {
+                  const actualType = firstItem === null ? 'null'
+                    : Array.isArray(firstItem) ? 'array'
+                    : typeof firstItem;
+                  const preview = String(firstItem).slice(0, 60);
+                  return err({
+                    code: 'LOOP_MISSING_CONTEXT',
+                    loopId: loopCompiled.loop.id,
+                    message: `forEach loop '${loopCompiled.loop.id}': body uses {{${itemVar}.field}} but '${itemsVar}' contains ${actualType}s (e.g. "${preview}"). Each item in '${itemsVar}' must be an object.`,
+                  });
+                }
+              }
+            }
+
             const shouldEnter = iteration < raw.length;
             if (shouldEnter && iteration === 0) trace.push(traceEnteredLoop(frame.loopId, iteration));
             return ok(shouldEnter);
