@@ -50,18 +50,64 @@ export const CONTEXT_TOKEN_PATTERN = /\{\{(?!wr\.)([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*
 // ---------------------------------------------------------------------------
 
 /**
- * Walk a dot-separated path into a value.
+ * Result of walking a dot-separated path into a context value.
  *
- * Returns undefined if any segment is missing or the base value is not an object.
+ * WHY a discriminated union instead of returning undefined: the two failure
+ * modes are categorically different and produce different diagnostic messages.
+ * - missing_root: the first segment is absent from context entirely
+ * - wrong_type: a non-terminal segment exists but is not an object, so the
+ *   walk cannot continue (e.g. currentSlice is a string, not an object)
+ * - leaf_missing: the walk succeeded through all non-terminal segments but
+ *   the final key is absent or null on the parent object
+ * - ok: the full path resolved to a defined, non-null value
+ */
+type DotPathResult =
+  | { readonly kind: 'ok'; readonly value: unknown }
+  | { readonly kind: 'missing_root'; readonly rootKey: string }
+  | {
+      readonly kind: 'wrong_type';
+      readonly failedAtKey: string;
+      readonly actualType: string;
+      readonly preview: string;
+    }
+  | { readonly kind: 'leaf_missing'; readonly fullPath: string };
+
+/**
+ * Walk a dot-separated path into a value, returning a typed result.
+ *
  * Pure — no side effects.
  */
-function resolveDotPath(base: unknown, path: readonly string[]): unknown {
-  let current: unknown = base;
-  for (const segment of path) {
-    if (current === null || typeof current !== 'object') return undefined;
+function resolveDotPath(base: unknown, path: readonly string[]): DotPathResult {
+  if (path.length === 0) return { kind: 'ok', value: base };
+
+  const rootKey = path[0]!;
+  if (base === null || typeof base !== 'object') {
+    return { kind: 'missing_root', rootKey };
+  }
+
+  const rootValue = (base as Record<string, unknown>)[rootKey];
+  if (rootValue === undefined || rootValue === null) {
+    return { kind: 'missing_root', rootKey };
+  }
+
+  let current: unknown = rootValue;
+  for (let i = 1; i < path.length; i++) {
+    const segment = path[i]!;
+    if (current === null || typeof current !== 'object') {
+      // Non-terminal segment is not an object -- report the type mismatch.
+      const actualType = current === null ? 'null' : typeof current;
+      const raw = String(current);
+      const preview = raw.length > 60 ? raw.slice(0, 60) + '…' : raw;
+      return { kind: 'wrong_type', failedAtKey: path.slice(0, i).join('.'), actualType, preview };
+    }
     current = (current as Record<string, unknown>)[segment];
   }
-  return current;
+
+  if (current === undefined || current === null) {
+    return { kind: 'leaf_missing', fullPath: path.join('.') };
+  }
+
+  return { kind: 'ok', value: current };
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +120,11 @@ function resolveDotPath(base: unknown, path: readonly string[]): unknown {
  * Resolution:
  * - Splits token path on '.' and walks into `context` using dot-path resolution
  * - Tokens that resolve to a defined, non-null value are replaced with String(value)
- * - Unresolvable tokens become [unset: varName.path] — visible, non-silent
+ * - Unresolvable tokens become [unset: ...] — visible, non-silent, with a
+ *   diagnostic reason so the author can immediately see why resolution failed:
+ *   - missing root: [unset: currentSlice.name -- 'currentSlice' not in context]
+ *   - wrong type:   [unset: currentSlice.name -- 'currentSlice' is string ("1: Auth..."), not object]
+ *   - missing leaf: [unset: slice.title]
  *
  * Tokens in the {{wr.*}} namespace are left untouched (owned by the compiler).
  *
@@ -90,12 +140,27 @@ export function resolveContextTemplates(
   // Construct a fresh `g`-flagged regex per call to avoid shared lastIndex state.
   const re = new RegExp(CONTEXT_TOKEN_PATTERN.source, 'g');
   return template.replace(re, (_match, dotPath: string) => {
-    const value = resolveDotPath(context, dotPath.split('.'));
+    const segments = dotPath.split('.');
+    const result = resolveDotPath(context, segments);
 
-    if (value === undefined || value === null) {
-      return `[unset: ${dotPath}]`;
+    switch (result.kind) {
+      case 'ok':
+        return String(result.value);
+
+      case 'missing_root':
+        // Simple case: variable not in context at all. Keep the original
+        // [unset: path] format so existing tests and prompt patterns are stable.
+        return `[unset: ${dotPath}]`;
+
+      case 'wrong_type':
+        // Actionable: tells the author/agent exactly what the value is and why
+        // dot-path navigation failed. This is the key diagnostic improvement.
+        return `[unset: ${dotPath} -- '${result.failedAtKey}' is ${result.actualType} ("${result.preview}"), not object]`;
+
+      case 'leaf_missing':
+        // Parent exists and is an object, but the final key is absent.
+        // Same format as missing_root for backwards compat.
+        return `[unset: ${dotPath}]`;
     }
-
-    return String(value);
   });
 }
