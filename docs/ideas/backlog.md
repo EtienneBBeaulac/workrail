@@ -1334,6 +1334,24 @@ This is already how mid-run resume works. The same mechanism extends naturally t
 
 ---
 
+### Extensible output contract registration: coordinator-owned schemas, engine-enforced (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 8** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+The engine's output contract registry (`ARTIFACT_CONTRACT_REFS` in `src/v2/durable-core/schemas/artifacts/index.ts`) is a closed list maintained in the engine source. Adding a new contract type requires modifying the engine: adding to the registry, implementing a validator in `artifact-contract-validator.ts`, and adding a Zod schema. This is the correct pattern today and works fine at 5 items. But as the pipeline gains more phase types, every new coordinator-domain artifact contract is an engine change. The registry is already mixed -- `review_verdict` and `discovery_handoff` are coordinator-domain artifacts registered there. At 15-20 items this becomes a maintenance burden and a coupling that is harder to justify.
+
+The better long-term design: the engine owns the enforcement mechanism (validate presence and schema at `complete_step`) but not the schema definitions. Coordinator-domain contracts register their Zod schemas from outside the engine. The engine validates against whatever is registered without a hardcoded case per contract type.
+
+**Things to hash out:**
+- What is the registration API? DI injection at startup (consistent with existing container pattern), a module-level call, or a config file?
+- How does registration work at compile time vs runtime? Workflow compilation and `complete_step` validation happen at different points -- the registry must be available at both.
+- Does this change the `workflowHash`? If registered schemas change, should the hash change? Does the hash include registered external schemas or only the workflow JSON?
+- Should the existing 5 contracts migrate, or stay hardcoded? A two-tier system (some hardcoded, some registered) is confusing but migration is low priority.
+
+---
+
 ### Task-scoped rules: step-level rule injection by task type (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
