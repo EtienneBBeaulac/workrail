@@ -526,15 +526,17 @@
           "State what kind of uncertainty remains: recommendation uncertainty, research uncertainty, or prototype-learning uncertainty."
         ],
         "procedure": [
-          "Produce a concise synthesis of the opportunity, the 3-5 criteria the final direction must satisfy, the strongest framing risk, and the current best explanation of what success looks like.",
+          "Produce a concise synthesis of the opportunity, the 3-5 criteria the final direction must satisfy, the strongest framing risk, and the current best explanation of what success looks like. Also surface which of the `challengedAssumptions` from phase-0a are still unresolved -- any candidate that silently bets on a challenged assumption must name it as a risk.",
           "When generating `decisionCriteria`: criteria that come from constraints and anti-goals are necessary but not sufficient. They are compatibility thresholds -- every viable candidate will satisfy them. At least one criterion must be quality-aspirational: derived from `idealEndState`, not from constraints. Quality-aspirational criteria ask 'which candidate is best?' not 'which candidates pass?'. Good examples: 'which requires the fewest changes to add a new phase?', 'which would a senior engineer be proudest of in two years?', 'which best reflects the architecture we want to be running against in 12 months?'. If `solutionAmbitiousness = 'ideal_architecture'`, this quality-aspirational criterion is mandatory -- not optional.",
           "Set `candidateCountTarget` adaptively: QUICK = 2-3, STANDARD = 3-4, THOROUGH = 4-5.",
+          "If a `visionDocPath` exists in context or is discoverable in the workspace (e.g. `docs/vision.md`), read it now. Then answer: (1) How does solving this problem serve the overarching vision? If it doesn't serve the vision, say so explicitly -- that is important signal. (2) Which vision goals does this design need to leave room for, even if it doesn't implement them yet? Name at least one seam or constraint the design must honor for the vision to remain achievable. (3) Does any candidate direction foreclose a vision goal that matters? If yes, name it. Add at least one vision-alignment criterion to `decisionCriteria`. If no vision doc exists, use your best understanding of the project's direction from context.",
           "Set these keys in the next `continue_workflow` call's `context` object: `decisionCriteria`, `riskiestAssumption`, `candidateCountTarget`, `needsPrototype`, `needsFurtherResearch`, `pathReady`."
         ],
         "verify": [
           "You can explain why this is the right path and what a good answer must satisfy.",
           "Remaining uncertainty is categorized explicitly instead of left fuzzy.",
-          "At least one `decisionCriterion` is quality-aspirational (derived from `idealEndState`), not just a compatibility threshold from constraints. If `solutionAmbitiousness = 'ideal_architecture'`, this is not optional."
+          "At least one `decisionCriterion` is quality-aspirational (derived from `idealEndState`), not just a compatibility threshold from constraints. If `solutionAmbitiousness = 'ideal_architecture'`, this is not optional.",
+          "At least one `decisionCriterion` is vision-aligned -- it tests whether the direction serves the project's overarching goals, not just the immediate problem."
         ]
       },
       "promptFragments": [
@@ -589,6 +591,14 @@
             "equals": "ideal_architecture"
           },
           "text": "Because `solutionAmbitiousness = 'ideal_architecture'`: the decision criteria must include at least one that directly tests against `idealEndState`. Constraint-satisfaction criteria alone will cause the most conservative candidate to win by default -- every viable option satisfies them. The quality-aspirational criterion is what makes the ambitious candidate compete on its own terms rather than just surviving a challenge."
+        },
+        {
+          "id": "p2-vision-alignment",
+          "when": {
+            "var": "solutionAmbitiousness",
+            "equals": "ideal_architecture"
+          },
+          "text": "Because this is an architectural decision: challenge your `decisionCriteria` against the vision explicitly. Ask: 'If we build this, does it make the next architectural decision easier or harder? Does it create the right seams for what the vision says comes next? Does it foreclose anything the vision names as important?' A criterion that only tests whether the design solves today's problem is insufficient -- at least one criterion must test whether the design is the right building block for tomorrow's."
         }
       ],
       "requireConfirmation": false
