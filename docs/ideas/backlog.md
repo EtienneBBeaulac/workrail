@@ -209,6 +209,29 @@ The use case has two layers: (1) operator-facing -- "your pipeline finished, her
 - How does the team-facing notification avoid becoming noise? If WorkTrain opens 10 PRs in a day, each triggering a Slack message, the channel becomes unusable. Is there a batching, threading, or filtering mechanism?
 - What is the authentication and secret management story? Slack/Teams tokens are sensitive. How are they stored -- same `$ENV_VAR_NAME` resolution as trigger HMAC secrets, or a separate credentials store?
 
+**See also:** Daemon working hours / dispatch scheduling (below) -- notifications sent outside working hours are noise. The two features are complementary and the notification design should account for working hours before being finalized.
+
+---
+
+### Daemon working hours and dispatch scheduling (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+WorkTrain is designed for overnight-safe autonomous operation, but "overnight-safe" currently means the daemon keeps working through the night without human oversight -- not that it respects the operator's or team's working hours. A PR opened at 2am sits unreviewed until morning, potentially blocking CI resources and creating a stale review context by the time anyone looks at it. Slack/Teams notifications sent at 3am for a completed pipeline are noise. Triggers that fire from a monitoring alert at midnight might not be appropriate to dispatch -- the team may prefer to address incidents during business hours unless they are truly critical.
+
+There is no current mechanism to configure when the daemon dispatches new sessions, when it sends notifications, or when it holds work for the next business day. This affects both the operator's experience (receiving alerts at inconvenient times) and the team's experience (PRs landing outside review windows).
+
+**Things to hash out:**
+- What is the scope? Working hours could affect: (a) trigger dispatch (hold incoming triggers until working hours), (b) notifications (send alerts only during working hours, or queue and send at start of next working day), (c) both. These may need separate configuration since you might want overnight dispatch but morning-only notifications.
+- What is the configuration model? Per-workspace (`~/.workrail/config.json: { workingHours: { timezone: "America/New_York", days: ["Mon","Tue","Wed","Thu","Fri"], start: "09:00", end: "18:00" } }`) or per-trigger (some triggers are critical and should dispatch any time; others are routine and should respect working hours)?
+- How does "critical" work? An on-call incident trigger probably should not be gated by working hours. What is the mechanism for a trigger to opt out of working hours scheduling? A `priority: critical` flag, or an explicit `ignoreWorkingHours: true` field?
+- What happens to triggers that fire outside working hours? Queue and dispatch at next working-hours start, discard, or dispatch anyway but suppress notifications?
+- How does this interact with multi-timezone teams? The operator may be in one timezone, reviewers in another. Working hours relative to whom?
+
+**See also:** Slack/Teams notification integration (above) -- the two features are designed to be used together.
+
 ---
 
 ### Intent gap: agent builds what it understood, not what the user meant (Apr 30, 2026)
