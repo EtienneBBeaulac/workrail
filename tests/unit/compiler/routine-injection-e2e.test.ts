@@ -50,9 +50,9 @@ describe('End-to-end routine injection through the compiler', () => {
     // First step is the regular gather context step
     expect(steps[0]!.id).toBe('phase-0-gather');
 
-    // The routine has 5 steps, so indices 1-5 should be the expanded routine steps
+    // The routine has 6 steps (step-0 anchor + 5 original steps)
     const routineStepCount = routine.steps.length;
-    expect(routineStepCount).toBe(5);
+    expect(routineStepCount).toBe(6);
 
     // Verify routine steps are expanded with correct ID prefixing
     for (let i = 0; i < routineStepCount; i++) {
@@ -68,8 +68,8 @@ describe('End-to-end routine injection through the compiler', () => {
     const lastStep = steps[steps.length - 1]!;
     expect(lastStep.id).toBe('phase-2-implement');
 
-    // Total step count: 1 (gather) + 5 (routine) + 1 (implement) = 7
-    expect(steps.length).toBe(7);
+    // Total step count: 1 (gather) + 6 (routine) + 1 (implement) = 8
+    expect(steps.length).toBe(8);
   });
 
   it('routine metaGuidance is injected as step-level guidance', () => {

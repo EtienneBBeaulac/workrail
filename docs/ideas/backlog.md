@@ -258,6 +258,71 @@ This is exactly what happened with the commit SHA change: setting `agentCommitSh
 The autonomous workflow runner (`worktrain daemon`). Completely separate from the MCP server -- calls the engine directly in-process.
 
 
+### Living work context: shared knowledge document that accumulates across the full pipeline (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+When a multi-agent pipeline runs -- discovery → shaping → coding → review → fix → re-review -- no agent has a complete picture of what came before it. The coding agent has the goal. The review agent has the code. The fix agent has the findings. None of them have the accumulated context from the full pipeline: why this approach was chosen over alternatives, what was ruled out, what constraints were discovered, what architectural decisions were made, what edge cases were handled, what the review found and why.
+
+Each agent reconstructs intent from incomplete context, which is why review finds things coding missed (review doesn't know what the coding agent was trying to do), why fix sessions address symptoms without understanding causes (no access to the architectural reasoning), and why agents repeat work that earlier agents already did.
+
+**The real need:** a **living work context document** that every agent in the pipeline both reads from and contributes to:
+
+- **Discovery adds**: why this approach over alternatives, what was ruled out, constraints found
+- **Shaping adds**: the bounded problem, no-gos, acceptance criteria -- the verifiable contract
+- **Architecture/coding adds**: why specific decisions were made, what invariants must hold, what was deliberately deferred and why
+- **Review adds**: what was found, the underlying reason it was missed, what the fix must address
+- **Fix adds**: what was changed and why the fix is correct per the spec
+
+The spec from shaping is one layer of this -- the *what to build* contract. But the full context also includes the *why* from discovery, the *how* decisions from coding, and the *what was missed* from review. All of it should be accessible to every downstream agent.
+
+This is related to the "session knowledge log" backlog entry (agents appending to `session-knowledge.jsonl`) but is explicitly a **multi-agent shared artifact**, not a single session's private log. The coordinator is responsible for maintaining and passing this document to each spawned agent.
+
+**Things to hash out:**
+- What is the right format? A growing markdown document is human-readable but hard to query. Structured JSON is queryable but loses the narrative. A hybrid (structured frontmatter + narrative body) may be best.
+- Where does it live? In the worktree (accessible to the coding agent)? In a well-known workspace path? In the session store (accessible to all agents via `read_artifact`)?
+- Who owns writing to it -- the coordinator (scripts that have no LLM)? Each agent? Both?
+- When a pure coordinator pipeline has no main agent, who synthesizes the discovery findings into the document? The discovery agent writes its own section; the coordinator passes it through. But synthesis across sections (connecting discovery constraints to coding decisions) requires reasoning.
+- How does the review agent know which work context applies to the current PR? It needs discovery without being told explicitly.
+- What's the minimum viable version -- is just passing the shaped spec (`SPEC.md`) to the coding and review agents already a major improvement, even without the full living document?
+- This is distinct from "context injection at dispatch time" (passing a static bundle) -- the living document evolves as the pipeline progresses. Does the coordinator update it after each phase completes?
+- **Is "document" even the right abstraction?** A flat document implies agents read it linearly. But agents need to query it selectively -- the coding agent needs "what constraints affect this decision?", the review agent needs "what did the coding agent say about this module?". A structured knowledge store (typed facts, queryable by agent role and topic) may be more useful than a document. This connects to the knowledge graph backlog entry -- the work-unit knowledge store may be a per-pipeline instance of the same infrastructure. This is worth hashing out before designing the format.
+
+---
+
+### Move backlog to a dedicated worktrain-meta repo (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: no
+
+The backlog (`docs/ideas/backlog.md`) lives in the code repo, which means every feature branch has its own version of it. Ideas added mid-session on a feature branch are held hostage until that PR merges. If two branches both modify the backlog, git merge conflicts occur. There is no single authoritative place to add an idea that immediately applies everywhere.
+
+**Proposed fix:** move the backlog to a dedicated `worktrain-meta` repo (e.g. `~/git/personal/worktrain-meta/`). This is a separate git repo that is never branched for feature work -- you commit and push directly to main whenever an idea is added. Full git history is preserved. No code branch ever touches it. WorkTrain daemon sessions and the `npm run backlog` script are configured with the path to this repo.
+
+**Why separate repo over a dedicated branch in this repo:**
+- A dedicated branch in this repo can be accidentally contaminated by a rebase or merge
+- CI runs on every push to a branch here -- wasting resources on docs-only changes
+- The backlog lifecycle (ideas, grooming, scoring) is independent of the code release cycle -- they should be independent repos
+- When native backlog operations (structured data, SQLite) are built later, the backlog is already isolated and the migration doesn't touch the code repo
+
+**Migration steps:**
+1. Create `~/git/personal/worktrain-meta/` git repo, push to GitHub as a new repo
+2. Move `docs/ideas/backlog.md` there as the initial commit
+3. Update `scripts/backlog-priority.ts` path
+4. Update AGENTS.md reference to `npm run backlog`
+5. Update daemon-soul.md and any session context that references the backlog path
+6. Add `backlogRepoPath` to `~/.workrail/config.json` so the daemon knows where to find it
+
+**Things to hash out:**
+- Should the worktrain-meta repo also hold other cross-cutting artifacts like planning docs, the now-next-later roadmap, open-work-inventory? Or just the backlog?
+- How do subagents spawned in a worktree find the backlog? They need the path configured, not relative to the code workspace.
+- When native structured backlog operations are built, does the storage backend (SQLite) live in worktrain-meta or in `~/.workrail/data/`? The history requirement points toward worktrain-meta (git-tracked), but query performance points toward `~/.workrail/data/` (local database).
+
+---
+
 ### Subagent context package: project vision and task goal baked into spawning (Apr 30, 2026)
 
 **Status: idea** | Priority: high
@@ -1266,6 +1331,25 @@ This is already how mid-run resume works. The same mechanism extends naturally t
 - How does the auto-checkpoint list interact with existing explicit `checkpoint_workflow` calls? Is there any risk of over-checkpointing causing storage bloat?
 - If a coordinator resumes a session for post-completion processing, is the resumed session billed/attributed to the same source trigger?
 - What is the retention and garbage collection policy for post-completion events appended to old sessions?
+
+---
+
+### Task-scoped rules: step-level rule injection by task type (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Workspace rules today are injected globally -- every session gets the same rules regardless of what the session is doing. This means PR-opening rules, issue-creation rules, commit message rules, and merge rules are all visible to a discovery session that will never do any of those things. Worse, a PR-opening step in a coding workflow doesn't get the rules injected precisely when it needs them -- they're diluted in the full rules blob. There is no mechanism to say "inject these rules only when the agent is about to open a PR" or "inject these rules only when creating a GitHub issue."
+
+The idea: a rule declaration mechanism (either in the workflow step definition or in a workspace rules file) that tags rules by task type. At step execution time, the engine injects only the rules tagged for that step's declared task type. Examples: a step with `taskType: 'git.open_pr'` automatically receives PR-opening rules; a step with `taskType: 'github.create_issue'` receives issue-creation rules. Rules not tagged for the current task type are not injected into that step's prompt. This is complementary to the phase-scoped rules preprocessing item -- phase scoping is coarse-grained (coding vs review), task scoping is fine-grained (which specific action within a step).
+
+**Things to hash out:**
+- Where are task-scoped rules declared -- in the workflow step definition (`taskType` field), in a workspace rules file with tags, or both?
+- What is the taxonomy of task types -- is it an open string, a closed enum, or a hierarchical namespace (e.g. `git.*`, `github.*`, `jira.*`)?
+- Does this interact with the ephemeral per-turn injection idea? Task-scoped rules are a natural candidate for ephemeral injection -- visible when needed, not accumulated in history.
+- Should task-scoped rules override or augment the global rules? What is the precedence and load order?
+- Who authors the task-scoped rules -- the workflow author (in the workflow JSON) or the workspace operator (in a workspace rules file)? Both seem valid but have different ownership models.
 
 ---
 
@@ -2483,6 +2567,25 @@ A workflow that aggregates activity across git history, GitLab/GitHub MRs and re
 - Who owns the community PR process for workflow improvements? Auto-opened PRs against a community repo need a reviewer.
 - If the same workflow is run with different models (Haiku vs Sonnet), the metrics will differ significantly. Are model-specific stats tracked separately or averaged?
 - How does this prevent a positive feedback loop where the assessment workflow optimizes for metrics (fewer turns, faster completion) at the expense of quality?
+
+---
+
+### Ephemeral per-turn context injection in the agent loop (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:1 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+The agent loop injects content (rules, soul, workspace context) into the system prompt once at session start. This means rules and behavioral constraints consume tokens for the entire session history. For long-running sessions, this is wasteful: every LLM API call re-sends the full system prompt including rules that were injected 50 turns ago. The alternative -- injecting rules on every turn as a fresh user or system message -- keeps them current but pollutes the conversation history with repetitive injections that further inflate context. There is no mechanism to inject content that is "always fresh, never historical" -- present on every loop iteration but not accumulated in the turn-by-turn conversation log.
+
+The desired behavior: certain content (rules, behavioral constraints, workspace context, soul principles) should be re-injected on every turn as an ephemeral "floating system message" that is visible to the LLM during inference but not stored in the conversation history. The LLM always sees it but it never grows the history.
+
+**Things to hash out:**
+- Does the Anthropic API (or other LLM providers) support a distinct ephemeral/volatile content slot that is not part of the messages array? If not, what is the closest approximation?
+- Is this a system prompt update per turn, or a separate "ephemeral context" message type? The distinction affects how context windows are managed by the provider.
+- Should ephemeral content be declared in the workflow (as a `volatileContext` field) or injected by the daemon's buildSystemPrompt() at the infrastructure level?
+- Which content actually benefits from this -- rules/soul only, or also things like "current git status", "last test run output", workspace context that may change mid-session?
+- Does this interact with the WorkRail engine's `continue_workflow` step injection? Step prompts are already injected per turn via `steer()` -- is this just a generalization of that mechanism?
 
 ---
 
@@ -4094,3 +4197,55 @@ WorkTrain has no tooling to surface the state of worktrees and branches relative
 
 ---
 
+
+## WorkRail usage report as a mercury-mobile team script (May 4, 2026)
+
+**Goal:** Make the WorkRail usage report dead simple to run for any mercury-mobile engineer -- one command, zero config beyond a GitLab token.
+
+### Distribution
+
+- Lives in mercury-mobile's common-ground team directory (`src/teams/mercury/mercury-mobile/scripts/workrail-report.sh`)
+- Distributed to every mercury engineer's machine by common-ground via `make sync`
+- Runnable as `~/.cg/dist/scripts/workrail-report.sh` or wrapped as a skill/alias
+
+### What it does
+
+1. Reads `~/.cg/config.toml` for the engineer's team identity
+2. Reads `~/.cg/repo-list.cache` to resolve repo names to local paths
+3. Scans `~/.workrail/data/sessions/` for sessions in the report window -- this is the authoritative source of what repos WorkRail was used on
+4. Fetches GitLab MRs via API for each repo that had sessions
+5. Builds the HTML report and writes to `~/Downloads/workrail-report-YYYY-MM-DD.html`
+6. Auto-opens the report
+
+### Configuration
+
+- **Token:** checks `GITLAB_TOKEN` env var → `~/.cg/secrets` → prompts once and offers to save. Zero setup if engineer already has `GITLAB_TOKEN` set.
+- **Date range:** defaults to last 30 days rolling. Override via `WORKRAIL_REPORT_DAYS=60 ./workrail-report.sh` or `--days 90` flag.
+- **Nothing else** -- team, repos, and GitLab paths are all auto-detected.
+
+### Report behavior
+
+- Only shows repos where WorkRail sessions exist in the window -- absence is signal, not a bug
+- Repos worked in outside WorkRail simply don't appear (the report is a WorkRail usage report, not a total productivity report)
+- "WorkRail shipped" correlation tab disabled in distributed version -- too expensive to run automatically. Available as a separate manual step for advanced users.
+
+### Error handling
+
+- No WorkRail installed → clear message with install instructions
+- No sessions in window → "No WorkRail activity in the last 30 days" with suggestion to check date range
+- No GitLab token → prompt with instructions for creating one
+- Repo not cloned locally → skip with note (LOC stats require local clone, rest of report works without it)
+
+### Non-goals
+
+- Not a team-level aggregated report (that's a future feature once `triggerSource` attribution is built)
+- Not a real-time dashboard
+- Not responsible for repos where WorkRail wasn't used
+
+### Depends on
+
+- The shared report scripts (`01-collect-sessions.py`, `02-collect-commits.py`, `04-build-html.py`) being stable -- ship this only after those are solid
+- `triggerSource: 'daemon' | 'mcp'` attribution (backlog) for distinguishing autonomous vs manual sessions -- not blocking but would improve the report
+- Common-ground `make sync` distributing the script reliably
+
+**Priority:** Medium. The shared scripts work and have been tested. Main remaining work is the shell wrapper, token storage, and integration with common-ground's team config.
