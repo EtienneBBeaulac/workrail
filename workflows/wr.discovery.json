@@ -1,7 +1,7 @@
 {
   "id": "wr.discovery",
   "name": "Discovery Workflow",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "metricsProfile": "research",
   "validatedAgainstSpecVersion": 3,
   "description": "Use this to explore and think through a problem end-to-end. Moves between landscape exploration, problem framing, candidate generation, adversarial challenge, and uncertainty resolution.",
@@ -19,6 +19,74 @@
   "features": [
     "wr.features.capabilities",
     "wr.features.subagent_guidance"
+  ],
+  "assessments": [
+    {
+      "id": "framing-rigor-gate",
+      "purpose": "The problem frame is specific enough to constrain candidate generation -- grounded with a concrete falsification condition and independent of the proposed solution.",
+      "dimensions": [
+        {
+          "id": "framing_specificity",
+          "purpose": "A specific falsification condition is named: one concrete thing that, if discovered true, would change the path or direction. Generic caveats do not count.",
+          "levels": [
+            "vague",
+            "specific"
+          ]
+        },
+        {
+          "id": "framing_independence",
+          "purpose": "The problem statement is independent of the proposed solution -- it does not embed the solution in its framing.",
+          "levels": [
+            "solution_embedded",
+            "problem_shaped"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "candidate-quality-gate",
+      "purpose": "Candidates are genuinely distinct in how they resolve the identified tensions, and at least one decision criterion is quality-aspirational rather than a constraint-satisfaction threshold.",
+      "dimensions": [
+        {
+          "id": "candidate_distinctness",
+          "purpose": "Each candidate resolves the identified tensions differently. At least one resolves a tension no other candidate addresses. Variants with different labels on the same approach do not count.",
+          "levels": [
+            "shallow",
+            "distinct"
+          ]
+        },
+        {
+          "id": "quality_criterion_present",
+          "purpose": "At least one decision criterion is derived from idealEndState (quality-aspirational), not just from constraints. Constraint-satisfaction criteria alone allow the most conservative candidate to win by default.",
+          "levels": [
+            "absent",
+            "present"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recommendation-confidence-gate",
+      "purpose": "The final recommendation is anchored to the ideal end state and has explicitly named residual risks -- not just a stated confidence band.",
+      "dimensions": [
+        {
+          "id": "ideal_state_comparison",
+          "purpose": "The selected direction was explicitly compared to idealEndState. Any gap between the recommendation and the ideal is named as an accepted limitation with a concrete reason, not left implicit.",
+          "levels": [
+            "uncompared",
+            "compared"
+          ]
+        },
+        {
+          "id": "residual_risks_named",
+          "purpose": "Residual risks are specific -- each names what concretely would invalidate the recommendation. Generic caveats ('complexity', 'maintenance burden') without specifics do not count.",
+          "levels": [
+            "generic",
+            "specific"
+          ]
+        }
+      ]
+    }
   ],
   "preconditions": [
     "I can tell you what problem, opportunity, or decision I want help thinking through.",
@@ -78,13 +146,15 @@
           "Challenge exactly 3 key assumptions embedded in the stated goal. For each assumption: state the assumption clearly, explain why it might be wrong, and identify what evidence would confirm or refute it. Record these as `challengedAssumptions`.",
           "Define what success looks like before any candidates are generated. Success criteria must be concrete and observable -- not 'the problem is solved' but 'we can measure X, users do Y, the system behaves Z'. Record these as `successCriteria`.",
           "Record a one-sentence `reframedProblem` that captures the real underlying problem, stripped of any solution bias from the original goal.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `goalType`, `reframedProblem`, `challengedAssumptions`, `successCriteria`, `goalWasSolutionStatement`."
+          "Record `idealEndState`: one paragraph describing what the best possible solution would look like if effort and scope were no constraint. This is not a candidate -- it is a quality ceiling that candidate generation will calibrate against. If you are uncertain, write the most ambitious version you can justify.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `goalType`, `reframedProblem`, `challengedAssumptions`, `successCriteria`, `goalWasSolutionStatement`, `idealEndState`."
         ],
         "verify": [
           "Each of the 3 challenged assumptions is specific enough that someone could disagree with the challenge.",
           "The success criteria would let a skeptic determine whether the work actually succeeded.",
           "If the goal was a solution-statement, the underlying problem is stated independently of the proposed solution.",
-          "The reframed problem is meaningfully different from the original goal wording, or you have explicitly noted why the original framing was already problem-shaped."
+          "The reframed problem is meaningfully different from the original goal wording, or you have explicitly noted why the original framing was already problem-shaped.",
+          "`idealEndState` describes the best achievable outcome, not the most defensible one. If they are the same, say so explicitly."
         ]
       },
       "requireConfirmation": false
@@ -109,14 +179,18 @@
           "Capture: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
           "If `goalWasSolutionStatement = true`, set `problemStatement` from `reframedProblem` rather than from the stated goal. Record the original stated goal as `statedGoal` in the design doc so the distinction is visible.",
           "Choose `landscape_first` when my dominant need is understanding the current landscape or comparing options. Choose `full_spectrum` when both landscape grounding and reframing are needed. Choose `design_first` when the dominant risk is solving the wrong problem or shaping the wrong concept. If `goalWasSolutionStatement = true`, bias toward `design_first` unless the stated solution is clearly the correct framing.",
+          "Set `rigorMode` to exactly one of: `QUICK`, `STANDARD`, `THOROUGH`. This is NOT the same as `pathRecommendation` -- do not use path names as rigor values. For architectural or system design problems, default to `THOROUGH`. For one-off decisions or well-bounded comparisons, use `STANDARD`. Use `QUICK` only when speed is explicitly more important than depth.",
+          "Set `solutionAmbitiousness` to exactly one of: `minimal_viable` (smallest thing that satisfies the criteria), `best_fit` (right solution for the stated constraints), `ideal_architecture` (best solution achievable, constraints relaxed). For architectural and system design problems, default to `ideal_architecture` unless the user has explicitly constrained scope. Record this in the design doc.",
           "Create or update `designDocPath` with sections for Context / Ask, Path Recommendation, Constraints / Anti-goals, Landscape Packet, Problem Frame Packet, Candidate Directions, Challenge Notes, Resolution Notes, Decision Log, and Final Summary.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `problemStatement`, `desiredOutcome`, `coreConstraints`, `antiGoals`, `primaryUncertainty`, `knownApproaches`, `importantStakeholders`, `rigorMode`, `automationLevel`, `pathRecommendation`, `pathRationale`, `designDocPath`, `solutionAmbitiousness`.",
           "Also set `goal` in the context object: one sentence describing what you are trying to accomplish. This populates the session title in the Workspace console immediately."
         ],
         "verify": [
           "The chosen path is justified against the other two, not just named.",
           "If `goalWasSolutionStatement = true`, the `problemStatement` reflects the reframed problem, not the stated solution.",
-          "The design doc exists and the path recommendation is recorded there."
+          "The design doc exists and the path recommendation is recorded there.",
+          "`rigorMode` is exactly one of QUICK, STANDARD, THOROUGH -- not a path name or free-form string.",
+          "`solutionAmbitiousness` is set and recorded in the design doc. For architectural problems, `ideal_architecture` is the default unless scope was explicitly constrained."
         ]
       },
       "requireConfirmation": {
@@ -302,6 +376,9 @@
     {
       "id": "phase-1e-frame-full",
       "title": "Phase 1e: Problem Frame and Stakeholders (Full-spectrum)",
+      "assessmentRefs": [
+        "framing-rigor-gate"
+      ],
       "runCondition": {
         "var": "pathRecommendation",
         "equals": "full_spectrum"
@@ -323,11 +400,15 @@
           "If `delegationAvailable = true`, decide whether parallel stakeholder lenses would actually sharpen the result. If yes, run them in parallel. If not, keep going yourself. In either case, you must synthesize the result yourself.",
           "Update `designDocPath` using `problemFrameTemplate`.",
           "Before finishing, name ONE specific concrete condition that would make the current framing wrong -- not a generic caveat, but a specific thing that if discovered to be true would change the path or direction. Record this as `primaryFramingRisk` in the design doc.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`."
+          "Capture the tensions as a structured list -- not just a count. Record `identifiedTensions` as an array of one-sentence tension descriptions (e.g. 'completeness vs token budget', 'typed contracts vs evolving interfaces'). This is the list that will be passed verbatim to candidate generation executors.",
+          "Record `philosophySources` as a list of file paths or Memory entry names that encode the dev's philosophy (e.g. 'CLAUDE.md', 'AGENTS.md', '.cursor/rules/'). If none exist, record an empty list.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`, `identifiedTensions`, `philosophySources`."
         ],
         "verify": [
           "The framing names what could still be wrong -- specifically, not generically.",
-          "The frame is strong enough to influence candidate generation and later selection."
+          "The frame is strong enough to influence candidate generation and later selection.",
+          "`identifiedTensions` is a structured list of named tensions, not just a count.",
+          "`philosophySources` is recorded -- empty list is acceptable if none exist."
         ]
       },
       "functionReferences": [
@@ -338,6 +419,9 @@
     {
       "id": "phase-1f-frame-design",
       "title": "Phase 1f: Problem Frame and Stakeholders (Design-first)",
+      "assessmentRefs": [
+        "framing-rigor-gate"
+      ],
       "runCondition": {
         "var": "pathRecommendation",
         "equals": "design_first"
@@ -359,11 +443,15 @@
           "If `delegationAvailable = true`, decide whether parallel stakeholder lenses would actually sharpen the result. If yes, run them in parallel. If not, keep going yourself. In either case, you must synthesize the result yourself.",
           "Update `designDocPath` using `problemFrameTemplate`.",
           "Before finishing, name ONE specific concrete condition that would make the current framing wrong -- not a generic caveat, but a specific thing that if discovered to be true would change the path or direction. Record this as `primaryFramingRisk` in the design doc.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`."
+          "Capture the tensions as a structured list -- not just a count. Record `identifiedTensions` as an array of one-sentence tension descriptions (e.g. 'completeness vs token budget', 'typed contracts vs evolving interfaces'). This is the list that will be passed verbatim to candidate generation executors.",
+          "Record `philosophySources` as a list of file paths or Memory entry names that encode the dev's philosophy (e.g. 'CLAUDE.md', 'AGENTS.md', '.cursor/rules/'). If none exist, record an empty list.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `problemFrame`, `primaryUsers`, `tensionCount`, `successCriteriaCount`, `framingRiskCount`, `needsChallenge`, `retriageNeeded`, `identifiedTensions`, `philosophySources`."
         ],
         "verify": [
           "The framing names what could still be wrong -- specifically, not generically.",
-          "The framing depth is strong enough to justify a design-first path."
+          "The framing depth is strong enough to justify a design-first path.",
+          "`identifiedTensions` is a structured list of named tensions, not just a count.",
+          "`philosophySources` is recorded -- empty list is acceptable if none exist."
         ]
       },
       "functionReferences": [
@@ -439,12 +527,14 @@
         ],
         "procedure": [
           "Produce a concise synthesis of the opportunity, the 3-5 criteria the final direction must satisfy, the strongest framing risk, and the current best explanation of what success looks like.",
+          "When generating `decisionCriteria`: criteria that come from constraints and anti-goals are necessary but not sufficient. They are compatibility thresholds -- every viable candidate will satisfy them. At least one criterion must be quality-aspirational: derived from `idealEndState`, not from constraints. Quality-aspirational criteria ask 'which candidate is best?' not 'which candidates pass?'. Good examples: 'which requires the fewest changes to add a new phase?', 'which would a senior engineer be proudest of in two years?', 'which best reflects the architecture we want to be running against in 12 months?'. If `solutionAmbitiousness = 'ideal_architecture'`, this quality-aspirational criterion is mandatory -- not optional.",
           "Set `candidateCountTarget` adaptively: QUICK = 2-3, STANDARD = 3-4, THOROUGH = 4-5.",
           "Set these keys in the next `continue_workflow` call's `context` object: `decisionCriteria`, `riskiestAssumption`, `candidateCountTarget`, `needsPrototype`, `needsFurtherResearch`, `pathReady`."
         ],
         "verify": [
           "You can explain why this is the right path and what a good answer must satisfy.",
-          "Remaining uncertainty is categorized explicitly instead of left fuzzy."
+          "Remaining uncertainty is categorized explicitly instead of left fuzzy.",
+          "At least one `decisionCriterion` is quality-aspirational (derived from `idealEndState`), not just a compatibility threshold from constraints. If `solutionAmbitiousness = 'ideal_architecture'`, this is not optional."
         ]
       },
       "promptFragments": [
@@ -491,6 +581,14 @@
             "equals": "design_first"
           },
           "text": "Because this is a `design_first` pass, keep the criteria anchored in framing quality, tension resolution, and learning value, not just comparison of known approaches."
+        },
+        {
+          "id": "p2-ideal-architecture-criteria",
+          "when": {
+            "var": "solutionAmbitiousness",
+            "equals": "ideal_architecture"
+          },
+          "text": "Because `solutionAmbitiousness = 'ideal_architecture'`: the decision criteria must include at least one that directly tests against `idealEndState`. Constraint-satisfaction criteria alone will cause the most conservative candidate to win by default -- every viable option satisfies them. The quality-aspirational criterion is what makes the ambitious candidate compete on its own terms rather than just surviving a challenge."
         }
       ],
       "requireConfirmation": false
@@ -557,20 +655,41 @@
           "For `design_first`, require at least one direction that meaningfully reframes the problem instead of only packaging obvious solutions.",
           "For `landscape_first`, require the candidate set to clearly reflect landscape precedents, constraints, and contradictions rather than drifting into free invention.",
           "For `THOROUGH`, require one extra push if the first spread still feels clustered or too safe.",
+          "If `delegationAvailable = true` and `rigorMode != QUICK`: assign 2-3 non-overlapping focus angles before spawning anything. Then spawn the corresponding WorkRail Executors SIMULTANEOUSLY, each running `wr.routine-tension-driven-design`. The ONLY way to pass context to each executor is via its goal string -- executors start with clean sessions and cannot read the main agent's context variables. Build a self-contained goal string for each executor using these exact markers (the routine reads them by label): 'FOCUS ANGLE: <the assigned angle as a concrete instruction> | PROBLEM: <reframedProblem> | TENSIONS: <bullet list of identified tensions> | CRITERIA: <bullet list of decisionCriteria> | IDEAL END STATE: <idealEndState> | RISKIEST ASSUMPTION: <riskiestAssumption> | PHILOSOPHY: <philosophySources paths or summary> | OUTPUT FILE: design-candidates-angle-N.md'. Assign distinct angles -- concrete examples: (A) 'Anchor every candidate to the ideal end state -- build the best achievable design if effort and scope were no constraint', (B) 'Anchor every candidate to the riskiest assumption -- build the most defensible design that does not bet on any single assumption being true', (C) 'Anchor every candidate to the primary framing risk -- what would the design look like if the current problem framing is wrong?'. After all executors complete, read each executor's output file (the filenames you specified in OUTPUT FILE in each goal string -- e.g. `design-candidates-angle-1.md`, `design-candidates-angle-2.md`, etc.). Synthesize using these criteria: (1) Does the final set span from idealEndState to most-defensible? If not, name the gap. (2) Does at least one candidate from each executor's angle survive? If an angle is absent, justify it. (3) Does cross-executor comparison yield any insight no single executor reached? If yes, add it as a new candidate. (4) Do any candidates that look different resolve the same tension the same way? Collapse to the sharper version. Write the synthesized result to `design-candidates.md`. If `delegationAvailable = false`, generate candidates yourself and record why solo execution was used.",
           "Write these expectations into `designDocPath` so the later synthesis can judge whether the injected routine met them."
         ],
         "verify": [
-          "The path-specific expectations for candidate generation are explicit before the injected routine runs."
+          "The path-specific expectations for candidate generation are explicit before the injected routine runs.",
+          "If delegation was used: each executor received a self-contained briefing with a distinct non-overlapping focus angle. The synthesized candidate set reflects main-agent judgment, not a flat concatenation of executor outputs.",
+          "If delegation was skipped: the reason is recorded."
         ]
       },
+      "promptFragments": [
+        {
+          "id": "p3b-ideal-architecture-target",
+          "when": {
+            "var": "solutionAmbitiousness",
+            "equals": "ideal_architecture"
+          },
+          "text": "Because `solutionAmbitiousness = 'ideal_architecture'`: require at least one candidate that directly targets `idealEndState` from phase-0a. This candidate represents the best achievable outcome if effort and scope were no constraint. If it turns out to also be the most practical candidate, say so explicitly. If no candidate reaches the ideal end state, that gap must be named and justified in phase-3d -- it cannot be left implicit."
+        }
+      ],
       "requireConfirmation": false
     },
     {
       "id": "phase-3c-candidates-deep-core",
       "title": "Phase 3c: Candidate Generation (Injected Routine)",
       "runCondition": {
-        "var": "rigorMode",
-        "not_equals": "QUICK"
+        "and": [
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          },
+          {
+            "var": "delegationAvailable",
+            "not_equals": true
+          }
+        ]
       },
       "templateCall": {
         "templateId": "wr.templates.routine.tension-driven-design",
@@ -583,6 +702,9 @@
     {
       "id": "phase-3d-select-direction",
       "title": "Phase 3d: Challenge and Select Direction",
+      "assessmentRefs": [
+        "candidate-quality-gate"
+      ],
       "promptBlocks": {
         "goal": "Read `design-candidates.md`, challenge the leading option, and make the final selection for me.",
         "constraints": [
@@ -601,8 +723,9 @@
           "If `delegationAvailable = true` and (`rigorMode != QUICK` or `pathRecommendation = full_spectrum`), decide whether a delegated challenge is likely to sharpen the decision enough to be worth the extra step. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the leading option. If not, keep the challenge in your own hands and say why.",
           "If `delegationAvailable = true` and `rigorMode = THOROUGH`, decide whether an execution simulation would materially sharpen the decision. If yes, you may also spawn ONE WorkRail Executor running `routine-execution-simulation`.",
           "Choose `selectedDirection` and `runnerUpDirection`.",
+          "Quality ceiling check: explicitly compare the selected direction to `idealEndState` from phase-0a. Answer: does the selected direction reach the ideal end state? If not, name exactly what it falls short of and why that shortfall is justified. If `solutionAmbitiousness = 'ideal_architecture'` and the selected direction is the most conservative or lowest-scope candidate, you must provide a specific reason each more ambitious candidate was ruled out -- 'too complex' or 'too much work' are not acceptable reasons on their own. Scope is a legitimate constraint only when it is a real stated constraint, not a default preference.",
           "Record `acceptedTradeoffs`, `identifiedFailureModes`, and what would trigger a switch.",
-          "Update `designDocPath` Decision Log with why the winner won and why the runner-up lost.",
+          "Update `designDocPath` Decision Log with why the winner won, why the runner-up lost, and how the winner compares to `idealEndState`.",
           "Set these keys in the next `continue_workflow` call's `context` object: `selectedDirection`, `runnerUpDirection`, `acceptedTradeoffs`, `identifiedFailureModes`, `hasStrongAlternative`, `needsPrototype`, `needsFurtherResearch`, `recommendationConfidenceBand`."
         ],
         "outputRequired": {
@@ -610,7 +733,8 @@
         },
         "verify": [
           "The strongest alternative was developed enough that switching to it would feel real, not just imaginable.",
-          "Tradeoffs, failure modes, and switch triggers are explicit."
+          "Tradeoffs, failure modes, and switch triggers are explicit.",
+          "The selected direction was compared to `idealEndState` -- explicitly, not implicitly. Any gap is named as an accepted limitation with a concrete reason, not left as an assumption."
         ]
       },
       "promptFragments": [
@@ -940,6 +1064,9 @@
     {
       "id": "phase-6-validate",
       "title": "Phase 6: Final Validation",
+      "assessmentRefs": [
+        "recommendation-confidence-gate"
+      ],
       "promptBlocks": {
         "goal": "Validate that you are ending with the right level of confidence and the right caveats for me.",
         "constraints": [
