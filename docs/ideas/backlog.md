@@ -65,26 +65,50 @@ No proposed solutions here -- just the problem.]
 
 ### wr.coding-task forEach loop exposes broken agent-facing state (Apr 30, 2026)
 
-**Status: bug** | Priority: high
+**Status: done** | Shipped May 1, 2026 (PR #926)
 
 **Score: 13** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
 
-The `phase-6-implement-slices` loop (forEach over `slices`) ran correctly mechanically -- it iterated all 8 slices and stopped. But the agent-facing representation was broken in ways that violate WorkRail's promise of consistency and determinism:
+**Root cause (diagnosed Apr 30, 2026):** The agent wrote `slices` as an array of plain strings (`["1: slice name", ...]`) instead of objects (`[{name: "...", ...}]`). The engine accepted the array (it was an array), entered the loop, and `{{currentSlice.name}}` silently resolved to `[unset]` on every iteration because strings don't have a `.name` property.
 
-1. **`currentSlice.name` showed `[unset]`** -- the agent was inside a forEach loop over `slices` with `itemVar: "currentSlice"`, but the template variable wasn't being projected into sessionContext before rendering. The agent couldn't see which slice it was on. This is an engine rendering issue in `buildLoopRenderContext` / `prompt-renderer.ts`.
+**Shipped (PR #926):**
+1. **forEach shape guard** (`workflow-interpreter.ts`): at iteration 0, if the body uses `{{itemVar.field}}` dot-path access but the items array contains primitives, returns `LOOP_MISSING_CONTEXT` with a message naming the actual type and a preview of the bad value. The loop never enters with broken state.
+2. **Diagnostic `[unset]` messages** (`context-template-resolver.ts`): when dot-path navigation fails mid-path due to a type mismatch (e.g. `currentSlice` is a string), the rendered prompt now shows `[unset: currentSlice.name -- 'currentSlice' is string ("1: Auth..."), not object]` instead of just `[unset: currentSlice.name]`.
 
-2. **Agent emitted `wr.loop_control` artifacts that had no effect** -- the forEach loop silently ignores these. The agent did useless work the engine discarded without signaling that this was happening. A correct system should either prevent the agent from emitting artifacts that can't affect the loop, or tell the agent explicitly that artifact-based exit isn't available in this loop type.
-
-3. **Loop presented as "Pass N of 20" not "Slice 3 of 8"** -- the framing confused the agent about what was happening. The agent should be told it's iterating over concrete slices, not burning through a budget.
-
-The forEach loop *worked* but the agent experience was wrong. This matters because WorkRail's value is that agents should not be confused about their own loop state. An agent that emits useless artifacts, can't see its own iteration variable, and misunderstands whether the loop is progress-based or budget-based is not operating under the deterministic, correct framework WorkRail promises.
+**Remaining open (separate items):** context contract enforcement (systemic fix), `todoList` abstraction, `wr.loop_control` shown in forEach prompts.
 
 **GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/920
 
+---
+
+### Context contract: steps must declare required and produced context keys (Apr 30, 2026)
+
+**Status: tentative** | Priority: medium
+
+**Score: 12** | Cor:3 Cap:2 Eff:1 Lev:3 Con:2 | Blocked: no
+
+The engine has no mechanism to enforce context between steps. `Capture:` instructions in step prompts are prose -- the engine accepts `continue_workflow` with empty context on every advance, silently. This is the systemic root of the forEach `[unset]` bug: the agent wrote planning output as notes, not as context, and the engine accepted every advance without complaint. The same failure can happen in any workflow that passes state between steps.
+
 **Things to hash out:**
-- Is `currentSlice.name = [unset]` a bug in `buildLoopRenderContext` (engine fix needed), or is it a workflow authoring issue (the slices array items don't have a `name` property)?
-- Should the engine prevent agents from emitting `wr.loop_control` artifacts inside forEach loops, or simply document that they have no effect?
-- Should forEach loops surface iteration progress ("slice 3 of 8") differently than while loops ("pass 3 of 20") in the step header text?
+- What schema format should `contextContract` use -- JSON Schema subset or a simpler workrail-specific type DSL?
+- Should validation be blocking (engine rejects the advance) or advisory (engine warns in the next step prompt)?
+- Does context contract cover loop entry preconditions, or does the separate forEach guard item handle that?
+
+---
+
+### `todoList` step type: ergonomic abstraction over forEach (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:3 Eff:1 Lev:2 Con:2 | Blocked: no
+
+Workflow authors using forEach must manually wire a prior step to populate the items array, understand iteration variables, avoid emitting `wr.loop_control` artifacts (which have no effect in forEach), and explain the loop framing to the agent. The forEach shape guard (PR #926) now catches primitive-item arrays loudly at loop entry, but the wiring between "the step that produces items" and "the loop that consumes them" remains implicit and invisible to the engine. The `todoList` abstraction would make this wiring structural.
+
+**Things to hash out:**
+- Should `todoList` compile to a forEach loop at the engine layer, or be a new execution primitive?
+- How does the setup step that produces the items array get authored -- inline prompt, routine reference, or both?
+- What does the agent-facing presentation look like: "Item 3 of 8" with item content injected, or something else?
+- Should `wr.loop_control` artifacts be stripped from the step prompt entirely in a `todoList`, or does the agent still need an explicit completion signal?
 
 ---
 
@@ -333,21 +357,7 @@ Five dimensions, each scored 1-3. Score = sum (max 15). Items marked **Blocked**
 
 ### `delivery_failed` unreachable in `getChildSessionResult` -- type promises more than code delivers (Apr 30, 2026)
 
-**Status: bug** | Priority: medium
-
-**Score: 10** | Cor:3 Cap:1 Eff:2 Lev:2 Con:2 | Blocked: no
-
-`ChildSessionResult` has `reason: 'delivery_failed'` as a variant of `kind: 'failed'`. However `fetchChildSessionResult` in `coordinator-deps.ts` reads session status through `ConsoleService.getSessionDetail`, which returns statuses like `complete`/`blocked`/`in_progress` -- it never returns a `delivery_failed` status. `delivery_failed` is a `TriggerRouter`-level concept (callbackUrl POST failure) that is not stored as a session status in the event log. Child sessions spawned via `spawnSession`/`spawnAndAwait` have no `callbackUrl` and cannot produce it through this code path.
-
-The result: coordinators using `getChildSessionResult` can never observe `reason: 'delivery_failed'`, even though the type says they might. This violates the "make illegal states unrepresentable" principle -- the type union promises a variant the implementation cannot produce on this path.
-
-**Architectural fix (not a comment):** surface `delivery_failed` through session status. When `TriggerRouter` records a `delivery_failed` outcome, write a corresponding session event or status that `ConsoleService.getSessionDetail` returns. Then `fetchChildSessionResult` can map it correctly. This closes the gap between what the type promises and what the infrastructure delivers.
-
-Alternative: if `spawnSession`/`spawnAndAwait` child sessions genuinely cannot have `delivery_failed` outcomes by design, remove `reason: 'delivery_failed'` from `ChildSessionResult` entirely and document that it only exists in `spawn_agent`'s direct outcome mapping.
-
-**Things to hash out:**
-- Should `delivery_failed` be surfaced through ConsoleService (requires touching session status storage), or removed from `ChildSessionResult` since the `spawnSession` path provably cannot produce it?
-- If surfaced: what event or field in the session store carries this status, and how does ConsoleService project it?
+**Status: done** | Fixed in `cd8aaeb8` -- `delivery_failed` removed from `ChildSessionResult` entirely. The `spawnSession`/`spawnAndAwait` path cannot produce it by design; it only exists in `spawn_agent`'s direct outcome mapping.
 
 ---
 
@@ -367,19 +377,27 @@ Alternative: if `spawnSession`/`spawnAndAwait` child sessions genuinely cannot h
 
 ### Daemon architecture: remaining migrations (Apr 29, 2026)
 
-**Status: partial** | A9 shipped Apr 29, 2026.
+**Status: partial** | A9 shipped Apr 29, 2026. FC/IS follow-on shipped Apr 30 -- May 1, 2026.
 
 **Score: 8** | Cor:1 Cap:1 Eff:2 Lev:1 Con:3 | Blocked: no
 
 Track A (A1-A9) shipped and the `SessionSource` migration is complete. `WorkflowTrigger._preAllocatedStartResponse` is gone.
 
+**Shipped Apr 30 -- May 1, 2026 (PR #925):**
+- `TerminalSignal` union replaces `stuckReason` + `timeoutReason`. Illegal state (stuck AND timeout simultaneously) now structurally impossible. Stall overwrite bug fixed. `Readonly<SessionState>` at pure read sites.
+- `SessionScope` capability boundary complete: `onTokenUpdate`, `onIssueReported`, `onSteer`, `getCurrentToken`, `sessionWorkspacePath`, spawn depths all named scope fields. `constructTools` signature is `(ctx, apiKey, schemas, scope)` -- zero direct `state.X` references.
+- Early-exit paths unified through `finalizeSession`. `SteerRegistry`/`AbortRegistry` dead exports removed.
+- Architecture tests enforce `state.terminalSignal` write restriction and `constructTools` state-access restriction in CI.
+- `persistTokens` failure early-exit path covered by new outcome invariants tests.
+
 **Remaining items:**
 
 - `CriticalEffect<T>` / `ObservabilityEffect` type distinction -- categorize side effects in `runAgentLoop` and finalization as either crash-relevant or observability-only
-- `StateRef` mutation wrapper -- replace direct `state.pendingSteerParts.push()` mutations with an explicit mutation API
 - Zod tool param validation -- replace manual `typeof` checks in tool factories with Zod schema validation (requires `zodToJsonSchema` or maintaining two sources of truth for param schemas)
 - `createCoordinatorDeps` unit tests -- extraction in B3 improved testability; cover `spawnSession`, `awaitSessions`, `getAgentResult` at minimum
 - ~~Wire `AllocatedSession.triggerSource` to the `run_started` event for session attribution~~ -- **done**, PR #899 (Apr 30, 2026)
+- ~~`SessionStateWriter` capability interfaces~~ -- **done** as part of PR #925 (`SessionScope` now owns all mutation callbacks)
+- ~~Architecture test: forbid `state.terminalSignal =` direct writes outside `setTerminalSignal()`~~ -- **done**, PR #925
 
 ---
 
@@ -443,6 +461,8 @@ Phase 3 (PRs #835, #837): `buildTurnEndSubscriber`, `buildAgentCallbacks`, `buil
 **Unit tests added (PRs #863-#865):** `DefaultFileStateTracker` (15), `DefaultContextLoader` (12), `ActiveSessionSet`/`SessionHandle` (11).
 
 **Total workflow-runner.ts reduction: ~4,955 → ~2,800 lines (44%).**
+
+**FC/IS follow-on (PR #925, Apr 30 -- May 1, 2026):** `TerminalSignal` union, `SessionScope` capability boundary completion, early-exit unification through `finalizeSession`, architecture tests. See "Daemon architecture: remaining migrations" entry for full details.
 
 **Follow-on:** `wr.refactoring` workflow (see backlog entry above). Remaining items in "Daemon architecture: remaining migrations" entry below.
 
