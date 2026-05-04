@@ -83,14 +83,60 @@ describe('resolveContextTemplates — missing variable fallback', () => {
     expect(result).toBe('[unset: slice.title]');
   });
 
-  it('produces [unset: path] when intermediate path segment is not an object', () => {
+  it('produces diagnostic message when intermediate path segment is not an object', () => {
+    // WHY different format: when the walk fails mid-path due to a type mismatch
+    // (not a missing key), the message names the failing segment and its actual type.
+    // This is the key diagnostic improvement -- e.g. {{currentSlice.name}} failing
+    // because currentSlice is a string rather than an object is now immediately visible.
     const result = resolveContextTemplates('{{a.b.c}}', { a: 'flat-string' });
-    expect(result).toBe('[unset: a.b.c]');
+    expect(result).toBe('[unset: a.b.c -- \'a\' is string ("flat-string"), not object]');
   });
 
   it('produces [unset: path] when value is null', () => {
     const result = resolveContextTemplates('{{x}}', { x: null });
     expect(result).toBe('[unset: x]');
+  });
+});
+
+describe('resolveContextTemplates — diagnostic unset messages', () => {
+  it('names the failing segment and its type when a string is treated as object', () => {
+    // The wr.coding-task bug: slices was ["1: slice name", ...] not [{name: ...}, ...].
+    // currentSlice gets bound to the string, then .name fails silently.
+    // With the diagnostic message, the agent sees exactly what went wrong.
+    const result = resolveContextTemplates(
+      'Implement: {{currentSlice.name}}',
+      { currentSlice: '1: TerminalSignal type + SessionState field replacement' },
+    );
+    expect(result).toBe(
+      'Implement: [unset: currentSlice.name -- \'currentSlice\' is string ("1: TerminalSignal type + SessionState field replacement"), not object]',
+    );
+  });
+
+  it('truncates long values in diagnostic messages at 60 chars', () => {
+    const longString = 'x'.repeat(100);
+    const result = resolveContextTemplates('{{a.b}}', { a: longString });
+    expect(result).toContain('…');
+    expect(result).toContain('is string');
+    // The preview should be truncated, not the full 100 chars
+    expect(result.length).toBeLessThan(longString.length + 50);
+  });
+
+  it('produces plain [unset: path] when array key is absent (arrays allow .length navigation)', () => {
+    // Arrays are objects, so dot-path navigation into them is allowed.
+    // {{items.length}} works (documented). {{items.name}} returns undefined -> leaf_missing.
+    const result = resolveContextTemplates('{{items.name}}', { items: ['a', 'b'] });
+    expect(result).toBe('[unset: items.name]');
+  });
+
+  it('still produces plain [unset: path] for a completely missing variable', () => {
+    // Missing root key keeps the simple format for backwards compat.
+    const result = resolveContextTemplates('{{rigorMode}}', {});
+    expect(result).toBe('[unset: rigorMode]');
+  });
+
+  it('still produces plain [unset: path] when parent exists but leaf is absent', () => {
+    const result = resolveContextTemplates('{{slice.title}}', { slice: { name: 'x' } });
+    expect(result).toBe('[unset: slice.title]');
   });
 });
 

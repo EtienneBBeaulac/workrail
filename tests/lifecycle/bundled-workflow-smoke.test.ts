@@ -152,10 +152,13 @@ function buildAutoFixtureResolver(
   const { stepInfo, forEachContextVars } = analyzeWorkflowWithAssessments(definition);
 
   // Build a base context that satisfies all forEach loops with a single-element array.
-  // The interpreter checks Array.isArray(context[items]) before entering forEach.
+  // WHY object (not string): the interpreter now validates that forEach items are
+  // objects when the body uses {{itemVar.field}} dot-path access. A plain string
+  // would trigger LOOP_MISSING_CONTEXT. An empty object satisfies the shape check
+  // without needing to know what fields the body accesses.
   const baseContext: Record<string, unknown> = {};
   for (const varName of forEachContextVars) {
-    baseContext[varName] = ['smoke-test-item'];
+    baseContext[varName] = [{ name: 'smoke-test-item' }];
   }
 
   return (stepId: string, loopContext: LoopContext): StepFixture => {
