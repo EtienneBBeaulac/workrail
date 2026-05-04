@@ -2591,6 +2591,31 @@ The desired behavior: certain content (rules, behavioral constraints, workspace 
 
 ## Platform Vision (longer-term)
 
+### Epic-mode: full autonomous delivery of a multi-task feature from discovery to merged PRs (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 10** | Cor:1 Cap:3 Eff:1 Lev:3 Con:1 | Blocked: yes (blocked by: living work context, coordinator pipeline operational end-to-end, spawn_agent depth + parallel worktree support)
+
+Today WorkTrain handles one ticket at a time. An epic -- a feature that requires 5-10 interdependent changes across multiple files, modules, or services -- requires the operator to manually decompose it into tickets and dispatch each one separately. The decomposition, dependency ordering, and integration are all human work. This is the gap between "WorkTrain handles tickets" and "WorkTrain handles features."
+
+The idea: a single operator action kicks off an end-to-end autonomous pipeline for an entire epic. A planning phase fully decomposes the epic into a dependency-ordered task graph. Each task is a concrete, independently-implementable unit of work. Dependent tasks wait for their predecessors to land. Independent tasks are dispatched simultaneously to parallel agents in separate worktrees. Each task produces a PR. PRs target each other in a chain (each PR's base branch is the previous task's feature branch, or a shared integration branch). A coordinator monitors progress, re-plans when a task produces unexpected output, and handles failures by re-dispatching or escalating. When all tasks are merged (in dependency order), the epic is done.
+
+This is the feature that makes WorkTrain feel like it can take on real engineering work, not just isolated bug fixes and small features.
+
+**Things to hash out:**
+- What is the planning artifact? The decomposition step needs to produce a typed task graph -- not just a list of tasks, but explicit dependency edges, estimated scope per task, and the integration strategy (shared branch, stacked PRs, merge train). What schema captures this in a way the coordinator can route on deterministically?
+- How are dependencies enforced? If task B depends on task A, does B's agent start only after A's PR is merged, or does it work against A's branch before merge? The latter is faster but requires the coordinator to handle A's branch being rebased or amended.
+- How does the coordinator handle a task whose output invalidates the plan? If task A's implementation reveals a constraint that makes task C unnecessary or changes its scope, the coordinator needs to re-plan. What signals task A to the coordinator, and what does re-planning look like? Does it spawn a new planning agent, or does the coordinator apply deterministic rules?
+- What is the integration strategy for parallel tasks that touch overlapping files? Two agents working in separate worktrees may produce conflicting changes. Is this detected at PR-open time (merge conflicts), at plan time (the planner tries to assign non-overlapping scopes), or both?
+- What is the failure model? If one task in a 10-task epic fails after 3 tasks have merged, what happens to the already-landed work? The coordinator can't un-merge. Does it escalate to the operator, attempt a compensating task, or leave the partial state as-is?
+- How does this interact with the living work context design? Each task agent needs context from the planning phase (what the epic is trying to accomplish, what other tasks are doing, what invariants the whole feature must satisfy). This is exactly the cross-session context problem but at epic scale -- the context store needs to accumulate across a task graph, not just a linear pipeline.
+- What is the operator experience? Does the operator see a dashboard of all tasks in flight, their dependencies, and their status? Can they pause the epic, re-scope a task, or cancel a branch of the task graph mid-execution?
+
+**Why it's high leverage despite low confidence:** getting this right makes WorkTrain the tool for large-scale autonomous development. Every other item in the backlog improves WorkTrain's reliability or quality for one ticket. This item changes the unit of work from "ticket" to "feature."
+
+---
+
 ### Move backlog to a dedicated worktrain-meta repo with version control (Apr 30, 2026)
 
 **Status: idea** | Priority: high
