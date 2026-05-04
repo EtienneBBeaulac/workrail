@@ -1334,6 +1334,23 @@ This is already how mid-run resume works. The same mechanism extends naturally t
 
 ---
 
+### Assumption resolution before acting: agents should fill information gaps with available tools (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:3 Cap:3 Eff:2 Lev:2 Con:1 | Blocked: no
+
+Pipeline agents currently have two options when they hit an information gap: proceed with an explicit assumption, or get stuck. Neither is optimal. The coding agent might assume a function signature, proceed with the wrong implementation, and only discover the error in review. The discovery agent might assume a schema doesn't exist when it does. Any phase agent might miss context that was resolvable with a two-second tool call (gh, glab, jira, glean, codebase search, MCP tools). There is currently no structured mechanism in the workflow engine or in individual workflows that asks agents to explicitly audit their open assumptions and use available tools to close them before committing to an approach. The result is preventable rework and incorrect outputs that trace back to unresolved assumptions an agent didn't know it should check.
+
+**Things to hash out:**
+- Is this a workflow-level concern (each workflow author decides when and where to add assumption resolution) or an engine-level concern (the engine injects it automatically)? Auto-injection is lower friction but may produce shallow results on workflows where there are no real assumptions to resolve. Workflow-opt-in produces better results but requires every workflow author to remember to add it.
+- Is the right mechanism a routine (injected via `templateCall` at authoring time, creating a visible dedicated step with notes output), a feature (engine-injected constraint on every step), or both (routine for workflows where the pause matters, feature as a lightweight nudge elsewhere)?
+- Should assumption resolution happen once per workflow (front-loaded as the first step) or opportunistically (at any step where the agent identifies a gap)? Front-loading is predictable but may resolve assumptions before the agent knows what it needs. Opportunistic is more natural but requires the agent to self-identify gaps mid-execution, which is harder to enforce structurally.
+- What tools should the agent be expected to use? The set varies by workspace (some have Jira, some have GitLab, some have Glean). A generic routine can only say "use whatever tools are available" -- is that specific enough to be useful, or does it produce shallow compliance?
+- How does this interact with the task-scoped rules idea and the ephemeral per-turn injection idea? All three are trying to get the right context to the agent at the right time -- they may be different facets of the same underlying problem.
+
+---
+
 ### Task-scoped rules: step-level rule injection by task type (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
