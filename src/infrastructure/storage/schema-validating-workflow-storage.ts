@@ -10,7 +10,7 @@ import {
   createWorkflow,
   toWorkflowSummary
 } from '../../types/workflow';
-import { InvalidWorkflowError } from '../../core/error-handler';
+import { InvalidWorkflowError, MCPError } from '../../core/error-handler';
 import { validateWorkflowIdForLoad, validateWorkflowIdForSave } from '../../domain/workflow-id-policy';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,45 @@ const VALIDATION_ERROR_PREFIX = '[ValidationError]';
  */
 function reportValidationFailure(workflowId: string, sourceKind: string, error: string): void {
   console.error(`${VALIDATION_ERROR_PREFIX} ${sourceKind}/${workflowId}: ${error}`);
+}
+
+interface AjvError {
+  readonly instancePath?: string;
+  readonly keyword?: string;
+  readonly message?: string;
+  readonly params?: unknown;
+}
+
+/**
+ * Extract human-readable schema error strings from a caught validation error.
+ *
+ * InvalidWorkflowError stores raw AJV errors as JSON in data.details.
+ * Parsing them here produces actionable messages like
+ * "additionalProperties: 'tags' not allowed at root" instead of
+ * the generic "Invalid workflow: <id>" from err.message.
+ */
+function extractValidationErrors(err: unknown): string[] {
+  if (err instanceof MCPError && typeof (err.data as Record<string, unknown>)?.details === 'string') {
+    try {
+      const ajvErrors = JSON.parse((err.data as Record<string, unknown>).details as string) as AjvError[];
+      if (Array.isArray(ajvErrors) && ajvErrors.length > 0) {
+        return ajvErrors.map((e) => {
+          const location = e.instancePath ? `at '${e.instancePath}'` : 'at root';
+          const detail = (() => {
+            if (e.keyword === 'additionalProperties' && e.params && typeof e.params === 'object') {
+              const prop = (e.params as Record<string, unknown>).additionalProperty;
+              return `additional property '${String(prop)}' is not allowed`;
+            }
+            return e.message ?? e.keyword ?? 'unknown error';
+          })();
+          return `${location}: ${detail}`;
+        });
+      }
+    } catch {
+      // Fall through to generic message if JSON.parse fails
+    }
+  }
+  return [err instanceof Error ? err.message : String(err)];
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +204,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage, HasVal
           warnings.push({
             workflowId: workflow.definition.id,
             sourceKind: workflow.source.kind,
-            errors: [errorMessage],
+            errors: extractValidationErrors(err),
           });
         }
       }
@@ -176,7 +215,7 @@ export class SchemaValidatingWorkflowStorage implements IWorkflowStorage, HasVal
 
   async getWorkflowById(id: string): Promise<Workflow | null> {
     const workflow = await this.inner.getWorkflowById(id);
-    
+
     if (!workflow) {
       return null;
     }
@@ -295,7 +334,7 @@ export class SchemaValidatingCompositeWorkflowStorage implements ICompositeWorkf
           warnings.push({
             workflowId: workflow.definition.id,
             sourceKind: workflow.source.kind,
-            errors: [errorMessage],
+            errors: extractValidationErrors(err),
           });
         }
       }

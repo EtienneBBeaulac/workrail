@@ -647,26 +647,20 @@
       "id": "phase-7a-assign-tags",
       "title": "Phase 7a: Assign Tags",
       "promptBlocks": {
-        "goal": "Register the workflow in the catalog: assign tags in spec/workflow-tags.json and write about and examples fields into the workflow JSON so humans and agents can discover and understand the workflow.",
+        "goal": "Choose the right tags for the workflow and write the about and examples fields into the workflow JSON so humans and agents can discover and understand it.",
         "procedure": [
-          "Read spec/workflow-tags.json to see the available tags and their 'when' phrases.",
           "Based on the workflow's purpose and description, select 1-3 tags from the closed set (coding, review_audit, investigation, design, documentation, tickets, learning, routines, authoring).",
-          "Check whether the workflow ID already exists in the `workflows` section. If it does, update the existing entry tags rather than adding a duplicate. If it does not exist, add a new entry under 'workflows' in spec/workflow-tags.json: { \"tags\": [\"<tag1>\"] }.",
-          "If the workflow is a test fixture or internal utility not meant for end-user discovery, add 'hidden': true.",
-          "Save the tags file. Do not modify any other field.",
           "Write the 'about' field into the workflow JSON: a markdown string (100-400 words) written for a human deciding whether to use this workflow. Cover what it does, when to use it, what it produces, and how to get good results. This is a user-facing surface -- not agent instructions (use metaGuidance for that).",
-          "Write the 'examples' field into the workflow JSON: an array of 2-4 short, concrete goal strings (10-120 chars each) showing what this workflow is used for. Each example should be specific enough to be informative -- not generic ('implement a feature'). These appear in list_workflows output so agents can communicate concrete goal phrasing to users.",
-          "Skip 'about' and 'examples' only if the workflow is marked hidden: true."
+          "Write the 'examples' field into the workflow JSON: an array of 2-4 short, concrete goal strings (10-120 chars each) showing what this workflow is used for. Each example should be specific enough to be informative -- not generic ('implement a feature'). These appear in list_workflows output so agents can communicate concrete goal phrasing to users."
         ],
         "constraints": [
-          "Only use tags from the closed set. Do not invent new tags.",
-          "If the workflow already has an entry in the tags file, update it rather than adding a duplicate.",
-          "Tags should reflect what the workflow does, not what it is named.",
+          "Only use tags from the closed set in spec/workflow-tags.json. Do not invent new tags.",
+          "Do not write tags into the workflow JSON file -- the tags field is not part of the workflow schema. Tags are for catalog registration only, and external users do not have access to the package's spec/workflow-tags.json.",
           "Write 'about' for humans, not agents -- do not copy metaGuidance or step prompt text into it.",
           "Examples must be specific to this workflow; reject generic examples that would fit any workflow."
         ],
         "outputRequired": {
-          "notesMarkdown": "List the assigned tags with a one-line justification for each. Confirm about and examples were written."
+          "notesMarkdown": "State the chosen tags with a one-line justification for each. Confirm about and examples were written into the workflow JSON."
         }
       },
       "requireConfirmation": false
