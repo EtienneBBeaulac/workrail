@@ -192,6 +192,25 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Slack/Teams/chat integration for pipeline completion alerts (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:3 Eff:2 Lev:1 Con:2 | Blocked: no
+
+When WorkTrain completes a pipeline run -- whether it produced a PR, escalated, timed out, or failed -- the operator currently has no push notification. They have to poll the console or check their email. For overnight-safe autonomous operation (the vision's stated success condition), the operator needs to know when work is ready for their attention without having to check. Beyond the individual operator, the team that will review the PR also needs to know it exists and is ready. Neither is addressed today.
+
+The use case has two layers: (1) operator-facing -- "your pipeline finished, here's the PR URL and outcome summary," sent to the operator's Slack/Teams DM or a dedicated channel; (2) team-facing -- "a PR is ready for review," sent to the team's review channel with enough context for a reviewer to triage without navigating to GitHub. The second layer is what makes WorkTrain feel integrated with a team's actual workflow rather than a solo tool.
+
+**Things to hash out:**
+- Is this a WorkTrain daemon concern (the coordinator sends the notification after pipeline completion) or a trigger-layer concern (configured alongside the trigger that started the pipeline)? The `callbackUrl` mechanism already exists for HTTP POST on completion -- is Slack/Teams just a specialized callback, or does it need first-class support?
+- What is the configuration model? Per-trigger configuration (`notifyOnComplete: { slack: { channel: "#pr-reviews", token: "$SLACK_TOKEN" } }`) or workspace-level configuration in `~/.workrail/config.json`? Per-trigger is more flexible; workspace-level is simpler for the common case.
+- What goes in the notification? PR URL and outcome is obvious. Does it include the pipeline mode, the escalation reason (if any), a one-line summary of what was built? Does the team-facing notification include the PR diff stat or just a pointer?
+- How does the team-facing notification avoid becoming noise? If WorkTrain opens 10 PRs in a day, each triggering a Slack message, the channel becomes unusable. Is there a batching, threading, or filtering mechanism?
+- What is the authentication and secret management story? Slack/Teams tokens are sensitive. How are they stored -- same `$ENV_VAR_NAME` resolution as trigger HMAC secrets, or a separate credentials store?
+
+---
+
 ### Intent gap: agent builds what it understood, not what the user meant (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
