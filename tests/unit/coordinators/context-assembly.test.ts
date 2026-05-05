@@ -95,6 +95,11 @@ describe('buildContextSummary()', () => {
       const result = buildContextSummary(all, 'coding');
       expect(result).not.toContain('Concrete Zod schemas per phase'); // coding.keyDecisions
     });
+
+    it('does NOT include shaping validationChecklist (coding agent does not need acceptance criteria)', () => {
+      const result = buildContextSummary([discovery, shaping], 'coding');
+      expect(result).not.toContain('All 4 workflows emit expected artifacts'); // shaping.validationChecklist
+    });
   });
 
   describe("'review' target phase", () => {

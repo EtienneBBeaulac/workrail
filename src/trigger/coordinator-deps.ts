@@ -725,6 +725,22 @@ export function createCoordinatorDeps(
 
     generateRunId: () => randomUUID(),
 
+    readActiveRunId: async (workspace: string) => {
+      const pointerPath = path.join(workspace, '.workrail', 'pipeline-runs', 'active-run.json');
+      try {
+        const raw = await fs.promises.readFile(pointerPath, 'utf-8');
+        const parsed = JSON.parse(raw) as unknown;
+        if (typeof parsed === 'object' && parsed !== null && typeof (parsed as Record<string, unknown>)['runId'] === 'string') {
+          return ok((parsed as Record<string, unknown>)['runId'] as string);
+        }
+        return ok(null);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return ok(null);
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(`readActiveRunId failed: ${msg}`);
+      }
+    },
+
     readPipelineContext: async (workspace: string, runId: string) => {
       const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
       const filePath = path.join(runsDir, `${runId}-context.json`);
@@ -778,9 +794,17 @@ export function createCoordinatorDeps(
           },
         };
 
-        // Atomic write via temp-rename
+        // Atomic write of context file via temp-rename
         await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
         await fs.promises.rename(tmpPath, filePath);
+
+        // Write recovery pointer atomically so crash recovery can find this run.
+        // Written after the context file so the pointer is never ahead of the data.
+        const pointerPath = path.join(runsDir, 'active-run.json');
+        const pointerTmp = pointerPath + '.tmp';
+        await fs.promises.writeFile(pointerTmp, JSON.stringify({ runId, workspace }, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(pointerTmp, pointerPath);
+
         return ok(undefined);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

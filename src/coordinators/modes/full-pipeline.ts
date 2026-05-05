@@ -178,14 +178,24 @@ export async function runFullPipeline(
 ): Promise<PipelineOutcome> {
   deps.stderr(`[full-pipeline] Starting FULL pipeline for workspace=${opts.workspace}`);
 
-  // Generate runId for PipelineRunContext -- crash recovery anchor.
-  // Check if an existing context file exists first (crash recovery path).
-  const runId = deps.generateRunId();
-  const existingContextResult = await deps.readPipelineContext(opts.workspace, runId);
-  const initialPriorArtifacts: readonly PhaseHandoffArtifact[] =
-    existingContextResult.isOk() && existingContextResult.value !== null
-      ? extractPriorArtifactsFromContext(existingContextResult.value)
-      : [];
+  // Crash recovery: check for an in-progress run before generating a new ID.
+  // writePhaseRecord() writes a recovery pointer ({workspace}/.workrail/pipeline-runs/active-run.json)
+  // on first write; we read it here to resume an interrupted run instead of starting fresh.
+  const activeRunResult = await deps.readActiveRunId(opts.workspace);
+  const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
+  const runId = priorRunId ?? deps.generateRunId();
+
+  let initialPriorArtifacts: readonly PhaseHandoffArtifact[] = [];
+  if (priorRunId) {
+    const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
+    if (existingCtx.isOk() && existingCtx.value !== null) {
+      initialPriorArtifacts = extractPriorArtifactsFromContext(existingCtx.value);
+    }
+  }
+
+  deps.stderr(priorRunId
+    ? `[full-pipeline] Resuming prior run ${priorRunId} with ${initialPriorArtifacts.length} artifact(s)`
+    : `[full-pipeline] Starting new run ${runId}`);
 
   // ── Pitch archival setup ──────────────────────────────────────────────
   // Build the archive path now so it's available in the finally block.

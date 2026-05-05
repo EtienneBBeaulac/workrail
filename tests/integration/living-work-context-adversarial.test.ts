@@ -111,6 +111,7 @@ function makeReviewDeps(): {
     getChildSessionResult: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
     spawnAndAwait: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
     generateRunId: vi.fn().mockReturnValue('adversarial-test-run'),
+    readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
     readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
   };

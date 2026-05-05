@@ -163,7 +163,8 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
       pollOutboxAck: vi.fn().mockResolvedValue('acked'),
       contextAssembler: undefined,
       generateRunId: vi.fn().mockReturnValue('test-run-id'),
-      readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
+      readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
+    readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
       writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     };
 

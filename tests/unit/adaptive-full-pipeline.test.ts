@@ -103,6 +103,7 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     spawnAndAwait: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
     // Living work context
     generateRunId: vi.fn().mockReturnValue('test-run-id'),
+    readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
     readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     ...overrides,
