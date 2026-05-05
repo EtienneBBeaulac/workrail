@@ -315,6 +315,239 @@ This is categorically different from bugs (the agent implemented the right thing
 
 ---
 
+### Intent resolution: tiered context harvest to close the intent gap before coding starts (May 4, 2026)
+
+**Status: designing -- not ready for shaping or implementation** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+The intent gap entry names the failure mode. This entry is the resolution design. The root cause is not that agents misread tickets -- it is that agents form interpretations without access to the context that would resolve ambiguity. The fix is a structured, tiered context harvest during discovery, a mid-discovery interpretation checkpoint, and a configurable escalation ladder when ambiguity survives the harvest.
+
+**The core insight:** a ticket description is almost never the most authoritative source of intent. The epic it belongs to, the design doc it references, the Slack thread where the feature was scoped, the vision doc that defines what the project is trying to become -- these carry far more signal. An agent that only reads the ticket is working with the thinnest slice of available context. Importantly, none of these sources need to live in the codebase -- they can be in Confluence, Notion, Slack, Google Docs, or a GitHub wiki. The tool layer is the access mechanism regardless of where the content lives.
+
+**Two distinct failure subtypes -- require different responses:**
+
+Research (AmbiEval 2026, Orchid 2026, AskBench 2026) distinguishes two failure modes:
+- **Subtype A -- vagueness/ambiguity:** the ticket is underspecified or has multiple valid interpretations. "Delete the record" -- soft-delete or hard-delete? The tiered harvest + council addresses this.
+- **Subtype B -- wrong prior:** the ticket is clear, but the agent has a systematically wrong prior about what tickets like this mean in this codebase. "Fix the auth issue" -- agent knows what auth issues usually mean, but this codebase does it differently. No amount of context harvest resolves this; it requires challenging the agent's assumptions explicitly.
+
+**Critical decision before building: measure which subtype dominates your actual failure distribution.** Retrospectively classify 10-20 past wrong-implementation cases as Subtype A vs B. If Subtype B is significant, the council and detection scaffold are insufficient -- Subtype B requires assumption-logging and adversarial plan review, not just ambiguity detection. The entire design below addresses Subtype A well and Subtype B only partially.
+
+**Tiered context harvest:**
+
+Tier 0 -- project identity (always injected, not searched):
+- Vision doc, active backlog items, design locks/ADRs for the affected area, coding philosophy
+- Not searched for relevance -- injected unconditionally because they constrain every interpretation
+- Source locations are workspace-configured and can be anywhere: local files (`docs/vision.md`), Confluence, Notion, Google Docs, GitHub wiki -- resolved via the same tool layer as other tiers
+- `ContextLoader` resolves Tier 0 sources before session start using whatever tools the workspace has configured
+- If Tier 0 is empty (no project identity configured), the minimum `ambiguityLevel` floor is `'uncertain'` regardless of agent self-report
+
+Tier 1 -- structured task sources (highest signal, deterministic):
+- Jira/Linear: linked epics, acceptance criteria, parent ticket, comments, attachments
+- GitHub/GitLab: linked PRs, prior implementations of the same feature, commit history on affected files, related issues
+- The ticket's own epic/milestone context -- a vague ticket is often disambiguated by the epic it belongs to
+
+Tier 2 -- conversational sources (high signal, noisier):
+- Slack: the thread where the ticket was discussed, the channel where the feature was scoped, off-ticket decisions
+- Notion/Confluence/Google Docs: design docs linked in the ticket or epic, ADRs for the affected area
+- Hard retrieval budget: top 2-3 most relevant sources, 4K token cap total. Beyond budget, sources logged as "available but not injected" and added to `unresolvedAssumptions[]`
+- Conflict resolution: when a lower-tier source contradicts a higher-tier source, the higher tier wins and the contradiction surfaces in `unresolvedAssumptions[]`. Priority: Tier 0 ADRs > Tier 1 acceptance criteria > Tier 1 linked epic > Tier 2 design docs > Tier 2 Slack threads
+
+Tier 3 -- codebase itself:
+- How similar features were implemented previously
+- Naming conventions, existing abstractions, patterns that constrain valid interpretations
+- Tests that describe current behavior of the affected area
+
+**"Enough context" checklist (harvest stops when satisfied, not when budget is full):**
+1. Tier 0 was injected or confirmed unavailable
+2. Tier 1 structured sources were queried (epic, acceptance criteria, linked issues)
+3. If Tier 1 returned ambiguity-relevant signal, Tier 2 search attempted for the most specific query
+4. Agent can articulate at least one rival interpretation with evidence
+
+**Ticket quality pre-flight (lightweight, independent of the full harvest):**
+Before dispatch, run 5 INVEST-based quality checks on the ticket: unambiguous, testable, non-compound, has acceptance criteria, scoped. USeR (arxiv 2503.02049) provides 34 automated RE quality metrics; these 5 are the highest-signal subset. Deployable independently of the full detection scaffold. A ticket that fails multiple quality checks is routed to Subtype A treatment immediately without spending turns on harvest.
+
+**Tool graceful degradation:** tool failure never blocks session start. When a configured source is unreachable, log the error, treat as empty, include in `unresolvedAssumptions[]`, and elevate `ambiguityLevel` accordingly. When a tool is not configured, skip silently.
+
+**Mid-discovery interpretation checkpoint:**
+
+Not pre-discovery (too low signal) and not post-discovery (too expensive to correct). The right spot is early in discovery after the agent has read the file structure, recent git history, relevant modules, and harvested Tier 0-1 context. Roughly turns 3-5.
+
+The checkpoint first classifies task type, then produces the interpretation artifact:
+
+`taskType: 'targeted_fix' | 'feature' | 'refactor' | 'architectural'`
+- `targeted_fix`: well-scoped, additive, low ambiguity risk -- council can be skipped
+- `feature`: new behavior, moderate ambiguity risk
+- `refactor`: structural change, high ambiguity risk
+- `architectural`: systemic change -- always requires council, minimum `ambiguityLevel` is `'uncertain'`
+
+Interpretation artifact:
+- `interpretation`: "I understand this task as X"
+- `rivalInterpretations[]`: genuine alternative readings -- must be architecturally different, not minor variations. Use falsification forcing: "What is the single most important word or phrase that, if read differently, leads to a substantially different implementation? Describe both implementations."
+- `unresolvedAssumptions[]`: what would have to be true for the primary interpretation to be wrong
+- `ambiguityLevel: 'clear' | 'uncertain' | 'ambiguous'` -- self-reported, used as floor only
+- `confidenceBreakdown`: `{ tier0Injected, tier1Complete, tier2Retrieved, rivalInterpretationStrength: 'weak' | 'plausible' | 'strong', unresolvedAssumptionCount, overallAmbiguityLevel }`
+
+**Add: clarification question generation as an independent signal.** Ask: "What is the one question you would most want answered before implementing this?" A specific high-stakes question ("Does 'delete' mean soft-delete or hard-delete?") = ambiguous. Inability to generate a meaningful question = likely clear. Specificity and number of non-trivial questions generated is an independent ambiguity meter (KC et al. 2025).
+
+**Critical: self-reported ambiguity is untrustworthy.** RLHF trains models to provide confident, forward-moving responses (Sharma et al. 2023). Use `max(introspective, structural)` as the effective level:
+
+Structural pre-filter signals (fast, no LLM, computed before checkpoint):
+- Presence of weak modals ("should", "may"), vague quantifiers ("fast", "large"), passive without agent, undefined pronouns, no acceptance criteria -- RE literature, 70-89% precision on formal requirements
+- `taskType` is `'architectural'` or `'refactor'`
+- Tier 0 is empty
+- `unresolvedAssumptionCount > 2`
+- Tier 1 returned empty
+
+Semantic entropy sampling (behavioral, no self-report):
+Sample the interpretation step 5-7 times at temperature ~0.8. Cluster semantically equivalent outputs. Compute Shannon entropy over clusters. High entropy = model is generating genuinely different interpretations, independent of self-report. Well-established (Wang et al. ICLR 2023, Kuhn et al. ICLR 2023 Spotlight). Cost: ~6-8x single inference, fully parallelizable.
+
+**Escalation ladder (coordinator routes deterministically on effective ambiguity level):**
+
+1. `'clear'` → proceed to full discovery automatically
+2. `'uncertain'` → council of agents (see below). Re-evaluate on council output.
+3. Still `'uncertain'` after council + `requireIntentConfirmation: 'uncertain'` on trigger → structured clarification request to operator. Structured options: "A / B / proceed with best judgment / abandon" + default-if-no-reply timeout (e.g. 4 hours → proceed with A). Delivered via configured channel (Slack > webhook > console outbox). Correction injected as `steer`; agent re-orients mid-discovery without restarting.
+4. `'ambiguous'` + `requireIntentConfirmation: 'always'` → pause for human approval.
+5. Genuinely unanswerable → escalate to outbox with full context packet.
+
+`requireIntentConfirmation: 'never' | 'uncertain' | 'always'` per trigger, defaulting to `'uncertain'`. Global workspace default overridable per trigger.
+
+**Vagueness vs. ambiguity routing:**
+
+- **Vague ticket** (underspecified -- doesn't say enough): clarification request to operator. Only the operator can add missing information. Council will not help -- both challengers fill the same gap the same way.
+- **Ambiguous ticket** (multiple valid interpretations): council of agents, then operator if unresolved.
+
+The detection layer classifies which failure mode before routing.
+
+**Council of agents -- cross-family comparison, not same-model debate:**
+
+The council handles ambiguous tickets. Its purpose is detecting interpretation error, not resolving genuine ambiguity (that requires the operator).
+
+**Critical research findings:**
+- "When Two LLMs Debate" (2025, 10-model study): both agents escalate to ~83% stated confidence by round 3 regardless of correctness. Never use stated confidence from a council -- compare interpretation content only.
+- "Persona Collapse / Chameleon's Limit" (2026): same-model instances with different personas converge to a narrow behavioral mode regardless of role assignment. Role prompts do not produce genuinely independent populations.
+- "Diversity of Thought in MAD" (2024): different model families achieve 91% vs 82% on reasoning benchmarks. Cross-family diversity reduces correlated interpretation errors.
+
+**Cross-family model diversity is required for genuine independence.** Role assignment can be layered on top but cannot substitute for it.
+
+The council is structured as comparison, not debate -- no "primary defends" turn:
+
+1. Primary agent (model family A) submits interpretation artifact
+2. Two challenger agents spawn in parallel from different model families (B, C), each with raw ticket + Tier 0-2 context but NOT the primary's interpretation. Each produces an independent reading.
+3. Coordinator compares all three outputs for substantive semantic divergence.
+4. Council produces typed output contract: `{ revisedAmbiguityLevel, failureMode: 'ambiguous' | 'vague', primaryInterpretationSurvived: boolean, winningInterpretation: { text, basis }, dissents[] }`
+5. Coordinator routes on `revisedAmbiguityLevel` and `failureMode`. Zero LLM turns.
+
+Challenger constraints:
+- Hard `maxTurns` cap (10-15 each) -- each challenger has one job
+- Spawned with `maxSubagentDepth: 1` -- challengers cannot spawn challengers
+- `mode: 'blind'` isolation -- no prior phase artifacts (per context isolation modes entry below)
+
+**ClarifyGPT consistency check (cheaper alternative to full council):**
+Generate the implementation plan twice independently. If the two plans are inconsistent, ask a targeted clarification question (arxiv 2310.10996). Cheaper than a full multi-family council; useful as a pre-council filter for `'uncertain'` cases before spending on cross-family challengers.
+
+**Program distribution divergence (Tier 2 behavioral signal where test oracles exist):**
+SpecFix (2025): generate N independent implementations (N=5-10), compare behavioral divergence on tests. 43.58% of ambiguous function-specs detected, +30.9% Pass@1 on repaired specs. Hard prerequisite: requires a test oracle. Viable only for repos with good test coverage. Transfer to informal GitHub-style descriptions is the highest-priority unvalidated gap before treating as production-ready.
+
+**Operator clarification UX:**
+
+A useful clarification request is answerable in one decision, time-bounded, and shows what changes between interpretations:
+```
+Task: "Improve error handling in auth module"
+
+Interpretation A: Add try/catch to the 3 unhandled failure points in token-service.ts (~50 lines, 1-2 hours)
+Interpretation B: Redesign the error type hierarchy across the auth subsystem (~300 lines, needs separate shaping)
+
+Evidence for A: ticket title says "improve" not "redesign"; linked issue reports a specific NPE in token-service.ts
+Evidence for B: parent epic is "Auth module modernization"; prior PR comment mentioned "error types need a complete overhaul"
+
+Reply: A / B / proceed with best judgment / abandon
+[Default if no reply in 4 hours: A]
+```
+
+For overnight queues: batched clarification UX (approve/correct a queue, not N individual notifications) is more practical. Undesigned -- needs its own design pass.
+
+**Feedback and calibration:**
+
+Build the calibration data capture layer now. Log: checkpoint outcome, `confidenceBreakdown`, operator correction, downstream PR verdict, and review findings tagged as interpretation-related. Use behavior-based ground truth -- divergent implementations as the ambiguity label, not human majority-vote polls (majority-voted labels miscalibrate detectors by 55-87% ECE, 2026).
+
+**`skipIntentResolution` escape hatch:**
+Operator sets `skipIntentResolution: true` on a trigger, or agent self-declares skip for: very short ticket + very narrow affected area + `taskType: 'targeted_fix'` + no rival interpretations possible. Skipped sessions still require a one-line interpretation statement.
+
+**Relationship to living work context:**
+Tier 0 injection needs a dedicated system prompt section separate from `assembledContextSummary` to avoid the 8KB cap. The interpretation checkpoint artifact flows into `DiscoveryHandoffArtifactV1` and `PipelineRunContext` once living work context lands. Downstream phases should see what interpretation the discovery agent committed to.
+
+**Research findings (resolved questions):**
+- **Role prompts vs. model families**: Persona Collapse (2026) shows same-model role-separated agents converge. Cross-family required for genuine independence. Resolved: cross-family > role prompts.
+- **Multi-agent debate confidence**: both agents escalate to ~83% confidence regardless of correctness. Never use stated confidence. Resolved: compare content only.
+- **Rival interpretation generation**: open-ended enumeration produces anchored minor variations. Falsification forcing is more reliable. Resolved.
+- **Vagueness vs. ambiguity**: empirically distinct failure modes requiring different responses. Resolved.
+- **Production systems**: SWE-agent, AutoCodeRover, Agentless have no ambiguity detection phase. Confirmed by 4 independent 2025-2026 benchmarks. WorkTrain architecture is differentiated.
+- **Calibration ground truth**: use divergent implementations, not human majority-vote labels. Resolved.
+
+**Things still to hash out:**
+- **Measure Subtype A vs B distribution first** -- retrospectively classify 10-20 past wrong-implementation cases before committing to the full design. If Subtype B dominates, the design needs explicit assumption-challenging and assumption-logging components that aren't here yet.
+- Semantic entropy sampling cost at scale -- always on, or triggered only when structural signals fire first?
+- Program distribution divergence (Tier 2) requires a test oracle. Fallback for repos without tests?
+- Council model selection: which model families for challengers, how configured per workspace?
+- Council cadence for large overnight queues: sampling approach may be more practical initially.
+- `taskType` classification: separate pre-checkpoint step or first output of the same checkpoint?
+- Batched clarification UX for overnight operators is undesigned.
+- Minimal interim wiring for interpretation commitment through phases before living work context lands?
+
+---
+
+### Subtype B intent failure: agent has a wrong prior about what this codebase does (May 5, 2026)
+
+**Status: idea -- needs empirical study before design** | Priority: high
+
+**Score: 12** | Cor:3 Cap:3 Eff:2 Lev:2 Con:1 | Blocked: no
+
+The intent resolution entry (above) addresses Subtype A failures -- tickets that are ambiguous or underspecified. This entry addresses Subtype B, which is categorically different and currently has no empirical intervention study in the literature.
+
+**The failure mode:** The ticket is clear and specific. The agent reads it correctly. But the agent has a systematically wrong prior about what the described thing means in this codebase -- because its training data, or a superficially similar pattern it has seen, leads it to a confident interpretation that is locally coherent but wrong for this specific system.
+
+Examples:
+- "Add rate limiting to the auth service" -- agent implements token bucket at the HTTP layer because that's what rate limiting means in most codebases. This codebase does it at the middleware layer with a different interface. The ticket was clear; the agent's prior was wrong.
+- "Fix the session expiry bug" -- agent finds and fixes the obvious TTL check. The actual expiry logic in this codebase is spread across three collaborating modules in a non-obvious way. The agent's mental model of "how session expiry works" doesn't match this codebase.
+- "Update the delivery pipeline to handle X" -- agent knows what delivery pipelines look like. This codebase's delivery pipeline has specific invariants (atomic stage ordering, sidecar lifecycle) that violate the agent's general expectations. The update is technically correct in isolation but violates a codebase-specific invariant the agent didn't know existed.
+
+**Why it's different from Subtype A:** You cannot fix this with more context harvest from Jira or Slack. The ticket is correctly specified. You cannot fix it with a council of agents -- challenger agents from different model families share the same wrong prior from training data. The problem is not ambiguity; it is that the agent's internal model of the codebase diverges from the actual codebase.
+
+**Why it's hard to detect:** the agent's interpretation feels correct and internally consistent. It will self-report high confidence. The semantic entropy signal may be low (all samples converge on the same wrong interpretation). A challenger agent may produce the same wrong interpretation independently. The failure is invisible until review or testing.
+
+**What might actually work (inferred, not empirically validated):**
+
+*Explicit assumption surfacing before acting:* Before touching any code, require the agent to write down: "Here is how I believe this component works based on what I have read." Then verify those beliefs against the codebase. If the agent's stated model of "how the delivery pipeline works" conflicts with what the code actually does, that conflict is the signal. This is different from rival interpretations (Subtype A) -- it is rival models of the existing system.
+
+*Assumption-challenging agent:* A separate lightweight agent reads the primary agent's stated assumptions about the codebase and actively searches for contradicting evidence. Not "is the ticket ambiguous" but "is the agent's model of this codebase correct?" Spawned with `mode: 'blind'` (no prior context) so it approaches the codebase fresh, then compares its reading to the primary agent's stated model.
+
+*Prior-invalidation pass in discovery:* Discovery workflow includes a mandatory step: for each major architectural assumption the agent is making, find one piece of codebase evidence that would invalidate it. If the agent assumes "rate limiting is at the HTTP layer," it must search for evidence that this is wrong before proceeding. Forces falsification of the prior rather than confirmation.
+
+*Historical session notes as prior correction:* If prior sessions have established "in this codebase, X works differently than you'd expect because Y," that context must be injected before the agent forms its model. This is the living work context applied across pipeline runs, not just within one run -- a per-workspace knowledge store of "things that are surprising about this codebase." Related to the knowledge graph backlog item.
+
+**Why Confidence is 1 (needs discovery before design can begin):**
+
+There is no empirical study of interventions for Subtype B in ticket-driven coding agents. AskBench's AskOverconfidence condition (arxiv 2602.11199) confirms agents fail differently on false-premise queries -- but "false premise" in a benchmark is a planted incorrect assumption, not a wrong prior from training data. The mechanisms may be similar but the intervention pathway is different. This needs:
+1. Empirical measurement of how often Subtype B vs Subtype A causes WorkTrain failures (the NS2 step from the independent research brief)
+2. A controlled study of whether assumption-surfacing before acting actually reduces Subtype B failures
+3. Design of the assumption-challenging agent -- what exactly it reads, what it produces, how the coordinator uses it
+
+**Relationship to other entries:**
+- "Intent resolution" (above): addresses Subtype A. This entry is the Subtype B complement.
+- "Living work context": the per-workspace knowledge store of codebase surprises is partial infrastructure for fixing Subtype B across sessions.
+- "Knowledge graph" (backlog): structural understanding of the codebase that would give the agent a ground-truth model to compare its priors against.
+- "Context isolation modes": the assumption-challenging agent needs `mode: 'blind'` to approach the codebase without anchoring on the primary agent's stated assumptions.
+
+**Things to hash out:**
+- How do you distinguish "the agent has a wrong prior" from "the ticket is genuinely ambiguous about which part of the system to change"? The boundary is fuzzy -- a ticket that doesn't name the specific module is Subtype A; a ticket that names the module but the agent's model of that module is wrong is Subtype B.
+- What format should "stated assumptions" take? Free-prose is hard to verify. A structured list of `{ assumption: string, evidence: string, falsificationQuery: string }` is verifiable but requires the agent to produce it honestly.
+- The assumption-challenging agent needs to approach the codebase independently. But it also needs to know what assumptions to challenge -- which means it needs the primary agent's stated assumption list. Is that contamination? No -- it is exactly the right input. The isolation is from the primary agent's conclusions, not its stated premises.
+- How does this interact with the `skipIntentResolution` escape hatch? Subtype B failures can occur even on tickets that pass quality pre-screening and look unambiguous. The skip hatch should not bypass assumption surfacing for `'refactor'` or `'architectural'` tasks.
+- Is the right long-term fix a knowledge graph (structural ground truth the agent can compare its model against) rather than per-session assumption surfacing? Knowledge graph is higher-confidence but much higher cost to build. Assumption surfacing is lower cost but relies on the agent honestly reporting its own priors.
+
+---
+
 ### Scope rationalization: agent silently accepts collateral damage (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
@@ -443,6 +676,67 @@ This is related to the "Coordinator context injection standard" and "Context bud
 - Should the package be structured (JSON/YAML) for programmatic injection, or prose for human readability?
 - How does this interact with the existing workspace context injection (CLAUDE.md, AGENTS.md, daemon-soul.md)?
 - Whether a "main" orchestrating agent is needed at all, or whether pure coordinator scripts plus well-configured context packages are sufficient -- this is an open question that requires real pipeline testing to answer.
+
+---
+
+### Subagent context isolation modes: enforced context sharing and contamination prevention (May 5, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+When WorkTrain spawns a subagent, the spawning agent decides what context to pass. Today this is purely by convention -- there is no mechanism to enforce isolation or guarantee completeness. Two distinct failure modes require opposite fixes:
+
+**Contamination (too much context):** A challenger agent spawned to independently evaluate an interpretation receives the primary agent's interpretation in the context bundle. It anchors on it and produces a biased reading. A review agent receives the coding agent's self-assessment and validates it rather than challenging it. These are cases where context leakage actively undermines the agent's purpose -- independence destroyed by prior context.
+
+**Starvation (too little context):** A coding agent spawned without discovery findings re-investigates settled questions. A review agent without shaping constraints cannot check whether the implementation satisfies them. Context absence causes wasted work or wrong output.
+
+Today both are addressed by convention. Convention fails silently -- the spawning agent follows its own judgment, which may be wrong. Even the orchestrating agent can contaminate a challenger without realizing it (as happened when spawning the research agents in this session without realizing context was being leaked).
+
+**The right fix is structural enforcement, not rules.** Context isolation mode should be a declared property of the spawn call, enforced by coordinator infrastructure, not managed by following instructions.
+
+**Proposed isolation modes:**
+
+```typescript
+type ContextIsolationMode =
+  | { mode: 'full' }
+  // Agent receives complete accumulated context: Tier 0 project identity +
+  // prior phase artifacts + task context. Default for most pipeline phases.
+
+  | { mode: 'task-only' }
+  // Agent receives only task description + Tier 0 project identity.
+  // No prior phase artifacts, no intermediate results.
+  // For agents that should approach the task fresh but know the project.
+
+  | { mode: 'blind' }
+  // Agent receives only the raw inputs declared at spawn time.
+  // No Tier 0 injection, no prior artifacts, no accumulated context.
+  // For adversarial/challenger agents where independence is the whole point.
+  // The spawning call must explicitly declare what inputs to pass.
+
+  | { mode: 'custom'; include: ContextKey[]; exclude: ContextKey[] }
+  // Explicit allowlist/blocklist. For partial context cases
+  // (e.g. review agent gets shaping constraints but not coding agent's self-assessment).
+```
+
+`mode: 'blind'` should be the enforced default for any session with `role: 'challenger' | 'adversarial' | 'evaluator'`. The coordinator cannot accidentally contaminate a challenger when the session declaration forbids it.
+
+**Note on 'blind' mode:** true blindness (no Tier 0 either) may be too aggressive. A challenger without the project's coding philosophy or architectural principles is missing the most important constraints. "No prior phase artifacts" is probably the right isolation boundary, not "no context whatsoever." A `challenger` mode that strips prior results but keeps Tier 0 may be more useful. Open question.
+
+**Enforcement point:** `spawnSession` in the coordinator infrastructure (`createCoordinatorDeps`). The spawning call declares the mode; the infrastructure assembles the context bundle according to the declared mode; the spawning agent cannot override it by passing extra fields. Validate at boundaries, trust inside.
+
+**Observability:** when an evaluation was produced by a `blind` or `task-only` session, that fact should be recorded in the session store so the independence of the evaluation is auditable. Without this, the isolation guarantee is invisible.
+
+**Relationship to existing entries:**
+- "Subagent context package" (above) is about ensuring agents receive enough context -- the `full` and `task-only` modes are the enforcement side of that design.
+- "Council of agents" in the intent resolution entry assumes `blind` mode for challengers -- this entry is what makes that assumption enforceable.
+- `buildContextSummary(priorArtifacts, targetPhase)` in living work context is the selection logic for `custom` mode.
+
+**Things to hash out:**
+- Should `mode` be declared on the workflow definition, the trigger, or the `spawnSession` call? Workflow definition is the right answer (the workflow knows its role), but requires a new schema field.
+- How does declared mode interact with the agent's tool access? A `blind` challenger can still read workspace files. True isolation may require tool path restrictions alongside context restrictions.
+- Custom `include`/`exclude` lists create maintenance burden as context keys evolve. Is there a better abstraction -- e.g. declaring the agent's role and having infrastructure derive the right context set from a role-to-context mapping?
+- Should `task-only` include or exclude Tier 0 project identity? Including it is almost always better, but the operator may have reasons to exclude it.
 
 ---
 
