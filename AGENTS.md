@@ -137,12 +137,12 @@ Work follows a deliberate progression. Do not skip steps or assume what comes ne
 1. **Understand** -- before doing anything, understand what the user is asking. Ask clarifying questions. Read relevant docs and code. Do not jump to implementation.
 2. **Explore and analyze** -- investigate the codebase, read planning docs, check what already exists. Surface what you find back to the user. The user wants to think through problems together, not just receive solutions.
 3. **Discuss and decide** -- present options, tradeoffs, and your honest assessment. The user will tell you which direction to go. Do not make architectural decisions unilaterally.
-4. **Plan** -- once direction is agreed, capture the idea in `docs/ideas/backlog.md` if it is new. When it is concrete enough to execute, create a GitHub issue with `gh issue create`. Update `now-next-later.md` and `open-work-inventory.md` as needed.
+4. **Plan** -- once direction is agreed, capture the idea in `docs/ideas/backlog.md` if it is new. When it is concrete enough to execute, create a GitHub issue with `gh issue create`.
 5. **Implement** -- only after the user says to proceed. Create a branch, write the code, run tests.
 6. **Verify** -- run `npx vitest run`, check for linter errors, confirm the change does what it should. If you are in a fresh worktree and dependencies are not installed yet, install them and still run the required verification rather than treating missing dependencies as a stopping point.
 7. **Update authoring docs before merge when engine behavior changes** -- if engine or schema work changes workflow authoring behavior, update `docs/authoring-v2.md` and `docs/authoring.md` before merging. Do not let shipped runtime behavior get ahead of author guidance.
 8. **Ship** -- only when the user asks. Create a PR, wait for CI, merge when told to.
-9. **Update planning docs** -- after shipping, mark work as done in the roadmap and inventory docs.
+9. **Update planning docs** -- after shipping, mark the backlog item as done in `docs/ideas/backlog.md`.
 
 Key principles of this flow:
 - **The user drives decisions.** You propose, analyze, and execute -- but the user decides when to move from one phase to the next. "What's next?" is a prompt for you to suggest, not a blanket authorization to proceed.
@@ -179,22 +179,20 @@ Do not duplicate information that already exists in a doc. Instead, point agents
 
 ### Planning system
 
-The planning system follows a graduation path: ideas -> roadmap -> tickets -> execution.
+The planning system follows a graduation path: ideas -> tickets -> execution.
 
 - `docs/planning/README.md` -- how the planning system works, the layers, and rules of thumb
-- `docs/ideas/backlog.md` -- raw ideas and feature thoughts (low-friction inbox); each item has a priority score
-- `docs/roadmap/now-next-later.md` -- lightweight cross-cutting roadmap (what is active, what is next, what is later)
-- `docs/roadmap/open-work-inventory.md` -- consolidated list of all partial, unimplemented, and parked work with status and source doc references
+- `docs/ideas/backlog.md` -- canonical source of all work items and their status; each item has a priority score
 - `docs/tickets/next-up.md` -- groomed near-term tickets with acceptance criteria
-- `docs/roadmap/legacy-planning-status.md` -- status map for older planning docs
+- `docs/roadmap/legacy-planning-status.md` -- status map for older planning docs (historical reference only)
 
 **Backlog priority view:** run `npm run backlog` to see a sorted, filtered list of backlog items by score. Use `npm run backlog -- --min-score 11 --unblocked-only` to see the top unblocked items ready to work on. Run `npm run backlog -- --help` for all options. The script is at `scripts/backlog-priority.ts`.
 
 **Keep planning docs current.** These documents are living artifacts, not write-once references. Update them as work happens:
-- When starting a feature: mark the relevant item as active in `now-next-later.md` and `open-work-inventory.md`
-- When completing a feature: mark it done, update status, note what was delivered
+- When starting a feature: update the item's status in `docs/ideas/backlog.md`
+- When completing a feature: mark it done in `docs/ideas/backlog.md`, note what was delivered
 - When the user shares an idea: capture it in `docs/ideas/backlog.md` immediately
-- When scope changes or new work is discovered: add it to `open-work-inventory.md`
+- When scope changes or new work is discovered: add it to `docs/ideas/backlog.md`
 - When a ticket is ready to execute: groom it into `docs/tickets/next-up.md`
 
 If you are unsure whether a planning doc needs updating, it probably does.

@@ -14,7 +14,7 @@ See also: `tests/unit/workflow-runner-outcome-invariants.test.ts` -- the test fi
 
 **Why:** `'unknown'` in `execution-stats.jsonl` is silent data loss. Operators calibrate session timeouts and monitor health from this data.
 
-**How it breaks:** The `writeExecutionStats()` helper takes `outcome` by value. If called with a variable that hasn't been assigned yet, it silently records `'unknown'`. Every result path must call `writeExecutionStats()` with the correct outcome at the call site, not via a shared variable captured in a closure.
+**How it breaks:** `writeExecutionStats()` takes `outcome` by value. If called with an unassigned variable, it silently records `'unknown'`. All result paths go through `finalizeSession()`, which calls `tagToStatsOutcome()` to derive the outcome -- there are no direct `writeExecutionStats()` calls outside `finalizeSession()`.
 
 ### 1.2 `delivery_failed` is never returned by `runWorkflow()` directly
 
@@ -32,13 +32,13 @@ See also: `tests/unit/workflow-runner-outcome-invariants.test.ts` -- the test fi
 | `'stuck'` | `'stuck'` |
 | `'delivery_failed'` | `'success'` (workflow succeeded; only the POST failed) |
 
-This mapping must be exhaustive. When `tagToStatsOutcome()` is extracted as a pure function (planned in the functional-core/imperative-shell refactor), it must use `assertNever` on the default case so the compiler enforces exhaustiveness.
+This mapping is exhaustive. `tagToStatsOutcome()` is a pure function in `workflow-runner.ts` that uses `assertNever` on the default case -- the compiler enforces exhaustiveness when new `_tag` variants are added.
 
 ### 1.4 Outcome priority when multiple signals fire
 
-If both `stuckReason` and `timeoutReason` are non-null at the same time (same turn), `stuck` takes priority over `timeout`. This is intentional: stuck is the more specific signal (the agent is looping, not just slow), and fires before the wall-clock limit.
+`stuck` takes priority over `timeout`. This is enforced structurally by `TerminalSignal` and `setTerminalSignal()`: `setTerminalSignal()` is first-writer-wins -- the first signal to set `state.terminalSignal` wins, and subsequent calls are silent no-ops. Because stuck detection fires inside the turn-end subscriber (which runs before the wall-clock timeout handler), stuck always sets `terminalSignal` first when both conditions are present in the same turn.
 
-**Code location:** The `if (stuckReason !== null)` check precedes `if (timeoutReason !== null)` in `runWorkflow()`.
+**Code location:** `setTerminalSignal()` in `workflow-runner.ts`. `buildSessionResult()` reads `state.terminalSignal` after the loop exits.
 
 ### 1.5 stepCount reflects agent-loop advances only
 
@@ -56,7 +56,7 @@ Each `runWorkflow()` call writes a per-session sidecar file at `~/.workrail/daem
 
 `persistTokens()` returns `Promise<Result<void, PersistTokensError>>` (not throws). Callers in the setup phase treat `err` as fatal (abort); callers inside tool closures treat `err` as degraded-but-continue (log and still call `onAdvance`/`onTokenUpdate` -- see invariant 4.3).
 
-**Exception:** If `continueToken` is undefined (instant single-step completion, or `_preAllocatedStartResponse` with no token), `persistTokens()` is skipped. There is nothing to recover.
+**Exception:** If `continueToken` is undefined (instant single-step completion, or a `pre_allocated` `SessionSource` with no token), `persistTokens()` is skipped. There is nothing to recover.
 
 ### 2.2 Sidecar is deleted on every non-worktree terminal path
 
@@ -88,33 +88,34 @@ Since Phase B crash recovery (PR #811), `persistTokens()` also writes `workflowI
 
 ## 3. Registry invariants
 
-Three registries track in-flight daemon sessions:
+Two registries track in-flight daemon sessions:
 
 | Registry | Key | Value | Purpose |
 |---|---|---|---|
 | `DaemonRegistry` | `workrailSessionId` | `{ workflowId, lastHeartbeatMs }` | Console `isLive` display |
-| `SteerRegistry` | `workrailSessionId` | `(text: string) => void` | Mid-session coordinator injection |
-| `AbortRegistry` | `workrailSessionId` | `() => void` | SIGTERM graceful shutdown |
+| `ActiveSessionSet` | `workrailSessionId` | `SessionHandle` | Steer injection + SIGTERM abort |
+
+`ActiveSessionSet` + `SessionHandle` (in `src/daemon/active-sessions.ts`) replaced the former separate `SteerRegistry` and `AbortRegistry` maps. A `SessionHandle` exposes `steer()`, `setAgent()`, `abort()`, and `dispose()` -- all session lifecycle operations on a single object.
 
 ### 3.1 Registry registration and deregistration
 
-**Registration** happens in two places:
+**Registration** happens in two phases:
 
-- `steerRegistry` and `DaemonRegistry` are registered inside `buildPreAgentSession()` -- AFTER all potentially-failing I/O (executeStartWorkflow, persistTokens, worktree creation). Error paths that return before registration have nothing to clean up. The single-step completion path (which returns success without running an agent loop) explicitly calls `steerRegistry.delete()` and `daemonRegistry.unregister()` before returning.
+- `DaemonRegistry` and `ActiveSessionSet` are registered inside `buildPreAgentSession()` -- AFTER all potentially-failing I/O (executeStartWorkflow, persistTokens, worktree creation). Error paths that return before this point have nothing to clean up. The single-step completion path goes through `finalizeSession()` (which calls `daemonRegistry.unregister()`) and returns the handle via `PreAgentSessionResult` so the caller (`runWorkflow()`) can call `handle.dispose()`.
 
-- `abortRegistry` is registered in `runWorkflow()` immediately after `const agent = new AgentLoop(...)`. The closure `() => agent.abort()` references `agent` -- registering before agent construction would be a TDZ hazard.
+- `handle.setAgent(agent)` is called in `buildAgentReadySession()` immediately after `const agent = new AgentLoop(...)`. This wires in abort capability. `abort()` before `setAgent()` is a safe no-op -- the TDZ hazard is eliminated by the null check inside `SessionHandleImpl.abort()`.
 
 **Deregistration**:
 
-- `steerRegistry.delete()` and `abortRegistry.delete()` are called in the `finally` block of `runWorkflow()`. This ensures cleanup happens even if an exception is thrown in the agent loop.
+- `handle.dispose()` is called in the `finally` block of `runAgentLoop()`. This removes the handle from `ActiveSessionSet` so `size` decrements correctly and shutdown drain terminates.
 
-- `daemonRegistry.unregister()` is called at each result path (success, error, timeout, stuck) via `finalizeSession()`. It is NOT in `finally` because the completion status ('completed' vs 'failed') differs by path.
+- `daemonRegistry.unregister()` is called via `finalizeSession()` at both result paths (early-exit and post-agent-loop). It is NOT in `finally` because the completion status ('completed' vs 'failed') differs by result.
 
-**Why stale entries are bugs:** A stale steer callback on a dead session makes `POST /sessions/:id/steer` return 200 (calling the closed-over callback) instead of 404. A stale abort callback makes the shutdown handler call `abort()` on an already-exited session. Both are silent correctness bugs.
+**Why stale entries are bugs:** A stale steer handle on a dead session makes `POST /sessions/:id/steer` return 200 instead of 404. A stale abort handle makes the shutdown handler call `abort()` on an already-exited session. Both are silent correctness bugs.
 
 ### 3.2 `DaemonRegistry` is unregistered at every result path
 
-`daemonRegistry.unregister(workrailSessionId, 'completed' | 'failed')` is called at each of the four result paths (success, error, timeout, stuck). It is NOT in the `finally` block because the completion status ('completed' vs 'failed') differs by path.
+`daemonRegistry.unregister(workrailSessionId, 'completed' | 'failed')` is called via `finalizeSession()` at both the early-exit path and the post-agent-loop path. It is NOT in `finally` because the completion status differs by result.
 
 ### 3.3 `workrailSessionId` is available before registry operations
 
@@ -124,11 +125,11 @@ If `parseContinueTokenOrFail()` fails (unusual -- the token just came from `exec
 
 ### 3.4 Registration gap is documented
 
-**SteerRegistry gap (~50ms):** There is a ~50ms window between `executeStartWorkflow()` returning and `steerRegistry.set()` being called (after `parseContinueTokenOrFail()` completes). A `POST /sessions/:id/steer` call in this window receives 404. Coordinators should retry once on 404 during session startup.
+**Steer gap (~50ms):** There is a ~50ms window between `executeStartWorkflow()` returning and `activeSessionSet.register()` being called (after `parseContinueTokenOrFail()` completes). A `POST /sessions/:id/steer` call in this window receives 404. Coordinators should retry once on 404 during session startup.
 
-**AbortRegistry gap (~200-500ms):** `abortRegistry.set()` is registered _after_ `const agent = new AgentLoop(...)` is constructed, which happens after the context-loading phase (`loadDaemonSoul`, `loadWorkspaceContext`, `loadSessionNotes` in parallel). This means there is a ~200-500ms window where SIGTERM will not abort an in-flight session. Sessions in this window run to completion or hit the wall-clock timeout.
+**Abort gap (~200-500ms):** `handle.setAgent(agent)` is called after `const agent = new AgentLoop(...)` is constructed, which happens after the context-loading phase (`loadDaemonSoul`, `loadWorkspaceContext`, `loadSessionNotes` in parallel). During this window, `handle.abort()` is a safe no-op -- SIGTERM will not abort the session. Sessions in this window run to completion or hit the wall-clock timeout.
 
-**Why the abort gap is wider than the steer gap:** `abortRegistry.set` registers `() => agent.abort()` which closes over `agent`. Registering this callback before `agent` is constructed would be a TDZ (Temporal Dead Zone) hazard -- `agent` is declared with `const` and would not yet be initialized if the shutdown handler fired on an early-exit path. Registering after `agent` construction eliminates the hazard at the cost of a wider registration window. The accepted tradeoff is the same as for the steer gap.
+**Why the abort gap is wider than the steer gap:** `setAgent()` must be called after `agent` construction. Calling it before would be a TDZ hazard. The `SessionHandleImpl.abort()` null-checks `_agent`, making pre-`setAgent()` abort a safe no-op rather than a crash.
 
 ---
 
@@ -160,7 +161,7 @@ Both are guarded by the sequential tool execution invariant (no concurrent token
 
 All three stuck detection signals (`repeated_tool_call`, `no_progress`, `timeout_imminent`) emit `agent_stuck` events via `emitter?.emit()`, which is fire-and-forget. An event write failure never affects the session.
 
-Signals 1 and 2 abort the session (set `stuckReason`) subject to `stuckAbortPolicy`. Signal 3 (`timeout_imminent`) is purely observational -- the abort has already been triggered by the timeout handler.
+Signals 1 and 2 call `setTerminalSignal(state, { kind: 'stuck', reason: ... })` subject to `stuckAbortPolicy`. Signal 3 (`timeout_imminent`) is purely observational -- the abort has already been triggered by the timeout handler.
 
 ### 4.5 `spawn_agent` depth is enforced at the call site
 
@@ -204,7 +205,7 @@ On failure/timeout/stuck paths, the worktree is left in place for debugging. `ru
 
 ### 6.3 Sessions with >= 1 step advance are resumed if sidecar has trigger context
 
-`evaluateRecovery({ stepAdvances: >= 1 })` returns `'resume'`. If the sidecar contains `workflowId` and `workspacePath`, `runStartupRecovery()` calls `executeContinueWorkflow({ intent: 'rehydrate' })` to get the current step prompt, builds a minimal `WorkflowTrigger` with `_preAllocatedStartResponse`, and calls `runWorkflow()` fire-and-forget.
+`evaluateRecovery({ stepAdvances: >= 1 })` returns `'resume'`. If the sidecar contains `workflowId` and `workspacePath`, `runStartupRecovery()` calls `executeContinueWorkflow({ intent: 'rehydrate' })` to get the current step prompt, builds a minimal `WorkflowTrigger` and a `pre_allocated` `SessionSource`, and calls `runWorkflow()` fire-and-forget.
 
 **Old-format sidecars** (missing `workflowId`/`workspacePath`) fall through to discard regardless of step count.
 
@@ -214,32 +215,15 @@ Worktree sessions that are resumed set `branchStrategy: 'none'` and use the pers
 
 ---
 
-## 7. Planned refactor: functional core / imperative shell
+## 7. Structural enforcement summary
 
-The invariants above are currently enforced by convention (comments, code structure) rather than by the type system. The planned refactor will make them structurally enforced:
+The invariants above are enforced by a combination of type system guarantees and code structure:
 
-**Core (pure functions, no I/O):**
-- `buildSessionConfig(trigger) → SessionConfig` -- model, tools, limits, prompts
-- `evaluateAgentExitState(exitState) → WorkflowRunResult` -- replaces 4 scattered return sites
-- `tagToStatsOutcome(tag) → StatsOutcome` -- exhaustive via `assertNever`
-- `evaluateStuck(signals) → StuckSignal | null` -- already nearly pure
+- `tagToStatsOutcome()` -- pure function with `assertNever` default; compiler error on unhandled `_tag`
+- `sidecardLifecycleFor()` -- pure function with `assertNever` default; compiler error on unhandled `_tag`
+- `buildSessionResult()` -- pure function; reads `state.terminalSignal` after loop exits
+- `finalizeSession()` -- single cleanup site for all result paths (event emission, registry cleanup, stats, sidecar deletion)
+- `setTerminalSignal()` -- first-writer-wins; structurally prevents dual stuck+timeout state
+- `SessionHandle` -- encapsulates steer/abort lifecycle; `abort()` before `setAgent()` is a safe no-op
 
-**Shell (one cleanup site for all I/O):**
-```typescript
-async function runWorkflow(trigger, ctx, apiKey, ...): Promise<WorkflowRunResult> {
-  const startMs = Date.now();
-  const result = await _runWorkflowCore(trigger, ctx, apiKey, ...);
-  // All I/O in one place:
-  writeExecutionStats(statsDir, ..., tagToStatsOutcome(result._tag), result.stepCount);
-  await cleanupSidecar(sessionId, result._tag, trigger.branchStrategy);
-  emitSessionCompleted(emitter, sessionId, result._tag);
-  daemonRegistry?.unregister(workrailSessionId, result._tag === 'success' ? 'completed' : 'failed');
-  return result.workflowRunResult;
-}
-```
-
-After the refactor, adding a new result path requires:
-1. Adding it to the `WorkflowRunResult` union (compiler enforces exhaustiveness in `tagToStatsOutcome` via `assertNever`)
-2. Returning the new variant from `_runWorkflowCore` (no I/O to add at the return site)
-
-The current pattern requires manually adding `writeExecutionStats()`, sidecar deletion, event emission, and registry deregistration at each new return site -- easily forgotten.
+Adding a new `WorkflowRunResult` variant requires updating `tagToStatsOutcome()` and `sidecardLifecycleFor()` -- the compiler enforces both via `assertNever`. No I/O needs to be added at the new return site.
