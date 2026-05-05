@@ -247,6 +247,17 @@ async function runImplementCore(
     return { kind: 'escalated', escalationReason: { phase: 'coding', reason: `context persistence failed: ${codingWriteResult.error}` } };
   }
 
+  // Route on phase quality -- review agent needs coding decisions to be useful
+  if (codingPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'coding',
+        reason: 'coding session produced no usable output (no artifact and no meaningful notes). Starting review blind would miss design-level issues. Fix the coding session and resume.',
+      },
+    };
+  }
+
   // ── Stage 3: Poll for PR ──────────────────────────────────────────────
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
   deps.stderr(`[implement] Polling for PR on branch pattern: ${branchPattern}`);

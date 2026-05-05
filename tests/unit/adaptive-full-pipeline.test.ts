@@ -78,7 +78,9 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     spawnSession: vi.fn().mockImplementation(async () => ok(nextHandle())),
     awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
     getAgentResult: vi.fn().mockResolvedValue({
-      recapMarkdown: 'APPROVE -- LGTM. No findings.',
+      // Notes > 50 chars so phases produce 'partial' (not 'fallback') by default,
+      // allowing the pipeline to continue in tests that don't care about phase quality.
+      recapMarkdown: 'APPROVE -- LGTM. No findings. Session completed successfully with all steps passing.',
       artifacts: [],
     }),
     listOpenPRs: vi.fn().mockResolvedValue([]),
@@ -241,14 +243,20 @@ describe('runFullPipeline - discovery handoff context threading', () => {
       })),
     });
 
-    await runFullPipeline(deps, makeOpts(), Date.now());
+    // New behavior: fallback phase (no artifact + notes too short) escalates before spawning shaping.
+    // Starting shaping with zero context would produce low-quality output.
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
 
-    expect(shapingContexts.length).toBe(1);
-    // No assembledContextSummary when notes too short
-    expect((shapingContexts[0] as Record<string, unknown>)['assembledContextSummary']).toBeUndefined();
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('discovery');
+      expect(outcome.escalationReason.reason).toContain('no usable output');
+    }
+    // Shaping was never reached
+    expect(shapingContexts.length).toBe(0);
   });
 
-  it('injects NO assembledContextSummary when recapMarkdown is null', async () => {
+  it('escalates when recapMarkdown is null (fallback -- no structured output at all)', async () => {
     const shapingContexts: Readonly<Record<string, unknown>>[] = [];
 
     const deps = makeFakeDeps({
@@ -266,10 +274,13 @@ describe('runFullPipeline - discovery handoff context threading', () => {
       }),
     });
 
-    await runFullPipeline(deps, makeOpts(), Date.now());
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
 
-    expect(shapingContexts.length).toBe(1);
-    expect((shapingContexts[0] as Record<string, unknown>)['assembledContextSummary']).toBeUndefined();
+    expect(outcome.kind).toBe('escalated');
+    if (outcome.kind === 'escalated') {
+      expect(outcome.escalationReason.phase).toBe('discovery');
+    }
+    expect(shapingContexts.length).toBe(0);
   });
 });
 
@@ -330,7 +341,11 @@ describe('runFullPipeline - discovery session failure', () => {
         if (awaitCount === 1) return makeSuccessAwait(handles[0]!);
         return makeFailedAwait(handles[0]!);
       }),
-      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+      // Discovery returns partial output (>50 chars notes, no artifact) so pipeline reaches shaping
+      getAgentResult: vi.fn().mockResolvedValue({
+        recapMarkdown: 'Discovery complete. Selected OAuth PKCE direction. Key invariants and constraints identified for shaping.',
+        artifacts: [],
+      }),
     });
 
     const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
@@ -389,11 +404,11 @@ describe('runFullPipeline - malformed handoff artifact', () => {
     await runFullPipeline(deps, makeOpts(), Date.now());
 
     expect(shapingContexts.length).toBe(1);
-    // New behavior: malformed artifact -> extractPhaseArtifact returns null ->
-    // priorArtifacts stays empty -> buildContextSummary returns '' -> no assembledContextSummary
-    // (The old recapMarkdown fallback is no longer used for context injection)
-    const summary = (shapingContexts[0] as Record<string, unknown>)['assembledContextSummary'];
-    expect(summary === undefined || summary === '').toBe(true);
+    // Malformed artifact -> PhaseResult.kind='partial' (notes > 50 chars, no valid artifact)
+    // Pipeline proceeds but injects a partial-quality warning so the shaping agent knows
+    const summary = (shapingContexts[0] as Record<string, unknown>)['assembledContextSummary'] as string | undefined;
+    // Partial warning is present since no structured artifact was produced
+    expect(summary).toContain('partial output only');
   });
 });
 
@@ -403,13 +418,30 @@ describe('runFullPipeline - malformed handoff artifact', () => {
 
 describe('runFullPipeline - happy path', () => {
   it('returns merged when review is clean after full pipeline', async () => {
-    const artifact = makeHandoffArtifact();
+    const reviewVerdictArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'clean',
+      confidence: 'high',
+      findings: [],
+      summary: 'No issues found.',
+    };
+    let callCount = 0;
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async () => ok(nextHandle())),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      getAgentResult: vi.fn().mockResolvedValue({
-        recapMarkdown: 'APPROVE -- LGTM',
-        artifacts: [artifact],
+      // Non-review phases: partial output (long notes, no artifact) so quality gates pass.
+      // Review phase: returns wr.review_verdict artifact for clean merge.
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        callCount++;
+        // First 3 calls = discovery, shaping, coding (partial notes, no artifact)
+        // 4th call = review (verdict artifact)
+        if (callCount >= 4) {
+          return { recapMarkdown: 'Review complete. Clean verdict.', artifacts: [reviewVerdictArtifact] };
+        }
+        return {
+          recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready for next phase.',
+          artifacts: [],
+        };
       }),
     });
 
@@ -427,8 +459,9 @@ describe('runFullPipeline - happy path', () => {
         return ok(nextHandle());
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      // Notes > 50 chars so all phases produce 'partial' (not 'fallback'), allowing pipeline to complete
       getAgentResult: vi.fn().mockResolvedValue({
-        recapMarkdown: 'APPROVE -- LGTM',
+        recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready for next phase.',
         artifacts: [],
       }),
     });
@@ -458,13 +491,15 @@ describe('runFullPipeline - happy path', () => {
 
 describe('runFullPipeline - pitch archival', () => {
   it('archives current-pitch.md on successful FULL pipeline run', async () => {
-    const artifact = makeHandoffArtifact();
+    const reviewVerdictArtifact = { kind: 'wr.review_verdict', verdict: 'clean', confidence: 'high', findings: [], summary: 'Clean.' };
+    let callCount = 0;
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async () => ok(nextHandle())),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      getAgentResult: vi.fn().mockResolvedValue({
-        recapMarkdown: 'APPROVE -- LGTM',
-        artifacts: [artifact],
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount >= 4) return { recapMarkdown: 'Review complete.', artifacts: [reviewVerdictArtifact] };
+        return { recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready.', artifacts: [] };
       }),
     });
 

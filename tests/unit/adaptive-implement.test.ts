@@ -55,6 +55,25 @@ function makeTimeoutAwait(handle: string): AwaitResult {
 }
 
 /**
+ * Build a getAgentResult mock that produces:
+ * - Call 1 (coding): long notes (>50 chars) so quality gate passes, no artifact
+ * - Calls 2+ (review/fix): the provided reviewBehavior
+ */
+function makePhaseAwareAgentResult(
+  reviewBehavior: () => { recapMarkdown: string; artifacts: unknown[] },
+): ReturnType<typeof vi.fn> {
+  let callCount = 0;
+  return vi.fn().mockImplementation(async () => {
+    callCount++;
+    if (callCount === 1) {
+      // First call = coding phase -- must return long notes so quality gate passes
+      return { recapMarkdown: 'Coding completed successfully. All implementation steps finished. Output is ready for review.', artifacts: [] };
+    }
+    return reviewBehavior();
+  });
+}
+
+/**
  * Build a minimal fake AdaptiveCoordinatorDeps.
  * Override specific methods to test different scenarios.
  */
@@ -65,10 +84,12 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
       const handle = handles[0] ?? 'default-handle';
       return makeSuccessAwait(handle);
     }),
-    getAgentResult: vi.fn().mockResolvedValue({
-      recapMarkdown: 'APPROVE -- no findings. LGTM.',
+    // Default: coding phase returns partial output (long notes, no artifact);
+    // review/fix phases return clean verdict via keyword scan.
+    getAgentResult: makePhaseAwareAgentResult(() => ({
+      recapMarkdown: 'APPROVE -- LGTM. No findings.',
       artifacts: [],
-    }),
+    })),
     listOpenPRs: vi.fn().mockResolvedValue([]),
     mergePR: vi.fn().mockResolvedValue(ok(undefined)),
     writeFile: vi.fn().mockResolvedValue(undefined),
@@ -342,10 +363,7 @@ describe('runImplementPipeline - fix loop cap', () => {
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      getAgentResult: vi.fn().mockResolvedValue({
-        recapMarkdown: minorNotes,
-        artifacts: [],
-      }),
+      getAgentResult: makePhaseAwareAgentResult(() => ({ recapMarkdown: minorNotes, artifacts: [] })),
     });
 
     const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
@@ -370,13 +388,9 @@ describe('runImplementPipeline - fix loop cap', () => {
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      getAgentResult: vi.fn().mockImplementation(async () => {
+      getAgentResult: makePhaseAwareAgentResult(() => {
         reviewCount++;
-        if (reviewCount === 1) {
-          // First review: minor
-          return { recapMarkdown: 'MINOR findings: missing test', artifacts: [] };
-        }
-        // Second review (after fix): clean
+        if (reviewCount === 1) return { recapMarkdown: 'MINOR findings: missing test', artifacts: [] };
         return { recapMarkdown: 'APPROVE -- LGTM, all findings addressed', artifacts: [] };
       }),
     });
@@ -417,10 +431,7 @@ describe('runImplementPipeline - happy path', () => {
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async () => ok(`h${++spawnCount}`)),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      getAgentResult: vi.fn().mockResolvedValue({
-        recapMarkdown: 'APPROVE -- LGTM. No findings.',
-        artifacts: [],
-      }),
+      getAgentResult: makePhaseAwareAgentResult(() => ({ recapMarkdown: 'APPROVE -- LGTM. No findings.', artifacts: [] })),
     });
 
     const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());

@@ -331,10 +331,25 @@ async function runFullPipelineCore(
 
   deps.stderr(`[full-pipeline] Discovery phase result: ${discoveryPhaseResult.kind}`);
 
+  // Route on phase quality -- control flow from data state
+  if (discoveryPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'discovery',
+        reason: 'discovery session produced no usable output (no artifact and no meaningful notes). Starting shaping blind would produce low-quality work. Fix the discovery session and resume.',
+      },
+    };
+  }
+
   // Build context for shaping using accumulated artifacts
   const shapingContextSummary = buildContextSummary(priorArtifacts, 'shaping');
-  const shapingContext: Readonly<Record<string, unknown>> = shapingContextSummary
-    ? { assembledContextSummary: shapingContextSummary }
+  // For partial completion, surface the quality gap to the shaping agent
+  const partialWarning = discoveryPhaseResult.kind === 'partial'
+    ? '\n\n**Note:** Discovery phase produced partial output only (no structured artifact). Context above is from session notes and may be incomplete.'
+    : '';
+  const shapingContext: Readonly<Record<string, unknown>> = (shapingContextSummary || partialWarning)
+    ? { assembledContextSummary: (shapingContextSummary + partialWarning).trim() }
     : {};
 
   // ── Stage 3: Shaping session ──────────────────────────────────────────
@@ -407,6 +422,17 @@ async function runFullPipelineCore(
     return { kind: 'escalated', escalationReason: { phase: 'shaping', reason: `context persistence failed: ${shapingWriteResult.error}` } };
   }
   deps.stderr(`[full-pipeline] Shaping phase result: ${shapingPhaseResult.kind}`);
+
+  // Route on phase quality
+  if (shapingPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'shaping',
+        reason: 'shaping session produced no usable output (no artifact and no meaningful notes). Starting coding blind would produce low-quality work. Fix the shaping session and resume.',
+      },
+    };
+  }
 
   // ── Stage 4: UX Gate (Large complexity + touchesUI) ──────────────────
   // In FULL mode, complexity is considered Large because there is no pre-existing pitch.
@@ -506,13 +532,21 @@ async function runFullPipelineCore(
   deps.stderr(`[full-pipeline] Spawning wr.coding-task`);
 
   const codingContextSummary = buildContextSummary(priorArtifacts, 'coding');
+  const shapingPartialWarning = shapingPhaseResult.kind === 'partial'
+    ? '\n\n**Note:** Shaping phase produced partial output only (no structured artifact). Context above is from session notes and may be incomplete.'
+    : '';
+  const discoveryPartialWarning = discoveryPhaseResult.kind === 'partial'
+    ? '\n\n**Note:** Discovery phase produced partial output only (no structured artifact). Some upstream context may be missing.'
+    : '';
+  const codingWarnings = discoveryPartialWarning + shapingPartialWarning;
+  const codingFullContext = (codingContextSummary + codingWarnings).trim();
   const codingSpawnResult = await deps.spawnSession(
     'wr.coding-task',
     opts.goal,
     opts.workspace,
     {
       pitchPath: opts.workspace + '/.workrail/current-pitch.md',
-      ...(codingContextSummary ? { assembledContextSummary: codingContextSummary } : {}),
+      ...(codingFullContext ? { assembledContextSummary: codingFullContext } : {}),
     },
     { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
   );
@@ -573,6 +607,18 @@ async function runFullPipelineCore(
     return { kind: 'escalated', escalationReason: { phase: 'coding', reason: `context persistence failed: ${codingWriteResult.error}` } };
   }
   deps.stderr(`[full-pipeline] Coding phase result: ${codingPhaseResult.kind}`);
+
+  // Route on phase quality -- a fallback coding phase means the review agent
+  // would have no decisions/limitations context, making review nearly blind.
+  if (codingPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'coding',
+        reason: 'coding session produced no usable output (no artifact and no meaningful notes). Starting review blind would miss design-level issues. Fix the coding session and resume.',
+      },
+    };
+  }
 
   // ── Stage 6: Poll for PR ──────────────────────────────────────────────
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
