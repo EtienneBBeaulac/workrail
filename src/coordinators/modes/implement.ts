@@ -25,6 +25,7 @@
  * - COORDINATOR_SPAWN_CUTOFF_MS is checked before every spawn via checkSpawnCutoff().
  */
 
+import { ok as okResult } from 'neverthrow';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, PipelineOutcome } from '../adaptive-pipeline.js';
 import {
   CODING_TIMEOUT_MS,
@@ -93,13 +94,17 @@ export async function runImplementPipeline(
   const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
-  // WHY no readActiveRunId check: IMPLEMENT mode always has a pre-existing pitch file as its
-  // recovery anchor. If the coordinator crashes mid-IMPLEMENT, the operator re-dispatches with
-  // the same pitchPath and a fresh runId -- the pitch file is the idempotency key, not a prior
-  // run's artifacts. Unlike FULL mode (which generates discovery/shaping from scratch and cannot
-  // cheaply reproduce them), IMPLEMENT starts from a durable human-authored artifact.
-  const runId = deps.generateRunId();
-  const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
+  // Crash recovery: same check as FULL mode. For IMPLEMENT, readActiveRunId may find a prior
+  // in-progress run, but extractPriorArtifactsFromContext will return [] because IMPLEMENT
+  // context files never have discovery or shaping phase records. The runId is still reused
+  // so writePhaseRecord can append to the existing file on resume.
+  const activeRunResult = await deps.readActiveRunId(opts.workspace);
+  const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
+  const runId = priorRunId ?? deps.generateRunId();
+
+  const initResult = priorRunId
+    ? okResult(undefined)  // existing context file already initialized on prior run
+    : await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
   if (initResult.isErr()) {
     deps.stderr(`[implement] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
     return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };

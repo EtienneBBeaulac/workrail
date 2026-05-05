@@ -726,28 +726,26 @@ export function createCoordinatorDeps(
     generateRunId: () => randomUUID(),
 
     readActiveRunId: async (workspace: string) => {
-      const pointerPath = path.join(workspace, '.workrail', 'pipeline-runs', 'active-run.json');
+      // Scan for an in-progress context file rather than reading a separate pointer file.
+      // Single-file design: no consistency gap between pointer and context file.
+      // "In-progress" = context file exists AND status != 'completed'.
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
       try {
-        const raw = await fs.promises.readFile(pointerPath, 'utf-8');
-        const parsed = JSON.parse(raw) as unknown;
-        if (typeof parsed !== 'object' || parsed === null) return ok(null);
-        const p = parsed as Record<string, unknown>;
-        if (typeof p['runId'] !== 'string') return ok(null);
-        const runId = p['runId'] as string;
-
-        // Check if the run is already completed -- if so, don't resume it.
-        // This prevents a fresh run from inheriting prior-task artifacts.
-        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
-        const contextPath = path.join(runsDir, `${runId}-context.json`);
-        try {
-          const ctxRaw = await fs.promises.readFile(contextPath, 'utf-8');
-          const ctx = JSON.parse(ctxRaw) as unknown;
-          if (typeof ctx === 'object' && ctx !== null && (ctx as Record<string, unknown>)['status'] === 'completed') {
-            return ok(null); // prior run completed -- start fresh
-          }
-        } catch { /* context file missing or unreadable -- treat as in-progress */ }
-
-        return ok(runId);
+        const entries = await fs.promises.readdir(runsDir);
+        for (const entry of entries) {
+          if (!entry.endsWith('-context.json')) continue;
+          try {
+            const filePath = path.join(runsDir, entry);
+            const raw = await fs.promises.readFile(filePath, 'utf-8');
+            const ctx = JSON.parse(raw) as unknown;
+            if (typeof ctx !== 'object' || ctx === null) continue;
+            const c = ctx as Record<string, unknown>;
+            if (typeof c['runId'] !== 'string') continue;
+            if (c['status'] === 'completed') continue; // this run finished cleanly
+            return ok(c['runId'] as string);
+          } catch { continue; }
+        }
+        return ok(null);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === 'ENOENT') return ok(null);
         const msg = e instanceof Error ? e.message : String(e);
@@ -798,16 +796,6 @@ export function createCoordinatorDeps(
         const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, phases: {} };
         await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
         await fs.promises.rename(tmpPath, filePath);
-        // Write recovery pointer AFTER the context file.
-        // WHY context-first: if a crash occurs between the two renames, the context file exists
-        // but the pointer does not. readActiveRunId returns null (ENOENT on pointer) so the next
-        // run starts fresh -- the orphaned context file is harmless. The reverse ordering
-        // (pointer-first) would be worse: the pointer would name a runId whose context file
-        // doesn't exist yet, causing writePhaseRecord to fail on the next run.
-        const pointerPath = path.join(runsDir, 'active-run.json');
-        const pointerTmp = pointerPath + '.tmp';
-        await fs.promises.writeFile(pointerTmp, JSON.stringify({ runId, workspace }, null, 2) + '\n', 'utf-8');
-        await fs.promises.rename(pointerTmp, pointerPath);
         return ok(undefined);
       } catch (e) {
         try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }

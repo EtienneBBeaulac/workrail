@@ -178,10 +178,14 @@ export interface AdaptiveCoordinatorDeps extends CoordinatorDeps {
   generateRunId(): string;
 
   /**
-   * Read the active run ID for a workspace from the recovery pointer file.
-   * Returns ok(null) if no active run exists (first run, or pointer was cleaned up).
-   * Used for crash recovery: if a prior runId exists, resume that run instead
-   * of starting a new one with a fresh UUID.
+   * Find the in-progress pipeline run for a workspace, if any.
+   * Scans {workspace}/.workrail/pipeline-runs/ for a context file without status='completed'.
+   * Returns ok(null) if no in-progress run exists (first run, all runs completed, or dir missing).
+   * Returns err(...) on I/O failure.
+   *
+   * WHY scan instead of a pointer file: a single-file design has no consistency gap.
+   * A separate pointer file creates a window where the pointer exists but the context file
+   * does not (or vice versa) if a crash occurs between the two writes.
    */
   readActiveRunId(workspace: string): Promise<Result<string | null, string>>;
 
