@@ -30,11 +30,12 @@ describe('buildPhaseResult()', () => {
     }
   });
 
-  it('full uses medium confidenceBand for artifact without confidenceBand field', () => {
+  it('full uses null confidenceBand for artifact without confidenceBand field', () => {
     const noConfidence = { kind: 'wr.shaping_handoff' as const, version: 1 as const, pitchPath: '', selectedShape: '', appetite: '', keyConstraints: [], rabbitHoles: [], outOfScope: [], validationChecklist: [] };
     const r = buildPhaseResult(noConfidence, null);
     expect(r.kind).toBe('full');
-    if (r.kind === 'full') expect(r.confidenceBand).toBe('medium');
+    // Shaping/coding artifacts don't carry confidenceBand -- null is the honest value
+    if (r.kind === 'full') expect(r.confidenceBand).toBeNull();
   });
 
   it('partial when notes long enough', () => {

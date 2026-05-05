@@ -44,12 +44,17 @@ import {
  * - full: agent emitted a valid structured artifact + optional notes
  * - partial: no artifact but meaningful notes (>50 chars) -- coordinator uses notes as fallback
  * - fallback: no artifact and no usable notes -- coordinator has minimal context
+ *
+ * WHY confidenceBand is optional on 'full':
+ * Not all artifact types carry a confidenceBand field (shaping and coding handoffs
+ * don't; discovery and review verdict do). Making it optional here means the type
+ * accurately reflects reality rather than hiding a runtime cast.
  */
 export type PhaseResult<TArtifact> =
   | {
       readonly kind: 'full';
       readonly artifact: TArtifact;
-      readonly confidenceBand: 'high' | 'medium' | 'low';
+      readonly confidenceBand: 'high' | 'medium' | 'low' | null;
       readonly recapMarkdown: string | null;
     }
   | {
@@ -81,8 +86,14 @@ export function buildPhaseResult<TArtifact>(
   recapMarkdown: string | null,
 ): PhaseResult<TArtifact> {
   if (artifact !== null) {
-    const confidenceBand =
-      (artifact as unknown as { confidenceBand?: 'high' | 'medium' | 'low' }).confidenceBand ?? 'medium';
+    // Extract confidenceBand if the artifact carries it; null otherwise.
+    // WHY not cast-and-default: the type accurately reflects that some artifact
+    // types don't carry a confidence band -- null is the honest representation.
+    const maybeConf = (artifact as { confidenceBand?: unknown }).confidenceBand;
+    const confidenceBand: 'high' | 'medium' | 'low' | null =
+      maybeConf === 'high' || maybeConf === 'medium' || maybeConf === 'low'
+        ? maybeConf
+        : null;
     return { kind: 'full', artifact, confidenceBand, recapMarkdown };
   }
   if (recapMarkdown !== null && recapMarkdown.trim().length > MIN_NOTES_LENGTH_FOR_PHASE_RESULT) {
@@ -160,28 +171,28 @@ export interface PipelineRunContext {
 const PhaseResultFullDiscoverySchema = z.object({
   kind: z.literal('full'),
   artifact: DiscoveryHandoffArtifactV1Schema,
-  confidenceBand: z.enum(['high', 'medium', 'low']),
+  confidenceBand: z.enum(['high', 'medium', 'low']).nullable(),
   recapMarkdown: z.string().nullable(),
 });
 
 const PhaseResultFullShapingSchema = z.object({
   kind: z.literal('full'),
   artifact: ShapingHandoffArtifactV1Schema,
-  confidenceBand: z.enum(['high', 'medium', 'low']),
+  confidenceBand: z.enum(['high', 'medium', 'low']).nullable(),
   recapMarkdown: z.string().nullable(),
 });
 
 const PhaseResultFullCodingSchema = z.object({
   kind: z.literal('full'),
   artifact: CodingHandoffArtifactV1Schema,
-  confidenceBand: z.enum(['high', 'medium', 'low']),
+  confidenceBand: z.enum(['high', 'medium', 'low']).nullable(),
   recapMarkdown: z.string().nullable(),
 });
 
 const PhaseResultFullReviewSchema = z.object({
   kind: z.literal('full'),
   artifact: ReviewVerdictArtifactV1Schema,
-  confidenceBand: z.enum(['high', 'medium', 'low']),
+  confidenceBand: z.enum(['high', 'medium', 'low']).nullable(),
   recapMarkdown: z.string().nullable(),
 });
 

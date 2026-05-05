@@ -94,6 +94,7 @@ export async function runImplementPipeline(
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
   const runId = deps.generateRunId();
+  void deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
 
   let outcome: PipelineOutcome;
 

@@ -165,7 +165,8 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
       generateRunId: vi.fn().mockReturnValue('test-run-id'),
       readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
     readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
-      writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
+      createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
+    writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     };
 
     const opts = {

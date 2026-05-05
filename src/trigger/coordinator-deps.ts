@@ -757,6 +757,27 @@ export function createCoordinatorDeps(
       }
     },
 
+    createPipelineContext: async (workspace, runId, goal, pipelineMode) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      const filePath = path.join(runsDir, `${runId}-context.json`);
+      const tmpPath = filePath + '.tmp';
+      try {
+        await fs.promises.mkdir(runsDir, { recursive: true });
+        const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, phases: {} };
+        await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(tmpPath, filePath);
+        // Write recovery pointer
+        const pointerPath = path.join(runsDir, 'active-run.json');
+        const pointerTmp = pointerPath + '.tmp';
+        await fs.promises.writeFile(pointerTmp, JSON.stringify({ runId, workspace }, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(pointerTmp, pointerPath);
+        return ok(undefined);
+      } catch (e) {
+        try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+        return err(`createPipelineContext failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+
     writePhaseRecord: async (workspace: string, runId: string, entry) => {
       const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
       const filePath = path.join(runsDir, `${runId}-context.json`);
@@ -765,50 +786,29 @@ export function createCoordinatorDeps(
       try {
         await fs.promises.mkdir(runsDir, { recursive: true });
 
-        // Read existing context or create empty
-        let existing: { runId: string; goal: string; workspace: string; startedAt: string; pipelineMode: string; phases: Record<string, unknown> } = {
-          runId,
-          goal: '',
-          workspace,
-          startedAt: new Date().toISOString(),
-          pipelineMode: 'FULL',
-          phases: {},
-        };
-        try {
-          const raw = await fs.promises.readFile(filePath, 'utf-8');
-          const parsed = JSON.parse(raw) as unknown;
-          const result = parsePipelineRunContext(parsed);
-          if (result.isOk() && result.value !== null) {
-            existing = result.value as typeof existing;
-          }
-        } catch {
-          // File doesn't exist yet -- use empty context
+        // Read existing context -- file must exist (createPipelineContext called first)
+        const raw = await fs.promises.readFile(filePath, 'utf-8');
+        const parsed = JSON.parse(raw) as unknown;
+        const existing = parsePipelineRunContext(parsed);
+        if (existing.isErr() || existing.value === null) {
+          return err(`writePhaseRecord: context file missing or invalid for runId=${runId}`);
         }
 
-        // Merge the new phase record
+        // Merge the phase record immutably
         const updated = {
-          ...existing,
+          ...existing.value,
           phases: {
-            ...existing.phases,
+            ...existing.value.phases,
             [entry.phase]: entry.record,
           },
         };
 
-        // Atomic write of context file via temp-rename
+        // Atomic write via temp-rename
         await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
         await fs.promises.rename(tmpPath, filePath);
-
-        // Write recovery pointer atomically so crash recovery can find this run.
-        // Written after the context file so the pointer is never ahead of the data.
-        const pointerPath = path.join(runsDir, 'active-run.json');
-        const pointerTmp = pointerPath + '.tmp';
-        await fs.promises.writeFile(pointerTmp, JSON.stringify({ runId, workspace }, null, 2) + '\n', 'utf-8');
-        await fs.promises.rename(pointerTmp, pointerPath);
-
         return ok(undefined);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        // Clean up temp file if it exists
         try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
         return err(`writePhaseRecord failed: ${msg}`);
       }

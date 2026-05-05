@@ -197,6 +197,11 @@ export async function runFullPipeline(
     ? `[full-pipeline] Resuming prior run ${priorRunId} with ${initialPriorArtifacts.length} artifact(s)`
     : `[full-pipeline] Starting new run ${runId}`);
 
+  // Initialize the context file for new runs only -- crash-resumed runs already have one.
+  if (!priorRunId) {
+    void deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL');
+  }
+
   // ── Pitch archival setup ──────────────────────────────────────────────
   // Build the archive path now so it's available in the finally block.
   // The shaping session creates current-pitch.md; we archive it on success or failure.

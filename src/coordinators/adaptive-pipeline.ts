@@ -193,8 +193,20 @@ export interface AdaptiveCoordinatorDeps extends CoordinatorDeps {
   readPipelineContext(workspace: string, runId: string): Promise<Result<PipelineRunContext | null, string>>;
 
   /**
+   * Create the initial PipelineRunContext file for a new run.
+   * Must be called before writePhaseRecord() to avoid placeholder goal/pipelineMode values.
+   * Uses atomic write (temp-rename).
+   */
+  createPipelineContext(
+    workspace: string,
+    runId: string,
+    goal: string,
+    pipelineMode: PipelineRunContext['pipelineMode'],
+  ): Promise<Result<void, string>>;
+
+  /**
    * Write a phase record into the PipelineRunContext for a given run ID.
-   * Creates the file if it does not exist; merges the phase record into the phases object.
+   * Merges the phase record into the existing phases object.
    * Uses atomic write (temp-rename) to prevent partial writes.
    * Returns err(...) on I/O failure.
    *
