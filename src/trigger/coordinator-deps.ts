@@ -726,26 +726,35 @@ export function createCoordinatorDeps(
     generateRunId: () => randomUUID(),
 
     readActiveRunId: async (workspace: string) => {
-      // Scan for an in-progress context file rather than reading a separate pointer file.
-      // Single-file design: no consistency gap between pointer and context file.
-      // "In-progress" = context file exists AND status != 'completed'.
       const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
       try {
         const entries = await fs.promises.readdir(runsDir);
+        // Collect all in-progress context files and pick the newest by startedAt.
+        // Multiple in-progress files indicates multiple crashes -- resume the newest,
+        // log a warning about the others so the operator can investigate.
+        const candidates: Array<{ runId: string; startedAt: string }> = [];
         for (const entry of entries) {
           if (!entry.endsWith('-context.json')) continue;
           try {
-            const filePath = path.join(runsDir, entry);
-            const raw = await fs.promises.readFile(filePath, 'utf-8');
+            const raw = await fs.promises.readFile(path.join(runsDir, entry), 'utf-8');
             const ctx = JSON.parse(raw) as unknown;
             if (typeof ctx !== 'object' || ctx === null) continue;
             const c = ctx as Record<string, unknown>;
             if (typeof c['runId'] !== 'string') continue;
-            if (c['status'] === 'completed') continue; // this run finished cleanly
-            return ok(c['runId'] as string);
+            if (c['status'] === 'completed') continue;
+            candidates.push({ runId: c['runId'] as string, startedAt: String(c['startedAt'] ?? '') });
           } catch { continue; }
         }
-        return ok(null);
+        if (candidates.length === 0) return ok(null);
+        // Sort descending by startedAt (ISO string -- lexicographic = chronological).
+        candidates.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+        if (candidates.length > 1) {
+          process.stderr.write(
+            `[WARN coordinator] ${candidates.length} in-progress pipeline runs found -- resuming newest (${candidates[0]!.runId}). ` +
+            `Others: ${candidates.slice(1).map(c => c.runId).join(', ')}. Run 'worktrain cleanup' to clear stale runs.\n`,
+          );
+        }
+        return ok(candidates[0]!.runId);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === 'ENOENT') return ok(null);
         const msg = e instanceof Error ? e.message : String(e);

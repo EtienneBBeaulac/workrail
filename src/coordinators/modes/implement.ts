@@ -94,10 +94,6 @@ export async function runImplementPipeline(
   const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
-  // Crash recovery: same check as FULL mode. For IMPLEMENT, readActiveRunId may find a prior
-  // in-progress run, but extractPriorArtifactsFromContext will return [] because IMPLEMENT
-  // context files never have discovery or shaping phase records. The runId is still reused
-  // so writePhaseRecord can append to the existing file on resume.
   const activeRunResult = await deps.readActiveRunId(opts.workspace);
   const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
   const runId = priorRunId ?? deps.generateRunId();
@@ -114,9 +110,10 @@ export async function runImplementPipeline(
 
   try {
     outcome = await runImplementCore(deps, opts, pitchPath, coordinatorStartMs, runId);
-    void deps.markPipelineRunComplete(opts.workspace, runId).then(r => {
-      if (r.isErr()) deps.stderr(`[WARN implement] markPipelineRunComplete failed: ${r.error}`);
-    });
+    const markResult = await deps.markPipelineRunComplete(opts.workspace, runId);
+    if (markResult.isErr()) {
+      deps.stderr(`[WARN implement] markPipelineRunComplete failed -- next run may resume this one: ${markResult.error}`);
+    }
   } finally {
     // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
     // WHY finally: if outcome is escalated (coding session failed, review failed,
