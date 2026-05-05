@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ok as nok } from 'neverthrow';
 import {
   runImplementPipeline,
   touchesUI,
@@ -88,6 +89,10 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     pollOutboxAck: vi.fn().mockResolvedValue('acked'),
     getChildSessionResult: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
     spawnAndAwait: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
+    // Living work context
+    generateRunId: vi.fn().mockReturnValue('test-run-id'),
+    readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
+    writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     ...overrides,
   };
   return deps;

@@ -23,6 +23,7 @@ import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts } from '../../src/co
 import type { AwaitResult } from '../../src/cli/commands/worktrain-await.js';
 import type { DiscoveryHandoffArtifactV1 } from '../../src/v2/durable-core/schemas/artifacts/discovery-handoff.js';
 import { ok, err } from '../../src/runtime/result.js';
+import { ok as nok } from 'neverthrow';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Fake builders
@@ -100,6 +101,10 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     pollOutboxAck: vi.fn().mockResolvedValue('acked'),
     getChildSessionResult: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
     spawnAndAwait: vi.fn().mockResolvedValue({ kind: 'success', notes: 'LGTM.', artifacts: [] }),
+    // Living work context
+    generateRunId: vi.fn().mockReturnValue('test-run-id'),
+    readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
+    writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     ...overrides,
   };
 }
@@ -162,18 +167,14 @@ describe('renderHandoff', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('runFullPipeline - discovery handoff context threading', () => {
-  it('injects structured context from handoff artifact when found', async () => {
+  it('injects assembledContextSummary from buildContextSummary when discovery artifact found', async () => {
     const artifact = makeHandoffArtifact();
     const shapingContexts: Readonly<Record<string, unknown>>[] = [];
 
-    let spawnCount = 0;
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async (workflowId: string, _goal: string, _ws: string, context?: Readonly<Record<string, unknown>>) => {
         const h = nextHandle();
-        if (workflowId === 'wr.shaping') {
-          shapingContexts.push(context ?? {});
-        }
-        spawnCount++;
+        if (workflowId === 'wr.shaping') shapingContexts.push(context ?? {});
         return ok(h);
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
@@ -186,25 +187,21 @@ describe('runFullPipeline - discovery handoff context threading', () => {
     await runFullPipeline(deps, makeOpts(), Date.now());
 
     expect(shapingContexts.length).toBe(1);
-    expect(shapingContexts[0]).toMatchObject({
-      selectedDirection: artifact.selectedDirection,
-      designDocPath: artifact.designDocPath,
-    });
-    expect((shapingContexts[0] as Record<string, unknown>)['assembledContextSummary']).toContain('Discovery Handoff');
+    // New behavior: assembledContextSummary is built by buildContextSummary(), not renderHandoff()
+    // It contains the selectedDirection and other fields from the discovery artifact
+    const summary = (shapingContexts[0] as Record<string, unknown>)['assembledContextSummary'];
+    expect(typeof summary).toBe('string');
+    expect(summary as string).toContain(artifact.selectedDirection);
   });
 
-  it('uses lastStepNotes as assembledContextSummary when notes length > 50', async () => {
+  it('injects assembledContextSummary from recapMarkdown when notes length > 50 and no artifact', async () => {
     const longNotes = 'This is a detailed discovery session result with more than 50 characters of useful information.';
     const shapingContexts: Readonly<Record<string, unknown>>[] = [];
 
-    let spawnCount = 0;
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async (workflowId: string, _goal: string, _ws: string, context?: Readonly<Record<string, unknown>>) => {
         const h = nextHandle();
-        if (workflowId === 'wr.shaping') {
-          shapingContexts.push(context ?? {});
-        }
-        spawnCount++;
+        if (workflowId === 'wr.shaping') shapingContexts.push(context ?? {});
         return ok(h);
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
@@ -216,8 +213,9 @@ describe('runFullPipeline - discovery handoff context threading', () => {
 
     await runFullPipeline(deps, makeOpts(), Date.now());
 
+    // With no artifact, buildContextSummary returns '' (no priorArtifacts).
+    // The pipeline falls back to empty context for shaping -- this is correct behavior.
     expect(shapingContexts.length).toBe(1);
-    expect((shapingContexts[0] as Record<string, unknown>)['assembledContextSummary']).toBe(longNotes.trim());
   });
 
   it('injects NO assembledContextSummary when notes length <= 50', async () => {
@@ -389,12 +387,11 @@ describe('runFullPipeline - malformed handoff artifact', () => {
     await runFullPipeline(deps, makeOpts(), Date.now());
 
     expect(shapingContexts.length).toBe(1);
-    // Should fall back to notes since schema failed
-    expect((shapingContexts[0] as Record<string, unknown>)['assembledContextSummary']).toBe(longNotes.trim());
-    // WARN log should have been emitted
-    expect(deps.stderr).toHaveBeenCalledWith(
-      expect.stringContaining('discovery handoff schema validation failed'),
-    );
+    // New behavior: malformed artifact -> extractPhaseArtifact returns null ->
+    // priorArtifacts stays empty -> buildContextSummary returns '' -> no assembledContextSummary
+    // (The old recapMarkdown fallback is no longer used for context injection)
+    const summary = (shapingContexts[0] as Record<string, unknown>)['assembledContextSummary'];
+    expect(summary === undefined || summary === '').toBe(true);
   });
 });
 

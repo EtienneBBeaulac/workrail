@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
+import { ok as nok } from 'neverthrow';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -161,6 +162,9 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
       postToOutbox: vi.fn().mockResolvedValue(undefined),
       pollOutboxAck: vi.fn().mockResolvedValue('acked'),
       contextAssembler: undefined,
+      generateRunId: vi.fn().mockReturnValue('test-run-id'),
+      readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
+      writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     };
 
     const opts = {

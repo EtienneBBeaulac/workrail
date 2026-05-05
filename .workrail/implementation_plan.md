@@ -1,1318 +1,159 @@
-# Implementation Plan: queue-config separate file (fix/queue-config-separate-file)
-
-*Generated: 2026-04-19 | Workflow: coding-task-workflow-agentic*
-
----
-
-## 1. Problem Statement
-
-WorkRail MCP server validates `~/.workrail/config.json` as a flat key-value map with string values only. The WorkTrain queue config is a nested object, which broke MCP validation and caused the entire `config.json` to be silently ignored. The fix moves queue config to a separate file `~/.workrail/queue-config.json`.
-
-## 2. Acceptance Criteria
-
-- `loadQueueConfig()` reads from `~/.workrail/queue-config.json` by default
-- `WORKRAIL_CONFIG_PATH` constant value ends with `queue-config.json`
-- WHY comment block is present above `loadQueueConfig()` explaining the separation
-- JSDoc for `loadQueueConfig()` says `queue-config.json` not `config.json`
-- `npm run build` exits 0
-- `npx vitest run` exits 0 with no regressions
-
-## 3. Non-Goals
-
-- Do NOT touch `src/mcp/`
-- Do NOT rename the `WORKRAIL_CONFIG_PATH` constant
-- Do NOT change `loadQueueConfig()` logic, return types, or validation
-- Do NOT add new tests (no path-mocking tests existed before)
-- Do NOT touch any caller (`polling-scheduler.ts`, `cli-worktrain.ts`)
-
-## 4. Philosophy-Driven Constraints
-
-- Document 'why', not 'what' -- WHY comment is required
-- Targeted fix, not a refactor
-- YAGNI -- change only what is needed
-
-## 5. Invariants
-
-- I1: `loadQueueConfig()` function signature is unchanged
-- I2: All validation logic inside `loadQueueConfig()` is unchanged
-- I3: Return type `Result<GitHubQueueConfig | null, string>` is unchanged
-- I4: ENOENT on the config file returns `ok(null)` (no change needed, already implemented)
-
-## 6. Selected Approach
-
-Candidate A: change `WORKRAIL_CONFIG_PATH` constant value from `config.json` to `queue-config.json`. Add WHY comment block. Update JSDoc.
-
-## 7. Vertical Slices
-
-### Slice 1: Change config path constant and add WHY comment
-
-**File**: `src/trigger/github-queue-config.ts`
-
-Changes:
-1. Line 110: change `WORKRAIL_CONFIG_PATH` value from `path.join(os.homedir(), '.workrail', 'config.json')` to `path.join(os.homedir(), '.workrail', 'queue-config.json')`
-2. Add WHY comment block above `loadQueueConfig()` as specified in task description
-3. Update JSDoc `@param configPath` description from `config.json` to `queue-config.json`
-4. Update file-level JSDoc (line 3) from `config.json` to `queue-config.json`
-
-**AC**: `WORKRAIL_CONFIG_PATH` ends with `queue-config.json`. WHY comment present. Build clean.
-
-## 8. Test Design
-
-No new tests needed. No existing tests mock the config file path for `loadQueueConfig`. The function's injectable `configPath` parameter is already available for future tests. Verification: `npx vitest run` with no regressions.
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Future developer reverts path | Low | Medium | WHY comment |
-| Tests break | Very Low | Low | Run `npx vitest run` to verify |
-
-## 10. PR Packaging
-
-Single PR. Branch: `fix/queue-config-separate-file`. One commit.
-
-## 11. Philosophy Alignment
-
-- document-why -> satisfied (WHY comment)
-- architectural-fixes-over-patches -> satisfied (separate config files)
-- YAGNI -> satisfied (minimal change)
-- make-illegal-states-unrepresentable -> satisfied (by construction)
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-
----
----
-
-# Implementation Plan: GitHub Issue Queue Poll Trigger (#4)
-
-*Generated: 2026-04-19 | Workflow: coding-task-workflow-agentic*
-
----
-
-## 1. Problem Statement
-
-WorkTrain runs as a daemon but has no mechanism to automatically look at the GitHub issue queue, pick the highest-priority actionable item, and dispatch a new session. Every session start requires manual invocation. This plan implements feature #4: a queue poll trigger that fetches open GitHub issues on a configurable interval, applies maturity inference and idempotency checks, selects a candidate, and dispatches a WorkTrain session.
-
----
-
-## 2. Acceptance Criteria
-
-1. `npm run build` produces no TypeScript errors.
-2. `npx vitest run tests/unit/github-queue-poller.test.ts` passes all tests.
-3. `npx vitest run` passes with no regressions.
-4. A `github_queue_poll` trigger in triggers.yml correctly assembles a `GitHubQueuePollingSource` at load time.
-5. Unknown provider still produces `unknown_provider` error (no regression in trigger-store).
-6. On each poll cycle: issues fetched, maturity inferred, top candidate dispatched, JSONL entry written.
-7. Issues with `worktrain:in-progress` label are excluded (H3 exclusion).
-8. Issues matching an active session file are skipped (idempotency).
-9. When total active sessions >= `maxConcurrentSelf`, entire cycle is skipped.
-10. `type: 'label' | 'mention' | 'query'` throws `not_implemented` at dispatch time.
-11. GitHub API error causes cycle skip with log, no crash.
-12. Bot identity (`worktrain-etienneb`) set after worktree creation when `trigger.botIdentity` is present.
-
----
-
-## 3. Non-Goals
-
-- No GitHub write-back (labels, comments, status updates).
-- No multi-phase pipeline routing (that's #3's job).
-- No grooming or maturity promotion.
-- No `type: 'label' | 'mention' | 'query'` implementation.
-- No auto-close, auto-label, auto-merge.
-- No `src/mcp/` changes.
-- No 4th maturity heuristic (scope lock).
-- No LLM calls in maturity inference.
-
----
-
-## 4. Philosophy-Driven Constraints
-
-- All public functions return `Result<T, E>` -- no throws at boundaries.
-- All interfaces use `readonly` fields.
-- `sessionsDir` parameter injectable for testing.
-- `FetchFn` injectable in adapter.
-- Idempotency catch block MUST return `'active'`, never `'clear'`.
-- Exactly 3 heuristics in `inferMaturity()` -- mark with `// SCOPE LOCK` comment.
-- `not_implemented` is a typed error value, not a thrown exception.
-
----
-
-## 5. Invariants
-
-1. **Conservative idempotency**: Any error during session file scan (ENOENT, parse error, missing field) folds to `'active'`. Never dispatch on uncertainty.
-2. **Concurrency cap ordering**: Total active sessions check BEFORE per-issue evaluation. If count >= `maxConcurrentSelf`, skip entire cycle.
-3. **Exactly 3 heuristics**: H1 (spec URL), H2 (acceptance criteria), H3 (active/skip). H3 is an exclusion, not a maturity level.
-4. **API error = skip cycle**: On any GitHub API error (network, 4xx, 5xx), log warning and return. No retry within tick.
-5. **Rate limit**: If `X-RateLimit-Remaining < 100`, skip cycle and log warning.
-6. **`not_implemented` at runtime**: Non-assignee queue types are rejected at dispatch time, not parse time.
-
----
-
-## 6. Selected Approach
-
-**Candidate A: Pitch-as-Spec**
-
-New files:
-- `src/trigger/github-queue-config.ts` -- `GitHubQueueConfig` type + `loadQueueConfig()`
-- `src/trigger/adapters/github-queue-poller.ts` -- adapter with fetch, candidate selection, maturity inference, idempotency, JSONL logging
-- `tests/unit/github-queue-poller.test.ts` -- unit tests
-
-Modified files:
-- `src/trigger/types.ts` -- add `GitHubQueuePollingSource`, `TaskCandidate`, new `PollingSource` arm
-- `src/trigger/trigger-store.ts` -- add `github_queue_poll` to `SUPPORTED_PROVIDERS`, separate assembly branch (no events required)
-- `src/trigger/polling-scheduler.ts` -- add `case 'github_queue_poll':` + `doPollGitHubQueue()` method
-- `src/daemon/workflow-runner.ts` -- add optional `botIdentity` field to `WorkflowTrigger`, set after worktree creation
-
-**Runner-up**: Candidate B (skip bot identity) -- rejected because bot identity is non-deterministic and violates pitch pre-implementation checklist.
-
----
-
-## 7. Vertical Slices
-
-### Slice 1: Type definitions
-**Files**: `src/trigger/types.ts`, `src/trigger/github-queue-config.ts`
-**Done when**: TypeScript compiles cleanly with new interfaces; `GitHubQueuePollingSource`, `TaskCandidate`, `GitHubQueueConfig` are exported and importable.
-
-### Slice 2: trigger-store.ts extension
-**Files**: `src/trigger/trigger-store.ts`
-**Done when**: `github_queue_poll` is in `SUPPORTED_PROVIDERS`; a `github_queue_poll` trigger with `source: { repo, token, pollIntervalSeconds }` assembles correctly; missing `repo` or `token` returns `missing_field`; existing providers unaffected.
-
-### Slice 3: Queue poller adapter
-**Files**: `src/trigger/adapters/github-queue-poller.ts`
-**Done when**: `pollGitHubQueueIssues()` fetches issues with assignee filter, returns `Result<GitHubQueueIssue[], ...>`, handles API errors, checks rate limit, injects `fetchFn`.
-
-### Slice 4: Maturity inference + idempotency
-**Files**: `src/trigger/adapters/github-queue-poller.ts` (continued)
-**Done when**: `inferMaturity()` correctly classifies issues per H1/H2 (3 heuristics, scope-locked); H3 exclusion applied before scoring; `checkIdempotency()` returns `'active'` for any parse error; `sessionsDir` injectable.
-
-### Slice 5: Scheduling integration
-**Files**: `src/trigger/polling-scheduler.ts`
-**Done when**: `case 'github_queue_poll':` added to `doPoll()` switch; `doPollGitHubQueue()` implements full cycle (config load, concurrency cap, fetch, selection, dispatch, JSONL log); stdout log format matches pitch spec.
-
-### Slice 6: Bot identity
-**Files**: `src/daemon/workflow-runner.ts`
-**Done when**: `WorkflowTrigger.botIdentity?: { name: string; email: string }` field added; after worktree creation, if `trigger.botIdentity` is present, two `git config` commands run; failure logs WARNING but does not abort session.
-
-### Slice 7: Tests
-**Files**: `tests/unit/github-queue-poller.test.ts`
-**Done when**: All tests in spec pass (see Section 9).
-
----
-
-## 8. Work Packages
-
-Not applicable -- slices are the right granularity for this task.
-
----
-
-## 9. Test Design
-
-File: `tests/unit/github-queue-poller.test.ts`
-
-Tests required per pitch:
-1. **Fetches issues matching assignee filter** -- mock fetch returns 3 issues, all returned
-2. **Returns `not_implemented` for non-assignee queue types** -- config.type = 'label' -> `not_implemented` error
-3. **Skips cycle on GitHub API error** -- mock fetch throws -> no dispatch, no crash
-4. **Idempotency: skips issue with matching active session file** -- temp session file with matching issueNumber -> issue skipped with reason=active_session
-5. **Maturity inference H1** -- body with spec URL -> `'ready'`
-6. **Maturity inference H2** -- body with `- [ ] ` items -> `'specced'`
-7. **Maturity inference default** -- plain body -> `'idea'`
-8. **H3 exclusion** -- issue with `worktrain:in-progress` label -> excluded before scoring
-9. **Concurrency cap** -- active sessions >= maxConcurrentSelf -> cycle skipped
-10. **JSONL entries written** -- `task_selected` and `task_skipped` entries in temp file
-11. **Rate limit skip** -- X-RateLimit-Remaining = 50 -> ok([]), log warning
-
-Testing infrastructure:
-- `sessionsDir`: temp directory per test (injectable)
-- `fetchFn`: injectable mock (same `makeFetch()` helper pattern as `github-poller.test.ts`)
-- JSONL log: temp file per test (injectable `logFile` path)
-
----
-
-## 10. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| events bypass regresses existing providers | Low | High | Separate else-if branch; isPollingProvider unchanged |
-| Idempotency returns 'clear' on error | Low | Critical | Explicit outer try/catch returning 'active' |
-| workflow-runner.ts bot identity causes build error | Low | Medium | Minimal change; optional field |
-| TypeScript union exhaustiveness missed | Low | Medium | Compiler error at build -- caught immediately |
-| JSONL file write fails | Low | Low | Catch and log warning; don't abort |
-
----
-
-## 11. PR Packaging Strategy
-
-**Single PR**: `feat/github-queue-poll` branch. All slices in one commit (or logical sequence of commits). PR title: `feat(trigger): GitHub issue queue poll trigger with maturity inference and idempotency`.
-
----
-
-## 12. Philosophy Alignment per Slice
-
-| Slice | Principle | Status |
-|-------|-----------|--------|
-| 1 (Types) | Immutability by default | Satisfied -- all readonly |
-| 1 (Types) | Make illegal states unrepresentable | Satisfied -- discriminated union |
-| 2 (trigger-store) | Validate at boundaries | Satisfied -- all fields validated at load time |
-| 3 (Adapter) | Errors are data | Satisfied -- Result<T, E> |
-| 3 (Adapter) | DI for boundaries | Satisfied -- fetchFn injectable |
-| 4 (Idempotency) | Determinism over cleverness | Satisfied -- file scan, no LLM |
-| 4 (Idempotency) | Errors are data | Satisfied -- error folds to 'active' |
-| 5 (Scheduler) | Exhaustiveness everywhere | Satisfied -- switch default type-checked |
-| 5 (Scheduler) | Architectural fixes over patches | Satisfied -- new method, not PolledEventStore reuse |
-| 6 (Bot identity) | Determinism over cleverness | Satisfied -- git config, not LLM |
-| 6 (Bot identity) | Architectural fixes over patches | Satisfied -- WorkflowTrigger field, not context hint |
-| 7 (Tests) | Prefer fakes over mocks | Satisfied -- injectable fetchFn, real temp files |
-| All | YAGNI with discipline | Satisfied -- exactly 3 heuristics; no speculative abstraction |
-
----
----
-
-# Implementation Plan: queue poll tasks route to FULL/IMPLEMENT not REVIEW_ONLY (fix/queue-routes-to-full-not-review)
-
-*Generated: 2026-04-19 | Workflow: coding-task-workflow-agentic*
-
----
-
-## 1. Problem Statement
-
-When the GitHub issue queue poller dispatches a task via `dispatchAdaptivePipeline`, `opts.taskCandidate` is set but `opts.triggerProvider` is not. A buggy conditional at `adaptive-pipeline.ts:288-290` infers `triggerProvider = 'github_prs_poll'` from `taskCandidate !== undefined`. This causes `routeTask()` Rule 2 to fire, routing queue tasks to `REVIEW_ONLY`. Verified in production: issue #393 was dispatched from the queue, routed to REVIEW_ONLY, and the coordinator reviewed 5 unrelated dep-bump PRs.
-
----
-
-## 2. Acceptance Criteria
-
-1. Issue queue task with no PR number in title routes to FULL or IMPLEMENT (not REVIEW_ONLY).
-2. `github_prs_poll` trigger with PR number in goal still routes to REVIEW_ONLY.
-3. Goal with explicit PR number still routes to REVIEW_ONLY.
-4. `npm run build` exits 0.
-5. `npx vitest run src/coordinators/` passes all tests.
-6. `npx vitest run` exits 0 with no regressions.
-
----
-
-## 3. Non-Goals
-
-- Do NOT touch `src/mcp/`.
-- Do NOT refactor surrounding code in `adaptive-pipeline.ts`.
-- Do NOT change `routeTask()` in `route-task.ts`.
-- Do NOT change any callers (`trigger-router.ts`, `polling-scheduler.ts`).
-- Do NOT add type-level enforcement (discriminated union split of AdaptivePipelineOpts).
-
----
-
-## 4. Philosophy-Driven Constraints
-
-- Architectural fixes over patches: remove the wrong inference entirely.
-- YAGNI: change only lines 288-290 and the JSDoc. No more.
-- Document 'why': fix JSDoc on `taskCandidate` field + add WHY comment at fix site.
-- Determinism: same opts (taskCandidate set, no triggerProvider) must always produce FULL routing.
-
----
-
-## 5. Invariants
-
-- I1: `routeTask()` is the only place routing decisions are made (enforced by existing design).
-- I2: `opts.triggerProvider` is the authoritative source of provider identity.
-- I3: `taskCandidate` presence does NOT imply any particular triggerProvider.
-- I4: `github_prs_poll` trigger behavior is unchanged - it passes `triggerProvider` directly.
-
----
-
-## 6. Selected Approach
-
-**Candidate A (one-line fix + JSDoc correction)**
-
-Change:
-```typescript
-// BEFORE (wrong):
-const triggerProvider = opts.taskCandidate !== undefined
-  ? 'github_prs_poll'
-  : opts.triggerProvider;
-
-// AFTER (correct):
-// taskCandidate comes from github_queue_poll, not github_prs_poll.
-// github_prs_poll triggers pass triggerProvider directly in opts.
-const triggerProvider = opts.triggerProvider;
-```
-
-Also fix JSDoc on `taskCandidate` field (line 113): remove "When present, the trigger provider is 'github_prs_poll'".
-
-**Runner-up**: Candidate B (type-level split) -- rejected per explicit user constraint: 'do not refactor surrounding code.'
-
----
-
-## 7. Vertical Slices
-
-### Slice 1: Code fix + JSDoc correction
-
-**File**: `src/coordinators/adaptive-pipeline.ts`
-
-Changes:
-1. Lines 288-290: replace 3-line conditional with `const triggerProvider = opts.triggerProvider;` + WHY comment.
-2. Line 113 (JSDoc on `taskCandidate`): fix incorrect statement about `github_prs_poll`.
-
-**Done when**: Code compiles. `triggerProvider` derivation is a single expression. JSDoc no longer says `github_prs_poll`.
-
-### Slice 2: Test coverage
-
-**File**: `tests/unit/` - new test file or addition to existing adaptive pipeline test.
-
-A test that calls `runAdaptivePipeline` (or verifies routing via the opts construction path) with `taskCandidate` set and no `triggerProvider`, verifying the resulting mode is FULL (not REVIEW_ONLY).
-
-**Done when**: Test passes. Covers all three acceptance criteria routing cases (queue task -> FULL, prs_poll -> REVIEW_ONLY, explicit PR number -> REVIEW_ONLY).
-
----
-
-## 8. Test Design
-
-**Option A**: Add to `tests/unit/route-task.test.ts` - add a new describe block verifying that when `triggerProvider` is undefined, no-PR-number goal routes to FULL. (This is already tested implicitly but not with a `taskCandidate` context.)
-
-**Option B**: New test file `tests/unit/adaptive-pipeline-routing.test.ts` - test `runAdaptivePipeline` directly with a minimal fake deps, verifying opts with `taskCandidate` set and no `triggerProvider` routes to FULL.
-
-**Preferred**: Option B. Tests the fix at the actual seam (triggerProvider derivation in `runAdaptivePipeline`), not just `routeTask()` in isolation.
-
-Test cases to add:
-1. `taskCandidate` set, no `triggerProvider`, no pitch, no PR in goal -> mode === 'FULL'
-2. `triggerProvider: 'github_prs_poll'`, no taskCandidate, no PR in goal -> mode === 'REVIEW_ONLY'
-3. No taskCandidate, no triggerProvider, goal contains 'PR #123' -> mode === 'REVIEW_ONLY'
-
----
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Future developer re-introduces taskCandidate inference | Low | Medium | WHY comment at fix site + corrected JSDoc |
-| PR poll path broken | None | N/A | PR poller passes triggerProvider directly, unaffected |
-| Build regression | Very Low | Low | npm run build |
-| Test regression | Very Low | Low | npx vitest run |
-
----
-
-## 10. PR Packaging Strategy
-
-**Single PR**. Branch: `fix/queue-routes-to-full-not-review`. One commit.
-Title: `fix(coordinator): queue poll tasks route to FULL/IMPLEMENT not REVIEW_ONLY`
-
----
-
-## 11. Philosophy Alignment
-
-| Slice | Principle | Status |
-|-------|-----------|--------|
-| 1 (Code fix) | Architectural fixes over patches | Satisfied -- wrong inference removed entirely |
-| 1 (Code fix) | Determinism over cleverness | Satisfied -- same opts always produce same routing |
-| 1 (Code fix) | Document 'why' | Satisfied -- JSDoc corrected, WHY comment added |
-| 1 (Code fix) | YAGNI | Satisfied -- minimal change, no new abstractions |
-| 2 (Tests) | Prefer fakes over mocks | Satisfied -- injectable deps as plain objects |
-| All | Immutability | Satisfied -- opts is readonly throughout |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: [type-level enforcement: split AdaptivePipelineOpts into QueueDispatchOpts/TriggerDispatchOpts discriminated union]
-
----
----
-
-# Implementation Plan: Workflow Validation Regression Test
-
-*Generated: 2026-04-23 | Workflow: coding-task-workflow-agentic*
-
----
-
-## 1. Problem Statement
-
-No test documents that unknown top-level fields in workflow JSON files are rejected by `validate:registry`. The invariant is correct in production (Ajv enforces `additionalProperties: false`), but invisible. A future refactor could remove the enforcement without any test catching it.
-
-## 2. Acceptance Criteria
-
-- `tests/unit/validate-workflow-registry.test.ts` contains a test that passes a `ParsedRawWorkflowFile` with an unknown top-level field through `validateRegistry` using real `validateWorkflowSchema`
-- Test asserts: `report.isValid === false`, `report.tier1FailedRawFiles === 1`, `report.rawFileResults[0].tier1Outcome.kind === 'schema_failed'`
-- Test includes a comment explaining it uses real `validateWorkflowSchema` to verify the Tier 1 enforcement path
-- `strict: false` removed from Ajv constructor in `src/application/validation.ts`
-- `npx tsc --noEmit` passes
-- `npx vitest run tests/unit/validate-workflow-registry.test.ts` passes with the new test included
-
-## 3. Non-Goals
-
-- Do NOT add schema validation to any new code path
-- Do NOT change `spec/workflow.schema.json`
-- Do NOT add a custom Ajv plugin, format, or keyword handler
-- Do NOT change `additionalProperties` settings anywhere in the schema
-- Do NOT address deployment sequencing or binary/schema versioning
-- Do NOT add tests for any other validation invariants
-
-## 4. Philosophy-Driven Constraints
-
-- Prefer fakes over mocks: use real `validateWorkflowSchema` (already the default in `fakePipelineDeps()`)
-- Document why not what: test must include explanatory comment
-- YAGNI: exactly two files, nothing more
-
-## 5. Invariants
-
-- I1: `validateRegistry` must call `deps.schemaValidate` for each raw file via `validateRawFileTier1`
-- I2: `additionalProperties: false` in `spec/workflow.schema.json` must cause `schemaValidate` to return `err()`
-- I3: The Ajv constructor must not carry settings that imply intentional relaxation of validation without documented reason
-
-## 6. Selected Approach
-
-Direct `fakeSnapshot` injection with real `validateWorkflowSchema`. Construct a `ParsedRawWorkflowFile` with an extra field, inject into `fakeSnapshot({ rawFiles: [...] })`, call `validateRegistry` with default `fakePipelineDeps()`, assert `schema_failed`.
-
-Runner-up: none (all candidates converge).
-
-## 7. Vertical Slices
-
-### Slice 1: Add regression test
-
-**File**: `tests/unit/validate-workflow-registry.test.ts`
-
-Add a new describe block "Schema Enforcement (Tier 1 Regression)" after the existing section 12 (File Discovery). Test case:
-- Construct definition with `unknownFieldForTesting: true` as `unknown as WorkflowDefinition`
-- Wrap in `ParsedRawWorkflowFile` with `kind: 'parsed'`, `filePath: 'test.json'`, `relativeFilePath: 'test.json'`, `variantKind: 'standard'`
-- `fakeSnapshot({ rawFiles: [rawFile] })` + `fakePipelineDeps()` (no overrides -- real validateWorkflowSchema)
-- Assert `report.isValid === false`, `report.tier1FailedRawFiles === 1`, `report.rawFileResults[0]!.tier1Outcome.kind === 'schema_failed'`
-- Comment: "Uses real validateWorkflowSchema (not a mock) to verify the Tier 1 enforcement path calls schema validation. This test ensures additionalProperties: false in workflow.schema.json is enforced at the raw-file validation boundary. If this test fails, the schema enforcement layer has been broken."
-
-**Done when**: Test passes.
-
-### Slice 2: Remove misleading Ajv option
-
-**File**: `src/application/validation.ts`
-
-Change `new Ajv({ allErrors: true, strict: false })` to `new Ajv({ allErrors: true })`.
-
-**Done when**: `npx tsc --noEmit` passes, `npx vitest run` passes.
-
-## 8. Test Design
-
-See Slice 1. No new test file -- add to existing `validate-workflow-registry.test.ts`.
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Ajv strict removal causes schema compile error | Very Low | Low | Empirically verified: tsc clean before changes |
-| Unknown field stripped before Ajv | None | N/A | createWorkflow does not serialize/deserialize |
-
-## 10. PR Packaging Strategy
-
-Single PR. Branch: `fix/etienneb/workflow-validation-regression-test`. One commit.
-Commit: `test(validation): add regression test for unknown workflow field rejection`
-
-## 11. Philosophy Alignment
-
-| Slice | Principle | Status |
-|-------|-----------|--------|
-| 1 (Test) | Prefer fakes over mocks | Satisfied -- real validateWorkflowSchema |
-| 1 (Test) | Document why not what | Satisfied -- explanatory comment |
-| 1 (Test) | Errors are data | Satisfied -- Result type used throughout |
-| 2 (Ajv) | YAGNI with discipline | Satisfied -- 1-line removal, no new abstractions |
-| All | Architectural fixes over patches | Satisfied -- documents correct invariant, not a patch |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: []
-
----
----
-
-# Implementation Plan: list_workflows Validation Warnings
-
-*Generated: 2026-04-23 | Workflow: coding-task-workflow-agentic*
-
----
-
-## 1. Problem Statement
-
-When a non-bundled workflow file fails JSON schema validation, `SchemaValidatingWorkflowStorage` and `SchemaValidatingCompositeWorkflowStorage` silently discard the workflow (logging to stderr only). Users calling `list_workflows` see no signal: their workflow is simply absent with no explanation. This turns a trivial typo fix into a multi-minute debugging session.
-
-## 2. Acceptance Criteria
-
-1. `list_workflows` response includes `validationWarnings` array when any non-bundled workflow fails JSON schema validation.
-2. Each warning entry has `workflowId: string`, `sourceKind: string`, `errors: string[]`.
-3. Bundled workflow failures (unexpected) are NOT included in `validationWarnings` -- they log to stderr as before.
-4. Valid workflows still appear in `workflows[]` unchanged.
-5. `IWorkflowStorage` interface is unchanged.
-6. `validationWarnings` is absent (not `[]`) when all workflows pass validation.
-7. Call-scoped: no instance-level state, no state leak between calls.
-8. `ctx.workflowService` singleton fallback path (no workspace signal) returns no `validationWarnings` (field absent).
-9. All three `handleV2ListWorkflows` payload assembly sites include `validationWarnings`.
-10. `npm run build` exits 0.
-11. `npx vitest run` exits 0 with no regressions.
-12. Unit tests for `loadAllWorkflowsWithWarnings()` on both classes.
-13. Handler integration test verifying `validationWarnings` appears in response.
-
-## 3. Non-Goals
-
-- Do NOT change `IWorkflowStorage` interface.
-- Do NOT surface bundled workflow failures in `validationWarnings`.
-- Do NOT add a `validate_workflow` MCP tool.
-- Do NOT change `inspect_workflow` NOT_FOUND behavior.
-- Do NOT add `validationWarnings` to any response other than `list_workflows`.
-
-## 4. Philosophy-Driven Constraints
-
-- **Errors are data:** `loadAllWorkflowsWithWarnings()` returns `{ workflows, warnings }` -- not thrown, not a side effect.
-- **Immutability by default:** `readonly ValidationWarning[]` in all return types.
-- **Explicit domain types:** `ValidationWarning` struct (`workflowId`, `sourceKind`, `errors[]`), not flat strings.
-- **Functional/declarative over imperative:** Paired return method, not callback injection.
-- **YAGNI with discipline:** Add only what is needed -- `IWorkflowStorage` stays untouched.
-- **Type safety as first line of defense:** `HasValidationWarnings` named interface for compile-time safety.
-- **Validate at boundaries, trust inside:** Bundled exclusion at storage method level.
-
-## 5. Invariants
-
-- I1: `IWorkflowStorage` interface signature is unchanged.
-- I2: Existing `loadAllWorkflows()` behavior is unchanged -- valid workflows still filter identically.
-- I3: `validationWarnings` absent (not present with empty array) when no failures.
-- I4: `source.kind !== 'bundled'` guard in `loadAllWorkflowsWithWarnings()` prevents bundled failures from appearing.
-- I5: `reportValidationFailure()` (stderr logging) still called for every filtered workflow -- no monitoring regression.
-- I6: Call-scoped: method creates a fresh `warnings` array per call; no instance state.
-
-## 6. Selected Approach + Rationale
-
-**Candidate A: Paired return method with `HasValidationWarnings` interface**
-
-Add `loadAllWorkflowsWithWarnings()` to both `SchemaValidatingWorkflowStorage` and `SchemaValidatingCompositeWorkflowStorage`, returning `{ workflows: readonly Workflow[]; warnings: readonly ValidationWarning[] }`. Export `HasValidationWarnings` TypeScript interface. In `handleV2ListWorkflows`, type-narrow to `HasValidationWarnings` and call the new method; thread `validationWarnings` into all 3 payload sites.
-
-**Runner-up:** Candidate B (optional callback) -- rejected because imperative callbacks conflict with the repo's functional style.
-
-**Architecture rationale:** Resolves interface stability (IWorkflowStorage untouched), call-scoped safety (no instance state), and signal completeness (bundled excluded at the boundary). Follows the `managedStoreError` side-channel precedent.
-
-## 7. Vertical Slices
-
-### Slice 1: Storage layer -- `ValidationWarning` type + `HasValidationWarnings` interface + `loadAllWorkflowsWithWarnings()` method
-
-**File:** `src/infrastructure/storage/schema-validating-workflow-storage.ts`
-
-Changes:
-1. Export `ValidationWarning` interface: `{ readonly workflowId: string; readonly sourceKind: string; readonly errors: string[] }`
-2. Export `HasValidationWarnings` interface: `{ loadAllWorkflowsWithWarnings(): Promise<{ workflows: readonly Workflow[]; warnings: readonly ValidationWarning[] }> }`
-3. Add `loadAllWorkflowsWithWarnings()` to `SchemaValidatingWorkflowStorage` -- same loop as `loadAllWorkflows()` but collects `ValidationWarning` entries for non-bundled failures.
-4. Add `loadAllWorkflowsWithWarnings()` to `SchemaValidatingCompositeWorkflowStorage` -- same.
-5. Both methods still call `reportValidationFailure()` (invariant I5).
-
-**Done when:** Build clean. Method exists on both classes, returns correct type, still calls `reportValidationFailure`.
-
-### Slice 2: Output schema -- `V2ValidationWarningSchema` + optional `validationWarnings` field
-
-**File:** `src/mcp/output-schemas.ts`
-
-Changes:
-1. Add `export const V2ValidationWarningSchema = z.object({ workflowId: z.string().min(1), sourceKind: z.string().min(1), errors: z.array(z.string().min(1)).min(1) })`
-2. Add `validationWarnings: z.array(V2ValidationWarningSchema).optional().describe(...)` to `V2WorkflowListOutputSchema`.
-
-**Done when:** Build clean. New schema type exported.
-
-### Slice 3: Handler -- type-narrow + call new method + thread to all 3 payload sites
-
-**File:** `src/mcp/handlers/v2-workflow.ts`
-
-Changes:
-1. Import `HasValidationWarnings`, `ValidationWarning` from storage module.
-2. Replace `withTimeout(workflowReader.loadAllWorkflows(), ...)` with: type-narrow to `HasValidationWarnings`; if available call `loadAllWorkflowsWithWarnings()` (wrapped in same `withTimeout`); extract `allWorkflows` and `validationWarnings` (absent if no failures); else fall through to `loadAllWorkflows()` with `validationWarnings = undefined`.
-3. Add `...(validationWarnings ? { validationWarnings } : {})` to all 3 payload assembly sites.
-4. Update `_nextStep` hint: when `validationWarnings` is non-empty (and no `tagSummaryEntry`), include a hint telling the agent to fix errors and retry `list_workflows`.
-
-**Done when:** Build clean. All 3 payload sites include `validationWarnings` spread. Handler integration test passes.
-
-### Slice 4: Tests
-
-**Files:**
-- `tests/unit/schema-validating-composite-workflow-storage.test.ts` (extend existing)
-- `tests/unit/mcp/v2-workflow-source-catalog-output.test.ts` (extend or new file for handler test)
-
-Tests required:
-1. `loadAllWorkflowsWithWarnings()` returns warning entry for non-bundled workflow with bad schema.
-2. `loadAllWorkflowsWithWarnings()` does NOT include bundled workflow failures.
-3. `loadAllWorkflowsWithWarnings()` returns empty `warnings` array (not absent) when all pass -- `validationWarnings` field absent in handler response.
-4. Handler integration test: create temp dir with one invalid workflow JSON, call `handleV2ListWorkflows`, verify `validationWarnings` present with correct structure.
-
-**Done when:** All new tests pass. `npx vitest run` exits 0.
-
-## 8. Test Design
-
-Storage unit tests (extend `schema-validating-composite-workflow-storage.test.ts`):
-- Use `InMemoryWorkflowStorage` with a workflow definition that will fail schema validation (add unknown top-level field or remove required field like `steps`).
-- Call `loadAllWorkflowsWithWarnings()` on `SchemaValidatingCompositeWorkflowStorage`.
-- Assert: `warnings` has one entry, `workflowId` matches, `sourceKind` matches, `errors` non-empty.
-- For bundled test: use `createBundledSource()` for the invalid workflow -- assert `warnings` is empty.
-
-Handler integration test (extend `v2-workflow-source-catalog-output.test.ts` or new file):
-- Write an invalid workflow JSON to a temp directory (missing required field).
-- Call `handleV2ListWorkflows` with `workspacePath` pointing at temp dir.
-- Assert response includes `validationWarnings` with correct structure.
-- Assert valid workflows still present in `workflows[]`.
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Missing one of 3 payload sites | Low | Medium | All 3 sites updated in Slice 3; verified by test exercising primary path + code review |
-| `withTimeout` not applied to new method | Very Low | Low | Wrap in same `withTimeout(workflowReader.loadAllWorkflowsWithWarnings(), TIMEOUT_MS, ...)` |
-| Rename of `loadAllWorkflowsWithWarnings` breaks handler | Very Low | Low | `HasValidationWarnings` interface -- TypeScript compile catches rename |
-| Bundled failures appear in `validationWarnings` | None | N/A | `source.kind !== 'bundled'` guard at collection level + dedicated test |
-| `reportValidationFailure` no longer called | Very Low | Low | Both methods explicitly call it (invariant I5) |
-
-## 10. PR Packaging Strategy
-
-**Single PR.** Branch: `feat/etienneb/list-workflows-validation-warnings`. One commit.
-Commit: `feat(mcp): surface workflow validation failures in list_workflows response`
-
-## 11. Philosophy Alignment per Slice
-
-| Slice | Principle | Status |
-|-------|-----------|--------|
-| 1 (Storage) | Errors are data | Satisfied -- ValidationWarning returned as value |
-| 1 (Storage) | Immutability by default | Satisfied -- readonly return types |
-| 1 (Storage) | Explicit domain types | Satisfied -- ValidationWarning struct, not flat string |
-| 1 (Storage) | Functional/declarative | Satisfied -- paired return, no callback/mutation |
-| 1 (Storage) | YAGNI | Satisfied -- IWorkflowStorage untouched |
-| 2 (Schema) | Explicit domain types | Satisfied -- V2ValidationWarningSchema |
-| 3 (Handler) | Type safety as first line | Satisfied -- HasValidationWarnings interface |
-| 3 (Handler) | Validate at boundaries | Satisfied -- bundled check in storage, handler trusts result |
-| 4 (Tests) | Prefer fakes over mocks | Satisfied -- InMemoryWorkflowStorage, real handler |
-| All | Document why not what | Satisfied -- comments explain bundled exclusion, call-scoped invariant |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: ["inspect_workflow validation surface (broken workflows still NOT_FOUND, separate pitch)"]
-
----
----
-
-# Implementation Plan: Graceful Shutdown via AbortRegistry
-
-*Generated: 2026-04-23 | Workflow: wr.coding-task | Branch: fix/etienneb/graceful-shutdown*
-
----
-
-## 1. Problem Statement
-
-SIGTERM/SIGINT does not abort in-flight `AgentLoop` instances in the WorkTrain daemon. `handle.stop()` closes the HTTP server and polling, but live `AgentLoop` instances keep making LLM API calls for up to 30 minutes. This breaks container orchestrators (Kubernetes, ECS), systemd, and rolling restarts.
-
-## 2. Acceptance Criteria
-
-1. SIGTERM causes all in-flight `AgentLoop` instances to receive `abort()` immediately.
-2. Process exits within ~5 seconds of SIGTERM rather than up to 30 minutes.
-3. `session_aborted` events are emitted before `abort()` (ordering preserved).
-4. `npm run build` exits 0.
-5. `npx vitest run` exits 0 (5 pre-existing `polling-scheduler` failures are unrelated).
-
-## 3. Non-Goals
-
-- No new HTTP endpoint for per-session abort.
-- No changes to the WorkRail MCP server (`src/mcp/`) or its shutdown path.
-- No mid-step graceful save -- sessions are hard-aborted; crash recovery handles the interrupted token.
-- No changes to `src/v2/durable-core/`.
-- No configurable drain window -- 5s is fixed.
-
-## 4. Philosophy-Driven Constraints
-
-- **YAGNI**: add exactly what the pitch specifies, no more.
-- **Dependency injection**: `abortRegistry` injected from composition root (`trigger-listener.ts`), not created inside `runWorkflow()` or `TriggerRouter`.
-- **Immutability under tension**: `Map` is mutable -- same accepted compromise as `SteerRegistry`.
-- **Document why**: WHY comments matching the `SteerRegistry` block pattern.
-
-## 5. Invariants
-
-- I1: `session_aborted` events emitted BEFORE any `abort()` call (ordering preserved).
-- I2: `abort()` called BEFORE `handle.stop()` closes the HTTP server.
-- I3: `handle.stop()` called BEFORE `resolve()` exits the shutdown promise.
-- I4: Drain window caps at exactly 5 seconds, regardless of session count.
-- I5: `abortRegistry.delete()` placed synchronously in `finally` alongside `steerRegistry.delete()`.
-- I6: `makeSpawnAgentTool()` does NOT pass `abortRegistry` to child sessions (consistent with `steerRegistry` treatment).
-
-## 6. Selected Approach + Rationale
-
-**Candidate A: Mirror SteerRegistry pattern exactly.**
-
-`AbortRegistry = Map<string, () => void>` -- maps workrailSessionId to abort callback. Threaded as optional 7th param through `runWorkflow()`, `RunWorkflowFn`, `TriggerRouter`, `TriggerListenerHandle`. Drain window: `Promise.race([5s timeout, registry-empty poll every 100ms])`.
-
-- Resolves: abort-fast + cleanup budget tensions.
-- Accepts: Map mutation at boundary (same as SteerRegistry).
-- Follows existing pattern exactly -- zero new abstractions.
-
-**Runner-up**: AbortController Map -- rejected because it requires `agent-loop.ts` changes excluded by pitch no-go.
-
-## 7. Vertical Slices
-
-### Slice 1: Add `AbortRegistry` type to `src/daemon/workflow-runner.ts`
-
-Export `AbortRegistry = Map<string, () => void>` alongside `SteerRegistry` (after line 665).
-
-**Done when**: `AbortRegistry` type is exported from `workflow-runner.ts`. Build clean.
-
-### Slice 2: Wire `AbortRegistry` through `runWorkflow()`
-
-Add `abortRegistry?: AbortRegistry` as optional 7th param to `runWorkflow()`.
-
-After `steerRegistry?.set()` at line 3498:
-```typescript
-if (workrailSessionId !== null) {
-  abortRegistry?.set(workrailSessionId, () => agent.abort());
-}
-```
-
-In `finally` block at line 4081, after `steerRegistry?.delete()`:
-```typescript
-if (workrailSessionId !== null) {
-  abortRegistry?.delete(workrailSessionId);
-}
-```
-
-**Done when**: `runWorkflow()` accepts and uses `abortRegistry`. Build clean.
-
-### Slice 3: Update `RunWorkflowFn` type and `TriggerRouter` in `src/trigger/trigger-router.ts`
-
-1. Add `abortRegistry?: AbortRegistry` as 7th param to `RunWorkflowFn` type.
-2. Add `private readonly abortRegistry: AbortRegistry | undefined` field to `TriggerRouter`.
-3. Add `abortRegistry?: AbortRegistry` to `TriggerRouter` constructor (after `steerRegistry`).
-4. Assign `this.abortRegistry = abortRegistry` in constructor body.
-5. Pass `this.abortRegistry` at both `runWorkflowFn` call sites (lines 765, 910).
-
-**Done when**: Both call sites pass `abortRegistry`. Build clean.
-
-### Slice 4: Expose `abortRegistry` from `TriggerListenerHandle` in `src/trigger/trigger-listener.ts`
-
-1. Import `AbortRegistry` from `workflow-runner.ts`.
-2. Add `readonly abortRegistry: AbortRegistry` to `TriggerListenerHandle` interface.
-3. Construct `const abortRegistry: AbortRegistry = new Map()` alongside `steerRegistry`.
-4. Pass `abortRegistry` to `TriggerRouter` constructor (after `steerRegistry`).
-5. Return `abortRegistry` on the handle object.
-
-**Done when**: `TriggerListenerHandle.abortRegistry` is typed, constructed, and returned. Build clean.
-
-### Slice 5: Update shutdown handler in `src/cli-worktrain.ts`
-
-Replace the shutdown sequence (lines 459-482) with:
-1. Emit `session_aborted` for each active session (unchanged from current).
-2. Emit `daemon_stopped` (unchanged from current).
-3. Call `abort()` for all `handle.abortRegistry.values()`.
-4. Drain window: `Promise.race([5s timeout, registry-empty poll every 100ms])`.
-5. Call `await handle.stop()`.
-6. Call `resolve()`.
-
-**Done when**: Shutdown handler drains correctly. Build and tests clean.
-
-## 8. Test Design
-
-No new unit tests for this change. The implementation is structural wiring (new optional param, registration/deregistration), not new logic. Verification:
-
-- `npm run build`: TypeScript catches any signature mismatches at all call sites.
-- `npx vitest run`: Existing tests exercise `runWorkflow()`, `TriggerRouter`, and `trigger-listener.ts` with the new optional param absent (which is valid).
-- Manual verification: SIGTERM behavior requires a running daemon -- not testable via unit tests without significant new test infrastructure (out of scope per pitch).
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Session registers in abortRegistry after abort-all fires | Very low | Low | Same ~50ms gap as steerRegistry; accepted |
-| Session finally block takes >5s | Very low | Low | Crash recovery handles incomplete sidecars |
-| TypeScript build error at call site | Low | Low | Build catches immediately |
-
-## 10. PR Packaging Strategy
-
-Single PR. Branch: `fix/etienneb/graceful-shutdown`. One commit.
-Commit: `fix(daemon): abort in-flight agent loops on SIGTERM with 5s drain window`
-
-## 11. Philosophy Alignment per Slice
-
-| Slice | Principle | Status |
+# Implementation Plan: Living Work Context (Issue #934)
+
+## Problem Statement
+
+Pipeline phase agents (shaping, coding, review) start sessions with almost no context from prior phases. The coordinator manually assembles ad-hoc string context. This causes rework, contradicted design intent, and review agents flagging deliberate decisions as bugs.
+
+## Acceptance Criteria
+
+1. `ShapingHandoffArtifactV1` and `CodingHandoffArtifactV1` Zod schemas in `src/v2/durable-core/schemas/artifacts/`
+2. `wr.contracts.shaping_handoff` and `wr.contracts.coding_handoff` in `ARTIFACT_CONTRACT_REFS` with validators
+3. `wr.contracts.discovery_handoff` gets a validator case in `artifact-contract-validator.ts` (currently registered but missing switch case)
+4. `PhaseHandoffArtifact` closed discriminated union in `src/v2/durable-core/schemas/artifacts/phase-handoff.ts`
+5. `buildContextSummary(priorArtifacts, targetPhase)` pure function with per-phase unit tests asserting presence AND absence of correct fields. `'fix'` target phase includes `filesChanged` from coding artifact.
+6. `PipelineRunContext` per-run JSON with `PhaseResult<T>` discriminated union (concrete per-phase Zod schemas). Deserialization always routes through concrete Zod schemas -- no raw casts.
+7. `writePhaseRecord()` and `readPipelineContext()` on `AdaptiveCoordinatorDeps`. `writePhaseRecord` accepts a single union type (not overloads) to make illegal states unrepresentable.
+8. All 4 coordinator mode files (full-pipeline, implement, implement-shared, quick-review) AND `implement.ts` updated with runId threading.
+9. Crash recovery: on pipeline restart, coordinator reads existing `PipelineRunContext` file and restores `priorArtifacts` to skip re-running completed phases.
+10. All 4 workflows updated (wr.discovery, wr.shaping, wr.coding-task, mr-review). Workflow prompt for `phase-8-retrospective` in coding-task explicitly states `correctedAssumptions` is populated by fix/retry agents, not the original coding agent -- leave empty on first run.
+11. Lifecycle integration tests: each workflow emits expected artifact at final step
+12. Validation test: all bundled workflow outputContract contractRefs exist in ARTIFACT_CONTRACT_REFS and have validator cases
+13. Single PR -- no partial landing
+
+## Non-Goals
+
+- No buildSystemPrompt() redesign
+- No cross-run context accumulation
+- No coordinator retry logic
+- No epic-mode task graph
+- No console visualization
+- No extensible contract registration
+- No agent reasoning changes
+
+## Philosophy Constraints
+
+- Make illegal states unrepresentable: PhaseResult<T> discriminated union; writePhaseRecord accepts PhaseRecordUnion (not overloads)
+- Validate at boundaries: Zod at extractPhaseArtifact() and writePhaseRecord(); all deserialization through concrete schemas
+- Errors are data: Result<T, E> return types, no throws
+- Compose with small pure functions: context-assembly.ts functions are pure, no I/O
+- DI for boundaries: file I/O behind AdaptiveCoordinatorDeps interface
+- Immutability by default: priorArtifacts accumulation uses new array creation (spread), never push()
+
+## Invariants
+
+1. Engine contract registration BEFORE workflow outputContract declarations (in same PR)
+2. `wr.contracts.discovery_handoff` must get a validator case (currently missing despite being registered)
+3. buildContextSummary() priority-ordered trimming: hard constraints never dropped; orientation aids dropped first; never truncate mid-array item
+4. `'fix'` target phase includes `filesChanged` from coding artifact (fix agent needs to know which files to modify)
+5. All new DiscoveryHandoffArtifactV1 fields use z.optional() for backward compat
+6. PhaseResult<T> -- concrete per-phase Zod schemas; all deserialization paths use them (no raw casts)
+7. runId generated at runFullPipeline()/runImplementPipeline() start, passed as explicit parameter (not closure) to all sub-functions including runReviewAndVerdictCycle()
+8. priorArtifacts accumulated via spread (new array), never mutated in place
+
+## Selected Approach
+
+9-slice sequential implementation (reordered: types before functions that use them).
+
+**Why single PR:** workflow outputContract declarations reference engine contractRefs. Partial landing breaks MCP sessions.
+
+## Vertical Slices
+
+### Slice 1: Enrich DiscoveryHandoffArtifactV1 + new artifact schemas
+**Files:** `src/v2/durable-core/schemas/artifacts/discovery-handoff.ts`, `src/v2/durable-core/schemas/artifacts/phase-handoff.ts` (new), `src/v2/durable-core/schemas/artifacts/index.ts`
+**Done when:** `DiscoveryHandoffArtifactV1Schema` has optional `rejectedDirections`, `implementationConstraints`, `keyCodebaseLocations` with maxItems/maxLength. `ShapingHandoffArtifactV1Schema` and `CodingHandoffArtifactV1Schema` exist with all fields (including `validationChecklist` on shaping, `correctedAssumptions` optional on coding). `PhaseHandoffArtifact` union exported. All schemas use `.strict()`. All new types exported from `index.ts` including `isShapingHandoffArtifact`, `isCodingHandoffArtifact`, `parseShapingHandoffArtifact`, `parseCodingHandoffArtifact`.
+
+### Slice 2: Engine contract registration (including discovery_handoff fix)
+**Files:** `src/v2/durable-core/schemas/artifacts/index.ts`, `src/v2/durable-core/domain/artifact-contract-validator.ts`
+**Done when:** `wr.contracts.shaping_handoff` and `wr.contracts.coding_handoff` in `ARTIFACT_CONTRACT_REFS`. `wr.contracts.discovery_handoff` now has a validator case in the switch (currently missing -- it's registered but falls through to UNKNOWN_CONTRACT_REF). Validators `validateShapingHandoffContract()`, `validateCodingHandoffContract()`, `validateDiscoveryHandoffContract()` implemented following `validateReviewVerdictContract()` pattern. All existing tests pass.
+
+### Slice 3: PipelineRunContext types + Zod schemas
+**File:** `src/coordinators/pipeline-run-context.ts` (new)
+**Done when:** `PhaseResult<T>` interface (3 variants: full/partial/fallback). `PipelineRunContext` interface with `phases` flat object. `DiscoveryPhaseRecord/ShapingPhaseRecord/CodingPhaseRecord/ReviewPhaseRecord` interfaces. Concrete Zod schemas for each using `z.discriminatedUnion()` for PhaseResult. `buildPhaseResult<T>()` pure function. All deserialization paths use concrete schemas (no generic casts). Tests in `tests/unit/coordinators/build-phase-result.test.ts`.
+
+### Slice 4: context-assembly.ts (depends on Slice 3)
+**File:** `src/coordinators/context-assembly.ts` (new)
+**Done when:** `extractPhaseArtifact<T>(artifacts, schema)` validates and returns `T | null`. `buildContextSummary(priorArtifacts, targetPhase)` implements selection table including `filesChanged` in `'fix'` target phase. Priority-ordered trimming with complete-section-or-omit rule. Unit tests in `tests/unit/coordinators/context-assembly.test.ts` asserting presence AND absence per phase plus trimming behavior.
+
+### Slice 5: AdaptiveCoordinatorDeps additions
+**File:** `src/coordinators/adaptive-pipeline.ts`
+**Done when:** `readPipelineContext(runId): Promise<Result<PipelineRunContext|null, string>>`, `writePhaseRecord(runId, record: PhaseRecord): Promise<Result<void, string>>` (single union type, not overloads), and `generateRunId(): string` added to `AdaptiveCoordinatorDeps`. TypeScript compiles.
+
+### Slice 6: coordinator-deps.ts + crash recovery
+**File:** `src/trigger/coordinator-deps.ts`
+**Done when:** `readPipelineContext` reads `{workspace}/.workrail/pipeline-runs/{runId}-context.json`, returns `ok(null)` if missing. `writePhaseRecord` atomically writes (temp-rename). `generateRunId` returns `randomUUID()`. Crash recovery logic: if coordinator starts and a `{runId}-context.json` exists, `readPipelineContext` restores prior phase records; mode executors check existing phase records and skip already-completed phases. Unit tests: read/write round-trip, atomicity, missing-file, crash-recovery restore.
+
+### Slice 7: Mode executor updates
+**Files:** `src/coordinators/modes/full-pipeline.ts`, `implement.ts`, `implement-shared.ts`, `quick-review.ts`
+**Done when:** Each mode generates `runId` at entry. `runFullPipelineCore()` and `runReviewAndVerdictCycle()` accept `runId` and `priorArtifacts` as explicit parameters (not closure). **`implement.ts` updated simultaneously** -- it also calls `runReviewAndVerdictCycle()` and must pass these new params. `buildContextSummary(priorArtifacts, targetPhase)` called before each `spawnSession()`. `writePhaseRecord()` called after each `getAgentResult()`. priorArtifacts accumulated via spread (not push). All existing coordinator tests pass.
+
+### Slice 8: Workflow authoring changes
+**Files:** `workflows/wr.discovery.json`, `workflows/wr.shaping.json`, `workflows/coding-task-workflow-agentic.json`, `workflows/mr-review-workflow.agentic.v2.json`
+**Done when:** All 4 workflows updated per pitch spec. `coding-task-workflow-agentic.json` `phase-8-retrospective` prompt explicitly states: "correctedAssumptions is populated by fix/retry agents documenting what assumptions turned out to be wrong. On a first-run coding session, omit this field." All 38 smoke tests pass. `npm run validate:registry` passes.
+
+### Slice 9: Tests
+**Files:** `tests/unit/coordinators/`, `tests/lifecycle/`, validation test
+**Done when:** All unit tests from plan pass. Lifecycle integration tests assert each of 4 workflows emits expected artifact kind at final step. Validation test asserts all bundled workflow outputContract contractRefs exist in ARTIFACT_CONTRACT_REFS AND have validator cases in the switch. Build passes.
+
+## Test Design
+
+**Unit: `tests/unit/coordinators/context-assembly.test.ts`**
+- `buildContextSummary([], 'coding')` → empty string
+- `buildContextSummary([discoveryArtifact], 'coding')` → contains `implementationConstraints`, does NOT contain `selectedDirection`
+- `buildContextSummary([discoveryArtifact, shapingArtifact], 'coding')` → contains `keyConstraints`, `rabbitHoles`, does NOT contain `keyDecisions`
+- `buildContextSummary([all3], 'review')` → contains `validationChecklist`, `keyDecisions`, does NOT contain `keyCodebaseLocations` (orientation aid, dropped under pressure)
+- `buildContextSummary([all3], 'fix')` → contains `filesChanged`, `keyDecisions`, `keyConstraints`
+- `buildContextSummary([oversizedArtifacts], 'review')` → ≤ 8KB, priority-1 present, priority-3 absent, no truncated array items
+
+**Unit: `tests/unit/coordinators/build-phase-result.test.ts`**
+- Full artifact → `{ kind: 'full', artifact, confidenceBand }`
+- Long recapMarkdown → `{ kind: 'partial' }`
+- Short/null → `{ kind: 'fallback' }`
+
+**Unit: `tests/unit/coordinators/pipeline-run-context.test.ts`**
+- Round-trip with PhaseResult.kind preserved
+- Crash recovery: write phases 1-2, read back, phases present
+- Missing file → `ok(null)`
+- Write is atomic
+
+**Validation test:**
+- All bundled workflow outputContract contractRefs exist in ARTIFACT_CONTRACT_REFS
+- All registered contractRefs have a validator case (not falling through to default)
+
+**Lifecycle integration:**
+- `wr.shaping` final step emits `wr.shaping_handoff`
+- `coding-task-workflow-agentic` final step emits `wr.coding_handoff`
+- `wr.discovery` final step emits enriched `wr.discovery_handoff`
+- `mr-review-workflow` phase-0 processes `validationChecklist`
+
+**Adversarial behavioral test (`tests/integration/living-work-context-adversarial.test.ts`):**
+- Run a scripted pipeline with a fake LLM client
+- Shaping session emits `wr.shaping_handoff` with `validationChecklist: ["do not modify the auth middleware"]`
+- Coding session emits `wr.coding_handoff` with `filesChanged: ["src/auth/middleware.ts"]`
+- Review session receives assembled context including both artifacts
+- Assert: review session's assembled context string contains the validationChecklist item
+- Assert: review session's assembled context string contains the filesChanged entry
+- WHY this test: unit tests prove plumbing; this test proves the context actually reaches the review agent in a form it can act on. It is the only test that falsifies the full chain.
+
+## Risk Register
+
+| Risk | Severity | Mitigation |
 |---|---|---|
-| 1 (AbortRegistry type) | Explicit domain types | Satisfied -- named export, not inline |
-| 2 (runWorkflow) | Dependency injection | Satisfied -- injected from caller, not created inside |
-| 2 (runWorkflow) | Immutability under tension | Accepted -- Map mutation required for registry |
-| 3 (TriggerRouter) | YAGNI | Satisfied -- mirrors steerRegistry exactly |
-| 4 (TriggerListenerHandle) | Dependency injection | Satisfied -- composition root constructs registry |
-| 5 (Shutdown) | Document why | Satisfied -- WHY comments in drain window |
-| 5 (Shutdown) | Determinism | Satisfied -- 5s cap is fixed, not configurable |
-| All | Architectural fix | Satisfied -- registry pattern solves root cause, not a workaround |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: []
-
----
----
-
-# Implementation Plan: runWorkflow() Functional Core / Imperative Shell Refactor
-
-*Generated: 2026-04-23 | Workflow: wr.coding-task | Branch: refactor/etienneb/runworkflow-functional-core*
-
----
-
-## 1. Problem Statement
-
-`runWorkflow()` in `src/daemon/workflow-runner.ts` is ~1046 lines and mixes pure logic (model selection, stuck detection, result classification) with imperative I/O (stats file writes, sidecar deletion, event emission, registry operations). This makes it hard to test pure logic in isolation and results in duplicated cleanup code across 4 result paths. Additionally, the `stuck` exit path has a pre-existing bug: it does not delete the session sidecar file, violating invariants doc section 2.2.
-
-## 2. Acceptance Criteria
-
-1. `npm run build` exits 0
-2. `npx vitest run` exits 0 -- ALL existing tests pass
-3. `tagToStatsOutcome()` is exported and has a unit test using the truth table from the invariants doc
-4. `buildAgentClient()` is exported and has unit tests: valid model override, Bedrock from env, direct API fallback
-5. `evaluateStuckSignals()` is exported and has unit tests: signal 1, signal 2, signal 3, notify_only policy
-6. The outcome invariant tests use injected `_statsDir` to verify actual stats file content
-7. `runWorkflow()` result paths each become ~3-5 lines (not 15-20)
-
-## 3. Non-Goals
-
-- Tool factory function signatures -- unchanged
-- `AgentLoop` (`src/daemon/agent-loop.ts`) -- do not touch
-- WorkRail MCP server (`src/mcp/`) -- do not touch
-- `runStartupRecovery()`, `readAllDaemonSessions()`, `persistTokens()` -- leave as-is
-- All exported public types -- unchanged
-- No new files -- all extractions stay in `workflow-runner.ts`
-
-## 4. Philosophy-Driven Constraints
-
-- `tagToStatsOutcome` must use `assertNever` (import at line 49)
-- Pure functions have no I/O; all I/O stays in shell
-- `buildAgentClient` validates model format, throws before any I/O
-- `_statsDir`, `_sessionsDir` injectable for tests
-- `SessionState` interface makes mutation explicit (not hidden in closures)
-- Extract exactly what the spec asks for, nothing more
-
-## 5. Invariants
-
-- I1: All 4 result paths call `finalizeSession` with correct data
-- I2: `stuck` path deletes sidecar (fixes pre-existing bug; invariants doc section 2.2)
-- I3: `success` worktree path does NOT delete sidecar (delivery cleanup gap)
-- I4: SteerRegistry and AbortRegistry still deregistered in `finally` block (not in `finalizeSession`)
-- I5: DaemonRegistry.unregister() still called per-result-path via `finalizeSession`
-- I6: `workrailSessionId` starts null, populated after token decode; mutation visible via `state` reference
-- I7: Early-exit paths still clean up registries explicitly
-- I8: `tagToStatsOutcome` exhaustive via `assertNever` -- new `_tag` fails to compile
-
-## 6. Selected Approach + Rationale
-
-**Candidate A: Minimal mechanical extraction in same file**
-
-Extract 6 pieces as module-level functions/interfaces in `workflow-runner.ts`. No new files. Fix pre-existing stuck sidecar bug in `finalizeSession`.
-
-**Runner-up:** Candidate B (separate files) -- rejected because YAGNI.
-
-## 7. Vertical Slices
-
-### Slice 1: `tagToStatsOutcome(tag)` -- pure, exhaustive mapping
-
-Export above `runWorkflow()`. Switch on `WorkflowRunResult['_tag']`, return stats outcome string, `default: assertNever(tag)`.
-
-**Done when:** Exported, build clean.
-
-### Slice 2: `buildAgentClient(trigger, apiKey, env)` -- pure model selection
-
-Extract lines ~3382-3410. Throws on invalid format. No I/O. Replace inline model selection in `runWorkflow()` with call to `buildAgentClient()`, wrapping in try/catch returning `_tag: 'error'`.
-
-**Done when:** Exported, build clean, model validation tests pass.
-
-### Slice 3: `SessionState` interface + `createSessionState(initialToken)`
-
-Extract all 13 `let` declarations into named interface and factory. Remove `let` declarations from `runWorkflow()`. Replace with `const state = createSessionState(startContinueToken)`. Update all mutation/read sites to `state.field`.
-
-**Key:** `onAdvance`/`onComplete`/`onTokenUpdate` callbacks mutate `state.field = value`. Tool factories pass callbacks as before.
-
-**Done when:** Build clean. All existing tests pass.
-
-### Slice 4: `evaluateStuckSignals(state, config)` -- pure stuck detection
-
-Extract stuck heuristics from turn_end subscriber. Returns `StuckSignal | null`. Turn_end subscriber calls this, handles effects per signal kind using explicit if-blocks with comments.
-
-**Done when:** Exported, build clean, stuck detection tests pass.
-
-### Slice 5: `finalizeSession` + injectable dirs
-
-Add `_statsDir?`, `_sessionsDir?` to `runWorkflow()`. Add `finalizeSession(result, context)` async helper. Consolidate 4 cleanup sites into single `await finalizeSession(result, ctx); return result;` pattern. **Add sidecar deletion for stuck path (fixes pre-existing bug) with WHY comment.**
-
-**Done when:** Build clean. All existing tests pass. Stuck path deletes sidecar.
-
-### Slice 6: New unit tests
-
-- `tagToStatsOutcome` truth table (5 cases)
-- `buildAgentClient` unit tests (4 cases with vi.stubEnv)
-- `evaluateStuckSignals` unit tests (4 cases)
-- Update `workflow-runner-outcome-invariants.test.ts` to pass `_statsDir` and verify stats file content
-
-**Done when:** All new tests pass. `npx vitest run` exits 0.
-
-## 8. Test Design
-
-- `tagToStatsOutcome`: direct unit tests, one per truth table row
-- `buildAgentClient`: `vi.stubEnv` for env, assert constructor type and modelId
-- `evaluateStuckSignals`: construct `SessionState` via `createSessionState()`, set state for each signal, assert returned signal
-- Stats file content: pass temp dir as `_statsDir`, run `runWorkflow()`, read `execution-stats.jsonl`, assert `outcome` field
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Missing let variable in SessionState | Low | Medium | TypeScript compiler catches at build |
-| TDZ with abortRegistry + agent | Low | Low | finalizeSession called only after finally block |
-| evaluateStuckSignals subscriber missing signal kind | Medium | Low | Explicit per-kind if-blocks with comments |
-| Stuck sidecar deletion breaks a test | Very Low | Low | No test asserts sidecar persists on stuck |
-
-## 10. PR Packaging Strategy
-
-Single PR. Branch: `refactor/etienneb/runworkflow-functional-core`.
-Commit: `refactor(engine): extract functional core from runWorkflow() for testability`
-
-## 11. Philosophy Alignment per Slice
-
-| Slice | Principle | Status |
-|---|---|---|
-| 1 (tagToStatsOutcome) | Exhaustiveness everywhere | Satisfied -- assertNever |
-| 2 (buildAgentClient) | Validate at boundaries | Satisfied -- model validated before I/O |
-| 3 (SessionState) | Explicit mutable state | Satisfied -- named interface not hidden closure |
-| 4 (evaluateStuckSignals) | Functional/declarative | Satisfied -- pure decision function |
-| 5 (finalizeSession) | Architectural fix over patch | Satisfied -- consolidates 4 scattered sites |
-| 5 (injectable dirs) | Dependency injection | Satisfied -- injectable for tests |
-| 6 (Tests) | Prefer fakes over mocks | Satisfied -- real temp dirs, stubEnv |
-| All | YAGNI with discipline | Satisfied -- no new files, no speculation |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: []
-
----
----
-
-# Implementation Plan: SessionScope and FileStateTracker
-
-*Generated: 2026-04-28 | Workflow: wr.coding-task | Branch: refactor/etienneb/session-scope*
-
----
-
-## 1. Problem Statement
-
-In `src/daemon/workflow-runner.ts`, `constructTools()` receives a raw `Map<string, ReadFileState>` (from `session.readFileState`) and five other per-session callback/config params as positional arguments. The raw Map is implicit shared state handed to every tool factory. This plan encapsulates it behind a typed interface (`FileStateTracker`) and bundles all per-session tool dependencies into a single `SessionScope` object.
-
-## 2. Acceptance Criteria
-
-1. `src/daemon/session-scope.ts` exists and exports `FileStateTracker` (interface), `DefaultFileStateTracker` (class), `SessionScope` (interface).
-2. `constructTools()` signature changes to `(session, ctx, apiKey, schemas, scope: SessionScope)` -- no longer takes `emitter`, `abortRegistry`, `onAdvance`, `onComplete`, `maxIssueSummaries` as positional params.
-3. `runWorkflow()` constructs a `SessionScope` before calling `constructTools()`.
-4. Tool factory signatures (`makeReadTool`, `makeWriteTool`, `makeEditTool`) are unchanged.
-5. `ReadFileState` type stays in `workflow-runner.ts`.
-6. `npm run build` exits 0.
-7. `npx vitest run` exits 0 -- all 365 tests pass.
-
-## 3. Non-Goals
-
-- Do NOT change `makeReadTool`, `makeWriteTool`, `makeEditTool`, or any other tool factory signatures.
-- Do NOT move `ReadFileState` type out of `workflow-runner.ts`.
-- Do NOT rename `constructTools`.
-- Do NOT change any behavior -- pure interface extraction and DI refactor.
-
-## 4. Philosophy-Driven Constraints
-
-- **Immutability by default**: all `SessionScope` fields are `readonly`.
-- **Explicit DI**: per-session dependencies injected via `SessionScope`, not positional params.
-- **Prefer explicit domain types**: `FileStateTracker` replaces raw `Map<string, ReadFileState>`.
-- **Document why not what**: WHY comments on `toMap()` and `SessionScope` fields, following `TurnEndSubscriberContext` pattern.
-- **YAGNI**: no speculative changes beyond what is specified.
-
-## 5. Invariants
-
-- I1: `DefaultFileStateTracker.toMap()` returns `this._map` (same instance) -- required for read-before-write checks to work correctly.
-- I2: `constructTools()` must not be exported (it was not exported before; it must not become exported).
-- I3: Tool factory signatures unchanged -- tests call them directly with `Map<string, ReadFileState>`.
-- I4: `ReadFileState` stays exported from `workflow-runner.ts`.
-
-## 6. Selected Approach + Rationale
-
-**FileStateTracker interface + DefaultFileStateTracker (with toMap() getter) + SessionScope bundle**
-
-`SessionScope` contains: `fileTracker`, `onAdvance`, `onComplete`, `workrailSessionId`, `emitter`, `sessionId`, `workflowId`, `abortRegistry`, `maxIssueSummaries`.
-
-`constructTools()` signature: `(session, ctx, apiKey, schemas, scope: SessionScope)`.
-
-Inside `constructTools()`: extracts `scope.fileTracker.toMap()` and passes it to tool factories unchanged.
-
-**Runner-up**: Raw Map in SessionScope -- rejected because task explicitly requires `FileStateTracker`.
-
-**Architecture rationale**: Follows `TurnEndSubscriberContext` and `FinalizationContext` patterns exactly. `toMap()` is the only seam and it is contained (constructTools is not exported).
-
-## 7. Vertical Slices
-
-### Slice 1: Create `src/daemon/session-scope.ts`
-
-**File**: `src/daemon/session-scope.ts` (new)
-
-Contents:
-- Import `ReadFileState` from `./workflow-runner.js`
-- Import `DaemonEventEmitter` from `./daemon-events.js`
-- Import `AbortRegistry` from `./workflow-runner.js`
-- `FileStateTracker` interface with `recordRead`, `getReadState`, `hasBeenRead` methods
-- `DefaultFileStateTracker` class implementing `FileStateTracker`:
-  - `private readonly _map = new Map<string, ReadFileState>()`
-  - `recordRead(path, content, isPartialView)`: calls `_map.set()`
-  - `getReadState(path)`: calls `_map.get()`
-  - `hasBeenRead(path)`: calls `_map.has()`
-  - `toMap()`: returns `this._map` (with WHY comment)
-- `SessionScope` interface with all required fields as `readonly`
-
-**Done when**: Build clean. File exists with correct exports.
-
-### Slice 2: Update `constructTools()` in `workflow-runner.ts`
-
-**File**: `src/daemon/workflow-runner.ts`
-
-Changes:
-1. Import `SessionScope` from `./session-scope.js`
-2. Change `constructTools()` signature to `(session, ctx, apiKey, schemas, scope: SessionScope)`
-3. Inside `constructTools()`: extract needed values from `scope.*`
-4. Pass `scope.fileTracker.toMap()` to `makeReadTool`, `makeWriteTool`, `makeEditTool`
-
-**Done when**: Build clean. constructTools() uses scope.
-
-### Slice 3: Update call site in `runWorkflow()`
-
-**File**: `src/daemon/workflow-runner.ts`
-
-Changes:
-1. Import `DefaultFileStateTracker` from `./session-scope.js`
-2. Create `DefaultFileStateTracker` at call site wrapping `session.readFileState`
-3. Construct `scope: SessionScope` with `fileTracker` + other values
-4. Update `constructTools()` call to pass `scope`
-
-Note: Keep `readFileState` on `PreAgentSession` unchanged (initialized in `buildPreAgentSession()`). Just wrap it at the call site.
-
-**Done when**: Build clean. All tests pass.
-
-## 8. Test Design
-
-No new tests required. Verification: `npx vitest run` (365 tests must pass). The existing file-tools tests (`workflow-runner-file-tools.test.ts`) call tool factories directly with Maps -- these must still pass unchanged.
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| toMap() returns different Map than _map | Very Low | High | DefaultFileStateTracker.toMap() returns `this._map` directly |
-| Circular import (session-scope imports from workflow-runner) | Low | Low | Check: workflow-runner imports session-scope (one direction only) |
-
-## 10. PR Packaging Strategy
-
-Single PR. Branch: `refactor/etienneb/session-scope`.
-Commit: `refactor(engine): introduce SessionScope and FileStateTracker for tool layer`
-
-## 11. Philosophy Alignment per Slice
-
-| Slice | Principle | Status |
-|-------|-----------|--------|
-| 1 (session-scope.ts) | Explicit domain types | Satisfied -- FileStateTracker replaces raw Map |
-| 1 (session-scope.ts) | Immutability by default | Satisfied -- readonly SessionScope fields |
-| 1 (session-scope.ts) | Document why not what | Satisfied -- WHY comment on toMap() |
-| 2 (constructTools) | Explicit DI | Satisfied -- scope passed explicitly |
-| 3 (call site) | YAGNI | Satisfied -- readFileState kept on PreAgentSession, wrapped at call site |
-| All | Architectural fix over patch | Satisfied -- makes implicit shared state explicit |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: ["future: update tool factory signatures to take FileStateTracker instead of Map"]
----
----
-
-# Implementation Plan: AgentLoop Stall Detection (Issue #895)
-
-*Generated: 2026-04-28 | Workflow: wr.coding-task | Branch: fix/etienneb/stall-detection-895*
-
----
-
-## 1. Problem Statement
-
-When a tool call hangs (network timeout, file lock, silent deadlock), the `AgentLoop._runLoop()` stops making LLM API calls but holds its queue slot for up to the configured `maxSessionMinutes` (up to 55-65 minutes by default). No event is emitted, no early detection fires. The operator has no visibility that the session is stuck in a tool execution.
-
-## 2. Acceptance Criteria
-
-1. A session where no `client.messages.create()` call starts within `stallTimeoutSeconds` is aborted.
-2. Default `stallTimeoutSeconds` = 120 (2 minutes), overridable via `agentConfig.stallTimeoutSeconds` in triggers.yml.
-3. Result type is `WorkflowRunStuck` with `reason: 'stall'` (new variant).
-4. `DaemonEventEmitter` emits `agent_stuck` event with `reason: 'stall'` on detection.
-5. `AgentLoop` stays decoupled from daemon-specific types (timer injected as `stallTimeoutMs?: number`).
-6. `npx vitest run` passes; new tests cover the stall abort path.
-
-## 3. Non-Goals
-
-- Do NOT add tool-execution level timeout (that's a per-tool concern, not AgentLoop scope).
-- Do NOT change `maxSessionMinutes` semantics (wall-clock global timeout stays as-is).
-- Do NOT modify the WorkRail v2 engine or MCP server.
-- Do NOT add retry policy or escalation logic for stall events.
-- Do NOT add per-tool stall detection (only per-LLM-turn gap is in scope).
-
-## 4. Philosophy-Driven Constraints
-
-- **DI-for-boundaries**: `stallTimeoutMs` injected via `AgentLoopOptions` (not hardcoded in AgentLoop).
-- **Immutability by default**: all new fields are `readonly`.
-- **Exhaustiveness everywhere**: all three discriminated unions extended with `'stall'`.
-- **Errors are data**: `onStallDetected` sets `state.stuckReason = 'stall'`, no throw.
-- **Compose with small pure functions**: `buildAgentCallbacks()` stays pure; `evaluateStuckSignals()` unchanged.
-- **YAGNI**: only `stallTimeoutSeconds` added -- no retry/escalation/stall coordinator hooks.
-
-## 5. Invariants
-
-- I1: `AgentLoop` imports no daemon-specific types.
-- I2: Default stall timeout is 120 seconds (`DEFAULT_STALL_TIMEOUT_SECONDS = 120` in workflow-runner.ts).
-- I3: Timer resets when `onLlmTurnStarted` fires (just before each `client.messages.create()` call).
-- I4: Timer is cleared in `prompt()`'s finally block (prevents post-completion abort).
-- I5: Timer only set if `stallTimeoutMs !== undefined && stallTimeoutMs > 0` (guard against misconfiguration).
-- I6: `onStallDetected` callback wrapped in try/catch (fire-and-forget invariant).
-- I7: `WorkflowRunStuck.reason` union: `'repeated_tool_call' | 'no_progress' | 'stall'`.
-- I8: `SessionState.stuckReason` union: `'repeated_tool_call' | 'no_progress' | 'stall' | null`.
-- I9: `AgentStuckEvent.reason` union: `'repeated_tool_call' | 'no_progress' | 'timeout_imminent' | 'stall'`.
-- I10: Timer guard -- `if (!this._aborted)` in timer callback prevents stall from overwriting a prior abort reason.
-
-## 6. Selected Approach + Rationale
-
-**Candidate A: Timer inside `_runLoop()` + `onStallDetected` callback on `AgentLoopCallbacks`**
-
-Add:
-- `stallTimeoutMs?: number` to `AgentLoopOptions`
-- `onStallDetected?: () => void` to `AgentLoopCallbacks`
-
-In `_runLoop()`: before each `client.messages.create()` call (where `onLlmTurnStarted` already fires), clear any previous stall timer and set a new one. When the timer fires: (1) check `!this._aborted`, (2) call `this.abort()`, (3) call `callbacks?.onStallDetected?.()`. Clear in `prompt()`'s finally.
-
-In `workflow-runner.ts`: `buildAgentCallbacks()` wires `onStallDetected` to set `state.stuckReason = 'stall'` and emit `agent_stuck` with `reason: 'stall'`.
-
-**Runner-up**: Candidate B (timer in `buildAgentCallbacks()` closure) -- rejected because it makes `buildAgentCallbacks()` stateful (violates compose-with-small-pure-functions and immutability).
-
-**Architecture rationale**: Timer ownership at the source (`_runLoop()` where stalls happen), clean DI via existing `AgentLoopCallbacks` channel, no daemon imports in AgentLoop.
-
-## 7. Vertical Slices
-
-### Slice 1: Extend type unions (workflow-runner.ts + daemon-events.ts)
-
-**Files**: `src/daemon/workflow-runner.ts`, `src/daemon/daemon-events.ts`
-
-Changes:
-1. `WorkflowRunStuck.reason`: change `'repeated_tool_call' | 'no_progress'` to `'repeated_tool_call' | 'no_progress' | 'stall'`
-2. `SessionState.stuckReason`: change `'repeated_tool_call' | 'no_progress' | null` to `'repeated_tool_call' | 'no_progress' | 'stall' | null`
-3. `AgentStuckEvent.reason`: change `'repeated_tool_call' | 'no_progress' | 'timeout_imminent'` to `'repeated_tool_call' | 'no_progress' | 'timeout_imminent' | 'stall'`
-4. Add `DEFAULT_STALL_TIMEOUT_SECONDS = 120` constant in workflow-runner.ts alongside `DEFAULT_SESSION_TIMEOUT_MINUTES` and `DEFAULT_MAX_TURNS`
-5. Add `stallTimeoutSeconds?: number` to `WorkflowTrigger.agentConfig`
-
-**Done when**: Build clean. No test regressions.
-
-### Slice 2: AgentLoop timer implementation (agent-loop.ts)
-
-**File**: `src/daemon/agent-loop.ts`
-
-Changes:
-1. Add `stallTimeoutMs?: number` to `AgentLoopOptions` (readonly, optional, documented)
-2. Add `onStallDetected?: () => void` to `AgentLoopCallbacks` (readonly, optional, documented)
-3. Add `private _stallTimerHandle: ReturnType<typeof setTimeout> | undefined = undefined` to `AgentLoop`
-4. In `_runLoop()`, just before `callbacks?.onLlmTurnStarted?.(...)` (line ~377): clear previous timer + set new timer (only if `stallTimeoutMs > 0`)
-5. Timer callback: guard `if (!this._aborted)`, call `this.abort()`, call `try { callbacks?.onStallDetected?.() } catch {}`
-6. In `prompt()`'s finally block: `if (this._stallTimerHandle !== undefined) { clearTimeout(this._stallTimerHandle); this._stallTimerHandle = undefined; }`
-
-**Done when**: Build clean. AgentLoop has stall timer support.
-
-### Slice 3: Wire stall detection in workflow-runner.ts
-
-**Files**: `src/daemon/workflow-runner.ts`
-
-Changes:
-1. Add `stallTimeoutSeconds` threaded from `WorkflowTrigger.agentConfig` through `buildSessionContext()` to return value
-2. In `buildAgentCallbacks()`: add `onStallDetected` to returned callbacks object; handler sets `state.stuckReason = 'stall'`, emits `agent_stuck` with `reason: 'stall'`
-3. In `buildSessionContext()` return type: add `stallTimeoutMs: number | undefined`
-4. In the AgentLoop construction site: pass `stallTimeoutMs` to `AgentLoopOptions`
-
-**Done when**: Build clean. `stallTimeoutMs` flows end-to-end from trigger config to AgentLoop.
-
-### Slice 4: Trigger-store validation
-
-**File**: `src/trigger/trigger-store.ts`
-
-Changes:
-1. Add `stallTimeoutSeconds?: string` to raw agentConfig parsed type
-2. Add `stallTimeoutSeconds` to the `agentConfig` parsing block (follow `stuckAbortPolicy` pattern)
-3. Validate `stallTimeoutSeconds >= 1` (positive integer, same as `maxTurns` validation)
-4. Pass parsed `stallTimeoutSeconds` into `TriggerDefinition.agentConfig`
-
-**Done when**: Build clean. `agentConfig.stallTimeoutSeconds` parseable in triggers.yml.
-
-### Slice 5: Tests
-
-**Files**:
-- `tests/unit/agent-loop.test.ts` -- new describe block for stall detection
-- `tests/unit/workflow-runner-agent-loop.test.ts` -- new test for WorkflowRunStuck reason='stall'
-
-Test cases for `agent-loop.test.ts`:
-1. Stall timer fires and aborts: use FakeAnthropicClient with a hanging promise + vi.useFakeTimers(); advance timer by stallTimeoutMs; verify abort was called
-2. Stall timer resets on each LLM call: 2 LLM calls, timer advances partway between calls, no abort; advance past stallTimeoutMs from 2nd call, abort fires
-3. Stall timer cleared on normal completion: loop completes normally; advance timer by stallTimeoutMs*2; no abort
-4. `onStallDetected` called when stall fires
-5. Prior abort suppresses stall detection (`!this._aborted` guard)
-
-Test cases for `workflow-runner-agent-loop.test.ts`:
-1. Stall abort produces `WorkflowRunStuck` with `reason: 'stall'`
-2. `agent_stuck` event emitted with `reason: 'stall'`
-
-**Done when**: All new tests pass. `npx vitest run` exits 0.
-
-## 8. Test Design
-
-**AgentLoop stall tests** (agent-loop.test.ts):
-- Use `vi.useFakeTimers()` in beforeEach, `vi.useRealTimers()` in afterEach
-- FakeAnthropicClient with a promise that never resolves (hangs tool execution): `messages.create: async () => new Promise(() => {})` for the second call
-- Or: use FakeAnthropicClient with `stallTimeoutMs = 50` (small value), advance timers
-
-Actually simpler: since `_runLoop()` sets the stall timer just before `client.messages.create()`, a short stallTimeoutMs (e.g. 50ms) + `vi.advanceTimersByTime(50)` fires the stall during the first LLM call.
-
-For "reset on each LLM call" test: use a FakeAnthropicClient that resolves after multiple calls; advance timers strategically.
-
-**WorkflowRunStuck 'stall' test** (workflow-runner-agent-loop.test.ts):
-- Extend existing FakeAgentLoop to support a 'stall' script turn type
-- Or: trigger stall by setting `stallTimeoutSeconds: 0.05` (50ms) and using fake timers in runWorkflow integration test
-
-## 9. Risk Register
-
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Stall timer fires after normal completion | Low | Low | Timer cleared in `prompt()` finally block (I4) |
-| `stallTimeoutMs = 0` misconfiguration | Low | High | `stallTimeoutMs > 0` guard in `_runLoop()` (I5); validate in trigger-store.ts |
-| `onStallDetected` throws | Very Low | Low | try/catch in timer callback (I6) |
-| Stall fires when prior abort was active | Very Low | Low | `!this._aborted` guard (I10) |
-| `assertNever` misses new `stuckReason = 'stall'` | None | N/A | TypeScript union extension + compiler catches at build |
-
-## 10. PR Packaging Strategy
-
-Single PR. Branch: `fix/etienneb/stall-detection-895`.
-Commit: `fix(daemon): detect and abort stalled agent loops after stallTimeoutSeconds`
-
-## 11. Philosophy Alignment per Slice
-
-| Slice | Principle | Status |
-|---|---|---|
-| 1 (Type unions) | Exhaustiveness everywhere | Satisfied -- all three unions extended |
-| 1 (Type unions) | Make illegal states unrepresentable | Satisfied -- closed union, not open string |
-| 2 (AgentLoop) | DI-for-boundaries | Satisfied -- stallTimeoutMs injected, not hardcoded |
-| 2 (AgentLoop) | Immutability by default | Satisfied -- all new fields readonly |
-| 2 (AgentLoop) | Errors are data | Satisfied -- onStallDetected sets data, no throw |
-| 3 (workflow-runner) | Compose with small pure functions | Satisfied -- buildAgentCallbacks() stays pure |
-| 3 (workflow-runner) | Document why not what | Satisfied -- WHY comments on timer reset/clear points |
-| 4 (trigger-store) | Validate at boundaries | Satisfied -- stallTimeoutSeconds validated at parse time |
-| 5 (Tests) | Prefer fakes over mocks | Satisfied -- FakeAnthropicClient, vi.useFakeTimers |
-| All | YAGNI | Satisfied -- no retry/escalation, just detect and abort |
-
----
-`unresolvedUnknownCount`: 0
-`planConfidenceBand`: High
-`estimatedPRCount`: 1
-`followUpTickets`: ["#895 follow-up: per-tool execution timeout (separate issue)"]
+| Workflow changes before engine contracts | HIGH | Slice 2 before Slice 8; single PR |
+| discovery_handoff missing validator case | HIGH | Slice 2 explicitly adds it |
+| runId threading blast radius (implement.ts) | MEDIUM | Slice 7 explicitly names implement.ts as co-change |
+| buildContextSummary 'fix' missing filesChanged | HIGH | Fixed in selection table; test asserts presence |
+| Unit tests pass for wrong reasons (coverage problem) | HIGH | Adversarial integration test (AC 21): scripted pipeline where shaping constraint is violated by coding, review must flag it |
+| Type erasure at JSON boundary | MEDIUM | All deserialization paths through concrete Zod schemas |
+| priorArtifacts mutation | LOW | Spread pattern enforced; invariant documented |
+
+## PR Packaging
+
+Single PR. All 9 slices. Gated by all existing tests + new unit + lifecycle integration + contractRef validation test.
+
+## Follow-up Tickets
+
+- buildSystemPrompt() named semantic slots
+- console visualization of PipelineRunContext
+- extensible contract registration
+- coordinator retry logic based on PhaseResult.kind = 'fallback'
+- targetPhase type: confirm 'discovery' is not a valid target (nothing precedes discovery) -- update docstring if so

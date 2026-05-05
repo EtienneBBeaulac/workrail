@@ -1146,7 +1146,8 @@
         ],
         "procedure": [
           "Update `designDocPath` with a final summary containing the selected path, problem framing, landscape takeaways, chosen direction, strongest alternative, why it lost, confidence band, residual risks, and next actions.",
-          "In the final chat output, tell me the selected path, the chosen direction, the key reason it won, and where to find `designDocPath`."
+          "In the final chat output, tell me the selected path, the chosen direction, the key reason it won, and where to find `designDocPath`.",
+          "When writing the final answer, also emit an enriched wr.discovery_handoff artifact in your complete_step call:\n{\n  \"kind\": \"wr.discovery_handoff\",\n  \"version\": 1,\n  \"selectedDirection\": \"<one sentence: the chosen approach>\",\n  \"designDocPath\": \"<path to design doc, or empty string>\",\n  \"confidenceBand\": \"high\" | \"medium\" | \"low\",\n  \"keyInvariants\": [\"<invariant that must hold>\", ...],\n  \"rejectedDirections\": [{\"direction\": \"<approach>\", \"reason\": \"<why rejected>\"}, ...],\n  \"implementationConstraints\": [\"<thing the coding agent MUST NOT violate>\", ...],\n  \"keyCodebaseLocations\": [{\"path\": \"<file path>\", \"relevance\": \"<why relevant>\"}, ...]\n}\nThe implementationConstraints and keyCodebaseLocations fields are especially important -- they orient the coding agent without requiring it to re-run discovery."
         ],
         "verify": [
           "The design doc reads like a coherent human artifact.",

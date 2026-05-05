@@ -27,9 +27,11 @@
  * This resolves the budget conflict without reducing per-phase budgets (rabbit hole #2).
  */
 
+import type { Result } from 'neverthrow';
 import type { CoordinatorDeps } from './pr-review.js';
 import { routeTask, extractPrNumbers } from './routing/route-task.js';
 import type { PipelineMode } from './routing/route-task.js';
+import type { PipelineRunContext, PhaseRecord } from './pipeline-run-context.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TIMEOUT CONSTANTS (hardcoded, never LLM-computed)
@@ -166,6 +168,32 @@ export interface AdaptiveCoordinatorDeps extends CoordinatorDeps {
    * times out after 24 hours if no acknowledgment is received.
    */
   pollOutboxAck(requestId: string, timeoutMs: number): Promise<'acked' | 'timeout'>;
+
+  // ── Living work context ────────────────────────────────────────────────
+
+  /**
+   * Generate a new unique pipeline run ID.
+   * Returns randomUUID() in production; injectable for test determinism.
+   */
+  generateRunId(): string;
+
+  /**
+   * Read the PipelineRunContext for a given run ID.
+   * Returns ok(null) if the context file does not exist (new run or pre-feature session).
+   * Returns err(...) on I/O failure.
+   */
+  readPipelineContext(workspace: string, runId: string): Promise<Result<PipelineRunContext | null, string>>;
+
+  /**
+   * Write a phase record into the PipelineRunContext for a given run ID.
+   * Creates the file if it does not exist; merges the phase record into the phases object.
+   * Uses atomic write (temp-rename) to prevent partial writes.
+   * Returns err(...) on I/O failure.
+   *
+   * WHY union type (not overloads): single function accepting a discriminated union
+   * makes illegal states unrepresentable -- the phase name and record type are coupled.
+   */
+  writePhaseRecord(workspace: string, runId: string, entry: PhaseRecord): Promise<Result<void, string>>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

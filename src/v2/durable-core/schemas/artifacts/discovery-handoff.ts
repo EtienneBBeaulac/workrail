@@ -70,7 +70,34 @@ export const DiscoveryHandoffArtifactV1Schema = z
      * Array of one-line invariant statements.
      * Used in renderHandoff() to build the context summary for shaping.
      */
-    keyInvariants: z.array(z.string().min(1)),
+    keyInvariants: z.array(z.string().min(1).max(200)).max(12),
+
+    /**
+     * Directions considered but rejected during discovery, with reasons.
+     * Prevents shaping agents from re-exploring already-ruled-out approaches.
+     * Optional for backward compatibility with sessions that predate this field.
+     */
+    rejectedDirections: z.array(z.object({
+      direction: z.string().min(1).max(200),
+      reason: z.string().min(1).max(300),
+    })).max(5).optional(),
+
+    /**
+     * Constraints the coding agent must respect during implementation.
+     * Things the implementation MUST NOT do or MUST preserve.
+     * Optional for backward compatibility.
+     */
+    implementationConstraints: z.array(z.string().min(1).max(200)).max(8).optional(),
+
+    /**
+     * Key codebase locations relevant to this feature.
+     * Orients the coding agent without requiring it to re-run discovery.
+     * Optional for backward compatibility.
+     */
+    keyCodebaseLocations: z.array(z.object({
+      path: z.string().min(1).max(300),
+      relevance: z.string().min(1).max(150),
+    })).max(10).optional(),
   })
   .strict();
 
