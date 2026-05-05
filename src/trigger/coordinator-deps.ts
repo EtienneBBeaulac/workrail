@@ -798,7 +798,12 @@ export function createCoordinatorDeps(
         const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, phases: {} };
         await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
         await fs.promises.rename(tmpPath, filePath);
-        // Write recovery pointer
+        // Write recovery pointer AFTER the context file.
+        // WHY context-first: if a crash occurs between the two renames, the context file exists
+        // but the pointer does not. readActiveRunId returns null (ENOENT on pointer) so the next
+        // run starts fresh -- the orphaned context file is harmless. The reverse ordering
+        // (pointer-first) would be worse: the pointer would name a runId whose context file
+        // doesn't exist yet, causing writePhaseRecord to fail on the next run.
         const pointerPath = path.join(runsDir, 'active-run.json');
         const pointerTmp = pointerPath + '.tmp';
         await fs.promises.writeFile(pointerTmp, JSON.stringify({ runId, workspace }, null, 2) + '\n', 'utf-8');

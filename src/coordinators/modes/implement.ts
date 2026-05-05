@@ -93,6 +93,11 @@ export async function runImplementPipeline(
   const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
+  // WHY no readActiveRunId check: IMPLEMENT mode always has a pre-existing pitch file as its
+  // recovery anchor. If the coordinator crashes mid-IMPLEMENT, the operator re-dispatches with
+  // the same pitchPath and a fresh runId -- the pitch file is the idempotency key, not a prior
+  // run's artifacts. Unlike FULL mode (which generates discovery/shaping from scratch and cannot
+  // cheaply reproduce them), IMPLEMENT starts from a durable human-authored artifact.
   const runId = deps.generateRunId();
   const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
   if (initResult.isErr()) {
