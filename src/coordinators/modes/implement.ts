@@ -94,7 +94,11 @@ export async function runImplementPipeline(
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
   const runId = deps.generateRunId();
-  void deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
+  const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
+  if (initResult.isErr()) {
+    deps.stderr(`[implement] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+  }
 
   let outcome: PipelineOutcome;
 
@@ -234,10 +238,14 @@ async function runImplementCore(
   const codingArtifact = extractPhaseArtifact(codingAgentResult.artifacts, CodingHandoffArtifactV1Schema, isCodingHandoffArtifact);
   const codingPhaseResult = buildPhaseResult(codingArtifact, codingAgentResult.recapMarkdown);
   const updatedPriorArtifacts = codingArtifact !== null ? [...priorArtifacts, codingArtifact] : priorArtifacts;
-  void deps.writePhaseRecord(opts.workspace, runId, {
+  const codingWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
     phase: 'coding',
     record: { completedAt: deps.nowIso(), sessionHandle: codingHandle, result: codingPhaseResult },
   });
+  if (codingWriteResult.isErr()) {
+    deps.stderr(`[implement] FATAL: failed to persist coding phase record: ${codingWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'coding', reason: `context persistence failed: ${codingWriteResult.error}` } };
+  }
 
   // ── Stage 3: Poll for PR ──────────────────────────────────────────────
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;

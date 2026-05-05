@@ -198,8 +198,14 @@ export async function runFullPipeline(
     : `[full-pipeline] Starting new run ${runId}`);
 
   // Initialize the context file for new runs only -- crash-resumed runs already have one.
+  // Awaited: if this fails we escalate immediately rather than running the pipeline
+  // without durability. An operator can fix the storage issue and resume.
   if (!priorRunId) {
-    void deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL');
+    const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL');
+    if (initResult.isErr()) {
+      deps.stderr(`[full-pipeline] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
+      return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+    }
   }
 
   // ── Pitch archival setup ──────────────────────────────────────────────
@@ -313,11 +319,15 @@ async function runFullPipelineCore(
   const discoveryPhaseResult = buildPhaseResult(discoveryArtifact, discoveryAgentResult.recapMarkdown);
   priorArtifacts = discoveryArtifact !== null ? [...priorArtifacts, discoveryArtifact] : priorArtifacts;
 
-  // Persist discovery phase record
-  void deps.writePhaseRecord(opts.workspace, runId, {
+  // Persist discovery phase record -- escalate if write fails (no point starting shaping blind)
+  const discoveryWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
     phase: 'discovery',
     record: { completedAt: deps.nowIso(), sessionHandle: discoveryHandle, result: discoveryPhaseResult },
   });
+  if (discoveryWriteResult.isErr()) {
+    deps.stderr(`[full-pipeline] FATAL: failed to persist discovery phase record: ${discoveryWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'discovery', reason: `context persistence failed: ${discoveryWriteResult.error}` } };
+  }
 
   deps.stderr(`[full-pipeline] Discovery phase result: ${discoveryPhaseResult.kind}`);
 
@@ -388,10 +398,14 @@ async function runFullPipelineCore(
   );
   const shapingPhaseResult = buildPhaseResult(shapingArtifact, shapingAgentResult.recapMarkdown);
   priorArtifacts = shapingArtifact !== null ? [...priorArtifacts, shapingArtifact] : priorArtifacts;
-  void deps.writePhaseRecord(opts.workspace, runId, {
+  const shapingWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
     phase: 'shaping',
     record: { completedAt: deps.nowIso(), sessionHandle: shapingHandle, result: shapingPhaseResult },
   });
+  if (shapingWriteResult.isErr()) {
+    deps.stderr(`[full-pipeline] FATAL: failed to persist shaping phase record: ${shapingWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'shaping', reason: `context persistence failed: ${shapingWriteResult.error}` } };
+  }
   deps.stderr(`[full-pipeline] Shaping phase result: ${shapingPhaseResult.kind}`);
 
   // ── Stage 4: UX Gate (Large complexity + touchesUI) ──────────────────
@@ -550,10 +564,14 @@ async function runFullPipelineCore(
   );
   const codingPhaseResult = buildPhaseResult(codingArtifact, codingAgentResult.recapMarkdown);
   priorArtifacts = codingArtifact !== null ? [...priorArtifacts, codingArtifact] : priorArtifacts;
-  void deps.writePhaseRecord(opts.workspace, runId, {
+  const codingWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
     phase: 'coding',
     record: { completedAt: deps.nowIso(), sessionHandle: codingHandle, result: codingPhaseResult },
   });
+  if (codingWriteResult.isErr()) {
+    deps.stderr(`[full-pipeline] FATAL: failed to persist coding phase record: ${codingWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'coding', reason: `context persistence failed: ${codingWriteResult.error}` } };
+  }
   deps.stderr(`[full-pipeline] Coding phase result: ${codingPhaseResult.kind}`);
 
   // ── Stage 6: Poll for PR ──────────────────────────────────────────────
