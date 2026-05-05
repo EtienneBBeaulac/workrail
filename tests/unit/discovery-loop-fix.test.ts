@@ -142,7 +142,7 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
         }
         return { results: [{ handle, outcome: 'failed', status: 'failed', durationMs: 500 }], allSucceeded: false };
       }),
-      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready for next phase.', artifacts: [] }),
       listOpenPRs: vi.fn().mockResolvedValue([]),
       mergePR: vi.fn().mockResolvedValue(ok(undefined)),
       writeFile: vi.fn().mockResolvedValue(undefined),
@@ -166,6 +166,7 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
       readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
     readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
       createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
+    markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     };
 

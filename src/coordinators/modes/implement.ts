@@ -104,6 +104,9 @@ export async function runImplementPipeline(
 
   try {
     outcome = await runImplementCore(deps, opts, pitchPath, coordinatorStartMs, runId);
+    void deps.markPipelineRunComplete(opts.workspace, runId).then(r => {
+      if (r.isErr()) deps.stderr(`[WARN implement] markPipelineRunComplete failed: ${r.error}`);
+    });
   } finally {
     // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
     // WHY finally: if outcome is escalated (coding session failed, review failed,

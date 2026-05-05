@@ -148,6 +148,12 @@ export interface PipelineRunContext {
   readonly startedAt: string;
   readonly pipelineMode: 'FULL' | 'IMPLEMENT' | 'REVIEW_ONLY' | 'QUICK_REVIEW';
   /**
+   * Run status. 'in_progress' while running, 'completed' after successful finish.
+   * WHY: active-run.json pointer must not be reused by the next fresh run.
+   * readActiveRunId checks this field and ignores completed runs.
+   */
+  readonly status?: 'in_progress' | 'completed';
+  /**
    * DELIBERATE SCOPE CONSTRAINT: flat linear-pipeline object.
    * Epic-mode extends this by replacing phases with tasks: { [taskId]: TaskRecord }.
    * Do not add inline logic that assumes exactly one of each phase type.
@@ -252,6 +258,7 @@ export const PipelineRunContextSchema = z.object({
   workspace: z.string().min(1),
   startedAt: z.string(),
   pipelineMode: z.enum(['FULL', 'IMPLEMENT', 'REVIEW_ONLY', 'QUICK_REVIEW']),
+  status: z.enum(['in_progress', 'completed']).optional(),
   phases: z.object({
     discovery: DiscoveryPhaseRecordSchema.optional(),
     shaping: ShapingPhaseRecordSchema.optional(),

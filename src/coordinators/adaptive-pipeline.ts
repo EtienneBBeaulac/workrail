@@ -205,6 +205,13 @@ export interface AdaptiveCoordinatorDeps extends CoordinatorDeps {
   ): Promise<Result<void, string>>;
 
   /**
+   * Mark a pipeline run as completed so the active-run.json pointer is not reused by the next fresh run.
+   * Called after a successful pipeline outcome (merged or clean escalation -- not on error/crash).
+   * Updates the context file's status field to 'completed'. Does not delete the file (operator inspectability).
+   */
+  markPipelineRunComplete(workspace: string, runId: string): Promise<Result<void, string>>;
+
+  /**
    * Write a phase record into the PipelineRunContext for a given run ID.
    * Merges the phase record into the existing phases object.
    * Uses atomic write (temp-rename) to prevent partial writes.

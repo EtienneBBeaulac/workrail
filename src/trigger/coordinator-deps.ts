@@ -730,14 +730,46 @@ export function createCoordinatorDeps(
       try {
         const raw = await fs.promises.readFile(pointerPath, 'utf-8');
         const parsed = JSON.parse(raw) as unknown;
-        if (typeof parsed === 'object' && parsed !== null && typeof (parsed as Record<string, unknown>)['runId'] === 'string') {
-          return ok((parsed as Record<string, unknown>)['runId'] as string);
-        }
-        return ok(null);
+        if (typeof parsed !== 'object' || parsed === null) return ok(null);
+        const p = parsed as Record<string, unknown>;
+        if (typeof p['runId'] !== 'string') return ok(null);
+        const runId = p['runId'] as string;
+
+        // Check if the run is already completed -- if so, don't resume it.
+        // This prevents a fresh run from inheriting prior-task artifacts.
+        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+        const contextPath = path.join(runsDir, `${runId}-context.json`);
+        try {
+          const ctxRaw = await fs.promises.readFile(contextPath, 'utf-8');
+          const ctx = JSON.parse(ctxRaw) as unknown;
+          if (typeof ctx === 'object' && ctx !== null && (ctx as Record<string, unknown>)['status'] === 'completed') {
+            return ok(null); // prior run completed -- start fresh
+          }
+        } catch { /* context file missing or unreadable -- treat as in-progress */ }
+
+        return ok(runId);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code === 'ENOENT') return ok(null);
         const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[WARN coordinator] readActiveRunId failed -- crash recovery skipped: ${msg}\n`);
         return err(`readActiveRunId failed: ${msg}`);
+      }
+    },
+
+    markPipelineRunComplete: async (workspace: string, runId: string) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      const filePath = path.join(runsDir, `${runId}-context.json`);
+      const tmpPath = filePath + '.tmp';
+      try {
+        const raw = await fs.promises.readFile(filePath, 'utf-8');
+        const existing = JSON.parse(raw) as Record<string, unknown>;
+        const updated = { ...existing, status: 'completed' };
+        await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(tmpPath, filePath);
+        return ok(undefined);
+      } catch (e) {
+        try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+        return err(`markPipelineRunComplete failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     },
 

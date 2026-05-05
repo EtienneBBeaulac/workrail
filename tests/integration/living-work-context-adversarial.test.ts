@@ -114,6 +114,7 @@ function makeReviewDeps(): {
     readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
     readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
     createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
+    markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
   };
 

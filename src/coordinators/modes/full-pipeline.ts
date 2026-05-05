@@ -220,6 +220,10 @@ export async function runFullPipeline(
 
   try {
     outcome = await runFullPipelineCore(deps, opts, coordinatorStartMs, runId, initialPriorArtifacts);
+    // Mark complete so the next fresh run doesn't inherit this run's artifacts via active-run.json
+    void deps.markPipelineRunComplete(opts.workspace, runId).then(r => {
+      if (r.isErr()) deps.stderr(`[WARN full-pipeline] markPipelineRunComplete failed: ${r.error}`);
+    });
   } finally {
     // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
     // WHY finally: if outcome is escalated (discovery failed, shaping failed,
