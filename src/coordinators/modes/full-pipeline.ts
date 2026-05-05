@@ -38,7 +38,14 @@ import {
   isDiscoveryHandoffArtifact,
   DiscoveryHandoffArtifactV1Schema,
   type DiscoveryHandoffArtifactV1,
-} from '../../v2/durable-core/schemas/artifacts/discovery-handoff.js';
+  isShapingHandoffArtifact,
+  ShapingHandoffArtifactV1Schema,
+  isCodingHandoffArtifact,
+  CodingHandoffArtifactV1Schema,
+} from '../../v2/durable-core/schemas/artifacts/index.js';
+import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
+import { buildContextSummary, extractPhaseArtifact } from '../context-assembly.js';
+import { buildPhaseResult } from '../pipeline-run-context.js';
 import { runReviewAndVerdictCycle } from './implement-shared.js';
 import { touchesUI } from './implement.js';
 
@@ -79,6 +86,20 @@ const MIN_NOTES_LENGTH_FOR_FALLBACK = 50;
  * No other module renders discovery handoff artifacts. Per YAGNI, extract
  * to a shared utility only when a second consumer exists.
  */
+/**
+ * Extract prior phase handoff artifacts from a recovered PipelineRunContext.
+ * Used for crash recovery: restores the accumulated artifact array without re-running phases.
+ */
+function extractPriorArtifactsFromContext(
+  ctx: import('../pipeline-run-context.js').PipelineRunContext,
+): PhaseHandoffArtifact[] {
+  const artifacts: PhaseHandoffArtifact[] = [];
+  if (ctx.phases.discovery?.result.kind === 'full') artifacts.push(ctx.phases.discovery.result.artifact);
+  if (ctx.phases.shaping?.result.kind === 'full') artifacts.push(ctx.phases.shaping.result.artifact);
+  if (ctx.phases.coding?.result.kind === 'full') artifacts.push(ctx.phases.coding.result.artifact);
+  return artifacts;
+}
+
 export function renderHandoff(artifact: DiscoveryHandoffArtifactV1): string {
   const lines: string[] = [
     `## Discovery Handoff`,
@@ -157,6 +178,36 @@ export async function runFullPipeline(
 ): Promise<PipelineOutcome> {
   deps.stderr(`[full-pipeline] Starting FULL pipeline for workspace=${opts.workspace}`);
 
+  // Crash recovery: check for an in-progress run before generating a new ID.
+  // writePhaseRecord() writes a recovery pointer ({workspace}/.workrail/pipeline-runs/active-run.json)
+  // on first write; we read it here to resume an interrupted run instead of starting fresh.
+  const activeRunResult = await deps.readActiveRunId(opts.workspace);
+  const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
+  const runId = priorRunId ?? deps.generateRunId();
+
+  let initialPriorArtifacts: readonly PhaseHandoffArtifact[] = [];
+  if (priorRunId) {
+    const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
+    if (existingCtx.isOk() && existingCtx.value !== null) {
+      initialPriorArtifacts = extractPriorArtifactsFromContext(existingCtx.value);
+    }
+  }
+
+  deps.stderr(priorRunId
+    ? `[full-pipeline] Resuming prior run ${priorRunId} with ${initialPriorArtifacts.length} artifact(s)`
+    : `[full-pipeline] Starting new run ${runId}`);
+
+  // Initialize the context file for new runs only -- crash-resumed runs already have one.
+  // Awaited: if this fails we escalate immediately rather than running the pipeline
+  // without durability. An operator can fix the storage issue and resume.
+  if (!priorRunId) {
+    const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL');
+    if (initResult.isErr()) {
+      deps.stderr(`[full-pipeline] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
+      return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+    }
+  }
+
   // ── Pitch archival setup ──────────────────────────────────────────────
   // Build the archive path now so it's available in the finally block.
   // The shaping session creates current-pitch.md; we archive it on success or failure.
@@ -168,7 +219,14 @@ export async function runFullPipeline(
   let outcome: PipelineOutcome;
 
   try {
-    outcome = await runFullPipelineCore(deps, opts, coordinatorStartMs);
+    outcome = await runFullPipelineCore(deps, opts, coordinatorStartMs, runId, initialPriorArtifacts);
+    // Mark complete so the next scan doesn't resume this run for a different goal.
+    // Awaited so a failure is visible before the finally block runs, but does NOT
+    // override the outcome -- the pipeline succeeded regardless of marking.
+    const markResult = await deps.markPipelineRunComplete(opts.workspace, runId);
+    if (markResult.isErr()) {
+      deps.stderr(`[WARN full-pipeline] markPipelineRunComplete failed -- next run may resume this one: ${markResult.error}`);
+    }
   } finally {
     // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
     // WHY finally: if outcome is escalated (discovery failed, shaping failed,
@@ -195,7 +253,12 @@ async function runFullPipelineCore(
   deps: AdaptiveCoordinatorDeps,
   opts: AdaptivePipelineOpts,
   coordinatorStartMs: number,
+  runId: string,
+  initialPriorArtifacts: readonly PhaseHandoffArtifact[],
 ): Promise<PipelineOutcome> {
+  // priorArtifacts accumulates phase handoffs as the pipeline progresses.
+  // WHY spread (not push): immutability by default.
+  let priorArtifacts: readonly PhaseHandoffArtifact[] = initialPriorArtifacts;
 
   // ── Stage 1: Discovery session ────────────────────────────────────────
   const discoveryCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'discovery');
@@ -243,9 +306,6 @@ async function runFullPipelineCore(
   deps.stderr(`[full-pipeline] Discovery session completed`);
 
   // ── Stage 2: Context bridge ───────────────────────────────────────────
-  // Read discovery handoff artifact and build shaping context.
-  // (Pitch invariant 12: try artifact first; fallback to lastStepNotes if length > 50)
-
   let discoveryAgentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
   try {
     discoveryAgentResult = await deps.getAgentResult(discoveryHandle);
@@ -254,38 +314,50 @@ async function runFullPipelineCore(
     deps.stderr(`[coordinator] getAgentResult failed: ${msg}`);
     return {
       kind: 'escalated',
-      escalationReason: { phase: 'review', reason: `getAgentResult threw: ${msg}` },
+      escalationReason: { phase: 'discovery', reason: `getAgentResult threw: ${msg}` },
     };
   }
-  const handoffArtifact = readDiscoveryHandoffArtifact(
+
+  const discoveryArtifact = extractPhaseArtifact(
     discoveryAgentResult.artifacts,
-    discoveryHandle,
-    deps.stderr,
+    DiscoveryHandoffArtifactV1Schema,
+    isDiscoveryHandoffArtifact,
   );
+  const discoveryPhaseResult = buildPhaseResult(discoveryArtifact, discoveryAgentResult.recapMarkdown);
+  priorArtifacts = discoveryArtifact !== null ? [...priorArtifacts, discoveryArtifact] : priorArtifacts;
 
-  let shapingContext: Readonly<Record<string, unknown>>;
-
-  if (handoffArtifact !== null) {
-    // Primary path: inject structured discovery handoff context into shaping
-    deps.stderr(`[full-pipeline] Discovery handoff artifact found -- injecting structured context`);
-    shapingContext = {
-      selectedDirection: handoffArtifact.selectedDirection,
-      designDocPath: handoffArtifact.designDocPath,
-      assembledContextSummary: renderHandoff(handoffArtifact),
-    };
-  } else {
-    // Fallback path: use raw step notes as context summary (if long enough)
-    const notes = discoveryAgentResult.recapMarkdown;
-    if (notes !== null && notes.trim().length > MIN_NOTES_LENGTH_FOR_FALLBACK) {
-      deps.stderr(`[full-pipeline] No handoff artifact -- using lastStepNotes as context (length=${notes.trim().length})`);
-      shapingContext = { assembledContextSummary: notes.trim() };
-    } else {
-      // Notes too short or null -- proceed without assembledContextSummary
-      const reason = notes === null ? 'null' : `length=${notes.trim().length} <= ${MIN_NOTES_LENGTH_FOR_FALLBACK}`;
-      deps.stderr(`[full-pipeline] No handoff artifact and notes too short (${reason}) -- proceeding without context`);
-      shapingContext = {};
-    }
+  // Persist discovery phase record -- escalate if write fails (no point starting shaping blind)
+  const discoveryWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
+    phase: 'discovery',
+    record: { completedAt: deps.nowIso(), sessionHandle: discoveryHandle, result: discoveryPhaseResult },
+  });
+  if (discoveryWriteResult.isErr()) {
+    deps.stderr(`[full-pipeline] FATAL: failed to persist discovery phase record: ${discoveryWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'discovery', reason: `context persistence failed: ${discoveryWriteResult.error}` } };
   }
+
+  deps.stderr(`[full-pipeline] Discovery phase result: ${discoveryPhaseResult.kind}`);
+
+  // Route on phase quality -- control flow from data state
+  if (discoveryPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'discovery',
+        reason: 'discovery session produced no usable output (no artifact and no meaningful notes). Starting shaping blind would produce low-quality work. Fix the discovery session and resume.',
+      },
+    };
+  }
+
+  // Build context for shaping using accumulated artifacts
+  const shapingContextSummary = buildContextSummary(priorArtifacts, 'shaping');
+  // For partial completion, surface the quality gap to the shaping agent
+  const partialWarning = discoveryPhaseResult.kind === 'partial'
+    ? '\n\n**Note:** Discovery phase produced partial output only (no structured artifact). Context above is from session notes and may be incomplete.'
+    : '';
+  const shapingContext: Readonly<Record<string, unknown>> = (shapingContextSummary || partialWarning)
+    ? { assembledContextSummary: (shapingContextSummary + partialWarning).trim() }
+    : {};
 
   // ── Stage 3: Shaping session ──────────────────────────────────────────
   const shapingCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'shaping');
@@ -331,6 +403,43 @@ async function runFullPipelineCore(
   }
 
   deps.stderr(`[full-pipeline] Shaping session completed`);
+
+  // Read shaping artifact + persist phase record + update priorArtifacts
+  let shapingAgentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
+  try {
+    shapingAgentResult = await deps.getAgentResult(shapingHandle);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] getAgentResult (shaping) failed: ${msg}`);
+    shapingAgentResult = { recapMarkdown: null, artifacts: [] };
+  }
+  const shapingArtifact = extractPhaseArtifact(
+    shapingAgentResult.artifacts,
+    ShapingHandoffArtifactV1Schema,
+    isShapingHandoffArtifact,
+  );
+  const shapingPhaseResult = buildPhaseResult(shapingArtifact, shapingAgentResult.recapMarkdown);
+  priorArtifacts = shapingArtifact !== null ? [...priorArtifacts, shapingArtifact] : priorArtifacts;
+  const shapingWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
+    phase: 'shaping',
+    record: { completedAt: deps.nowIso(), sessionHandle: shapingHandle, result: shapingPhaseResult },
+  });
+  if (shapingWriteResult.isErr()) {
+    deps.stderr(`[full-pipeline] FATAL: failed to persist shaping phase record: ${shapingWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'shaping', reason: `context persistence failed: ${shapingWriteResult.error}` } };
+  }
+  deps.stderr(`[full-pipeline] Shaping phase result: ${shapingPhaseResult.kind}`);
+
+  // Route on phase quality
+  if (shapingPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'shaping',
+        reason: 'shaping session produced no usable output (no artifact and no meaningful notes). Starting coding blind would produce low-quality work. Fix the shaping session and resume.',
+      },
+    };
+  }
 
   // ── Stage 4: UX Gate (Large complexity + touchesUI) ──────────────────
   // In FULL mode, complexity is considered Large because there is no pre-existing pitch.
@@ -429,14 +538,22 @@ async function runFullPipelineCore(
 
   deps.stderr(`[full-pipeline] Spawning wr.coding-task`);
 
+  const codingContextSummary = buildContextSummary(priorArtifacts, 'coding');
+  const shapingPartialWarning = shapingPhaseResult.kind === 'partial'
+    ? '\n\n**Note:** Shaping phase produced partial output only (no structured artifact). Context above is from session notes and may be incomplete.'
+    : '';
+  const discoveryPartialWarning = discoveryPhaseResult.kind === 'partial'
+    ? '\n\n**Note:** Discovery phase produced partial output only (no structured artifact). Some upstream context may be missing.'
+    : '';
+  const codingWarnings = discoveryPartialWarning + shapingPartialWarning;
+  const codingFullContext = (codingContextSummary + codingWarnings).trim();
   const codingSpawnResult = await deps.spawnSession(
     'wr.coding-task',
     opts.goal,
     opts.workspace,
     {
-      // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13)
-      // The shaping session should have created current-pitch.md
       pitchPath: opts.workspace + '/.workrail/current-pitch.md',
+      ...(codingFullContext ? { assembledContextSummary: codingFullContext } : {}),
     },
     { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
   );
@@ -472,6 +589,44 @@ async function runFullPipelineCore(
 
   deps.stderr(`[full-pipeline] Coding session completed`);
 
+  // Read coding artifact + persist phase record + update priorArtifacts
+  let codingAgentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
+  try {
+    codingAgentResult = await deps.getAgentResult(codingHandle);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    deps.stderr(`[coordinator] getAgentResult (coding) failed: ${msg}`);
+    codingAgentResult = { recapMarkdown: null, artifacts: [] };
+  }
+  const codingArtifact = extractPhaseArtifact(
+    codingAgentResult.artifacts,
+    CodingHandoffArtifactV1Schema,
+    isCodingHandoffArtifact,
+  );
+  const codingPhaseResult = buildPhaseResult(codingArtifact, codingAgentResult.recapMarkdown);
+  priorArtifacts = codingArtifact !== null ? [...priorArtifacts, codingArtifact] : priorArtifacts;
+  const codingWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
+    phase: 'coding',
+    record: { completedAt: deps.nowIso(), sessionHandle: codingHandle, result: codingPhaseResult },
+  });
+  if (codingWriteResult.isErr()) {
+    deps.stderr(`[full-pipeline] FATAL: failed to persist coding phase record: ${codingWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'coding', reason: `context persistence failed: ${codingWriteResult.error}` } };
+  }
+  deps.stderr(`[full-pipeline] Coding phase result: ${codingPhaseResult.kind}`);
+
+  // Route on phase quality -- a fallback coding phase means the review agent
+  // would have no decisions/limitations context, making review nearly blind.
+  if (codingPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'coding',
+        reason: 'coding session produced no usable output (no artifact and no meaningful notes). Starting review blind would miss design-level issues. Fix the coding session and resume.',
+      },
+    };
+  }
+
   // ── Stage 6: Poll for PR ──────────────────────────────────────────────
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
   deps.stderr(`[full-pipeline] Polling for PR on branch pattern: ${branchPattern}`);
@@ -500,5 +655,5 @@ async function runFullPipelineCore(
   deps.stderr(`[full-pipeline] PR detected: ${prUrl}`);
 
   // ── Stage 7: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0);
+  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, priorArtifacts);
 }

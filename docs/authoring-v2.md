@@ -434,6 +434,18 @@ WorkRail v2 provides **built-in** building blocks that workflows (including exte
 - **Features**: deterministic, closed-set “middleware” applied by WorkRail (e.g., tier-aware instructions, formatting, durable recap guidance).
 - **Contract packs**: server-side definitions for allowed artifact kinds and small examples (no schema authoring required by workflow authors).
 
+**Available contract refs** (use in `outputContract: { contractRef: "..." }`):
+
+| contractRef | Artifact kind | Emitted by |
+|---|---|---|
+| `wr.contracts.loop_control` | `wr.loop_control` | Loop body exit steps |
+| `wr.contracts.coordinator_signal` | `wr.coordinator_signal` | Coordinator signal steps |
+| `wr.contracts.review_verdict` | `wr.review_verdict` | Review workflow final step |
+| `wr.contracts.discovery_handoff` | `wr.discovery_handoff` | Discovery workflow handoff step |
+| `wr.contracts.shaping_handoff` | `wr.shaping_handoff` | Shaping workflow finalize step |
+| `wr.contracts.coding_handoff` | `wr.coding_handoff` | Coding workflow retrospective step |
+| `wr.contracts.assessment` | `wr.assessment` | Assessment gate steps |
+
 External workflows can reference these builtins, but cannot define arbitrary new plugin code.
 
 ### Where injections happen: templates as anchors

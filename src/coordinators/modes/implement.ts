@@ -25,6 +25,7 @@
  * - COORDINATOR_SPAWN_CUTOFF_MS is checked before every spawn via checkSpawnCutoff().
  */
 
+import { ok as okResult } from 'neverthrow';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, PipelineOutcome } from '../adaptive-pipeline.js';
 import {
   CODING_TIMEOUT_MS,
@@ -32,6 +33,10 @@ import {
   checkSpawnCutoff,
 } from '../adaptive-pipeline.js';
 import { runReviewAndVerdictCycle, MAX_FIX_ITERATIONS } from './implement-shared.js';
+import { extractPhaseArtifact, buildContextSummary } from '../context-assembly.js';
+import { buildPhaseResult } from '../pipeline-run-context.js';
+import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
+import { isCodingHandoffArtifact, CodingHandoffArtifactV1Schema } from '../../v2/durable-core/schemas/artifacts/index.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -89,10 +94,26 @@ export async function runImplementPipeline(
   const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
+  const activeRunResult = await deps.readActiveRunId(opts.workspace);
+  const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
+  const runId = priorRunId ?? deps.generateRunId();
+
+  const initResult = priorRunId
+    ? okResult(undefined)  // existing context file already initialized on prior run
+    : await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
+  if (initResult.isErr()) {
+    deps.stderr(`[implement] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+  }
+
   let outcome: PipelineOutcome;
 
   try {
-    outcome = await runImplementCore(deps, opts, pitchPath, coordinatorStartMs);
+    outcome = await runImplementCore(deps, opts, pitchPath, coordinatorStartMs, runId);
+    const markResult = await deps.markPipelineRunComplete(opts.workspace, runId);
+    if (markResult.isErr()) {
+      deps.stderr(`[WARN implement] markPipelineRunComplete failed -- next run may resume this one: ${markResult.error}`);
+    }
   } finally {
     // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
     // WHY finally: if outcome is escalated (coding session failed, review failed,
@@ -120,7 +141,11 @@ async function runImplementCore(
   opts: AdaptivePipelineOpts,
   pitchPath: string,
   coordinatorStartMs: number,
+  runId: string,
 ): Promise<PipelineOutcome> {
+  // IMPLEMENT mode starts with the pitch already shaped -- no prior phase artifacts to restore.
+  // priorArtifacts starts empty; coding handoff will be accumulated below.
+  const priorArtifacts: readonly PhaseHandoffArtifact[] = [];
 
   // ── Stage 1: UX Gate ─────────────────────────────────────────────────
   if (touchesUI(opts.goal)) {
@@ -213,6 +238,36 @@ async function runImplementCore(
 
   deps.stderr(`[implement] Coding session completed (${Math.round((codingResult.durationMs ?? 0) / 1000)}s)`);
 
+  // Read coding artifact + write phase record
+  let codingAgentResult: Awaited<ReturnType<typeof deps.getAgentResult>>;
+  try {
+    codingAgentResult = await deps.getAgentResult(codingHandle);
+  } catch {
+    codingAgentResult = { recapMarkdown: null, artifacts: [] };
+  }
+  const codingArtifact = extractPhaseArtifact(codingAgentResult.artifacts, CodingHandoffArtifactV1Schema, isCodingHandoffArtifact);
+  const codingPhaseResult = buildPhaseResult(codingArtifact, codingAgentResult.recapMarkdown);
+  const updatedPriorArtifacts = codingArtifact !== null ? [...priorArtifacts, codingArtifact] : priorArtifacts;
+  const codingWriteResult = await deps.writePhaseRecord(opts.workspace, runId, {
+    phase: 'coding',
+    record: { completedAt: deps.nowIso(), sessionHandle: codingHandle, result: codingPhaseResult },
+  });
+  if (codingWriteResult.isErr()) {
+    deps.stderr(`[implement] FATAL: failed to persist coding phase record: ${codingWriteResult.error}`);
+    return { kind: 'escalated', escalationReason: { phase: 'coding', reason: `context persistence failed: ${codingWriteResult.error}` } };
+  }
+
+  // Route on phase quality -- review agent needs coding decisions to be useful
+  if (codingPhaseResult.kind === 'fallback') {
+    return {
+      kind: 'escalated',
+      escalationReason: {
+        phase: 'coding',
+        reason: 'coding session produced no usable output (no artifact and no meaningful notes). Starting review blind would miss design-level issues. Fix the coding session and resume.',
+      },
+    };
+  }
+
   // ── Stage 3: Poll for PR ──────────────────────────────────────────────
   const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
   deps.stderr(`[implement] Polling for PR on branch pattern: ${branchPattern}`);
@@ -241,5 +296,5 @@ async function runImplementCore(
   deps.stderr(`[implement] PR detected: ${prUrl}`);
 
   // ── Stage 4: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0);
+  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts);
 }

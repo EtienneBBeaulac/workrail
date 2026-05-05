@@ -13,6 +13,15 @@ import {
   REVIEW_VERDICT_CONTRACT_REF,
   ReviewVerdictArtifactV1Schema,
   isReviewVerdictArtifact,
+  DISCOVERY_HANDOFF_CONTRACT_REF,
+  DiscoveryHandoffArtifactV1Schema,
+  isDiscoveryHandoffArtifact,
+  SHAPING_HANDOFF_CONTRACT_REF,
+  ShapingHandoffArtifactV1Schema,
+  isShapingHandoffArtifact,
+  CODING_HANDOFF_CONTRACT_REF,
+  CodingHandoffArtifactV1Schema,
+  isCodingHandoffArtifact,
 } from '../schemas/artifacts/index.js';
 
 /**
@@ -73,6 +82,15 @@ export function validateArtifactContract(
 
     case REVIEW_VERDICT_CONTRACT_REF:
       return validateReviewVerdictContract(artifacts, contractRef, required);
+
+    case DISCOVERY_HANDOFF_CONTRACT_REF:
+      return validateDiscoveryHandoffContract(artifacts, contractRef, required);
+
+    case SHAPING_HANDOFF_CONTRACT_REF:
+      return validateShapingHandoffContract(artifacts, contractRef, required);
+
+    case CODING_HANDOFF_CONTRACT_REF:
+      return validateCodingHandoffContract(artifacts, contractRef, required);
 
     default:
       // Type system should prevent this, but fail-fast just in case
@@ -212,6 +230,141 @@ function validateReviewVerdictContract(
   // Validate the first matching artifact
   const artifact = verdictArtifacts[0]!;
   const parseResult = ReviewVerdictArtifactV1Schema.safeParse(artifact);
+
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues.map(
+      (issue) => `${issue.path.join('.')}: ${issue.message}`
+    );
+    return {
+      valid: false,
+      error: {
+        code: 'INVALID_ARTIFACT_SCHEMA',
+        contractRef,
+        message: `Artifact schema validation failed for ${contractRef}`,
+        issues,
+      },
+    };
+  }
+
+  return { valid: true, artifact: parseResult.data };
+}
+
+/**
+ * Validate discovery handoff artifact contract.
+ */
+function validateDiscoveryHandoffContract(
+  artifacts: readonly unknown[],
+  contractRef: string,
+  required: boolean
+): ArtifactContractValidationResult {
+  const handoffArtifacts = artifacts.filter(isDiscoveryHandoffArtifact);
+
+  if (handoffArtifacts.length === 0) {
+    if (required) {
+      return {
+        valid: false,
+        error: {
+          code: 'MISSING_REQUIRED_ARTIFACT',
+          contractRef,
+          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.discovery_handoff'.`,
+        },
+      };
+    }
+    return { valid: true, artifact: null };
+  }
+
+  const artifact = handoffArtifacts[0]!;
+  const parseResult = DiscoveryHandoffArtifactV1Schema.safeParse(artifact);
+
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues.map(
+      (issue) => `${issue.path.join('.')}: ${issue.message}`
+    );
+    return {
+      valid: false,
+      error: {
+        code: 'INVALID_ARTIFACT_SCHEMA',
+        contractRef,
+        message: `Artifact schema validation failed for ${contractRef}`,
+        issues,
+      },
+    };
+  }
+
+  return { valid: true, artifact: parseResult.data };
+}
+
+/**
+ * Validate shaping handoff artifact contract.
+ */
+function validateShapingHandoffContract(
+  artifacts: readonly unknown[],
+  contractRef: string,
+  required: boolean
+): ArtifactContractValidationResult {
+  const handoffArtifacts = artifacts.filter(isShapingHandoffArtifact);
+
+  if (handoffArtifacts.length === 0) {
+    if (required) {
+      return {
+        valid: false,
+        error: {
+          code: 'MISSING_REQUIRED_ARTIFACT',
+          contractRef,
+          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.shaping_handoff'.`,
+        },
+      };
+    }
+    return { valid: true, artifact: null };
+  }
+
+  const artifact = handoffArtifacts[0]!;
+  const parseResult = ShapingHandoffArtifactV1Schema.safeParse(artifact);
+
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues.map(
+      (issue) => `${issue.path.join('.')}: ${issue.message}`
+    );
+    return {
+      valid: false,
+      error: {
+        code: 'INVALID_ARTIFACT_SCHEMA',
+        contractRef,
+        message: `Artifact schema validation failed for ${contractRef}`,
+        issues,
+      },
+    };
+  }
+
+  return { valid: true, artifact: parseResult.data };
+}
+
+/**
+ * Validate coding handoff artifact contract.
+ */
+function validateCodingHandoffContract(
+  artifacts: readonly unknown[],
+  contractRef: string,
+  required: boolean
+): ArtifactContractValidationResult {
+  const handoffArtifacts = artifacts.filter(isCodingHandoffArtifact);
+
+  if (handoffArtifacts.length === 0) {
+    if (required) {
+      return {
+        valid: false,
+        error: {
+          code: 'MISSING_REQUIRED_ARTIFACT',
+          contractRef,
+          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.coding_handoff'.`,
+        },
+      };
+    }
+    return { valid: true, artifact: null };
+  }
+
+  const artifact = handoffArtifacts[0]!;
+  const parseResult = CodingHandoffArtifactV1Schema.safeParse(artifact);
 
   if (!parseResult.success) {
     const issues = parseResult.error.issues.map(

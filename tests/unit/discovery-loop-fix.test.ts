@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
+import { ok as nok } from 'neverthrow';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -141,7 +142,7 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
         }
         return { results: [{ handle, outcome: 'failed', status: 'failed', durationMs: 500 }], allSucceeded: false };
       }),
-      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready for next phase.', artifacts: [] }),
       listOpenPRs: vi.fn().mockResolvedValue([]),
       mergePR: vi.fn().mockResolvedValue(ok(undefined)),
       writeFile: vi.fn().mockResolvedValue(undefined),
@@ -161,6 +162,12 @@ describe('Fix 1: agentConfig.maxSessionMinutes threads through to dispatch', () 
       postToOutbox: vi.fn().mockResolvedValue(undefined),
       pollOutboxAck: vi.fn().mockResolvedValue('acked'),
       contextAssembler: undefined,
+      generateRunId: vi.fn().mockReturnValue('test-run-id'),
+      readActiveRunId: vi.fn().mockResolvedValue(nok(null)),
+    readPipelineContext: vi.fn().mockResolvedValue(nok(null)),
+      createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
+    markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
+    writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
     };
 
     const opts = {

@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { ok, err } from 'neverthrow';
 import type { V2ToolContext } from '../mcp/types.js';
 import type { AdaptiveCoordinatorDeps } from '../coordinators/adaptive-pipeline.js';
 import type { ChildSessionResult } from '../coordinators/types.js';
@@ -29,6 +30,7 @@ import { createContextAssembler } from '../context-assembly/index.js';
 import { createListRecentSessions } from '../context-assembly/infra.js';
 import type { WorkflowTrigger, SessionSource, AllocatedSession } from '../daemon/workflow-runner.js';
 import type { ConsoleService } from '../v2/usecases/console-service.js';
+import { parsePipelineRunContext } from '../coordinators/pipeline-run-context.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -717,6 +719,133 @@ export function createCoordinatorDeps(
         }
       }
       return 'timeout';
+    },
+
+    // ── Living work context ──────────────────────────────────────────────
+
+    generateRunId: () => randomUUID(),
+
+    readActiveRunId: async (workspace: string) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      try {
+        const entries = await fs.promises.readdir(runsDir);
+        // Collect all in-progress context files and pick the newest by startedAt.
+        // Multiple in-progress files indicates multiple crashes -- resume the newest,
+        // log a warning about the others so the operator can investigate.
+        const candidates: Array<{ runId: string; startedAt: string }> = [];
+        for (const entry of entries) {
+          if (!entry.endsWith('-context.json')) continue;
+          try {
+            const raw = await fs.promises.readFile(path.join(runsDir, entry), 'utf-8');
+            const ctx = JSON.parse(raw) as unknown;
+            if (typeof ctx !== 'object' || ctx === null) continue;
+            const c = ctx as Record<string, unknown>;
+            if (typeof c['runId'] !== 'string') continue;
+            if (c['status'] === 'completed') continue;
+            candidates.push({ runId: c['runId'] as string, startedAt: String(c['startedAt'] ?? '') });
+          } catch { continue; }
+        }
+        if (candidates.length === 0) return ok(null);
+        // Sort descending by startedAt (ISO string -- lexicographic = chronological).
+        candidates.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+        if (candidates.length > 1) {
+          process.stderr.write(
+            `[WARN coordinator] ${candidates.length} in-progress pipeline runs found -- resuming newest (${candidates[0]!.runId}). ` +
+            `Others: ${candidates.slice(1).map(c => c.runId).join(', ')}. Run 'worktrain cleanup' to clear stale runs.\n`,
+          );
+        }
+        return ok(candidates[0]!.runId);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return ok(null);
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(`[WARN coordinator] readActiveRunId failed -- crash recovery skipped: ${msg}\n`);
+        return err(`readActiveRunId failed: ${msg}`);
+      }
+    },
+
+    markPipelineRunComplete: async (workspace: string, runId: string) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      const filePath = path.join(runsDir, `${runId}-context.json`);
+      const tmpPath = filePath + '.tmp';
+      try {
+        const raw = await fs.promises.readFile(filePath, 'utf-8');
+        const existing = JSON.parse(raw) as Record<string, unknown>;
+        const updated = { ...existing, status: 'completed' };
+        await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(tmpPath, filePath);
+        return ok(undefined);
+      } catch (e) {
+        try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+        return err(`markPipelineRunComplete failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+
+    readPipelineContext: async (workspace: string, runId: string) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      const filePath = path.join(runsDir, `${runId}-context.json`);
+      try {
+        const raw = await fs.promises.readFile(filePath, 'utf-8');
+        const parsed = JSON.parse(raw) as unknown;
+        return parsePipelineRunContext(parsed);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+          return ok(null);
+        }
+        const msg = e instanceof Error ? e.message : String(e);
+        return err(`readPipelineContext failed: ${msg}`);
+      }
+    },
+
+    createPipelineContext: async (workspace, runId, goal, pipelineMode) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      const filePath = path.join(runsDir, `${runId}-context.json`);
+      const tmpPath = filePath + '.tmp';
+      try {
+        await fs.promises.mkdir(runsDir, { recursive: true });
+        const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, phases: {} };
+        await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(tmpPath, filePath);
+        return ok(undefined);
+      } catch (e) {
+        try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+        return err(`createPipelineContext failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+
+    writePhaseRecord: async (workspace: string, runId: string, entry) => {
+      const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+      const filePath = path.join(runsDir, `${runId}-context.json`);
+      const tmpPath = filePath + '.tmp';
+
+      try {
+        await fs.promises.mkdir(runsDir, { recursive: true });
+
+        // Read existing context -- file must exist (createPipelineContext called first)
+        const raw = await fs.promises.readFile(filePath, 'utf-8');
+        const parsed = JSON.parse(raw) as unknown;
+        const existing = parsePipelineRunContext(parsed);
+        if (existing.isErr() || existing.value === null) {
+          return err(`writePhaseRecord: context file missing or invalid for runId=${runId}`);
+        }
+
+        // Merge the phase record immutably
+        const updated = {
+          ...existing.value,
+          phases: {
+            ...existing.value.phases,
+            [entry.phase]: entry.record,
+          },
+        };
+
+        // Atomic write via temp-rename
+        await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+        await fs.promises.rename(tmpPath, filePath);
+        return ok(undefined);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+        return err(`writePhaseRecord failed: ${msg}`);
+      }
     },
   };
 }

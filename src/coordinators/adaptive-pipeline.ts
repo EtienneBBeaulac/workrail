@@ -27,9 +27,11 @@
  * This resolves the budget conflict without reducing per-phase budgets (rabbit hole #2).
  */
 
+import type { Result } from 'neverthrow';
 import type { CoordinatorDeps } from './pr-review.js';
 import { routeTask, extractPrNumbers } from './routing/route-task.js';
 import type { PipelineMode } from './routing/route-task.js';
+import type { PipelineRunContext, PhaseRecord } from './pipeline-run-context.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TIMEOUT CONSTANTS (hardcoded, never LLM-computed)
@@ -166,6 +168,63 @@ export interface AdaptiveCoordinatorDeps extends CoordinatorDeps {
    * times out after 24 hours if no acknowledgment is received.
    */
   pollOutboxAck(requestId: string, timeoutMs: number): Promise<'acked' | 'timeout'>;
+
+  // ── Living work context ────────────────────────────────────────────────
+
+  /**
+   * Generate a new unique pipeline run ID.
+   * Returns randomUUID() in production; injectable for test determinism.
+   */
+  generateRunId(): string;
+
+  /**
+   * Find the in-progress pipeline run for a workspace, if any.
+   * Scans {workspace}/.workrail/pipeline-runs/ for a context file without status='completed'.
+   * Returns ok(null) if no in-progress run exists (first run, all runs completed, or dir missing).
+   * Returns err(...) on I/O failure.
+   *
+   * WHY scan instead of a pointer file: a single-file design has no consistency gap.
+   * A separate pointer file creates a window where the pointer exists but the context file
+   * does not (or vice versa) if a crash occurs between the two writes.
+   */
+  readActiveRunId(workspace: string): Promise<Result<string | null, string>>;
+
+  /**
+   * Read the PipelineRunContext for a given run ID.
+   * Returns ok(null) if the context file does not exist (new run or pre-feature session).
+   * Returns err(...) on I/O failure.
+   */
+  readPipelineContext(workspace: string, runId: string): Promise<Result<PipelineRunContext | null, string>>;
+
+  /**
+   * Create the initial PipelineRunContext file for a new run.
+   * Must be called before writePhaseRecord() to avoid placeholder goal/pipelineMode values.
+   * Uses atomic write (temp-rename).
+   */
+  createPipelineContext(
+    workspace: string,
+    runId: string,
+    goal: string,
+    pipelineMode: PipelineRunContext['pipelineMode'],
+  ): Promise<Result<void, string>>;
+
+  /**
+   * Mark a pipeline run as completed so the active-run.json pointer is not reused by the next fresh run.
+   * Called after a successful pipeline outcome (merged or clean escalation -- not on error/crash).
+   * Updates the context file's status field to 'completed'. Does not delete the file (operator inspectability).
+   */
+  markPipelineRunComplete(workspace: string, runId: string): Promise<Result<void, string>>;
+
+  /**
+   * Write a phase record into the PipelineRunContext for a given run ID.
+   * Merges the phase record into the existing phases object.
+   * Uses atomic write (temp-rename) to prevent partial writes.
+   * Returns err(...) on I/O failure.
+   *
+   * WHY union type (not overloads): single function accepting a discriminated union
+   * makes illegal states unrepresentable -- the phase name and record type are coupled.
+   */
+  writePhaseRecord(workspace: string, runId: string, entry: PhaseRecord): Promise<Result<void, string>>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

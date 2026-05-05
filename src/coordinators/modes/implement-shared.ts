@@ -15,6 +15,8 @@ import { CODING_TIMEOUT_MS, REVIEW_TIMEOUT_MS, checkSpawnCutoff } from '../adapt
 import { readVerdictArtifact, parseFindingsFromNotes } from '../pr-review.js';
 import type { ReviewVerdictArtifactV1 } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 import { parseReviewVerdictArtifact } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
+import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
+import { buildContextSummary } from '../context-assembly.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -41,6 +43,8 @@ export async function runReviewAndVerdictCycle(
   prUrl: string,
   coordinatorStartMs: number,
   iteration: number,
+  runId = '',
+  priorArtifacts: readonly PhaseHandoffArtifact[] = [],
 ): Promise<PipelineOutcome> {
   const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'review');
   if (cutoffCheck) return cutoffCheck;
@@ -51,11 +55,15 @@ export async function runReviewAndVerdictCycle(
 
   deps.stderr(`[review-cycle] Spawning review session (iteration=${iteration}): ${reviewGoal.slice(0, 80)}`);
 
+  const reviewContextSummary = buildContextSummary(priorArtifacts, 'review');
   const reviewSpawnResult = await deps.spawnSession(
     'wr.mr-review',
     reviewGoal,
     opts.workspace,
-    { prUrl },
+    {
+      prUrl,
+      ...(reviewContextSummary ? { assembledContextSummary: reviewContextSummary } : {}),
+    },
   );
 
   if (reviewSpawnResult.kind === 'err') {
@@ -146,11 +154,16 @@ export async function runReviewAndVerdictCycle(
       if (fixCutoff) return fixCutoff;
 
       const fixGoal = `Fix review findings: ${findings.findingSummaries.slice(0, 3).join('; ')}`;
+      const fixContextSummary = buildContextSummary(priorArtifacts, 'fix');
       const fixSpawnResult = await deps.spawnSession(
         'wr.coding-task',
         fixGoal,
         opts.workspace,
-        { prUrl, findings: findings.findingSummaries },
+        {
+          prUrl,
+          findings: findings.findingSummaries,
+          ...(fixContextSummary ? { assembledContextSummary: fixContextSummary } : {}),
+        },
       );
 
       if (fixSpawnResult.kind === 'err') {
@@ -180,12 +193,12 @@ export async function runReviewAndVerdictCycle(
       }
 
       deps.stderr(`[review-cycle] Fix iteration ${iteration + 1} complete -- re-reviewing`);
-      return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, iteration + 1);
+      return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, iteration + 1, runId, priorArtifacts);
     }
 
     case 'blocking':
     case 'unknown': {
-      return runAuditChain(deps, opts, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings);
+      return runAuditChain(deps, opts, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings, priorArtifacts);
     }
   }
 }
@@ -214,6 +227,7 @@ export async function runAuditChain(
   coordinatorStartMs: number,
   severity: 'blocking' | 'unknown',
   findings?: ReviewVerdictArtifactV1['findings'],
+  priorArtifacts: readonly PhaseHandoffArtifact[] = [],
 ): Promise<PipelineOutcome> {
   deps.stderr(`[audit-chain] ${severity.toUpperCase()} finding -- running audit chain`);
 
