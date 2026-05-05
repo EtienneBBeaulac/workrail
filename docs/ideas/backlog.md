@@ -192,6 +192,27 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Per-run retrospective: structured learning from pipeline outcomes (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+After a pipeline run completes -- whether it merged, escalated, or failed -- there is no structured mechanism for WorkTrain to record what it learned. Mistakes that occurred in one run (wrong interpretation, missed edge case, collateral damage rationalized as a tradeoff) are not surfaced to future sessions. Each run starts with the same baseline.
+
+A per-run retrospective is a lightweight post-completion step that answers: what went wrong or unexpectedly, what assumption turned out to be false, what should the next session starting on this codebase know that this session didn't? The output would be a structured record written to the session store and made available as Tier 0 context for future sessions on the same workspace.
+
+This is distinct from the per-step `report_issue` mechanism (which records obstacles mid-session) and from the `wr.coding-task` phase-8 retrospective workflow (which is an agent-facing step prompt). This is a coordinator-level mechanism that runs after the pipeline exits, regardless of which workflows ran.
+
+**Things to hash out:**
+- Who runs the retrospective -- the coordinator (deterministic, reads phase results and produces structured output), a lightweight LLM step, or the agent in a final workflow phase?
+- What is the output format? A structured `RetrospectiveArtifactV1` that feeds Tier 0 context injection, or freeform notes that accumulate in a `workspace-knowledge.md` file?
+- Where does the output live? Per-run (alongside `PipelineRunContext`), per-workspace (accumulated knowledge store), or per-session in the session store?
+- When a retrospective records "assumption X was wrong," how does that fact reach future sessions? It needs to be injected as Tier 0 context -- which requires the context loading path to know where to look.
+- Should the retrospective run on every pipeline outcome (merge, escalate, timeout, error), or only on non-merge outcomes where something went wrong?
+
+---
+
 ### Phase quality gate policy: partial vs escalate (May 5, 2026)
 
 **Status: idea** | Priority: medium
@@ -1004,6 +1025,25 @@ The daemon reads `triggers.yml` once at startup. Any change requires a full daem
 - How should validation errors in the new `triggers.yml` be surfaced to the operator? A log line is easy to miss -- is there a better notification path?
 - Does hot-reload need to be transactional (all-or-nothing swap) or can partial updates be safe?
 - Should file watching be optional (behind a `--watch` flag) to avoid surprising behavior for users who prefer explicit restarts?
+
+---
+
+### External task tracker integrations: Jira, Linear, Notion, and beyond (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+WorkTrain currently picks up work from GitHub and GitLab. Most engineering teams track work in Jira, Linear, Notion, or similar systems -- not in GitHub issues. Without native trigger adapters for these systems, WorkTrain cannot be used as the default development workflow for teams that don't use GitHub Issues as their primary tracker.
+
+The vision says WorkTrain picks up tasks "from external systems (GitHub issues, GitLab MRs, Jira tickets, webhooks)." The webhook trigger (`provider: generic`) handles anything with a POST endpoint, but it requires the operator to wire up field extraction manually and provides no assignee filtering, label filtering, or status-transition detection out of the box. A first-class adapter for each tracker would handle the integration details and give operators a clean configuration surface.
+
+**Things to hash out:**
+- What is the right abstraction boundary? A generic polling adapter with per-tracker field mapping (same pattern as `github_issues_poll` / `gitlab_poll`) vs. a more opinionated per-tracker adapter that understands Jira workflow states, Linear priorities, etc.
+- Jira's API requires OAuth or API token; Linear uses API keys; Notion uses integration tokens. Is secret resolution via `$ENV_VAR_NAME` sufficient, or is a richer credentials model needed?
+- For Jira specifically: issue assignment events are not available via webhook without Jira admin access to configure webhooks. Does WorkTrain need a polling adapter (`jira_poll`) as the primary path, with webhook as an optional enhancement?
+- What context does each tracker inject into the workflow session? Jira issues have epics, acceptance criteria, sprint context, labels. Linear issues have priority, team, estimate, project. The context mapping needs to capture what's useful without overwhelming the session.
+- How does deduplication work across tracker adapters? A Jira issue that was already picked up and is in-flight should not be dispatched again on the next poll cycle, even if it was updated.
 
 ---
 

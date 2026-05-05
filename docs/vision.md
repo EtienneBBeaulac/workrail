@@ -14,7 +14,7 @@ WorkTrain runs the workrail repository as one of its own workspaces. It picks up
 
 This creates a direct feedback loop: if WorkTrain's development pipeline is flawed, it will produce flawed changes to itself and catch them in review. If its context injection is thin, it will miss things in its own codebase that a well-briefed agent would catch. The quality of WorkTrain's output is the quality of WorkTrain.
 
-The self-improvement loop is not fully operational today. The pieces -- coordinator session chaining, full development pipeline, spec as ground truth, living work context -- are being built. But it is the north star. If WorkTrain cannot build WorkTrain well, it cannot be trusted to build anything else.
+The self-improvement loop is not fully operational today, but it is the north star. If WorkTrain cannot build WorkTrain well, it cannot be trusted to build anything else.
 
 ## What success looks like
 
@@ -34,7 +34,7 @@ WorkTrain earns trust over time by doing this correctly, repeatedly, at scale --
 
 **Zero LLM turns for routing.** Coordinator decisions -- what workflow to run next, whether findings are blocking, when to merge -- are deterministic TypeScript code. LLM turns are used for cognitive work: understanding code, writing code, evaluating findings. Never for deciding "what do I do next?".
 
-**Structured outputs at every boundary.** Each phase produces a typed result. The next phase reads that result. Free-text scraping between phases is a design smell. `ChildSessionResult`, `wr.coordinator_result`, `wr.review_verdict` are the contracts that make phases composable without a main agent holding context.
+**Structured outputs at every boundary.** Each phase produces a typed result. The next phase reads that result. Free-text scraping between phases is a design smell. Typed contracts at phase boundaries are what make phases composable without a main agent holding context.
 
 **Correctness over speed.** WorkTrain does not merge changes it is not confident in. Review findings are addressed. Tests pass. The right next step is not always the fastest one.
 
@@ -88,18 +88,6 @@ WorkTrain does not pause for: implementation decisions within a well-specified t
 
 This boundary is still being tested and refined through real usage. Where exactly "genuine ambiguity" begins is an open question.
 
-## What is still being built
-
-WorkTrain is not finished. The vision above is where it is going, not where it is today. Key pieces still in progress:
-
-- **Living work context** -- shared knowledge store that accumulates across all phases so every agent starts informed (`docs/ideas/backlog.md`: "Living work context")
-- **Coordinator pipeline templates** -- actual coordinator scripts for full development pipeline, bug-fix, grooming (`docs/ideas/backlog.md`: "Scripts-first coordinator")
-- **`worktrain spawn`/`await` CLI** -- CLI surface for coordinator scripts
-- **Knowledge graph** -- per-workspace structural understanding so agents skip discovery on repeated tasks
-- **Spec as ground truth** -- wiring `wr.shaping` output into coordinator dispatch so coding/review agents work from the same spec
-
-For the current prioritized list, see `npm run backlog` or `docs/ideas/backlog.md`.
-
 ## Open questions
 
 These are genuinely unresolved. Any agent operating in this system should know they exist and not assume they are answered.
@@ -112,4 +100,6 @@ These are genuinely unresolved. Any agent operating in this system should know t
 
 - **What is the right granularity of tasks?** WorkTrain is being designed for ticket-sized work. Whether it handles epics (by decomposing them), hotfixes (by moving fast and deferring thoroughness), and architectural changes (which may require multiple sessions across multiple days) the same way is untested.
 
-- **Is "document" the right abstraction for the living work context?** A flat document implies agents read it linearly. Agents need to query it selectively -- the coding agent wants constraints relevant to a specific decision, the review agent wants what the coding agent said about a specific module. A structured knowledge store (typed facts, queryable by topic) may be more useful than a document. See `docs/ideas/backlog.md`: "Living work context".
+- **Is typed-artifact-per-phase the right abstraction for inter-phase context?** The current model threads structured handoff artifacts between pipeline phases. Whether this is sufficient long-term, or whether a queryable per-workspace knowledge store (indexed by topic, accessible across pipeline runs and across tasks) is needed for things like codebase-specific priors and accumulated project memory, is an open question. See `docs/ideas/backlog.md`: "Knowledge graph".
+
+For current priorities and status, run `npm run backlog` or read `docs/ideas/backlog.md`.
