@@ -529,6 +529,13 @@ function constructTools(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   scope: SessionScope,
+  /**
+   * Injectable runWorkflow implementation. Defaults to the module-level runWorkflow.
+   * WHY injected (not referenced directly): allows constructTools to be moved to
+   * runner/ without creating a circular import (runner/ -> workflow-runner.ts -> runner/).
+   * Tests that need a fake implementation can pass one without affecting the real path.
+   */
+  runWorkflowFn: typeof runWorkflow = runWorkflow,
 ): readonly AgentTool[] {
   const {
     fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported,
@@ -573,7 +580,7 @@ function constructTools(
       workrailSid ?? '',
       spawnCurrentDepth,
       spawnMaxDepth,
-      runWorkflow,
+      runWorkflowFn,
       schemas,
       emitter,
       activeSessionSet,
@@ -826,7 +833,7 @@ async function buildAgentReadySession(
     workflowId: trigger.workflowId,
     activeSessionSet,
   };
-  const tools = constructTools(ctx, apiKey, schemas, scope);
+  const tools = constructTools(ctx, apiKey, schemas, scope, runWorkflow);
 
   // ---- I/O phase: load context (soul + workspace + session notes) ----
   // WHY: load before Agent construction -- the system prompt is set at init
