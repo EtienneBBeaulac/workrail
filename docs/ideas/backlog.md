@@ -2048,27 +2048,20 @@ Each file is injected only into sessions running the matching pipeline phase. Re
 
 ### Coordinator architecture: separation of concerns
 
-**Status: idea** | Priority: medium
+**Status: done** | Shipped May 2026 (PRs #947, #954)
 
-**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no (unblocked by Apr 30 discovery -- context assembly does not require the knowledge graph)
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
 
-**Problem:** `src/coordinators/pr-review.ts` is already ~500 LOC doing session dispatch, result aggregation, finding classification, merge routing, message queue drain, and outbox writes. Adding knowledge graph queries, context bundle assembly, and prior session lookups would create a god class.
-
-**Right layering:**
+The layering is implemented:
 ```
 Trigger layer         src/trigger/          receives events, validates, enqueues
-Dispatch layer        (TBD)                 decides which workflow + what goal
-Context assembly      src/daemon/           enriches trigger before runWorkflow() fires
-Orchestration layer   src/coordinators/     spawns, awaits, routes, retries, escalates
+Dispatch layer        adaptive-pipeline.ts  decides workflow + goal (queue-polled tasks)
+Context assembly      src/daemon/           WorkflowEnricher enriches before runWorkflow()
+Orchestration layer   src/coordinators/     CoordinatorSpawnContext typed interface (PR #954)
 Delivery layer        src/trigger/delivery  posts results back to origin systems
 ```
 
-**Resolution from Apr 30 discovery:** Context assembly does NOT require the knowledge graph as a prerequisite. The universal enricher (Phase 1 of the memory architecture) provides a structural context assembly layer via `WorkflowEnricher` injected into `runWorkflow()` -- this IS the missing layer. The orchestration scripts (coordinators) continue to add task-specific richer context on top (phase artifacts, git diff for PRs) via the existing `assembledContextSummary` mechanism. The two layers compose: universal enricher provides the floor, coordinators provide the ceiling.
-
-**The Dispatch layer question** is resolved by the adaptive pipeline coordinator (`src/coordinators/adaptive-pipeline.ts`) -- it IS the dispatch layer for queue-polled tasks. For webhook-triggered tasks, `TriggerRouter.route()` performs dispatch. The layering is already present; it just isn't documented as such.
-
-**Remaining open question:**
-- When a coordinator calls `spawnSession()` with an `assembledContextSummary`, should the universal enricher's prior-notes injection be suppressed (coordinator already covered it) or additive (both run)? The discovery recommends suppression -- enricher skips prior notes when `assembledContextSummary` is already set.
+Universal enricher provides the floor (prior workspace notes + git diff for all entry points). Coordinators provide the ceiling (phase artifacts, PR-specific context via `assembledContextSummary`). Enricher suppresses prior-notes when `assembledContextSummary` is already set -- resolved, not additive.
 
 ---
 
@@ -2935,26 +2928,20 @@ Human always required for: schema changes, dependency upgrades (major version), 
 
 ### Coordinator context injection standard: agents start informed, not discovering (Apr 18, 2026)
 
-**Status: idea** | Priority: high
+**Status: partial** | Priority: high
 
 **Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
 
-Every coordinator-spawned agent gets a pre-packaged context bundle. The coordinator assembles it before calling `worktrain spawn`. The bundle includes:
-1. **Prior session findings** -- what relevant sessions discovered (from session store query)
-2. **Established patterns** -- the specific invariants and patterns the agent needs (from knowledge graph or AGENTS.md)
-3. **What NOT to discover** -- explicit list of things already known so the agent doesn't waste turns
-4. **Failure history** -- what's been tried and didn't work (prevents re-exploring dead ends)
+**What shipped (May 2026):**
+- `WorkflowEnricher` (PR #947) -- daemon injects prior workspace session notes + git diff stat for all root sessions. This is the floor layer.
+- `CoordinatorSpawnContext` typed interface (PR #954) in `src/coordinators/types.ts` -- explicit fields, no index signature. Coordinators inject typed context at dispatch time.
+- `buildContextSummary()` + `PipelineRunContext` (PR #939) -- inter-phase artifact threading for FULL pipeline (discovery/shaping/coding/review).
+- PR review coordinator assembles git diff + prior session notes via `ContextAssembler` before spawning review and fix sessions.
 
-~2000 tokens max, injected as a `<context>` block before the task description. Structured so the agent can skip Phase 0 context gathering entirely when the bundle is complete.
+**What remains:** "Prior session findings" and "failure history" require Phase 2 MemoryStore (indexed SQLite) before they're fast enough to use at dispatch time. The assembly architecture is correct; the indexed data source is still unbuilt.
 
-Without this: every agent spawned without proper context burns tokens on discovery that should have been provided upfront. At 10 concurrent agents, that's 10x the waste.
-
-**Things to hash out:**
-- Who assembles the context bundle -- the coordinator script, the daemon, or a dedicated context assembly service? Where does the assembly logic live?
-- The 2000-token budget is a guess. What is the actual optimal size -- enough to be useful, small enough not to crowd out the step prompt?
-- How does the context bundle stay fresh across a long coordinator run? Prior session findings from 2 hours ago may be stale if main advanced significantly.
-- If the knowledge graph is not yet built for a workspace, what is the fallback for context assembly? Does the coordinator skip bundling entirely, or manually assemble from known sources?
-- Should the `<context>` block format be standardized so all workflows know how to consume it, or is it opaque content the agent reads naturally?
+**Remaining thing to hash out:**
+- Should the context format be standardized across all workflows, or is unstructured text the agent reads naturally sufficient?
 
 ---
 
