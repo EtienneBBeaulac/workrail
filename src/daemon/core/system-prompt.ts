@@ -117,7 +117,7 @@ complete_step is your advancement tool. It does not require a continueToken. Do 
  * parses it consistently with the documented schema.
  *
  * @param notes - Prior step notes (already limited to MAX_SESSION_RECAP_NOTES
- *   entries and truncated to MAX_SESSION_NOTE_CHARS each by the caller).
+ *   entries and bounded in size by the caller).
  */
 export function buildSessionRecap(notes: readonly string[]): string {
   if (notes.length === 0) return '';
@@ -242,7 +242,9 @@ export function buildSystemPrompt(
   if (enricherResult !== undefined && enricherResult.gitDiffStat !== null) {
     let diffStat = enricherResult.gitDiffStat;
     if (Buffer.byteLength(diffStat, 'utf8') > MAX_GIT_DIFF_STAT_BYTES) {
-      diffStat = diffStat.slice(0, MAX_GIT_DIFF_STAT_BYTES) + '\n[diff stat truncated]';
+      // WHY Buffer subarray + TextDecoder: avoids the char-based slice pitfall where
+      // a 2048-char slice of non-ASCII content exceeds 2048 bytes.
+      diffStat = new TextDecoder().decode(Buffer.from(diffStat, 'utf8').subarray(0, MAX_GIT_DIFF_STAT_BYTES)) + '\n[diff stat truncated]';
     }
     lines.push('');
     lines.push('## Changed files');

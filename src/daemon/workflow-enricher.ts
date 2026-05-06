@@ -131,15 +131,24 @@ export async function enrichTriggerContext(
   const [notesResult, gitResult] = await Promise.all([
     skipPriorNotes
       ? Promise.resolve<Result<readonly SessionNote[], string>>({ kind: 'ok', value: [] })
-      : Promise.race<Result<readonly SessionNote[], string>>([
-          deps.listRecentSessions(trigger.workspacePath, MAX_PRIOR_NOTES),
-          new Promise<Result<readonly SessionNote[], string>>((resolve) =>
-            setTimeout(
+      : (() => {
+          // WHY clearTimeout on normal path: without it the timeout timer keeps
+          // running after listRecentSessions resolves, leaking a handle.
+          let timeoutHandle: ReturnType<typeof setTimeout>;
+          const timeoutPromise = new Promise<Result<readonly SessionNote[], string>>((resolve) => {
+            timeoutHandle = setTimeout(
               () => resolve({ kind: 'err', error: 'listRecentSessions timeout (1s)' }),
               LIST_SESSIONS_TIMEOUT_MS,
-            ),
-          ),
-        ]),
+            );
+          });
+          return Promise.race([
+            deps.listRecentSessions(trigger.workspacePath, MAX_PRIOR_NOTES).then((r) => {
+              clearTimeout(timeoutHandle);
+              return r;
+            }),
+            timeoutPromise,
+          ]);
+        })(),
     deps.execGit(['diff', 'HEAD~1', '--stat'], trigger.workspacePath),
   ]);
 
