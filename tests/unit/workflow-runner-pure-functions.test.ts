@@ -626,6 +626,37 @@ describe('buildSessionContext', () => {
     expect(result1.sessionTimeoutMs).toBe(result2.sessionTimeoutMs);
     expect(result1.maxTurns).toBe(result2.maxTurns);
   });
+
+  // ---- workspaceRules multi-rule join (Bug 3 regression) ----
+
+  it('system prompt contains all workspaceRules content when multiple rules are provided', () => {
+    const bundle: ContextBundle = {
+      soulContent: DAEMON_SOUL_DEFAULT,
+      workspaceRules: [
+        { source: 'CLAUDE.md', content: 'Rule A content from CLAUDE.md', truncated: false },
+        { source: 'AGENTS.md', content: 'Rule B content from AGENTS.md', truncated: false },
+      ],
+      sessionHistory: [],
+    };
+    const { systemPrompt } = callBuildSessionContext(makeSessionTrigger(), bundle, 'Step 1.');
+    expect(systemPrompt).toContain('Rule A content from CLAUDE.md');
+    expect(systemPrompt).toContain('Rule B content from AGENTS.md');
+  });
+
+  // ---- truncateToByteLimit (assembledContextSummary > 8KB) ----
+
+  it('assembledContextSummary > 8KB is truncated at a line boundary with marker', () => {
+    // Build a string that exceeds 8192 bytes, with a clear line before the boundary
+    const lineBeforeCut = 'This line is near the 8KB boundary';
+    const bigBlock = 'x'.repeat(8200);
+    const longSummary = `${lineBeforeCut}\n${bigBlock}`;
+    const trigger = makeSessionTrigger({ context: { assembledContextSummary: longSummary } });
+    const { systemPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1.');
+    expect(systemPrompt).toContain('## Prior Context');
+    expect(systemPrompt).toContain('[Prior context truncated at 8KB]');
+    // The line before the cut should survive
+    expect(systemPrompt).toContain(lineBeforeCut);
+  });
 });
 
 // ── buildAgentCallbacks ───────────────────────────────────────────────────────
