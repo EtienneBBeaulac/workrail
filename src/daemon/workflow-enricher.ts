@@ -25,13 +25,8 @@ export const EMPTY_RESULT: EnricherResult = {
 // PriorNotesPolicy
 // ---------------------------------------------------------------------------
 
-/**
- * Controls whether prior workspace session notes are assembled.
- *
- * 'inject': assemble and inject notes (standard path for all root sessions).
- * 'skip_coordinator_provided': coordinator already wrote assembledContextSummary;
- *   prior notes would be redundant and lower-signal. gitDiffStat still assembled.
- */
+// skip_coordinator_provided: coordinator already wrote assembledContextSummary, so prior
+// notes would be lower-signal redundancy. gitDiffStat is still assembled either way.
 export type PriorNotesPolicy = 'inject' | 'skip_coordinator_provided';
 
 // ---------------------------------------------------------------------------
