@@ -194,42 +194,23 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ### Context injection bugs: double-injection, byte-slice truncation, workspaceRules[0] drop (Apr 30, 2026)
 
-**Status: idea** | Priority: high
+**Status: done** | Shipped in PR #946 (fix/etienneb/context-injection-bugs, auto-merge enabled)
 
 **Score: 13** | Cor:3 Cap:1 Eff:3 Lev:3 Con:3 | Blocked: no
 
-Three active bugs in the context injection pipeline that waste tokens, produce incorrect truncation, and silently discard workspace context. Confirmed by codebase audit (Apr 30, 2026).
-
-1. **Double-injection (`session-context.ts:117-119`):** `trigger.context` is JSON-serialized in full into the initial user message. Since coordinators write `assembledContextSummary` *into* `trigger.context`, the assembled context appears twice -- once in the system prompt (8KB cap applied) and once in the initial user message (uncapped). These diverge when the content exceeds 8KB.
-
-2. **Byte-slice truncation (`system-prompt.ts:200-202`):** `assembledContextSummary` is truncated by raw byte index (`ctxStr.slice(0, 8192)`), which splits mid-sentence, mid-section, and can produce malformed UTF-8. The section-aware `buildBudgetedOutput()` pattern already exists in `src/coordinators/context-assembly.ts` and handles this correctly.
-
-3. **`workspaceRules[0]` silent drop (`session-context.ts:106`):** `ContextBundle.workspaceRules` is typed as `ContextRule[]` but only `[0]` is consumed. All additional workspace context rules are silently dropped. The type implies per-file rules are supported; the consumer silently ignores them.
-
-**Also in scope:** introduce `WorkflowContextSlots` typed fields on `WorkflowTrigger` (or a companion type) for system-managed context fields (`assembledContextSummary`, `priorSessionNotes`, `gitDiffStat`). This eliminates the stringly-typed `trigger.context['assembledContextSummary']` access pattern and is a prerequisite for the universal enricher (see next item). Scope Phase 0 changes to consumption sites only (`buildSystemPrompt`, `buildSessionContext`); coordinator write sites migrate in Phase 1.
-
-**Done looks like:** no `trigger.context` JSON dump in `initialPrompt`; `assembledContextSummary` truncated at section boundaries; all `workspaceRules` entries injected; `WorkflowContextSlots` typed fields replace stringly-typed access in consumption sites.
+All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSlots()` introduced in `src/daemon/types.ts`. `buildSystemPrompt` refactored to pipeline of pure section functions. `truncateToByteLimit` uses Buffer/surrogate-safe walk-back.
 
 ---
 
 ### Universal context enricher for all session entry points (Apr 30, 2026)
 
-**Status: idea** | Priority: high
+**Status: done** | Shipped in PR #947 (feat/etienneb/workflow-enricher, auto-merge enabled, depends on #946)
 
-**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: yes (needs context injection bugs fixed first)
+**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
-Today 4 of 6 session entry points receive zero assembled context: raw webhook triggers, direct dispatch, `spawn_agent` children, and crash-recovered sessions never get cross-session notes or git diff state. Only coordinator-spawned sessions (via `pr-review.ts` or the adaptive pipeline) get assembled context -- and even then only through opt-in coordinator logic, not structural injection.
+`WorkflowEnricher` service in `src/daemon/workflow-enricher.ts`. Fires for root sessions (`spawnDepth === 0`) inside `runWorkflow()` before `buildPreAgentSession()`. `PriorNotesPolicy` discriminated type controls notes injection. 1s timeout with partial fallback on `listRecentSessions`. `EnricherResult` threaded as typed value through call chain -- trigger never mutated. All 6 entry points covered.
 
-There is no single layer that all dispatch paths share where assembly can run universally. Coordinators that care must call assembly explicitly; everything else gets nothing. This means every new entry point or coordinator is another opportunity to forget assembly.
-
-**Design (from Apr 30 discovery):** A `WorkflowEnricher` service injected into `runWorkflow()` that fires for root sessions only (`spawnDepth === 0`). Provides prior workspace session notes (max 3, newest-first, workspace-scoped) and `git diff HEAD~1 --stat` to all entry points. Injected via `WorkflowContextSlots` typed fields (see context injection bugs item). When a coordinator has already set `assembledContextSummary`, the enricher skips prior-notes injection (coordinator's richer context takes precedence) but still provides git diff stat if absent.
-
-**Critical gate:** before this ships, run a pilot test -- one session with `assembledContextSummary` injected, inspect turn-1 reasoning for citation. If agents don't reference pre-loaded context, the investment in universal enrichment adds tokens without improving outcomes.
-
-**Things to hash out:**
-- Where exactly does the enricher inject: inside `runWorkflow()` before `buildPreAgentSession()`, or inside `buildPreAgentSession()` itself? The latter is cleaner but changes the pre-agent phase boundary.
-- `listRecentSessions` must have a 1s wall-clock timeout with partial-result fallback. Without it, large session stores silently slow all session startups. This is a spec requirement, not optional.
-- `spawn_agent` children don't get enriched (they'd trigger redundant assembly for deeply nested trees). Is there a case where children should optionally enrich? Candidate: an `inheritParentContext: boolean` flag in the `spawn_agent` tool schema.
+**Pilot test gate still pending:** before declaring full success, verify agents reference prior notes in turn-1 reasoning in at least one real session.
 
 ---
 
