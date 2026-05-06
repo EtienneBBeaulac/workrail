@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildSessionRecap } from '../../src/daemon/workflow-runner.js';
+import { buildSessionRecap } from '../../src/daemon/core/system-prompt.js';
 
 // These match the constants in workflow-runner.ts.
 // If the constants change, these tests will catch the drift.

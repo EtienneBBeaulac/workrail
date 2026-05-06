@@ -85,6 +85,20 @@ import {
   setTerminalSignal,
   evaluateStuckSignals,
 } from './state/index.js';
+import type { SessionContext, SidecarLifecycle } from './core/index.js';
+import {
+  BASE_SYSTEM_PROMPT,
+  buildSessionRecap,
+  buildSystemPrompt,
+  DEFAULT_SESSION_TIMEOUT_MINUTES,
+  DEFAULT_MAX_TURNS,
+  DEFAULT_STALL_TIMEOUT_SECONDS,
+  buildSessionContext,
+  tagToStatsOutcome,
+  sidecardLifecycleFor,
+  buildSessionResult,
+  buildAgentClient,
+} from './core/index.js';
 import { withWorkrailSession, persistTokens, DAEMON_SESSIONS_DIR } from './tools/_shared.js';
 import { makeContinueWorkflowTool, makeCompleteStepTool } from './tools/continue-workflow.js';
 import { makeBashTool } from './tools/bash.js';
@@ -135,6 +149,22 @@ export {
   setSessionId,
   recordToolCall,
 } from './state/index.js';
+// Re-export core layer for backward compatibility.
+// New code should import directly from './core/index.js'.
+export type { SessionContext, SidecarLifecycle } from './core/index.js';
+export {
+  BASE_SYSTEM_PROMPT,
+  buildSessionRecap,
+  buildSystemPrompt,
+  DEFAULT_SESSION_TIMEOUT_MINUTES,
+  DEFAULT_MAX_TURNS,
+  DEFAULT_STALL_TIMEOUT_SECONDS,
+  buildSessionContext,
+  tagToStatsOutcome,
+  sidecardLifecycleFor,
+  buildSessionResult,
+  buildAgentClient,
+} from './core/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -157,47 +187,6 @@ const MAX_SESSION_RECAP_NOTES = 3;
  */
 const MAX_SESSION_NOTE_CHARS = 800;
 
-/**
- * Default wall-clock time limit (in minutes) for a single workflow run.
- *
- * WHY: a stuck tool call, infinite retry loop, or runaway LLM can hold a
- * queue slot indefinitely. This cap is the safety valve.
- *
- * This default is used when no agentConfig.maxSessionMinutes is configured.
- * Per-trigger overrides are set via triggers.yml agentConfig.maxSessionMinutes.
- * If the agent loop does not complete within this window, runWorkflow() aborts
- * the agent and returns { _tag: 'timeout', reason: 'wall_clock' }.
- */
-export const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
-
-/**
- * Default maximum number of LLM turns per agent session.
- *
- * This default is used when no agentConfig.maxTurns is configured.
- * Per-trigger overrides are set via triggers.yml agentConfig.maxTurns.
- * WHY: prevents infinite retry loops when the LLM keeps calling continue_workflow
- * with a broken token -- without a cap, each isError tool_result is visible to the
- * LLM and it will simply retry, looping forever. 200 turns provides a generous
- * safety net for complex autonomous workflows (e.g. wr.discovery deep codebase
- * exploration) without being the bottleneck -- wall-clock maxSessionMinutes is
- * the primary cap for runaway sessions.
- */
-export const DEFAULT_MAX_TURNS = 200;
-
-/**
- * Default number of seconds without a new LLM API call before the agent loop
- * is considered stalled and aborted.
- *
- * WHY 120 seconds: a legitimate tool call (bash, git, file I/O) should complete
- * well within 120s. A tool call that runs longer than 2 minutes with no LLM
- * activity is almost certainly hung (network timeout, file lock, deadlock).
- * 120s provides a generous buffer for slow operations while catching real stalls
- * before they consume 55-65 minutes of wall-clock time.
- *
- * This default is used when no agentConfig.stallTimeoutSeconds is configured.
- * Per-trigger overrides are set via triggers.yml agentConfig.stallTimeoutSeconds.
- */
-export const DEFAULT_STALL_TIMEOUT_SECONDS = 120;
 
 // DAEMON_SESSIONS_DIR is re-exported from './tools/_shared.js' at the top of this file.
 
@@ -255,12 +244,6 @@ const DAEMON_STATS_DIR = path.join(os.homedir(), '.workrail', 'data');
  */
 const WORKSPACE_CONTEXT_MAX_BYTES = 32 * 1024;
 
-/**
- * Maximum byte size for injected assembledContextSummary (prior session notes + git diff).
- * WHY: caps the coordinator-assembled context to protect LLM token budget.
- * Mirrors the WORKSPACE_CONTEXT_MAX_BYTES cap pattern used for CLAUDE.md injection.
- */
-const MAX_ASSEMBLED_CONTEXT_BYTES = 8192;
 
 /**
  * A literal path entry: a single file at a known relative path.
@@ -1456,200 +1439,6 @@ async function writeStuckOutboxEntry(opts: {
   }
 }
 
-// ---------------------------------------------------------------------------
-// System prompt
-// ---------------------------------------------------------------------------
-
-/**
- * Static preamble for the daemon agent system prompt.
- *
- * WHY a named constant: extracting the preamble makes it readable as a document,
- * gives it a stable identity for tests, and follows the soul-template.ts precedent
- * of separating stable content from dynamic assembly. The dynamic parts (session
- * state, soul, workspace context) are injected by buildSystemPrompt() below.
- *
- * WHY these sections: daemon sessions run unattended. The agent has no user to ask.
- * The preamble replaces that missing human with: an oracle hierarchy, a reasoning
- * protocol, and explicit contracts for the two failure modes that matter most --
- * skipping steps and silent failure.
- */
-const BASE_SYSTEM_PROMPT = `\
-You are WorkRail Auto, an autonomous agent that executes workflows step by step. You are running unattended -- there is no user watching. Your entire job is to faithfully complete the current workflow.
-
-## What you are
-You are highly capable. You handle ambitious, multi-step tasks that require real codebase understanding. You don't hedge, ask for permission, or stop to check in. You work.
-
-## Your oracle (consult in this order when uncertain)
-1. The daemon soul rules (## Agent Rules and Philosophy below)
-2. AGENTS.md / CLAUDE.md in the workspace (injected below under Workspace Context)
-3. The current workflow step's prompt and guidance
-4. Local code patterns in the relevant module (grep the directory, not the whole repo)
-5. Industry best practices -- only when nothing above applies
-
-## Self-directed reasoning
-Ask yourself questions to clarify your approach, then answer them yourself using tools before acting. Never wait for a human to answer -- you are the oracle.
-
-Bad pattern: "I'll analyze both layers." (no justification)
-Good pattern: "Question: Should I check the middleware? Answer: The workflow step says 'trace the full call chain', and the AGENTS.md says the entry point is in the middleware layer. Yes, start there."
-
-## Your tools
-- \`complete_step\`: Mark the current step complete and advance to the next one. Call this after completing ALL work required by the step. Include your notes (min 50 characters) in the notes field. The daemon manages the session token internally -- you do NOT need a continueToken. This is the preferred advancement tool for daemon sessions.
-- \`continue_workflow\`: [DEPRECATED -- use complete_step instead. Do NOT pass a continueToken.] Only use this if complete_step is unavailable.
-- \`Bash\`: Run shell commands. Use for building, testing, running scripts.
-- \`Read\`: Read files.
-- \`Write\`: Write files.
-- \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND complete_step (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
-- \`spawn_agent\`: Delegate a sub-task to a child WorkRail session. BLOCKS until the child completes. Returns \`{ childSessionId, outcome: "success"|"error"|"timeout", notes: string }\`. Always check \`outcome\` before using \`notes\`. IMPORTANT: your session's time limit (maxSessionMinutes) keeps running while the child executes -- ensure your parent session has enough time for both your work AND the child's work. Maximum spawn depth is 3 by default (configurable). Use only when a step explicitly asks for delegation or when a clearly separable sub-task would benefit from its own WorkRail audit trail.
-- \`signal_coordinator\`: Emit a structured mid-session signal to the coordinator WITHOUT advancing the workflow step. Use when the step asks you to surface a finding, request data, request approval, or report a blocking condition. Always returns immediately -- fire-and-observe. Signal kinds: "progress", "finding", "data_needed", "approval_needed", "blocked".
-
-## Execution contract
-1. Read the step carefully. Do ALL the work the step asks for.
-2. Call \`complete_step\` with your notes. No continueToken needed -- the daemon manages it.
-3. Repeat until the workflow reports it is complete.
-4. Do NOT skip steps. Do NOT call \`complete_step\` without completing the step's work.
-
-## The workflow is the contract
-Every step must be fully completed before you call complete_step. The workflow step prompt is the specification of what 'done' means -- not a suggestion. Don't advance until the work is actually done.
-
-Your cognitive mode changes per step: some steps make you a researcher, others a reviewer, others an implementer. Adopt the mode the step describes. Don't bring your own agenda.
-
-## Silent failure is the worst outcome
-If something goes wrong: call report_issue, then continue unless severity is 'fatal'. Do NOT silently retry forever, work around failures without noting them, or pretend things worked. The issue record is how the system learns and self-heals.
-
-## Tools are your hands, not your voice
-Don't narrate what you're about to do. Use the tool and report what you found. Token efficiency matters -- you have a wall-clock timeout.
-
-## You don't have a user. You have a workflow and a soul.
-If you're unsure, consult the oracle above. If nothing answers the question, make a reasoned decision, call report_issue with kind='self_correction' to document it, and continue.
-
-## IMPORTANT: Never use continue_workflow in daemon sessions
-complete_step is your advancement tool. It does not require a continueToken. Do NOT call continue_workflow with a token you found in a previous message -- use complete_step instead.\
-`;
-
-/**
- * Format prior step notes into a concise session state recap string.
- *
- * This is a pure function -- all I/O (note loading, truncation decisions) is
- * handled by the caller. WHY pure: unit-testable without mocking the session
- * store or token codec.
- *
- * Returns an empty string when `notes` is empty so the caller can guard on
- * `recap !== ''` before injecting it into the system prompt.
- *
- * WHY `<workrail_session_state>` tag: `buildSystemPrompt()` already reserves
- * this XML slot in the system prompt. Using the existing tag ensures the agent
- * parses it consistently with the documented schema.
- *
- * @param notes - Prior step notes (already limited to MAX_SESSION_RECAP_NOTES
- *   entries and truncated to MAX_SESSION_NOTE_CHARS each by the caller).
- */
-export function buildSessionRecap(notes: readonly string[]): string {
-  if (notes.length === 0) return '';
-
-  const formattedNotes = notes
-    .map((note, i) => `### Prior step ${i + 1}\n${note}`)
-    .join('\n\n');
-
-  return `<workrail_session_state>\nThe following notes summarize prior steps from this session:\n\n${formattedNotes}\n</workrail_session_state>`;
-}
-
-/**
- * Build the system prompt for the daemon agent.
- *
- * This function is intentionally synchronous and pure -- all I/O (soul file,
- * workspace context) is resolved by the caller before invoking this function.
- * WHY: keeps the function unit-testable by passing pre-loaded strings directly,
- * without requiring fs mocking or real disk access in tests.
- *
- * @param trigger - The workflow trigger containing workspacePath and referenceUrls.
- * @param sessionState - Serialized WorkRail session state (may be empty string).
- * @param soulContent - Loaded content of daemon-soul.md (always a string; caller
- *   provides the hardcoded default if the file was absent).
- * @param workspaceContext - Combined workspace context from CLAUDE.md / AGENTS.md,
- *   or null if no workspace context files were found.
- * @param effectiveWorkspacePath - The workspace path the agent must work in.
- *   Callers compute this as: sessionWorkspacePath ?? trigger.workspacePath.
- *   Required (not optional) so the type system enforces the caller makes an explicit
- *   decision -- there is no silent fallback to trigger.workspacePath inside this function.
- *   WHY a separate parameter (not derived from trigger): trigger.workspacePath is always
- *   the main checkout. The worktree path is only known after worktree creation in
- *   buildPreAgentSession(). Passing it explicitly keeps this function pure and testable.
- */
-export function buildSystemPrompt(
-  trigger: WorkflowTrigger,
-  sessionState: string,
-  soulContent: string,
-  workspaceContext: string | null,
-  effectiveWorkspacePath: string,
-): string {
-  const isWorktreeSession = effectiveWorkspacePath !== trigger.workspacePath;
-
-  const lines = [
-    BASE_SYSTEM_PROMPT,
-    '',
-    `<workrail_session_state>${sessionState}</workrail_session_state>`,
-    '',
-    '## Agent Rules and Philosophy',
-    soulContent,
-    '',
-    `## Workspace: ${effectiveWorkspacePath}`,
-  ];
-
-  // When running in a worktree, add an explicit scope boundary so the agent never
-  // accidentally reads roadmap docs, runs git log on main, or modifies the main checkout.
-  // WHY: without this, the agent may drift to the main checkout for "context" (git log,
-  // planning docs, roadmap) which (1) pollutes the session with coordinator work and
-  // (2) can mutate the main checkout. This note is a hard constraint, not guidance.
-  if (isWorktreeSession) {
-    lines.push('');
-    lines.push(`**Worktree session scope:** Your workspace is the isolated git worktree at \`${effectiveWorkspacePath}\`. Do not access, read, or modify the main checkout at \`${trigger.workspacePath}\`. Do not read planning docs, roadmap files, or backlog files. All Bash commands, file reads, and file writes must stay within your worktree path.`);
-  }
-
-  // Inject workspace context (CLAUDE.md / AGENTS.md) when available.
-  // WHY: these files define repo-specific coding conventions, commit style, and
-  // tooling preferences. Injecting them here gives the agent the same context
-  // it would have if invoked by Claude Code or another agent-aware tool.
-  if (workspaceContext !== null) {
-    lines.push('');
-    lines.push('## Workspace Context (from AGENTS.md / CLAUDE.md)');
-    lines.push(workspaceContext);
-  }
-
-  // Inject assembled task context (prior session notes + git diff stat) when provided.
-  // WHY before referenceUrls: task-specific runtime context should be visible before
-  // static reference documents. Earlier position improves agent attention.
-  // WHY trigger.context key: the coordinator serializes the rendered context bundle
-  // into trigger.context['assembledContextSummary'] (string) before spawning. This
-  // survives the HTTP transport (context map is already JSON-serialized).
-  const assembledContextSummary = trigger.context?.['assembledContextSummary'];
-  if (typeof assembledContextSummary === 'string' && assembledContextSummary.trim().length > 0) {
-    let ctxStr = assembledContextSummary as string;
-    if (Buffer.byteLength(ctxStr, 'utf8') > MAX_ASSEMBLED_CONTEXT_BYTES) {
-      ctxStr = ctxStr.slice(0, MAX_ASSEMBLED_CONTEXT_BYTES) + '\n[Prior context truncated at 8KB]';
-    }
-    lines.push('');
-    lines.push('## Prior Context');
-    lines.push(ctxStr.trim());
-  }
-
-  // Append reference URLs section when provided.
-  // WHY: some tasks require background context (specs, design docs, ADRs) that
-  // the agent should fetch and read before starting work. Providing the URLs in
-  // the system prompt ensures they are visible from the first turn.
-  if (trigger.referenceUrls && trigger.referenceUrls.length > 0) {
-    lines.push('');
-    lines.push('## Reference documents');
-    lines.push(
-      'Before starting, fetch and read these reference documents: ' +
-      trigger.referenceUrls.join(' '),
-    );
-    lines.push(
-      'If you cannot fetch any of these documents, note their unavailability and proceed.',
-    );
-  }
-
-  return lines.join('\n');
-}
 
 /** Build a user message for the agent loop. */
 function buildUserMessage(text: string): { role: 'user'; content: string; timestamp: number } {
@@ -1659,140 +1448,6 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
     timestamp: Date.now(),
   };
 }
-
-// ---------------------------------------------------------------------------
-// Execution stats helper
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Pure functions: functional core
-// ---------------------------------------------------------------------------
-
-/**
- * Map a WorkflowRunResult._tag to the stats outcome string recorded in execution-stats.jsonl.
- *
- * WHY pure function with assertNever: the compiler enforces exhaustiveness.
- * Adding a new _tag variant to WorkflowRunResult without updating this function
- * produces a TypeScript compile error -- silent omissions are impossible.
- *
- * WHY delivery_failed -> 'success': the workflow ran to completion; only the
- * HTTP callback POST failed. The stats should reflect that the work was done.
- * See WorkflowDeliveryFailed and invariants doc section 1.3.
- */
-export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | 'error' | 'timeout' | 'stuck' {
-  switch (tag) {
-    case 'success': return 'success';
-    case 'error': return 'error';
-    case 'timeout': return 'timeout';
-    case 'stuck': return 'stuck';
-    case 'delivery_failed': return 'success'; // workflow succeeded; only POST failed
-    default: return assertNever(tag);
-  }
-}
-
-/**
- * Sidecar lifecycle decision for a completed runWorkflow() session.
- *
- * WHY a discriminated union: the two outcomes have categorically different
- * cleanup owners. 'delete_now' means runWorkflow() (via finalizeSession) deletes
- * the sidecar before returning. 'retain_for_delivery' means TriggerRouter.maybeRunDelivery()
- * deletes it after git delivery completes -- runWorkflow() must NOT delete it.
- */
-export type SidecarLifecycle =
-  | { readonly kind: 'delete_now' }
-  | { readonly kind: 'retain_for_delivery' };
-
-/**
- * Determine the correct sidecar lifecycle action for a completed session.
- *
- * Pure: no I/O, no side effects, deterministic.
- *
- * Rules (from worktrain-daemon-invariants.md section 2.2):
- * - success + worktree: retain -- delivery (git push, gh pr create) runs in the
- *   worktree after runWorkflow() returns; sidecar must outlive this function.
- * - all other outcomes and branch strategies: delete immediately.
- *
- * WHY delivery_failed hits assertNever: runWorkflow() never produces delivery_failed
- * (invariant 1.2). If it ever does, a compile error here forces the caller to handle it.
- */
-export function sidecardLifecycleFor(
-  tag: WorkflowRunResult['_tag'],
-  branchStrategy: WorkflowTrigger['branchStrategy'],
-): SidecarLifecycle {
-  switch (tag) {
-    case 'success':
-      return branchStrategy === 'worktree'
-        ? { kind: 'retain_for_delivery' }
-        : { kind: 'delete_now' };
-    case 'error':
-    case 'timeout':
-    case 'stuck':
-      return { kind: 'delete_now' };
-    case 'delivery_failed':
-      // WHY throw: delivery_failed is in WorkflowRunResult but is never produced by
-      // runWorkflow() directly (invariant 1.2). This case is unreachable in production.
-      // Explicit handling (not assertNever) so the default: branch remains typed as never,
-      // making the assertNever guard work for future WorkflowRunResult variants.
-      throw new Error(`sidecardLifecycleFor: delivery_failed is not a valid input (invariant 1.2)`);
-    default:
-      // WHY assertNever: if a new WorkflowRunResult._tag variant is added without updating
-      // this function, the compiler breaks here and forces handling.
-      return assertNever(tag);
-  }
-}
-
-/**
- * Build the Anthropic (or AnthropicBedrock) client and resolve the model ID.
- *
- * Pure: no I/O. Reads only the trigger config and process.env.
- * Throws with a clear message on invalid model format -- the caller wraps
- * in a try/catch that returns _tag: 'error'.
- *
- * WHY pure: model selection is a pure computation from trigger + env. Extracting
- * it makes the logic testable without real API keys or a running daemon session.
- *
- * Model format: "provider/model-id" (e.g. "amazon-bedrock/claude-sonnet-4-6").
- * When absent, detects AWS credentials in env (Bedrock) vs. direct API key.
- *
- * @param trigger - WorkflowTrigger carrying optional agentConfig.model override.
- * @param apiKey - Anthropic API key (used only when not using Bedrock).
- * @param env - Process environment variables (for AWS credential detection).
- */
-export function buildAgentClient(
-  trigger: WorkflowTrigger,
-  apiKey: string,
-  env: NodeJS.ProcessEnv,
-): { agentClient: Anthropic | AnthropicBedrock; modelId: string } {
-  if (trigger.agentConfig?.model) {
-    // Parse "provider/model-id" -- split on the first slash only.
-    const slashIdx = trigger.agentConfig.model.indexOf('/');
-    if (slashIdx === -1) {
-      throw new Error(
-        `agentConfig.model must be in "provider/model-id" format, got: "${trigger.agentConfig.model}"`,
-      );
-    }
-    const provider = trigger.agentConfig.model.slice(0, slashIdx);
-    const modelId = trigger.agentConfig.model.slice(slashIdx + 1);
-    const agentClient: Anthropic | AnthropicBedrock =
-      provider === 'amazon-bedrock' ? new AnthropicBedrock() : new Anthropic({ apiKey });
-    return { agentClient, modelId };
-  }
-
-  // Default: use Bedrock when AWS credentials are present, direct API otherwise.
-  // WHY: avoids personal API key charges when AWS credentials are available.
-  const usesBedrock = !!env['AWS_PROFILE'] || !!env['AWS_ACCESS_KEY_ID'];
-  if (usesBedrock) {
-    return {
-      agentClient: new AnthropicBedrock(),
-      modelId: 'us.anthropic.claude-sonnet-4-6',
-    };
-  }
-  return {
-    agentClient: new Anthropic({ apiKey }),
-    modelId: 'claude-sonnet-4-6',
-  };
-}
-
 
 /**
  * Write a single execution-stats entry and regenerate the stats summary.
@@ -2073,101 +1728,6 @@ export async function finalizeSession(
   }
 }
 
-// ---------------------------------------------------------------------------
-// buildSessionContext -- pure session configuration
-// ---------------------------------------------------------------------------
-
-/**
- * Everything the agent loop needs, produced by buildSessionContext().
- * Pure value -- no I/O, no closures, no mutable state.
- */
-export interface SessionContext {
-  readonly systemPrompt: string;
-  readonly initialPrompt: string;
-  readonly sessionTimeoutMs: number;
-  readonly maxTurns: number;
-  /**
-   * Per-turn stall detection timeout in milliseconds.
-   * Undefined when stall detection is disabled (agentConfig.stallTimeoutSeconds absent
-   * and DEFAULT_STALL_TIMEOUT_SECONDS applied, converting to ms). Passed directly to
-   * AgentLoopOptions.stallTimeoutMs.
-   */
-  readonly stallTimeoutMs: number;
-}
-
-/**
- * Build the session configuration from a ContextBundle and the first step prompt.
- *
- * This function is intentionally synchronous and pure -- all I/O (soul file,
- * workspace context, session notes) is resolved by the caller before invoking
- * this function. WHY: keeps the function unit-testable by passing pre-loaded
- * values directly, without requiring any I/O or mocking in tests.
- *
- * @param trigger - The workflow trigger (provides agentConfig limits and context).
- * @param context - The ContextBundle from DefaultContextLoader.loadSession().
- * @param firstStepPrompt - The first step's pending prompt from executeStartWorkflow
- *   or the pre-allocated AllocatedSession.
- * @param effectiveWorkspacePath - The workspace path the agent must work in.
- *   Callers compute this as: sessionWorkspacePath ?? trigger.workspacePath.
- *   Required so the type system forces callers to make an explicit decision.
- *   Passed through to buildSystemPrompt() -- see that function's docs for details.
- * @returns SessionContext containing systemPrompt, initialPrompt, and session limits.
- */
-export function buildSessionContext(
-  trigger: WorkflowTrigger,
-  context: import('./context-loader.js').ContextBundle,
-  firstStepPrompt: string,
-  effectiveWorkspacePath: string,
-): SessionContext {
-  // ---- Flatten ContextBundle to the primitives buildSystemPrompt expects ----
-  // WHY flatten here (not in DefaultContextLoader): buildSystemPrompt() is a stable
-  // pure function that predates ContextBundle. Flattening at the call site in
-  // buildSessionContext() keeps DefaultContextLoader decoupled from the prompt layer.
-  // workspaceRules[0].content: v1 always has at most one element (the aggregate from
-  // loadWorkspaceContext). The ?? null pattern converts undefined to null correctly
-  // since optional chaining returns undefined, not null.
-  const workspaceContext: string | null = context.workspaceRules[0]?.content ?? null;
-  // sessionHistory.map: restores the flat string[] that buildSessionRecap expects.
-  // nodeId/stepId are discarded here -- they are unused in v1.
-  const sessionNotes: readonly string[] = context.sessionHistory.map((n) => n.content);
-
-  // ---- System prompt ----
-  // buildSystemPrompt() is synchronous and pure. It reads assembledContextSummary
-  // and referenceUrls from trigger.context and trigger.referenceUrls directly;
-  // the authoritative values flow through trigger.
-  const sessionState = buildSessionRecap(sessionNotes);
-  const systemPrompt = buildSystemPrompt(trigger, sessionState, context.soulContent, workspaceContext, effectiveWorkspacePath);
-
-  // ---- Initial prompt ----
-  // WHY no continueToken in the initial prompt: the daemon uses complete_step which
-  // manages the token internally. Including the token would invite the LLM to store
-  // it and call continue_workflow (deprecated) instead of complete_step, defeating
-  // the purpose of the new tool.
-  // WHY closing directive: an explicit imperative at the end of the initial prompt
-  // directs the agent to complete the step work before calling complete_step. Without
-  // this, the agent may produce a "thinking aloud" turn before the first tool call,
-  // which wastes tokens and delays step execution.
-  const contextJson = trigger.context
-    ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
-    : '';
-
-  const initialPrompt =
-    firstStepPrompt +
-    contextJson +
-    '\n\nComplete all step work, then call complete_step with your notes to advance.';
-
-  // ---- Session limits ----
-  // Resolved from trigger.agentConfig with hardcoded defaults as fallback.
-  // WHY: per-trigger configurability lets operators tune limits per workflow type
-  // (e.g. a fast code-review trigger vs. a slow coding-task trigger).
-  const sessionTimeoutMs =
-    (trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES) * 60 * 1000;
-  const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
-  const stallTimeoutMs =
-    (trigger.agentConfig?.stallTimeoutSeconds ?? DEFAULT_STALL_TIMEOUT_SECONDS) * 1000;
-
-  return { systemPrompt, initialPrompt, sessionTimeoutMs, maxTurns, stallTimeoutMs };
-}
 
 // ---------------------------------------------------------------------------
 // buildPreAgentSession -- pre-agent I/O phase
@@ -2672,93 +2232,6 @@ export function buildAgentCallbacks(
   };
 }
 
-// ---------------------------------------------------------------------------
-// buildSessionResult -- pure result construction
-// ---------------------------------------------------------------------------
-
-/**
- * Build the WorkflowRunResult for the completed session.
- *
- * Pure: reads state and trigger config, produces a typed result value.
- * Does NOT call finalizeSession -- the caller is responsible for that.
- *
- * WHY pure: the result-building logic is deterministic from its inputs.
- * Extracting it makes the mapping from session state to result type
- * independently readable and testable.
- */
-export function buildSessionResult(
-  state: Readonly<SessionState>,
-  stopReason: string,
-  errorMessage: string | undefined,
-  trigger: WorkflowTrigger,
-  sessionId: string,
-  sessionWorktreePath: string | undefined,
-): WorkflowRunResult {
-  // Terminal signal: stuck takes priority over timeout (invariant 1.4 -- structurally
-  // enforced by setTerminalSignal's first-writer-wins; this switch handles the result).
-  if (state.terminalSignal !== null) {
-    const signal = state.terminalSignal;
-    if (signal.kind === 'stuck') {
-      return {
-        _tag: 'stuck',
-        workflowId: trigger.workflowId,
-        reason: signal.reason,
-        message: `Session aborted: stuck heuristic fired (${signal.reason})`,
-        stopReason: 'aborted',
-        ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
-      };
-    }
-    if (signal.kind === 'timeout') {
-      const limitDescription = signal.reason === 'wall_clock'
-        ? `${trigger.agentConfig?.maxSessionMinutes ?? DEFAULT_SESSION_TIMEOUT_MINUTES} minutes`
-        : `${trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS} turns`;
-      return {
-        _tag: 'timeout',
-        workflowId: trigger.workflowId,
-        reason: signal.reason,
-        message: `Workflow ${signal.reason === 'wall_clock' ? 'timed out' : 'exceeded turn limit'} after ${limitDescription}`,
-        stopReason: 'aborted',
-      };
-    }
-    // WHY assertNever: if TerminalSignal gains a new kind variant, the compiler
-    // forces this function to handle it before the code will compile.
-    return assertNever(signal);
-  }
-
-  if (stopReason === 'error' || errorMessage) {
-    const errMsg = errorMessage ?? 'Agent stopped with error reason';
-    const lastToolCalled = state.lastNToolCalls.length > 0 ? state.lastNToolCalls[state.lastNToolCalls.length - 1] : null;
-    const stuckMarker = `\n\nWORKTRAIN_STUCK: ${JSON.stringify({
-      reason: 'session_error',
-      error: errMsg.slice(0, 500),
-      workflowId: trigger.workflowId,
-      sessionId,
-      turnCount: state.turnCount,
-      stepAdvanceCount: state.stepAdvanceCount,
-      ...(lastToolCalled !== null && { lastToolCalled }),
-      ...(state.issueSummaries.length > 0 && { issueSummaries: state.issueSummaries }),
-    })}`;
-    return {
-      _tag: 'error',
-      workflowId: trigger.workflowId,
-      message: errMsg,
-      stopReason,
-      lastStepNotes: stuckMarker,
-    };
-  }
-
-  // Success
-  return {
-    _tag: 'success',
-    workflowId: trigger.workflowId,
-    stopReason,
-    ...(state.lastStepNotes !== undefined ? { lastStepNotes: state.lastStepNotes } : {}),
-    ...(state.lastStepArtifacts !== undefined ? { lastStepArtifacts: state.lastStepArtifacts } : {}),
-    ...(sessionWorktreePath !== undefined ? { sessionWorkspacePath: sessionWorktreePath } : {}),
-    ...(sessionWorktreePath !== undefined ? { sessionId } : {}),
-    ...(trigger.botIdentity !== undefined ? { botIdentity: trigger.botIdentity } : {}),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // buildAgentReadySession -- context loading + tool construction + AgentLoop setup

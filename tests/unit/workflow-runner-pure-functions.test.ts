@@ -20,22 +20,23 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { tmpPath } from '../helpers/platform.js';
+// State layer imports
+import { evaluateStuckSignals, createSessionState, setTerminalSignal } from '../../src/daemon/state/index.js';
+import type { SessionState, StuckConfig, TerminalSignal } from '../../src/daemon/state/index.js';
+// Core layer imports
 import {
   tagToStatsOutcome,
   buildAgentClient,
-  evaluateStuckSignals,
-  createSessionState,
   buildSessionContext,
   buildSessionResult,
-  buildAgentCallbacks,
   sidecardLifecycleFor,
-  setTerminalSignal,
   DAEMON_SOUL_DEFAULT,
   DEFAULT_SESSION_TIMEOUT_MINUTES,
   DEFAULT_MAX_TURNS,
-} from '../../src/daemon/workflow-runner.js';
-import type { SessionState, StuckConfig, TerminalSignal } from '../../src/daemon/workflow-runner.js';
-import type { WorkflowRunResult, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+} from '../../src/daemon/core/index.js';
+// buildAgentCallbacks stays in workflow-runner (it has I/O dependency via writeStuckOutboxEntry)
+import { buildAgentCallbacks } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowRunResult, WorkflowTrigger } from '../../src/daemon/types.js';
 import type { ContextBundle } from '../../src/daemon/context-loader.js';
 
 // ── tagToStatsOutcome ─────────────────────────────────────────────────────────
