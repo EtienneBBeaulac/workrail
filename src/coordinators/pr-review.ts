@@ -1309,10 +1309,13 @@ async function runFixAgentLoop(
 
     log(`      PR #${pr.number}  ->  spawning fix agent (pass ${passCount})...`);
 
+    // Forward the same assembled context (git diff, prior session notes) that the
+    // initial review session received -- the fix agent needs the same workspace awareness.
     const fixSpawnResult = await deps.spawnSession(
       'wr.coding-task',
       fixGoal,
       opts.workspace,
+      reviewSpawnContext,
     );
 
     if (fixSpawnResult.kind === 'err') {
