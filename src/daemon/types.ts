@@ -420,11 +420,6 @@ export interface WorkflowContextSlots {
   readonly assembledContextSummary?: string;
 }
 
-/**
- * Extract WorkflowContextSlots from a trigger's context map.
- * Reads the known typed fields; ignores all others.
- * Pure function -- no I/O.
- */
 export function extractContextSlots(context: Readonly<Record<string, unknown>> | undefined): WorkflowContextSlots {
   if (!context) return {};
   const assembledContextSummary = typeof context['assembledContextSummary'] === 'string'
