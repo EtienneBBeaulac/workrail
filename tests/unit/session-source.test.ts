@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { SessionSource, AllocatedSession, WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import type { SessionSource, AllocatedSession, WorkflowTrigger } from '../../src/daemon/types.js';
 
 const BASE_TRIGGER: WorkflowTrigger = {
   workflowId: 'wr.coding-task',

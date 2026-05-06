@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DefaultFileStateTracker } from '../../src/daemon/session-scope.js';
-import type { ReadFileState } from '../../src/daemon/workflow-runner.js';
+import type { ReadFileState } from '../../src/daemon/types.js';
 
 describe('DefaultFileStateTracker', () => {
   describe('initially empty (no constructor arg)', () => {

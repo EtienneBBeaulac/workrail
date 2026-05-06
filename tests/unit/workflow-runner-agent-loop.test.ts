@@ -251,7 +251,8 @@ vi.mock('../../src/v2/projections/node-outputs.js', () => ({
 
 // ── Import after mocks ─────────────────────────────────────────────────────────
 
-import { runWorkflow, type WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import { runWorkflow } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowTrigger } from '../../src/daemon/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────

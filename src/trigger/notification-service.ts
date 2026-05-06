@@ -25,7 +25,7 @@
 
 import * as childProcess from 'node:child_process';
 import * as os from 'node:os';
-import type { WorkflowRunResult } from '../daemon/workflow-runner.js';
+import type { WorkflowRunResult } from '../daemon/types.js';
 
 // ---------------------------------------------------------------------------
 // Injected function types

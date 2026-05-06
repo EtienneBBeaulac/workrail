@@ -22,7 +22,7 @@
  *     A future v2 could populate these from the projection's `nodesById` keys.
  */
 
-import type { WorkflowTrigger } from './workflow-runner.js';
+import type { WorkflowTrigger } from './types.js';
 import type { V2ToolContext } from '../mcp/types.js';
 
 // ---------------------------------------------------------------------------

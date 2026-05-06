@@ -25,7 +25,7 @@
 import * as crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SessionSource } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, WorkflowRunResult, WorkflowDeliveryFailed, SessionSource } from '../daemon/types.js';
 import type { ActiveSessionSet } from '../daemon/active-sessions.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { V2ToolContext } from '../mcp/types.js';

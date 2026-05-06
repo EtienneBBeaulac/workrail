@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { DefaultContextLoader } from '../../src/daemon/context-loader.js';
-import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowTrigger } from '../../src/daemon/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 
 // ---------------------------------------------------------------------------

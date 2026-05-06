@@ -32,7 +32,7 @@ import { PolledEventStore } from '../../src/trigger/polled-event-store.js';
 import type { TriggerDefinition } from '../../src/trigger/types.js';
 import { asTriggerId } from '../../src/trigger/types.js';
 import type { TriggerRouter } from '../../src/trigger/trigger-router.js';
-import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowTrigger } from '../../src/daemon/types.js';
 import type { FetchFn } from '../../src/trigger/adapters/gitlab-poller.js';
 import type { FetchFn as QueueFetchFn } from '../../src/trigger/adapters/github-queue-poller.js';
 

@@ -47,7 +47,8 @@ vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 
-import { runWorkflow, type WorkflowTrigger, type SessionSource, type AllocatedSession } from '../../src/daemon/workflow-runner.js';
+import { runWorkflow } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowTrigger, SessionSource, AllocatedSession } from '../../src/daemon/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────

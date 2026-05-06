@@ -32,7 +32,7 @@ import { pollGitLabMRs, type FetchFn, type GitLabMR } from './adapters/gitlab-po
 import { pollGitHubIssues, pollGitHubPRs, type GitHubIssue, type GitHubPR } from './adapters/github-poller.js';
 import { pollGitHubQueueIssues, inferMaturity, checkIdempotency, readSidecarAttemptCount, type GitHubQueueIssue, type FetchFn as QueueFetchFn } from './adapters/github-queue-poller.js';
 import { loadQueueConfig } from './github-queue-config.js';
-import type { WorkflowTrigger } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger } from '../daemon/types.js';
 import type { PipelineOutcome } from '../coordinators/adaptive-pipeline.js';
 import { DISCOVERY_TIMEOUT_MS } from '../coordinators/adaptive-pipeline.js';
 import * as fs from 'node:fs/promises';
