@@ -1164,6 +1164,9 @@ function projectSessionDetail(
   const sortedEventsRes = asSortedEventLog(events);
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
 
+  // Hoist context projection so both triggerSource derivation and injectedContext can reuse it.
+  const runContextRes = sortedEventsRes.isOk() ? projectRunContextV2(sortedEventsRes.value) : err(sortedEventsRes.error as never);
+
   // Derive triggerSource from run_started events (same backfill logic as projectSessionSummary).
   const detailTriggerSource = ((): 'daemon' | 'mcp' => {
     if (sortedEventsRes.isOk()) {
@@ -1173,18 +1176,29 @@ function projectSessionDetail(
         }
       }
     }
-    const contextRes = sortedEventsRes.isOk() ? projectRunContextV2(sortedEventsRes.value) : err(sortedEventsRes.error as never);
-    const isAutonomous = contextRes.isOk() && Object.values(contextRes.value.byRunId).some(
+    const isAutonomous = runContextRes.isOk() && Object.values(runContextRes.value.byRunId).some(
       (runCtx) => runCtx.context['is_autonomous'] === 'true',
     );
     return isAutonomous ? 'daemon' : 'mcp';
+  })();
+
+  // Extract injected context from the context_set projection.
+  const injectedContext = ((): { readonly assembledContextSummary?: string } | undefined => {
+    if (!runContextRes.isOk()) return undefined;
+    for (const runCtx of Object.values(runContextRes.value.byRunId)) {
+      const summary = runCtx.context['assembledContextSummary'];
+      if (typeof summary === 'string' && summary.trim().length > 0) {
+        return { assembledContextSummary: summary };
+      }
+    }
+    return undefined;
   })();
 
   const dagRes = projectRunDagV2(events);
   if (dagRes.isErr()) {
     // metrics and repoRoot are null here as placeholders; the caller (getSessionDetail)
     // always overrides these with the actual computed values via spread.
-    return { sessionId, sessionTitle, health: sessionHealth, runs: [], metrics: null, repoRoot: null, triggerSource: detailTriggerSource };
+    return { sessionId, sessionTitle, health: sessionHealth, runs: [], metrics: null, repoRoot: null, triggerSource: detailTriggerSource, ...(injectedContext !== undefined ? { injectedContext } : {}) };
   }
 
   const statusRes = sortedEventsRes.isOk() ? projectRunStatusSignalsV2(sortedEventsRes.value) : err(sortedEventsRes.error);
@@ -1273,7 +1287,7 @@ function projectSessionDetail(
 
   // metrics and repoRoot are null here as placeholders; the caller (getSessionDetail)
   // always overrides these with the actual computed values via spread.
-  return { sessionId, sessionTitle, health: sessionHealth, runs, metrics: null, repoRoot: null, triggerSource: detailTriggerSource };
+  return { sessionId, sessionTitle, health: sessionHealth, runs, metrics: null, repoRoot: null, triggerSource: detailTriggerSource, ...(injectedContext !== undefined ? { injectedContext } : {}) };
 }
 
 /**

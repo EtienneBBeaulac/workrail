@@ -193,6 +193,18 @@ export interface ConsoleSessionDetail {
    * Same backfill logic as ConsoleSessionSummary: old sessions without the field
    * default to 'daemon' when isAutonomous is true, 'mcp' otherwise. */
   readonly triggerSource: 'daemon' | 'mcp';
+  /**
+   * Context injected into this session at dispatch time, from the context_set event.
+   * Absent for sessions that received no assembled context (e.g. direct trigger dispatch,
+   * pre-living-work-context sessions).
+   *
+   * assembledContextSummary: the coordinator-assembled phase handoff context (discovery
+   * constraints, shaping decisions, coding notes) that was injected as ## Prior Context
+   * in the agent's system prompt.
+   */
+  readonly injectedContext?: {
+    readonly assembledContextSummary?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
