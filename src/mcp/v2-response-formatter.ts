@@ -458,6 +458,7 @@ function formatCleanBlocked(data: V2Blocked): string {
   const token = data.retryContinueToken ?? data.nextCall?.params.continueToken ?? data.continueToken;
   if (token) {
     lines.push(`WorkRail: retry with corrected output. Token: ${token}`);
+    lines.push('---');
   }
 
   return lines.join('\n');
@@ -476,6 +477,7 @@ function formatCleanRehydrate(data: V2ExecutionResponse): string {
   if (token) {
     const footer = pickFooter(CLEAN_REHYDRATE_FOOTERS, data.pending?.stepId);
     lines.push(`${footer} ${token}`);
+    lines.push('---');
   }
 
   const driftBlock = formatBindingDriftWarnings(data);
@@ -499,6 +501,7 @@ function formatCleanSuccess(data: V2ExecutionResponse): string {
   if (token) {
     const footer = pickFooter(CLEAN_ADVANCE_FOOTERS, data.pending?.stepId);
     lines.push(`${footer} ${token}`);
+    lines.push('---');
   }
 
   const driftBlock = formatBindingDriftWarnings(data);
