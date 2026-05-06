@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto';
 import { ok, err } from 'neverthrow';
 import type { V2ToolContext } from '../mcp/types.js';
 import type { AdaptiveCoordinatorDeps } from '../coordinators/adaptive-pipeline.js';
+import type { CoordinatorSpawnContext } from '../coordinators/pr-review.js';
 import type { ChildSessionResult } from '../coordinators/types.js';
 import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
@@ -237,7 +238,7 @@ export function createCoordinatorDeps(
       workflowId: string,
       goal: string,
       workspace: string,
-      context?: Readonly<Record<string, unknown>>,
+      context?: CoordinatorSpawnContext,
       agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
       parentSessionId?: string,
     ) => {
