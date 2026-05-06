@@ -119,6 +119,23 @@ export {
   MAX_SESSION_RECAP_NOTES,
   MAX_SESSION_NOTE_CHARS,
 } from './io/index.js';
+import { getSchemas, WORKTREES_DIR } from './runner/index.js';
+import type {
+  PreAgentSession,
+  PreAgentSessionResult,
+  AgentReadySession,
+  SessionOutcome,
+  FinalizationContext,
+
+} from './runner/runner-types.js';
+export type {
+  PreAgentSession,
+  PreAgentSessionResult,
+  AgentReadySession,
+  SessionOutcome,
+  FinalizationContext,
+} from './runner/runner-types.js';
+export { WORKTREES_DIR } from './runner/runner-types.js';
 import { withWorkrailSession, persistTokens, DAEMON_SESSIONS_DIR } from './tools/_shared.js';
 import { makeContinueWorkflowTool, makeCompleteStepTool } from './tools/continue-workflow.js';
 import { makeBashTool } from './tools/bash.js';
@@ -220,15 +237,6 @@ const MAX_ORPHAN_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MAX_WORKTREE_ORPHAN_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 
-/**
- * Directory that holds per-session isolated git worktrees.
- * Each runWorkflow() call with branchStrategy === 'worktree' creates a subdirectory
- * at <WORKTREES_DIR>/<sessionId>/ containing the git worktree for that session.
- * Worktrees are removed on successful session completion (after delivery).
- * Failed/timed-out sessions keep their worktree for debugging; runStartupRecovery()
- * reaps orphans older than MAX_WORKTREE_ORPHAN_AGE_MS on the next daemon start.
- */
-export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
 
 
 
@@ -857,167 +865,6 @@ async function clearStrayTmpFiles(sessionsDir: string): Promise<void> {
 }
 
 
-// ---------------------------------------------------------------------------
-// Tool parameter schemas (plain JSON Schema -- no TypeBox or external loader needed)
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _schemas: Record<string, any> | null = null;
-
-// WHY plain JSON Schema: the Anthropic SDK's Tool.input_schema accepts
-// Record<string, unknown>. TypeBox was only needed because pi-agent-core's
-// AgentTool<TSchema> required a TypeBox schema type. The new AgentTool interface
-// (from agent-loop.ts) accepts plain JSON Schema directly.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getSchemas(): Record<string, any> {
-  if (_schemas) return _schemas;
-  _schemas = {
-    ContinueWorkflowParams: {
-      type: 'object',
-      properties: {
-        continueToken: {
-          type: 'string',
-          description: 'The continueToken from the previous start_workflow or continue_workflow call. Round-trip exactly as received.',
-        },
-        intent: {
-          type: 'string',
-          enum: ['advance', 'rehydrate'],
-          description: 'advance: I completed this step. rehydrate: remind me what the current step is.',
-        },
-        notesMarkdown: {
-          type: 'string',
-          description: 'Notes on what you did in this step (10-30 lines, markdown).',
-        },
-        artifacts: {
-          type: 'array',
-          items: {},
-          description:
-            'Optional structured artifacts to attach to this step. ' +
-            'Include wr.assessment objects here when the step requires an assessment gate. ' +
-            'Example: [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }]',
-        },
-        context: {
-          type: 'object',
-          additionalProperties: true,
-          description: 'Updated context variables (only changed values). Exception: metrics_commit_shas must always contain the FULL accumulated list of all commit SHAs from this session -- never send only new SHAs.',
-        },
-      },
-      required: ['continueToken'],
-    },
-    CompleteStepParams: {
-      type: 'object',
-      properties: {
-        notes: {
-          type: 'string',
-          minLength: 50,
-          description:
-            'What you did in this step (required, at least 50 characters). Write for a human reader. ' +
-            'Include: what you did and key decisions, what you produced (files, tests, numbers), ' +
-            'anything notable (risks, open questions, things you chose NOT to do and why). ' +
-            'Use markdown: headings, bullets, bold. 10-30 lines is ideal.',
-        },
-        artifacts: {
-          type: 'array',
-          items: {},
-          description:
-            'Optional structured artifacts to attach to this step. ' +
-            'Include wr.assessment objects here when the step requires an assessment gate. ' +
-            'Example: [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }]',
-        },
-        context: {
-          type: 'object',
-          additionalProperties: true,
-          description: 'Updated context variables (only changed values). Omit entirely if no facts changed. Exception: metrics_commit_shas must always contain the FULL accumulated list of all commit SHAs from this session -- never send only new SHAs.',
-        },
-      },
-      required: ['notes'],
-      additionalProperties: false,
-    },
-    BashParams: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'Shell command to execute' },
-        cwd: { type: 'string', description: 'Working directory for the command' },
-      },
-      required: ['command'],
-    },
-    ReadParams: {
-      type: 'object',
-      properties: {
-        filePath: { type: 'string', description: 'Absolute path to the file to read. Content is returned in cat -n format: each line prefixed with its 1-indexed line number and a tab character.' },
-        offset: { type: 'number', description: '0-indexed line number to start reading from (inclusive). Omit to read from the beginning.' },
-        limit: { type: 'number', description: 'Maximum number of lines to return. Omit to read to end of file.' },
-      },
-      required: ['filePath'],
-    },
-    WriteParams: {
-      type: 'object',
-      properties: {
-        filePath: { type: 'string', description: 'Absolute path to the file to write' },
-        content: { type: 'string', description: 'Content to write to the file' },
-      },
-      required: ['filePath', 'content'],
-    },
-    GlobParams: {
-      type: 'object',
-      properties: {
-        pattern: { type: 'string', description: 'Glob pattern to match (e.g. "**/*.ts"). Supports standard glob syntax.' },
-        path: { type: 'string', description: 'Absolute path to search root. Defaults to the workspace root.' },
-      },
-      required: ['pattern'],
-    },
-    GrepParams: {
-      type: 'object',
-      properties: {
-        pattern: { type: 'string', description: 'Regular expression pattern to search for in file contents.' },
-        path: { type: 'string', description: 'Absolute path to search in. Defaults to the workspace root.' },
-        glob: { type: 'string', description: 'Glob pattern to restrict which files are searched (e.g. "*.ts").' },
-        type: { type: 'string', description: 'File type filter for ripgrep (e.g. "ts", "js", "py").' },
-        output_mode: { type: 'string', enum: ['content', 'files_with_matches', 'count'], description: 'Output mode. "files_with_matches": only file paths (default). "content": matching lines with context. "count": match counts per file.' },
-        head_limit: { type: 'number', description: 'Maximum number of output lines to return. Default: 250.' },
-        context: { type: 'number', description: 'Number of lines of context to show before and after each match (output_mode=content only).' },
-        '-i': { type: 'boolean', description: 'Case-insensitive search.' },
-      },
-      required: ['pattern'],
-    },
-    EditParams: {
-      type: 'object',
-      properties: {
-        file_path: { type: 'string', description: 'Absolute path to the file to edit. The file must have been read in this session via the Read tool.' },
-        old_string: { type: 'string', description: 'Exact string to find and replace. Must appear exactly once in the file (or use replace_all=true for multiple occurrences). Do NOT include line-number prefixes from Read output.' },
-        new_string: { type: 'string', description: 'Replacement string. Must differ from old_string.' },
-        replace_all: { type: 'boolean', description: 'Replace all occurrences of old_string. Default: false (fails if more than one match).' },
-      },
-      required: ['file_path', 'old_string', 'new_string'],
-      additionalProperties: false,
-    },
-    SpawnAgentParams: {
-      type: 'object',
-      properties: {
-        workflowId: {
-          type: 'string',
-          description: 'ID of the workflow to run in the child session (e.g. "wr.discovery").',
-        },
-        goal: {
-          type: 'string',
-          description: 'One-sentence description of what the child session should accomplish.',
-        },
-        workspacePath: {
-          type: 'string',
-          description: 'Absolute path to the workspace directory for the child session.',
-        },
-        context: {
-          type: 'object',
-          additionalProperties: true,
-          description: 'Optional initial context variables to pass to the child workflow.',
-        },
-      },
-      required: ['workflowId', 'goal', 'workspacePath'],
-      additionalProperties: false,
-    },
-  };
-  return _schemas;
-}
 
 // Tool factories are implemented in src/daemon/tools/ and re-exported at the top of this file.
 
@@ -1036,237 +883,6 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
 // ---------------------------------------------------------------------------
 // Imperative shell helper: session finalization
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Two-phase session construction
-// ---------------------------------------------------------------------------
-
-/**
- * All state produced by the pre-agent I/O phase of runWorkflow().
- *
- * WHY a named interface: makes the phase boundary explicit. Everything in this
- * struct was established before `new AgentLoop()` -- the agent binding is NOT
- * included here. The abort registry is registered AFTER agent construction,
- * using `session.workrailSessionId` as the key.
- *
- * WHY `state` is mutable and included here: tool factory closures must observe
- * live token updates (getCurrentToken reads state.currentContinueToken at call
- * time). Making state an explicit field documents the intentional impurity
- * rather than hiding it in ambient scope.
- */
-export interface PreAgentSession {
-  readonly sessionId: string;
-  readonly workrailSessionId: string | null;
-  readonly continueToken: string;
-  readonly checkpointToken: string | null;
-  readonly sessionWorkspacePath: string;
-  readonly sessionWorktreePath: string | undefined;
-  /**
-   * The first step's pending prompt text.
-   *
-   * WHY string (not the full V2StartWorkflowOutputSchema): only the prompt text
-   * is needed downstream (buildSessionContext, buildAgentReadySession). Narrowing
-   * to a string here prevents future callers from accidentally depending on
-   * schema fields that may change, and removes the dependency on the Zod type.
-   */
-  readonly firstStepPrompt: string;
-  readonly state: SessionState;           // mutable; explicit to document impurity
-  readonly spawnCurrentDepth: number;
-  readonly spawnMaxDepth: number;
-  readonly readFileState: Map<string, ReadFileState>;
-  readonly agentClient: Anthropic | AnthropicBedrock;
-  readonly modelId: string;
-  readonly startMs: number;
-  /** Session handle from ActiveSessionSet. Undefined when no activeSessionSet injected. */
-  readonly handle?: SessionHandle;
-}
-
-/**
- * Result of the pre-agent I/O phase.
- *
- * 'ready'    -- agent loop should run; `session` holds all pre-agent state.
- * 'complete' -- session ended before the agent loop started (instant completion,
- *               model error, start failure, worktree failure, persist failure).
- *               `result` is the final WorkflowRunResult to return from runWorkflow().
- */
-export type PreAgentSessionResult =
-  | { readonly kind: 'ready'; readonly session: PreAgentSession }
-  | {
-      readonly kind: 'complete';
-      readonly result: WorkflowRunResult;
-      /**
-       * WorkRail session ID, decoded from the continueToken.
-       * Present when executeStartWorkflow succeeded and the token was decoded --
-       * needed by runWorkflow() to build a FinalizationContext for early-exit paths
-       * so finalizeSession() can unregister from DaemonRegistry correctly.
-       * Null for paths that exit before token decode (model error, start failure).
-       */
-      readonly workrailSessionId: string | null;
-      /**
-       * Session handle from ActiveSessionSet, if registered.
-       * Present only for the single-step completion path (registered before isComplete check).
-       * Null for all error paths (never registered).
-       */
-      readonly handle: SessionHandle | undefined;
-    };
-
-// ---------------------------------------------------------------------------
-// AgentReadySession -- fully constructed pre-loop state
-// ---------------------------------------------------------------------------
-
-/**
- * Fully constructed pre-loop state -- everything runAgentLoop() needs.
- *
- * Produced by buildAgentReadySession() after context loading and tool
- * construction complete. Holds all pre-loop immutable values so that
- * runAgentLoop() has no knowledge of the setup steps.
- *
- * WHY a named interface (not an anonymous object): follows the established
- * FinalizationContext / TurnEndSubscriberContext / SessionScope pattern of
- * making dependency surfaces explicit and readable at the call site.
- */
-export interface AgentReadySession {
-  /** Pre-agent state from buildPreAgentSession() -- includes mutable SessionState. */
-  readonly preAgentSession: PreAgentSession;
-  /** Loaded context bundle (soul + workspace + session notes). */
-  readonly contextBundle: import('./context-loader.js').ContextBundle;
-  /** Per-session tool dependency bundle. */
-  readonly scope: SessionScope;
-  /** Constructed tool list for the agent. */
-  readonly tools: readonly AgentTool[];
-  /** Assembled session config (system prompt, initial prompt, limits). */
-  readonly sessionCtx: SessionContext;
-  /** Session handle from ActiveSessionSet. Undefined when no activeSessionSet injected. */
-  readonly handle: import('./active-sessions.js').SessionHandle | undefined;
-  /** Process-local session UUID (keys the sidecar file and conversation JSONL). */
-  readonly sessionId: string;
-  /** Workflow ID from the trigger. */
-  readonly workflowId: string;
-  /** Worktree path when branchStrategy === 'worktree', otherwise undefined. */
-  readonly worktreePath: string | undefined;
-  /** Constructed AgentLoop instance, ready to receive prompt(). */
-  readonly agent: AgentLoop;
-  /** Repeat threshold for stuck-detection heuristic. */
-  readonly stuckRepeatThreshold: number;
-}
-
-// ---------------------------------------------------------------------------
-// SessionOutcome -- terminal agent states before delivery and cleanup
-// ---------------------------------------------------------------------------
-
-/**
- * Terminal state of the agent loop, returned by runAgentLoop().
- *
- * Represents what the agent loop's own exit signal was, NOT the final
- * session outcome (which is determined by buildSessionResult() reading
- * state.terminalSignal after the loop exits).
- *
- * WHY a discriminated union (not raw strings): follows explicit-domain-types
- * philosophy. The two variants map directly to the two code paths through
- * the agent loop's try/catch block.
- */
-export type SessionOutcome =
-  | { readonly kind: 'completed'; readonly stopReason: string; readonly errorMessage?: string }
-  | { readonly kind: 'aborted'; readonly errorMessage?: string };
-
-/**
- * Context for finalizing a completed runWorkflow() session.
- * Passed from runWorkflow() to finalizeSession() after the agent loop exits.
- */
-export interface FinalizationContext {
-  readonly sessionId: string;
-  readonly workrailSessionId: string | null;
-  readonly startMs: number;
-  readonly stepAdvanceCount: number;
-  readonly branchStrategy: 'worktree' | 'none' | undefined;
-  readonly statsDir: string;
-  readonly sessionsDir: string;
-  readonly conversationPath: string;
-  readonly emitter: DaemonEventEmitter | undefined;
-  readonly daemonRegistry: DaemonRegistry | undefined;
-  readonly workflowId: string;
-}
-
-/**
- * Consolidate all session cleanup I/O for a completed runWorkflow() call.
- *
- * Handles:
- * 1. emitter?.emit({ kind: 'session_completed', ... }) with the correct outcome
- * 2. daemonRegistry?.unregister() with the correct status ('completed' or 'failed')
- * 3. writeExecutionStats() using tagToStatsOutcome() for exhaustive outcome mapping
- * 4. Sidecar file deletion (all paths except success+worktree)
- * 5. Conversation file deletion (success+non-worktree only)
- *
- * WHY consolidated here (not inline at each result path): each result path previously
- * had ~15-20 lines of identical cleanup code. A single function guarantees consistent
- * behavior across all paths and makes adding a new result path safer.
- *
- * WHY sidecar deletion for stuck: the pre-existing stuck path did NOT delete the sidecar.
- * This function fixes that bug. See worktrain-daemon-invariants.md section 2.2.
- *
- * WHY NOT called on early-exit paths (model validation, start_workflow failure, worktree
- * creation failure): those paths clean up inline because the agent loop never started
- * and this function assumes post-agent-loop state (conversationPath, stepAdvanceCount).
- */
-export async function finalizeSession(
-  result: WorkflowRunResult,
-  ctx: FinalizationContext,
-): Promise<void> {
-  // ---- 1. Emit session_completed event ----
-  const outcome = tagToStatsOutcome(result._tag);
-  const detail = result._tag === 'stuck' ? result.reason
-    : result._tag === 'timeout' ? result.reason
-    : result._tag === 'error' ? result.message.slice(0, 200)
-    : result._tag === 'delivery_failed' ? result.deliveryError.slice(0, 200)
-    : result.stopReason;
-  ctx.emitter?.emit({
-    kind: 'session_completed',
-    sessionId: ctx.sessionId,
-    workflowId: ctx.workflowId,
-    outcome,
-    detail,
-    ...withWorkrailSession(ctx.workrailSessionId),
-  });
-
-  // ---- 2. DaemonRegistry unregister ----
-  // WHY NOT in finally block: the completion status ('completed' vs 'failed') differs
-  // by result path. The finally block handles steer/abort registry cleanup (always safe).
-  if (ctx.workrailSessionId !== null) {
-    ctx.daemonRegistry?.unregister(
-      ctx.workrailSessionId,
-      result._tag === 'success' || result._tag === 'delivery_failed' ? 'completed' : 'failed',
-    );
-  }
-
-  // ---- 3. Execution stats ----
-  writeExecutionStats(ctx.statsDir, ctx.sessionId, ctx.workflowId, ctx.startMs, outcome, ctx.stepAdvanceCount);
-
-  // ---- 4. Sidecar deletion ----
-  // Decision is delegated to sidecardLifecycleFor() -- see that function and
-  // worktrain-daemon-invariants.md section 2.2 for the full rules.
-  // WHY assertNever is in sidecardLifecycleFor: if WorkflowRunResult gains a new
-  // variant, the compiler breaks there and forces the caller to handle it here.
-  const lifecycle = sidecardLifecycleFor(result._tag, ctx.branchStrategy);
-  switch (lifecycle.kind) {
-    case 'delete_now':
-      await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
-      break;
-    case 'retain_for_delivery':
-      // TriggerRouter.maybeRunDelivery() deletes the sidecar after delivery completes.
-      break;
-    default:
-      assertNever(lifecycle);
-  }
-
-  // ---- 5. Conversation file deletion ----
-  // Delete on clean success (non-worktree only): no debug value after success.
-  // WHY only non-worktree: worktree sessions defer conversation file deletion to
-  // TriggerRouter.maybeRunDelivery() alongside the sidecar, after delivery completes.
-  // Errors and crashes leave the file intact for post-hoc inspection and Phase B.
-  if (result._tag === 'success' && ctx.branchStrategy !== 'worktree') {
-    await fs.unlink(ctx.conversationPath).catch(() => {});
-  }
-}
 
 
 // ---------------------------------------------------------------------------
@@ -2098,6 +1714,62 @@ async function runAgentLoop(
     return { kind: 'aborted', errorMessage };
   }
   return { kind: 'completed', stopReason, errorMessage };
+}
+
+// ---------------------------------------------------------------------------
+// finalizeSession -- session cleanup
+// ---------------------------------------------------------------------------
+
+/**
+ * Consolidate all session cleanup I/O for a completed runWorkflow() call.
+ *
+ * WHY NOT in runner/: finalizeSession calls writeExecutionStats (io/), uses
+ * fs directly for sidecar deletion, and needs sidecardLifecycleFor + tagToStatsOutcome
+ * (core/). Moving it to runner/ would require runner/ -> io/ + core/ imports, which
+ * is already the correct direction. Deferred to the runner/ function extraction follow-on.
+ */
+export async function finalizeSession(
+  result: WorkflowRunResult,
+  ctx: FinalizationContext,
+): Promise<void> {
+  const outcome = tagToStatsOutcome(result._tag);
+  const detail = result._tag === 'stuck' ? result.reason
+    : result._tag === 'timeout' ? result.reason
+    : result._tag === 'error' ? result.message.slice(0, 200)
+    : result._tag === 'delivery_failed' ? result.deliveryError.slice(0, 200)
+    : result.stopReason;
+  ctx.emitter?.emit({
+    kind: 'session_completed',
+    sessionId: ctx.sessionId,
+    workflowId: ctx.workflowId,
+    outcome,
+    detail,
+    ...withWorkrailSession(ctx.workrailSessionId),
+  });
+
+  if (ctx.workrailSessionId !== null) {
+    ctx.daemonRegistry?.unregister(
+      ctx.workrailSessionId,
+      result._tag === 'success' || result._tag === 'delivery_failed' ? 'completed' : 'failed',
+    );
+  }
+
+  writeExecutionStats(ctx.statsDir, ctx.sessionId, ctx.workflowId, ctx.startMs, outcome, ctx.stepAdvanceCount);
+
+  const lifecycle = sidecardLifecycleFor(result._tag, ctx.branchStrategy);
+  switch (lifecycle.kind) {
+    case 'delete_now':
+      await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
+      break;
+    case 'retain_for_delivery':
+      break;
+    default:
+      assertNever(lifecycle);
+  }
+
+  if (result._tag === 'success' && ctx.branchStrategy !== 'worktree') {
+    await fs.unlink(ctx.conversationPath).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------

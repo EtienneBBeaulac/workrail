@@ -217,3 +217,48 @@ describe('Daemon io/ boundary enforcement', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Daemon runner/ boundary enforcement
+// ---------------------------------------------------------------------------
+//
+// src/daemon/runner/ is the orchestration layer. It may import from io/, state/,
+// core/, tools/, and agent-loop.ts. It must NOT import runWorkflow from
+// workflow-runner.ts at runtime (that would create a circular dependency since
+// workflow-runner.ts calls runner/ functions and defines runWorkflow).
+
+describe('Daemon runner/ boundary enforcement', () => {
+  const DAEMON_RUNNER_DIR = path.resolve(__dirname, '../../src/daemon/runner');
+
+  it('src/daemon/runner/ does not import runWorkflow from workflow-runner.ts', async () => {
+    let files: string[];
+    try {
+      files = await listFilesRecursive(DAEMON_RUNNER_DIR);
+    } catch {
+      return; // directory does not exist yet
+    }
+    const violations: Array<{ file: string; line: number; text: string }> = [];
+    for (const file of files) {
+      const content = await fs.readFile(file, 'utf8');
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        // Match runtime import of runWorkflow from workflow-runner (not type-only)
+        if (/\bimport\s*\{[^}]*\brunWorkflow\b/.test(line) && /workflow-runner/.test(line) && !/\bimport\s+type\b/.test(line)) {
+          violations.push({
+            file: path.relative(path.resolve(__dirname, '../..'), file),
+            line: i + 1,
+            text: line.trim(),
+          });
+        }
+      }
+    }
+    if (violations.length > 0) {
+      expect.fail(
+        `runner/ imports runWorkflow from workflow-runner.ts at runtime:\n` +
+        violations.map((v) => `  ${v.file}:${v.line}: ${v.text}`).join('\n') +
+        `\n\nThis creates a circular dependency. Inject runWorkflow as a parameter instead.`,
+      );
+    }
+  });
+});
