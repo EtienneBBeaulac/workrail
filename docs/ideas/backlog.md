@@ -194,46 +194,27 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ### Context injection bugs: double-injection, byte-slice truncation, workspaceRules[0] drop (Apr 30, 2026)
 
-**Status: idea** | Priority: high
+**Status: done** | Shipped in PR #946 (fix/etienneb/context-injection-bugs, auto-merge enabled)
 
 **Score: 13** | Cor:3 Cap:1 Eff:3 Lev:3 Con:3 | Blocked: no
 
-Three active bugs in the context injection pipeline that waste tokens, produce incorrect truncation, and silently discard workspace context. Confirmed by codebase audit (Apr 30, 2026).
-
-1. **Double-injection (`session-context.ts:117-119`):** `trigger.context` is JSON-serialized in full into the initial user message. Since coordinators write `assembledContextSummary` *into* `trigger.context`, the assembled context appears twice -- once in the system prompt (8KB cap applied) and once in the initial user message (uncapped). These diverge when the content exceeds 8KB.
-
-2. **Byte-slice truncation (`system-prompt.ts:200-202`):** `assembledContextSummary` is truncated by raw byte index (`ctxStr.slice(0, 8192)`), which splits mid-sentence, mid-section, and can produce malformed UTF-8. The section-aware `buildBudgetedOutput()` pattern already exists in `src/coordinators/context-assembly.ts` and handles this correctly.
-
-3. **`workspaceRules[0]` silent drop (`session-context.ts:106`):** `ContextBundle.workspaceRules` is typed as `ContextRule[]` but only `[0]` is consumed. All additional workspace context rules are silently dropped. The type implies per-file rules are supported; the consumer silently ignores them.
-
-**Also in scope:** introduce `WorkflowContextSlots` typed fields on `WorkflowTrigger` (or a companion type) for system-managed context fields (`assembledContextSummary`, `priorSessionNotes`, `gitDiffStat`). This eliminates the stringly-typed `trigger.context['assembledContextSummary']` access pattern and is a prerequisite for the universal enricher (see next item). Scope Phase 0 changes to consumption sites only (`buildSystemPrompt`, `buildSessionContext`); coordinator write sites migrate in Phase 1.
-
-**Done looks like:** no `trigger.context` JSON dump in `initialPrompt`; `assembledContextSummary` truncated at section boundaries; all `workspaceRules` entries injected; `WorkflowContextSlots` typed fields replace stringly-typed access in consumption sites.
+All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSlots()` introduced in `src/daemon/types.ts`. `buildSystemPrompt` refactored to pipeline of pure section functions. `truncateToByteLimit` uses Buffer/surrogate-safe walk-back.
 
 ---
 
 ### Universal context enricher for all session entry points (Apr 30, 2026)
 
-**Status: idea** | Priority: high
+**Status: done** | Shipped in PR #947 (feat/etienneb/workflow-enricher, auto-merge enabled, depends on #946)
 
-**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: yes (needs context injection bugs fixed first)
+**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
-Today 4 of 6 session entry points receive zero assembled context: raw webhook triggers, direct dispatch, `spawn_agent` children, and crash-recovered sessions never get cross-session notes or git diff state. Only coordinator-spawned sessions (via `pr-review.ts` or the adaptive pipeline) get assembled context -- and even then only through opt-in coordinator logic, not structural injection.
+`WorkflowEnricher` service in `src/daemon/workflow-enricher.ts`. Fires for root sessions (`spawnDepth === 0`) inside `runWorkflow()` before `buildPreAgentSession()`. `PriorNotesPolicy` discriminated type controls notes injection. 1s timeout with partial fallback on `listRecentSessions`. `EnricherResult` threaded as typed value through call chain -- trigger never mutated. All 6 entry points covered.
 
-There is no single layer that all dispatch paths share where assembly can run universally. Coordinators that care must call assembly explicitly; everything else gets nothing. This means every new entry point or coordinator is another opportunity to forget assembly.
-
-**Design (from Apr 30 discovery):** A `WorkflowEnricher` service injected into `runWorkflow()` that fires for root sessions only (`spawnDepth === 0`). Provides prior workspace session notes (max 3, newest-first, workspace-scoped) and `git diff HEAD~1 --stat` to all entry points. Injected via `WorkflowContextSlots` typed fields (see context injection bugs item). When a coordinator has already set `assembledContextSummary`, the enricher skips prior-notes injection (coordinator's richer context takes precedence) but still provides git diff stat if absent.
-
-**Critical gate:** before this ships, run a pilot test -- one session with `assembledContextSummary` injected, inspect turn-1 reasoning for citation. If agents don't reference pre-loaded context, the investment in universal enrichment adds tokens without improving outcomes.
-
-**Things to hash out:**
-- Where exactly does the enricher inject: inside `runWorkflow()` before `buildPreAgentSession()`, or inside `buildPreAgentSession()` itself? The latter is cleaner but changes the pre-agent phase boundary.
-- `listRecentSessions` must have a 1s wall-clock timeout with partial-result fallback. Without it, large session stores silently slow all session startups. This is a spec requirement, not optional.
-- `spawn_agent` children don't get enriched (they'd trigger redundant assembly for deeply nested trees). Is there a case where children should optionally enrich? Candidate: an `inheritParentContext: boolean` flag in the `spawn_agent` tool schema.
+**Pilot test gate still pending:** before declaring full success, verify agents reference prior notes in turn-1 reasoning in at least one real session.
 
 ---
 
-### MemoryStore: indexed session history and mid-session query_memory tool (Apr 30, 2026)
+### MemoryStore: indexed session history as a coordinator and enricher dependency (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
 
@@ -241,16 +222,17 @@ There is no single layer that all dispatch paths share where assembly can run un
 
 The session event log is rich -- it records goals, step notes, artifacts, delivered commits, git state, and phase handoffs. But querying it requires a full directory scan and per-session event projection on every call. `LocalSessionSummaryProviderV2` does this today and is used in exactly one place (the PR-review coordinator). Every other consumer either skips it or re-implements a slower version.
 
-There is no mid-session memory query capability at all. An agent mid-session cannot ask "what did we decide about this module last week" and get an answer from persistent memory -- it can only use what was pre-loaded at session start.
+**Design:** A `MemoryStore` port backed by `~/.workrail/memory.db` (SQLite, WAL mode), indexed by `finalizeSession()` as fire-and-forget after each session completes. Replaces the current full directory scan with an indexed query -- O(log n + k) for "recent sessions for this workspace" instead of O(n) full scan. Query kinds v1: `recent_sessions` (workspace-scoped, indexed on `(workspace_hash, completed_at DESC)`), `sessions_by_goal_keywords` (requires full-text index or O(n) scan). Consumed by the WorkflowEnricher and coordinator pre-dispatch paths, not by agents directly.
 
-**Design (from Apr 30 discovery):** A `MemoryStore` port backed by `~/.workrail/memory.db` (SQLite, WAL mode) indexed by `finalizeSession()` as fire-and-forget after each session completes. Query kinds v1: `recent_sessions` (by workspace path hash), `sessions_by_goal_keywords`. A `query_memory` tool added to the daemon tool set. Replaces the slow `listRecentSessions` scan in the universal enricher.
+**Why not a mid-session agent tool:** context assembly belongs in the layer that dispatches the session -- the coordinator and enricher know what workspace they're spawning into and can assemble context deterministically before the first turn. Leaving retrieval to the agent requires the LLM to make a judgment call about its own context needs mid-session, burns turns, and produces inconsistent results. If an agent needs something that wasn't pre-loaded, that's a gap in the assembly step, not a signal to give agents a retrieval tool.
 
-Phase 2b (separate): index phase artifacts via a new `phase_artifact_appended` session event kind -- bridges the current PipelineRunContext silo into the session event log so phase artifacts are queryable alongside session notes. Requires engine schema review before implementation.
+Phase 2b (separate): index phase artifacts via a new `phase_artifact_appended` session event kind -- bridges the PipelineRunContext silo into the session event log. Requires engine schema review.
 
 **Things to hash out:**
-- SQLite native compilation may fail in some deployment environments (Docker, Alpine Linux). Mitigation: use `@sqlite.org/sqlite-wasm` (pure WASM) or make `MemoryStore` fully optional -- daemon works without it, just no indexed queries.
-- `phase_artifact_appended` event schema change is the highest-risk part of Phase 2b. Should it reuse the existing artifact channel with a new content type, or be a new event kind? Each has different backward-compatibility implications.
-- Should `query_memory` be a general-purpose tool or typed with specific query kinds? A typed discriminated union prevents agents from inventing unsupported query shapes.
+- SQLite native compilation may fail in some environments (Docker, Alpine). Mitigation: `@sqlite.org/sqlite-wasm` (pure WASM) or make MemoryStore fully optional -- daemon works without it, enricher falls back to the slow scan.
+- `sessions_by_goal_keywords` without a full-text index is still O(n). Is keyword search needed in v1, or is recency-scoped `recent_sessions` sufficient to start?
+- `phase_artifact_appended` schema change: new event kind vs reuse existing artifact channel with new content type. Different backward-compatibility implications -- needs engine team input before Phase 2b starts.
+- **The ideal vs achievable tension:** ideally all context is assembled before the first turn and the agent never has to fetch more. Whether that's achievable depends on whether the relevant context is predictable from the trigger payload. For structured tasks (PR review, known issue) it usually is. For open-ended discovery or tasks with ambiguous scope, the needed context only becomes clear as the agent reads code -- you can't fully front-load it. One candidate: a context-gathering sub-agent spawned before the main session that reads the workspace and returns a structured context bundle to the coordinator, which then assembles it into the main session's pre-load. This has its own issues: it adds latency (a full extra session before the real work starts), risks gathering the wrong things (the sub-agent doesn't know what the main agent will need), and may just push the "what context do I need?" judgment to an earlier LLM call rather than eliminating it. Worth tracking as a design direction before deciding whether to invest in mid-session retrieval infrastructure at all.
 
 ---
 
@@ -270,6 +252,35 @@ Today, validating this requires manually reading raw session transcripts, which 
 - "Citation" is hard to define precisely -- the agent might paraphrase rather than quote. Does substring matching suffice, or does this need an LLM similarity check?
 - Should this be a CLI command or a console feature? The console already reads session data; this could be a "context audit" view.
 - The primary use case is a one-time validation gate (before shipping the universal enricher). Does this justify a permanent command, or is it a one-off script?
+
+---
+
+### Operator preference memory: WorkTrain learns and retains operator-specific preferences (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+WorkTrain runs fully autonomously but has no persistent memory of operator preferences -- things like "always squash before merging", "don't open PRs without a linked issue", "prefer functional patterns in new files", or "this workspace uses tabs not spaces." Every session starts from the same generic `daemon-soul.md` baseline. Preferences discovered or stated in one session don't carry forward.
+
+Claude Code solves this for human-in-the-loop sessions via its memory system (feedback, user, project entries written by the AI mid-conversation). WorkTrain needs an equivalent, but the mechanism is fundamentally different because: (a) there is no human watching the session to correct or confirm, and (b) opening up an interactive channel into an autonomous pipeline introduces risk that has to be carefully scoped.
+
+Candidate input mechanisms (not mutually exclusive):
+
+1. **MR/PR review comments** -- when a human reviewer requests changes or comments on a WorkTrain PR, that signal is authoritative feedback. WorkTrain already monitors PRs post-review (see backlog entry on root cause analysis). Extracting preference-relevant comments ("always add a test for this pattern", "don't use this API directly") and persisting them is a natural extension.
+
+2. **`worktrain tell`** -- the existing CLI command queues a message to the daemon. Could be extended to a `worktrain remember "..."` variant that writes directly to a workspace-scoped preferences store, bypassing the session queue entirely.
+
+3. **Explicit preference file** -- a `~/.workrail/operator-preferences.md` (or per-workspace variant) that the operator edits directly, injected into every session alongside `daemon-soul.md`. Lower friction than building a learning mechanism; higher friction than automatic inference.
+
+4. **Inferred from repeated corrections** -- if WorkTrain makes the same kind of mistake N times across sessions (same type of review finding, same escalation reason), automatically surface a draft preference for operator approval before persisting.
+
+**Things to hash out:**
+- What is the storage format -- append-only structured log, a single evolving markdown file, or a SQLite table? The answer affects how preferences are queried and how conflicts between preferences are resolved.
+- How does a persisted preference get *removed or updated*? Stale preferences can be worse than none -- "always use library X" becomes harmful when X is deprecated.
+- What is the trust model for inferred preferences vs explicitly stated ones? A preference extracted from a PR comment should carry different weight than one inferred from repeated behavior.
+- Does this interact with `daemon-soul.md`? Soul covers behavioral philosophy; preferences cover workspace/operator-specific constraints. They're different concerns but both end up in the system prompt -- precedence and load order matter.
+- The fully-closed-pipeline concern is real: mechanisms 1 and 4 operate without human intervention during sessions, which is the correct design. Mechanism 2 requires the operator to pull a lever (acceptable). Mechanism 3 is fully manual (always safe). Any mechanism that *pauses a session mid-run to ask a question* would break the autonomous contract and should not be explored here.
 
 ---
 

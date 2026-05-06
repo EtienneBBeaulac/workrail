@@ -193,6 +193,18 @@ export interface ConsoleSessionDetail {
    * Same backfill logic as ConsoleSessionSummary: old sessions without the field
    * default to 'daemon' when isAutonomous is true, 'mcp' otherwise. */
   readonly triggerSource: 'daemon' | 'mcp';
+  /**
+   * Context injected into this session at dispatch time, from the context_set event.
+   * Absent for sessions that received no assembled context (e.g. direct trigger dispatch,
+   * pre-living-work-context sessions).
+   *
+   * Invariant: when present, assembledContextSummary is always a non-empty string.
+   * The field is optional at the object level (absent vs present) but required inside --
+   * there is no state where injectedContext exists but assembledContextSummary is missing.
+   */
+  readonly injectedContext?: {
+    readonly assembledContextSummary: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

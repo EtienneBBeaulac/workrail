@@ -222,6 +222,14 @@ export interface ConsoleSessionDetail {
    * Mirror of ConsoleSessionDetail.repoRoot in src/v2/usecases/console-types.ts.
    */
   readonly repoRoot: string | null;
+  /**
+   * Context injected into this session at dispatch time.
+   * Absent for sessions that received no assembled context.
+   * Mirror of ConsoleSessionDetail.injectedContext in src/v2/usecases/console-types.ts.
+   */
+  readonly injectedContext?: {
+    readonly assembledContextSummary: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

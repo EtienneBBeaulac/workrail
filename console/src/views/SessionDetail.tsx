@@ -81,6 +81,29 @@ function SessionMetaCard({ data }: { data: ConsoleSessionDetail }) {
 }
 
 // ---------------------------------------------------------------------------
+// InjectedContextSection
+// ---------------------------------------------------------------------------
+
+function InjectedContextSection({ summary }: { summary: string }) {
+  const byteCount = new TextEncoder().encode(summary).length;
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] px-5 py-4 corner-brackets" style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="font-mono text-[10px] uppercase tracking-[0.30em] text-[var(--text-muted)]">
+          Injected Context
+        </span>
+        <span className="font-mono text-[10px] text-[var(--text-muted)]">
+          {byteCount.toLocaleString()} bytes
+        </span>
+      </div>
+      <pre className="font-mono text-xs text-[var(--text-secondary)] whitespace-pre-wrap break-words max-h-48 overflow-y-auto leading-relaxed">
+        {summary}
+      </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SessionMetricsSection
 // ---------------------------------------------------------------------------
 
@@ -351,6 +374,10 @@ export function SessionDetail({ viewModel }: Props) {
             Completely absent (no empty card, no placeholder) when metrics === null. */}
         {data.metrics !== null && (
           <SessionMetricsSection sessionId={sessionId} metrics={data.metrics} />
+        )}
+
+        {data.injectedContext !== undefined && (
+          <InjectedContextSection summary={data.injectedContext.assembledContextSummary} />
         )}
 
         {data.runs.length === 0 ? (
