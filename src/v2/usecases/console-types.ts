@@ -198,12 +198,12 @@ export interface ConsoleSessionDetail {
    * Absent for sessions that received no assembled context (e.g. direct trigger dispatch,
    * pre-living-work-context sessions).
    *
-   * assembledContextSummary: the coordinator-assembled phase handoff context (discovery
-   * constraints, shaping decisions, coding notes) that was injected as ## Prior Context
-   * in the agent's system prompt.
+   * Invariant: when present, assembledContextSummary is always a non-empty string.
+   * The field is optional at the object level (absent vs present) but required inside --
+   * there is no state where injectedContext exists but assembledContextSummary is missing.
    */
   readonly injectedContext?: {
-    readonly assembledContextSummary?: string;
+    readonly assembledContextSummary: string;
   };
 }
 

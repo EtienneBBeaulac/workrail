@@ -376,7 +376,7 @@ export function SessionDetail({ viewModel }: Props) {
           <SessionMetricsSection sessionId={sessionId} metrics={data.metrics} />
         )}
 
-        {data.injectedContext?.assembledContextSummary !== undefined && (
+        {data.injectedContext !== undefined && (
           <InjectedContextSection summary={data.injectedContext.assembledContextSummary} />
         )}
 

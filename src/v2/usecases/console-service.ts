@@ -1165,6 +1165,9 @@ function projectSessionDetail(
   const sessionTitle = sortedEventsRes.isOk() ? deriveSessionTitle(sortedEventsRes.value) : null;
 
   // Hoist context projection so both triggerSource derivation and injectedContext can reuse it.
+  // WHY `as never`: err() is typed err<E, never> but this ternary's false branch must match
+  // Result<RunContextProjectionV2, ProjectionError>. The error value is never accessed on the
+  // false branch (sortedEventsRes.isErr() guards all callers), so the cast is safe.
   const runContextRes = sortedEventsRes.isOk() ? projectRunContextV2(sortedEventsRes.value) : err(sortedEventsRes.error as never);
 
   // Derive triggerSource from run_started events (same backfill logic as projectSessionSummary).
@@ -1183,7 +1186,10 @@ function projectSessionDetail(
   })();
 
   // Extract injected context from the context_set projection.
-  const injectedContext = ((): { readonly assembledContextSummary?: string } | undefined => {
+  // WHY first-wins: coordinator sessions are single-run by design (one run_started per session).
+  // Multi-run sessions (rare, from checkpoint resume) use the same workflow context, so any
+  // run's assembledContextSummary is equivalent. First non-empty wins.
+  const injectedContext = ((): { readonly assembledContextSummary: string } | undefined => {
     if (!runContextRes.isOk()) return undefined;
     for (const runCtx of Object.values(runContextRes.value.byRunId)) {
       const summary = runCtx.context['assembledContextSummary'];

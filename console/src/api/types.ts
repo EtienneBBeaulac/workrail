@@ -228,7 +228,7 @@ export interface ConsoleSessionDetail {
    * Mirror of ConsoleSessionDetail.injectedContext in src/v2/usecases/console-types.ts.
    */
   readonly injectedContext?: {
-    readonly assembledContextSummary?: string;
+    readonly assembledContextSummary: string;
   };
 }
 
