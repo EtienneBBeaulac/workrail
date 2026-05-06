@@ -214,7 +214,7 @@ All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSl
 
 ---
 
-### MemoryStore: indexed session history and mid-session query_memory tool (Apr 30, 2026)
+### MemoryStore: indexed session history as a coordinator and enricher dependency (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
 
@@ -222,16 +222,16 @@ All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSl
 
 The session event log is rich -- it records goals, step notes, artifacts, delivered commits, git state, and phase handoffs. But querying it requires a full directory scan and per-session event projection on every call. `LocalSessionSummaryProviderV2` does this today and is used in exactly one place (the PR-review coordinator). Every other consumer either skips it or re-implements a slower version.
 
-There is no mid-session memory query capability at all. An agent mid-session cannot ask "what did we decide about this module last week" and get an answer from persistent memory -- it can only use what was pre-loaded at session start.
+**Design:** A `MemoryStore` port backed by `~/.workrail/memory.db` (SQLite, WAL mode), indexed by `finalizeSession()` as fire-and-forget after each session completes. Replaces the current full directory scan with an indexed query -- O(log n + k) for "recent sessions for this workspace" instead of O(n) full scan. Query kinds v1: `recent_sessions` (workspace-scoped, indexed on `(workspace_hash, completed_at DESC)`), `sessions_by_goal_keywords` (requires full-text index or O(n) scan). Consumed by the WorkflowEnricher and coordinator pre-dispatch paths, not by agents directly.
 
-**Design (from Apr 30 discovery):** A `MemoryStore` port backed by `~/.workrail/memory.db` (SQLite, WAL mode) indexed by `finalizeSession()` as fire-and-forget after each session completes. Query kinds v1: `recent_sessions` (by workspace path hash), `sessions_by_goal_keywords`. A `query_memory` tool added to the daemon tool set. Replaces the slow `listRecentSessions` scan in the universal enricher.
+**Why not a mid-session agent tool:** context assembly belongs in the layer that dispatches the session -- the coordinator and enricher know what workspace they're spawning into and can assemble context deterministically before the first turn. Leaving retrieval to the agent requires the LLM to make a judgment call about its own context needs mid-session, burns turns, and produces inconsistent results. If an agent needs something that wasn't pre-loaded, that's a gap in the assembly step, not a signal to give agents a retrieval tool.
 
-Phase 2b (separate): index phase artifacts via a new `phase_artifact_appended` session event kind -- bridges the current PipelineRunContext silo into the session event log so phase artifacts are queryable alongside session notes. Requires engine schema review before implementation.
+Phase 2b (separate): index phase artifacts via a new `phase_artifact_appended` session event kind -- bridges the PipelineRunContext silo into the session event log. Requires engine schema review.
 
 **Things to hash out:**
-- SQLite native compilation may fail in some deployment environments (Docker, Alpine Linux). Mitigation: use `@sqlite.org/sqlite-wasm` (pure WASM) or make `MemoryStore` fully optional -- daemon works without it, just no indexed queries.
-- `phase_artifact_appended` event schema change is the highest-risk part of Phase 2b. Should it reuse the existing artifact channel with a new content type, or be a new event kind? Each has different backward-compatibility implications.
-- Should `query_memory` be a general-purpose tool or typed with specific query kinds? A typed discriminated union prevents agents from inventing unsupported query shapes.
+- SQLite native compilation may fail in some environments (Docker, Alpine). Mitigation: `@sqlite.org/sqlite-wasm` (pure WASM) or make MemoryStore fully optional -- daemon works without it, enricher falls back to the slow scan.
+- `sessions_by_goal_keywords` without a full-text index is still O(n). Is keyword search needed in v1, or is recency-scoped `recent_sessions` sufficient to start?
+- `phase_artifact_appended` schema change: new event kind vs reuse existing artifact channel with new content type. Different backward-compatibility implications -- needs engine team input before Phase 2b starts.
 
 ---
 
