@@ -1955,6 +1955,34 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
 
 
+### Human approval gates for high-stakes coordinator actions (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+WorkTrain coordinators currently make irreversible decisions autonomously -- opening PRs, enabling auto-merge, merging branches, posting comments -- without any mechanism for a human to intercept and review before the action fires. Today there is no way to configure "always ask before merging" or "require approval before enabling auto-merge on PRs touching the main branch." The operator either accepts full autonomy or turns off automation entirely.
+
+This is the same problem as the "fully closed pipeline" concern in the operator preference memory item, but applied specifically to coordinator actions with external side effects. A review finding is reversible. An auto-merge is not.
+
+**The need:** a declarative gate mechanism where coordinators can mark specific actions as requiring human approval before proceeding. The gate would: (1) post a structured outbox message describing the pending action, (2) block the coordinator until either the operator acknowledges or a timeout fires, (3) on ack: proceed; on timeout or reject: escalate. This is distinct from the existing `signal_coordinator` tool (which is mid-session and fire-and-observe) -- approval gates are blocking and decision-forcing.
+
+**Concrete examples of gateable actions:**
+- Auto-merge on a PR (current gap -- we had to manually disable it)
+- Opening a PR to a protected branch
+- Posting a comment on a PR authored by a senior engineer
+- Running `git push --force` (even with lease)
+- Deploying to a non-sandbox environment
+
+**Things to hash out:**
+- Where does the gate live -- in the coordinator TypeScript script, in the workflow step definition, or as a daemon-level policy (e.g. `autoMerge: require_approval` in triggers.yml)?
+- How does the operator acknowledge -- via `worktrain tell "approve <requestId>"`? A console button? A Slack reaction?
+- What is the right timeout -- 24 hours for a merge gate during business hours? Configurable per gate type?
+- How does this interact with dry-run mode? A gate in dry-run should log "would pause for approval" but not actually block.
+- Is the gate per-action-type (always gate auto-merge) or per-PR (gate this specific merge because it touches auth code)?
+
+---
+
 ### Event-driven agent coordination (coordinator as event bus)
 
 **Status: idea** | Priority: high
