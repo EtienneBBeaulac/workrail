@@ -4722,3 +4722,25 @@ WorkTrain has no tooling to surface the state of worktrees and branches relative
 - Common-ground `make sync` distributing the script reliably
 
 **Priority:** Medium. The shared scripts work and have been tested. Main remaining work is the shell wrapper, token storage, and integration with common-ground's team config.
+
+---
+
+### Cross-system blind benchmark: compare AI coding tools/models on the same tasks (May 6, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:3 Eff:1 Lev:2 Con:2 | Blocked: no
+
+There is no reproducible way to compare WorkTrain against other AI coding systems (Cursor, Copilot, raw Claude Code, competing agent frameworks) or to compare model families within WorkTrain on the same real tasks. Without this, claims about WorkTrain's quality are anecdotal. A structured blind benchmark would produce empirical evidence about where WorkTrain adds value and where it falls short.
+
+The core idea: run the same coding task on N selected tools/models simultaneously, grade all outputs using a shared reusable rubric, and do the grading blind (an agent or series of parallel agents evaluates each submission without knowing which system produced it). Token usage is tracked per system so cost-adjusted comparisons are possible.
+
+**Things to hash out:**
+- What constitutes a valid "task" for comparison? Real GitHub issues from a well-understood repo are better than synthetic benchmarks, but they may not reproduce cleanly across different tool setups. What's the minimum reproducibility requirement?
+- How does the blind grading work in practice? The grading agent can't see the submission metadata, but it will see code style and comments that may reveal the model/tool. How blind is "blind" enough to be meaningful? Should we normalize submissions before grading (strip comments, rename vars)?
+- Should the rubric be global (same for all task types) or per-task-type (refactor vs feature vs bug fix)? A feature task and a debugging task have different quality signals.
+- Token usage comparison requires accurate accounting. WorkTrain sessions already record input/output tokens. Other tools may not expose this. How do we handle tools where token cost is opaque?
+- Is this a one-time study or a continuous regression benchmark? The demo-repo benchmark idea (existing backlog entry) covers regression -- this entry is specifically about cross-system comparative evaluation.
+- What is the right number of tasks to be statistically meaningful? 5 is too few; 100 is too many for a first pass. 15-20 tasks across 3 task types is probably the right starting point.
+
+**Relationship to existing entries:** the demo-repo benchmark (existing entry) runs the same tasks after each WorkRail release to track regression. This entry is orthogonal -- it compares WorkTrain vs other systems, not WorkTrain past vs present.
