@@ -10,13 +10,11 @@
  * signature requires the message type for type safety. This is a type-only
  * dependency -- no AgentLoop CLASS is constructed here.
  *
- * WHY this module imports DAEMON_SESSIONS_DIR from tools/_shared.ts: the
- * conversation log directory is co-located with session sidecar files.
  */
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import type { AgentInternalMessage } from '../agent-loop.js';
-import { DAEMON_SESSIONS_DIR } from '../tools/_shared.js';
 
 /**
  * Append a batch of AgentInternalMessage values to a per-session conversation JSONL file.
@@ -38,6 +36,6 @@ export async function appendConversationMessages(
 ): Promise<void> {
   if (messages.length === 0) return;
   const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n';
-  await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.appendFile(filePath, lines, 'utf8');
 }

@@ -5,6 +5,7 @@
  * flush delegation, and steer injection.
  */
 
+import { tmpPath } from '../helpers/platform.js';
 import { describe, it, expect, vi } from 'vitest';
 import { buildTurnEndSubscriber } from '../../src/daemon/runner/agent-loop-runner.js';
 import type { TurnEndSubscriberContext } from '../../src/daemon/runner/agent-loop-runner.js';
@@ -43,7 +44,7 @@ function makeCtx(overrides: Partial<TurnEndSubscriberContext> = {}): TurnEndSubs
     sessionId: 'sess-001',
     workflowId: 'wr.test',
     emitter: undefined,
-    conversationPath: '/tmp/fake-conversation.jsonl',
+    conversationPath: tmpPath('fake-conversation.jsonl'),
     lastFlushedRef: { count: 0 },
     stuckRepeatThreshold: 3,
     ...overrides,

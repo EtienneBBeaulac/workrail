@@ -3,6 +3,7 @@
  * and cross-cutting runner concerns.
  */
 
+import { tmpPath } from '../helpers/platform.js';
 import { describe, it, expect } from 'vitest';
 import type { TurnEndSubscriberContext } from '../../src/daemon/runner/agent-loop-runner.js';
 import type { FinalizationContext, SessionOutcome } from '../../src/daemon/runner/runner-types.js';
@@ -28,7 +29,7 @@ describe('TurnEndSubscriberContext shape', () => {
       sessionId: 'sess-001',
       workflowId: 'wr.test',
       emitter: undefined,
-      conversationPath: '/tmp/conv.jsonl',
+      conversationPath: tmpPath('conv.jsonl'),
       lastFlushedRef: { count: 0 },
       stuckRepeatThreshold: 3,
     };
@@ -89,9 +90,9 @@ describe('FinalizationContext shape', () => {
       startMs: Date.now() - 1000,
       stepAdvanceCount: 5,
       branchStrategy: 'none',
-      statsDir: '/tmp/stats',
-      sessionsDir: '/tmp/sessions',
-      conversationPath: '/tmp/conv.jsonl',
+      statsDir: tmpPath('stats'),
+      sessionsDir: tmpPath('sessions'),
+      conversationPath: tmpPath('conv.jsonl'),
       emitter: undefined,
       daemonRegistry: undefined,
       workflowId: 'wr.test',
@@ -107,9 +108,9 @@ describe('FinalizationContext shape', () => {
       startMs: Date.now(),
       stepAdvanceCount: 0,
       branchStrategy: undefined,
-      statsDir: '/tmp',
-      sessionsDir: '/tmp',
-      conversationPath: '/tmp/conv.jsonl',
+      statsDir: tmpPath('runner-test'),
+      sessionsDir: tmpPath('runner-test'),
+      conversationPath: tmpPath('conv.jsonl'),
       emitter: undefined,
       daemonRegistry: undefined,
       workflowId: 'wr.test',

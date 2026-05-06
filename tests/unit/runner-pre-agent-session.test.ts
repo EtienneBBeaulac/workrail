@@ -9,6 +9,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { tmpPath } from '../helpers/platform.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 import type { WorkflowTrigger, SessionSource, AllocatedSession } from '../../src/daemon/types.js';
@@ -65,7 +66,7 @@ const FAKE_TOKEN = 'ct_faketoken12345678901234567890';
 const FAKE_MODEL = { agentClient: {} as never, modelId: 'claude-test' };
 
 function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger {
-  return { workflowId: 'wr.test', goal: 'test', workspacePath: '/tmp/ws', ...overrides };
+  return { workflowId: 'wr.test', goal: 'test', workspacePath: tmpPath('ws'), ...overrides };
 }
 
 function makePendingStart() {

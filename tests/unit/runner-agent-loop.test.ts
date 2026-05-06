@@ -5,6 +5,7 @@
  * conversation flush in finally, and handle disposal.
  */
 
+import { tmpPath } from '../helpers/platform.js';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runAgentLoop } from '../../src/daemon/runner/agent-loop-runner.js';
 import { createSessionState, setTerminalSignal } from '../../src/daemon/state/index.js';
@@ -20,7 +21,7 @@ import type { SessionHandle } from '../../src/daemon/active-sessions.js';
 // ---------------------------------------------------------------------------
 
 function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger {
-  return { workflowId: 'wr.test', goal: 'test goal', workspacePath: '/tmp/ws', ...overrides };
+  return { workflowId: 'wr.test', goal: 'test goal', workspacePath: tmpPath('ws'), ...overrides };
 }
 
 function makeSessionCtx(overrides: Partial<SessionContext> = {}): SessionContext {
@@ -43,7 +44,7 @@ function makeScope(emitter?: SessionScope['emitter']): SessionScope {
     onIssueReported: vi.fn(),
     onSteer: vi.fn(),
     getCurrentToken: vi.fn(() => 'ct_test'),
-    sessionWorkspacePath: '/tmp/ws',
+    sessionWorkspacePath: tmpPath('ws'),
     spawnCurrentDepth: 0,
     spawnMaxDepth: 3,
     workrailSessionId: 'sess_test',
@@ -95,7 +96,7 @@ function makeSession(overrides: Partial<AgentReadySession> = {}): AgentReadySess
       workrailSessionId: 'sess_test',
       continueToken: 'ct_test',
       checkpointToken: null,
-      sessionWorkspacePath: '/tmp/ws',
+      sessionWorkspacePath: tmpPath('ws'),
       sessionWorktreePath: undefined,
       firstStepPrompt: 'Step 1',
       state,
@@ -130,7 +131,7 @@ describe('runAgentLoop -- successful completion', () => {
     const agent = makeAgent();
     const session = makeSession({ agent });
 
-    const outcome = await runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+    const outcome = await runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
 
     expect(outcome.kind).toBe('completed');
     if (outcome.kind === 'completed') {
@@ -142,7 +143,7 @@ describe('runAgentLoop -- successful completion', () => {
     const handle = makeHandle();
     const session = makeSession({ handle });
 
-    await runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+    await runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
 
     expect(handle.dispose).toHaveBeenCalled();
   });
@@ -152,7 +153,7 @@ describe('runAgentLoop -- successful completion', () => {
     const agent = makeAgent({ promptFn: async () => { throw new Error('API error'); } });
     const session = makeSession({ agent, handle });
 
-    const outcome = await runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+    const outcome = await runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
 
     expect(handle.dispose).toHaveBeenCalled();
     expect(outcome.kind).toBe('aborted');
@@ -168,7 +169,7 @@ describe('runAgentLoop -- error paths', () => {
     const agent = makeAgent({ promptFn: async () => { throw new Error('API failure'); } });
     const session = makeSession({ agent });
 
-    const outcome = await runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+    const outcome = await runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
 
     expect(outcome.kind).toBe('aborted');
     if (outcome.kind === 'aborted') {
@@ -185,7 +186,7 @@ describe('runAgentLoop -- error paths', () => {
         sessionCtx: makeSessionCtx({ sessionTimeoutMs: 100 }),
       });
 
-      const outcomePromise = runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+      const outcomePromise = runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
       await vi.runAllTimersAsync();
       const outcome = await outcomePromise;
 
@@ -206,14 +207,14 @@ describe('runAgentLoop -- error paths', () => {
         agent, handle,
         preAgentSession: {
           sessionId: 'local', workrailSessionId: 'sess_t', continueToken: 'ct_t',
-          checkpointToken: null, sessionWorkspacePath: '/tmp', sessionWorktreePath: undefined,
+          checkpointToken: null, sessionWorkspacePath: tmpPath('runner-test'), sessionWorktreePath: undefined,
           firstStepPrompt: '', state, spawnCurrentDepth: 0, spawnMaxDepth: 3,
           readFileState: new Map(), agentClient: {} as never, modelId: 'test', startMs: Date.now(), handle,
         },
         sessionCtx: makeSessionCtx({ sessionTimeoutMs: 100 }),
       });
 
-      const outcomePromise = runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+      const outcomePromise = runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
       await vi.runAllTimersAsync();
       await outcomePromise;
 
@@ -242,7 +243,7 @@ describe('runAgentLoop -- stuck detection via stuckConfig', () => {
       agent,
       preAgentSession: {
         sessionId: 'local', workrailSessionId: 'sess_t', continueToken: 'ct_t',
-        checkpointToken: null, sessionWorkspacePath: '/tmp', sessionWorktreePath: undefined,
+        checkpointToken: null, sessionWorkspacePath: tmpPath('runner-test'), sessionWorktreePath: undefined,
         firstStepPrompt: '', state, spawnCurrentDepth: 0, spawnMaxDepth: 3,
         readFileState: new Map(), agentClient: {} as never, modelId: 'test', startMs: Date.now(),
       },
@@ -251,7 +252,7 @@ describe('runAgentLoop -- stuck detection via stuckConfig', () => {
     const outcome = await runAgentLoop(
       session,
       makeTrigger({ agentConfig: { stuckAbortPolicy: 'notify_only' } }),
-      '/tmp/conv.jsonl',
+      tmpPath('conv.jsonl'),
     );
 
     // Should complete normally (no abort triggered by subscriber for notify_only)
@@ -275,7 +276,7 @@ describe('runAgentLoop -- stop reason extraction', () => {
     });
     const session = makeSession({ agent });
 
-    const outcome = await runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+    const outcome = await runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
 
     expect(outcome.kind).toBe('completed');
     if (outcome.kind === 'completed') {
@@ -289,7 +290,7 @@ describe('runAgentLoop -- stop reason extraction', () => {
     });
     const session = makeSession({ agent });
 
-    const outcome = await runAgentLoop(session, makeTrigger(), '/tmp/conversation.jsonl');
+    const outcome = await runAgentLoop(session, makeTrigger(), tmpPath('conversation.jsonl'));
 
     expect(outcome.kind).toBe('completed');
     if (outcome.kind === 'completed') {

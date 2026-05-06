@@ -5,6 +5,7 @@
  * and the SessionScope capability boundary (no direct state access).
  */
 
+import { tmpPath } from '../helpers/platform.js';
 import { describe, it, expect, vi } from 'vitest';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 import { constructTools } from '../../src/daemon/runner/construct-tools.js';
@@ -31,7 +32,7 @@ function makeMinimalScope(overrides: Partial<SessionScope> = {}): SessionScope {
     onIssueReported: vi.fn(),
     onSteer: vi.fn(),
     getCurrentToken: vi.fn(() => 'ct_test'),
-    sessionWorkspacePath: '/tmp/workspace',
+    sessionWorkspacePath: tmpPath('workspace'),
     spawnCurrentDepth: 0,
     spawnMaxDepth: 3,
     workrailSessionId: 'sess_test123',

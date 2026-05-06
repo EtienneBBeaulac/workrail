@@ -283,7 +283,7 @@ export async function buildAgentReadySession(
   const contextBundle = await contextLoader.loadSession(startContinueToken, baseCtx);
 
   // ---- Pure phase: build session configuration ----
-  const effectiveWorkspacePath = sessionWorkspacePath ?? trigger.workspacePath;
+  const effectiveWorkspacePath = sessionWorkspacePath;
   const sessionCtx = buildSessionContext(
     trigger,
     contextBundle,
