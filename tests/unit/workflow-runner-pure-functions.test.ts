@@ -484,16 +484,16 @@ describe('buildSessionContext', () => {
     expect(initialPrompt).toContain('unique-first-step-marker-12345');
   });
 
-  it('initial prompt contains trigger context JSON when trigger.context is present', () => {
+  it('initial prompt does NOT contain trigger context JSON dump when trigger.context is present', () => {
+    // WHY: trigger.context (including assembledContextSummary) is injected into the system
+    // prompt by buildSystemPrompt(). Dumping it again here causes double-injection.
     const trigger = makeSessionTrigger({
       context: { task: 'implement-oauth', priority: 'high' },
     });
     const { initialPrompt } = callBuildSessionContext(trigger, makeContextBundle(), 'Step 1: Do the work.');
-    expect(initialPrompt).toContain('Trigger context:');
-    expect(initialPrompt).toContain('"task"');
-    expect(initialPrompt).toContain('"implement-oauth"');
-    expect(initialPrompt).toContain('"priority"');
-    expect(initialPrompt).toContain('"high"');
+    expect(initialPrompt).not.toContain('Trigger context:');
+    expect(initialPrompt).not.toContain('"task"');
+    expect(initialPrompt).not.toContain('"implement-oauth"');
   });
 
   it('initial prompt omits context JSON block when trigger.context is absent', () => {

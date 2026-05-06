@@ -105,7 +105,9 @@ export function buildSessionContext(
   // WHY flatten here (not in DefaultContextLoader): buildSystemPrompt() is a stable
   // pure function that predates ContextBundle. Flattening at the call site in
   // buildSessionContext() keeps DefaultContextLoader decoupled from the prompt layer.
-  const workspaceContext: string | null = context.workspaceRules[0]?.content ?? null;
+  const workspaceContext: string | null = context.workspaceRules.length > 0
+    ? context.workspaceRules.map(r => r.content).join('\n\n')
+    : null;
   const sessionNotes: readonly string[] = context.sessionHistory.map((n) => n.content);
 
   // ---- System prompt ----
@@ -116,14 +118,10 @@ export function buildSessionContext(
   // WHY no continueToken in the initial prompt: the daemon uses complete_step which
   // manages the token internally. Including the token would invite the LLM to store
   // it and call continue_workflow (deprecated) instead of complete_step.
-  const contextJson = trigger.context
-    ? `\n\nTrigger context:\n\`\`\`json\n${JSON.stringify(trigger.context, null, 2)}\n\`\`\``
-    : '';
-
-  const initialPrompt =
-    firstStepPrompt +
-    contextJson +
-    '\n\nComplete all step work, then call complete_step with your notes to advance.';
+  // WHY no trigger.context dump: assembledContextSummary is already injected into the
+  // system prompt by buildSystemPrompt(). Dumping trigger.context here would cause
+  // assembledContextSummary to appear twice, doubling its token cost.
+  const initialPrompt = firstStepPrompt + '\n\nComplete all step work, then call complete_step with your notes to advance.';
 
   // ---- Session limits ----
   // Resolved from trigger.agentConfig with hardcoded defaults as fallback.
