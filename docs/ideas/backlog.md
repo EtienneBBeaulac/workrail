@@ -192,6 +192,87 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Context injection bugs: double-injection, byte-slice truncation, workspaceRules[0] drop (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:1 Eff:3 Lev:3 Con:3 | Blocked: no
+
+Three active bugs in the context injection pipeline that waste tokens, produce incorrect truncation, and silently discard workspace context. Confirmed by codebase audit (Apr 30, 2026).
+
+1. **Double-injection (`session-context.ts:117-119`):** `trigger.context` is JSON-serialized in full into the initial user message. Since coordinators write `assembledContextSummary` *into* `trigger.context`, the assembled context appears twice -- once in the system prompt (8KB cap applied) and once in the initial user message (uncapped). These diverge when the content exceeds 8KB.
+
+2. **Byte-slice truncation (`system-prompt.ts:200-202`):** `assembledContextSummary` is truncated by raw byte index (`ctxStr.slice(0, 8192)`), which splits mid-sentence, mid-section, and can produce malformed UTF-8. The section-aware `buildBudgetedOutput()` pattern already exists in `src/coordinators/context-assembly.ts` and handles this correctly.
+
+3. **`workspaceRules[0]` silent drop (`session-context.ts:106`):** `ContextBundle.workspaceRules` is typed as `ContextRule[]` but only `[0]` is consumed. All additional workspace context rules are silently dropped. The type implies per-file rules are supported; the consumer silently ignores them.
+
+**Also in scope:** introduce `WorkflowContextSlots` typed fields on `WorkflowTrigger` (or a companion type) for system-managed context fields (`assembledContextSummary`, `priorSessionNotes`, `gitDiffStat`). This eliminates the stringly-typed `trigger.context['assembledContextSummary']` access pattern and is a prerequisite for the universal enricher (see next item). Scope Phase 0 changes to consumption sites only (`buildSystemPrompt`, `buildSessionContext`); coordinator write sites migrate in Phase 1.
+
+**Done looks like:** no `trigger.context` JSON dump in `initialPrompt`; `assembledContextSummary` truncated at section boundaries; all `workspaceRules` entries injected; `WorkflowContextSlots` typed fields replace stringly-typed access in consumption sites.
+
+---
+
+### Universal context enricher for all session entry points (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: yes (needs context injection bugs fixed first)
+
+Today 4 of 6 session entry points receive zero assembled context: raw webhook triggers, direct dispatch, `spawn_agent` children, and crash-recovered sessions never get cross-session notes or git diff state. Only coordinator-spawned sessions (via `pr-review.ts` or the adaptive pipeline) get assembled context -- and even then only through opt-in coordinator logic, not structural injection.
+
+There is no single layer that all dispatch paths share where assembly can run universally. Coordinators that care must call assembly explicitly; everything else gets nothing. This means every new entry point or coordinator is another opportunity to forget assembly.
+
+**Design (from Apr 30 discovery):** A `WorkflowEnricher` service injected into `runWorkflow()` that fires for root sessions only (`spawnDepth === 0`). Provides prior workspace session notes (max 3, newest-first, workspace-scoped) and `git diff HEAD~1 --stat` to all entry points. Injected via `WorkflowContextSlots` typed fields (see context injection bugs item). When a coordinator has already set `assembledContextSummary`, the enricher skips prior-notes injection (coordinator's richer context takes precedence) but still provides git diff stat if absent.
+
+**Critical gate:** before this ships, run a pilot test -- one session with `assembledContextSummary` injected, inspect turn-1 reasoning for citation. If agents don't reference pre-loaded context, the investment in universal enrichment adds tokens without improving outcomes.
+
+**Things to hash out:**
+- Where exactly does the enricher inject: inside `runWorkflow()` before `buildPreAgentSession()`, or inside `buildPreAgentSession()` itself? The latter is cleaner but changes the pre-agent phase boundary.
+- `listRecentSessions` must have a 1s wall-clock timeout with partial-result fallback. Without it, large session stores silently slow all session startups. This is a spec requirement, not optional.
+- `spawn_agent` children don't get enriched (they'd trigger redundant assembly for deeply nested trees). Is there a case where children should optionally enrich? Candidate: an `inheritParentContext: boolean` flag in the `spawn_agent` tool schema.
+
+---
+
+### MemoryStore: indexed session history and mid-session query_memory tool (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: yes (needs universal enricher first)
+
+The session event log is rich -- it records goals, step notes, artifacts, delivered commits, git state, and phase handoffs. But querying it requires a full directory scan and per-session event projection on every call. `LocalSessionSummaryProviderV2` does this today and is used in exactly one place (the PR-review coordinator). Every other consumer either skips it or re-implements a slower version.
+
+There is no mid-session memory query capability at all. An agent mid-session cannot ask "what did we decide about this module last week" and get an answer from persistent memory -- it can only use what was pre-loaded at session start.
+
+**Design (from Apr 30 discovery):** A `MemoryStore` port backed by `~/.workrail/memory.db` (SQLite, WAL mode) indexed by `finalizeSession()` as fire-and-forget after each session completes. Query kinds v1: `recent_sessions` (by workspace path hash), `sessions_by_goal_keywords`. A `query_memory` tool added to the daemon tool set. Replaces the slow `listRecentSessions` scan in the universal enricher.
+
+Phase 2b (separate): index phase artifacts via a new `phase_artifact_appended` session event kind -- bridges the current PipelineRunContext silo into the session event log so phase artifacts are queryable alongside session notes. Requires engine schema review before implementation.
+
+**Things to hash out:**
+- SQLite native compilation may fail in some deployment environments (Docker, Alpine Linux). Mitigation: use `@sqlite.org/sqlite-wasm` (pure WASM) or make `MemoryStore` fully optional -- daemon works without it, just no indexed queries.
+- `phase_artifact_appended` event schema change is the highest-risk part of Phase 2b. Should it reuse the existing artifact channel with a new content type, or be a new event kind? Each has different backward-compatibility implications.
+- Should `query_memory` be a general-purpose tool or typed with specific query kinds? A typed discriminated union prevents agents from inventing unsupported query shapes.
+
+---
+
+### worktrain session analyze: verify agents actually use pre-loaded context (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 8** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+There is no way to verify whether agents actually use pre-loaded context (soul, workspace context, `assembledContextSummary`, session notes) in their reasoning. The entire memory architecture investment (universal enricher, MemoryStore, knowledge graph) assumes agents reference pre-loaded context at turn 1 -- but this assumption is unvalidated. If agents receive 32KB of workspace context and `assembledContextSummary` but don't cite them in their reasoning before acting, richer pre-loading adds token cost without improving outcomes.
+
+Today, validating this requires manually reading raw session transcripts, which is impractical at scale. A `worktrain session analyze <sessionId>` command that reads the agent turn events and reports whether any pre-loaded context fields were cited in turn-1 reasoning would make this automatable and support data-driven decisions about context loading investment.
+
+**Done looks like:** `worktrain session analyze <sessionId>` reads the session event log, extracts turn-1 assistant message content, checks for citations of injected fields (workspace context file names, goal text, prior step note content), and reports a structured summary: fields injected, fields cited, fields ignored.
+
+**Things to hash out:**
+- "Citation" is hard to define precisely -- the agent might paraphrase rather than quote. Does substring matching suffice, or does this need an LLM similarity check?
+- Should this be a CLI command or a console feature? The console already reads session data; this could be a "context audit" view.
+- The primary use case is a one-time validation gate (before shipping the universal enricher). Does this justify a permanent command, or is it a one-off script?
+
+---
+
 ### Per-run retrospective: structured learning from pipeline outcomes (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
@@ -1939,7 +2020,7 @@ Each file is injected only into sessions running the matching pipeline phase. Re
 
 **Status: idea** | Priority: medium
 
-**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (needs knowledge graph for context assembly)
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no (unblocked by Apr 30 discovery -- context assembly does not require the knowledge graph)
 
 **Problem:** `src/coordinators/pr-review.ts` is already ~500 LOC doing session dispatch, result aggregation, finding classification, merge routing, message queue drain, and outbox writes. Adding knowledge graph queries, context bundle assembly, and prior session lookups would create a god class.
 
@@ -1947,18 +2028,17 @@ Each file is injected only into sessions running the matching pipeline phase. Re
 ```
 Trigger layer         src/trigger/          receives events, validates, enqueues
 Dispatch layer        (TBD)                 decides which workflow + what goal
-Context assembly      (TBD)                 gathers and packages context before spawning
+Context assembly      src/daemon/           enriches trigger before runWorkflow() fires
 Orchestration layer   src/coordinators/     spawns, awaits, routes, retries, escalates
 Delivery layer        src/trigger/delivery  posts results back to origin systems
 ```
 
-**Context assembly** is the missing layer. Before dispatching a coding session, `assembleContext(task, workspace)` runs: knowledge graph query, upstream pitch/PRD fetch, relevant prior session notes, returns a structured context bundle. The orchestration script should call this, not own it.
+**Resolution from Apr 30 discovery:** Context assembly does NOT require the knowledge graph as a prerequisite. The universal enricher (Phase 1 of the memory architecture) provides a structural context assembly layer via `WorkflowEnricher` injected into `runWorkflow()` -- this IS the missing layer. The orchestration scripts (coordinators) continue to add task-specific richer context on top (phase artifacts, git diff for PRs) via the existing `assembledContextSummary` mechanism. The two layers compose: universal enricher provides the floor, coordinators provide the ceiling.
 
-**Things to hash out:**
-- The right layering puts "Dispatch layer (TBD)" between Trigger and Orchestration. What exactly does the dispatch layer decide, and how does it relate to the adaptive pipeline coordinator concept elsewhere in the backlog?
-- Context assembly requires the knowledge graph. What is the fallback when the KG is not yet built for a workspace -- does context assembly simply return empty, or does it fall back to a slower manual search?
-- Should context assembly run synchronously before dispatch (blocking the trigger listener) or asynchronously (session starts with partial context while assembly continues)?
-- Who owns the context assembly API contract -- the engine (as a new primitive), the daemon (as an infrastructure capability), or user-authored scripts?
+**The Dispatch layer question** is resolved by the adaptive pipeline coordinator (`src/coordinators/adaptive-pipeline.ts`) -- it IS the dispatch layer for queue-polled tasks. For webhook-triggered tasks, `TriggerRouter.route()` performs dispatch. The layering is already present; it just isn't documented as such.
+
+**Remaining open question:**
+- When a coordinator calls `spawnSession()` with an `assembledContextSummary`, should the universal enricher's prior-notes injection be suppressed (coordinator already covered it) or additive (both run)? The discovery recommends suppression -- enricher skips prior notes when `assembledContextSummary` is already set.
 
 ---
 
@@ -2384,6 +2464,42 @@ When an MR review session (run by a WorkTrain agent) finds issues in a coding se
 - How do you distinguish "the workflow is fine but this was a genuinely hard edge case" from "the workflow has a systematic gap"? A single miss doesn't prove a gap; multiple misses of the same kind do.
 - Should the analysis result feed directly into `workflow-effectiveness-assessment`, or is it a separate concern?
 - For the "coding agent missed it" case: is the right fix to change the coding workflow, or to make the review workflow more adversarial?
+
+---
+
+### wr.discovery lacks domain-specific ideation guidance (May 6, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+`wr.discovery` classifies `problemDomain` (software / product / ux / personal / general) and uses it for a few things -- philosophy source lookup, vision doc location, and `decisionCriteria` examples. But candidate generation, challenge framing, and resolution path guidance do not adapt to domain at all. A personal career decision, a product strategy question, and a software architecture problem have meaningfully different ideation patterns, different failure modes in candidate generation, different challenge rubrics, and different resolution artifacts. The workflow currently treats them all identically after `problemDomain` is set.
+
+The result is that `problemDomain` is a classification that carries almost no behavioral weight past phase-0 and phase-2. It reads well but does not change the actual work.
+
+**Things to hash out:**
+- Where is domain-specific guidance most needed? Candidate generation (different ideation patterns per domain) and challenge framing (different adversarial angles) are the clearest gaps. Are there others -- resolution mode selection, confidence dimensions, handoff format?
+- What is the right mechanism -- `promptFragments` conditioned on `problemDomain`, a domain-specific routine injected via `templateCall`, or richer domain context blocks injected at workflow start? The answer probably varies by where in the workflow the guidance applies.
+- How much domain specificity is enough? Software vs non-software is the biggest gap. Within non-software, personal vs product vs ux are also meaningfully different. Is a two-level split (software / general) sufficient for now, or is the full five-way split worth tackling immediately?
+- Are there domain-specific output formats worth considering? A personal decision probably ends with a different handoff shape than a software architecture decision -- different fields, different confidence dimensions, different "next actions" structure.
+
+---
+
+### wr.discovery anchors candidates to existing infrastructure instead of the ideal solution (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+`wr.discovery` produces candidates bounded by what already exists. The landscape step grounds the agent in the current codebase, which anchors candidate generation to what is buildable today rather than what would be best. On a discovery run for context-passing, for example, candidates are shaped by the current pre-load architecture instead of questioning whether pre-load is the right model at all. Decisions that should be challenged by the discovery process are instead silently inherited from it.
+
+The result is that discovery optimizes within the current design space rather than finding the edge of it. Problems that require restructuring existing code -- not just adding to it -- tend to produce timid candidates that paper over the root cause instead of addressing it. Discovery is supposed to find the best answer; it is currently finding the best answer that doesn't require changing much.
+
+**Things to hash out:**
+- Should the ideal-first reasoning happen before or after the landscape pass? Before risks ignoring hard constraints; after risks being anchored by them. What is the right sequencing, and is it always the same or does it depend on the problem type?
+- How do non-negotiable constraints (e.g. "must not change the engine API", "must work without a running daemon") get introduced without becoming the excuse for avoiding the best answer? There's a real difference between a hard constraint and an inherited assumption that could be challenged.
+- Is "what would the ideal look like, and what's the migration path from here?" a step inside discovery, or does it belong in `wr.shaping`? Shaping already produces an appetite and scope cut -- is ideal-first reasoning a discovery concern or a shaping concern, or does each need it independently?
+- When the ideal requires multi-sprint groundwork (e.g. "first build the KG, then build context assembly on top of it"), how should discovery represent that? As a sequenced multi-phase candidate? As a separate "phase 1" item that gets its own discovery?
 
 ---
 
@@ -3218,33 +3334,33 @@ openclaw is worth studying deeply before building out the platform layer. Draw i
 
 **Status: idea** | Priority: medium
 
-**Score: 10** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+**Score: 10** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: yes (needs MemoryStore first as Phase 2 prerequisite)
 
-**Problem:** Every session starts with a full repo sweep. Context gathering subagents re-read the same files, re-trace the same call chains, re-identify the same invariants.
+**Problem:** Every session starts with a full repo sweep. Context gathering subagents re-read the same files, re-trace the same call chains, re-identify the same invariants. And cross-session semantic queries ("what did we find about this module last week") cannot be answered without a vector index.
+
+**Position in the phased memory architecture (from Apr 30 discovery):** This is Phase 3 in a four-phase sequence. Phase 0 (bug fixes) → Phase 1 (universal enricher) → Phase 2 (MemoryStore SQLite) → Phase 3 (knowledge graph). The MemoryStore SQLite from Phase 2 answers 6 of 8 memory queries without a vector model. The knowledge graph adds the remaining two: code-structure traversal (Q8) and semantic similarity ("what is related to X"). Phase 3a (structural layer) extends the existing spike; Phase 3b (vector layer) is a feature flag.
 
 **Design -- two-layer hybrid:**
 
-**Layer 1: Structural graph (hard edges, deterministic)**
-Built by `ts-morph` (TypeScript Compiler API) + DuckDB. Captures: `imports`, `calls`, `exports`, `implements`, `extends`, `registers_in`, `tested_by`. Answers precise questions with certainty: "what imports trigger-router.ts?", "what CLI commands are registered?"
+**Layer 1: Structural graph (hard edges, deterministic) -- Phase 3a**
+Extends existing `src/knowledge-graph/` spike (DuckDB + ts-morph, already in `dependencies`). New node kinds: `session`, `pipeline_run`, `workspace_convention`. New edge kinds: `produced_by` (session → file), `applies_to_workspace`. Current spike only tracks import edges and CLI commands; session data from Phase 2 MemoryStore migrates here. Answers: "what imports trigger-router.ts?", "what files did session X touch?", "what sessions ran in this workspace?"
 
-**Layer 2: Vector similarity (soft weights, semantic)**
-Every node gets an embedding. Answers fuzzy questions: "what is conceptually related to this?", "what past sessions are relevant to this bug?" Built with LanceDB (embedded, TypeScript-native, local-first).
+**Layer 2: Vector similarity (soft weights, semantic) -- Phase 3b (feature flag)**
+LanceDB (embedded, TypeScript-native, local-first). Embeddings over session recaps and workspace conventions. Off by default (`WORKRAIL_VECTOR_SEARCH=1` to enable). Answers: "what sessions are semantically related to this bug?", "what workspace conventions mention authentication?"
 
 **Technology:**
-- Structural: `ts-morph` + DuckDB
-- Vector: LanceDB + local embedding model (Ollama or `@xenova/transformers`)
-- Unified query: `query_knowledge_graph(intent)` returns merged structural + semantic results
-
-**Build order:** Structural layer spike first (1-day). Vector layer after spike proves the foundation. Incremental update: re-index only files in `filesChanged` after each session.
+- Structural: `ts-morph` + DuckDB (existing spike, already in dependencies)
+- Vector: LanceDB + local embedding model -- `@xenova/transformers` (in-process, no external dep) preferred over Ollama (better quality but requires external process)
+- Unified query: `query_knowledge(intent, workspacePath)` replaces `query_memory` tool when Phase 3a lands
 
 **Build decision (from Apr 15 research):** ts-morph + DuckDB wins. Cognee: Python-only. GraphRAG/LightRAG: use LLMs to build graph (violates scripts-over-agent). Mem0/Zep: conversational memory, not code graphs. Sourcegraph: enterprise weight, overkill.
 
 **Things to hash out:**
-- How large does a typical workspace KG get? For a medium-sized TypeScript monorepo, what are the expected node and edge counts for the structural layer?
-- The incremental update strategy (re-index only `filesChanged`) requires accurate change tracking. What is the fallback when `filesChanged` is unavailable (e.g. for manually triggered sessions)?
-- The embedding model (Ollama or `@xenova/transformers`) needs to be running locally. What is the setup story for a new workspace -- is it expected to already have an embedding model, or does WorkTrain set one up?
-- DuckDB is in-process -- what is the concurrency story when multiple daemon sessions try to query or update it simultaneously?
-- Is the KG per-workspace or global? If per-workspace, cross-workspace queries (multi-project WorkTrain) require a federation layer.
+- Phase 3a scope: should the structural layer replace the Phase 2 SQLite MemoryStore (same data, different engine) or exist alongside it? Replacing is cleaner; coexisting avoids a migration.
+- `@xenova/transformers` vs Ollama for Phase 3b: @xenova runs in-process (no setup friction) but has lower embedding quality. Ollama is better quality but adds an external process dependency. Which matters more for the target user base?
+- The incremental update strategy (re-index only `filesChanged` after each session) requires accurate change tracking. What is the fallback when `filesChanged` is unavailable?
+- DuckDB is in-process -- WAL mode handles read concurrency but writes are serialized. Is the concurrency story acceptable when 3 sessions complete simultaneously?
+- Is the KG per-workspace or global? Per-workspace is simpler; global enables cross-workspace queries but adds federation complexity.
 
 ---
 
