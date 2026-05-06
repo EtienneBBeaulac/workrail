@@ -254,6 +254,35 @@ Today, validating this requires manually reading raw session transcripts, which 
 
 ---
 
+### Operator preference memory: WorkTrain learns and retains operator-specific preferences (Apr 30, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+WorkTrain runs fully autonomously but has no persistent memory of operator preferences -- things like "always squash before merging", "don't open PRs without a linked issue", "prefer functional patterns in new files", or "this workspace uses tabs not spaces." Every session starts from the same generic `daemon-soul.md` baseline. Preferences discovered or stated in one session don't carry forward.
+
+Claude Code solves this for human-in-the-loop sessions via its memory system (feedback, user, project entries written by the AI mid-conversation). WorkTrain needs an equivalent, but the mechanism is fundamentally different because: (a) there is no human watching the session to correct or confirm, and (b) opening up an interactive channel into an autonomous pipeline introduces risk that has to be carefully scoped.
+
+Candidate input mechanisms (not mutually exclusive):
+
+1. **MR/PR review comments** -- when a human reviewer requests changes or comments on a WorkTrain PR, that signal is authoritative feedback. WorkTrain already monitors PRs post-review (see backlog entry on root cause analysis). Extracting preference-relevant comments ("always add a test for this pattern", "don't use this API directly") and persisting them is a natural extension.
+
+2. **`worktrain tell`** -- the existing CLI command queues a message to the daemon. Could be extended to a `worktrain remember "..."` variant that writes directly to a workspace-scoped preferences store, bypassing the session queue entirely.
+
+3. **Explicit preference file** -- a `~/.workrail/operator-preferences.md` (or per-workspace variant) that the operator edits directly, injected into every session alongside `daemon-soul.md`. Lower friction than building a learning mechanism; higher friction than automatic inference.
+
+4. **Inferred from repeated corrections** -- if WorkTrain makes the same kind of mistake N times across sessions (same type of review finding, same escalation reason), automatically surface a draft preference for operator approval before persisting.
+
+**Things to hash out:**
+- What is the storage format -- append-only structured log, a single evolving markdown file, or a SQLite table? The answer affects how preferences are queried and how conflicts between preferences are resolved.
+- How does a persisted preference get *removed or updated*? Stale preferences can be worse than none -- "always use library X" becomes harmful when X is deprecated.
+- What is the trust model for inferred preferences vs explicitly stated ones? A preference extracted from a PR comment should carry different weight than one inferred from repeated behavior.
+- Does this interact with `daemon-soul.md`? Soul covers behavioral philosophy; preferences cover workspace/operator-specific constraints. They're different concerns but both end up in the system prompt -- precedence and load order matter.
+- The fully-closed-pipeline concern is real: mechanisms 1 and 4 operate without human intervention during sessions, which is the correct design. Mechanism 2 requires the operator to pull a lever (acceptable). Mechanism 3 is fully manual (always safe). Any mechanism that *pauses a session mid-run to ask a question* would break the autonomous contract and should not be explored here.
+
+---
+
 ### Per-run retrospective: structured learning from pipeline outcomes (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
