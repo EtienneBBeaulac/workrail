@@ -698,19 +698,17 @@ The autonomous workflow runner (`worktrain daemon`). Completely separate from th
 
 ### Living work context: shared knowledge document that accumulates across the full pipeline (Apr 30, 2026)
 
-**Status: partial** | Core infra shipped May 5, 2026 (PR #939). Three gaps remain.
+**Status: partial** | Core infra shipped May 5, 2026 (PR #939). All three original gaps now addressed; one residual gap deferred to Phase 2.
 
 **Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
-**Shipped (PR #939):** `ShapingHandoffArtifactV1` + `CodingHandoffArtifactV1` + enriched `DiscoveryHandoffArtifactV1`, `PhaseHandoffArtifact` union, `buildContextSummary()` pure function with per-phase selection, `PipelineRunContext` per-run JSON with `PhaseResult<T>`, crash recovery via `active-run.json` pointer, phase quality gates (fallback escalates, partial warns), persistence failure escalation, 4 workflow authoring changes, adversarial behavioral test (AC 21), `contractRef` validation test. Deferred: `buildSystemPrompt()` named semantic slots, console visualization, retry logic, epic-mode task graph, extensible contract registration, per-workflow lifecycle artifact tests.
+**Shipped (PR #939):** `ShapingHandoffArtifactV1` + `CodingHandoffArtifactV1` + enriched `DiscoveryHandoffArtifactV1`, `PhaseHandoffArtifact` union, `buildContextSummary()` pure function with per-phase selection, `PipelineRunContext` per-run JSON with `PhaseResult<T>`, crash recovery via `active-run.json` pointer, phase quality gates (fallback escalates, partial warns), persistence failure escalation, 4 workflow authoring changes, adversarial behavioral test (AC 21), `contractRef` validation test.
 
-**Remaining gaps (not tracked elsewhere):**
+**Gap #1 -- fixed (PR #948):** Contract test added: `tests/unit/context-chain-contract.test.ts` pins the seam between `buildContextSummary()` coordinator output and `buildSessionContext()` daemon input across all 4 phase transitions.
 
-1. **No end-to-end validation that context reaches downstream agents.** The `assembledContextSummary` is wired through `trigger.context` → `buildSystemPrompt()` → system prompt, but there is no test that runs a full pipeline (discovery → shaping → coding) and asserts that the coding agent's system prompt actually contains the discovery context. The adversarial behavioral test (AC 21) proves the pipeline structure -- it does not prove the context content is meaningful to the downstream agent.
+**Gap #2 -- fixed (PR #952):** The actual gap was narrower than originally described: QUICK_REVIEW/REVIEW_ONLY do invoke `runPrReviewCoordinator` with a `contextAssembler` wired. The real issue was the **fix agent spawn** in `runFixAgentLoop()` was not forwarding `reviewSpawnContext` -- fixed with one line. Residual: the `github_prs_poll` direct dispatch path bypasses the coordinator entirely; fix agents from that path still start cold. Deferred to Phase 2 (MemoryStore pre-assembly).
 
-2. **Not all coordinator pipeline modes populate `assembledContextSummary`.** Some modes (e.g. quick-review) may exit without writing a full `PipelineRunContext`. When context is absent, `buildSystemPrompt()` silently injects nothing -- the downstream agent gets no prior context with no warning. There is no check that the coordinator always writes context before dispatching a downstream session.
-
-3. **No operator visibility into injected context.** The "Prior Context" section in an agent's system prompt is invisible from the console. An operator has no way to see what context was injected into a session without reading raw conversation logs. The console should surface this -- at minimum, whether the session had prior context and how many bytes.
+**Gap #3 -- fixed (PR #948):** Console session detail view now surfaces an **Injected Context** card when `assembledContextSummary` is present in the session's `context_set` event.
 
 When a multi-agent pipeline runs -- discovery → shaping → coding → review → fix → re-review -- no agent has a complete picture of what came before it. The coding agent has the goal. The review agent has the code. The fix agent has the findings. None of them have the accumulated context from the full pipeline: why this approach was chosen over alternatives, what was ruled out, what constraints were discovered, what architectural decisions were made, what edge cases were handled, what the review found and why.
 
