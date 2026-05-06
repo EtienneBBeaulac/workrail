@@ -389,6 +389,7 @@ These principles guide all code decisions in this project. When writing, reviewi
 - **Make illegal states unrepresentable** -- model domain states so invalid combinations cannot be constructed
 - **Prefer explicit domain types over primitives** -- avoid stringly/numberly typed APIs when domain-specific types or ADTs communicate intent
 - **Type safety as the first line of defense** -- prefer compile-time guarantees over runtime checks
+- **Types must constrain, not just label** -- a type that accepts everything its predecessor accepted is a rename, not an improvement. The test: can the compiler reject an invalid caller? If no, the type is documentation. An interface with an index signature (`[key: string]: unknown`) is structurally identical to `Record<string, unknown>` and provides no safety. Explicit fields with no escape hatch are the only way to make illegal states unrepresentable at compile time.
 - **Exhaustiveness everywhere** -- use discriminated unions so handling is complete and refactor-safe
 - **Errors are data** -- represent failure as values (Result/Either), not exceptions as control flow
 - **Validate at boundaries, trust inside** -- do input validation at system edges; keep core logic free of defensive checks

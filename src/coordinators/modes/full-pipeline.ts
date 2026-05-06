@@ -48,7 +48,7 @@ import { buildContextSummary, extractPhaseArtifact } from '../context-assembly.j
 import { buildPhaseResult } from '../pipeline-run-context.js';
 import { runReviewAndVerdictCycle } from './implement-shared.js';
 import { touchesUI } from './implement.js';
-import type { CoordinatorSpawnContext } from '../pr-review.js';
+import type { CoordinatorSpawnContext } from '../types.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS

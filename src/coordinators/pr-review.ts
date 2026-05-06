@@ -28,7 +28,8 @@ import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
 import { assertNever } from '../runtime/assert-never.js';
 import type { AwaitResult, SessionResult } from '../cli/commands/worktrain-await.js';
-import type { ChildSessionResult } from './types.js';
+import type { ChildSessionResult, CoordinatorSpawnContext } from './types.js';
+export type { CoordinatorSpawnContext } from './types.js';
 import {
   ReviewVerdictArtifactV1Schema,
   isReviewVerdictArtifact,
@@ -36,29 +37,6 @@ import {
 import { renderContextBundle } from '../context-assembly/index.js';
 import type { ContextAssembler } from '../context-assembly/types.js';
 
-// ---------------------------------------------------------------------------
-// CoordinatorSpawnContext
-// ---------------------------------------------------------------------------
-
-/**
- * Typed context passed to spawned sessions by coordinators.
- *
- * WHY a named type (not Readonly<Record<string, unknown>>): makes the field surface
- * explicit and prevents callers from passing arbitrary untyped data. All fields are
- * passed through to the agent's trigger.context map.
- *
- * Invariant for assembledContextSummary: coordinators only set this when the rendered
- * context string is non-empty. The illegal state (set but empty) cannot arise at
- * construction sites that guard with `if (rendered.trim().length > 0)`.
- *
- * The index signature permits additional coordinator-specific fields (e.g. pitchPath,
- * prUrl, findings) without requiring a separate type per coordinator.
- */
-export interface CoordinatorSpawnContext {
-  /** Coordinator-assembled prior phase context injected as ## Prior Context in the system prompt. */
-  readonly assembledContextSummary?: string;
-  readonly [key: string]: unknown;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DOMAIN TYPES
