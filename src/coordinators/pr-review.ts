@@ -1271,7 +1271,7 @@ async function runFixAgentLoop(
   initialOutcome: PrOutcome,
   coordinatorStartMs: number,
   log: (line: string) => void,
-  /** Assembled context from the initial review spawn. Forwarded to re-review spawns. */
+  /** Assembled context from the initial review spawn. Forwarded to fix agent spawns and re-review spawns. */
   reviewSpawnContext?: Readonly<Record<string, unknown>>,
 ): Promise<PrOutcome> {
   let passCount = 0;
