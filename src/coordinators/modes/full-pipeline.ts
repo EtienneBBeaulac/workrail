@@ -48,6 +48,7 @@ import { buildContextSummary, extractPhaseArtifact } from '../context-assembly.j
 import { buildPhaseResult } from '../pipeline-run-context.js';
 import { runReviewAndVerdictCycle } from './implement-shared.js';
 import { touchesUI } from './implement.js';
+import type { CoordinatorSpawnContext } from '../pr-review.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -355,9 +356,9 @@ async function runFullPipelineCore(
   const partialWarning = discoveryPhaseResult.kind === 'partial'
     ? '\n\n**Note:** Discovery phase produced partial output only (no structured artifact). Context above is from session notes and may be incomplete.'
     : '';
-  const shapingContext: Readonly<Record<string, unknown>> = (shapingContextSummary || partialWarning)
+  const shapingContext: CoordinatorSpawnContext | undefined = (shapingContextSummary || partialWarning)
     ? { assembledContextSummary: (shapingContextSummary + partialWarning).trim() }
-    : {};
+    : undefined;
 
   // ── Stage 3: Shaping session ──────────────────────────────────────────
   const shapingCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'shaping');
@@ -547,14 +548,14 @@ async function runFullPipelineCore(
     : '';
   const codingWarnings = discoveryPartialWarning + shapingPartialWarning;
   const codingFullContext = (codingContextSummary + codingWarnings).trim();
+  const codingContext: CoordinatorSpawnContext | undefined = codingFullContext
+    ? { pitchPath: opts.workspace + '/.workrail/current-pitch.md', assembledContextSummary: codingFullContext }
+    : undefined;
   const codingSpawnResult = await deps.spawnSession(
     'wr.coding-task',
     opts.goal,
     opts.workspace,
-    {
-      pitchPath: opts.workspace + '/.workrail/current-pitch.md',
-      ...(codingFullContext ? { assembledContextSummary: codingFullContext } : {}),
-    },
+    codingContext,
     { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
   );
 

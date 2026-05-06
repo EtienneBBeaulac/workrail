@@ -476,13 +476,13 @@ describe('formatElapsed', () => {
  * All I/O operations are recorded for assertion.
  */
 function makeFakeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps & {
-  spawnCalls: Array<{ workflowId: string; goal: string }>;
+  spawnCalls: Array<{ workflowId: string; goal: string; context?: Readonly<Record<string, unknown>> }>;
   awaitCalls: Array<{ handles: readonly string[] }>;
   mergeCalls: number[];
   writtenFiles: Map<string, string>;
   stderrLines: string[];
 } {
-  const spawnCalls: Array<{ workflowId: string; goal: string }> = [];
+  const spawnCalls: Array<{ workflowId: string; goal: string; context?: Readonly<Record<string, unknown>> }> = [];
   const awaitCalls: Array<{ handles: readonly string[] }> = [];
   const mergeCalls: number[] = [];
   const writtenFiles = new Map<string, string>();
@@ -492,8 +492,8 @@ function makeFakeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps
   const fakeFiles = new Map<string, string>();
 
   const base: CoordinatorDeps = {
-    spawnSession: async (workflowId, goal) => {
-      spawnCalls.push({ workflowId, goal });
+    spawnSession: async (workflowId, goal, _workspace, context) => {
+      spawnCalls.push({ workflowId, goal, context });
       return { kind: 'ok', value: `handle-${spawnCalls.length}` };
     },
     awaitSessions: async (handles, _timeoutMs) => {
@@ -664,6 +664,53 @@ describe('runPrReviewCoordinator', () => {
     expect(deps.mergeCalls).toContain(419);
     // Should have spawned: 1 review + 1 fix agent + 1 re-review = 3 spawns minimum
     expect(deps.spawnCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('fix agent receives assembled context when contextAssembler is present', async () => {
+    const deps = makeFakeDeps({
+      contextAssembler: {
+        assemble: async () => ({
+          task: { kind: 'pr_review', prNumber: 419, workspacePath: '/workspace' },
+          gitDiff: { kind: 'ok', value: 'src/foo.ts | 3 +++' },
+          priorSessionNotes: { kind: 'ok', value: [] },
+          assembledAt: new Date().toISOString(),
+        }),
+      },
+      getAgentResult: async (handle) => {
+        if (handle === 'handle-1') {
+          return { recapMarkdown: 'MINOR: missing test coverage.', artifacts: [] };
+        }
+        return { recapMarkdown: 'APPROVE -- all issues addressed.', artifacts: [] };
+      },
+    });
+
+    await runPrReviewCoordinator(deps, defaultOpts);
+
+    // Find the fix agent spawn (wr.coding-task)
+    const fixSpawn = deps.spawnCalls.find((c) => c.workflowId === 'wr.coding-task');
+    expect(fixSpawn).toBeDefined();
+    // Fix agent must receive assembledContextSummary (same as review session)
+    expect(fixSpawn?.context).toBeDefined();
+    expect(typeof fixSpawn?.context?.['assembledContextSummary']).toBe('string');
+    const summary = fixSpawn?.context?.['assembledContextSummary'] as string;
+    expect(summary.length).toBeGreaterThan(0);
+  });
+
+  it('fix agent receives no context when contextAssembler is absent', async () => {
+    const deps = makeFakeDeps({
+      getAgentResult: async (handle) => {
+        if (handle === 'handle-1') {
+          return { recapMarkdown: 'MINOR: missing test coverage.', artifacts: [] };
+        }
+        return { recapMarkdown: 'APPROVE -- all issues addressed.', artifacts: [] };
+      },
+    });
+    await runPrReviewCoordinator(deps, defaultOpts);
+
+    const fixSpawn = deps.spawnCalls.find((c) => c.workflowId === 'wr.coding-task');
+    expect(fixSpawn).toBeDefined();
+    // No contextAssembler = no context injected
+    expect(fixSpawn?.context).toBeUndefined();
   });
 
   it('escalates after 3 fix passes with persistent minor findings', async () => {

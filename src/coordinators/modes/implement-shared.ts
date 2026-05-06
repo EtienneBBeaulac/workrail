@@ -13,6 +13,7 @@
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, PipelineOutcome } from '../adaptive-pipeline.js';
 import { CODING_TIMEOUT_MS, REVIEW_TIMEOUT_MS, checkSpawnCutoff } from '../adaptive-pipeline.js';
 import { readVerdictArtifact, parseFindingsFromNotes } from '../pr-review.js';
+import type { CoordinatorSpawnContext } from '../pr-review.js';
 import type { ReviewVerdictArtifactV1 } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 import { parseReviewVerdictArtifact } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
@@ -56,14 +57,14 @@ export async function runReviewAndVerdictCycle(
   deps.stderr(`[review-cycle] Spawning review session (iteration=${iteration}): ${reviewGoal.slice(0, 80)}`);
 
   const reviewContextSummary = buildContextSummary(priorArtifacts, 'review');
+  const reviewContext: CoordinatorSpawnContext | undefined = reviewContextSummary
+    ? { prUrl, assembledContextSummary: reviewContextSummary }
+    : undefined;
   const reviewSpawnResult = await deps.spawnSession(
     'wr.mr-review',
     reviewGoal,
     opts.workspace,
-    {
-      prUrl,
-      ...(reviewContextSummary ? { assembledContextSummary: reviewContextSummary } : {}),
-    },
+    reviewContext,
   );
 
   if (reviewSpawnResult.kind === 'err') {
@@ -155,15 +156,14 @@ export async function runReviewAndVerdictCycle(
 
       const fixGoal = `Fix review findings: ${findings.findingSummaries.slice(0, 3).join('; ')}`;
       const fixContextSummary = buildContextSummary(priorArtifacts, 'fix');
+      const fixContext: CoordinatorSpawnContext | undefined = fixContextSummary
+        ? { prUrl, findings: findings.findingSummaries, assembledContextSummary: fixContextSummary }
+        : undefined;
       const fixSpawnResult = await deps.spawnSession(
         'wr.coding-task',
         fixGoal,
         opts.workspace,
-        {
-          prUrl,
-          findings: findings.findingSummaries,
-          ...(fixContextSummary ? { assembledContextSummary: fixContextSummary } : {}),
-        },
+        fixContext,
       );
 
       if (fixSpawnResult.kind === 'err') {

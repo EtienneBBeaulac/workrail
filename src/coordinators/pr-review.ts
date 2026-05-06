@@ -36,6 +36,30 @@ import {
 import { renderContextBundle } from '../context-assembly/index.js';
 import type { ContextAssembler } from '../context-assembly/types.js';
 
+// ---------------------------------------------------------------------------
+// CoordinatorSpawnContext
+// ---------------------------------------------------------------------------
+
+/**
+ * Typed context passed to spawned sessions by coordinators.
+ *
+ * WHY a named type (not Readonly<Record<string, unknown>>): makes the field surface
+ * explicit and prevents callers from passing arbitrary untyped data. All fields are
+ * passed through to the agent's trigger.context map.
+ *
+ * Invariant for assembledContextSummary: coordinators only set this when the rendered
+ * context string is non-empty. The illegal state (set but empty) cannot arise at
+ * construction sites that guard with `if (rendered.trim().length > 0)`.
+ *
+ * The index signature permits additional coordinator-specific fields (e.g. pitchPath,
+ * prUrl, findings) without requiring a separate type per coordinator.
+ */
+export interface CoordinatorSpawnContext {
+  /** Coordinator-assembled prior phase context injected as ## Prior Context in the system prompt. */
+  readonly assembledContextSummary?: string;
+  readonly [key: string]: unknown;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DOMAIN TYPES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -146,7 +170,7 @@ export interface CoordinatorDeps {
     workflowId: string,
     goal: string,
     workspace: string,
-    context?: Readonly<Record<string, unknown>>,
+    context?: CoordinatorSpawnContext,
     agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
     parentSessionId?: string,
   ) => Promise<Result<string, string>>;
@@ -1025,8 +1049,8 @@ export async function runPrReviewCoordinator(
   // Spawn review sessions in parallel
   const reviewHandles = new Map<number, string>(); // prNumber -> sessionHandle
   const spawnErrors = new Map<number, string>(); // prNumber -> error message
-  // Assembled context per PR -- forwarded to re-review spawns in runFixAgentLoop
-  const spawnContexts = new Map<number, Readonly<Record<string, unknown>>>();
+  // Assembled context per PR -- forwarded to fix agent spawns and re-review spawns in runFixAgentLoop
+  const spawnContexts = new Map<number, CoordinatorSpawnContext>();
 
   for (const pr of prs) {
     const goal = `Review PR #${pr.number} "${pr.title}" before merge`;
@@ -1036,7 +1060,7 @@ export async function runPrReviewCoordinator(
     }
 
     // Assemble context before spawning (optional -- skip if no assembler injected).
-    let spawnContext: Readonly<Record<string, unknown>> | undefined;
+    let spawnContext: CoordinatorSpawnContext | undefined;
     if (deps.contextAssembler) {
       const bundle = await deps.contextAssembler.assemble({
         kind: 'pr_review',
@@ -1271,8 +1295,8 @@ async function runFixAgentLoop(
   initialOutcome: PrOutcome,
   coordinatorStartMs: number,
   log: (line: string) => void,
-  /** Assembled context from the initial review spawn. Forwarded to re-review spawns. */
-  reviewSpawnContext?: Readonly<Record<string, unknown>>,
+  /** Assembled context from the initial review spawn. Forwarded to fix agent spawns and re-review spawns. */
+  reviewSpawnContext?: CoordinatorSpawnContext,
 ): Promise<PrOutcome> {
   let passCount = 0;
   let currentFindings = initialFindings;
@@ -1309,10 +1333,13 @@ async function runFixAgentLoop(
 
     log(`      PR #${pr.number}  ->  spawning fix agent (pass ${passCount})...`);
 
+    // Forward the same assembled context (git diff, prior session notes) that the
+    // initial review session received -- the fix agent needs the same workspace awareness.
     const fixSpawnResult = await deps.spawnSession(
       'wr.coding-task',
       fixGoal,
       opts.workspace,
+      reviewSpawnContext,
     );
 
     if (fixSpawnResult.kind === 'err') {

@@ -698,19 +698,17 @@ The autonomous workflow runner (`worktrain daemon`). Completely separate from th
 
 ### Living work context: shared knowledge document that accumulates across the full pipeline (Apr 30, 2026)
 
-**Status: partial** | Core infra shipped May 5, 2026 (PR #939). Three gaps remain.
+**Status: partial** | Core infra shipped May 5, 2026 (PR #939). All three original gaps now addressed; one residual gap deferred to Phase 2.
 
 **Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
-**Shipped (PR #939):** `ShapingHandoffArtifactV1` + `CodingHandoffArtifactV1` + enriched `DiscoveryHandoffArtifactV1`, `PhaseHandoffArtifact` union, `buildContextSummary()` pure function with per-phase selection, `PipelineRunContext` per-run JSON with `PhaseResult<T>`, crash recovery via `active-run.json` pointer, phase quality gates (fallback escalates, partial warns), persistence failure escalation, 4 workflow authoring changes, adversarial behavioral test (AC 21), `contractRef` validation test. Deferred: `buildSystemPrompt()` named semantic slots, console visualization, retry logic, epic-mode task graph, extensible contract registration, per-workflow lifecycle artifact tests.
+**Shipped (PR #939):** `ShapingHandoffArtifactV1` + `CodingHandoffArtifactV1` + enriched `DiscoveryHandoffArtifactV1`, `PhaseHandoffArtifact` union, `buildContextSummary()` pure function with per-phase selection, `PipelineRunContext` per-run JSON with `PhaseResult<T>`, crash recovery via `active-run.json` pointer, phase quality gates (fallback escalates, partial warns), persistence failure escalation, 4 workflow authoring changes, adversarial behavioral test (AC 21), `contractRef` validation test.
 
-**Remaining gaps (not tracked elsewhere):**
+**Gap #1 -- fixed (PR #948):** Contract test added: `tests/unit/context-chain-contract.test.ts` pins the seam between `buildContextSummary()` coordinator output and `buildSessionContext()` daemon input across all 4 phase transitions.
 
-1. **No end-to-end validation that context reaches downstream agents.** The `assembledContextSummary` is wired through `trigger.context` → `buildSystemPrompt()` → system prompt, but there is no test that runs a full pipeline (discovery → shaping → coding) and asserts that the coding agent's system prompt actually contains the discovery context. The adversarial behavioral test (AC 21) proves the pipeline structure -- it does not prove the context content is meaningful to the downstream agent.
+**Gap #2 -- fixed (PR #952):** The actual gap was narrower than originally described: QUICK_REVIEW/REVIEW_ONLY do invoke `runPrReviewCoordinator` with a `contextAssembler` wired. The real issue was the **fix agent spawn** in `runFixAgentLoop()` was not forwarding `reviewSpawnContext` -- fixed with one line. Residual: the `github_prs_poll` direct dispatch path bypasses the coordinator entirely; fix agents from that path still start cold. Deferred to Phase 2 (MemoryStore pre-assembly).
 
-2. **Not all coordinator pipeline modes populate `assembledContextSummary`.** Some modes (e.g. quick-review) may exit without writing a full `PipelineRunContext`. When context is absent, `buildSystemPrompt()` silently injects nothing -- the downstream agent gets no prior context with no warning. There is no check that the coordinator always writes context before dispatching a downstream session.
-
-3. **No operator visibility into injected context.** The "Prior Context" section in an agent's system prompt is invisible from the console. An operator has no way to see what context was injected into a session without reading raw conversation logs. The console should surface this -- at minimum, whether the session had prior context and how many bytes.
+**Gap #3 -- fixed (PR #948):** Console session detail view now surfaces an **Injected Context** card when `assembledContextSummary` is present in the session's `context_set` event.
 
 When a multi-agent pipeline runs -- discovery → shaping → coding → review → fix → re-review -- no agent has a complete picture of what came before it. The coding agent has the goal. The review agent has the code. The fix agent has the findings. None of them have the accumulated context from the full pipeline: why this approach was chosen over alternatives, what was ruled out, what constraints were discovered, what architectural decisions were made, what edge cases were handled, what the review found and why.
 
@@ -1956,6 +1954,27 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
 
+
+### Agents must not perform delivery actions -- only the coordinator's delivery layer can (Apr 30, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: no
+
+Daemon agents currently have unrestricted access to `gh` and `git` via the `Bash` tool. There is nothing preventing an agent from running `gh pr create`, `gh pr merge --squash --auto`, `git push --force`, or any other delivery action inside its session. These actions should be exclusively the coordinator delivery layer's responsibility -- they happen after the session completes, after all quality gates pass, through explicit coordinator scripts. Agents that perform them autonomously bypass every gate that was designed to protect the pipeline.
+
+The problem is architectural: delivery actions are not separated from agent capabilities. An agent that calls `gh pr merge` mid-session has merged before the coordinator's review routing, before CI has a chance to run, before any post-session quality check fires. This is not a hypothetical -- a sufficiently "helpful" agent will try to complete the job it was given, which includes delivery.
+
+The correct invariant: delivery actions (open PR, merge PR, enable auto-merge, push to main, post to external systems) are only reachable through the coordinator's `autoCommit`, `autoOpenPR`, and delivery pipeline scripts -- not through the agent's Bash tool. The agent's job ends when it calls `complete_step` on the final step. Everything after that is coordinator-owned.
+
+**Things to hash out:**
+- How is "delivery action" defined precisely enough to enforce? `gh pr create` is delivery; `gh pr view` is read-only. `git push origin feature-branch` is delivery; `git status` is not. The boundary is write-to-external-system.
+- Can this be enforced at the tool level (block specific shell commands in the Bash tool) or does it require a capability-based architecture (agents get a restricted Bash that can't reach delivery commands)?
+- The `daemon-soul.md` could document this as a rule, but that relies on LLM compliance -- not enforcement. What is the structural mechanism?
+- How does this interact with workflows that intentionally ask the agent to run delivery scripts (e.g. a workflow step that says "commit your changes")? Those may be legitimate. The distinction is agent-initiated delivery vs coordinator-authorized delivery.
+- Should the coordinator pass a `deliveryAllowed: false` flag that the daemon enforces in the Bash tool wrapper? Or is this a workflow authoring constraint?
+
+---
 
 ### Event-driven agent coordination (coordinator as event bus)
 

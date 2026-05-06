@@ -34,6 +34,7 @@ import {
 } from '../adaptive-pipeline.js';
 import { runReviewAndVerdictCycle, MAX_FIX_ITERATIONS } from './implement-shared.js';
 import { extractPhaseArtifact, buildContextSummary } from '../context-assembly.js';
+import type { CoordinatorSpawnContext } from '../pr-review.js';
 import { buildPhaseResult } from '../pipeline-run-context.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
 import { isCodingHandoffArtifact, CodingHandoffArtifactV1Schema } from '../../v2/durable-core/schemas/artifacts/index.js';
