@@ -314,4 +314,82 @@ describe('buildSystemPrompt()', () => {
       expect(prompt).not.toContain('## Prior Context');
     });
   });
+
+  describe('enricherResult injection', () => {
+    const sampleEnricher = {
+      priorSessionNotes: [
+        {
+          sessionId: 'sess_abc',
+          sessionTitle: 'Prior review',
+          recapSnippet: 'Found 2 issues in auth module',
+          gitBranch: 'main',
+          lastModifiedMs: Date.now(),
+        },
+      ],
+      gitDiffStat: 'src/auth.ts | 12 +++\n1 file changed',
+    };
+
+    it('injects ## Prior Workspace Notes when enricherResult has notes and no assembledContextSummary', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath, sampleEnricher);
+
+      expect(prompt).toContain('## Prior Workspace Notes');
+      expect(prompt).toContain('Prior review');
+      expect(prompt).toContain('Found 2 issues in auth module');
+    });
+
+    it('injects ## Changed files section', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath, sampleEnricher);
+
+      expect(prompt).toContain('## Changed files');
+      expect(prompt).toContain('src/auth.ts');
+    });
+
+    it('skips ## Prior Workspace Notes when assembledContextSummary is present', () => {
+      const triggerWithCtx: WorkflowTrigger = {
+        ...baseTrigger,
+        context: { assembledContextSummary: 'Coordinator context here' },
+      };
+      const prompt = buildSystemPrompt(triggerWithCtx, '', DAEMON_SOUL_DEFAULT, null, triggerWithCtx.workspacePath, sampleEnricher);
+
+      expect(prompt).not.toContain('## Prior Workspace Notes');
+      // But Changed files is still injected
+      expect(prompt).toContain('## Changed files');
+    });
+
+    it('omits ## Prior Workspace Notes when enricherResult has empty notes', () => {
+      const emptyNotes = { priorSessionNotes: [], gitDiffStat: null };
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath, emptyNotes);
+
+      expect(prompt).not.toContain('## Prior Workspace Notes');
+      expect(prompt).not.toContain('## Changed files');
+    });
+
+    it('omits enricher sections when enricherResult is undefined', () => {
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath);
+
+      expect(prompt).not.toContain('## Prior Workspace Notes');
+      expect(prompt).not.toContain('## Changed files');
+    });
+
+    it('injects ## Changed files even when notes are empty', () => {
+      const onlyDiff = { priorSessionNotes: [], gitDiffStat: 'src/foo.ts | 1 +' };
+      const prompt = buildSystemPrompt(baseTrigger, '', DAEMON_SOUL_DEFAULT, null, baseTrigger.workspacePath, onlyDiff);
+
+      expect(prompt).toContain('## Changed files');
+      expect(prompt).not.toContain('## Prior Workspace Notes');
+    });
+
+    it('## Changed files appears after ## Prior Context', () => {
+      const trigger: WorkflowTrigger = {
+        ...baseTrigger,
+        context: { assembledContextSummary: 'coordinator context' },
+      };
+      const prompt = buildSystemPrompt(trigger, '', DAEMON_SOUL_DEFAULT, null, trigger.workspacePath, sampleEnricher);
+
+      const priorCtxIdx = prompt.indexOf('## Prior Context');
+      const changedFilesIdx = prompt.indexOf('## Changed files');
+      expect(priorCtxIdx).toBeGreaterThan(-1);
+      expect(changedFilesIdx).toBeGreaterThan(priorCtxIdx);
+    });
+  });
 });

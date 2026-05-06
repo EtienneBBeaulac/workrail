@@ -14,6 +14,7 @@
  */
 
 import type { WorkflowTrigger } from '../types.js';
+import type { EnricherResult } from '../workflow-enricher.js';
 export { DAEMON_SOUL_DEFAULT } from '../soul-template.js';
 
 // ---------------------------------------------------------------------------
@@ -154,12 +155,20 @@ export function buildSessionRecap(notes: readonly string[]): string {
  *   the main checkout. The worktree path is only known after worktree creation in
  *   buildPreAgentSession(). Passing it explicitly keeps this function pure and testable.
  */
+/**
+ * Maximum byte size of git diff stat injected from WorkflowEnricher.
+ * WHY 2KB: diff stat is orientation context (file names + change counts), not the
+ * full diff. 2KB covers typical PRs without bloating the system prompt.
+ */
+const MAX_GIT_DIFF_STAT_BYTES = 2048;
+
 export function buildSystemPrompt(
   trigger: WorkflowTrigger,
   sessionState: string,
   soulContent: string,
   workspaceContext: string | null,
   effectiveWorkspacePath: string,
+  enricherResult?: EnricherResult,
 ): string {
   const isWorktreeSession = effectiveWorkspacePath !== trigger.workspacePath;
 
@@ -203,6 +212,43 @@ export function buildSystemPrompt(
     lines.push('');
     lines.push('## Prior Context');
     lines.push(ctxStr.trim());
+  }
+
+  // Inject prior workspace session notes from WorkflowEnricher.
+  // WHY after ## Prior Context: coordinator-assembled phase artifacts (discovery/shaping/coding
+  // handoffs) are higher-signal than raw session recaps. Enricher notes follow to supplement.
+  // WHY skip when assembledContextSummary present: the coordinator already provided richer
+  // structured context; raw notes would be redundant and lower-signal.
+  if (
+    enricherResult !== undefined &&
+    enricherResult.priorSessionNotes.length > 0 &&
+    !(typeof trigger.context?.['assembledContextSummary'] === 'string' &&
+      (trigger.context['assembledContextSummary'] as string).trim().length > 0)
+  ) {
+    lines.push('');
+    lines.push('## Prior Workspace Notes');
+    for (const note of enricherResult.priorSessionNotes) {
+      const title = note.sessionTitle ?? note.sessionId.slice(0, 12);
+      const branch = note.gitBranch ? ` (${note.gitBranch})` : '';
+      const recap = note.recapSnippet ?? '(no recap)';
+      lines.push(`**${title}**${branch}: ${recap}`);
+    }
+  }
+
+  // Inject git diff stat from WorkflowEnricher.
+  // WHY always inject (even when assembledContextSummary present): coordinators don't always
+  // include changed-files lists, and the diff stat is cheap orientation context that never
+  // conflicts with phase artifacts.
+  if (enricherResult !== undefined && enricherResult.gitDiffStat !== null) {
+    let diffStat = enricherResult.gitDiffStat;
+    if (Buffer.byteLength(diffStat, 'utf8') > MAX_GIT_DIFF_STAT_BYTES) {
+      diffStat = diffStat.slice(0, MAX_GIT_DIFF_STAT_BYTES) + '\n[diff stat truncated]';
+    }
+    lines.push('');
+    lines.push('## Changed files');
+    lines.push('```');
+    lines.push(diffStat);
+    lines.push('```');
   }
 
   // Append reference URLs section when provided.

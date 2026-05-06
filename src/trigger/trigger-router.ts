@@ -97,6 +97,7 @@ export type RunWorkflowFn = (
   _statsDir?: string,
   _sessionsDir?: string,
   source?: SessionSource,
+  enricherDeps?: import('../daemon/workflow-enricher.js').WorkflowEnricherDeps,
 ) => Promise<WorkflowRunResult>;
 
 // ---------------------------------------------------------------------------

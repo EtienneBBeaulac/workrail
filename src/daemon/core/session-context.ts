@@ -15,6 +15,7 @@
 
 import type { WorkflowTrigger } from '../types.js';
 import type { ContextBundle } from '../context-loader.js';
+import type { EnricherResult } from '../workflow-enricher.js';
 import { buildSystemPrompt, buildSessionRecap } from './system-prompt.js';
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,7 @@ export function buildSessionContext(
   context: ContextBundle,
   firstStepPrompt: string,
   effectiveWorkspacePath: string,
+  enricherResult?: EnricherResult,
 ): SessionContext {
   // ---- Flatten ContextBundle to the primitives buildSystemPrompt expects ----
   // WHY flatten here (not in DefaultContextLoader): buildSystemPrompt() is a stable
@@ -108,7 +110,7 @@ export function buildSessionContext(
 
   // ---- System prompt ----
   const sessionState = buildSessionRecap(sessionNotes);
-  const systemPrompt = buildSystemPrompt(trigger, sessionState, context.soulContent, workspaceContext, effectiveWorkspacePath);
+  const systemPrompt = buildSystemPrompt(trigger, sessionState, context.soulContent, workspaceContext, effectiveWorkspacePath, enricherResult);
 
   // ---- Initial prompt ----
   // WHY no continueToken in the initial prompt: the daemon uses complete_step which

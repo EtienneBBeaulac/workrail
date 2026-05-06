@@ -43,6 +43,7 @@ import type { PreAgentSession, AgentReadySession, SessionOutcome } from './runne
 import { getSchemas } from './tool-schemas.js';
 import { constructTools } from './construct-tools.js';
 import type { runWorkflow } from '../workflow-runner.js';
+import type { EnricherResult } from '../workflow-enricher.js';
 
 // ---------------------------------------------------------------------------
 // TurnEndSubscriberContext
@@ -234,6 +235,7 @@ export async function buildAgentReadySession(
   daemonRegistry: DaemonRegistry | undefined,
   activeSessionSet: ActiveSessionSet | undefined,
   runWorkflowFn: typeof runWorkflow,
+  enricherResult?: EnricherResult,
 ): Promise<AgentReadySession> {
   const { state, firstStepPrompt, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = preAgentSession;
   const startContinueToken = preAgentSession.continueToken;
@@ -289,6 +291,7 @@ export async function buildAgentReadySession(
     contextBundle,
     firstStepPrompt || 'No step content available',
     effectiveWorkspacePath,
+    enricherResult,
   );
 
   // ---- Observability callbacks for AgentLoop ----
