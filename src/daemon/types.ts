@@ -465,3 +465,21 @@ export interface OrphanedSession {
    */
   readonly workspacePath?: string;
 }
+
+// ---------------------------------------------------------------------------
+// WorkflowContextSlots
+// ---------------------------------------------------------------------------
+
+export interface WorkflowContextSlots {
+  /** Coordinator-assembled prior phase context (discovery/shaping/coding handoffs). */
+  readonly assembledContextSummary?: string;
+}
+
+export function extractContextSlots(context: Readonly<Record<string, unknown>> | undefined): WorkflowContextSlots {
+  if (!context) return {};
+  const assembledContextSummary = typeof context['assembledContextSummary'] === 'string'
+    ? context['assembledContextSummary']
+    : undefined;
+  return { assembledContextSummary };
+}
+

@@ -14,6 +14,7 @@
  */
 
 import type { WorkflowTrigger } from '../types.js';
+import { extractContextSlots } from '../types.js';
 import type { EnricherResult } from '../workflow-enricher.js';
 export { DAEMON_SOUL_DEFAULT } from '../soul-template.js';
 
@@ -99,6 +100,22 @@ complete_step is your advancement tool. It does not require a continueToken. Do 
 `;
 
 // ---------------------------------------------------------------------------
+// truncateToByteLimit
+// ---------------------------------------------------------------------------
+
+function truncateToByteLimit(s: string, maxBytes: number, marker: string): string {
+  if (Buffer.byteLength(s, 'utf8') <= maxBytes) return s;
+  let end = maxBytes;
+  while (end > 0 && Buffer.byteLength(s.slice(0, end), 'utf8') > maxBytes) end--;
+  while (end > 0) {
+    const code = s.charCodeAt(end - 1);
+    if (code >= 0xD800 && code <= 0xDFFF) { end--; } else { break; }
+  }
+  const newlineIdx = s.lastIndexOf('\n', end);
+  return (newlineIdx > 0 ? s.slice(0, newlineIdx) : s.slice(0, end)) + '\n' + marker;
+}
+
+// ---------------------------------------------------------------------------
 // buildSessionRecap
 // ---------------------------------------------------------------------------
 
@@ -130,37 +147,66 @@ export function buildSessionRecap(notes: readonly string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// buildSystemPrompt
+// buildSystemPrompt -- pipeline of pure section functions
 // ---------------------------------------------------------------------------
 
-/**
- * Build the system prompt for the daemon agent.
- *
- * Intentionally synchronous and pure -- all I/O (soul file, workspace context)
- * is resolved by the caller before invoking this function. WHY: keeps the
- * function unit-testable by passing pre-loaded strings directly, without
- * requiring fs mocking or real disk access in tests.
- *
- * @param trigger - The workflow trigger containing workspacePath and referenceUrls.
- * @param sessionState - Serialized WorkRail session state (may be empty string).
- * @param soulContent - Loaded content of daemon-soul.md (always a string; caller
- *   provides the hardcoded default if the file was absent).
- * @param workspaceContext - Combined workspace context from CLAUDE.md / AGENTS.md,
- *   or null if no workspace context files were found.
- * @param effectiveWorkspacePath - The workspace path the agent must work in.
- *   Callers compute this as: sessionWorkspacePath ?? trigger.workspacePath.
- *   Required (not optional) so the type system enforces the caller makes an explicit
- *   decision -- there is no silent fallback to trigger.workspacePath inside this function.
- *   WHY a separate parameter (not derived from trigger): trigger.workspacePath is always
- *   the main checkout. The worktree path is only known after worktree creation in
- *   buildPreAgentSession(). Passing it explicitly keeps this function pure and testable.
- */
-/**
- * Maximum byte size of git diff stat injected from WorkflowEnricher.
- * WHY 2KB: diff stat is orientation context (file names + change counts), not the
- * full diff. 2KB covers typical PRs without bloating the system prompt.
- */
+// Each section function returns string[] (lines to append) or [] to omit.
+// buildSystemPrompt composes them in order. Adding a new section = adding one
+// function and one entry in the pipeline array.
+
 const MAX_GIT_DIFF_STAT_BYTES = 2048;
+
+function sectionWorktreeScope(trigger: WorkflowTrigger, effectiveWorkspacePath: string): string[] {
+  if (effectiveWorkspacePath === trigger.workspacePath) return [];
+  return [
+    '',
+    `**Worktree session scope:** Your workspace is the isolated git worktree at \`${effectiveWorkspacePath}\`. Do not access, read, or modify the main checkout at \`${trigger.workspacePath}\`. Do not read planning docs, roadmap files, or backlog files. All Bash commands, file reads, and file writes must stay within your worktree path.`,
+  ];
+}
+
+function sectionWorkspaceContext(workspaceContext: string | null): string[] {
+  if (workspaceContext === null) return [];
+  return ['', '## Workspace Context (from AGENTS.md / CLAUDE.md)', workspaceContext];
+}
+
+function sectionAssembledContext(trigger: WorkflowTrigger): string[] {
+  const { assembledContextSummary } = extractContextSlots(trigger.context);
+  if (!assembledContextSummary || assembledContextSummary.trim().length === 0) return [];
+  const ctxStr = truncateToByteLimit(assembledContextSummary, MAX_ASSEMBLED_CONTEXT_BYTES, '[Prior context truncated at 8KB]');
+  return ['', '## Prior Context', ctxStr.trim()];
+}
+
+function sectionPriorWorkspaceNotes(trigger: WorkflowTrigger, enricherResult: EnricherResult | undefined): string[] {
+  if (!enricherResult || enricherResult.priorSessionNotes.length === 0) return [];
+  // Skip when coordinator already provided richer assembled context.
+  const { assembledContextSummary } = extractContextSlots(trigger.context);
+  if (assembledContextSummary && assembledContextSummary.trim().length > 0) return [];
+  const noteLines = enricherResult.priorSessionNotes.map((note) => {
+    const title = note.sessionTitle ?? note.sessionId.slice(0, 12);
+    const branch = note.gitBranch ? ` (${note.gitBranch})` : '';
+    const recap = note.recapSnippet ?? '(no recap)';
+    return `**${title}**${branch}: ${recap}`;
+  });
+  return ['', '## Prior Workspace Notes', ...noteLines];
+}
+
+function sectionChangedFiles(enricherResult: EnricherResult | undefined): string[] {
+  if (!enricherResult || enricherResult.gitDiffStat === null) return [];
+  const diffStat = Buffer.byteLength(enricherResult.gitDiffStat, 'utf8') > MAX_GIT_DIFF_STAT_BYTES
+    ? new TextDecoder().decode(Buffer.from(enricherResult.gitDiffStat, 'utf8').subarray(0, MAX_GIT_DIFF_STAT_BYTES)) + '\n[diff stat truncated]'
+    : enricherResult.gitDiffStat;
+  return ['', '## Changed files', '```', diffStat, '```'];
+}
+
+function sectionReferenceUrls(trigger: WorkflowTrigger): string[] {
+  if (!trigger.referenceUrls || trigger.referenceUrls.length === 0) return [];
+  return [
+    '',
+    '## Reference documents',
+    'Before starting, fetch and read these reference documents: ' + trigger.referenceUrls.join(' '),
+    'If you cannot fetch any of these documents, note their unavailability and proceed.',
+  ];
+}
 
 export function buildSystemPrompt(
   trigger: WorkflowTrigger,
@@ -170,101 +216,14 @@ export function buildSystemPrompt(
   effectiveWorkspacePath: string,
   enricherResult?: EnricherResult,
 ): string {
-  const isWorktreeSession = effectiveWorkspacePath !== trigger.workspacePath;
-
-  const lines = [
-    BASE_SYSTEM_PROMPT,
-    '',
-    `<workrail_session_state>${sessionState}</workrail_session_state>`,
-    '',
-    '## Agent Rules and Philosophy',
-    soulContent,
-    '',
-    `## Workspace: ${effectiveWorkspacePath}`,
+  const sections: string[][] = [
+    [BASE_SYSTEM_PROMPT, '', `<workrail_session_state>${sessionState}</workrail_session_state>`, '', '## Agent Rules and Philosophy', soulContent, '', `## Workspace: ${effectiveWorkspacePath}`],
+    sectionWorktreeScope(trigger, effectiveWorkspacePath),
+    sectionWorkspaceContext(workspaceContext),
+    sectionAssembledContext(trigger),
+    sectionPriorWorkspaceNotes(trigger, enricherResult),
+    sectionChangedFiles(enricherResult),
+    sectionReferenceUrls(trigger),
   ];
-
-  // When running in a worktree, add an explicit scope boundary so the agent never
-  // accidentally reads roadmap docs, runs git log on main, or modifies the main checkout.
-  // WHY: without this, the agent may drift to the main checkout for "context" (git log,
-  // planning docs, roadmap) which (1) pollutes the session with coordinator work and
-  // (2) can mutate the main checkout. This note is a hard constraint, not guidance.
-  if (isWorktreeSession) {
-    lines.push('');
-    lines.push(`**Worktree session scope:** Your workspace is the isolated git worktree at \`${effectiveWorkspacePath}\`. Do not access, read, or modify the main checkout at \`${trigger.workspacePath}\`. Do not read planning docs, roadmap files, or backlog files. All Bash commands, file reads, and file writes must stay within your worktree path.`);
-  }
-
-  // Inject workspace context (CLAUDE.md / AGENTS.md) when available.
-  if (workspaceContext !== null) {
-    lines.push('');
-    lines.push('## Workspace Context (from AGENTS.md / CLAUDE.md)');
-    lines.push(workspaceContext);
-  }
-
-  // Inject assembled task context (prior session notes + git diff stat) when provided.
-  // WHY before referenceUrls: task-specific runtime context should be visible before
-  // static reference documents. Earlier position improves agent attention.
-  const assembledContextSummary = trigger.context?.['assembledContextSummary'];
-  if (typeof assembledContextSummary === 'string' && assembledContextSummary.trim().length > 0) {
-    let ctxStr = assembledContextSummary as string;
-    if (Buffer.byteLength(ctxStr, 'utf8') > MAX_ASSEMBLED_CONTEXT_BYTES) {
-      ctxStr = ctxStr.slice(0, MAX_ASSEMBLED_CONTEXT_BYTES) + '\n[Prior context truncated at 8KB]';
-    }
-    lines.push('');
-    lines.push('## Prior Context');
-    lines.push(ctxStr.trim());
-  }
-
-  // Inject prior workspace session notes from WorkflowEnricher.
-  // WHY after ## Prior Context: coordinator-assembled phase artifacts (discovery/shaping/coding
-  // handoffs) are higher-signal than raw session recaps. Enricher notes follow to supplement.
-  // WHY skip when assembledContextSummary present: the coordinator already provided richer
-  // structured context; raw notes would be redundant and lower-signal.
-  if (
-    enricherResult !== undefined &&
-    enricherResult.priorSessionNotes.length > 0 &&
-    !(typeof trigger.context?.['assembledContextSummary'] === 'string' &&
-      (trigger.context['assembledContextSummary'] as string).trim().length > 0)
-  ) {
-    lines.push('');
-    lines.push('## Prior Workspace Notes');
-    for (const note of enricherResult.priorSessionNotes) {
-      const title = note.sessionTitle ?? note.sessionId.slice(0, 12);
-      const branch = note.gitBranch ? ` (${note.gitBranch})` : '';
-      const recap = note.recapSnippet ?? '(no recap)';
-      lines.push(`**${title}**${branch}: ${recap}`);
-    }
-  }
-
-  // Inject git diff stat from WorkflowEnricher.
-  // WHY always inject (even when assembledContextSummary present): coordinators don't always
-  // include changed-files lists, and the diff stat is cheap orientation context that never
-  // conflicts with phase artifacts.
-  if (enricherResult !== undefined && enricherResult.gitDiffStat !== null) {
-    let diffStat = enricherResult.gitDiffStat;
-    if (Buffer.byteLength(diffStat, 'utf8') > MAX_GIT_DIFF_STAT_BYTES) {
-      // WHY Buffer subarray + TextDecoder: avoids the char-based slice pitfall where
-      // a 2048-char slice of non-ASCII content exceeds 2048 bytes.
-      diffStat = new TextDecoder().decode(Buffer.from(diffStat, 'utf8').subarray(0, MAX_GIT_DIFF_STAT_BYTES)) + '\n[diff stat truncated]';
-    }
-    lines.push('');
-    lines.push('## Changed files');
-    lines.push('```');
-    lines.push(diffStat);
-    lines.push('```');
-  }
-
-  // Append reference URLs section when provided.
-  if (trigger.referenceUrls && trigger.referenceUrls.length > 0) {
-    lines.push('');
-    lines.push('## Reference documents');
-    lines.push(
-      'Before starting, fetch and read these reference documents: ' +
-      trigger.referenceUrls.join(' '),
-    );
-    lines.push(
-      'If you cannot fetch any of these documents, note their unavailability and proceed.',
-    );
-  }
-
-  return lines.join('\n');
+  return sections.flat().join('\n');
 }

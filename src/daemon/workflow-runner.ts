@@ -74,12 +74,15 @@ import type {
   ChildWorkflowRunResult,
   OrphanedSession,
 } from './types.js';
+import { extractContextSlots } from './types.js';
 import {
   enrichTriggerContext,
   shouldEnrich,
   EMPTY_RESULT,
+  type WorkflowEnricherDeps,
+  type EnricherResult,
+  type PriorNotesPolicy,
 } from './workflow-enricher.js';
-import type { WorkflowEnricherDeps, EnricherResult } from './workflow-enricher.js';
 import type { SessionState, TerminalSignal, StuckConfig, StuckSignal } from './state/index.js';
 import {
   createSessionState,
@@ -366,10 +369,11 @@ export async function runWorkflow(
   // created. spawn_agent children bypass this via the spawnDepth guard.
   let enricherResult: EnricherResult = EMPTY_RESULT;
   if (enricherDeps !== undefined && shouldEnrich(trigger)) {
-    const skipPriorNotes =
-      typeof trigger.context?.['assembledContextSummary'] === 'string' &&
-      (trigger.context['assembledContextSummary'] as string).trim().length > 0;
-    enricherResult = await enrichTriggerContext(trigger, enricherDeps, skipPriorNotes);
+    const { assembledContextSummary } = extractContextSlots(trigger.context);
+    const policy: PriorNotesPolicy = assembledContextSummary !== undefined && assembledContextSummary.trim().length > 0
+      ? 'skip_coordinator_provided'
+      : 'inject';
+    enricherResult = await enrichTriggerContext(trigger, enricherDeps, policy);
   }
 
   // ---- Pre-agent I/O phase ----

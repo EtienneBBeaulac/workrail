@@ -10,6 +10,7 @@ import {
   enrichTriggerContext,
   shouldEnrich,
   type WorkflowEnricherDeps,
+  type PriorNotesPolicy,
 } from '../../src/daemon/workflow-enricher.js';
 import type { WorkflowTrigger } from '../../src/daemon/types.js';
 import type { SessionNote } from '../../src/context-assembly/types.js';
@@ -56,30 +57,29 @@ describe('shouldEnrich()', () => {
 describe('enrichTriggerContext()', () => {
   it('returns prior notes and gitDiffStat for a root session', async () => {
     const deps = makeFakeDeps();
-    const result = await enrichTriggerContext(baseTrigger, deps, false);
+    const result = await enrichTriggerContext(baseTrigger, deps, 'inject');
 
     expect(result.priorSessionNotes).toHaveLength(1);
     expect(result.priorSessionNotes[0]?.sessionTitle).toBe('Prior review session');
     expect(result.gitDiffStat).toContain('src/foo.ts');
   });
 
-  it('skips prior notes when skipPriorNotes is true (assembledContextSummary present)', async () => {
+  it('skips prior notes when policy is skip_coordinator_provided', async () => {
     const deps = makeFakeDeps();
-    const result = await enrichTriggerContext(baseTrigger, deps, true);
+    const result = await enrichTriggerContext(baseTrigger, deps, 'skip_coordinator_provided');
 
     expect(result.priorSessionNotes).toHaveLength(0);
     expect(deps.listRecentSessions).not.toHaveBeenCalled();
-    // gitDiffStat is still injected
     expect(result.gitDiffStat).toBeTruthy();
   });
 
-  it('still injects gitDiffStat when assembledContextSummary present (skipPriorNotes=true)', async () => {
+  it('still injects gitDiffStat when policy is skip_coordinator_provided', async () => {
     const triggerWithCtx: WorkflowTrigger = {
       ...baseTrigger,
       context: { assembledContextSummary: 'Coordinator assembled context' },
     };
     const deps = makeFakeDeps();
-    const result = await enrichTriggerContext(triggerWithCtx, deps, true);
+    const result = await enrichTriggerContext(triggerWithCtx, deps, 'skip_coordinator_provided');
 
     expect(result.priorSessionNotes).toHaveLength(0);
     expect(result.gitDiffStat).toBeTruthy();
@@ -90,7 +90,7 @@ describe('enrichTriggerContext()', () => {
       new Promise((resolve) => setTimeout(() => resolve({ kind: 'ok', value: sampleNotes }), 5000));
     const deps = makeFakeDeps({ listRecentSessions: slowListSessions });
 
-    const result = await enrichTriggerContext(baseTrigger, deps, false);
+    const result = await enrichTriggerContext(baseTrigger, deps, 'inject');
 
     // Timeout fires before the slow promise resolves
     expect(result.priorSessionNotes).toHaveLength(0);
@@ -102,7 +102,7 @@ describe('enrichTriggerContext()', () => {
     const deps = makeFakeDeps({
       execGit: vi.fn().mockResolvedValue({ kind: 'err', error: 'not a git repository' }),
     });
-    const result = await enrichTriggerContext(baseTrigger, deps, false);
+    const result = await enrichTriggerContext(baseTrigger, deps, 'inject');
 
     expect(result.gitDiffStat).toBeNull();
     expect(result.priorSessionNotes).toHaveLength(1);
@@ -112,7 +112,7 @@ describe('enrichTriggerContext()', () => {
     const deps = makeFakeDeps({
       listRecentSessions: vi.fn().mockResolvedValue({ kind: 'err', error: 'store unavailable' }),
     });
-    const result = await enrichTriggerContext(baseTrigger, deps, false);
+    const result = await enrichTriggerContext(baseTrigger, deps, 'inject');
 
     expect(result.priorSessionNotes).toHaveLength(0);
     expect(result.gitDiffStat).toBeTruthy(); // git still ran
