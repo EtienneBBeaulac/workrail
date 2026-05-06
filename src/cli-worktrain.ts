@@ -43,7 +43,7 @@ import {
   type Priority,
 } from './cli/commands/index.js';
 import { writeStatsSummary } from './daemon/stats-summary.js';
-import type { ChildSessionResult } from './coordinators/types.js';
+import type { ChildSessionResult, CoordinatorSpawnContext } from './coordinators/types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1294,8 +1294,7 @@ runCommand
         workflowId: string,
         goal: string,
         workspace: string,
-        context?: Readonly<Record<string, unknown>>,
-        // CLI path does not support agentConfig -- sessions use daemon default timeouts.
+        context?: CoordinatorSpawnContext,
         _agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
         parentSessionId?: string,
       ) => {

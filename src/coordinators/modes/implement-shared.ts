@@ -13,7 +13,7 @@
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, PipelineOutcome } from '../adaptive-pipeline.js';
 import { CODING_TIMEOUT_MS, REVIEW_TIMEOUT_MS, checkSpawnCutoff } from '../adaptive-pipeline.js';
 import { readVerdictArtifact, parseFindingsFromNotes } from '../pr-review.js';
-import type { CoordinatorSpawnContext } from '../pr-review.js';
+import type { CoordinatorSpawnContext } from '../types.js';
 import type { ReviewVerdictArtifactV1 } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 import { parseReviewVerdictArtifact } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';

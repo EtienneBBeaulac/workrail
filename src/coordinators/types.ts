@@ -1,5 +1,5 @@
 /**
- * Coordinator Session Chaining Types
+ * Coordinator Context and Session Chaining Types
  *
  * Typed result for child session execution in coordinator pipelines.
  *
@@ -20,6 +20,42 @@
  * spawn_agent uses ChildWorkflowRunResult (which also excludes delivery_failed) for the
  * same reason. The type says exactly what can happen; delivery_failed cannot happen here.
  */
+
+// ---------------------------------------------------------------------------
+// CoordinatorSpawnContext
+// ---------------------------------------------------------------------------
+
+/**
+ * Typed context passed to spawned sessions by coordinators.
+ *
+ * WHY explicit fields (not Readonly<Record<string,unknown>> or index signature):
+ * Every field a coordinator can pass must be declared here. Unknown fields are
+ * rejected by TypeScript, preventing coordinators from silently injecting data
+ * that agents can't access via typed extraction. Adding a new field requires
+ * a deliberate type change, not an ad-hoc string key.
+ *
+ * Invariant: assembledContextSummary is only set when the rendered string is
+ * non-empty. Callers guard with `if (rendered.trim().length > 0)` before
+ * constructing -- the illegal state (set but empty) cannot arise.
+ */
+export interface CoordinatorSpawnContext {
+  /** Coordinator-assembled prior phase context injected as ## Prior Context. Non-empty when present. */
+  readonly assembledContextSummary?: string;
+  /** Absolute path to the pitch file for IMPLEMENT mode coding sessions. */
+  readonly pitchPath?: string;
+  /** PR URL passed to review, audit, and re-review sessions. */
+  readonly prUrl?: string;
+  /** Finding summaries forwarded to fix sessions so the agent knows what to fix. */
+  readonly findings?: readonly string[];
+  /** Severity from the review verdict, forwarded to audit sessions. */
+  readonly severity?: string;
+  /** Signals to the UX session that shaping completed (full-pipeline). */
+  readonly shapingComplete?: true;
+  /** Signals to the re-review session that the audit pass completed. */
+  readonly auditComplete?: true;
+}
+
+// ---------------------------------------------------------------------------
 
 /**
  * Typed result of a child session execution.

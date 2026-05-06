@@ -34,7 +34,7 @@ import {
 } from '../adaptive-pipeline.js';
 import { runReviewAndVerdictCycle, MAX_FIX_ITERATIONS } from './implement-shared.js';
 import { extractPhaseArtifact, buildContextSummary } from '../context-assembly.js';
-import type { CoordinatorSpawnContext } from '../pr-review.js';
+import type { CoordinatorSpawnContext } from '../types.js';
 import { buildPhaseResult } from '../pipeline-run-context.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
 import { isCodingHandoffArtifact, CodingHandoffArtifactV1Schema } from '../../v2/durable-core/schemas/artifacts/index.js';
@@ -155,9 +155,7 @@ async function runImplementCore(
     const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'ux-gate');
     if (cutoffCheck) return cutoffCheck;
 
-    const uxSpawnResult = await deps.spawnSession('wr.ui-ux-design', opts.goal, opts.workspace, {
-      pitchPath,
-    });
+    const uxSpawnResult = await deps.spawnSession('wr.ui-ux-design', opts.goal, opts.workspace, { pitchPath });
 
     if (uxSpawnResult.kind === 'err') {
       deps.stderr(`[implement] UX gate spawn failed: ${uxSpawnResult.error}`);
@@ -201,15 +199,8 @@ async function runImplementCore(
 
   deps.stderr(`[implement] Spawning wr.coding-task`);
 
-  const codingSpawnResult = await deps.spawnSession(
-    'wr.coding-task',
-    opts.goal,
-    opts.workspace,
-    {
-      // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13)
-      pitchPath,
-    },
-  );
+  // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13)
+  const codingSpawnResult = await deps.spawnSession('wr.coding-task', opts.goal, opts.workspace, { pitchPath });
 
   if (codingSpawnResult.kind === 'err') {
     return {
