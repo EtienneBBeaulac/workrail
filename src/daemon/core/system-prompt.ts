@@ -1,17 +1,4 @@
-/**
- * System prompt construction for daemon agent sessions.
- *
- * WHY this module: buildSystemPrompt, buildSessionRecap, and BASE_SYSTEM_PROMPT
- * are pure functions/values -- no I/O, no node: imports, no SDK deps. They belong
- * in the functional core, not in the 3,900-line orchestration file.
- *
- * WHY no node: or @anthropic-ai/* imports: this module is part of the functional
- * core. It must be importable in any test context without I/O stubs.
- *
- * DAEMON_SOUL_DEFAULT is re-exported from soul-template.ts (which has zero deps
- * and exists specifically to avoid loading heavy deps in CLI init). Tests that
- * need DAEMON_SOUL_DEFAULT can import from here or from soul-template.ts directly.
- */
+// Pure functions only. No node:/SDK imports -- must be importable in any test context.
 
 import type { WorkflowTrigger } from '../types.js';
 import { extractContextSlots } from '../types.js';
@@ -22,30 +9,12 @@ export { DAEMON_SOUL_DEFAULT } from '../soul-template.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-/**
- * Maximum combined byte size of assembled coordinator context injected via
- * trigger.context['assembledContextSummary'].
- * WHY: caps the coordinator-assembled context to protect LLM token budget.
- */
 const MAX_ASSEMBLED_CONTEXT_BYTES = 8192;
 
 // ---------------------------------------------------------------------------
 // BASE_SYSTEM_PROMPT
 // ---------------------------------------------------------------------------
 
-/**
- * Static preamble for the daemon agent system prompt.
- *
- * WHY a named constant: extracting the preamble makes it readable as a document,
- * gives it a stable identity for tests, and follows the soul-template.ts precedent
- * of separating stable content from dynamic assembly. The dynamic parts (session
- * state, soul, workspace context) are injected by buildSystemPrompt() below.
- *
- * WHY these sections: daemon sessions run unattended. The agent has no user to ask.
- * The preamble replaces that missing human with: an oracle hierarchy, a reasoning
- * protocol, and explicit contracts for the two failure modes that matter most --
- * skipping steps and silent failure.
- */
 export const BASE_SYSTEM_PROMPT = `\
 You are WorkRail Auto, an autonomous agent that executes workflows step by step. You are running unattended -- there is no user watching. Your entire job is to faithfully complete the current workflow.
 
@@ -119,23 +88,8 @@ function truncateToByteLimit(s: string, maxBytes: number, marker: string): strin
 // buildSessionRecap
 // ---------------------------------------------------------------------------
 
-/**
- * Format prior step notes into a concise session state recap string.
- *
- * Pure function -- all I/O (note loading, truncation decisions) is handled
- * by the caller. WHY pure: unit-testable without mocking the session store
- * or token codec.
- *
- * Returns an empty string when `notes` is empty so the caller can guard on
- * `recap !== ''` before injecting it into the system prompt.
- *
- * WHY `<workrail_session_state>` tag: `buildSystemPrompt()` already reserves
- * this XML slot in the system prompt. Using the existing tag ensures the agent
- * parses it consistently with the documented schema.
- *
- * @param notes - Prior step notes (already limited to MAX_SESSION_RECAP_NOTES
- *   entries and bounded in size by the caller).
- */
+// <workrail_session_state> tag is reserved in BASE_SYSTEM_PROMPT; using the same tag
+// ensures the agent parses it consistently with the documented schema.
 export function buildSessionRecap(notes: readonly string[]): string {
   if (notes.length === 0) return '';
 
