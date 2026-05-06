@@ -123,17 +123,14 @@ function sectionWorkspaceContext(workspaceContext: string | null): string[] {
   return ['', '## Workspace Context (from AGENTS.md / CLAUDE.md)', workspaceContext];
 }
 
-function sectionAssembledContext(trigger: WorkflowTrigger): string[] {
-  const { assembledContextSummary } = extractContextSlots(trigger.context);
+function sectionAssembledContext(assembledContextSummary: string | undefined): string[] {
   if (!assembledContextSummary || assembledContextSummary.trim().length === 0) return [];
   const ctxStr = truncateToByteLimit(assembledContextSummary, MAX_ASSEMBLED_CONTEXT_BYTES, '[Prior context truncated at 8KB]');
   return ['', '## Prior Context', ctxStr.trim()];
 }
 
-function sectionPriorWorkspaceNotes(trigger: WorkflowTrigger, enricherResult: EnricherResult | undefined): string[] {
+function sectionPriorWorkspaceNotes(assembledContextSummary: string | undefined, enricherResult: EnricherResult | undefined): string[] {
   if (!enricherResult || enricherResult.priorSessionNotes.length === 0) return [];
-  // Skip when coordinator already provided richer assembled context.
-  const { assembledContextSummary } = extractContextSlots(trigger.context);
   if (assembledContextSummary && assembledContextSummary.trim().length > 0) return [];
   const noteLines = enricherResult.priorSessionNotes.map((note) => {
     const title = note.sessionTitle ?? note.sessionId.slice(0, 12);
@@ -170,12 +167,13 @@ export function buildSystemPrompt(
   effectiveWorkspacePath: string,
   enricherResult?: EnricherResult,
 ): string {
+  const { assembledContextSummary } = extractContextSlots(trigger.context);
   const sections: string[][] = [
     [BASE_SYSTEM_PROMPT, '', `<workrail_session_state>${sessionState}</workrail_session_state>`, '', '## Agent Rules and Philosophy', soulContent, '', `## Workspace: ${effectiveWorkspacePath}`],
     sectionWorktreeScope(trigger, effectiveWorkspacePath),
     sectionWorkspaceContext(workspaceContext),
-    sectionAssembledContext(trigger),
-    sectionPriorWorkspaceNotes(trigger, enricherResult),
+    sectionAssembledContext(assembledContextSummary),
+    sectionPriorWorkspaceNotes(assembledContextSummary, enricherResult),
     sectionChangedFiles(enricherResult),
     sectionReferenceUrls(trigger),
   ];

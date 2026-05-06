@@ -67,12 +67,7 @@ export function createWorkflowEnricherDeps(): WorkflowEnricherDeps {
 
 const LIST_SESSIONS_TIMEOUT_MS = 1000;
 
-/**
- * Race a promise against a timeout. Clears the timer if the promise resolves
- * first to avoid handle leaks.
- *
- * Returns err('timeout') when the timer fires before the promise resolves.
- */
+// Clears the timer on the normal path to avoid handle leaks.
 function raceWithTimeout<T>(
   promise: Promise<Result<T, string>>,
   timeoutMs: number,
