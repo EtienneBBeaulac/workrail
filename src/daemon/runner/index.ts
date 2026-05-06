@@ -7,10 +7,8 @@
  * calls runner/ functions). This is enforced by the architecture test in
  * tests/unit/architecture-boundaries.test.ts.
  *
- * Note: constructTools(), buildPreAgentSession(), buildAgentReadySession(),
- * runAgentLoop(), buildAgentCallbacks(), buildTurnEndSubscriber(), and
- * finalizeSession() remain in workflow-runner.ts pending a follow-on refactor
- * that introduces runWorkflow injection to eliminate the circular dependency.
+ * runWorkflow is imported as `import type { runWorkflow }` in runner/ files --
+ * type-only, erased at compile time, no runtime circular dependency.
  */
 
 export { WORKTREES_DIR } from './runner-types.js';
@@ -20,6 +18,15 @@ export type {
   AgentReadySession,
   SessionOutcome,
   FinalizationContext,
-
 } from './runner-types.js';
 export { getSchemas } from './tool-schemas.js';
+export { constructTools } from './construct-tools.js';
+export { finalizeSession } from './finalize-session.js';
+export { buildPreAgentSession } from './pre-agent-session.js';
+export type { TurnEndSubscriberContext } from './agent-loop-runner.js';
+export {
+  buildTurnEndSubscriber,
+  buildAgentCallbacks,
+  buildAgentReadySession,
+  runAgentLoop,
+} from './agent-loop-runner.js';

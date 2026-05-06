@@ -361,10 +361,12 @@ describe('Daemon SessionState mutation invariants', () => {
   });
 
   it('constructTools() does not reference state or session.state directly', () => {
-    const content = fs.readFileSync(WORKFLOW_RUNNER, 'utf-8');
+    // constructTools moved to runner/construct-tools.ts; scan that file.
+    const CONSTRUCT_TOOLS_FILE = path.join(__dirname, '../../src/daemon/runner/construct-tools.ts');
+    const content = fs.readFileSync(CONSTRUCT_TOOLS_FILE, 'utf-8');
 
     // Extract constructTools function body
-    const fnStart = content.indexOf('\nfunction constructTools(');
+    const fnStart = content.indexOf('\nexport function constructTools(');
     expect(fnStart).toBeGreaterThan(-1);
 
     // Find the closing brace by counting brace depth
