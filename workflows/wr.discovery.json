@@ -1,7 +1,7 @@
 {
   "id": "wr.discovery",
   "name": "Discovery Workflow",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "metricsProfile": "research",
   "validatedAgainstSpecVersion": 3,
   "description": "Use this to explore and think through a problem end-to-end. Moves between landscape exploration, problem framing, candidate generation, adversarial challenge, and uncertainty resolution.",
@@ -21,6 +21,20 @@
     "wr.features.subagent_guidance"
   ],
   "assessments": [
+    {
+      "id": "framing-specificity-gate",
+      "purpose": "The problem frame has a specific falsification condition before entering candidate generation. Lighter gate used on the landscape_first path.",
+      "dimensions": [
+        {
+          "id": "framing_specificity",
+          "purpose": "A concrete falsification condition is named -- one thing that if discovered true would change the path or direction. Generic caveats do not count.",
+          "levels": [
+            "vague",
+            "specific"
+          ]
+        }
+      ]
+    },
     {
       "id": "framing-rigor-gate",
       "purpose": "The problem frame is specific enough to constrain candidate generation -- grounded with a concrete falsification condition and independent of the proposed solution.",
@@ -106,7 +120,14 @@
     "Parallelism: parallelize independent research lenses, stakeholder lenses, and bounded cognitive routines. Serialize synthesis, recommendation decisions, and canonical document writes.",
     "Capability fallbacks: if web browsing is unavailable, use repo context, user context, and internal knowledge, then record the evidence gaps explicitly. If delegation is unavailable, do the passes yourself in sequence.",
     "Doc discipline: keep append-only decision reasoning in the design doc. Record assumptions, contradictions, abandoned paths, and why the selected direction won.",
-    "Boundary: this workflow can end with a recommendation memo, prototype or test plan, or a research-informed direction. It should not implement production code."
+    "Boundary: this workflow can end with a recommendation memo, prototype or test plan, or a research-informed direction. It should not implement production code.",
+    "Framing lock-in: no LLM-driven reframing before landscape research -- no quality gain was found (N=280). Pre-landscape framing lock-in is a known residual risk. Phase 0a surfaces assumptions but does not guarantee the frame is correct.",
+    "FrameValidityCheck in Phase 1g is the structural defense: after landscape research, check whether new information challenges the current frame before generating candidates.",
+    "Autonomous operation: in fully autonomous runs without human confirmation gates, the recommendation is provisional. Surface selectionTier from Phase 3e to the user. QUICK mode always produces provisional_recommendation regardless of observed signals.",
+    "Confidence calibration: recommendationConfidenceBand can be downgraded but never upgraded once a phase is complete. If challenge or review reveals new uncertainty, downgrade. Upstream findings cannot be washed out by downstream optimism.",
+    "Cross-family challenge: use a verified different model family for challenge/selection executors where possible. If cross-family cannot be verified, default to Rung 2 (same-family steelmanning) -- conservative degradation over optimistic claim.",
+    "Challenge quality self-judgment: structural/tactical/surface classification is self-produced -- a known residual risk. New evidence justifying a position change must reference a specific finding already recorded in designDocPath or a candidate output file.",
+    "Position-bias correction: the order-randomization check in Phase 3e is a prompt-level approximation -- it reduces but does not eliminate position bias. Structural randomization requires future engine support."
   ],
   "functionDefinitions": [
     {
@@ -120,14 +141,30 @@
     {
       "name": "prototypeSpecTemplate",
       "definition": "Use this shape for a lightweight prototype or validation artifact:\n## Goal\n## Non-goals\n## Learning question\n## Artifact type\n## What will be exercised\n## Falsification criteria\n## Test scenarios\n## Expected signals\n## Pivot / stop rule"
+    },
+    {
+      "name": "FrameValidityCheckTemplate",
+      "definition": "Use this shape when performing a FrameValidityCheck:\n## Frame Validity Check\n- Current frame (one sentence)\n- New information from landscape/research not present when frame was set\n- frameChallenge: valid | partial | needs_reframe\n- reframeRequired: { revisedFrame: string, changedAssumptions: string[] } | null\nNote: frameChallenge = 'needs_reframe' with reframeRequired = null is structurally invalid -- if the frame needs revision, provide the revision before proceeding."
+    },
+    {
+      "name": "SelectionOutputTemplate",
+      "definition": "Use this shape for the SelectionOutput (structured output value, not a doc section):\n## Selection Output\n- tier: strong_recommendation | provisional_recommendation | insufficient_signal\n- tierRationale: explicit reasoning checkable against the signals below\n- challengeQualityObserved: structural | tactical | surface\n- semanticDiversityObserved: high | medium | low\n- framingResolutionStatus: resolved | partial | unresolved\n- requiredActionOnInsufficient: what the user must do before acting (null if not insufficient_signal)\nTier rules:\n  strong_recommendation: structural challenge + high/medium diversity + resolved framing\n  provisional_recommendation: tactical challenge OR medium diversity OR partial framing\n  insufficient_signal: surface challenge OR low diversity OR unresolved framing OR single-family with no verified external grounding OR QUICK mode (always provisional)\nNote: tier assignment uses only observable signals -- not self-reported confidence."
+    },
+    {
+      "name": "SelectionEvidenceTemplate",
+      "definition": "Use this shape for the fresh-context selection executor's return artifact:\n## Selection Evidence\n- Candidate ranking (ordered, one-sentence rationale per candidate)\n- challengeQualityObserved: structural | tactical | surface\n- semanticDiversityObserved: high | medium | low\n- framingResolutionStatus: resolved | partial | unresolved\n- keyReasoning: what most influenced the ranking\n- caveat: any limitation (single-family, no external grounding, model family unverified, etc.)"
+    },
+    {
+      "name": "framingDeepProcedureTemplate",
+      "definition": "Shared framing procedure (used by full_spectrum and design_first paths):\n- Capture the tensions as a structured list -- not just a count. Record identifiedTensions as an array of one-sentence tension descriptions. This list is passed verbatim to candidate generation executors.\n- Name ONE specific concrete condition that would make the current framing wrong -- not a generic caveat, but a specific thing that if discovered true would change the path or direction. Record as primaryFramingRisk in the design doc.\n- Record philosophySources as a list of file paths or Memory entry names encoding the decision-maker's principles and constraints. (Domain-specific lookup rules per problemDomain.) Empty list is acceptable if none exist."
     }
   ],
   "steps": [
     {
       "id": "phase-0-reframe",
-      "title": "Phase 0a: Reframe the Goal Before Jumping to Solutions",
+      "title": "Phase 0a: Surface Assumptions and Define Success",
       "promptBlocks": {
-        "goal": "Challenge the stated goal before we start researching it. Figure out whether I handed you a problem or a solution, surface the assumptions baked into the framing, and define what success actually looks like.",
+        "goal": "Surface the assumptions baked into the stated goal, commit to what success looks like, and identify what would make the current framing wrong -- before any research begins. This is an assumption-commitment step: the output is a set of explicit commitments the rest of the workflow is held to, not a claim that reframing has improved the problem statement.",
         "constraints": [
           [
             {
@@ -154,7 +191,8 @@
           "The success criteria would let a skeptic determine whether the work actually succeeded.",
           "If the goal was a solution-statement, the underlying problem is stated independently of the proposed solution.",
           "The reframed problem is meaningfully different from the original goal wording, or you have explicitly noted why the original framing was already problem-shaped.",
-          "`idealEndState` describes the best achievable outcome, not the most defensible one. If they are the same, say so explicitly."
+          "`idealEndState` describes the best achievable outcome, not the most defensible one. If they are the same, say so explicitly.",
+          "For each alternative frame produced: name one candidate solution it would generate that the original frame would not. If you cannot name such a candidate, the frames are not substantively different -- iterate until they are."
         ]
       },
       "requireConfirmation": false
@@ -258,7 +296,8 @@
           "Gather a current-state summary, existing approaches or precedents, option categories, notable contradictions, strong constraints from the world, and evidence gaps.",
           "If `delegationAvailable = true`, decide whether parallel research is likely to give you a better read here. If yes, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH, then synthesize the outputs yourself. If not, keep going yourself and record why solo work is enough.",
           "Update `designDocPath` using `landscapePacketTemplate`.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`."
+          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`.",
+          "Before proceeding: confirm landscape findings are recorded in `designDocPath`. Do not begin synthesis or candidate generation until the landscape packet is committed to the doc."
         ],
         "verify": [
           "Important contradictions or evidence gaps are explicit.",
@@ -293,7 +332,8 @@
           "Gather a current-state summary, existing approaches or precedents, option categories, notable contradictions, strong constraints from the world, and evidence gaps.",
           "If `delegationAvailable = true` and `rigorMode != QUICK`, decide whether parallel research is likely to sharpen the landscape meaningfully. If yes, spawn TWO WorkRail Executors SIMULTANEOUSLY running `routine-context-gathering` with focus=COMPLETENESS and focus=DEPTH, then synthesize the outputs yourself. If not, keep going yourself and record why solo work is enough.",
           "Update `designDocPath` using `landscapePacketTemplate`.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`."
+          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`.",
+          "Before proceeding: confirm landscape findings are recorded in `designDocPath`. Do not begin synthesis or candidate generation until the landscape packet is committed to the doc."
         ],
         "verify": [
           "Important contradictions or evidence gaps are explicit.",
@@ -328,7 +368,8 @@
           "Gather a current-state summary, the main existing approaches or precedents, hard constraints from the world, obvious contradictions, and evidence gaps.",
           "If `delegationAvailable = true` and `rigorMode = THOROUGH`, decide whether a parallel scan is worth the extra step. If yes, spawn bounded research support and synthesize it yourself. If not, keep going yourself and record why solo work is enough.",
           "Update `designDocPath` using `landscapePacketTemplate`.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`."
+          "Set these keys in the next `continue_workflow` call's `context` object: `landscapeSummary`, `landscapeGapCount`, `contradictionCount`, `precedentCount`, `retriageNeeded`.",
+          "Before proceeding: confirm landscape findings are recorded in `designDocPath`. Do not begin synthesis or candidate generation until the landscape packet is committed to the doc."
         ],
         "verify": [
           "The design-first path is still grounded in reality rather than invention alone.",
@@ -370,6 +411,20 @@
           "The stakeholder/problem packet covers the core tension, primary stakeholders, success criteria, and framing risk."
         ]
       },
+      "assessmentRefs": [
+        "framing-specificity-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "vague"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "framing_specificity = vague: name a single concrete thing that, if discovered true, would change the path or direction chosen. Generic caveats do not count."
+          }
+        }
+      ],
       "functionReferences": [
         "problemFrameTemplate()"
       ],
@@ -413,6 +468,17 @@
           "`philosophySources` is recorded -- empty list is acceptable if none exist."
         ]
       },
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "vague"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "framing_specificity = vague: name a concrete falsification condition. framing_independence = solution_embedded: restate the problem without the proposed solution -- what outcome or pain are you solving for?"
+          }
+        }
+      ],
       "functionReferences": [
         "problemFrameTemplate()"
       ],
@@ -456,6 +522,17 @@
           "`philosophySources` is recorded -- empty list is acceptable if none exist."
         ]
       },
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "vague"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "framing_specificity = vague: name a concrete falsification condition. framing_independence = solution_embedded: restate the problem without the proposed solution -- what outcome or pain are you solving for?"
+          }
+        }
+      ],
       "functionReferences": [
         "problemFrameTemplate()"
       ],
@@ -463,38 +540,27 @@
     },
     {
       "id": "phase-1g-retriage",
-      "title": "Phase 1g: Re-Triage After Early Context",
-      "runCondition": {
-        "or": [
-          {
-            "var": "retriageNeeded",
-            "equals": true
-          },
-          {
-            "var": "pathRecommendation",
-            "equals": "design_first"
-          },
-          {
-            "var": "pathRecommendation",
-            "equals": "full_spectrum"
-          }
-        ]
-      },
+      "title": "Phase 1g: Re-Triage and Frame Validity Check",
       "promptBlocks": {
-        "goal": "Reassess the path now that you have real landscape and framing context instead of just my initial wording.",
+        "goal": "Check whether the landscape and framing work revealed anything that challenges the current problem frame, then reassess the path with real evidence instead of just the initial wording.",
         "constraints": [
           "Base the re-triage on actual evidence gathered so far, not on the original default path alone.",
-          "Only change the path or rigor when the center of gravity has materially shifted."
+          "Only change the path or rigor when the center of gravity has materially shifted.",
+          "The FrameValidityCheck is required on every path -- do not skip it."
         ],
         "procedure": [
+          "Perform a FrameValidityCheck using `FrameValidityCheckTemplate`: what did the landscape and framing work reveal that was not present in the frame set in Phase 0a? Does any new information challenge the current problem frame? Set `frameChallenge`: valid | partial | needs_reframe. If needs_reframe: provide `reframeRequired` with `revisedFrame` and `changedAssumptions`; record the revised frame in `designDocPath` before proceeding. If valid or partial: proceed, recording any partial concerns in `designDocPath`.",
+          "Set `framingResolutionStatus` based on FrameValidityCheck result: `resolved` (frameChallenge = valid), `partial` (frameChallenge = partial), `unresolved` (frameChallenge = needs_reframe and not yet resolved).",
           "Review whether the dominant uncertainty is still what you thought it was at the start.",
           "Review whether `landscapeGapCount`, `contradictionCount`, or `framingRiskCount` materially change the center of gravity.",
           "Review whether the task now clearly needs a prototype, more research, or a broader synthesis pass.",
           "Confirm or adjust `pathRecommendation` and `rigorMode`.",
           "Set `pathChangedAfterContext`, `needsPrototype`, and `needsFurtherResearch`.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `pathRecommendation`, `rigorMode`, `pathChangedAfterContext`, `needsPrototype`, `needsFurtherResearch`."
+          "Set these keys in the next `continue_workflow` call's `context` object: `pathRecommendation`, `rigorMode`, `pathChangedAfterContext`, `needsPrototype`, `needsFurtherResearch`, `framingResolutionStatus`."
         ],
         "verify": [
+          "FrameValidityCheck was completed and `framingResolutionStatus` is set.",
+          "If `frameChallenge = needs_reframe`: `reframeRequired` is provided and the revised frame is recorded in `designDocPath` before proceeding.",
           "Any path change is justified by the evidence gathered so far.",
           "Prototype and research needs are called explicitly rather than left implicit."
         ]
@@ -528,10 +594,12 @@
           "State what kind of uncertainty remains: recommendation uncertainty, research uncertainty, or prototype-learning uncertainty."
         ],
         "procedure": [
+          "Before generating criteria: name the abstract principles at play in this problem independent of any specific candidate or solution. What does a good answer look like in principle, before you know what the candidates are?",
           "Produce a concise synthesis of the opportunity, the 3-5 criteria the final direction must satisfy, the strongest framing risk, and the current best explanation of what success looks like. Also surface which of the `challengedAssumptions` from phase-0a are still unresolved -- any candidate that silently bets on a challenged assumption must name it as a risk.",
           "When generating `decisionCriteria`: criteria that come from constraints and anti-goals are necessary but not sufficient. They are compatibility thresholds -- every viable candidate will satisfy them. At least one criterion must be quality-aspirational: derived from `idealEndState`, not from constraints. Quality-aspirational criteria ask 'which candidate is best?' not 'which candidates pass?'. Examples by domain -- software: 'which requires the fewest changes to add a new phase?', 'which would a senior engineer be proudest of in two years?'; product: 'which best positions us for the market shift we expect in 18 months?', 'which gives us the most learning per unit of investment?'; ux: 'which best serves users who are stressed or in a hurry?', 'which scales to the full vision without a redesign?'; personal: 'which aligns best with the values I've said matter most?', 'which would I regret least in 10 years?'; general: 'which creates the most optionality for future decisions?'. If `solutionAmbitiousness = 'ideal_solution'`, this quality-aspirational criterion is mandatory -- not optional.",
           "Set `candidateCountTarget` adaptively: QUICK = 2-3, STANDARD = 3-4, THOROUGH = 4-5.",
           "Identify and read the overarching vision or north-star document for this problem. For `problemDomain = 'software'`: look for `docs/vision.md`, `VISION.md`, or a product vision section in project docs. For `problemDomain = 'product'`: look for a product strategy doc, company mission, or OKRs. For `problemDomain = 'ux'`: look for a design vision, brand guide, or experience principles. For `problemDomain = 'personal'`: look for stated personal goals or values the user has shared. For `problemDomain = 'general'`: ask yourself what the overarching goal behind this decision is. Then answer: (1) How does solving this problem serve the overarching vision? If it doesn't, say so explicitly. (2) Which long-term goals does this decision need to leave room for? Name at least one seam or constraint the solution must honor. (3) Does any candidate direction foreclose something that matters long-term? Add at least one vision-alignment criterion to `decisionCriteria`. If no vision document exists, use your best understanding of the direction from context.",
+          "Record `decisionCriteria` (with explicit weights or priority order) and your interpretation of `idealEndState` in `designDocPath` before proceeding to candidate generation. In Phase 3e you will be required to quote these weights verbatim -- any modification after seeing candidates must be flagged explicitly.",
           "Set these keys in the next `continue_workflow` call's `context` object: `decisionCriteria`, `riskiestAssumption`, `candidateCountTarget`, `needsPrototype`, `needsFurtherResearch`, `pathReady`."
         ],
         "verify": [
@@ -542,34 +610,6 @@
         ]
       },
       "promptFragments": [
-        {
-          "id": "p2-challenge-needed",
-          "when": {
-            "var": "needsChallenge",
-            "equals": true
-          },
-          "text": "Because the framing still needs challenge, produce the strongest case against it yourself before moving on."
-        },
-        {
-          "id": "p2-challenge-deleg",
-          "when": {
-            "and": [
-              {
-                "var": "needsChallenge",
-                "equals": true
-              },
-              {
-                "var": "delegationAvailable",
-                "equals": true
-              },
-              {
-                "var": "rigorMode",
-                "not_equals": "QUICK"
-              }
-            ]
-          },
-          "text": "Also decide whether a delegated challenge is worth the extra step. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the current framing, then synthesize it yourself. If not, record why your own challenge is enough."
-        },
         {
           "id": "p2-full-balance",
           "when": {
@@ -616,7 +656,8 @@
         "goal": "Generate enough genuinely distinct candidates for me to support a real choice and write `design-candidates.md`.",
         "constraints": [
           "Create at least 2 materially different candidates, and add another if the set still clusters too tightly.",
-          "Include at least one runner-up strong enough that switching to it would feel real, not hypothetical."
+          "Include at least one runner-up strong enough that switching to it would feel real, not hypothetical.",
+          "Diversity interventions (persona rotation, verbalized sampling) are not applied in QUICK mode. This is intentional -- QUICK accepts lower diversity for speed. The selectionTier will be provisional_recommendation regardless of observed signals."
         ],
         "procedure": [
           "Include one simplest plausible direction and one direction that better serves the selected path's emphasis.",
@@ -626,7 +667,8 @@
         ],
         "verify": [
           "`design-candidates.md` contains a genuinely distinct quick candidate set rather than shallow variations.",
-          "The quick path still leaves a real choice on the table."
+          "The quick path still leaves a real choice on the table.",
+          "Confirm candidates rely on different primary mechanisms -- not just different labels on the same approach. If they cluster, add one more generation pass before proceeding."
         ]
       },
       "promptFragments": [
@@ -667,13 +709,14 @@
           "For `design_first`, require at least one direction that meaningfully reframes the problem instead of only packaging obvious solutions.",
           "For `landscape_first`, require the candidate set to clearly reflect landscape precedents, constraints, and contradictions rather than drifting into free invention.",
           "For `THOROUGH`, require one extra push if the first spread still feels clustered or too safe.",
-          "If `delegationAvailable = true` and `rigorMode != QUICK`: assign 2-3 non-overlapping focus angles before spawning anything. Then spawn the corresponding WorkRail Executors SIMULTANEOUSLY, each running `wr.routine-tension-driven-design`. The ONLY way to pass context to each executor is via its goal string -- executors start with clean sessions and cannot read the main agent's context variables. Build a self-contained goal string for each executor using these exact markers (the routine reads them by label): 'FOCUS ANGLE: <the assigned angle as a concrete instruction> | PROBLEM: <reframedProblem> | TENSIONS: <bullet list of identified tensions> | CRITERIA: <bullet list of decisionCriteria> | IDEAL END STATE: <idealEndState> | RISKIEST ASSUMPTION: <riskiestAssumption> | PHILOSOPHY: <philosophySources paths or summary> | OUTPUT FILE: design-candidates-angle-N.md'. Assign distinct angles -- concrete examples: (A) 'Anchor every candidate to the ideal end state -- build the best achievable design if effort and scope were no constraint', (B) 'Anchor every candidate to the riskiest assumption -- build the most defensible design that does not bet on any single assumption being true', (C) 'Anchor every candidate to the primary framing risk -- what would the design look like if the current problem framing is wrong?'. After all executors complete, read each executor's output file (the filenames you specified in OUTPUT FILE in each goal string -- e.g. `design-candidates-angle-1.md`, `design-candidates-angle-2.md`, etc.). Synthesize using these criteria: (1) Does the final set span from idealEndState to most-defensible? If not, name the gap. (2) Does at least one candidate from each executor's angle survive? If an angle is absent, justify it. (3) Does cross-executor comparison yield any insight no single executor reached? If yes, add it as a new candidate. (4) Do any candidates that look different resolve the same tension the same way? Collapse to the sharper version. Write the synthesized result to `design-candidates.md`. If `delegationAvailable = false`, generate candidates yourself and record why solo execution was used.",
+          "If `delegationAvailable = true` and `rigorMode != QUICK`: assign 2-3 non-overlapping focus angles before spawning anything. Then spawn the corresponding WorkRail Executors SIMULTANEOUSLY, each running `wr.routine-tension-driven-design`. The ONLY way to pass context to each executor is via its goal string -- executors start with clean sessions and cannot read the main agent's context variables. Build a self-contained goal string for each executor using these exact markers: 'FOCUS ANGLE: <the assigned angle as a concrete instruction> | PERSONA: <a mundane ordinary persona for this executor, e.g. \"a pragmatic ops engineer who has seen many systems fail\" or \"a product manager who has shipped features that missed the mark\"> | SAMPLING: Generate 5 distinct approaches with the probability (0.0-1.0) that a typical AI assistant would suggest each. Include at least 2 with probability < 0.10. Label each: Approach [N] (p=[probability]): [description]. | PROBLEM: <reframedProblem> | TENSIONS: <bullet list of identified tensions> | CRITERIA: <bullet list of decisionCriteria> | IDEAL END STATE: <idealEndState> | RISKIEST ASSUMPTION: <riskiestAssumption> | PHILOSOPHY: <philosophySources paths or summary> | OUTPUT FILE: design-candidates-angle-N.md'. Assign distinct angles -- concrete examples: (A) 'Anchor every candidate to the ideal end state -- build the best achievable design if effort and scope were no constraint', (B) 'Anchor every candidate to the riskiest assumption -- build the most defensible design that does not bet on any single assumption being true', (C) 'Anchor every candidate to the primary framing risk -- what would the design look like if the current problem framing is wrong?'. After all executors complete, read each executor's output file. Synthesize: (1) Does the final set span from idealEndState to most-defensible? If not, name the gap. (2) Does at least one candidate from each executor's angle survive? If an angle is absent, justify it. (3) Does cross-executor comparison yield any insight no single executor reached? If yes, add it as a new candidate. (4) For each candidate: name its primary mechanism in one sentence. Confirm all primary mechanisms are distinct. If two share a mechanism, merge them into the stronger version and note what was collapsed -- a set where all candidates share a primary mechanism is a failed generation pass. Write the synthesized result to `design-candidates.md`. If `delegationAvailable = false`, generate candidates yourself and record why solo execution was used.",
           "Write these expectations into `designDocPath` so the later synthesis can judge whether the injected routine met them."
         ],
         "verify": [
           "The path-specific expectations for candidate generation are explicit before the injected routine runs.",
-          "If delegation was used: each executor received a self-contained briefing with a distinct non-overlapping focus angle. The synthesized candidate set reflects main-agent judgment, not a flat concatenation of executor outputs.",
-          "If delegation was skipped: the reason is recorded."
+          "If delegation was used: each executor received a self-contained briefing with a distinct non-overlapping focus angle and a distinct mundane persona. The synthesized candidate set reflects main-agent judgment, not a flat concatenation of executor outputs.",
+          "If delegation was used: the primary mechanism of each candidate is named and confirmed distinct. If two share a mechanism, they were merged before finalizing.",
+          "If delegation was skipped: the reason is recorded. After Phase 3c injected routine completes, name the primary mechanism of each generated candidate. Confirm they are distinct. If two share a mechanism, merge and regenerate before proceeding to Phase 3d."
         ]
       },
       "promptFragments": [
@@ -713,12 +756,23 @@
     },
     {
       "id": "phase-3d-select-direction",
-      "title": "Phase 3d: Challenge and Select Direction",
+      "title": "Phase 3d: Challenge Direction",
       "assessmentRefs": [
         "candidate-quality-gate"
       ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "shallow"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "candidate_distinctness = shallow: name the primary mechanism of each candidate; merge any sharing the same mechanism; generate a replacement. quality_criterion_present = absent: add a criterion from idealEndState asking 'which is best?' not just 'which passes?'"
+          }
+        }
+      ],
       "promptBlocks": {
-        "goal": "Read `design-candidates.md`, challenge the leading option, and make the final selection for me.",
+        "goal": "Read `design-candidates.md` and challenge the leading option externally before selection. You are challenging, not selecting -- selection happens in Phase 3e.",
         "constraints": [
           [
             {
@@ -726,27 +780,26 @@
               "refId": "wr.refs.adversarial_challenge_rules"
             }
           ],
-          "You own the selection. Candidate generation output is evidence, not the final decision.",
-          "If the leading option no longer looks best after challenge, switch deliberately rather than defending sunk cost."
+          "Challenge comes before selection. Do not choose a winner in this step.",
+          "External challenge is required -- not optional. Use the degradation ladder."
         ],
         "procedure": [
-          "Compare candidates against `pathRecommendation` and `decisionCriteria`: which candidate best fits, which candidate is the strongest alternative, and what evidence or stakeholder tension the top candidate still risks missing.",
-          "Self-produce the strongest argument against the leading option.",
-          "If `delegationAvailable = true` and (`rigorMode != QUICK` or `pathRecommendation = full_spectrum`), decide whether a delegated challenge is likely to sharpen the decision enough to be worth the extra step. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the leading option. If not, keep the challenge in your own hands and say why.",
-          "If `delegationAvailable = true` and `rigorMode = THOROUGH`, decide whether an execution simulation would materially sharpen the decision. If yes, you may also spawn ONE WorkRail Executor running `routine-execution-simulation`.",
-          "Choose `selectedDirection` and `runnerUpDirection`.",
-          "Quality ceiling check: explicitly compare the selected direction to `idealEndState` from phase-0a. Answer: does the selected direction reach the ideal end state? If not, name exactly what it falls short of and why that shortfall is justified. If `solutionAmbitiousness = 'ideal_solution'` and the selected direction is the most conservative or lowest-scope candidate, you must provide a specific reason each more ambitious candidate was ruled out -- 'too complex' or 'too much work' are not acceptable reasons on their own. Scope is a legitimate constraint only when it is a real stated constraint, not a default preference.",
-          "Record `acceptedTradeoffs`, `identifiedFailureModes`, and what would trigger a switch.",
-          "Update `designDocPath` Decision Log with why the winner won, why the runner-up lost, and how the winner compares to `idealEndState`.",
-          "Set these keys in the next `continue_workflow` call's `context` object: `selectedDirection`, `runnerUpDirection`, `acceptedTradeoffs`, `identifiedFailureModes`, `hasStrongAlternative`, `needsPrototype`, `needsFurtherResearch`, `recommendationConfidenceBand`."
+          "Compare candidates against `pathRecommendation` and `decisionCriteria` to identify the leading candidate and strongest alternative.",
+          "Challenge the leading candidate using the cross-family degradation ladder: Rung 1 (verified cross-family): spawn a WorkRail Executor from a verified different model family running `routine-hypothesis-challenge` against the leading candidate, providing the leading candidate, `decisionCriteria`, `acceptedTradeoffs`, `identifiedFailureModes`, and the strongest runner-up. Rung 2 (single-family fallback, or if cross-family cannot be verified): spawn a same-family WorkRail Executor running `routine-hypothesis-challenge` with explicit steelmanning instructions -- the executor must construct the strongest possible case for the runner-up, not just find flaws in the leader. Rung 3 (no delegation available): record the gap, note that no external challenge was possible, and set `recommendationConfidenceBand` to at most 'medium'. Record which rung was used.",
+          "Classify each challenge finding before acting on it: structural (questions a fundamental assumption -- would require changing the direction), tactical (questions scope or implementation -- changes within the direction), surface (style or completeness -- does not change the direction). Only structural findings should trigger reconsideration of the leading candidate. Tactical findings: record as implementation risks. Surface findings: note and set aside.",
+          "Complete this sentence at least 3 times with genuinely distinct reasons: 'This direction will fail if ___.' Record as pre-mortem risks in `designDocPath`. Generic completions ('too complex', 'team bandwidth') do not count.",
+          "Record `challengeQualityObserved` (structural | tactical | surface -- the highest-quality finding), `acceptedTradeoffs`, `identifiedFailureModes`, and the rung used.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `challengeQualityObserved`, `acceptedTradeoffs`, `identifiedFailureModes`, `hasStrongAlternative`, `needsPrototype`, `needsFurtherResearch`."
         ],
         "outputRequired": {
-          "notesMarkdown": "Explain the winning direction for me, the strongest alternative, and what challenge pressure changed or failed to change."
+          "notesMarkdown": "Describe the leading candidate, the strongest alternative, what the challenge found, the challenge quality classification, and the rung used."
         },
         "verify": [
-          "The strongest alternative was developed enough that switching to it would feel real, not just imaginable.",
-          "Tradeoffs, failure modes, and switch triggers are explicit.",
-          "The selected direction was compared to `idealEndState` -- explicitly, not implicitly. Any gap is named as an accepted limitation with a concrete reason, not left as an assumption."
+          "An external challenge executor was spawned -- not self-produced. The rung used is recorded.",
+          "Each challenge finding is classified as structural / tactical / surface before being acted on.",
+          "Pre-mortem has at least 3 distinct specific failure conditions -- not generic caveats.",
+          "`challengeQualityObserved` is set.",
+          "Has any position changed during this step? If yes: the new evidence must reference a specific finding already recorded in a candidate output file or the challenge output -- not reasoning generated in this step. 'On reflection' does not count. If no qualifying evidence, restore the prior position and record: 'Position change without new evidence detected.'"
         ]
       },
       "promptFragments": [
@@ -756,10 +809,63 @@
             "var": "pathRecommendation",
             "equals": "full_spectrum"
           },
-          "text": "Because this is `full_spectrum`, do not let the final choice overfit either the landscape or the framing. Make the winner earn both."
+          "text": "Because this is `full_spectrum`, ensure the challenge tests both landscape fit and framing fit -- not just one."
         },
         {
           "id": "p3c-prototype-test",
+          "when": {
+            "var": "needsPrototype",
+            "equals": true
+          },
+          "text": "Because the work may still need a prototype, ensure the challenge specifically tests the direction's biggest uncertainty."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3e-select-direction",
+      "title": "Phase 3e: Select Direction",
+      "promptBlocks": {
+        "goal": "Read the challenge findings from Phase 3d, apply the criteria you pre-committed to in Phase 2, and select the winning direction. Assign a typed SelectionOutput tier from observable signals only.",
+        "constraints": [
+          "Use criteria weights you recorded in Phase 2 -- quote them before reading candidates. Do not adjust weights after seeing candidates.",
+          "Tier assignment uses only observable signals: challengeQualityObserved, semantic diversity, framingResolutionStatus. Not self-reported confidence."
+        ],
+        "procedure": [
+          "Quote the `decisionCriteria` and weights you recorded in `designDocPath` during Phase 2 before reading any candidates. If your weights have changed since then, flag the change explicitly and justify it -- weight drift toward the leading candidate is a red flag.",
+          "Order-bias check: consider each candidate as if it were presented to you first. Does your ranking change by position? If yes, name which bias is affecting you and correct for it. Note: this is a prompt-level approximation of structural order randomization -- it reduces but does not eliminate position bias.",
+          "If `rigorMode != QUICK`: spawn a fresh-context WorkRail Executor with ONLY: the candidate summaries, the quoted `decisionCriteria` with weights, and `challengeQualityObserved` from Phase 3d. Do NOT include full discovery context, session history, or the design doc. The executor returns `SelectionEvidenceTemplate` output. Read the executor's ranked evidence and assign the SelectionOutput tier using `SelectionOutputTemplate`. You assign the tier -- the executor provides evidence.",
+          "If `rigorMode = QUICK`: skip fresh-context selection entirely. Set `selectionTier = provisional_recommendation`. Record in `designDocPath`: 'QUICK mode: fresh-context selection was not applied. Tier is provisional regardless of apparent signal quality.'",
+          "Choose `selectedDirection` and `runnerUpDirection`.",
+          "Quality ceiling check: compare `selectedDirection` to `idealEndState` from Phase 0a. Does it reach the ideal? If not, name exactly what it falls short of and why that shortfall is justified. If `solutionAmbitiousness = 'ideal_solution'` and the selected direction is the most conservative candidate, provide a specific reason each more ambitious candidate was ruled out -- 'too complex' alone is not sufficient. Also confirm that at least one candidate in the final set is consistent with an alternative frame from Phase 0a; if none is, record the gap.",
+          "Apply downgrade-only rule: `recommendationConfidenceBand` may be downgraded from the Phase 3d baseline if challenge findings revealed uncertainty; it may not be upgraded.",
+          "Record `acceptedTradeoffs`, `identifiedFailureModes`, `selectionTier`, and what would trigger a switch to the runner-up.",
+          "Update `designDocPath` Decision Log with why the winner won, why the runner-up lost, and how the winner compares to `idealEndState`.",
+          "Set these keys in the next `continue_workflow` call's `context` object: `selectedDirection`, `runnerUpDirection`, `acceptedTradeoffs`, `identifiedFailureModes`, `hasStrongAlternative`, `needsPrototype`, `needsFurtherResearch`, `recommendationConfidenceBand`, `selectionTier`."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Explain the winning direction, the strongest alternative, what the challenge changed or failed to change, and the selectionTier with explicit rationale citing observable signals."
+        },
+        "verify": [
+          "`selectionTier` is assigned from observable signals -- not self-reported confidence.",
+          "`decisionCriteria` weights were quoted from Phase 2 before reading candidates; any changes flagged explicitly.",
+          "Quality ceiling check explicitly compared `selectedDirection` to `idealEndState`.",
+          "`recommendationConfidenceBand` was not upgraded from the Phase 3d value.",
+          "If `rigorMode = QUICK`: `selectionTier = provisional_recommendation`, no exceptions.",
+          "If `selectionTier = insufficient_signal`: `requiredActionOnInsufficient` is non-null and specific."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "p3e-full-balance",
+          "when": {
+            "var": "pathRecommendation",
+            "equals": "full_spectrum"
+          },
+          "text": "Because this is `full_spectrum`, do not let the final choice overfit either the landscape or the framing. Make the winner earn both."
+        },
+        {
+          "id": "p3e-prototype-test",
           "when": {
             "var": "needsPrototype",
             "equals": true
@@ -831,13 +937,17 @@
               "If the review surfaces bounded issues but not a direction change, record them as residual concerns instead of pretending the design is perfect."
             ],
             "procedure": [
+              "Before acting on review findings: classify each finding as structural (questions a fundamental assumption -- would change the direction), tactical (questions implementation -- changes within the direction), or surface (style, completeness). Only structural findings should trigger direction revision.",
               "Compare the review findings to your own prior reasoning.",
               "State what changed your mind, what did not, and why.",
               "If issues are real, update `selectedDirection`, `runnerUpDirection`, `acceptedTradeoffs`, `identifiedFailureModes`, and the Decision Log in `designDocPath`.",
+              "If review findings reveal new uncertainty, downgrade `recommendationConfidenceBand` accordingly. Do not upgrade it above the Phase 3e value.",
               "Set these keys in the next `continue_workflow` call's `context` object: `directionFindings`, `directionRevised`, `needsPrototype`, `needsFurtherResearch`, `recommendationConfidenceBand`."
             ],
             "verify": [
-              "Your decision reflects synthesized judgment, not copied review output."
+              "Your decision reflects synthesized judgment, not copied review output.",
+              "Each review finding was classified as structural / tactical / surface before being acted on.",
+              "`recommendationConfidenceBand` was not upgraded above the Phase 3e value."
             ]
           },
           "requireConfirmation": false
@@ -924,11 +1034,13 @@
         ],
         "procedure": [
           "Consolidate the recommendation, strongest alternative, confidence band, and residual risks in `designDocPath`.",
+          "Apply the downgrade-only rule: `recommendationConfidenceBand` may be downgraded if remaining uncertainty justifies it. It may not be upgraded above the Phase 3e value.",
           "Set these keys in the next `continue_workflow` call's `context` object: `finalConfidenceBand`, `residualRiskCount`, `handoffReady`."
         ],
         "verify": [
           "The direct recommendation path is justified by the actual remaining uncertainty.",
-          "The handoff can proceed without pretending unresolved work has vanished."
+          "The handoff can proceed without pretending unresolved work has vanished.",
+          "`recommendationConfidenceBand` was not upgraded above the Phase 3e value."
         ]
       },
       "requireConfirmation": false
@@ -963,13 +1075,15 @@
             "procedure": [
               "Gather the missing evidence that could actually change the recommendation and update the Landscape Packet and Decision Log in `designDocPath`.",
               "Update assumptions, confidence, and the recommended next action for me.",
+              "Apply the downgrade-only rule: `recommendationConfidenceBand` may be downgraded if this pass reveals new uncertainty. It may not be upgraded above the Phase 3e value.",
               "Set these keys in the next `continue_workflow` call's `context` object: `resolutionInsightCount`, `invalidatedAssumptionCount`, `remainingGapCount`, `resolutionContinueRecommended`, `recommendationConfidenceBand`."
             ],
             "outputRequired": {
               "notesMarkdown": "Summarize what the research follow-up taught you and how it changed the recommendation."
             },
             "verify": [
-              "The pass materially addressed a real missing evidence gap."
+              "The pass materially addressed a real missing evidence gap.",
+              "`recommendationConfidenceBand` was not upgraded above the Phase 3e value."
             ]
           },
           "requireConfirmation": false
@@ -1032,13 +1146,15 @@
               "Create or update a minimal prototype/test spec in `designDocPath` using `prototypeSpecTemplate`, then run the cheapest test that can still falsify the direction or give it real support.",
               "Capture what worked, what failed, and what would falsify it.",
               "Update assumptions, confidence, and the recommended next action for me.",
+              "Apply the downgrade-only rule: `recommendationConfidenceBand` may be downgraded if this pass reveals new uncertainty. It may not be upgraded above the Phase 3e value.",
               "Set these keys in the next `continue_workflow` call's `context` object: `resolutionInsightCount`, `invalidatedAssumptionCount`, `remainingGapCount`, `resolutionContinueRecommended`, `recommendationConfidenceBand`."
             ],
             "outputRequired": {
               "notesMarkdown": "Summarize what the prototype or test pass taught you and how it changed the recommendation."
             },
             "verify": [
-              "The pass materially addressed the selected remaining uncertainty."
+              "The pass materially addressed the selected remaining uncertainty.",
+              "`recommendationConfidenceBand` was not upgraded above the Phase 3e value."
             ]
           },
           "functionReferences": [
@@ -1079,8 +1195,19 @@
       "assessmentRefs": [
         "recommendation-confidence-gate"
       ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "uncompared"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "ideal_state_comparison = uncompared: compare the selected direction to idealEndState and name what it falls short of with justification. residual_risks_named = generic: replace generic caveats with specific risks naming what would concretely invalidate the recommendation."
+          }
+        }
+      ],
       "promptBlocks": {
-        "goal": "Validate that you are ending with the right level of confidence and the right caveats for me.",
+        "goal": "Validate the recommendation using a falsification-focused fresh-context check, then confirm the right confidence level and caveats.",
         "constraints": [
           [
             {
@@ -1092,13 +1219,17 @@
           "If important contradictions or gaps remain, downgrade confidence and say so explicitly."
         ],
         "procedure": [
-          "Validate that the selected path still makes sense in hindsight, the chosen direction still beats the strongest alternative, the remaining uncertainty is named honestly, and the design doc is complete enough for a human to use.",
-          "If a serious unresolved concern remains and `delegationAvailable = true`, decide whether a delegated final challenge is likely to change the result or sharpen the caveats. If yes, spawn ONE WorkRail Executor running `routine-hypothesis-challenge` against the final recommendation. If not, keep the challenge in your own hands and record why.",
+          "Spawn a fresh-context WorkRail Executor with ONLY: the original problem statement, `idealEndState` from Phase 0a, and the full content of `designDocPath`. Do NOT include `selectionTier`, session history, or Phase 3e rationale. The executor answers: (1) Based only on this document and the original problem, what important considerations appear to be missing? (2) What single piece of evidence, if discovered, would most likely change the recommendation? (3) What failure modes are not addressed by the recommendation? Read the executor's findings. For each gap the executor identifies that the workflow did not address: record as a residual risk, or if material, the recommendation-confidence-gate will require follow-up.",
+          "Final check: `recommendationConfidenceBand` must not exceed the Phase 3e value. If Phase 6 work reveals no new uncertainty, the band stays at the Phase 3e value.",
+          "Ensure the design doc is complete enough for a human to use.",
           "Set these keys in the next `continue_workflow` call's `context` object: `finalConfidenceBand`, `residualRiskCount`, `handoffReady`."
         ],
         "verify": [
+          "The fresh-context validation executor was spawned and its findings were read.",
           "The confidence band matches the evidence quality and remaining risks.",
-          "The handoff is recommendation-ready, not just thought-complete."
+          "`recommendationConfidenceBand` was not upgraded above the Phase 3e value.",
+          "The handoff is recommendation-ready, not just thought-complete.",
+          "Has any position changed since Phase 3e? If yes: the new evidence must reference a specific finding in `designDocPath` or the Phase 6 executor output -- not reasoning generated in this step. If no qualifying evidence, restore the Phase 3e position and record: 'Position change without new evidence detected -- Phase 3e position restored.'"
         ]
       },
       "promptFragments": [
@@ -1146,8 +1277,8 @@
         ],
         "procedure": [
           "Update `designDocPath` with a final summary containing the selected path, problem framing, landscape takeaways, chosen direction, strongest alternative, why it lost, confidence band, residual risks, and next actions.",
-          "In the final chat output, tell me the selected path, the chosen direction, the key reason it won, and where to find `designDocPath`.",
-          "When writing the final answer, also emit an enriched wr.discovery_handoff artifact in your complete_step call:\n{\n  \"kind\": \"wr.discovery_handoff\",\n  \"version\": 1,\n  \"selectedDirection\": \"<one sentence: the chosen approach>\",\n  \"designDocPath\": \"<path to design doc, or empty string>\",\n  \"confidenceBand\": \"high\" | \"medium\" | \"low\",\n  \"keyInvariants\": [\"<invariant that must hold>\", ...],\n  \"rejectedDirections\": [{\"direction\": \"<approach>\", \"reason\": \"<why rejected>\"}, ...],\n  \"implementationConstraints\": [\"<thing the coding agent MUST NOT violate>\", ...],\n  \"keyCodebaseLocations\": [{\"path\": \"<file path>\", \"relevance\": \"<why relevant>\"}, ...]\n}\nThe implementationConstraints and keyCodebaseLocations fields are especially important -- they orient the coding agent without requiring it to re-run discovery."
+          "In the final chat output, tell me: the selected path, the chosen direction, the key reason it won, the `selectionTier` and what it means for how much to trust this recommendation, and where to find `designDocPath`. If `selectionTier = insufficient_signal`: explicitly tell me that human review is required before acting on this recommendation. If `selectionTier = provisional_recommendation`: note what would need to be true for the recommendation to reach strong_recommendation.",
+          "When writing the final answer, also emit an enriched wr.discovery_handoff artifact in your complete_step call:\n{\n  \"kind\": \"wr.discovery_handoff\",\n  \"version\": 1,\n  \"selectedDirection\": \"<one sentence: the chosen approach>\",\n  \"designDocPath\": \"<path to design doc, or empty string>\",\n  \"confidenceBand\": \"high\" | \"medium\" | \"low\",\n  \"selectionTier\": \"strong_recommendation\" | \"provisional_recommendation\" | \"insufficient_signal\",\n  \"keyInvariants\": [\"<invariant that must hold>\", ...],\n  \"rejectedDirections\": [{\"direction\": \"<approach>\", \"reason\": \"<why rejected>\"}, ...],\n  \"implementationConstraints\": [\"<thing the coding agent MUST NOT violate>\", ...],\n  \"keyCodebaseLocations\": [{\"path\": \"<file path>\", \"relevance\": \"<why relevant>\"}, ...]\n}\nThe implementationConstraints, keyCodebaseLocations, and selectionTier fields are especially important -- they orient downstream agents and signal how much to trust the recommendation."
         ],
         "verify": [
           "The design doc reads like a coherent human artifact.",

@@ -98,6 +98,13 @@ export const DiscoveryHandoffArtifactV1Schema = z
       path: z.string().min(1).max(300),
       relevance: z.string().min(1).max(150),
     })).max(10).optional(),
+
+    /**
+     * Selection tier from the typed SelectionOutput in Phase 3e.
+     * Signals how much confidence to place in the recommendation.
+     * Optional for backward compatibility with sessions predating v3.5.
+     */
+    selectionTier: z.enum(['strong_recommendation', 'provisional_recommendation', 'insufficient_signal']).optional(),
   })
   .strict();
 

@@ -86,7 +86,8 @@ const REF_CONTENT = {
 
   'wr.refs.adversarial_challenge_rules': [
     'Adversarial challenge rules:',
-    '- Actively try to break the current leading position — do not just look for confirming evidence',
+    '- Actively try to break the current leading position -- do not just look for confirming evidence',
+    '- Construct the strongest case for a different answer: what would it look like if the current position is wrong and an alternative is right?',
     '- For each finding or conclusion, ask: what evidence would disprove this? Is that evidence missing or present?',
     '- If the challenge cannot materially weaken the position, the position is strengthened',
     '- If the challenge reveals a genuine weakness, it must be recorded as a finding and the position must be updated',

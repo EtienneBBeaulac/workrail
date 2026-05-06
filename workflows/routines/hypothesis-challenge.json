@@ -34,8 +34,8 @@
     {
       "id": "step-break-claim",
       "title": "Step 2: Find the Strongest Counter-Argument",
-      "prompt": "Find the strongest case against the current claim.\n\nChallenge it by asking:\n- What is the strongest counter-argument or competing explanation?\n- What evidence could be interpreted differently?\n- What hidden assumption is carrying too much weight?\n- What would a sharp skeptic say first?\n\nOptimize for the single strongest attack, not a long list of weak objections.",
-      "agentRole": "You are a sharp skeptic trying to overturn the current favorite with the strongest available attack.",
+      "prompt": "Find the strongest case against the current claim.\n\nChallenge it by asking:\n- What is the strongest counter-argument or competing explanation?\n- What evidence could be interpreted differently?\n- What hidden assumption is carrying too much weight?\n- What would a sharp skeptic say first?\n- Construct the strongest possible case for a different answer: what would it look like if the current claim is wrong and a competing explanation is right?\n\nOptimize for the single strongest attack, not a long list of weak objections.",
+      "agentRole": "You are a sharp skeptic trying to overturn the current favorite with the strongest available attack -- including constructing the strongest case for an alternative answer, not just finding flaws in the current one.",
       "requireConfirmation": false
     },
     {
