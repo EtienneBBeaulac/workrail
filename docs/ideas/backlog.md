@@ -4752,3 +4752,70 @@ The core idea: run the same coding task on N selected tools/models simultaneousl
 - What is the right number of tasks to be statistically meaningful? 5 is too few; 100 is too many for a first pass. 15-20 tasks across 3 task types is probably the right starting point.
 
 **Relationship to existing entries:** the demo-repo benchmark (existing entry) runs the same tasks after each WorkRail release to track regression. This entry is orthogonal -- it compares WorkTrain vs other systems, not WorkTrain past vs present.
+
+---
+
+### WorkTrain as a full software team: design, PM, data science, opex, and everything in between (May 6, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+The current vision defines WorkTrain as an autonomous *software development* system. But the work that ships software is not just coding -- it's product management, design, data science, operations, release engineering, and the feedback loop from production back into ideas. WorkTrain should eventually be capable of covering every role that contributes to shipping software, not just the coding role.
+
+**What this means concretely:**
+
+- **PM work:** Analyze a product area from usage metrics, session logs, user feedback, and issue patterns. Surface improvement opportunities backed by data, not intuition. Prioritize a backlog using real signal. Write specs grounded in evidence of what users need. Identify features whose value hypothesis can be tested quickly.
+
+- **Design work:** Produce interaction designs and design decisions grounded in the existing system's patterns, constraints, and user behavior data -- not pixel pushing, but the decisions about what to build, what to optimize for, what tradeoffs to accept. Review proposed designs against established patterns and flag inconsistencies or regressions.
+
+- **Data science / analytics:** Instrument features correctly, write and validate tracking, query event logs and metrics stores, identify anomalies, attribute causality from metrics changes, and produce the data-backed analysis that should precede any significant product decision.
+
+- **Fact-based idea generation:** WorkTrain should originate good ideas -- not generic LLM suggestions like "add a dark mode," but ideas grounded in specific evidence from production data, user behavior, competitive positioning, and system constraints. "Your p95 load time for this flow is 4.2s and 23% of users who reach step 3 abandon -- here is a data-backed hypothesis about why and a proposal for addressing it" is the kind of output this needs to produce. Every claim must be traceable to a specific data source, and the hypothesis stated in falsifiable form.
+
+- **Iterating on ideas with metrics:** Once a feature ships, WorkTrain closes the loop -- instruments it, collects data, compares against the hypothesis, and proposes iterations or reversals based on what the data shows.
+
+- **Release engineering and feature flags:** Manage the full rollout lifecycle -- create and configure feature flags, implement gradual rollouts, monitor metrics during rollout, automate rollback if a threshold is crossed, and clean up flags after full rollout.
+
+- **Operational excellence:** Monitor production health, respond to anomalies, investigate root cause with access to logs and traces, implement mitigations, and report on incidents with full context. This goes beyond anomaly detection to proactive operational improvement.
+
+**Why this matters:** The current vision stops at "ship a PR." But the value loop for software is PR → metrics → insight → idea → spec → PR → repeat. If WorkTrain only covers the middle of that loop and not the edges, humans have to manually bridge the analysis → idea and the metrics → iteration gaps. That defeats the purpose of having an autonomous system.
+
+**What distinguishes this from "crappy LLM ideas":** The constraint is that every claim must be traceable to a specific, verifiable data source. "Users might want X" is not a WorkTrain-quality idea. "23% of users who reach step 3 abandon at the form validation; the median time on that step is 47 seconds; the top 3 errors are Y, Z, W; here is what fixing those errors is projected to recover" is. The difference is specificity and falsifiability.
+
+**Relationship to existing entries:** This is the north star that many existing backlog entries are partial implementations of -- monitoring loops, analytics integration, feature flag management, opex, the blind benchmark / comparative study, subagent context packages. This entry captures the full frame so those individual entries can be understood as steps toward it rather than isolated features.
+
+**Things to hash out:**
+- The vision.md defines WorkTrain as "autonomous software development." Does expanding to design, PM, and data science require a vision revision, or is this a natural extension of "everything that ships software"?
+- Design work requires access to design systems, component libraries, and interaction patterns. What is WorkTrain's interface to design tooling (Figma, Storybook, etc.) and how does it learn the constraints of an existing system?
+- Data science work requires access to event logs, metrics stores, and potentially sensitive user data. What is the authorization model, and what is the minimum data needed to produce useful insights?
+- "Fact-based idea generation" requires WorkTrain to know what a good idea looks like in context -- product domain knowledge, not just technical knowledge. How does it acquire and maintain this? Workspace context (like AGENTS.md today) or accumulated from prior analysis sessions?
+- Release management requires write access to feature flag systems (LaunchDarkly, Statsig, homegrown). What safeguards prevent accidental wrong-pace rollouts or incorrect rollbacks?
+- How does opex (incident response, SLO management) interact with the current coding-focused pipeline? Separate workflow type, or extension of the existing one?
+
+---
+
+### Task completion enforcement: detect and prevent deferred work within tasks (May 6, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Agents routinely defer work within tasks rather than completing it. Common patterns: "I'll file a ticket for this later," "this is out of scope, leaving for a follow-up," "TODO: handle this edge case," "I noticed X but didn't address it to stay focused." These deferral patterns are individually plausible but collectively mean tasks are never actually finished -- they just transition from "in progress" to "apparently done" while work accumulates in a long tail of unfiled tickets and unresolved TODOs.
+
+The problem is not that agents identify things they can't do in a single session -- some deferral is legitimate. The problem is that there is no mechanism to distinguish "this genuinely needs a separate session with different scope" from "I could have done this but chose not to," and there is no enforcement that deferred items are actually tracked and eventually completed. A task that spawns three follow-up tickets without completing the core work is not done. A task that leaves TODOs in the code is not done.
+
+**What correct behavior looks like:** A completed task has no unresolved work that was in scope at the time of dispatch. If the agent determined that work was genuinely out of scope, that determination is documented and the coordinator decides whether to accept it or spawn a follow-up agent immediately. The agent cannot unilaterally declare something out of scope and move on -- it must surface the decision to the coordinator.
+
+**Mechanisms to explore:**
+- Completion proof requirement: before a session advances past its final step, it must produce a structured `CompletionProofArtifact` that itemizes what was done, what was explicitly deferred (with rationale), and what TODOs remain in the code. The coordinator inspects this before accepting the session as complete.
+- Deferred work detection: static analysis of the session output for TODO/FIXME/HACK markers, "I'll..." patterns in notes, open questions that weren't resolved. Any detection triggers either forced continuation or a follow-up spawn.
+- Scope boundary enforcement: agents declare scope at the start of a session (via the shaping artifact or trigger context). Anything discovered in-session that is in scope must either be handled or explicitly escalated, not silently deferred.
+- Parallel spawning: when an agent identifies legitimate deferred work, the coordinator can immediately spawn a parallel agent for that work rather than relying on a future human to file and prioritize a ticket.
+
+**Things to hash out:**
+- What is the right place to enforce this -- in the workflow step definitions (each step has completion criteria), in the coordinator (inspects session output before accepting), or in the agent loop itself (turn-end subscriber checks for deferral patterns)?
+- How do you distinguish legitimate scope decisions from laziness? A session on a performance bug that identifies an unrelated security issue is right to defer the security issue. A session that fixes only 2 of 3 acceptance criteria and defers the third is not right to defer it. The distinction is whether the deferred work is in scope for the task or genuinely separate.
+- TODO comments in code are not always deferred work -- some are architectural notes, some are pre-existing. How does the completion proof system avoid false positives from pre-existing TODOs that the agent inherited?
+- If the agent is forced to continue when it wants to stop, what is the token budget and time limit for continuation? There needs to be a ceiling to prevent a stuck continuation loop.
+- How does this interact with the existing stuck detection system? An agent that keeps spinning on the same step because it can't complete it is already detected. This is different -- an agent that *could* complete but *chooses not to*.
