@@ -28,7 +28,7 @@ import type { TriggerDefinition, WebhookEvent } from '../../src/trigger/types.js
 import { asTriggerId } from '../../src/trigger/types.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
 import type { NotificationService } from '../../src/trigger/notification-service.js';
-import type { SessionSource, AllocatedSession } from '../../src/daemon/workflow-runner.js';
+import type { SessionSource, AllocatedSession } from '../../src/daemon/types.js';
 import { tmpPath } from '../helpers/platform.js';
 
 // ---------------------------------------------------------------------------

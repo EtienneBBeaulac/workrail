@@ -19,7 +19,7 @@
 
 import type { Result } from '../runtime/result.js';
 import { ok, err } from '../runtime/result.js';
-import type { WorkflowRunResult } from '../daemon/workflow-runner.js';
+import type { WorkflowRunResult } from '../daemon/types.js';
 import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 
 // ---------------------------------------------------------------------------

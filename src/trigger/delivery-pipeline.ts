@@ -25,7 +25,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { WorkflowRunSuccess } from '../daemon/workflow-runner.js';
+import type { WorkflowRunSuccess } from '../daemon/types.js';
 import { DAEMON_SESSIONS_DIR } from '../daemon/workflow-runner.js';
 import type { TriggerDefinition } from './types.js';
 import type { ExecFn, HandoffArtifact } from './delivery-action.js';

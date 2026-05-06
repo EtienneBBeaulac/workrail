@@ -14,7 +14,8 @@ import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
 // WHY import type: runWorkflow is passed as a parameter (runWorkflowFn), not called
 // directly. The type reference is erased at compile time -- no runtime circular dep.
-import type { runWorkflow, ChildWorkflowRunResult, SessionSource, AllocatedSession } from '../workflow-runner.js';
+import type { runWorkflow } from '../workflow-runner.js';
+import type { ChildWorkflowRunResult, SessionSource, AllocatedSession } from '../types.js';
 import type { ActiveSessionSet } from '../active-sessions.js';
 
 /**

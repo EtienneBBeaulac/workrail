@@ -24,7 +24,7 @@ import { isDevMode } from '../../mcp/dev-mode.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 // TODO: runWorkflow is imported from src/daemon/ -- remaining coupling to address when browser dispatch is redesigned
 import { runWorkflow } from '../../daemon/workflow-runner.js';
-import type { SessionSource, AllocatedSession } from '../../daemon/workflow-runner.js';
+import type { SessionSource, AllocatedSession } from '../../daemon/types.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';

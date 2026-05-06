@@ -12,8 +12,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildSystemPrompt, DAEMON_SOUL_DEFAULT } from '../../src/daemon/workflow-runner.js';
-import type { WorkflowTrigger } from '../../src/daemon/workflow-runner.js';
+import { buildSystemPrompt, DAEMON_SOUL_DEFAULT } from '../../src/daemon/core/system-prompt.js';
+import type { WorkflowTrigger } from '../../src/daemon/types.js';
 
 const baseTrigger: WorkflowTrigger = {
   workflowId: 'wr.coding-task',

@@ -25,7 +25,7 @@ import {
   type FetchNotifyFn,
   type NotificationPayload,
 } from '../../src/trigger/notification-service.js';
-import type { WorkflowRunResult } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowRunResult } from '../../src/daemon/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

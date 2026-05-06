@@ -606,11 +606,19 @@ The autonomous workflow runner (`worktrain daemon`). Completely separate from th
 
 ### Living work context: shared knowledge document that accumulates across the full pipeline (Apr 30, 2026)
 
-**Status: done** | Shipped May 5, 2026 (PR #939)
+**Status: partial** | Core infra shipped May 5, 2026 (PR #939). Three gaps remain.
 
 **Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
 **Shipped (PR #939):** `ShapingHandoffArtifactV1` + `CodingHandoffArtifactV1` + enriched `DiscoveryHandoffArtifactV1`, `PhaseHandoffArtifact` union, `buildContextSummary()` pure function with per-phase selection, `PipelineRunContext` per-run JSON with `PhaseResult<T>`, crash recovery via `active-run.json` pointer, phase quality gates (fallback escalates, partial warns), persistence failure escalation, 4 workflow authoring changes, adversarial behavioral test (AC 21), `contractRef` validation test. Deferred: `buildSystemPrompt()` named semantic slots, console visualization, retry logic, epic-mode task graph, extensible contract registration, per-workflow lifecycle artifact tests.
+
+**Remaining gaps (not tracked elsewhere):**
+
+1. **No end-to-end validation that context reaches downstream agents.** The `assembledContextSummary` is wired through `trigger.context` → `buildSystemPrompt()` → system prompt, but there is no test that runs a full pipeline (discovery → shaping → coding) and asserts that the coding agent's system prompt actually contains the discovery context. The adversarial behavioral test (AC 21) proves the pipeline structure -- it does not prove the context content is meaningful to the downstream agent.
+
+2. **Not all coordinator pipeline modes populate `assembledContextSummary`.** Some modes (e.g. quick-review) may exit without writing a full `PipelineRunContext`. When context is absent, `buildSystemPrompt()` silently injects nothing -- the downstream agent gets no prior context with no warning. There is no check that the coordinator always writes context before dispatching a downstream session.
+
+3. **No operator visibility into injected context.** The "Prior Context" section in an agent's system prompt is invisible from the console. An operator has no way to see what context was injected into a session without reading raw conversation logs. The console should surface this -- at minimum, whether the session had prior context and how many bytes.
 
 When a multi-agent pipeline runs -- discovery → shaping → coding → review → fix → re-review -- no agent has a complete picture of what came before it. The coding agent has the goal. The review agent has the code. The fix agent has the findings. None of them have the accumulated context from the full pipeline: why this approach was chosen over alternatives, what was ruled out, what constraints were discovered, what architectural decisions were made, what edge cases were handled, what the review found and why.
 
@@ -4722,3 +4730,25 @@ WorkTrain has no tooling to surface the state of worktrees and branches relative
 - Common-ground `make sync` distributing the script reliably
 
 **Priority:** Medium. The shared scripts work and have been tested. Main remaining work is the shell wrapper, token storage, and integration with common-ground's team config.
+
+---
+
+### Cross-system blind benchmark: compare AI coding tools/models on the same tasks (May 6, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:3 Eff:1 Lev:2 Con:2 | Blocked: no
+
+There is no reproducible way to compare WorkTrain against other AI coding systems (Cursor, Copilot, raw Claude Code, competing agent frameworks) or to compare model families within WorkTrain on the same real tasks. Without this, claims about WorkTrain's quality are anecdotal. A structured blind benchmark would produce empirical evidence about where WorkTrain adds value and where it falls short.
+
+The core idea: run the same coding task on N selected tools/models simultaneously, grade all outputs using a shared reusable rubric, and do the grading blind (an agent or series of parallel agents evaluates each submission without knowing which system produced it). Token usage is tracked per system so cost-adjusted comparisons are possible.
+
+**Things to hash out:**
+- What constitutes a valid "task" for comparison? Real GitHub issues from a well-understood repo are better than synthetic benchmarks, but they may not reproduce cleanly across different tool setups. What's the minimum reproducibility requirement?
+- How does the blind grading work in practice? The grading agent can't see the submission metadata, but it will see code style and comments that may reveal the model/tool. How blind is "blind" enough to be meaningful? Should we normalize submissions before grading (strip comments, rename vars)?
+- Should the rubric be global (same for all task types) or per-task-type (refactor vs feature vs bug fix)? A feature task and a debugging task have different quality signals.
+- Token usage comparison requires accurate accounting. WorkTrain sessions already record input/output tokens. Other tools may not expose this. How do we handle tools where token cost is opaque?
+- Is this a one-time study or a continuous regression benchmark? The demo-repo benchmark idea (existing backlog entry) covers regression -- this entry is specifically about cross-system comparative evaluation.
+- What is the right number of tasks to be statistically meaningful? 5 is too few; 100 is too many for a first pass. 15-20 tasks across 3 task types is probably the right starting point.
+
+**Relationship to existing entries:** the demo-repo benchmark (existing entry) runs the same tasks after each WorkRail release to track regression. This entry is orthogonal -- it compares WorkTrain vs other systems, not WorkTrain past vs present.

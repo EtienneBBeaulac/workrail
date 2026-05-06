@@ -28,7 +28,7 @@ import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { createContextAssembler } from '../context-assembly/index.js';
 import { createListRecentSessions } from '../context-assembly/infra.js';
-import type { WorkflowTrigger, SessionSource, AllocatedSession } from '../daemon/workflow-runner.js';
+import type { WorkflowTrigger, SessionSource, AllocatedSession } from '../daemon/types.js';
 import type { ConsoleService } from '../v2/usecases/console-service.js';
 import { parsePipelineRunContext } from '../coordinators/pipeline-run-context.js';
 

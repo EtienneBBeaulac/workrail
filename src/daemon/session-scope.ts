@@ -14,12 +14,12 @@
  *      `constructTools()` needs. Follows the same pattern as `TurnEndSubscriberContext`
  *      and `FinalizationContext` elsewhere in this file.
  *
- * CIRCULAR IMPORT NOTE: This module uses `import type` from workflow-runner.ts
- * to avoid runtime circular dependencies. Type-only imports are erased at compile
- * time and do not create module-level cycles.
+ * WHY imports from types.ts (not workflow-runner.ts): ReadFileState is a domain type
+ * that belongs in src/daemon/types.ts. The former import from workflow-runner.ts
+ * created an incorrect dependency direction (scope module depending on orchestration).
  */
 
-import type { ReadFileState } from './workflow-runner.js';
+import type { ReadFileState } from './types.js';
 import type { ActiveSessionSet } from './active-sessions.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
 

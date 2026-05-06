@@ -9,7 +9,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { DaemonEventEmitter } from '../daemon-events.js';
-import type { ReadFileState } from '../workflow-runner.js';
+import type { ReadFileState } from '../types.js';
 import { READ_SIZE_CAP_BYTES, findActualString, withWorkrailSession } from './_shared.js';
 
 /**

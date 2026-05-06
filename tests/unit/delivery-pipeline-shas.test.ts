@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { runDeliveryPipeline, DEFAULT_DELIVERY_PIPELINE, type DeliveryPipelineDeps } from '../../src/trigger/delivery-pipeline.js';
-import type { WorkflowRunSuccess } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowRunSuccess } from '../../src/daemon/types.js';
 import type { TriggerDefinition } from '../../src/trigger/types.js';
 import { okAsync, errAsync } from 'neverthrow';
 

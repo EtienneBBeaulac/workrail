@@ -295,10 +295,36 @@ describe('v2 fs/promises boundary enforcement', () => {
 
 describe('Daemon SessionState mutation invariants', () => {
   const WORKFLOW_RUNNER = path.join(__dirname, '../../src/daemon/workflow-runner.ts');
+  // setTerminalSignal now lives in state/terminal-signal.ts; the invariant test
+  // scans that file to verify the only assignment is inside the gate function.
+  const TERMINAL_SIGNAL_FILE = path.join(__dirname, '../../src/daemon/state/terminal-signal.ts');
   const SET_TERMINAL_SIGNAL_FN = 'setTerminalSignal';
 
   it('state.terminalSignal is only assigned inside setTerminalSignal()', () => {
-    const content = fs.readFileSync(WORKFLOW_RUNNER, 'utf-8');
+    // Scan both files: the gate function file (where the one allowed assignment lives)
+    // and workflow-runner.ts (which must have no direct assignments).
+    const terminalContent = fs.readFileSync(TERMINAL_SIGNAL_FILE, 'utf-8');
+    const runnerContent = fs.readFileSync(WORKFLOW_RUNNER, 'utf-8');
+
+    // workflow-runner.ts must have ZERO state.terminalSignal assignments.
+    const runnerLines = runnerContent.split('\n');
+    const runnerViolations: string[] = [];
+    for (let i = 0; i < runnerLines.length; i++) {
+      const line = runnerLines[i]!;
+      if (/\bstate\.terminalSignal\s*=(?!=)/.test(line)) {
+        runnerViolations.push(`  line ${i + 1}: ${line.trim()}`);
+      }
+    }
+    if (runnerViolations.length > 0) {
+      expect.fail(
+        `Direct state.terminalSignal assignment found in workflow-runner.ts:\n` +
+        runnerViolations.join('\n') +
+        `\n\nUse setTerminalSignal(state, signal) to preserve first-writer-wins invariant.`,
+      );
+    }
+
+    // terminal-signal.ts: the one assignment must be inside setTerminalSignal().
+    const content = terminalContent;
     const lines = content.split('\n');
 
     const violations: string[] = [];
@@ -335,10 +361,12 @@ describe('Daemon SessionState mutation invariants', () => {
   });
 
   it('constructTools() does not reference state or session.state directly', () => {
-    const content = fs.readFileSync(WORKFLOW_RUNNER, 'utf-8');
+    // constructTools moved to runner/construct-tools.ts; scan that file.
+    const CONSTRUCT_TOOLS_FILE = path.join(__dirname, '../../src/daemon/runner/construct-tools.ts');
+    const content = fs.readFileSync(CONSTRUCT_TOOLS_FILE, 'utf-8');
 
     // Extract constructTools function body
-    const fnStart = content.indexOf('\nfunction constructTools(');
+    const fnStart = content.indexOf('\nexport function constructTools(');
     expect(fnStart).toBeGreaterThan(-1);
 
     // Find the closing brace by counting brace depth

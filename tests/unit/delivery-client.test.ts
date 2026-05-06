@@ -12,7 +12,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { post } from '../../src/trigger/delivery-client.js';
-import type { WorkflowRunResult } from '../../src/daemon/workflow-runner.js';
+import type { WorkflowRunResult } from '../../src/daemon/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

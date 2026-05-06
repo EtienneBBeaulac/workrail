@@ -1,4 +1,4 @@
-import type { SessionState } from '../workflow-runner.js';
+import type { SessionState } from '../state/session-state.js';
 
 /**
  * Drain `state.pendingSteerParts` and inject the combined message into the
