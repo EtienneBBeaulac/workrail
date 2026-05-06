@@ -204,6 +204,12 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // writeExecutionStats is fire-and-forget; wait for stats-summary.json before cleanup
+  // to prevent ENOTEMPTY errors when the write chain hasn't finished yet.
+  const summaryPath = path.join(tmpDir, 'stats-summary.json');
+  for (let i = 0; i < 50; i++) {
+    try { await fs.access(summaryPath); break; } catch { await new Promise<void>((r) => setTimeout(r, 10)); }
+  }
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
