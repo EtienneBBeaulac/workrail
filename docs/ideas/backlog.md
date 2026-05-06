@@ -698,7 +698,7 @@ The autonomous workflow runner (`worktrain daemon`). Completely separate from th
 
 ### Living work context: shared knowledge document that accumulates across the full pipeline (Apr 30, 2026)
 
-**Status: partial** | Core infra shipped May 5, 2026 (PR #939). All three original gaps now addressed; one residual gap deferred to Phase 2.
+**Status: done** | Core infra shipped May 5, 2026 (PR #939). All three gaps fixed (PRs #948, #952). Residual: `github_prs_poll` direct dispatch path deferred to Phase 2 (MemoryStore).
 
 **Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
@@ -706,7 +706,7 @@ The autonomous workflow runner (`worktrain daemon`). Completely separate from th
 
 **Gap #1 -- fixed (PR #948):** Contract test added: `tests/unit/context-chain-contract.test.ts` pins the seam between `buildContextSummary()` coordinator output and `buildSessionContext()` daemon input across all 4 phase transitions.
 
-**Gap #2 -- fixed (PR #952):** The actual gap was narrower than originally described: QUICK_REVIEW/REVIEW_ONLY do invoke `runPrReviewCoordinator` with a `contextAssembler` wired. The real issue was the **fix agent spawn** in `runFixAgentLoop()` was not forwarding `reviewSpawnContext` -- fixed with one line. Residual: the `github_prs_poll` direct dispatch path bypasses the coordinator entirely; fix agents from that path still start cold. Deferred to Phase 2 (MemoryStore pre-assembly).
+**Gap #2 -- fixed (PRs #952, #954):** The actual gap was narrower than originally described: QUICK_REVIEW/REVIEW_ONLY do invoke `runPrReviewCoordinator` with a `contextAssembler` wired. The real issue was the **fix agent spawn** in `runFixAgentLoop()` was not forwarding `reviewSpawnContext` -- fixed with one line. Also shipped: `CoordinatorSpawnContext` typed interface in `src/coordinators/types.ts` with explicit fields and no index signature, replacing `Readonly<Record<string,unknown>>` across all coordinator spawn sites (5 files). Passing unknown keys is now a compile error. Residual: the `github_prs_poll` direct dispatch path bypasses the coordinator entirely; fix agents from that path still start cold. Deferred to Phase 2 (MemoryStore pre-assembly).
 
 **Gap #3 -- fixed (PR #948):** Console session detail view now surfaces an **Injected Context** card when `assembledContextSummary` is present in the session's `context_set` event.
 
