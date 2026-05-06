@@ -1955,31 +1955,24 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
 
 
-### Human approval gates for high-stakes coordinator actions (Apr 30, 2026)
+### Agents must not perform delivery actions -- only the coordinator's delivery layer can (Apr 30, 2026)
 
 **Status: idea** | Priority: high
 
-**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+**Score: 13** | Cor:3 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: no
 
-WorkTrain coordinators currently make irreversible decisions autonomously -- opening PRs, enabling auto-merge, merging branches, posting comments -- without any mechanism for a human to intercept and review before the action fires. Today there is no way to configure "always ask before merging" or "require approval before enabling auto-merge on PRs touching the main branch." The operator either accepts full autonomy or turns off automation entirely.
+Daemon agents currently have unrestricted access to `gh` and `git` via the `Bash` tool. There is nothing preventing an agent from running `gh pr create`, `gh pr merge --squash --auto`, `git push --force`, or any other delivery action inside its session. These actions should be exclusively the coordinator delivery layer's responsibility -- they happen after the session completes, after all quality gates pass, through explicit coordinator scripts. Agents that perform them autonomously bypass every gate that was designed to protect the pipeline.
 
-This is the same problem as the "fully closed pipeline" concern in the operator preference memory item, but applied specifically to coordinator actions with external side effects. A review finding is reversible. An auto-merge is not.
+The problem is architectural: delivery actions are not separated from agent capabilities. An agent that calls `gh pr merge` mid-session has merged before the coordinator's review routing, before CI has a chance to run, before any post-session quality check fires. This is not a hypothetical -- a sufficiently "helpful" agent will try to complete the job it was given, which includes delivery.
 
-**The need:** a declarative gate mechanism where coordinators can mark specific actions as requiring human approval before proceeding. The gate would: (1) post a structured outbox message describing the pending action, (2) block the coordinator until either the operator acknowledges or a timeout fires, (3) on ack: proceed; on timeout or reject: escalate. This is distinct from the existing `signal_coordinator` tool (which is mid-session and fire-and-observe) -- approval gates are blocking and decision-forcing.
-
-**Concrete examples of gateable actions:**
-- Auto-merge on a PR (current gap -- we had to manually disable it)
-- Opening a PR to a protected branch
-- Posting a comment on a PR authored by a senior engineer
-- Running `git push --force` (even with lease)
-- Deploying to a non-sandbox environment
+The correct invariant: delivery actions (open PR, merge PR, enable auto-merge, push to main, post to external systems) are only reachable through the coordinator's `autoCommit`, `autoOpenPR`, and delivery pipeline scripts -- not through the agent's Bash tool. The agent's job ends when it calls `complete_step` on the final step. Everything after that is coordinator-owned.
 
 **Things to hash out:**
-- Where does the gate live -- in the coordinator TypeScript script, in the workflow step definition, or as a daemon-level policy (e.g. `autoMerge: require_approval` in triggers.yml)?
-- How does the operator acknowledge -- via `worktrain tell "approve <requestId>"`? A console button? A Slack reaction?
-- What is the right timeout -- 24 hours for a merge gate during business hours? Configurable per gate type?
-- How does this interact with dry-run mode? A gate in dry-run should log "would pause for approval" but not actually block.
-- Is the gate per-action-type (always gate auto-merge) or per-PR (gate this specific merge because it touches auth code)?
+- How is "delivery action" defined precisely enough to enforce? `gh pr create` is delivery; `gh pr view` is read-only. `git push origin feature-branch` is delivery; `git status` is not. The boundary is write-to-external-system.
+- Can this be enforced at the tool level (block specific shell commands in the Bash tool) or does it require a capability-based architecture (agents get a restricted Bash that can't reach delivery commands)?
+- The `daemon-soul.md` could document this as a rule, but that relies on LLM compliance -- not enforcement. What is the structural mechanism?
+- How does this interact with workflows that intentionally ask the agent to run delivery scripts (e.g. a workflow step that says "commit your changes")? Those may be legitimate. The distinction is agent-initiated delivery vs coordinator-authorized delivery.
+- Should the coordinator pass a `deliveryAllowed: false` flag that the daemon enforces in the Bash tool wrapper? Or is this a workflow authoring constraint?
 
 ---
 
