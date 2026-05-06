@@ -74,6 +74,17 @@ import type {
   ChildWorkflowRunResult,
   OrphanedSession,
 } from './types.js';
+import type { SessionState, TerminalSignal, StuckConfig, StuckSignal } from './state/index.js';
+import {
+  createSessionState,
+  advanceStep,
+  recordCompletion,
+  updateToken,
+  setSessionId,
+  recordToolCall,
+  setTerminalSignal,
+  evaluateStuckSignals,
+} from './state/index.js';
 import { withWorkrailSession, persistTokens, DAEMON_SESSIONS_DIR } from './tools/_shared.js';
 import { makeContinueWorkflowTool, makeCompleteStepTool } from './tools/continue-workflow.js';
 import { makeBashTool } from './tools/bash.js';
@@ -111,6 +122,19 @@ export type {
   ChildWorkflowRunResult,
   OrphanedSession,
 } from './types.js';
+// Re-export state layer for backward compatibility.
+// New code should import directly from './state/index.js'.
+export type { SessionState, TerminalSignal, StuckConfig, StuckSignal } from './state/index.js';
+export {
+  createSessionState,
+  setTerminalSignal,
+  evaluateStuckSignals,
+  advanceStep,
+  recordCompletion,
+  updateToken,
+  setSessionId,
+  recordToolCall,
+} from './state/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1769,247 +1793,6 @@ export function buildAgentClient(
   };
 }
 
-// ---------------------------------------------------------------------------
-// TerminalSignal: typed terminal state replacing dual nullable fields
-// ---------------------------------------------------------------------------
-
-/**
- * The terminal signal that ended a workflow session.
- *
- * WHY a discriminated union (not stuckReason + timeoutReason separately):
- * Two independent nullable fields that must never both be set is a textbook
- * "illegal state representable" violation. This union makes stuck AND timeout
- * simultaneously structurally impossible -- only one terminal signal can exist.
- *
- * WHY first-writer-wins via setTerminalSignal(): invariant 1.4 (stuck > timeout
- * priority) is enforced structurally rather than by convention. The first caller
- * to set the signal wins; all later attempts are silent no-ops. This replaces
- * scattered `if (state.stuckReason === null)` guards.
- */
-export type TerminalSignal =
-  | { readonly kind: 'stuck'; readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall' }
-  | { readonly kind: 'timeout'; readonly reason: 'wall_clock' | 'max_turns' };
-
-/**
- * Set the terminal signal for a session (first-writer-wins).
- *
- * WHY first-writer-wins: invariant 1.4 requires stuck to take priority over
- * timeout. Rather than requiring every mutation site to check the current value,
- * this setter enforces the invariant in one place. The first signal set is the
- * authoritative terminal reason; all subsequent calls are no-ops.
- *
- * WHY returns boolean: callers that want to abort only when they were the first
- * writer can branch on the return value instead of reading back the field.
- * Avoids the fragile `state.terminalSignal?.reason === X` pattern at call sites.
- *
- * WHY a plain function (not a class method): SessionState is a plain object.
- * A free function keeps the mutation surface explicit without introducing a
- * class wrapper. The convention is: only call setTerminalSignal() -- never
- * write state.terminalSignal directly.
- *
- * @returns true if the signal was set (this call was the first writer), false if
- *   a prior signal already existed (this call was a no-op).
- */
-export function setTerminalSignal(state: SessionState, signal: TerminalSignal): boolean {
-  if (state.terminalSignal === null) {
-    state.terminalSignal = signal;
-    return true;
-  }
-  return false;
-}
-
-// ---------------------------------------------------------------------------
-// Session state: explicit mutable record
-// ---------------------------------------------------------------------------
-
-/**
- * All mutable state for a single runWorkflow() call.
- *
- * WHY a named interface (not 13 separate let declarations): makes the mutation
- * surface explicit and auditable. Every field that changes during a session is
- * visible here, not scattered across a 1000-line function body. The object is
- * passed by reference so closures (onAdvance, onComplete, onTokenUpdate, the
- * steer callback) capture `state` once and see all mutations.
- *
- * WHY mutable (not readonly): the callback pattern inherently mutates shared
- * state. Making it explicitly mutable is better than hiding mutation in closures.
- *
- * INVARIANT: workrailSessionId starts null and is populated asynchronously
- * after parseContinueTokenOrFail() succeeds. All closures that need it capture
- * `state` by reference -- they see the correct value when they execute (after
- * assignment), because JavaScript object mutation is visible through all references.
- */
-export interface SessionState {
-  /** Set to true by onComplete when the workflow's final step is advanced. */
-  isComplete: boolean;
-  /** Notes from the agent's final continue_workflow/complete_step call. */
-  lastStepNotes: string | undefined;
-  /** Artifacts from the agent's final continue_workflow/complete_step call. */
-  lastStepArtifacts: readonly unknown[] | undefined;
-  /**
-   * The current session token injected by complete_step.
-   * Updated by onAdvance (successful step) and onTokenUpdate (blocked retry).
-   * INVARIANT: always updated AFTER persistTokens() is called.
-   */
-  currentContinueToken: string;
-  /**
-   * The WorkRail sess_* ID decoded from the continueToken after executeStartWorkflow.
-   * Starts null; populated by parseContinueTokenOrFail(). Used to key DaemonRegistry,
-   * ActiveSessionSet, and event emission.
-   */
-  workrailSessionId: string | null;
-  /**
-   * Number of times onAdvance() was called (workflow step advances in the agent loop).
-   * Used for stuck detection Signal 2 and recorded in execution stats as stepCount.
-   */
-  stepAdvanceCount: number;
-  /**
-   * Ring buffer of the last STUCK_REPEAT_THRESHOLD tool calls.
-   * Used by stuck detection Signal 1 (repeated tool + same args).
-   */
-  lastNToolCalls: Array<{ toolName: string; argsSummary: string }>;
-  /** Issue summaries from report_issue calls; included in WORKTRAIN_STUCK marker. */
-  issueSummaries: string[];
-  /**
-   * Pending text parts to inject via agent.steer() on the next turn_end.
-   * Populated by onAdvance (step text) and the steer callback (coordinator injection).
-   */
-  pendingSteerParts: string[];
-  /**
-   * Terminal signal for this session, or null if none has fired.
-   *
-   * WHY a single discriminated union (not separate stuckReason + timeoutReason):
-   * Two independent nullable fields encoded invariant 1.4 (stuck > timeout) via
-   * convention. This field makes the illegal state (stuck AND timeout simultaneously)
-   * structurally impossible. Only one terminal signal can exist per session.
-   *
-   * INVARIANT: write only through setTerminalSignal() -- never assign directly.
-   * setTerminalSignal() is first-writer-wins; subsequent calls are silent no-ops.
-   */
-  terminalSignal: TerminalSignal | null;
-  /** Number of complete LLM response turns since the agent loop started. */
-  turnCount: number;
-}
-
-/**
- * Create a fresh SessionState for a new runWorkflow() call.
- *
- * @param initialToken - The continueToken from executeStartWorkflow. This is
- *   the first token complete_step will inject for the first workflow step.
- */
-export function createSessionState(initialToken: string): SessionState {
-  return {
-    isComplete: false,
-    lastStepNotes: undefined,
-    lastStepArtifacts: undefined,
-    currentContinueToken: initialToken,
-    workrailSessionId: null,
-    stepAdvanceCount: 0,
-    lastNToolCalls: [],
-    issueSummaries: [],
-    pendingSteerParts: [],
-    terminalSignal: null,
-    turnCount: 0,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Pure: stuck signal evaluation
-// ---------------------------------------------------------------------------
-
-/**
- * Configuration for stuck detection heuristics.
- *
- * WHY separated from SessionState: these are read-only inputs (trigger config +
- * constants). They do not change during the session and do not belong in the
- * mutable SessionState record.
- */
-export interface StuckConfig {
-  /** Configured max LLM turns for this session (DEFAULT_MAX_TURNS if not set). */
-  maxTurns: number;
-  /** 'abort' (default) or 'notify_only' -- controls whether abort fires on stuck. */
-  stuckAbortPolicy: 'abort' | 'notify_only';
-  /** When true, Signal 2 (no_progress) participates in abort. Default: false. */
-  noProgressAbortEnabled: boolean;
-  /** How many consecutive identical tool calls trigger Signal 1. Currently 3. */
-  stuckRepeatThreshold: number;
-}
-
-/**
- * A stuck signal returned by evaluateStuckSignals(). Each kind maps to a
- * specific stuck detection heuristic.
- *
- * WHY discriminated union: forces the subscriber to handle each kind explicitly.
- * The subscriber is inherently imperative (calls agent.abort(), emitter.emit(),
- * writes outbox), but the decision of WHICH signal fired is pure.
- */
-export type StuckSignal =
-  | { kind: 'repeated_tool_call'; toolName: string; argsSummary: string }
-  | { kind: 'no_progress'; turnCount: number; maxTurns: number }
-  | { kind: 'max_turns_exceeded' }
-  | { kind: 'timeout_imminent'; timeoutReason: 'wall_clock' | 'max_turns' };
-
-/**
- * Evaluate all stuck detection signals for the current turn and return the
- * first applicable one, or null if none fires.
- *
- * Pure: reads `state` and `config`, no I/O, no side effects.
- * The caller (turn_end subscriber) handles all effects (abort, emit, outbox).
- *
- * WHY check max_turns_exceeded before repeated_tool_call: the max_turns path
- * in the subscriber returns early (skipping steer injection), so it must be
- * evaluated first. If we returned a repeated_tool_call signal when max_turns
- * also fired, the subscriber would handle the wrong signal.
- *
- * WHY check timeout_imminent last: it is purely observational (the abort was
- * already triggered by the wall-clock timeout). It does not cause a new abort.
- *
- * @param state - Current session state (read-only view).
- * @param config - Stuck detection configuration from the trigger.
- */
-export function evaluateStuckSignals(state: Readonly<SessionState>, config: StuckConfig): StuckSignal | null {
-  // Signal: max_turns exceeded -- this turn is the termination turn.
-  // WHY evaluated first: the subscriber returns early on this signal (no steer injection).
-  if (config.maxTurns > 0 && state.turnCount >= config.maxTurns && state.terminalSignal === null) {
-    return { kind: 'max_turns_exceeded' };
-  }
-
-  // Signal 1: same tool + same args called stuckRepeatThreshold times in a row.
-  // WHY argsSummary comparison: same tool with different args is not stuck.
-  if (
-    state.lastNToolCalls.length === config.stuckRepeatThreshold &&
-    state.lastNToolCalls.every(
-      (c) => c.toolName === state.lastNToolCalls[0]?.toolName && c.argsSummary === state.lastNToolCalls[0]?.argsSummary,
-    )
-  ) {
-    return {
-      kind: 'repeated_tool_call',
-      toolName: state.lastNToolCalls[0]?.toolName ?? 'unknown',
-      argsSummary: state.lastNToolCalls[0]?.argsSummary ?? '',
-    };
-  }
-
-  // Signal 2: 80%+ of turns used with 0 step advances.
-  // WHY 0.8: conservative -- avoids false positives on research workflows.
-  // Returns regardless of noProgressAbortEnabled -- the subscriber checks the flag
-  // before deciding whether to abort.
-  if (
-    config.maxTurns > 0 &&
-    state.turnCount >= Math.floor(config.maxTurns * 0.8) &&
-    state.stepAdvanceCount === 0
-  ) {
-    return { kind: 'no_progress', turnCount: state.turnCount, maxTurns: config.maxTurns };
-  }
-
-  // Signal 3: wall-clock timeout already firing (session is aborting).
-  // WHY observational: the abort was triggered by the timeout Promise rejection,
-  // not by this signal. Signal 3 is a last-chance notification, not a new abort.
-  if (state.terminalSignal?.kind === 'timeout') {
-    return { kind: 'timeout_imminent', timeoutReason: state.terminalSignal.reason };
-  }
-
-  return null;
-}
 
 /**
  * Write a single execution-stats entry and regenerate the stats summary.
@@ -2489,13 +2272,13 @@ export async function buildPreAgentSession(
     firstStepPrompt = r.pending?.prompt ?? '';
     isComplete = r.isComplete;
   }
-  state.currentContinueToken = continueToken;
+  updateToken(state, continueToken);
 
   // ---- Decode WorkRail session ID ----
   if (continueToken) {
     const decoded = await parseContinueTokenOrFail(continueToken, ctx.v2.tokenCodecPorts, ctx.v2.tokenAliasStore);
     if (decoded.isOk()) {
-      state.workrailSessionId = decoded.value.sessionId;
+      setSessionId(state, decoded.value.sessionId);
     } else {
       console.error(
         `[WorkflowRunner] Error: could not decode WorkRail session ID from continueToken -- isLive and liveActivity will not work. Reason: ${decoded.error.message}`,
@@ -2853,8 +2636,7 @@ export function buildAgentCallbacks(
       emitter?.emit({ kind: 'tool_call_started', sessionId, toolName, argsSummary, ...withWorkrailSession(state.workrailSessionId) });
       // WHY here: fires synchronously before tool.execute() so the ring buffer reflects
       // the most recent tool calls at turn_end check time. Bounded at stuckRepeatThreshold.
-      state.lastNToolCalls.push({ toolName, argsSummary });
-      if (state.lastNToolCalls.length > stuckRepeatThreshold) state.lastNToolCalls.shift();
+      recordToolCall(state, toolName, argsSummary, stuckRepeatThreshold);
     },
     onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
       emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(state.workrailSessionId) });
@@ -3016,17 +2798,13 @@ async function buildAgentReadySession(
   const STUCK_REPEAT_THRESHOLD = 3;
 
   const onAdvance = (stepText: string, continueToken: string): void => {
-    state.pendingSteerParts.push(stepText);
-    state.stepAdvanceCount++;
-    state.currentContinueToken = continueToken;
+    advanceStep(state, stepText, continueToken);
     if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
     emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
   };
 
   const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
-    state.isComplete = true;
-    state.lastStepNotes = notes;
-    state.lastStepArtifacts = artifacts;
+    recordCompletion(state, notes, artifacts);
   };
 
   // ---- Schemas + tool construction ----
@@ -3039,7 +2817,7 @@ async function buildAgentReadySession(
     fileTracker: new DefaultFileStateTracker(preAgentSession.readFileState),
     onAdvance,
     onComplete,
-    onTokenUpdate: (t: string) => { state.currentContinueToken = t; },
+    onTokenUpdate: (t: string) => { updateToken(state, t); },
     onIssueReported: (summary: string) => {
       if (state.issueSummaries.length < MAX_ISSUE_SUMMARIES) {
         state.issueSummaries.push(summary);
