@@ -76,7 +76,9 @@ describe('Daemon functional core boundary enforcement', () => {
   const DAEMON_CORE_DIR = path.resolve(__dirname, '../../src/daemon/core');
   const DAEMON_STATE_DIR = path.resolve(__dirname, '../../src/daemon/state');
 
-  const NODE_IMPORT_PATTERN = /\bfrom\s+['"](?:node:|fs['"\/]|path['"]|os['"]|child_process['"]|crypto['"]|util['"])/;
+  // Extended to cover all Node.js built-ins that would violate the no-I/O invariant.
+  // Covers: node: prefix, and bare module names for common built-ins without the prefix.
+  const NODE_IMPORT_PATTERN = /\bfrom\s+['"](?:node:|fs['"\/]|path['"]|os['"]|child_process['"]|crypto['"]|util['"]|events['"]|stream['"]|buffer['"]|url['"]|assert['"]|timers['"])/;
   const SDK_IMPORT_PATTERN = /\bfrom\s+['"]@anthropic-ai\//;
 
   async function checkDirectory(dir: string, excludeFile?: string): Promise<Array<{ file: string; violation: string }>> {
@@ -128,6 +130,89 @@ describe('Daemon functional core boundary enforcement', () => {
         violations.map((v) => `  ${v.file}: ${v.violation}`).join('\n') +
         `\n\nDaemon state/ must have no node: or SDK imports.` +
         `\nState types and transitions are pure; keep them free of I/O.`,
+      );
+    }
+  });
+
+  it('src/daemon/state/ does not import from src/daemon/core/', async () => {
+    // WHY: core/ may depend on state/ (e.g. buildSessionResult reads SessionState).
+    // The reverse direction (state/ importing from core/) would create a cycle.
+    let files: string[];
+    try {
+      files = await listFilesRecursive(DAEMON_STATE_DIR);
+    } catch {
+      return;
+    }
+    const violations: Array<{ file: string; line: number; text: string }> = [];
+    for (const file of files) {
+      const content = await fs.readFile(file, 'utf8');
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (/\bfrom\s+['"].*\/core\//.test(lines[i]!)) {
+          violations.push({ file: path.relative(path.resolve(__dirname, '../..'), file), line: i + 1, text: lines[i]!.trim() });
+        }
+      }
+    }
+    if (violations.length > 0) {
+      expect.fail(
+        `state/ imports from core/ (forbidden direction):\n` +
+        violations.map((v) => `  ${v.file}:${v.line}: ${v.text}`).join('\n'),
+      );
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Daemon io/ boundary enforcement
+// ---------------------------------------------------------------------------
+//
+// src/daemon/io/ is the I/O layer. It may import node: modules and types from
+// agent-loop.ts (e.g., AgentInternalMessage for appendConversationMessages).
+// It must NOT import SDK client construction packages or session-management
+// modules (session-scope.ts, active-sessions.ts).
+
+describe('Daemon io/ boundary enforcement', () => {
+  const DAEMON_IO_DIR = path.resolve(__dirname, '../../src/daemon/io');
+
+  async function checkIoDirectory(): Promise<Array<{ file: string; violation: string }>> {
+    const violations: Array<{ file: string; violation: string }> = [];
+    let files: string[];
+    try {
+      files = await listFilesRecursive(DAEMON_IO_DIR);
+    } catch {
+      return [];
+    }
+    for (const file of files) {
+      const content = await fs.readFile(file, 'utf8');
+      const lines = content.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const rel = path.relative(path.resolve(__dirname, '../..'), file);
+        if (/\bfrom\s+['"]@anthropic-ai\/sdk['"]/.test(line)) {
+          violations.push({ file: rel, violation: `line ${i + 1}: @anthropic-ai/sdk import -- ${line.trim()}` });
+        }
+        if (/\bfrom\s+['"]@anthropic-ai\/bedrock-sdk['"]/.test(line)) {
+          violations.push({ file: rel, violation: `line ${i + 1}: @anthropic-ai/bedrock-sdk import -- ${line.trim()}` });
+        }
+        if (/\bfrom\s+['"].*\/session-scope(\.js)?['"]/.test(line)) {
+          violations.push({ file: rel, violation: `line ${i + 1}: session-scope import -- ${line.trim()}` });
+        }
+        if (/\bfrom\s+['"].*\/active-sessions(\.js)?['"]/.test(line)) {
+          violations.push({ file: rel, violation: `line ${i + 1}: active-sessions import -- ${line.trim()}` });
+        }
+      }
+    }
+    return violations;
+  }
+
+  it('src/daemon/io/ does not import SDK clients or session-management modules', async () => {
+    const violations = await checkIoDirectory();
+    if (violations.length > 0) {
+      expect.fail(
+        `Forbidden imports in daemon io/ layer:\n` +
+        violations.map((v) => `  ${v.file}: ${v.violation}`).join('\n') +
+        `\n\nio/ is the I/O boundary layer. It may not construct SDK clients or` +
+        `\nmanage session state. Move session-dependent code to src/daemon/runner/ instead.`,
       );
     }
   });

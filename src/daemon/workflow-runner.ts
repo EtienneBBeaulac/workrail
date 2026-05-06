@@ -99,6 +99,26 @@ import {
   buildSessionResult,
   buildAgentClient,
 } from './core/index.js';
+import {
+  loadDaemonSoul,
+  loadWorkspaceContext,
+  loadSessionNotes,
+  appendConversationMessages,
+  writeExecutionStats,
+  writeStuckOutboxEntry,
+  DAEMON_STATS_DIR,
+  MAX_SESSION_RECAP_NOTES,
+  MAX_SESSION_NOTE_CHARS,
+  stripFrontmatter,
+} from './io/index.js';
+export {
+  loadDaemonSoul,
+  loadWorkspaceContext,
+  loadSessionNotes,
+  stripFrontmatter,
+  MAX_SESSION_RECAP_NOTES,
+  MAX_SESSION_NOTE_CHARS,
+} from './io/index.js';
 import { withWorkrailSession, persistTokens, DAEMON_SESSIONS_DIR } from './tools/_shared.js';
 import { makeContinueWorkflowTool, makeCompleteStepTool } from './tools/continue-workflow.js';
 import { makeBashTool } from './tools/bash.js';
@@ -172,20 +192,7 @@ const execFileAsync = promisify(execFile);
 // Constants
 // ---------------------------------------------------------------------------
 
-/**
- * Maximum number of prior step notes injected into the session state recap.
- * WHY: Caps context window usage. Three notes (~200 tokens each) gives the agent
- * meaningful continuity without bloating the system prompt.
- */
-const MAX_SESSION_RECAP_NOTES = 3;
 
-/**
- * Maximum characters per note in the session state recap.
- * WHY: Individual step notes can be long (30+ lines). Truncating at 800 chars
- * preserves the summary while preventing a single verbose note from consuming
- * the entire session state budget.
- */
-const MAX_SESSION_NOTE_CHARS = 800;
 
 
 // DAEMON_SESSIONS_DIR is re-exported from './tools/_shared.js' at the top of this file.
@@ -212,13 +219,6 @@ const MAX_ORPHAN_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
  */
 const MAX_WORKTREE_ORPHAN_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-/**
- * Root directory for WorkRail user data (crash recovery, soul file, etc.).
- * WHY: daemon-soul.md lives alongside daemon-sessions/ in ~/.workrail/, not in
- * the data/ subdirectory controlled by WORKRAIL_DATA_DIR. This is consistent with
- * other files in the ~/.workrail/ root that are not part of the structured data store.
- */
-const WORKRAIL_DIR = path.join(os.homedir(), '.workrail');
 
 /**
  * Directory that holds per-session isolated git worktrees.
@@ -230,101 +230,7 @@ const WORKRAIL_DIR = path.join(os.homedir(), '.workrail');
  */
 export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
 
-/**
- * Directory that holds execution stats JSONL files written by writeExecutionStats().
- * WHY: each early-exit path and the finally block all write to this same directory.
- * Centralising it as a constant avoids the repeated inline path.join() calls.
- */
-const DAEMON_STATS_DIR = path.join(os.homedir(), '.workrail', 'data');
 
-/**
- * Maximum combined byte size of all workspace context files.
- * WHY: Prevents context window bloat from large CLAUDE.md / AGENTS.md files.
- * Approximates 8000 tokens at ~4 bytes/token.
- */
-const WORKSPACE_CONTEXT_MAX_BYTES = 32 * 1024;
-
-
-/**
- * A literal path entry: a single file at a known relative path.
- * WHY: Claude Code and AGENTS.md paths are stable single-file conventions.
- */
-type LiteralCandidatePath = {
-  readonly kind: 'literal';
-  readonly relativePath: string;
-};
-
-/**
- * A glob pattern entry: zero or more files matching a pattern in a directory.
- * WHY: Cursor, Windsurf, and Firebender all use directory-based conventions
- * where teams add multiple rule files. A glob pattern discovers them all.
- */
-type GlobCandidatePath = {
-  readonly kind: 'glob';
-  /** Relative to workspacePath, e.g. '.cursor/rules/*.mdc' */
-  readonly pattern: string;
-  /**
-   * WHY: .mdc (Cursor/Firebender) and .windsurf/rules/*.md files have YAML
-   * frontmatter with metadata (alwaysApply, description, etc.) not meant for
-   * LLM consumption. Must be stripped before injection.
-   */
-  readonly stripFrontmatter: boolean;
-  /**
-   * WHY: tinyglobby order is filesystem-dependent. Alpha sort ensures the same
-   * workspace produces the same context on every WorkTrain session.
-   */
-  readonly sort: 'alpha';
-};
-
-type WorkspaceContextCandidate = LiteralCandidatePath | GlobCandidatePath;
-
-/**
- * Maximum files to read per glob pattern.
- * WHY: Prevents I/O cost and context budget waste in repos where .cursor/rules/
- * or similar directories contain many files (generated artifacts, etc.).
- */
-const MAX_GLOB_FILES_PER_PATTERN = 20;
-
-/**
- * Candidate workspace context files in priority order.
- * WHY: More specific (tool-specific, project-specific) before more general.
- * User-written Claude Code config takes top priority. Glob formats (newer) come
- * before legacy single-file formats (older) for each tool to reduce duplicate
- * injection when both coexist.
- *
- * Sources:
- *   Claude Code: https://code.claude.com/docs/en/memory (April 2026)
- *   Cursor .cursorrules: empirical (zillow-android-2/.cursorrules)
- *   Cursor .cursor/rules/*.mdc: empirical (zillow-android-2/.cursor/rules/)
- *   Windsurf .windsurf/rules/*.md: https://docs.windsurf.com/windsurf/cascade/memories (April 2026)
- *   Firebender .firebender/rules/*.mdc: empirical (zillow-android-2/.firebender/rules/)
- *   Firebender AGENTS.md: docs/integrations/firebender.md + empirical
- *   GitHub Copilot: https://docs.github.com/en/copilot/customizing-copilot (April 2026)
- *   Continue.dev: https://docs.continue.dev/customize/deep-dives/rules (April 2026)
- *
- * NOTE: .windsurfrules does NOT exist -- Windsurf uses .windsurf/rules/ directory.
- * NOTE: alwaysApply: false rules in .mdc files are injected unconditionally in
- *   Phase 1. Phase 2 will add filtering based on the alwaysApply frontmatter field.
- */
-const WORKSPACE_CONTEXT_CANDIDATE_PATHS: readonly WorkspaceContextCandidate[] = [
-  { kind: 'literal', relativePath: '.claude/CLAUDE.md' },
-  { kind: 'literal', relativePath: 'CLAUDE.md' },
-  { kind: 'literal', relativePath: 'CLAUDE.local.md' },
-  { kind: 'literal', relativePath: 'AGENTS.md' },
-  { kind: 'literal', relativePath: '.github/AGENTS.md' },
-  // Cursor: newer directory format before legacy single-file format
-  { kind: 'glob', pattern: '.cursor/rules/*.mdc', stripFrontmatter: true, sort: 'alpha' },
-  { kind: 'literal', relativePath: '.cursorrules' },
-  // Windsurf: directory format only (.windsurfrules does NOT exist per official docs)
-  { kind: 'glob', pattern: '.windsurf/rules/*.md', stripFrontmatter: true, sort: 'alpha' },
-  // Firebender: both rules directory and AGENTS.md convention
-  { kind: 'glob', pattern: '.firebender/rules/*.mdc', stripFrontmatter: true, sort: 'alpha' },
-  { kind: 'literal', relativePath: '.firebender/AGENTS.md' },
-  // GitHub Copilot
-  { kind: 'literal', relativePath: '.github/copilot-instructions.md' },
-  // Continue.dev
-  { kind: 'glob', pattern: '.continue/rules/*.md', stripFrontmatter: false, sort: 'alpha' },
-] as const;
 
 // WHY: Soul content is defined in soul-template.ts (zero imports) so the CLI
 // init command can import the template without pulling in this module's heavy
@@ -360,30 +266,6 @@ export { DAEMON_SOUL_DEFAULT, DAEMON_SOUL_TEMPLATE } from './soul-template.js';
 // PersistTokensError is re-exported from './tools/_shared.js' at the top of this file.
 // persistTokens is imported from './tools/_shared.js' at the top of this file.
 
-/**
- * Append a batch of AgentInternalMessage values to a per-session conversation JSONL file.
- *
- * WHY fire-and-forget: conversation history is observability/crash-recovery data. A write
- * failure must never affect the agent loop. Callers invoke this as void + .catch(() => {}).
- *
- * WHY JSONL (one JSON object per line): enables incremental delta appends, crash-tolerant
- * reads (discard the last line if it is not valid JSON), and direct jq inspection.
- *
- * WHY append-only: preserves the valid prefix even if the daemon crashes mid-write. Phase B
- * crash recovery uses loadValidatedPrefix semantics (discard invalid last line).
- *
- * @param filePath - Absolute path to the .jsonl file (created on first call if absent).
- * @param messages - New messages since the last flush (the delta for this turn).
- */
-async function appendConversationMessages(
-  filePath: string,
-  messages: ReadonlyArray<AgentInternalMessage>,
-): Promise<void> {
-  if (messages.length === 0) return;
-  const lines = messages.map((m) => JSON.stringify(m)).join('\n') + '\n';
-  await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
-  await fs.appendFile(filePath, lines, 'utf8');
-}
 
 /**
  * Read a previously persisted session state from ~/.workrail/daemon-sessions/<sessionId>.json.
@@ -974,261 +856,6 @@ async function clearStrayTmpFiles(sessionsDir: string): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Context loaders (daemon soul + workspace context)
-// ---------------------------------------------------------------------------
-
-/**
- * Load the operator-customizable agent rules from a soul file.
- *
- * @param resolvedPath - Optional resolved path from the cascade in trigger-store.ts:
- *   TriggerDefinition.soulFile (trigger override) -> WorkspaceConfig.soulFile (workspace default).
- *   When absent, falls back to ~/.workrail/daemon-soul.md (global default).
- *
- * On first run (file absent), writes a template to disk so the operator can discover
- * and customize it. The write is best-effort: if it fails, the warning is logged and
- * DAEMON_SOUL_DEFAULT is returned anyway.
- *
- * WHY path.dirname(soulPath) for mkdir: for workspace-scoped paths like
- * ~/.workrail/workspaces/my-project/daemon-soul.md, the parent dir must be created --
- * not WORKRAIL_DIR (~/.workrail) which is already present.
- */
-async function loadDaemonSoul(resolvedPath?: string): Promise<string> {
-  const soulPath = resolvedPath ?? path.join(WORKRAIL_DIR, 'daemon-soul.md');
-  try {
-    return await fs.readFile(soulPath, 'utf8');
-  } catch (err: unknown) {
-    // ENOENT = first run. Write the template, then return the default content.
-    // Any other error (permissions, etc.) is treated the same way.
-    const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
-    if (isEnoent) {
-      // Best-effort template creation -- failure is logged but never fatal.
-      try {
-        await fs.mkdir(path.dirname(soulPath), { recursive: true });
-        await fs.writeFile(soulPath, DAEMON_SOUL_TEMPLATE, 'utf8');
-        console.log(`[WorkflowRunner] Created daemon-soul.md template at ${soulPath}`);
-      } catch (writeErr: unknown) {
-        console.warn(
-          `[WorkflowRunner] Warning: could not write daemon-soul.md template: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`,
-        );
-      }
-    } else {
-      console.warn(
-        `[WorkflowRunner] Warning: could not read daemon-soul.md: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    return DAEMON_SOUL_DEFAULT;
-  }
-}
-
-/**
- * Strip YAML frontmatter from file content before injection into the system prompt.
- *
- * WHY: .mdc files (Cursor, Firebender) and .windsurf/rules/*.md files include
- * YAML metadata (alwaysApply, description, trigger) that is tool-specific and
- * not meaningful in a WorkTrain system prompt context.
- *
- * Safety: Only strips if the file starts with '---\n' or '---\r\n' (YAML frontmatter
- * is always at the start of the file). Returns original content unchanged if:
- * - File does not start with '---' (no frontmatter present -- safe no-op)
- * - No closing '---' delimiter found (malformed frontmatter -- preserve as-is)
- */
-export function stripFrontmatter(content: string): string {
-  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) return content;
-  const endIdx = content.indexOf('\n---', 4);
-  if (endIdx === -1) return content;
-  return content.slice(endIdx + 4).trimStart();
-}
-
-/**
- * Scan the workspace for convention files across 7 AI tools and combine them
- * into a single string for injection into the system prompt.
- *
- * Files are read in priority order (WORKSPACE_CONTEXT_CANDIDATE_PATHS). Combined
- * size is capped at WORKSPACE_CONTEXT_MAX_BYTES to prevent context window bloat.
- * If the cap is exceeded, a notice is appended so the agent knows content was cut.
- *
- * Returns null if no context files were found (section is omitted from the prompt).
- *
- * WHY best-effort: these files are optional. Missing or unreadable files are silently
- * skipped (or logged at warn level for non-ENOENT errors). The agent can still run
- * without workspace context.
- */
-export async function loadWorkspaceContext(workspacePath: string): Promise<string | null> {
-  const parts: string[] = [];
-  const injectedPaths: string[] = [];
-  let combinedBytes = 0;
-  let truncated = false;
-
-  /**
-   * Accumulates a single file's content into parts[], respecting the byte budget.
-   * WHY extracted as inner helper: the same accumulation logic is needed for both
-   * literal and glob candidates.
-   */
-  function accumulateFile(relativePath: string, content: string): void {
-    const contentBytes = Buffer.byteLength(content, 'utf8');
-    if (combinedBytes + contentBytes > WORKSPACE_CONTEXT_MAX_BYTES) {
-      // Fit as much of this file as will fill the remaining budget.
-      const remaining = WORKSPACE_CONTEXT_MAX_BYTES - combinedBytes;
-      const truncatedContent = content.slice(0, remaining);
-      parts.push(`### ${relativePath}\n${truncatedContent}`);
-      injectedPaths.push(relativePath);
-      truncated = true;
-    } else {
-      parts.push(`### ${relativePath}\n${content}`);
-      injectedPaths.push(relativePath);
-      combinedBytes += contentBytes;
-    }
-  }
-
-  for (const entry of WORKSPACE_CONTEXT_CANDIDATE_PATHS) {
-    if (truncated) break;
-
-    if (entry.kind === 'literal') {
-      const fullPath = path.join(workspacePath, entry.relativePath);
-      let content: string;
-      try {
-        content = await fs.readFile(fullPath, 'utf8');
-      } catch (err: unknown) {
-        const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
-        if (!isEnoent) {
-          // Unexpected error (permissions, etc.) -- log and skip.
-          console.warn(
-            `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-        continue;
-      }
-      accumulateFile(entry.relativePath, content);
-    } else {
-      // kind === 'glob': expand pattern, sort, cap, read each file.
-      const matches = await tinyGlob(entry.pattern, { cwd: workspacePath, absolute: false });
-      const sorted = [...matches].sort(); // alpha sort for determinism
-      if (sorted.length > MAX_GLOB_FILES_PER_PATTERN) {
-        console.warn(
-          `[WorkflowRunner] ${entry.pattern}: ${sorted.length} files found, capped at ${MAX_GLOB_FILES_PER_PATTERN}`,
-        );
-      }
-      for (const relativePath of sorted.slice(0, MAX_GLOB_FILES_PER_PATTERN)) {
-        if (truncated) break;
-        const fullPath = path.join(workspacePath, relativePath);
-        let content: string;
-        try {
-          content = await fs.readFile(fullPath, 'utf8');
-        } catch (err: unknown) {
-          const isEnoent = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
-          if (!isEnoent) {
-            console.warn(
-              `[WorkflowRunner] Skipping ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-          continue;
-        }
-        accumulateFile(relativePath, entry.stripFrontmatter ? stripFrontmatter(content) : content);
-      }
-    }
-  }
-
-  if (parts.length === 0) return null;
-
-  let combined = parts.join('\n\n');
-  if (truncated) {
-    combined += '\n\n[Workspace context truncated: combined size exceeded 32 KB limit. Some files may be missing.]';
-  }
-
-  console.log(
-    `[WorkflowRunner] Injecting workspace context from: ${injectedPaths.join(', ')}`,
-  );
-
-  return combined;
-}
-
-/**
- * Load prior step notes from the WorkRail session store for recap injection.
- *
- * Best-effort: any failure (token decode, store load, projection) logs a WARN
- * and returns an empty array so the daemon session can continue without context.
- * WHY: session state is a continuity aid, not a correctness requirement. A
- * session that starts without a recap still functions correctly -- it just has
- * no awareness of prior steps from the same checkpoint-resumed session.
- *
- * WHY system prompt injection instead of agent.steer():
- * The daemon calls executeStartWorkflow() BEFORE constructing the Agent.
- * Populating the system prompt at Agent construction time satisfies
- * "after start_workflow fires, before first LLM call" -- steer() would fire
- * AFTER the first LLM response (incorrect ordering for pre-step-1 context).
- *
- * @param continueToken - The continueToken from executeStartWorkflow (used to
- *   extract the sessionId via the alias store, without schema changes).
- * @param ctx - V2ToolContext providing tokenCodecPorts, tokenAliasStore, sessionStore.
- */
-export async function loadSessionNotes(
-  continueToken: string,
-  ctx: V2ToolContext,
-): Promise<readonly string[]> {
-  try {
-    // Decode the continueToken to extract the sessionId.
-    // WHY token decode instead of returning sessionId from executeStartWorkflow:
-    // Adding sessionId to V2StartWorkflowOutputSchema is a public schema change
-    // (GAP-7 territory). Token decode via the alias store is the correct in-process
-    // path that avoids breaking the public API contract.
-    const resolvedResult = await parseContinueTokenOrFail(
-      continueToken,
-      ctx.v2.tokenCodecPorts,
-      ctx.v2.tokenAliasStore,
-    );
-
-    if (resolvedResult.isErr()) {
-      console.warn(
-        `[WorkflowRunner] Warning: could not decode continueToken for session recap: ${resolvedResult.error.message}`,
-      );
-      return [];
-    }
-
-    const sessionId = asSessionId(resolvedResult.value.sessionId);
-
-    // Load the session event log (read-only -- no state mutation).
-    const loadResult = await ctx.v2.sessionStore.load(sessionId);
-    if (loadResult.isErr()) {
-      console.warn(
-        `[WorkflowRunner] Warning: could not load session store for recap: ${loadResult.error.code} -- ${loadResult.error.message}`,
-      );
-      return [];
-    }
-
-    // Project node outputs to extract step notes.
-    const projectionResult = projectNodeOutputsV2(loadResult.value.events);
-    if (projectionResult.isErr()) {
-      console.warn(
-        `[WorkflowRunner] Warning: could not project session outputs for recap: ${projectionResult.error.code} -- ${projectionResult.error.message}`,
-      );
-      return [];
-    }
-
-    // Collect all recap-channel notes across all nodes, in event order.
-    // WHY recap channel only: 'artifact' outputs are references, not human-readable notes.
-    const allNotes: string[] = [];
-    for (const nodeView of Object.values(projectionResult.value.nodesById)) {
-      for (const output of nodeView.currentByChannel.recap) {
-        if (output.payload.payloadKind === 'notes') {
-          // Truncate each note to prevent per-note context bloat.
-          const note = output.payload.notesMarkdown.length > MAX_SESSION_NOTE_CHARS
-            ? output.payload.notesMarkdown.slice(0, MAX_SESSION_NOTE_CHARS) + '\n[truncated]'
-            : output.payload.notesMarkdown;
-          allNotes.push(note);
-        }
-      }
-    }
-
-    // Take only the last N notes (most recent context is most relevant).
-    return allNotes.slice(-MAX_SESSION_RECAP_NOTES);
-  } catch (err) {
-    console.warn(
-      `[WorkflowRunner] Warning: unexpected error loading session notes for recap: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return [];
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Tool parameter schemas (plain JSON Schema -- no TypeBox or external loader needed)
@@ -1394,50 +1021,6 @@ function getSchemas(): Record<string, any> {
 
 // Tool factories are implemented in src/daemon/tools/ and re-exported at the top of this file.
 
-// ---------------------------------------------------------------------------
-// writeStuckOutboxEntry -- stuck detection helper
-// ---------------------------------------------------------------------------
-
-/**
- * Append a stuck-escalation entry to ~/.workrail/outbox.jsonl.
- *
- * WHY fire-and-forget (called as void): outbox write is best-effort. A failed
- * write must never affect the session result or abort the turn_end subscriber.
- *
- * WHY a separate helper: keeps the turn_end subscriber readable. The outbox write
- * requires async fs operations that would add noise inside the subscriber.
- */
-async function writeStuckOutboxEntry(opts: {
-  workflowId: string;
-  reason: 'repeated_tool_call' | 'no_progress' | 'stall';
-  issueSummaries?: readonly string[];
-}): Promise<void> {
-  try {
-    const outboxPath = path.join(os.homedir(), '.workrail', 'outbox.jsonl');
-    await fs.mkdir(path.dirname(outboxPath), { recursive: true });
-    const entry = JSON.stringify({
-      id: randomUUID(),
-      kind: 'stuck',
-      message:
-        `Session stuck (${opts.reason}): workflowId=${opts.workflowId}` +
-        (opts.issueSummaries && opts.issueSummaries.length > 0
-          ? ` -- issues: ${opts.issueSummaries.join('; ')}`
-          : ''),
-      timestamp: new Date().toISOString(),
-      workflowId: opts.workflowId,
-      reason: opts.reason,
-      ...(opts.issueSummaries && opts.issueSummaries.length > 0
-        ? { issueSummaries: opts.issueSummaries }
-        : {}),
-    });
-    await fs.appendFile(outboxPath, entry + '\n');
-  } catch (err) {
-    console.warn(
-      `[WorkflowRunner] Could not write stuck outbox entry: ` +
-        `${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-}
 
 
 /** Build a user message for the agent loop. */
@@ -1449,49 +1032,6 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
   };
 }
 
-/**
- * Write a single execution-stats entry and regenerate the stats summary.
- *
- * Fire-and-forget: returns void, never throws, never awaited. A stats write
- * failure must never affect the session result -- this is observability data,
- * not crash recovery state.
- *
- * WHY module-level (not inline): the same logic is needed at 4 early-exit
- * paths (before the try block) and in the finally block. A single helper
- * eliminates duplication and guarantees all paths write the same schema.
- *
- * WHY chained .then() for writeStatsSummary: writeStatsSummary reads
- * execution-stats.jsonl and must include the record just appended above.
- * Chaining ensures the append completes before the read starts.
- */
-function writeExecutionStats(
-  statsDir: string,
-  sessionId: string,
-  workflowId: string,
-  startMs: number,
-  outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown',
-  stepCount: number,
-): void {
-  const endMs = Date.now();
-  const statsPath = path.join(statsDir, 'execution-stats.jsonl');
-  fs.mkdir(statsDir, { recursive: true })
-    .then(() => fs.appendFile(
-      statsPath,
-      JSON.stringify({
-        sessionId,
-        workflowId,
-        startMs,
-        endMs,
-        durationMs: endMs - startMs,
-        outcome,
-        stepCount,
-        ts: new Date().toISOString(),
-      }) + '\n',
-      'utf8',
-    ))
-    .then(() => { writeStatsSummary(statsDir).catch(() => {}); })
-    .catch(() => {}); // best-effort -- never propagate
-}
 
 // ---------------------------------------------------------------------------
 // Imperative shell helper: session finalization
