@@ -406,21 +406,18 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Workflow
 // ---------------------------------------------------------------------------
 
 /**
- * Typed system-managed context fields injected by coordinators and the
- * WorkflowEnricher. Separate from the raw trigger.context payload map
- * so these fields have explicit types and cannot be accidentally dropped.
+ * Typed extraction of system-managed context fields written into trigger.context
+ * by coordinators. Separate from raw trigger.context so these fields have
+ * explicit types and cannot be accidentally dropped.
  *
- * WHY a companion type (not fields on WorkflowTrigger directly): avoids
- * widening the WorkflowTrigger interface before the enricher is wired.
- * Phase 1 will migrate WorkflowTrigger to carry these as first-class fields.
+ * WHY only assembledContextSummary here: coordinator-written fields belong in this
+ * type. WorkflowEnricher output (priorSessionNotes, gitDiffStat) travels as a
+ * separate EnricherResult value threaded through the call chain -- it never touches
+ * trigger.context and therefore doesn't belong here.
  */
 export interface WorkflowContextSlots {
   /** Coordinator-assembled prior phase context (discovery/shaping/coding handoffs). */
   readonly assembledContextSummary?: string;
-  /** Prior workspace session notes from WorkflowEnricher (Phase 1). */
-  readonly priorSessionNotes?: readonly string[];
-  /** Git diff stat from WorkflowEnricher (Phase 1). */
-  readonly gitDiffStat?: string;
 }
 
 /**
