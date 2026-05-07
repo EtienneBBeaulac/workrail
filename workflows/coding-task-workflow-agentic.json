@@ -1,7 +1,7 @@
 {
   "id": "wr.coding-task",
   "name": "Agentic Task Dev Workflow",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "about": "## Agentic Coding Task Workflow\n\nThis workflow structures the full lifecycle of a software implementation task: from understanding and classifying the work, through architecture decisions and incremental implementation, to final verification and handoff.\n\n### What it does\n\nThe workflow guides an AI agent through a disciplined plan-then-execute process. It begins by analyzing the task to determine complexity, risk, and the right level of rigor (QUICK, STANDARD, or THOROUGH). For non-trivial tasks, it then gathers codebase context, surfaces invariants and non-goals, generates competing design candidates, and selects an approach before writing a single line of code. Implementation proceeds slice by slice, with built-in verification gates after each slice. A final integration verification pass confirms acceptance criteria are met before handoff.\n\n### Upstream context (Phase 0.5)\n\nPhase 0.5 looks for any upstream document that has already defined what to build -- a Shape Up pitch, PRD, BRD, RFC, design doc, user story with acceptance criteria, Jira epic, or equivalent. The agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, Memory MCP) to find it. If found, two flags are set: `upstreamSpecDetected` (something exists) and `solutionFixed` (whether the document commits to a specific technical direction). When `solutionFixed = true`, design ideation phases (1a-1c) are skipped and Phase 1d translates the upstream constraints directly into an engineering approach. When `solutionFixed = false`, design ideation runs normally but is constrained by whatever the upstream document does specify. The plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.\n\n### When to use it\n\nUse this workflow whenever you are implementing a feature, fixing a non-trivial bug, or making an architectural change in a real codebase. It is especially valuable when:\n- The task touches multiple files or systems\n- There is meaningful risk of regressions or invariant violations\n- You want the agent to surface trade-offs and commit to a reasoned design decision rather than guessing\n- You need a resumable, auditable record of what was decided and why\n\nFor quick one-liner fixes or very small changes, the workflow includes a fast path that skips heavyweight planning.\n\n### What it produces\n\n- An `implementation_plan.md` artifact covering the selected approach, vertical slices, test design, and philosophy alignment\n- A `spec.md` for large or high-risk tasks, capturing observable behavior and acceptance criteria\n- Step-level notes in WorkRail that serve as a durable execution log\n- A PR-ready handoff summary with acceptance criteria status, invariant proofs, and follow-up tickets\n\n### How to get good results\n\n- Provide a clear task description and at least partial acceptance criteria before starting\n- If you have coding philosophy or project conventions configured in session rules or Memory MCP, the workflow will apply them automatically as a design lens\n- Let the workflow classify complexity and rigor itself; override only if the classification is clearly wrong\n- For large or high-risk tasks, review the architecture decision step before implementation begins",
   "examples": [
@@ -143,7 +143,7 @@
     "SUBAGENT SYNTHESIS: treat subagent output as evidence, not conclusions. State your hypothesis before delegating, then interrogate what came back: what was missed, wrong, or new? Say what changed your mind or what you still reject, and why.",
     "PARALLELISM: when reads, audits, or delegations are independent, run them in parallel inside the phase. Parallelize cognition; serialize synthesis and canonical writes.",
     "PHILOSOPHY LENS: apply the user's coding philosophy (from active session rules) as the evaluation lens. Flag violations by principle name, not as generic feedback. If principles conflict, surface the tension explicitly instead of silently choosing.",
-    "VALIDATION: prefer static/compile-time safety over runtime checks. Use build, type-checking, and tests as the primary proof of correctness \u2014 in that order of reliability.",
+    "VALIDATION: prefer static/compile-time safety over runtime checks. Use build, type-checking, and tests as the primary proof of correctness — in that order of reliability.",
     "DRIFT HANDLING: when reality diverges from the plan, update the plan artifact and re-audit deliberately rather than accumulating undocumented drift.",
     "NEVER COMMIT MARKDOWN FILES UNLESS USER EXPLICITLY ASKS.",
     "SLICE DISCIPLINE: Phase 6 is a loop -- implement ONE slice per iteration. Do not implement multiple slices at once. The verification loop exists to catch drift per slice, not retroactively."
@@ -165,6 +165,47 @@
           }
         ]
       }
+    },
+    {
+      "id": "phase-0c-assumption-verification",
+      "title": "Phase 0c: Interpretation & Assumption Verification",
+      "promptBlocks": {
+        "goal": "State your interpretation of what you are building, make three explicit assumptions about codebase state, verify each by reading the predicted location, and produce an InterpretationArtifact that the coordinator can inspect and route on.",
+        "constraints": [
+          "The interpretation statement MUST appear before any assumption listing.",
+          "You MUST produce exactly 3 assumptions -- no more, no fewer.",
+          "Each assumption MUST be about a design pattern, architectural invariant, or module behavior. Trivially checkable facts are disqualified: do NOT assume things like 'file X exists', 'import Y is present', or 'function Z has signature W'. Those are not assumptions -- they are lookups. An assumption must assert something about how the system is designed or how a module behaves.",
+          "Each assumption MUST name a specific predicted file or code location that would corroborate it.",
+          "Each assumption MUST be labeled with severity AT STATEMENT TIME (before verification): 'high' for core architectural invariants (e.g. token protocol, session model, phase boundary contract) or 'low' for pattern preferences or conventions.",
+          "Do NOT attempt automated correction of context when an assumption is refuted. Record the refutation and route per the procedure.",
+          "Do NOT propagate InterpretationArtifact to coordinator-spawned subagents."
+        ],
+        "procedure": [
+          "1. Write one sentence: 'I am building [X].' This is your interpretation. Write it before you list any assumptions.",
+          "2. State assumption 1: name the design pattern or architectural invariant you are asserting, name the predicted corroborating location, and label severity (high or low).",
+          "3. State assumption 2: same format.",
+          "4. State assumption 3: same format.",
+          "5. Verify assumption 1: read the predicted location. Record whether it is confirmed, refuted, or unresolvable.",
+          "6. Verify assumption 2: same.",
+          "7. Verify assumption 3: same.",
+          "8. Determine ambiguityLevel: 'clear' if all three assumptions are confirmed. 'uncertain' if any assumption is refuted or unresolvable.",
+          "9. Route on refuted assumptions: for any low-severity refuted assumption, downgrade ambiguityLevel to 'uncertain' and proceed. For any high-severity refuted assumption, call report_issue with kind: 'needs_human' and the specific refuted claim as the message, then stop.",
+          "10. Set these keys in the next continue_workflow call's context object: interpretationArtifact (the full artifact object), ambiguityLevel (the string 'clear' or 'uncertain')."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Summary of the interpretation, all three assumptions with their verification results, and the final ambiguityLevel."
+        },
+        "verify": [
+          "The interpretation sentence appears before the assumption list.",
+          "Exactly 3 assumptions are stated, each with a named predicted location and a severity label.",
+          "Each assumption is about a design pattern, invariant, or module behavior -- not a trivially checkable fact.",
+          "Each assumption has been verified by reading the predicted location.",
+          "ambiguityLevel is 'clear' only if all 3 assumptions are confirmed.",
+          "Any high-severity refuted assumption triggered report_issue before this step was completed.",
+          "interpretationArtifact context key is set with fields: interpretation, assumptionList, ambiguityLevel."
+        ]
+      },
+      "requireConfirmation": false
     },
     {
       "id": "phase-0-5-upstream-context",
@@ -218,7 +259,7 @@
     },
     {
       "id": "phase-1b-design-deep",
-      "title": "Phase 1b: Design Generation (Injected Routine \u2014 Tension-Driven Design)",
+      "title": "Phase 1b: Design Generation (Injected Routine — Tension-Driven Design)",
       "runCondition": {
         "and": [
           {
@@ -257,7 +298,7 @@
           }
         ]
       },
-      "prompt": "Read `design-candidates.md`, compare it to your original guess, and make the call.\n\nBe explicit about three things:\n- what the design work confirmed\n- what changed your mind\n- what you missed the first time\n\nThen pressure-test the leading option:\n- what's the strongest case against it?\n- what assumption breaks it?\n\nAfter the challenge batch, say:\n- what changed your mind\n- what didn't\n- which findings you reject and why\n\nPick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.\n\nCapture:\n- `selectedApproach` \u2014 chosen design with rationale tied to tensions\n- `runnerUpApproach` \u2014 next-best option and why it lost\n- `architectureRationale` \u2014 tensions resolved vs accepted\n- `pivotTriggers` \u2014 conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` \u2014 failure mode of the selected approach\n- `acceptedTradeoffs`\n- `identifiedFailureModes`",
+      "prompt": "Read `design-candidates.md`, compare it to your original guess, and make the call.\n\nBe explicit about three things:\n- what the design work confirmed\n- what changed your mind\n- what you missed the first time\n\nThen pressure-test the leading option:\n- what's the strongest case against it?\n- what assumption breaks it?\n\nAfter the challenge batch, say:\n- what changed your mind\n- what didn't\n- which findings you reject and why\n\nPick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.\n\nCapture:\n- `selectedApproach` — chosen design with rationale tied to tensions\n- `runnerUpApproach` — next-best option and why it lost\n- `architectureRationale` — tensions resolved vs accepted\n- `pivotTriggers` — conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — failure mode of the selected approach\n- `acceptedTradeoffs`\n- `identifiedFailureModes`",
       "promptFragments": [
         {
           "id": "phase-1c-challenge-standard",
@@ -429,7 +470,7 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\n**Open questions gate:** check `openQuestions` from Phase 0. If any remain unanswered and would materially affect implementation quality, either resolve them now with tools or record them in the risk register with an explicit decision about how to proceed without them. Do not silently carry unanswered questions into implementation.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` \u2014 count of open questions that would materially affect implementation quality\n- `planConfidenceBand` \u2014 Low / Medium / High\n\nThe plan is the deliverable for this step. Do not implement anything -- not a \"quick win\", not a file read that bleeds into edits, nothing. Execution begins in Phase 6, one slice at a time. If you find yourself writing code or editing source files right now, stop immediately.",
+      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\n**Open questions gate:** check `openQuestions` from Phase 0. If any remain unanswered and would materially affect implementation quality, either resolve them now with tools or record them in the risk register with an explicit decision about how to proceed without them. Do not silently carry unanswered questions into implementation.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open questions that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High\n\nThe plan is the deliverable for this step. Do not implement anything -- not a \"quick win\", not a file read that bleeds into edits, nothing. Execution begins in Phase 6, one slice at a time. If you find yourself writing code or editing source files right now, stop immediately.",
       "assessmentRefs": [
         "plan-completeness-gate",
         "invariant-clarity-gate",
@@ -543,7 +584,7 @@
         {
           "id": "phase-4b-loop-decision",
           "title": "Loop Exit Decision",
-          "prompt": "Decide whether the plan needs another pass.\n\nIf `planFindings` is non-empty, keep going.\nIf it's empty, stop \u2014 but say what you checked so the clean pass means something.\nIf you've hit the limit, stop and record what still bothers you.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "prompt": "Decide whether the plan needs another pass.\n\nIf `planFindings` is non-empty, keep going.\nIf it's empty, stop — but say what you checked so the clean pass means something.\nIf you've hit the limit, stop and record what still bothers you.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -706,7 +747,7 @@
       "id": "phase-8-retrospective",
       "title": "Phase 8: Retrospective",
       "requireConfirmation": false,
-      "prompt": "The implementation is done and verified. Now look back.\n\nThis is not a re-run of tests. It is a short honest look at the work you just did.\n\nAsk yourself:\n\n1. **What would you do differently?** Now that the implementation is real, what approach, boundary, or decision looks wrong in hindsight?\n\n2. **What adjacent problems did this reveal?** Did the implementation expose gaps, tech debt, or fragile assumptions in the surrounding code that were not in scope but are worth noting?\n\n3. **What follow-up work is now visible?** What is the natural next step that became clear only after doing this work?\n\n4. **What was harder or easier than expected?** Were there surprises -- good or bad -- that would change how similar tasks are approached next time?\n\nProduce 2-4 concrete observations. Each should be specific enough to act on.\n\nFor each observation:\n- **File as follow-up**: add to backlog or open a ticket if it warrants tracking\n- **Accept**: note it explicitly if it is a known limitation you are consciously leaving\n- **Fix now**: if it is small and low-risk, fix it before closing\n\nCapture:\n- `retrospectiveObservations`: list of observations with disposition (filed/accepted/fixed)\n- `followUpTickets`: any new tickets created (append to existing list)\n\nBefore completing this step, emit a wr.coding_handoff artifact in your complete_step call:\n{\n  \"kind\": \"wr.coding_handoff\",\n  \"version\": 1,\n  \"branchName\": \"<git branch name containing your changes>\",\n  \"keyDecisions\": [\"<architectural decision + WHY>\", ...],\n  \"knownLimitations\": [\"<known gap or deliberate shortcut>\", ...],\n  \"testsAdded\": [\"<test file or test name added>\", ...],\n  \"filesChanged\": [\"<primary file path changed>\", ...]\n}\nNote: correctedAssumptions is populated ONLY by fix/retry agents when correcting assumptions from a prior coding session. On a first-run coding session, omit this field entirely.",
+      "prompt": "The implementation is done and verified. Now look back.\n\nThis is not a re-run of tests. It is a short honest look at the work you just did.\n\nAsk yourself:\n\n1. **What would you do differently?** Now that the implementation is real, what approach, boundary, or decision looks wrong in hindsight?\n\n2. **What adjacent problems did this reveal?** Did the implementation expose gaps, tech debt, or fragile assumptions in the surrounding code that were not in scope but are worth noting?\n\n3. **What follow-up work is now visible?** What is the natural next step that became clear only after doing this work?\n\n4. **What was harder or easier than expected?** Were there surprises -- good or bad -- that would change how similar tasks are approached next time?\n\nProduce 2-4 concrete observations. Each should be specific enough to act on.\n\nFor each observation:\n- **File as follow-up**: add to backlog or open a ticket if it warrants tracking\n- **Accept**: note it explicitly if it is a known limitation you are consciously leaving\n- **Fix now**: if it is small and low-risk, fix it before closing\n\nCapture:\n- `retrospectiveObservations`: list of observations with disposition (filed/accepted/fixed)\n- `followUpTickets`: any new tickets created (append to existing list)\n\nBefore completing this step, emit a wr.coding_handoff artifact in your complete_step call:\n{\n  \"kind\": \"wr.coding_handoff\",\n  \"version\": 1,\n  \"branchName\": \"<git branch name containing your changes>\",\n  \"keyDecisions\": [\"<architectural decision + WHY>\", ...],\n  \"knownLimitations\": [\"<known gap or deliberate shortcut>\", ...],\n  \"testsAdded\": [\"<test file or test name added>\", ...],\n  \"filesChanged\": [\"<primary file path changed>\", ...]\n}\nNote: correctedAssumptions is populated ONLY by fix/retry agents when correcting assumptions from a prior coding session. On a first-run coding session, omit this field entirely.\n\n5. **Interpretation accuracy check.** Did this session build what was intended? If there was a gap between what you set out to build and what you actually built, classify it:\n- Subtype A: you misread or misunderstood the ticket (the task description said one thing and you built something else)\n- Subtype B: you had a wrong model of how this codebase works (you understood the task but your assumption about a design pattern, invariant, or module behavior turned out to be incorrect)\n- Unclear: you cannot confidently attribute the gap to one type\n\nIf there was no gap, say so explicitly. Add this classification to `retrospectiveObservations`.",
       "outputContract": {
         "contractRef": "wr.contracts.coding_handoff"
       }
