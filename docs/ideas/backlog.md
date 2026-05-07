@@ -2557,8 +2557,16 @@ These expert agents are not running the main workflow. They do not own any phase
 - A payments module expert pre-loaded with the payments execution paths, known invariants, and past design decisions -- queried when the task touches payments code
 - A security expert pre-loaded with the codebase's auth model, known vulnerabilities, and security invariants -- queried during review of auth-adjacent changes
 
-**What makes this distinct from existing reviewer families (MR review):**
-Existing reviewer families are top-level sessions that run the full review workflow independently. Expert consultants are lightweight bounded spawns that answer a specific question and return -- more like calling a function than running a parallel pipeline. Much cheaper, no workflow overhead, no separate session in the console for each consultation.
+**Two distinct usage patterns -- both valid:**
+
+*Consultant mode:* The main agent mid-task asks a specific question ("is this Kotlin idiomatic?"), a pre-specialized agent is spawned with that question and its expertise briefing, it returns a bounded answer, the main agent synthesizes and moves on. Lightweight, on-demand, the main agent drives the interaction.
+
+*Parallel specialist mode:* The coordinator spawns multiple pre-specialized agents simultaneously for a phase of work -- e.g. an MR review that launches a Kotlin expert, a payments module expert, and an FP patterns expert in parallel, each reviewing the same diff through their lens. The main agent or coordinator synthesizes. This is the 3-angle executor pattern from wr.discovery applied to expertise curation rather than framing angles. Each specialist contributes their perspective; no single agent has to cover everything.
+
+The parallel specialist mode is conceptually similar to the existing reviewer families in wr.mr-review, but with expertise injection replacing role prompts. "You are a correctness reviewer" and "you are an agent briefed on this codebase's actual invariants, the past bugs in this module, and the specific patterns we use here" are very different levels of specificity.
+
+**What makes expert consultants distinct from existing reviewer families (MR review):**
+Existing reviewer families are top-level sessions running the full review workflow independently. Expert consultants (in consultant mode) are lightweight bounded spawns -- more like calling a function than running a parallel pipeline. In parallel specialist mode they are closer to reviewer families, but curated for the specific task rather than generically role-assigned.
 
 **What makes this distinct from existing context injection:**
 Existing context injection (living work context, assembledContextSummary) threads pipeline state between phases -- history of what happened. Expert consultants carry curated domain expertise -- best practices, idioms, invariants, patterns. The content type is different: not "what was done" but "what is true about this domain."
