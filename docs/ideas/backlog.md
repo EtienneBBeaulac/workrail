@@ -1712,6 +1712,36 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### Typed suggestion artifacts with workflow-directed verification (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Agents frequently make suggestions mid-workflow -- propose an abstraction, recommend a deferral, flag a scope expansion, suggest a performance optimization. Today these live in plain prose notes. The workflow cannot distinguish one type of suggestion from another, cannot apply targeted follow-up logic, and cannot verify that the suggestion was actually scrutinized before being accepted. A suggestion that warrants architectural review gets the same treatment as one that warrants nothing.
+
+The idea: a typed `suggestion` tool call that the agent makes instead of embedding the suggestion in prose. The artifact carries a `kind` field (closed enum, workflow-declared) that tells the engine what type of suggestion this is. The workflow author declares, per suggestion kind, what verification the engine should require before the suggestion is accepted.
+
+**Example suggestion kinds and their natural follow-up scrutiny:**
+- `abstraction_extraction` -- "is this premature? what are the three concrete future cases this serves? does any of them exist in the current backlog? does this introduce coupling that didn't exist before?"
+- `architectural_change` -- "does this conflict with any design locks? what breaks downstream?"
+- `scope_expansion` -- "is this actually in scope? is this the scope rationalization failure mode -- the agent declaring it's a separate ticket to avoid doing the work?"
+- `deferral` -- "is this genuinely separate work, or is the agent completing checkboxes while leaving real work undone?"
+- `performance_optimization` -- "is this premature? what is the actual measured bottleneck? what evidence justifies this now?"
+
+**Mechanism:** fits naturally with the assessment gate system. A `suggestion_quality` assessment with dimensions specific to the suggestion kind. The workflow author declares which dimensions apply to each kind. When the agent calls the suggestion tool, the engine fires a `require_followup` consequence requiring the agent to answer the verification criteria for that kind before proceeding. If the agent cannot answer them satisfactorily, the suggestion does not pass.
+
+**The friction concern:** if suggestions require too much overhead, agents will stop surfacing them or bury them in prose to avoid the gate. The verification criteria must be targeted and lightweight -- not a full review pass, just the specific questions that matter for that kind. "What are the three future cases this abstraction serves?" is lightweight. "Run a full architecture review" is not.
+
+**Things to hash out:**
+- What is the closed set of suggestion kinds for the initial version? Too many kinds creates complexity; too few misses the point.
+- Should suggestion kinds be workflow-declared (each workflow author defines their own) or engine-owned (a closed set the engine enforces)? Engine-owned is more consistent but less flexible.
+- How does the agent signal that a suggestion was considered and rejected, not just overlooked? A declined suggestion should be as visible as an accepted one.
+- Does the verification happen inline (a `require_followup` on the same step) or as a separate verification step? Inline is lower friction; a separate step is more auditable.
+- How does this interact with the existing `report_issue` mechanism? Some suggestions that fail verification should surface to the operator, not just loop back to the agent.
+
+---
+
 ### WorkTrain as the canonical workflow author -- MCP as a derived runtime (Apr 30, 2026)
 
 **Status: idea** | Priority: high
