@@ -2572,6 +2572,18 @@ When an MR review session (run by a WorkTrain agent) finds issues in a coding se
 
 ---
 
+### wr.discovery recommendation quality improvements v3.5 (May 6, 2026)
+
+**Status: done** | Shipped in PR #951 (feat/etienneb/discovery-workflow-v35, May 6, 2026)
+
+**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+Evidence-based redesign of `wr.discovery` (v3.4.0 → v3.5.0) addressing three failure modes -- coverage (right answer never generated), quality (wrong answer selected), and selection (right answer not selected). Key changes: all three assessment gates now have `assessmentConsequences` that block on failure; Phase 3d/3e split isolates external challenge from fresh-context selection; typed `SelectionOutput` tier (`strong_recommendation | provisional_recommendation | insufficient_signal`) driven by observable signals; `FrameValidityCheck` at landscape-to-frame transition; verbalized sampling + ordinary persona rotation in executor goal strings; `recommendationConfidenceBand` downgrade-only invariant across resolution phases; Phase 6 restructured as falsification-shaped fresh-context validator; `selectionTier` added to `wr.discovery_handoff` artifact.
+
+Full audit at `.workrail/discovery-workflow-audit.md`, implementation plan at `.workrail/discovery-workflow-implementation-plan.md`.
+
+---
+
 ### wr.discovery lacks domain-specific ideation guidance (May 6, 2026)
 
 **Status: idea** | Priority: medium
