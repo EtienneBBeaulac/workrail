@@ -1710,6 +1710,45 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### Coordinator-managed typed output vocabulary: agent emits typed events, coordinator reacts per type (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+Today, agent output is largely untyped -- notes, artifacts, context keys. The coordinator reacts to typed handoff artifacts at phase boundaries, but within a session the agent's observations, decisions, findings, and suggestions are all prose. The coordinator cannot programmatically react to them.
+
+The idea: the coordinator owns a vocabulary of typed output kinds that it supports. Before a session starts, it injects that vocabulary into the agent's context -- the agent knows exactly what typed things it can emit and what each one means. When the agent emits a typed output, the coordinator reacts with the appropriate process for that type. The reaction is deterministic coordinator logic (not LLM reasoning), specified per type.
+
+**Examples of typed output kinds and coordinator reactions:**
+
+- `suggestion(kind: "abstraction_extraction")` → coordinator fires targeted verification: "what are the three future cases this serves?"
+- `finding(severity: "critical", area: "security")` → coordinator routes to immediate review, may block merge
+- `decision(chose: X, over: Y, rationale: ...)` → coordinator checks for conflicts with prior decisions in the session store
+- `scope_change(direction: "larger", reason: ...)` → coordinator re-evaluates task complexity, may re-route to a heavier workflow
+- `blocker(kind: "missing_context", what: ...)` → coordinator attempts to resolve the blocker from known sources before surfacing to operator
+- `learning(claim: ..., area: ..., confidence: ...)` → coordinator writes to the assumption store for future sessions
+- `assumption(claim: ..., severity: ...)` → coordinator gates on verification before proceeding (Candidate 5 is a specific instance of this)
+
+**What makes this powerful:**
+The agent doesn't need to know what happens next when it emits a typed output -- that's the coordinator's job. The agent just has to recognize "this is an assumption I'm making" or "this is a scope change I'm noticing" and emit the right type. The coordinator's reaction logic handles the rest deterministically, without LLM turns.
+
+**Relationship to existing entries:**
+- "Typed suggestion artifacts with workflow-directed verification" (below): a specific application of this pattern to suggestions
+- "Coordinator mid-session hooks": the coordinator's reaction to typed outputs is exactly a mid-session hook triggered by a specific event type
+- "Candidate 5 / interpretation checkpoint": the assumption verification step is a manually-implemented instance of this pattern for one output type
+- "Coordinator session store awareness": the coordinator's reaction to a `learning` or `decision` type can write to the session store for future sessions
+
+**Things to hash out:**
+- Who defines the vocabulary of supported types -- the engine (closed set), the workflow author (per-workflow), or the coordinator (per-deployment)?
+- How does the agent learn what types are available? Injected in the system prompt, declared in the workflow, or both?
+- What is the API surface for emitting a typed output? A dedicated tool, a structured artifact field, a reserved context key pattern?
+- How are reactions defined? TypeScript in the coordinator script, declarative rules in triggers.yml, or something else?
+- What happens when the agent emits a type the coordinator doesn't handle? Silent drop, warning, or error?
+- Should typed outputs be visible in the console as first-class events, or only in the raw session log?
+
+---
+
 ### Typed suggestion artifacts with workflow-directed verification (May 7, 2026)
 
 **Status: idea** | Priority: medium
