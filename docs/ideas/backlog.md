@@ -610,6 +610,52 @@ Tier 0 injection needs a dedicated system prompt section separate from `assemble
 
 ---
 
+### External assumption ranking for interpretation checkpoint (May 6, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (blocked by: interpretation checkpoint -- Candidate 5 must ship first)
+
+The interpretation checkpoint (Candidate 5) asks the coding agent to label each of its own assumptions as `severity: high` or `severity: low`. This self-labeling is a known weak point: an agent with a confident wrong prior may mislabel its most dangerous architectural assumption as low-severity to avoid triggering the gate. Self-assessed severity is the single lowest-confidence element in the pitch (confidence: 0.55).
+
+An external agent -- one that did not produce the assumptions -- can independently rank them by actual risk before verification runs. The external agent receives only the ticket and the assumption list (not the producing agent's full context or reasoning) and answers: which of these assumptions is most load-bearing? Which, if wrong, would cause the most damage? Are there high-risk areas this agent didn't surface at all?
+
+The producing agent then verifies in order of externally-ranked risk rather than self-assessed severity. Severity classification moves from self-labeling to an independent signal, removing the 0.55-confidence gap entirely.
+
+**Relationship to targeted session review:** the external ranking agent's output is also a high-signal review moment -- if the external agent flags assumptions the producing agent didn't think to surface, that delta is direct evidence of an interpretation gap.
+
+**Things to hash out:**
+- What context does the ranking agent receive? Ticket + assumption list only, or also the affected file list and design lock references? More context improves ranking quality but risks contaminating the independence.
+- Is this a lightweight parallel call (runs simultaneously with verification setup) or a blocking step?
+- How are conflicts between self-assessed severity and external ranking resolved? External ranking should win, but the producing agent should see the disagreement and explain it.
+- Cost: one additional inference call per session. Acceptable for standard/thorough sessions; probably skip for QUICK mode.
+
+---
+
+### Intent gap correction: fix the interpretation after assumption refutation (May 6, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (blocked by: interpretation detection -- Candidate 5 assumption surfacing step must ship first)
+
+When an agent's assumption-surfacing step (Candidate 5) refutes a high-severity assumption, the current scoped fix is to surface the refutation to the operator and halt. But the real problem is deeper: the wrong prior that caused the refuted assumption may have already contaminated earlier context -- the upstream context harvest, the problem framing, the `reframedProblem` and `challengedAssumptions` context keys. A simple "re-read the file and try again" doesn't fix a wrong model; it patches the symptom in one step while leaving the contaminated context intact. Long-term, a refuted assumption that reflects a codebase-specific wrong prior (Subtype B) should also update the Memory store and eventually the knowledge graph so future sessions don't repeat the mistake.
+
+This is explicitly out of scope for the Candidate 5 pitch -- detection is the right first boundary. Correction is a separate, larger problem that depends on session context rollback, Memory store integration, and eventually the knowledge graph.
+
+**Done looks like:** when a high-severity assumption is refuted mid-session, the system can: (1) identify which prior context keys were formed under the wrong prior, (2) trigger a targeted correction sub-flow that re-derives those keys with the corrected interpretation, (3) write the correction back to the Memory store so future sessions in this workspace start with the right prior.
+
+**Things to hash out:**
+- What is the right granularity for context rollback? Rolling back individual keys vs. re-running entire prior phases are very different costs.
+- How do you distinguish "assumption was wrong about this specific file" (local fix) from "assumption reflects a systematic wrong prior about this codebase pattern" (Memory store update warranted)?
+- What is the trigger for a Memory store write -- every refuted high-severity assumption, or only ones confirmed as Subtype B by retrospective labeling?
+- How does this interact with the knowledge graph when it ships? The assumption store (Candidate 2 from the intent gap discovery) and the knowledge graph are both candidates for receiving the correction signal.
+
+**Relationship to existing entries:**
+- Blocked by: Candidate 5 (assumption surfacing step) -- detection must exist before correction can be designed
+- Related to: Subtype B intent failure (below), Knowledge graph (backlog), Memory store / living work context (shipped PR #939, #948, #952)
+
+---
+
 ### Subtype B intent failure: agent has a wrong prior about what this codebase does (May 5, 2026)
 
 **Status: idea -- needs empirical study before design** | Priority: high
@@ -1956,6 +2002,37 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
 
+### Reliable synthetic human gates: mimicking operator approval and refusal in autonomous pipelines (May 6, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+WorkTrain's pipeline has several points where a human operator would naturally approve, reject, or redirect -- confirming an interpretation before coding starts, approving a direction from discovery, accepting a shaped pitch. In guided MCP sessions these gates fire as `requireConfirmation` steps. In fully autonomous daemon sessions, they either don't fire or surface to the operator outbox and wait indefinitely. There is currently no reliable mechanism for the coordinator to make these gate decisions autonomously in a way that is trustworthy enough to substitute for human judgment.
+
+The problem is not just "add an LLM to make the decision." An LLM making approval decisions is subject to the same sycophancy, self-enhancement bias, and overconfidence problems the rest of the pipeline has. A naïve "spawn an agent to approve this" produces rubber-stamping, not genuine gatekeeping. What is needed is a structured, auditable, multi-signal gate that approximates what a careful human reviewer would do -- checking specific criteria, flagging specific concerns, requiring specific evidence before proceeding.
+
+**What a strong synthetic gate needs:**
+- Typed criteria against which the artifact is evaluated (not free-form "does this look good?")
+- An independent agent that did not produce the artifact being evaluated
+- A cross-family challenger where possible (different model family = different correlated blind spots)
+- A structured verdict with explicit rationale tied to the criteria, not a confidence score
+- An escalation path when the synthetic gate is uncertain -- surface to operator rather than rubber-stamp
+
+**Use cases that need this:**
+- Interpretation checkpoint: does the coded assumption set actually cover the architectural risks for this ticket?
+- Shaping approval: does the pitch have genuine acceptance criteria or are they vague enough to accept anything?
+- Discovery direction: is the selected direction actually distinct from the runner-up, or are they the same approach with different labels?
+- Review verdict: is this finding severe enough to block merge, or is it a style preference being inflated?
+
+**Things to hash out:**
+- What is the right abstraction? A reusable `synthetic-gate` routine that takes typed criteria + artifact and returns a structured verdict? Or specialized gates per use case?
+- How do you prevent the synthetic gate from being gamed by the same agent that produced the artifact? The gate agent must not have access to the producing agent's reasoning, only its output.
+- What is the confidence threshold below which the synthetic gate escalates to a human rather than deciding? And how is that threshold configured per trigger?
+- How do you validate that a synthetic gate is actually performing the function of a human gate -- not just producing confident verdicts? Requires a calibration dataset of known-correct and known-incorrect artifacts with human ground truth.
+- Relationship to the `requireConfirmation` gate mechanism: the synthetic gate is the autonomous equivalent. It should produce the same typed routing signal the human confirmation gate produces, so the coordinator routing logic doesn't need to know which kind of gate fired.
+
+---
 
 ### Event-driven agent coordination (coordinator as event bus)
 
@@ -2468,6 +2545,8 @@ When an MR review session (run by a WorkTrain agent) finds issues in a coding se
 
 **Why this matters**: every finding that slips through is a signal about a workflow or process gap. Today that signal is lost. Capturing it systematically and feeding it back into workflow improvement closes the quality loop.
 
+**Concrete model:** CodeRabbit does this for MR reviews -- when a human reviewer corrects a CodeRabbit finding or points out something it missed, CodeRabbit extracts a structured learning (`{ claim, repo, file context, timestamp }`) and injects it into future review sessions for the same repo. WorkTrain should do the same, and broader: learnings from coding corrections (not just review corrections) feed into the per-workspace codebase assumption store, which directly addresses Subtype B intent failures. Human feedback on WorkTrain's PRs is the write path for that store.
+
 **Things to hash out:**
 - How does WorkTrain detect that a human has commented on a PR post-review? This requires monitoring the PR for new review activity after WorkTrain's session completed -- either webhook events or polling.
 - What does the analysis session actually produce? A structured finding about the gap? A concrete proposal for workflow improvement? Both?
@@ -2475,6 +2554,9 @@ When an MR review session (run by a WorkTrain agent) finds issues in a coding se
 - How do you distinguish "the workflow is fine but this was a genuinely hard edge case" from "the workflow has a systematic gap"? A single miss doesn't prove a gap; multiple misses of the same kind do.
 - Should the analysis result feed directly into `workflow-effectiveness-assessment`, or is it a separate concern?
 - For the "coding agent missed it" case: is the right fix to change the coding workflow, or to make the review workflow more adversarial?
+- How are codebase-specific learnings extracted from free-form human review comments? A structured extraction step (similar to CodeRabbit's learning extraction) is needed to turn "actually this is wrong because X" into a typed store entry.
+- How are extracted learnings scoped and invalidated over time? Per-repo scope is right for codebase-specific facts, but learnings go stale after refactors. A `lastVerified` + staleness mechanism is needed.
+- Relationship to the assumption store (Candidate 2 from the intent gap discovery): human PR corrections are the primary write path for the per-workspace codebase assumption store. These two entries should be designed together.
 
 ---
 
@@ -2589,6 +2671,45 @@ Some workflows want notes to consistently capture current understanding, key fin
 
 ---
 
+### Targeted session review: extract high-signal moments instead of reviewing full transcripts (May 6, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+Reviewing a full agent session transcript to evaluate quality is prohibitively expensive -- long sessions have hundreds of tool calls, file reads, and reasoning steps. But most of the signal about whether a session went well lives in a small number of high-signal moments: confirmation gates, places where the agent flagged uncertainty or divergence, steps where the agent's output failed to match the expected contract, and points where the agent encountered reality and had to adapt. Reviewing those moments selectively is 10-50x cheaper than reading the full transcript and captures most of the quality signal.
+
+**High-signal moments worth targeting:**
+
+1. **Confirmation gate outcomes** -- when a `requireConfirmation` gate fired, what did the agent report? Did it accurately represent the state of the work? Was the decision the right one in hindsight?
+
+2. **Agent self-reported issues** -- calls to `report_issue` or `signal_coordinator` during the session. These are the agent's own flags that something was wrong. Each one warrants inspection: was the issue real, was the agent's characterization accurate, was the resolution appropriate?
+
+3. **Contract validation failures** -- steps where the engine returned a `blocked` or `require_followup` response. The agent's output failed the output contract. What did it produce, and why?
+
+4. **Agent-workflow friction points** -- places where the agent deviated from the expected step procedure, added divergence markers, or explicitly noted a gap between the workflow instructions and the reality it encountered. These are the inputs to workflow improvement.
+
+5. **Interpretation vs outcome delta** -- the gap between what the agent stated it was building (interpretation checkpoint, once it exists) and what it actually produced. The delta is the intent gap in concrete form.
+
+6. **Sycophancy signals** -- position changes without new evidence, position reversals after challenge, confidence-accuracy mismatches visible in the notes.
+
+**Why this matters:** without targeted review, session quality is only observable at the PR level (did the output pass review?). That's a lagging indicator that catches failures after they've shipped cost. Targeted review of high-signal moments catches failures mid-session or immediately post-session, before the cost compounds.
+
+**Relationship to existing entries:**
+- "Agent-reportable workflow bugs" (below) -- the agent's own flags are one of the primary review targets
+- "Synthetic human gates" -- the targeted review output is what a synthetic gate would consume to make an approval decision
+- "Automatic root cause analysis" -- targeted review is the cheaper precursor that identifies which sessions warrant full root cause analysis
+- "Per-run workflow improvement retrospective" -- the session retrospective is one moment in the targeted review; this entry is about the full set of moments across a session
+
+**Things to hash out:**
+- What is the right extraction mechanism? The session event log already records every tool call, step advance, and artifact. A targeted review agent reads selected event types rather than the full log. What is the right query interface?
+- Which moments are always reviewed vs. sampled? Confirmation gates and `report_issue` calls probably warrant 100% review; routine step advances can be sampled.
+- Should targeted review happen synchronously (coordinator waits before proceeding) or asynchronously (review happens in parallel, findings surface to operator outbox)?
+- How are review findings acted on? They could feed into: (a) the synthetic gate decision for the current session, (b) the workflow improvement retrospective, (c) the assumption store if codebase-specific learnings are extracted.
+- What does the targeted review agent actually produce? A structured verdict per moment reviewed, a severity-tagged list of concerns, or a binary pass/fail?
+
+---
+
 ### Agent-reportable workflow bugs (Apr 28, 2026)
 
 **Status: idea** | Priority: high
@@ -2605,6 +2726,7 @@ A mechanism for agents to report problems with the WorkRail system itself during
 - Should reports survive session cleanup, or is their lifetime tied to the session?
 - Who owns acting on these reports -- the operator, the workflow author, or an automated system?
 - Should this be available in interactive (MCP) sessions, or daemon sessions only?
+- Relationship to "Targeted session review": agent-reported workflow bugs are one of the primary high-signal moments that targeted session review would extract and inspect.
 
 ---
 
@@ -2658,6 +2780,40 @@ A proof record contains: `prNumber`, `goal`, `verificationChain` (array of `{ ki
 - What is the storage model for proof records -- append-only event log (like sessions), a separate file per PR, or entries in the knowledge graph? Each has different query characteristics.
 - "The coordinator gates on them before merging" requires the coordinator to read the proof record at merge time. What happens when the proof record is incomplete (a gate ran but its result was not recorded)?
 - How does this interact with PRs that are merged manually by humans, bypassing the coordinator's merge gate? The proof record would be incomplete but the merge already happened.
+
+---
+
+### Coordinator mid-session hooks: react to workflow events without waiting for session completion (May 6, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+The coordinator currently acts only between sessions -- it spawns a session, awaits its completion, reads the typed output artifact, and decides what to do next. It has no mechanism to react to events that happen inside a running session. This means the coordinator cannot spawn helper agents mid-session (e.g. an external assumption ranker when the interpretation checkpoint fires), cannot intercept a confirmation gate and satisfy it autonomously, and cannot act on a step completion artifact before the full session finishes.
+
+The gap: workflow lifecycle events (step completed, gate fired, artifact emitted, `report_issue` called) are currently only visible after the session ends via the session store. The coordinator needs a way to subscribe to these events as they happen and act on them -- spawning agents, injecting steer messages, or making routing decisions -- without waiting for session completion.
+
+**Concrete use cases this unlocks:**
+- Spawn an external assumption-ranking agent when the interpretation checkpoint step completes, inject its ranking back into the session before verification runs
+- Auto-satisfy a `requireConfirmation` gate in autonomous mode by running a synthetic gate evaluation and steering the session with the result
+- Spawn a targeted review agent when a specific step artifact is emitted, surface findings before the session proceeds to the next phase
+- React to a `report_issue` call mid-session by spawning an investigation agent immediately rather than waiting for the full session to fail
+
+**What this requires:**
+- A real-time or near-real-time event subscription mechanism from the coordinator to the session event log (the append-only JSONL already has all the events; the coordinator needs a watch/poll interface on it)
+- A `steer` injection path from the coordinator into a running session (the steer endpoint already exists at `POST /sessions/:id/steer`)
+- A coordinator hook registry: declarative rules of the form "when session X emits event type Y with artifact kind Z, execute hook H"
+
+**Relationship to existing entries:**
+- "Scripts-first coordinator" (below): the hooks would be coordinator scripts reacting to events, not LLM reasoning
+- "Native multi-agent orchestration": `spawn_session` + `await_sessions` handles between-session orchestration; this handles within-session coordination
+- "Workflow runtime adapter": mid-session hooks are how the daemon adapter satisfies `requireConfirmation` gates autonomously
+
+**Things to hash out:**
+- Poll vs push: the session event log is append-only JSONL. The coordinator can poll it efficiently (tail -f equivalent), but a proper event bus (the daemon event emitter already exists) would be cleaner. Which is the right mechanism?
+- Hook registry format: declarative JSON rules in `triggers.yml`, or imperative TypeScript in the coordinator script? The declarative approach is more auditable; the imperative approach is more flexible.
+- Ordering guarantees: if the coordinator injects a steer message in response to a step completion, does the session engine guarantee the steer is processed before the next step begins? Race condition risk.
+- Blast radius: a hook that fires incorrectly (wrong event matched, wrong steer injected) could derail a running session in a hard-to-debug way. What are the rollback and auditability guarantees?
 
 ---
 
