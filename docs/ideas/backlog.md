@@ -2541,6 +2541,49 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 
 ## Workflow Library
 
+### Pre-specialized expert agents: on-demand consultants for main agents (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+The main agent running a coding, review, or investigation workflow is not the expert. It is the orchestrator. When it needs specialized input -- "is this Kotlin idiomatic?", "does this violate any payments module invariants?", "what are the FP patterns this codebase uses for this?" -- it should be able to ask a pre-specialized consultant agent and get a bounded, expert answer back.
+
+These expert agents are not running the main workflow. They do not own any phase or make any final decisions. They are consulted: spawned with a specific question, pre-loaded with dense expertise in a specific domain, and they return a bounded answer. The main agent synthesizes the input and retains full ownership.
+
+**Examples:**
+- A Kotlin idioms expert pre-loaded with Kotlin best practices, common pitfalls, and idiomatic patterns -- queried when the coding or review agent wants to know "is this idiomatic Kotlin?"
+- A functional programming expert pre-loaded with the FP philosophy and patterns relevant to this codebase (from CLAUDE.md, design docs, etc.) -- queried when the agent is making decisions that touch FP style
+- A payments module expert pre-loaded with the payments execution paths, known invariants, and past design decisions -- queried when the task touches payments code
+- A security expert pre-loaded with the codebase's auth model, known vulnerabilities, and security invariants -- queried during review of auth-adjacent changes
+
+**What makes this distinct from existing reviewer families (MR review):**
+Existing reviewer families are top-level sessions that run the full review workflow independently. Expert consultants are lightweight bounded spawns that answer a specific question and return -- more like calling a function than running a parallel pipeline. Much cheaper, no workflow overhead, no separate session in the console for each consultation.
+
+**What makes this distinct from existing context injection:**
+Existing context injection (living work context, assembledContextSummary) threads pipeline state between phases -- history of what happened. Expert consultants carry curated domain expertise -- best practices, idioms, invariants, patterns. The content type is different: not "what was done" but "what is true about this domain."
+
+**What needs to be built:**
+- A catalog of expertise briefings: static (language idioms, FP patterns) and dynamic (module execution paths derived by walking the current codebase)
+- A matching mechanism: given the task's affected files and domains, which experts are relevant to consult?
+- A consultation protocol: how does the main agent frame a question for an expert? How does the expert return a bounded answer the main agent can act on?
+- Dynamic briefing generation: for codebase-specific experts, a step that walks affected execution paths and generates the briefing
+
+**Relationship to existing entries:**
+- "Knowledge graph": the long-term structural ground truth version of this. Expert briefings are the lower-cost precursor that doesn't require the full graph.
+- "Assumption store": verified codebase facts are one input to the module expert briefing.
+- "Coordinator mid-session hooks": expert consultation could be triggered mid-session by the coordinator when specific signals fire (e.g. agent touches a known-tricky module).
+
+**Things to hash out:**
+- What is the right format for an expertise briefing? Prose vs structured facts vs a combination?
+- How are static briefings maintained? They go stale as language versions change and codebases evolve.
+- How are dynamic briefings generated? Static analysis? LLM-assisted code walk? What is the cost and freshness guarantee?
+- How does the main agent know which experts are available and when to consult them? Explicit workflow step, or opportunistic mid-task consultation?
+- Token budget: expert consultation adds turns and tokens. When is the cost worth it vs. the main agent just proceeding with its own judgment?
+- How does the consultation differ from just giving the main agent a bigger context window? The answer should be "specificity and freshness" -- a consultant briefed on this specific module is better than a general agent with everything injected.
+
+---
+
 ### Automatic root cause analysis when MR review finds issues post-coding (Apr 30, 2026)
 
 **Status: idea** | Priority: high
