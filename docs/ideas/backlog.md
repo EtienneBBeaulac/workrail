@@ -1729,7 +1729,9 @@ The idea: a typed `suggestion` tool call that the agent makes instead of embeddi
 - `deferral` -- "is this genuinely separate work, or is the agent completing checkboxes while leaving real work undone?"
 - `performance_optimization` -- "is this premature? what is the actual measured bottleneck? what evidence justifies this now?"
 
-**Mechanism:** fits naturally with the assessment gate system. A `suggestion_quality` assessment with dimensions specific to the suggestion kind. The workflow author declares which dimensions apply to each kind. When the agent calls the suggestion tool, the engine fires a `require_followup` consequence requiring the agent to answer the verification criteria for that kind before proceeding. If the agent cannot answer them satisfactorily, the suggestion does not pass.
+**Mechanism:** fits naturally with the assessment gate system. A `suggestion_quality` assessment with dimensions specific to the suggestion kind. The workflow author declares which dimensions apply to each kind. When the agent emits a typed suggestion, the engine fires a `require_followup` consequence requiring the agent to answer the verification criteria for that kind before proceeding. If the agent cannot answer them satisfactorily, the suggestion does not pass.
+
+**API shape is open:** the typed suggestion could be a dedicated tool call (`suggest(type: "abstraction_extraction", ...)`), a structured artifact field in `continue_workflow`, a special context key, or something else entirely. The key property is that it is machine-readable and has a `kind` field the engine can act on -- not prose. The exact surface needs design work.
 
 **The friction concern:** if suggestions require too much overhead, agents will stop surfacing them or bury them in prose to avoid the gate. The verification criteria must be targeted and lightweight -- not a full review pass, just the specific questions that matter for that kind. "What are the three future cases this abstraction serves?" is lightweight. "Run a full architecture review" is not.
 
