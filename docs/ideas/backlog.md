@@ -2571,11 +2571,21 @@ Existing reviewer families are top-level sessions running the full review workfl
 **What makes this distinct from existing context injection:**
 Existing context injection (living work context, assembledContextSummary) threads pipeline state between phases -- history of what happened. Expert consultants carry curated domain expertise -- best practices, idioms, invariants, patterns. The content type is different: not "what was done" but "what is true about this domain."
 
+**Implementation shape -- specialized workflows, not just context injection:**
+
+The most powerful form of a specialist is not an agent that receives a big expertise briefing at spawn time and then works freely. It is an agent running a purpose-built specialized workflow that contains both the expertise and the process for applying it systematically.
+
+A `wr.kotlin-review` workflow contains: the Kotlin expertise in `metaGuidance` and `references`, and a structured procedure -- "step 1: check null safety patterns at these call sites; step 2: evaluate coroutine usage against these criteria; step 3: check data class conventions..." Breaking the domain into steps ensures the specialist covers everything the domain requires, in the right order, with the right depth. A pure context dump leaves coverage to chance; a workflow enforces it.
+
+This also makes specialists auditable: you can see in the session store exactly which steps the specialist ran, what it found, and whether it covered all required dimensions. And specialized workflows improve over time via `wr.workflow-for-workflows`, compounding quality the same way all bundled workflows do.
+
+For dynamic specialists (payments module expert, specific subsystem expert), the workflow defines the process for generating the briefing dynamically -- walk these execution paths, read these design docs, extract these invariants -- rather than containing a static briefing.
+
 **What needs to be built:**
-- A catalog of expertise briefings: static (language idioms, FP patterns) and dynamic (module execution paths derived by walking the current codebase)
-- A matching mechanism: given the task's affected files and domains, which experts are relevant to consult?
-- A consultation protocol: how does the main agent frame a question for an expert? How does the expert return a bounded answer the main agent can act on?
-- Dynamic briefing generation: for codebase-specific experts, a step that walks affected execution paths and generates the briefing
+- A catalog of specialized workflows: static domain specialists (wr.kotlin-review, wr.fp-patterns-review) and dynamic module specialists (wr.module-expert with a briefing-generation phase)
+- A matching mechanism: given the task's affected files and domains, which specialist workflows are relevant?
+- A consultation protocol: how does the main agent query a specialist? How does the specialist return a typed artifact the main agent can act on?
+- Dynamic briefing generation: for module-specific specialists, a workflow phase that walks affected execution paths and generates the curated briefing before the expert work begins
 
 **Relationship to existing entries:**
 - "Knowledge graph": the long-term structural ground truth version of this. Expert briefings are the lower-cost precursor that doesn't require the full graph.
