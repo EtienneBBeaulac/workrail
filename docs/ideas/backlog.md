@@ -610,11 +610,23 @@ Tier 0 injection needs a dedicated system prompt section separate from `assemble
 
 ---
 
+### Interpretation checkpoint for coding workflow: Candidate 5 (May 6, 2026)
+
+**Status: done** | Shipped in PR #962 (feat/etienneb/interpretation-checkpoint, May 7, 2026)
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+Added `phase-0c-assumption-verification` step to `wr.coding-task` (v1.3.0 → v1.4.0) between Phase 0 (classify) and Phase 0.5 (upstream context). The step requires the coding agent to state a one-sentence interpretation before listing any assumptions, produce exactly 3 codebase assumptions with predicted locations and severity labels, verify each assumption by reading the predicted location, and output an `InterpretationArtifact` context key with `ambiguityLevel: clear | uncertain`. High-severity refutations surface to operator via `report_issue`. Also appended Subtype A/B classification prompt to the retrospective step for distribution measurement.
+
+This is the first step of the intent gap intervention sequence: Candidate 5 (shipped) → Candidate 4 (git-grounded context, next) → Candidate 1 or 3 gated on Subtype A/B empirical data.
+
+---
+
 ### External assumption ranking for interpretation checkpoint (May 6, 2026)
 
 **Status: idea** | Priority: medium
 
-**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (blocked by: interpretation checkpoint -- Candidate 5 must ship first)
+**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no (Candidate 5 shipped PR #962, May 7, 2026)
 
 The interpretation checkpoint (Candidate 5) asks the coding agent to label each of its own assumptions as `severity: high` or `severity: low`. This self-labeling is a known weak point: an agent with a confident wrong prior may mislabel its most dangerous architectural assumption as low-severity to avoid triggering the gate. Self-assessed severity is the single lowest-confidence element in the pitch (confidence: 0.55).
 
@@ -636,7 +648,7 @@ The producing agent then verifies in order of externally-ranked risk rather than
 
 **Status: idea** | Priority: medium
 
-**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (blocked by: interpretation detection -- Candidate 5 assumption surfacing step must ship first)
+**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no (Candidate 5 shipped PR #962, May 7, 2026)
 
 When an agent's assumption-surfacing step (Candidate 5) refutes a high-severity assumption, the current scoped fix is to surface the refutation to the operator and halt. But the real problem is deeper: the wrong prior that caused the refuted assumption may have already contaminated earlier context -- the upstream context harvest, the problem framing, the `reframedProblem` and `challengedAssumptions` context keys. A simple "re-read the file and try again" doesn't fix a wrong model; it patches the symptom in one step while leaving the contaminated context intact. Long-term, a refuted assumption that reflects a codebase-specific wrong prior (Subtype B) should also update the Memory store and eventually the knowledge graph so future sessions don't repeat the mistake.
 
