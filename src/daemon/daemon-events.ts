@@ -421,6 +421,8 @@ export class DaemonEventEmitter {
   }
 
   emit(event: DaemonEvent): void {
+    // Chaining serializes writes FIFO; .catch() isolates failures so a bad write
+    // never blocks subsequent emits.
     this._tail = this._tail.then(() => this._append(event)).catch(() => {});
   }
 
