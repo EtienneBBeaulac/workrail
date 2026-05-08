@@ -414,61 +414,19 @@ export type DaemonEvent =
  */
 export class DaemonEventEmitter {
   private readonly _dir: string;
-  /**
-   * Per-file write chain. Each key is an absolute file path; each value is the
-   * tail of the promise chain for that file. New writes append to the tail so
-   * they execute in FIFO order with no concurrent appends to the same file.
-   *
-   * WHY a Map of promise chains (not a mutex or queue): single-file serialization
-   * with zero overhead for unrelated files. A burst of tool_call events all target
-   * the same daily JSONL file -- they chain onto each other. Events targeting a
-   * file on a different day (rotation) get their own independent chain.
-   *
-   * WHY cleanup after each write: the Map would otherwise grow one entry per
-   * distinct file path over the daemon's lifetime. Clearing the entry after
-   * the chain drains keeps the Map at most 1-2 entries (today's file, rarely
-   * yesterday's if rotation happens mid-burst).
-   */
-  private readonly _writers = new Map<string, Promise<void>>();
+  private _tail: Promise<void> = Promise.resolve();
 
-  /**
-   * @param dirOverride - Override the output directory. Used in tests to
-   *   capture events in a temp directory without touching ~/.workrail.
-   *   Production code omits this parameter.
-   */
   constructor(dirOverride?: string) {
     this._dir = dirOverride ?? path.join(os.homedir(), '.workrail', 'events', 'daemon');
   }
 
-  /**
-   * Append a structured event to the daily JSONL file.
-   *
-   * Fire-and-forget: returns void synchronously. The underlying append is
-   * serialized per file via a promise chain -- concurrent emits to the same
-   * file are queued FIFO, preventing interleaved JSONL lines. All errors are
-   * swallowed -- observability must never affect correctness.
-   */
   emit(event: DaemonEvent): void {
-    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const filePath = path.join(this._dir, `${date}.jsonl`);
-    const prev = this._writers.get(filePath) ?? Promise.resolve();
-    const next = prev.then(() => this._append(filePath, event)).catch(() => {
-      // Intentionally empty: errors are silently swallowed.
-    });
-    this._writers.set(filePath, next);
-    // Clean up the chain entry once this write settles so the Map doesn't grow unbounded.
-    void next.then(() => {
-      if (this._writers.get(filePath) === next) this._writers.delete(filePath);
-    });
+    this._tail = this._tail.then(() => this._append(event)).catch(() => {});
   }
 
-  /**
-   * Internal async append implementation.
-   *
-   * WHY separated from emit(): keeps the chaining logic in emit() readable and
-   * this I/O path independently testable.
-   */
-  private async _append(filePath: string, event: DaemonEvent): Promise<void> {
+  private async _append(event: DaemonEvent): Promise<void> {
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const filePath = path.join(this._dir, `${date}.jsonl`);
     await fs.mkdir(this._dir, { recursive: true });
     const line = JSON.stringify({ ...event, ts: Date.now() }) + '\n';
     await fs.appendFile(filePath, line, 'utf8');
