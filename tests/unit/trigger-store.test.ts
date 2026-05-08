@@ -1543,6 +1543,85 @@ triggers:
   });
 });
 
+// agentConfig.model format parsing
+// WHY: a bad model ID (wrong format or wrong Bedrock inference profile suffix) silently
+// allocates a session and creates a worktree before crashing on the first LLM call with
+// a bare 400 error. Parse-time rejection matches the pattern used for all other agentConfig
+// fields (maxSessionMinutes, stuckAbortPolicy, etc.).
+describe('agentConfig.model format parsing', () => {
+  it('accepts a valid provider/model-id format', () => {
+    const yaml = `
+triggers:
+  - id: valid-model-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers[0]?.agentConfig?.model).toBe('amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0');
+    }
+  });
+
+  it('skips trigger when model has no slash (no provider/model-id separator)', () => {
+    const yaml = `
+triggers:
+  - id: bad-model-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      model: badformat-no-slash
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('skips trigger when model has slash but empty model-id part (e.g. "amazon-bedrock/")', () => {
+    const yaml = `
+triggers:
+  - id: empty-model-id-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      model: "amazon-bedrock/"
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+
+  it('skips trigger when model has slash but empty provider part (e.g. "/claude")', () => {
+    const yaml = `
+triggers:
+  - id: empty-provider-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    agentConfig:
+      model: "/claude-sonnet"
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') {
+      expect(result.value.triggers).toHaveLength(0);
+    }
+  });
+});
+
 // maxOutputTokens parsing
 // WHY: maxOutputTokens is a per-trigger cap on LLM output tokens, threaded from
 // triggers.yml through TriggerDefinition.agentConfig.maxOutputTokens to AgentLoop.maxTokens.

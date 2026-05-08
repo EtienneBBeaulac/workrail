@@ -999,3 +999,81 @@ describe('AgentLoop stall detection', () => {
     expect(stallDetectedSpy).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 400 API error enrichment
+// ---------------------------------------------------------------------------
+
+describe('AgentLoop 400 error enrichment', () => {
+  it('prepends model ID and triggers.yml pointer when API returns 400', async () => {
+    // Simulate the real failure: Bedrock returns 400 for a bad inference profile ID.
+    // The enrichment should include the model ID and point at agentConfig.model.
+    const apiError = Object.assign(new Error('400 The provided model identifier is invalid.'), { status: 400 });
+    const client: AgentClientInterface = {
+      messages: { create: async () => { throw apiError; } },
+    };
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [],
+      client,
+      modelId: 'us.anthropic.claude-haiku-4-5-20251001',
+    });
+
+    await agent.prompt({ role: 'user', content: 'hi', timestamp: Date.now() });
+
+    const messages = agent.state.messages;
+    const lastMsg = messages[messages.length - 1];
+    expect(lastMsg?.role).toBe('assistant');
+    const errorMessage = (lastMsg as { errorMessage?: string }).errorMessage ?? '';
+    expect(errorMessage).toContain("agentConfig.model 'us.anthropic.claude-haiku-4-5-20251001'");
+    expect(errorMessage).toContain('check agentConfig.model in triggers.yml');
+    expect(errorMessage).toContain('400 The provided model identifier is invalid.');
+  });
+
+  it('does NOT enrich non-400 API errors', async () => {
+    const apiError = Object.assign(new Error('500 Internal Server Error'), { status: 500 });
+    const client: AgentClientInterface = {
+      messages: { create: async () => { throw apiError; } },
+    };
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [],
+      client,
+      modelId: 'claude-sonnet-4-6',
+    });
+
+    await agent.prompt({ role: 'user', content: 'hi', timestamp: Date.now() });
+
+    const messages = agent.state.messages;
+    const lastMsg = messages[messages.length - 1];
+    const errorMessage = (lastMsg as { errorMessage?: string }).errorMessage ?? '';
+    expect(errorMessage).not.toContain('agentConfig.model');
+    expect(errorMessage).not.toContain('triggers.yml');
+    expect(errorMessage).toContain('500 Internal Server Error');
+  });
+
+  it('does NOT enrich abort errors (status absent)', async () => {
+    const client: AgentClientInterface = {
+      messages: { create: async () => { throw new Error('AbortError'); } },
+    };
+
+    const agent = new AgentLoop({
+      systemPrompt: 'test',
+      tools: [],
+      client,
+      modelId: 'claude-sonnet-4-6',
+    });
+
+    // abort() sets the internal signal before prompt() starts the loop
+    agent.abort();
+    await agent.prompt({ role: 'user', content: 'hi', timestamp: Date.now() });
+
+    const messages = agent.state.messages;
+    const lastMsg = messages[messages.length - 1];
+    const errorMessage = (lastMsg as { errorMessage?: string }).errorMessage ?? '';
+    expect(errorMessage).not.toContain('agentConfig.model');
+    expect(errorMessage).toBe('aborted');
+  });
+});

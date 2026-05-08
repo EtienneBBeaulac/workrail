@@ -320,6 +320,28 @@ describe('sync coverage: validateTriggerStrict mirrors validateAndResolveTrigger
     expect(errorIssues.find((i) => i.rule === 'autoopenpr-needs-autocommit')).toBeDefined();
   });
 
+  it('invalid-model-format error: model string has no slash', () => {
+    // validateAndResolveTrigger rejects 'badformat' -- validateTriggerStrict must also error.
+    const trigger = makeTrigger({ agentConfig: { model: 'badformat' } });
+    const issues = validateTriggerStrict(trigger);
+    const errorIssues = issues.filter((i) => i.severity === 'error');
+    expect(errorIssues.length).toBeGreaterThan(0);
+    expect(errorIssues.find((i) => i.rule === 'invalid-model-format')).toBeDefined();
+  });
+
+  it('invalid-model-format error: model has empty model-id part', () => {
+    const trigger = makeTrigger({ agentConfig: { model: 'amazon-bedrock/' } });
+    const issues = validateTriggerStrict(trigger);
+    const errorIssues = issues.filter((i) => i.severity === 'error');
+    expect(errorIssues.find((i) => i.rule === 'invalid-model-format')).toBeDefined();
+  });
+
+  it('invalid-model-format: valid model format produces no invalid-model-format error', () => {
+    const trigger = makeTrigger({ agentConfig: { model: 'amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0' } });
+    const issues = validateTriggerStrict(trigger);
+    expect(issues.find((i) => i.rule === 'invalid-model-format')).toBeUndefined();
+  });
+
   it('clean trigger produces no error-severity issues', () => {
     // A fully valid trigger should produce no errors (may have warnings for missing limits).
     const trigger = makeTrigger({

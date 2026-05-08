@@ -16,7 +16,7 @@ triggers:
       maxSessionMinutes: 60
       # Dev/test: Haiku for fast, cheap iteration.
       # Switch to amazon-bedrock/us.anthropic.claude-sonnet-4-6 for production runs.
-      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001
+      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
 
   # MR review: fires when a PR is opened/updated via GitHub PR polling or webhook.
   # Dispatch manually: POST /webhook/mr-review {"pull_request": {"title": "PR #123: ...", "number": 123}}
@@ -31,26 +31,27 @@ triggers:
     agentConfig:
       maxSessionMinutes: 30
       # Dev/test: Haiku for fast, cheap iteration.
-      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001
+      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
 
   # Self-improvement queue: assign issues to worktrain-etienneb to queue them.
   # WorkTrain acts as EtienneBBeaulac. PRs get [WT] prefix and worktrain/ branch.
-  - id: self-improvement
-    provider: github_queue_poll
-    workspacePath: /Users/etienneb/git/personal/workrail
-    goalTemplate: "{{$.issue.title}}"
-    queueType: assignee
-    branchStrategy: worktree
-    baseBranch: main
-    branchPrefix: "worktrain/"
-    autoCommit: true
-    autoOpenPR: true
-    source:
-      repo: EtienneBBeaulac/workrail
-      token: $WORKTRAIN_BOT_TOKEN
-      pollIntervalSeconds: 3600
-    agentConfig:
-      maxSessionMinutes: 120
-      stuckAbortPolicy: abort
-      # Dev/test: Haiku for fast, cheap iteration.
-      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001
+  # DISABLED: uncomment to re-enable queue polling.
+  #- id: self-improvement
+  #  provider: github_queue_poll
+  #  workspacePath: /Users/etienneb/git/personal/workrail
+  #  goalTemplate: "{{$.issue.title}}"
+  #  queueType: assignee
+  #  branchStrategy: worktree
+  #  baseBranch: main
+  #  branchPrefix: "worktrain/"
+  #  autoCommit: true
+  #  autoOpenPR: true
+  #  source:
+  #    repo: EtienneBBeaulac/workrail
+  #    token: $WORKTRAIN_BOT_TOKEN
+  #    pollIntervalSeconds: 3600
+  #  agentConfig:
+  #    maxSessionMinutes: 120
+  #    stuckAbortPolicy: abort
+  #    # Dev/test: Haiku for fast, cheap iteration.
+  #    model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0

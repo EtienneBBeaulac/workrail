@@ -824,6 +824,25 @@ function validateAndResolveTrigger(
   if (raw.agentConfig) {
     const model = raw.agentConfig.model?.trim() || undefined;
 
+    // agentConfig.model format check: must be 'provider/model-id' with both parts non-empty.
+    // WHY fail-fast: a bad model ID silently allocates a session and creates a worktree before
+    // crashing on the first LLM call. Parse-time rejection matches the pattern used for all
+    // other agentConfig fields (maxSessionMinutes, stuckAbortPolicy, etc.).
+    // WHY both parts checked: 'amazon-bedrock/' (empty model-id) and '/claude' (empty provider)
+    // both pass a naive slash-presence check but will fail at runtime.
+    if (model !== undefined) {
+      const slashIdx = model.indexOf('/');
+      const provider = slashIdx === -1 ? '' : model.slice(0, slashIdx);
+      const modelId = slashIdx === -1 ? '' : model.slice(slashIdx + 1);
+      if (!provider || !modelId) {
+        return err({
+          kind: 'invalid_field_value',
+          field: `agentConfig.model (must be in 'provider/model-id' format, e.g. amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0, got: "${model}")`,
+          triggerId: rawId,
+        });
+      }
+    }
+
     let maxSessionMinutes: number | undefined;
     if (raw.agentConfig.maxSessionMinutes !== undefined) {
       // WHY Number.isInteger instead of parseInt: parseInt('1.5', 10) silently returns 1,
@@ -1526,6 +1545,27 @@ export function validateTriggerStrict(
       message: 'branchStrategy: worktree requires branchPrefix to be set; add branchPrefix: worktrain/',
       suggestedFix: 'branchPrefix: worktrain/',
     });
+  }
+
+  // Rule: invalid-model-format (error)
+  // Mirrors validateAndResolveTrigger hard error: agentConfig.model present but not in
+  // 'provider/model-id' format with both parts non-empty.
+  if (trigger.agentConfig?.model !== undefined) {
+    const m = trigger.agentConfig.model;
+    const slashIdx = m.indexOf('/');
+    const provider = slashIdx === -1 ? '' : m.slice(0, slashIdx);
+    const modelId = slashIdx === -1 ? '' : m.slice(slashIdx + 1);
+    if (!provider || !modelId) {
+      issues.push({
+        rule: 'invalid-model-format',
+        severity: 'error',
+        triggerId: id,
+        message:
+          `agentConfig.model "${m}" is not in 'provider/model-id' format -- ` +
+          'both provider and model-id must be non-empty (e.g. amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0)',
+        suggestedFix: 'model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0',
+      });
+    }
   }
 
   // --- Warning-severity rules ---

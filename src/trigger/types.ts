@@ -755,7 +755,9 @@ export type TriggerValidationRule =
   /** autoCommit: true AND branchStrategy: 'none' explicit -- latent danger in serial mode */
   | 'autocommit-on-main-checkout'
   /** serial trigger has no maxQueueDepth -- using default of 10 */
-  | 'missing-max-queue-depth';
+  | 'missing-max-queue-depth'
+  /** agentConfig.model present but not in 'provider/model-id' format */
+  | 'invalid-model-format';
 
 // ---------------------------------------------------------------------------
 // TriggerValidationIssue: a single named validation issue for a trigger.

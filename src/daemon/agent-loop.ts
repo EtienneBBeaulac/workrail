@@ -465,7 +465,16 @@ export class AgentLoop {
         const isAbort =
           this._abortController.signal.aborted ||
           (err instanceof Error && err.name === 'AbortError');
-        const message = err instanceof Error ? err.message : String(err);
+        let message = err instanceof Error ? err.message : String(err);
+        // WHY: a 400 from the API almost always means the model ID is wrong (bad inference
+        // profile ID, missing -v1:0 suffix, etc.). Prepend context so the operator knows
+        // exactly which field to fix rather than chasing a bare HTTP error code.
+        // WHY duck-typed .status check (not instanceof APIError): agent-loop.ts only has
+        // `import type` from @anthropic-ai/sdk -- no runtime SDK value imports. Duck-typing
+        // is equally reliable since both sdk and bedrock-sdk always set .status on API errors.
+        if (!isAbort && (err as { status?: number }).status === 400) {
+          message = `agentConfig.model '${modelId}' was rejected by the API (check agentConfig.model in triggers.yml): ${message}`;
+        }
         this._appendErrorMessage(isAbort ? 'aborted' : message);
         await this._emitEvent({ type: 'agent_end' });
         return;

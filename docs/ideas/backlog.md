@@ -5070,7 +5070,25 @@ The agent is expensive, inconsistent, and slow. Scripts are free, deterministic,
 
 ### Dynamic model selection
 
-**Status: done** -- shipped in `triggers.yml` `agentConfig.model`
+**Status: partial** -- raw model ID (`agentConfig.model`) shipped in `triggers.yml`. Two gaps remain: (1) no validation at trigger parse or startup -- a bad model ID is only caught when the first LLM call fires; (2) every trigger hardcodes a provider-specific ID, which breaks when the inference profile naming convention changes (e.g. `us.anthropic.claude-haiku-4-5-20251001` vs `us.anthropic.claude-haiku-4-5-20251001-v1:0`).
+
+### Model tier abstraction: cheap / medium / expensive (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**The problem:** Triggers hardcode provider-specific model IDs (`amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0`). When inference profile naming conventions change, or when switching providers/regions, every trigger must be updated manually. The daemon's adaptive coordinator already makes implicit cost/quality tradeoffs (Haiku for routing, Sonnet for coding) but has no first-class mechanism to express them -- it's locked to whatever IDs are in `agentConfig.model`.
+
+**The idea:** Introduce a tier abstraction. Triggers and workflow phases declare a tier (`cheap | medium | expensive`). The daemon resolves tiers to concrete model IDs from a tier map in `~/.workrail/config.json`. The adaptive coordinator picks tiers per phase: cheap for classification and routing, medium for coding, expensive for architectural review. Changing provider or region means updating the tier map once.
+
+**Validation is a prerequisite.** Before tiers make sense, bad model IDs need to be caught at startup rather than at first LLM call. See "Model ID validation at daemon startup" below.
+
+**Things to hash out:**
+- Where does the tier map live? `~/.workrail/config.json` (global) vs. `triggers.yml` (per-workspace) vs. both with cascade.
+- Does the tier map need to carry both a Bedrock and a direct-API model per tier, or does one path own the daemon?
+- Should the adaptive coordinator receive the tier map as a dependency, or should it always spawn sessions with explicit `agentConfig.model` set by the coordinator?
+- How do you handle models that exist on one provider but not another (e.g. Opus available on Bedrock but not direct API under certain rate limits)?
 
 ### Multi-agent support (spawn_agent + coordinator sessions)
 
