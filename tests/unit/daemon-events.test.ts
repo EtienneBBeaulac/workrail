@@ -90,7 +90,7 @@ describe('DaemonEventEmitter', () => {
     expect(line['workspacePath']).toBe('/workspace');
   });
 
-  it('appends multiple events as separate lines', async () => {
+  it('appends multiple events as separate lines in emit order', async () => {
     const emitter = new DaemonEventEmitter(tmpDir);
 
     emitter.emit({ kind: 'trigger_fired', triggerId: 'trig-1', workflowId: 'wf-1' });
@@ -102,12 +102,31 @@ describe('DaemonEventEmitter', () => {
     const files = await fs.readdir(tmpDir);
     const lines = await readJsonlLines(path.join(tmpDir, files[0]!));
     expect(lines).toHaveLength(3);
-    // Ordering is not guaranteed for concurrent fire-and-forget appends.
-    // Verify all 3 kinds are present.
-    const kinds = lines.map((l) => l['kind']);
-    expect(kinds).toContain('trigger_fired');
-    expect(kinds).toContain('session_queued');
-    expect(kinds).toContain('session_started');
+    // Writes are serialized per-file -- order matches emit() call order.
+    expect(lines[0]!['kind']).toBe('trigger_fired');
+    expect(lines[1]!['kind']).toBe('session_queued');
+    expect(lines[2]!['kind']).toBe('session_started');
+  });
+
+  it('serializes burst writes so JSONL lines never interleave', async () => {
+    const emitter = new DaemonEventEmitter(tmpDir);
+
+    // Fire 20 events in rapid succession -- the per-file chain must keep them in order.
+    const count = 20;
+    for (let i = 0; i < count; i++) {
+      emitter.emit({ kind: 'step_advanced', sessionId: `sess-${i}` });
+    }
+
+    await flushAsync();
+
+    const files = await fs.readdir(tmpDir);
+    const lines = await readJsonlLines(path.join(tmpDir, files[0]!));
+    expect(lines).toHaveLength(count);
+    // Every line must be valid JSON with the correct kind -- no interleaving.
+    for (let i = 0; i < count; i++) {
+      expect(lines[i]!['kind']).toBe('step_advanced');
+      expect(lines[i]!['sessionId']).toBe(`sess-${i}`);
+    }
   });
 
   it('creates directory lazily on first write', async () => {
@@ -204,7 +223,6 @@ describe('DaemonEventEmitter', () => {
     const lines = await readJsonlLines(path.join(tmpDir, files[0]!));
     expect(lines).toHaveLength(events.length);
 
-    // Ordering is not guaranteed for concurrent fire-and-forget appends.
     // Verify all event kinds are present and each line has a numeric ts.
     const kinds = lines.map((l) => l['kind']);
     for (const event of events) {
