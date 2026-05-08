@@ -37,6 +37,7 @@ export function makeContinueWorkflowTool(
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: continue_workflow sessionId=${sessionId}`);
       emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'continue_workflow', summary: (params.intent as string | undefined) ?? 'advance', ...withWorkrailSession(workrailSessionId) });
@@ -226,6 +227,7 @@ export function makeCompleteStepTool(
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       console.log(`[WorkflowRunner] Tool: complete_step sessionId=${sessionId}`);
       emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'complete_step', summary: 'advance', ...withWorkrailSession(workrailSessionId) });

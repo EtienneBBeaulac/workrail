@@ -30,6 +30,7 @@ export function makeGlobTool(workspacePath: string, schemas: Record<string, any>
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.pattern !== 'string' || !params.pattern) throw new Error('Glob: pattern must be a non-empty string');
       const pattern: string = params.pattern;
@@ -95,6 +96,7 @@ export function makeGrepTool(workspacePath: string, schemas: Record<string, any>
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.pattern !== 'string' || !params.pattern) throw new Error('Grep: pattern must be a non-empty string');
       const pattern: string = params.pattern;

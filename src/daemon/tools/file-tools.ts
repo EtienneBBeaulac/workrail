@@ -50,6 +50,7 @@ export function makeReadTool(workspacePath: string, readFileState: Map<string, R
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Read: filePath must be a non-empty string');
       const filePath: string = resolveWithinWorkspace(params.filePath, workspacePath, 'Read');
@@ -106,6 +107,7 @@ export function makeWriteTool(workspacePath: string, readFileState: Map<string, 
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Write: filePath must be a non-empty string');
       if (typeof params.content !== 'string') throw new Error('Write: content must be a string');
@@ -168,6 +170,7 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      _signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.file_path !== 'string' || !params.file_path) throw new Error('Edit: file_path must be a non-empty string');
       if (typeof params.old_string !== 'string') throw new Error('Edit: old_string must be a string');

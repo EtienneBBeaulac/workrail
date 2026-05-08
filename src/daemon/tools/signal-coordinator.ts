@@ -96,7 +96,7 @@ export function makeSignalCoordinatorTool(
     label: 'signal_coordinator',
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+    execute: async (_toolCallId: string, params: any, _signal: AbortSignal): Promise<AgentToolResult<unknown>> => {
       if (typeof params.signalKind !== 'string' || !params.signalKind) throw new Error('signal_coordinator: signalKind must be a non-empty string');
       const signalId = 'sig_' + randomUUID().replace(/-/g, '').slice(0, 8);
       const signalKind = String(params.signalKind ?? 'progress');

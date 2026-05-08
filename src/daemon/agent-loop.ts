@@ -82,8 +82,9 @@ export interface AgentTool {
    * Execute the tool call.
    * May throw on failure -- AgentLoop._executeTools() catches throws and converts them
    * to isError tool_results so the LLM can see and recover from failures.
+   * Tools that do not use signal should name it _signal (underscore = intentional non-use).
    */
-  execute(toolCallId: string, params: Record<string, unknown>): Promise<AgentToolResult<unknown>>;
+  execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal): Promise<AgentToolResult<unknown>>;
 }
 
 /**
@@ -630,7 +631,7 @@ export class AgentLoop {
       const toolStartMs = Date.now();
       let result: AgentToolResult<unknown>;
       try {
-        result = await tool.execute(block.id, params);
+        result = await tool.execute(block.id, params, this._abortController.signal);
       } catch (err: unknown) {
         const durationMs = Date.now() - toolStartMs;
         const message = err instanceof Error ? err.message : String(err);

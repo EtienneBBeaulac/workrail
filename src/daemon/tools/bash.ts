@@ -28,6 +28,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       _toolCallId: string,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       params: any,
+      signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.command !== 'string' || !params.command) throw new Error('Bash: command must be a non-empty string');
       console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
@@ -38,6 +39,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
           cwd,
           timeout: BASH_TIMEOUT_MS,
           shell: '/bin/bash',
+          signal,
         });
         const output = [stdout, stderr].filter(Boolean).join('\n');
         return {
@@ -45,6 +47,10 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
           details: { stdout, stderr },
         };
       } catch (err: unknown) {
+        // ABORT_ERR is a string code -- it would fall through the numeric rawCode checks
+        // below and produce 'exit unknown'. Rethrow so _executeTools gets a clean error.
+        if ((err as { code?: unknown }).code === 'ABORT_ERR') throw err;
+
         // Node's child_process.exec errors (ExecException) attach stdout, stderr,
         // code, and signal as own properties. Extract them so the agent can reason
         // about what went wrong and retry intelligently.
@@ -56,7 +62,7 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
         const stdout = String(e.stdout ?? '');
         const stderr = String(e.stderr ?? '');
         const rawCode = e.code;
-        const signal = e.signal;
+        const killSignal = e.signal;
 
         // Exit code 1 with empty stderr is "no match found" -- not a real error.
         // This is standard POSIX semantics for grep (exit 1 = no lines matched,
@@ -76,8 +82,8 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
 
         const exitInfo = rawCode != null
           ? `exit ${String(rawCode)}`
-          : signal
-            ? `signal ${String(signal)}`
+          : killSignal
+            ? `signal ${String(killSignal)}`
             : 'exit unknown';
         throw new Error(
           `Command failed: ${params.command} (${exitInfo})\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`,

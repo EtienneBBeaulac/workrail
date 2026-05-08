@@ -87,7 +87,7 @@ export function makeReportIssueTool(
     label: 'report_issue',
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    execute: async (_toolCallId: string, params: any): Promise<AgentToolResult<unknown>> => {
+    execute: async (_toolCallId: string, params: any, _signal: AbortSignal): Promise<AgentToolResult<unknown>> => {
       if (typeof params.kind !== 'string' || !params.kind) throw new Error('report_issue: kind must be a non-empty string');
       if (typeof params.severity !== 'string' || !params.severity) throw new Error('report_issue: severity must be a non-empty string');
       if (typeof params.summary !== 'string' || !params.summary) throw new Error('report_issue: summary must be a non-empty string');

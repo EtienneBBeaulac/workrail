@@ -208,4 +208,23 @@ describe('makeBashTool()', () => {
       expect(thrownError?.message).toContain('my-err');
     });
   });
+
+  describe.skipIf(SKIP_ON_WINDOWS)('abort signal', () => {
+    it('aborts a running command when signal is fired mid-execution', async () => {
+      const ac = new AbortController();
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      const p = tool.execute('test-call-id', { command: 'sleep 10' }, ac.signal);
+      ac.abort();
+      await expect(p).rejects.toThrow();
+    }, 2000);
+
+    it('rejects immediately when signal is already aborted before execute', async () => {
+      const ac = new AbortController();
+      ac.abort();
+      const tool = makeBashTool(WORKSPACE, stubSchemas);
+      await expect(
+        tool.execute('test-call-id', { command: 'echo hello' }, ac.signal),
+      ).rejects.toThrow();
+    });
+  });
 });
