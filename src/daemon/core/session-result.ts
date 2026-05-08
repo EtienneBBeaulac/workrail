@@ -9,7 +9,7 @@
  * core. It must be importable in any test context without I/O stubs.
  */
 
-import type { WorkflowTrigger, WorkflowRunResult } from '../types.js';
+import type { WorkflowTrigger, WorkflowRunResult, RunId } from '../types.js';
 import type { SessionState } from '../state/session-state.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { DEFAULT_SESSION_TIMEOUT_MINUTES, DEFAULT_MAX_TURNS } from './session-context.js';
@@ -110,7 +110,7 @@ export function buildSessionResult(
   stopReason: string,
   errorMessage: string | undefined,
   trigger: WorkflowTrigger,
-  sessionId: string,
+  sessionId: RunId,
   sessionWorktreePath: string | undefined,
 ): WorkflowRunResult {
   // Terminal signal: stuck takes priority over timeout (invariant 1.4 -- structurally

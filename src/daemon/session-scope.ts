@@ -21,7 +21,7 @@
 
 import type { ReadFileState } from './types.js';
 import type { ActiveSessionSet } from './active-sessions.js';
-import type { DaemonEventEmitter } from './daemon-events.js';
+import type { DaemonEventEmitter, RunId } from './daemon-events.js';
 
 // ---------------------------------------------------------------------------
 // FileStateTracker
@@ -237,7 +237,7 @@ export interface SessionScope {
   readonly emitter: DaemonEventEmitter | undefined;
 
   /** The daemon-local session identifier (a UUID). */
-  readonly sessionId: string;
+  readonly sessionId: RunId;
 
   /**
    * The workflow ID being executed (e.g. "wr.coding-task").

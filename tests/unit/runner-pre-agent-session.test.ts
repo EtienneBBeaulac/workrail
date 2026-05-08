@@ -330,7 +330,7 @@ describe('buildPreAgentSession -- registry registration', () => {
     }
   });
 
-  it('does not register when workrailSessionId is null (token decode failed)', async () => {
+  it('registers with ActiveSessionSet even when token decode fails (workrailSessionId stays null)', async () => {
     mockExecuteStartWorkflow.mockResolvedValue(makePendingStart());
     mockParseContinueTokenOrFail.mockReturnValue({
       isOk: () => false, isErr: () => true, error: { message: 'bad token' },
@@ -342,7 +342,11 @@ describe('buildPreAgentSession -- registry registration', () => {
       tmpDir, tmpDir, undefined, undefined, activeSessionSet,
     );
 
-    expect(activeSessionSet.size).toBe(0);
+    // Registration is unconditional on RunId (always available).
+    // workrailSessionId is only set when token decode succeeds.
+    expect(activeSessionSet.size).toBe(1);
+    const handle = Array.from(activeSessionSet.handles())[0]!;
+    expect(handle.workrailSessionId).toBeNull();
   });
 });
 

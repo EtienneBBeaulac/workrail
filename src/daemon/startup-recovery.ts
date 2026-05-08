@@ -32,6 +32,7 @@ import { DAEMON_SESSIONS_DIR } from './tools/_shared.js';
 import type { OrphanedSession, SessionSource, AllocatedSession, WorkflowTrigger } from './types.js';
 import { WORKTREES_DIR } from './runner/runner-types.js';
 import { runWorkflow } from './workflow-runner.js';
+import { asRunId } from './daemon-events.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -112,7 +113,7 @@ export async function readAllDaemonSessions(
     // queue-issue-*.json sidecars live in the same directory; skip them here.
     if (!entry.endsWith('.json') || entry.startsWith('queue-issue-')) continue;
 
-    const sessionId = entry.slice(0, -5); // strip .json
+    const sessionId = asRunId(entry.slice(0, -5)); // strip .json
     const filePath = path.join(sessionsDir, entry);
 
     try {

@@ -7,13 +7,13 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { BASH_TIMEOUT_MS, withWorkrailSession } from './_shared.js';
 
 const execAsync = promisify(exec);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeBashTool(workspacePath: string, schemas: Record<string, any>, sessionId?: string, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeBashTool(workspacePath: string, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
   return {
     name: 'Bash',
     description:

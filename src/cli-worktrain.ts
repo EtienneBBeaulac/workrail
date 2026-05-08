@@ -481,14 +481,13 @@ program
               // the process is in teardown state.
               clearInterval(heartbeatInterval);
 
-              // 1. Emit session_aborted for all in-flight sessions.
               // 1. Emit session_aborted for all in-flight sessions before aborting,
               // so the event log shows terminal state (not RUNNING forever after restart).
-              for (const workrailSessionId of handle.activeSessionSet.sessionIds()) {
+              for (const sh of handle.activeSessionSet.handles()) {
                 emitter.emit({
                   kind: 'session_aborted',
-                  sessionId: workrailSessionId,
-                  workrailSessionId,
+                  sessionId: sh.sessionId,
+                  ...(sh.workrailSessionId !== null ? { workrailSessionId: sh.workrailSessionId } : {}),
                   reason: 'daemon_shutdown',
                   ts: Date.now(),
                 });

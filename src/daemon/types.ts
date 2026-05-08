@@ -28,6 +28,9 @@
  * WHY: Read, Edit, and Write tools share this Map to enforce read-before-write
  * and detect file modification between read and write.
  */
+import type { RunId } from './daemon-events.js';
+export type { RunId } from './daemon-events.js';
+
 export type ReadFileState = { content: string; timestamp: number; isPartialView: boolean };
 
 // ---------------------------------------------------------------------------
@@ -303,7 +306,7 @@ export interface WorkflowRunSuccess {
    * WHY this field exists: trigger-router.ts uses sessionId for branch assertion before
    * git push (verifying HEAD matches the expected branch name `branchPrefix + sessionId`).
    */
-  readonly sessionId?: string;
+  readonly sessionId?: RunId;
   /**
    * Bot identity sourced from trigger.botIdentity.
    * Present only when trigger.botIdentity is set.
@@ -457,7 +460,7 @@ export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Wor
  */
 export interface OrphanedSession {
   /** The process-local UUID that was used to key the session file. */
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   /** The last persisted continueToken for this session. */
   readonly continueToken: string;
   /** The last persisted checkpointToken (null if none was written). */

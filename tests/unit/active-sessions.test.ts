@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ActiveSessionSet } from '../../src/daemon/active-sessions.js';
+import { asRunId } from '../../src/daemon/daemon-events.js';
 import type { AgentLoop } from '../../src/daemon/agent-loop.js';
 
 // ---------------------------------------------------------------------------
@@ -39,7 +40,7 @@ describe('ActiveSessionSet', () => {
     it('returns a handle whose steer() invokes the onSteer callback', () => {
       const set = new ActiveSessionSet();
       const received: string[] = [];
-      const handle = set.register('sess_1', (text) => received.push(text));
+      const handle = set.register(asRunId('sess_1'), (text) => received.push(text));
 
       handle.steer('hello');
       handle.steer('world');
@@ -51,24 +52,24 @@ describe('ActiveSessionSet', () => {
   describe('get()', () => {
     it('returns the registered handle', () => {
       const set = new ActiveSessionSet();
-      const handle = set.register('sess_2', () => {});
+      const handle = set.register(asRunId('sess_2'), () => {});
 
-      const result = set.get('sess_2');
+      const result = set.get(asRunId('sess_2'));
 
       expect(result).toBe(handle);
-      expect(result!.sessionId).toBe('sess_2');
+      expect(result!.sessionId).toBe(asRunId('sess_2'));
     });
 
     it('returns undefined for an unknown sessionId', () => {
       const set = new ActiveSessionSet();
-      expect(set.get('unknown')).toBeUndefined();
+      expect(set.get(asRunId('unknown'))).toBeUndefined();
     });
   });
 
   describe('abort() before setAgent() -- TDZ safety', () => {
     it('is a safe no-op and does not throw', () => {
       const set = new ActiveSessionSet();
-      const handle = set.register('sess_3', () => {});
+      const handle = set.register(asRunId('sess_3'), () => {});
 
       // WHY: between register() and setAgent() there is a ~200-500ms window where
       // _agent is null. A SIGTERM during this window must not crash the daemon.
@@ -79,7 +80,7 @@ describe('ActiveSessionSet', () => {
   describe('setAgent() and abort()', () => {
     it('calls agent.abort() after setAgent()', () => {
       const set = new ActiveSessionSet();
-      const handle = set.register('sess_4', () => {});
+      const handle = set.register(asRunId('sess_4'), () => {});
       const agent = makeFakeAgent();
 
       handle.setAgent(agent as unknown as AgentLoop);
@@ -90,7 +91,7 @@ describe('ActiveSessionSet', () => {
 
     it('is idempotent -- second setAgent() call is ignored; only first agent is aborted', () => {
       const set = new ActiveSessionSet();
-      const handle = set.register('sess_5', () => {});
+      const handle = set.register(asRunId('sess_5'), () => {});
       const agent1 = makeFakeAgent();
       const agent2 = makeFakeAgent();
 
@@ -110,7 +111,7 @@ describe('ActiveSessionSet', () => {
       const set = new ActiveSessionSet();
       expect(set.size).toBe(0);
 
-      const handle = set.register('sess_6', () => {});
+      const handle = set.register(asRunId('sess_6'), () => {});
       expect(set.size).toBe(1);
 
       handle.dispose();
@@ -119,19 +120,19 @@ describe('ActiveSessionSet', () => {
 
     it('deregisters the handle so get() returns undefined', () => {
       const set = new ActiveSessionSet();
-      const handle = set.register('sess_7', () => {});
+      const handle = set.register(asRunId('sess_7'), () => {});
 
       handle.dispose();
 
-      expect(set.get('sess_7')).toBeUndefined();
+      expect(set.get(asRunId('sess_7'))).toBeUndefined();
     });
   });
 
   describe('abortAll()', () => {
     it('calls abort() on all registered handles that have an agent', () => {
       const set = new ActiveSessionSet();
-      const h1 = set.register('sess_8a', () => {});
-      const h2 = set.register('sess_8b', () => {});
+      const h1 = set.register(asRunId('sess_8a'), () => {});
+      const h2 = set.register(asRunId('sess_8b'), () => {});
       const agent1 = makeFakeAgent();
       const agent2 = makeFakeAgent();
 
@@ -146,29 +147,42 @@ describe('ActiveSessionSet', () => {
 
     it('does not throw when called before any setAgent()', () => {
       const set = new ActiveSessionSet();
-      set.register('sess_9a', () => {});
-      set.register('sess_9b', () => {});
+      set.register(asRunId('sess_9a'), () => {});
+      set.register(asRunId('sess_9b'), () => {});
 
       // WHY: SIGTERM may fire before AgentLoop construction completes for any session.
       expect(() => set.abortAll()).not.toThrow();
     });
   });
 
-  describe('sessionIds()', () => {
-    it('contains exactly the registered session IDs, and excludes disposed ones', () => {
+  describe('handles()', () => {
+    it('yields exactly the registered handles, excludes disposed ones, carries both IDs', () => {
       const set = new ActiveSessionSet();
-      const h1 = set.register('sess_10a', () => {});
-      const h2 = set.register('sess_10b', () => {});
+      const h1 = set.register(asRunId('sess_10a'), () => {});
+      const h2 = set.register(asRunId('sess_10b'), () => {});
+      h1.setWorkrailSessionId('sess_wr_a');
 
-      const beforeDispose = Array.from(set.sessionIds()).sort();
+      const beforeDispose = Array.from(set.handles()).map((h) => h.sessionId).sort();
       expect(beforeDispose).toEqual(['sess_10a', 'sess_10b']);
+
+      // workrailSessionId populated on h1 only
+      const h1Again = set.get(asRunId('sess_10a'))!;
+      expect(h1Again.workrailSessionId).toBe('sess_wr_a');
+      expect(set.get(asRunId('sess_10b'))!.workrailSessionId).toBeNull();
 
       h1.dispose();
 
-      // Collect the iterator AFTER dispose so we see the updated map state.
-      const afterDispose = Array.from(set.sessionIds());
+      const afterDispose = Array.from(set.handles()).map((h) => h.sessionId);
       expect(afterDispose).toEqual(['sess_10b']);
       expect(afterDispose).not.toContain('sess_10a');
+    });
+
+    it('setWorkrailSessionId is idempotent -- second call is a no-op', () => {
+      const set = new ActiveSessionSet();
+      const handle = set.register(asRunId('sess_11'), () => {});
+      handle.setWorkrailSessionId('sess_wr_first');
+      handle.setWorkrailSessionId('sess_wr_second');
+      expect(handle.workrailSessionId).toBe('sess_wr_first');
     });
   });
 });

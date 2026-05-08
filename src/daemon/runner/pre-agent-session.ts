@@ -17,7 +17,7 @@ import type { V2ToolContext } from '../../mcp/types.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import type { DaemonRegistry } from '../../v2/infra/in-memory/daemon-registry/index.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { createSessionState, updateToken, setSessionId } from '../state/index.js';
 import { buildAgentClient } from '../core/index.js';
 import { persistTokens } from '../tools/_shared.js';
@@ -50,7 +50,7 @@ export async function buildPreAgentSession(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
   apiKey: string,
-  sessionId: string,
+  sessionId: RunId,
   startMs: number,
   statsDir: string,
   sessionsDir: string,
@@ -217,9 +217,10 @@ export async function buildPreAgentSession(
 
   // ---- Registry setup (AFTER all potentially-failing I/O -- FM1 invariant) ----
   let handle: ReturnType<ActiveSessionSet['register']> | undefined;
+  handle = activeSessionSet?.register(sessionId, (text: string) => { state.pendingSteerParts.push(text); });
   if (state.workrailSessionId !== null) {
     daemonRegistry?.register(state.workrailSessionId, trigger.workflowId);
-    handle = activeSessionSet?.register(state.workrailSessionId, (text: string) => { state.pendingSteerParts.push(text); });
+    handle?.setWorkrailSessionId(state.workrailSessionId);
   }
 
   // ---- Single-step completion (must check AFTER registry setup) ----

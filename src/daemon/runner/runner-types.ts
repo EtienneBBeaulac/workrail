@@ -19,7 +19,7 @@ import type { SessionContext } from '../core/session-context.js';
 import type { ContextBundle } from '../context-loader.js';
 import type { SessionScope } from '../session-scope.js';
 import type { SessionHandle } from '../active-sessions.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import type { DaemonRegistry } from '../../v2/infra/in-memory/daemon-registry/index.js';
 import type { WorkflowRunResult } from '../types.js';
 import type { ReadFileState } from '../types.js';
@@ -55,7 +55,7 @@ export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
  * rather than hiding it in ambient scope.
  */
 export interface PreAgentSession {
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly workrailSessionId: string | null;
   readonly continueToken: string;
   readonly checkpointToken: string | null;
@@ -116,7 +116,7 @@ export interface AgentReadySession {
   readonly tools: readonly AgentTool[];
   readonly sessionCtx: SessionContext;
   readonly handle: SessionHandle | undefined;
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly workflowId: string;
   readonly worktreePath: string | undefined;
   readonly agent: AgentLoop;
@@ -148,7 +148,7 @@ export type SessionOutcome =
 
 /** Context for finalizing a completed runWorkflow() session. */
 export interface FinalizationContext {
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly workrailSessionId: string | null;
   readonly startMs: number;
   readonly stepAdvanceCount: number;

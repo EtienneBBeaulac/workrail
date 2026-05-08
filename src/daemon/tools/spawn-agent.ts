@@ -7,7 +7,7 @@
 
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
 import { assertNever } from '../../runtime/assert-never.js';
@@ -49,7 +49,7 @@ import type { ActiveSessionSet } from '../active-sessions.js';
  * @param activeSessionSet - Session registry for abort callbacks (graceful shutdown).
  */
 export function makeSpawnAgentTool(
-  sessionId: string,
+  sessionId: RunId,
   ctx: V2ToolContext,
   apiKey: string,
   thisWorkrailSessionId: string,

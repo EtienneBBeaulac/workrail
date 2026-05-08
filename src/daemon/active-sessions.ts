@@ -11,15 +11,28 @@
  */
 
 import type { AgentLoop } from './agent-loop.js';
+import type { RunId } from './daemon-events.js';
 
 // ---------------------------------------------------------------------------
 // SessionHandle interface
 // ---------------------------------------------------------------------------
 
 export interface SessionHandle {
-  readonly sessionId: string;
+  readonly sessionId: RunId;
+  /**
+   * The WorkRail session ID (sess_* ID) for this session.
+   * Set via setWorkrailSessionId() after the continueToken is decoded.
+   * Null until decoding completes (~50ms after session start).
+   */
+  readonly workrailSessionId: string | null;
   /** Inject text into the session's next agent turn. */
   steer(text: string): void;
+  /**
+   * Wire in the WorkRail session ID once the continueToken is decoded.
+   * Called from buildPreAgentSession() after parseContinueTokenOrFail() succeeds.
+   * Idempotent: second call is a no-op (first writer wins).
+   */
+  setWorkrailSessionId(workrailSessionId: string): void;
   /**
    * Wire in the AgentLoop reference for abort capability.
    * Must be called after `const agent = new AgentLoop(...)`.
@@ -43,19 +56,30 @@ export interface SessionHandle {
 // ---------------------------------------------------------------------------
 
 class SessionHandleImpl implements SessionHandle {
-  readonly sessionId: string;
+  readonly sessionId: RunId;
+  private _workrailSessionId: string | null = null;
   private readonly _onSteer: (text: string) => void;
   private _agent: AgentLoop | null = null;
   private readonly _set: ActiveSessionSet;
 
-  constructor(sessionId: string, onSteer: (text: string) => void, set: ActiveSessionSet) {
+  constructor(sessionId: RunId, onSteer: (text: string) => void, set: ActiveSessionSet) {
     this.sessionId = sessionId;
     this._onSteer = onSteer;
     this._set = set;
   }
 
+  get workrailSessionId(): string | null {
+    return this._workrailSessionId;
+  }
+
   steer(text: string): void {
     this._onSteer(text);
+  }
+
+  setWorkrailSessionId(workrailSessionId: string): void {
+    if (this._workrailSessionId === null) {
+      this._workrailSessionId = workrailSessionId;
+    }
   }
 
   setAgent(agent: AgentLoop): void {
@@ -87,25 +111,31 @@ class SessionHandleImpl implements SessionHandle {
  * Created once at the composition root (trigger-listener.ts).
  */
 export class ActiveSessionSet {
-  private readonly _handles = new Map<string, SessionHandleImpl>();
+  private readonly _handles = new Map<RunId, SessionHandleImpl>();
 
   /**
    * Register a new session handle before AgentLoop construction.
+   * Keyed by the daemon-local RunId (always available immediately).
+   * The WorkRail session ID (sess_*) is set later via handle.setWorkrailSessionId()
+   * once the continueToken is decoded.
    * @param onSteer - Callback that closes over state.pendingSteerParts in runWorkflow().
    */
-  register(sessionId: string, onSteer: (text: string) => void): SessionHandle {
+  register(sessionId: RunId, onSteer: (text: string) => void): SessionHandle {
     const handle = new SessionHandleImpl(sessionId, onSteer, this);
     this._handles.set(sessionId, handle);
     return handle;
   }
 
-  get(sessionId: string): SessionHandle | undefined {
+  get(sessionId: RunId): SessionHandle | undefined {
     return this._handles.get(sessionId);
   }
 
-  /** Iterate active workrailSessionIds (for shutdown event emission). */
-  sessionIds(): IterableIterator<string> {
-    return this._handles.keys();
+  /**
+   * Iterate all active session handles (for shutdown event emission and abort).
+   * Each handle carries both sessionId (RunId) and workrailSessionId (string | null).
+   */
+  handles(): IterableIterator<SessionHandle> {
+    return this._handles.values();
   }
 
   /** Abort all in-flight sessions simultaneously (SIGTERM/SIGINT handler). */
@@ -120,7 +150,7 @@ export class ActiveSessionSet {
   }
 
   /** Called by SessionHandleImpl.dispose() -- not for external callers. */
-  _remove(sessionId: string): void {
+  _remove(sessionId: RunId): void {
     this._handles.delete(sessionId);
   }
 }

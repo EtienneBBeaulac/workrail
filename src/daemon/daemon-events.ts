@@ -25,6 +25,27 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 // ---------------------------------------------------------------------------
+// RunId: branded process-local session UUID
+// ---------------------------------------------------------------------------
+
+/**
+ * Branded type for the daemon's process-local session UUID.
+ *
+ * WHY branded: prevents accidental substitution with `workrailSessionId`
+ * (the WorkRail engine `sess_*` ID) at call sites. Same pattern as TriggerId
+ * in src/trigger/types.ts.
+ *
+ * Created exactly twice per session:
+ * - `asRunId(randomUUID())` in workflow-runner.ts (normal path)
+ * - `asRunId(entry.slice(0, -5))` in startup-recovery.ts (crash recovery)
+ */
+export type RunId = string & { readonly _brand: 'RunId' };
+
+export function asRunId(value: string): RunId {
+  return value as RunId;
+}
+
+// ---------------------------------------------------------------------------
 // DaemonEvent: discriminated union of all event kinds
 // ---------------------------------------------------------------------------
 
@@ -52,7 +73,7 @@ export interface SessionQueuedEvent {
 /** Workflow run started (session ID assigned, agent loop about to start). */
 export interface SessionStartedEvent {
   readonly kind: 'session_started';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly workflowId: string;
   readonly workspacePath: string;
   /**
@@ -67,7 +88,7 @@ export interface SessionStartedEvent {
 /** An agent tool was called. */
 export interface ToolCalledEvent {
   readonly kind: 'tool_called';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly toolName: string;
   /** First 80 chars of the primary tool parameter (e.g. bash command, file path). */
   readonly summary?: string;
@@ -82,7 +103,7 @@ export interface ToolCalledEvent {
 /** A tool returned an error result (isError=true). */
 export interface ToolErrorEvent {
   readonly kind: 'tool_error';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly toolName: string;
   /** First 200 chars of the error message. */
   readonly error: string;
@@ -93,7 +114,7 @@ export interface ToolErrorEvent {
 /** Workflow advanced to the next step. */
 export interface StepAdvancedEvent {
   readonly kind: 'step_advanced';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
   readonly workrailSessionId?: string;
 }
@@ -101,7 +122,7 @@ export interface StepAdvancedEvent {
 /** Workflow run ended (success, error, or timeout). */
 export interface SessionCompletedEvent {
   readonly kind: 'session_completed';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly workflowId: string;
   readonly outcome: 'success' | 'error' | 'timeout' | 'stuck';
   /** Human-readable reason (stopReason, error message, or timeout type). */
@@ -127,7 +148,7 @@ export interface DeliveryAttemptedEvent {
  */
 export interface IssueReportedEvent {
   readonly kind: 'issue_reported';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly issueKind: 'tool_failure' | 'blocked' | 'unexpected_behavior' | 'needs_human' | 'self_correction';
   readonly severity: 'info' | 'warn' | 'error' | 'fatal';
   readonly summary: string;
@@ -146,7 +167,7 @@ export interface IssueReportedEvent {
  */
 export interface LlmTurnStartedEvent {
   readonly kind: 'llm_turn_started';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   /** Number of messages in the conversation at the time of the call. */
   readonly messageCount: number;
   /** The model ID used for this LLM turn (e.g. 'claude-sonnet-4-5'). */
@@ -163,7 +184,7 @@ export interface LlmTurnStartedEvent {
  */
 export interface LlmTurnCompletedEvent {
   readonly kind: 'llm_turn_completed';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   /** The stop_reason from the API response ('tool_use', 'end_turn', etc.). */
   readonly stopReason: string;
   /** Actual output token count from the API response. */
@@ -202,7 +223,7 @@ export interface LlmTurnCompletedEvent {
  */
 export interface ToolCallStartedEvent {
   readonly kind: 'tool_call_started';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly toolName: string;
   /** JSON-serialized params, truncated to 200 chars. */
   readonly argsSummary: string;
@@ -215,7 +236,7 @@ export interface ToolCallStartedEvent {
  */
 export interface ToolCallCompletedEvent {
   readonly kind: 'tool_call_completed';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly toolName: string;
   /** Wall-clock duration of the tool execution in milliseconds. */
   readonly durationMs: number;
@@ -234,7 +255,7 @@ export interface ToolCallCompletedEvent {
  */
 export interface ToolCallFailedEvent {
   readonly kind: 'tool_call_failed';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly toolName: string;
   /** Wall-clock duration up to the point of failure in milliseconds. */
   readonly durationMs: number;
@@ -270,6 +291,12 @@ export interface DaemonStoppedEvent {
  */
 export interface DaemonSessionAbortedEvent {
   readonly kind: 'session_aborted';
+  /**
+   * The workrailSessionId (sess_* ID) used as the session identifier here.
+   * At shutdown time the process-local RunId is not available -- only the
+   * workrailSessionId from ActiveSessionSet is accessible.
+   * WHY string (not RunId): this field carries a workrailSessionId, not a RunId.
+   */
   readonly sessionId: string;
   readonly workrailSessionId?: string;
   readonly reason: 'daemon_shutdown' | 'daemon_killed';
@@ -318,7 +345,7 @@ export interface SessionDroppedEvent {
  */
 export interface SignalEmittedEvent {
   readonly kind: 'signal_emitted';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   /**
    * The signal kind ('progress' | 'finding' | 'data_needed' | 'approval_needed' | 'blocked').
    * Matches the CoordinatorSignalKind values from coordinator-signal.ts.
@@ -349,7 +376,7 @@ export interface SignalEmittedEvent {
  */
 export interface AgentStuckEvent {
   readonly kind: 'agent_stuck';
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   /**
    * Which heuristic triggered:
    * - repeated_tool_call: same tool + same args called 3+ times in a row
@@ -434,3 +461,4 @@ export class DaemonEventEmitter {
     await fs.appendFile(filePath, line, 'utf8');
   }
 }
+

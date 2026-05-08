@@ -46,6 +46,7 @@ import type { ToolFailure } from '../mcp/handlers/v2-execution-helpers.js';
 import type { ResultAsync } from 'neverthrow';
 import { projectNodeOutputsV2 } from '../v2/projections/node-outputs.js';
 import type { DaemonEventEmitter } from './daemon-events.js';
+import { asRunId } from './daemon-events.js';
 import { assertNever } from '../runtime/assert-never.js';
 import { ok, err } from '../runtime/result.js';
 import type { Result } from '../runtime/result.js';
@@ -348,7 +349,7 @@ export async function runWorkflow(
   // state file in sessionsDir. This UUID is NOT the WorkRail server session ID --
   // it is a process-local identifier. The server continueToken is stored as a value
   // inside the file, so crash-resume can retrieve it.
-  const sessionId = randomUUID();
+  const sessionId = asRunId(randomUUID());
   console.log(`[WorkflowRunner] Session started: sessionId=${sessionId} workflowId=${trigger.workflowId}`);
 
   // Emit session_started event immediately after session ID is assigned.

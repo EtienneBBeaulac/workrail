@@ -7,7 +7,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { appendIssueAsync, type IssueRecord } from './_shared.js';
 
 /**
@@ -29,7 +29,7 @@ import { appendIssueAsync, type IssueRecord } from './_shared.js';
  *   from the caller's perspective. Fire-and-forget writes happen separately.
  */
 export function makeReportIssueTool(
-  sessionId: string,
+  sessionId: RunId,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: string | null,
   issuesDirOverride?: string,

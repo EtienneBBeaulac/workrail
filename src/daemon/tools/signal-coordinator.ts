@@ -12,7 +12,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { appendSignalAsync, type SignalRecord, withWorkrailSession } from './_shared.js';
 
 /**
@@ -59,7 +59,7 @@ export const DAEMON_SIGNALS_DIR = path.join(os.homedir(), '.workrail', 'signals'
  * @param signalsDirOverride - Override the signals directory (for tests).
  */
 export function makeSignalCoordinatorTool(
-  sessionId: string,
+  sessionId: RunId,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: string | null,
   signalsDirOverride?: string,

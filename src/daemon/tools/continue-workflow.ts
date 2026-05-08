@@ -7,12 +7,12 @@
 
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { executeContinueWorkflow } from '../../mcp/handlers/v2-execution/index.js';
 import { persistTokens, withWorkrailSession } from './_shared.js';
 
 export function makeContinueWorkflowTool(
-  sessionId: string,
+  sessionId: RunId,
   ctx: V2ToolContext,
   onAdvance: (nextStepText: string, continueToken: string) => void,
   onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
@@ -198,7 +198,7 @@ export function makeContinueWorkflowTool(
  * @param workrailSessionId - WorkRail session ID for event correlation.
  */
 export function makeCompleteStepTool(
-  sessionId: string,
+  sessionId: RunId,
   ctx: V2ToolContext,
   getCurrentToken: () => string,
   onAdvance: (nextStepText: string, continueToken: string) => void,

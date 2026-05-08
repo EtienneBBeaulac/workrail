@@ -15,7 +15,7 @@ import type { AgentLoop, AgentEvent, AgentLoopCallbacks } from '../agent-loop.js
 import { AgentLoop as AgentLoopClass } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import type { DaemonRegistry } from '../../v2/infra/in-memory/daemon-registry/index.js';
-import type { DaemonEventEmitter } from '../daemon-events.js';
+import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import type { SessionState } from '../state/session-state.js';
 import type { StuckConfig } from '../state/stuck-detection.js';
 import {
@@ -62,7 +62,7 @@ export interface TurnEndSubscriberContext {
   /** Mutable session state -- subscriber increments turnCount and reads stuck signals. */
   readonly state: SessionState;
   readonly stuckConfig: StuckConfig;
-  readonly sessionId: string;
+  readonly sessionId: RunId;
   readonly workflowId: string;
   readonly emitter: DaemonEventEmitter | undefined;
   readonly conversationPath: string;
@@ -161,7 +161,7 @@ export function buildTurnEndSubscriber(
  * onToolCallStarted also updates the stuck-detection ring buffer in state.
  */
 export function buildAgentCallbacks(
-  sessionId: string,
+  sessionId: RunId,
   state: SessionState,
   modelId: string,
   emitter: DaemonEventEmitter | undefined,
@@ -230,7 +230,7 @@ export async function buildAgentReadySession(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
   apiKey: string,
-  sessionId: string,
+  sessionId: RunId,
   emitter: DaemonEventEmitter | undefined,
   daemonRegistry: DaemonRegistry | undefined,
   activeSessionSet: ActiveSessionSet | undefined,
