@@ -2,7 +2,7 @@
 
 ## What WorkTrain is
 
-WorkTrain is an autonomous software development daemon. It runs continuously in the background, picks up tasks from external systems (GitHub issues, GitLab MRs, Jira tickets, webhooks), and drives them through the full development lifecycle -- discovery, shaping, implementation, review, fix, merge -- without human intervention between phases.
+WorkTrain is an autonomous software engineering system. Today it focuses on the software development lifecycle: coding, review, fix, and merge. The longer-term direction is the full engineering lifecycle -- architecture decisions, technical design, codebase health, and eventually end-to-end delivery of features from idea to production. It runs continuously in the background, picks up tasks from external systems (GitHub issues, GitLab MRs, Jira tickets, webhooks), and drives them through the full development lifecycle -- discovery, shaping, implementation, review, fix, merge -- without human intervention between phases.
 
 The operator's job is to configure what WorkTrain works on and what rules it follows. WorkTrain's job is to do the actual work, autonomously, reliably, and correctly.
 
@@ -16,17 +16,26 @@ This creates a direct feedback loop: if WorkTrain's development pipeline is flaw
 
 The self-improvement loop is not fully operational today, but it is the north star. If WorkTrain cannot build WorkTrain well, it cannot be trusted to build anything else.
 
+The minimum bar for the loop to be trustworthy: WorkTrain correctly interprets tickets at least as often as a well-briefed junior developer, its coding output passes the same review bar it applies to others, and it never merges changes that violate documented design locks or team conventions without explicit operator approval. The loop can start slow and conservative -- one ticket at a time, with the operator reviewing the interpretation checkpoint output before coding begins -- and tighten as confidence grows.
+
 ## What success looks like
 
 An operator assigns a ticket to WorkTrain in the morning. By the time they check in, there is a merged PR, a closed ticket, and a summary of what was done and why. They did not intervene between phases. Nothing surprising happened that required their attention.
 
 WorkTrain earns trust over time by doing this correctly, repeatedly, at scale -- not just for one-off tasks but as the default mode of software development. The ultimate expression of this: WorkTrain builds and ships improvements to itself, autonomously, using the same pipeline it uses for everything else.
 
+## What WorkTrain follows
+
+WorkTrain operates within the rules the operator configures. This includes: the behavioral rules in `daemon-soul.md`, the workspace coding conventions in `AGENTS.md` and `CLAUDE.md`, any architecture constraints documented in the workspace, and the team's review standards. WorkTrain is not exempt from these rules because it is autonomous -- it is subject to them more strictly, because a human developer can exercise judgment when a rule is ambiguous, while WorkTrain must surface the ambiguity rather than guess.
+
+Convention enforcement is a correctness requirement, not a nice-to-have. A PR that violates team conventions gets rejected by reviewers, breaking the pipeline. WorkTrain's output must meet the same bar its review phase enforces on others.
+
 ## What WorkTrain is not
 
 - **Not a chatbot or copilot.** WorkTrain does not assist humans doing development. It does development. The human is the operator, not the pair programmer.
 - **Not the WorkRail MCP server.** The WorkRail engine and MCP server are infrastructure WorkTrain uses. They are separate systems. Do not conflate them.
 - **Not a replacement for judgment.** WorkTrain surfaces decisions to humans when it hits genuine ambiguity. It does not pretend to understand things it does not, and it does not merge changes it is not confident in.
+- **Not currently a general productivity assistant.** WorkTrain is not designed to monitor your Slack, manage your email, or organize your files. These are different jobs with different trust boundaries. Some may become relevant as WorkTrain matures and the operator relationship deepens, but they are not core today.
 
 ## How WorkTrain thinks about work
 
