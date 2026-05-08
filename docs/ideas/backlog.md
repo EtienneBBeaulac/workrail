@@ -152,6 +152,25 @@ Issue #241 (TTL eviction across multiple files + new tests) was classified as Sm
 
 ---
 
+### `worktrain doctor`: typed service config audit and auto-repair (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+There is no command that audits whether the WorkTrain daemon is correctly configured and healthy before an operator relies on it for overnight work. Config problems (stale binary, wrong launchd plist path, missing env vars, port mismatch, bad model override) surface as silent failures at runtime -- often at 3am. The operator has no way to proactively detect or repair them.
+
+OpenClaw ships a `SERVICE_AUDIT_CODES` system (typed issue codes: `gatewayCommandMissing`, `gatewayEntrypointMismatch`, `launchdKeepAlive`, `gatewayRuntimeBun`, etc.) with a `doctor --fix` command that auto-repairs the most common issues. A `worktrain doctor` command with the same pattern -- audit returns typed `ServiceConfigIssue[]`, severity `warning | error`, suggested fix per code -- would surface config problems before they become silent 3am failures.
+
+This item is distinct from the "daemon --start reports success on crash" fix (PR #898, done): that fix verifies liveness after start; doctor would verify config correctness before start and at any time.
+
+**Things to hash out:**
+- Which audit codes are most valuable for Phase 1? Candidates: stale binary (binary mtime check), missing ANTHROPIC_API_KEY, triggers.yml parse error, launchd plist mismatch (plist path points to wrong binary), port conflict.
+- Should `doctor --fix` auto-repair or only print instructions? Auto-repair for simple cases (rewrite plist path), print instructions for secrets.
+- Where does this live -- `worktrain doctor` as a new subcommand, or integrated into `worktrain daemon --status`?
+
+---
+
 ### Daemon binary stale after rebuild, no indication to user
 
 **Status: ux gap** | Priority: medium
@@ -211,6 +230,118 @@ All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSl
 `WorkflowEnricher` service in `src/daemon/workflow-enricher.ts`. Fires for root sessions (`spawnDepth === 0`) inside `runWorkflow()` before `buildPreAgentSession()`. `PriorNotesPolicy` discriminated type controls notes injection. 1s timeout with partial fallback on `listRecentSessions`. `EnricherResult` threaded as typed value through call chain -- trigger never mutated. All 6 entry points covered.
 
 **Pilot test gate still pending:** before declaring full success, verify agents reference prior notes in turn-1 reasoning in at least one real session.
+
+---
+
+### Unified daemon event schema: merge daemon event log and v2 session store into one trace format (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:1 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+WorkTrain writes two separate event stores: the daemon event log at `~/.workrail/events/daemon/<date>.jsonl` (tool calls, session lifecycle, trigger fired) and the v2 session event store at `~/.workrail/data/sessions/<id>/`. Every console feature that needs both structured session data and daemon-layer events (goal text, trigger provenance, tool call history) must bridge two storage formats. The status briefing discovery doc explicitly flagged this as a blocking split: "Two storage systems: Daemon event log vs per-session store. Bridging them requires either reading two systems or accepting one system's incomplete picture."
+
+OpenClaw ships a unified `TrajectoryEvent` schema (`traceId`, `source: "runtime" | "transcript" | "export"`, `type`, `ts`, `seq`, `sessionId`, `runId`, `workspaceDir`, `provider`, `modelId`) covering all event kinds from both sources. A single schema means tooling (console, export, replay, search) is built once.
+
+The migration path does not require replacing either store immediately -- it can start by making the daemon event log speak the same schema fields, so the console can query either source without a bridge layer.
+
+**Things to hash out:**
+- Phase 1 scope: unify schema fields only (no storage migration), or actually consolidate to one storage backend?
+- Does the v2 engine event format need to change, or can the daemon event log adopt v2-compatible fields without touching the engine?
+- What is the correct `source` discriminant for WorkTrain? Candidates: `daemon` (trigger/session lifecycle), `engine` (step advances, token ops), `agent` (tool calls, LLM turns).
+
+---
+
+### Pluggable context assembly: replace hardcoded `buildSystemPrompt()` with an injectable interface (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:1 Lev:2 Con:2 | Blocked: no
+
+WorkTrain's context injection is a hardcoded pipeline of pure section functions in `buildSystemPrompt()` (`sectionWorktreeScope`, `sectionWorkspaceContext`, `sectionAssembledContext`, `sectionPriorWorkspaceNotes`, `sectionChangedFiles`, `sectionReferenceUrls`). This works for the current fixed context set, but cannot support: (a) dynamic token-budget management (truncation today is a hard 8KB ceiling on assembled context with no compaction), (b) retrieval-augmented context injection (pull relevant prior session notes by semantic similarity rather than recency), (c) per-workflow context policies (a discovery session needs different context than an implementation session). Adding any of these requires modifying `buildSystemPrompt()` directly rather than composing a new context strategy.
+
+OpenClaw ships a `ContextEngine` interface (`assemble(params: { tokenBudget, availableTools, model, prompt }) => Promise<{ messages, estimatedTokens, systemPromptAddition }>`, `compact()`, `maintain()` with background/foreground mode, `ingest()`, `rewriteTranscriptEntries()` via runtime callback) that is fully pluggable. Any context strategy -- windowed recency, semantic retrieval, summary-based compaction -- can be implemented behind the interface without touching the agent loop.
+
+Phase 1 is not a full interface extraction -- it is scoping the problem: identify which callers of `buildSystemPrompt()` would benefit from a budget parameter, and what the minimal injectable seam looks like.
+
+**Things to hash out:**
+- What is the right Phase 1 scope? Candidates: (a) add a `tokenBudget` parameter to `buildSystemPrompt()` and use it for truncation decisions, (b) extract a `ContextAssembler` port with a single `assemble()` method, (c) define the full interface and ship a `DefaultContextAssembler` that wraps the current behavior unchanged.
+- Does this depend on the unified event schema (above), or is it independent? If context retrieval needs session history, it depends on MemoryStore, which depends on indexed session history.
+- Effort: Phase 1 (budget parameter only) is hours. Full interface extraction is days. The backlog score reflects Phase 1.
+
+---
+
+### Add runId, provider, and modelId to DaemonEvent (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 10** | Cor:1 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+The console correlates daemon event log entries with v2 session store entries via `workrailSessionId`, but that field is only available after the continueToken is decoded (~50ms after session start). Events emitted before decode (notably `session_started`) have no `workrailSessionId`, creating a gap where the console cannot link early lifecycle events to the correct session.
+
+Adding `runId` (set to the process-local `sessionId` UUID at the top of `runWorkflow()`) as an optional field on all per-session DaemonEvent interfaces closes this gap without migration: `runId` is available immediately, constant for the session's lifetime, and already threaded through `buildPreAgentSession()`. Adding `provider` and `modelId` at the same time gives the event log the model attribution that OpenClaw's trajectory schema has and WorkTrain's currently lacks.
+
+Pattern source: OpenClaw `src/trajectory/types.ts` `TrajectoryEvent.runId` / `.provider` / `.modelId`.
+
+**Philosophy note:** `runId` should be a branded type (`type RunId = string & { readonly _brand: 'RunId' }`) so it cannot be accidentally swapped with `sessionId` or `workrailSessionId` at call sites -- explicit domain types over primitives. All three fields should be optional in the event union (additive, backward-compatible) but required in a separate `SessionEventContext` helper type that is constructed once per session and passed through explicitly -- single source of state truth, no scattered `runId` assignments.
+
+**Done looks like:** All per-session event interfaces (`SessionStartedEvent`, `ToolCalledEvent`, `StepAdvancedEvent`, etc.) have an optional `runId?: string` field. `runWorkflow()` assigns `runId = sessionId` and passes it wherever `workrailSessionId` is currently passed. `provider` and `modelId` are populated at session start from `buildAgentClient()`.
+
+---
+
+### QueuedFileWriter for DaemonEventEmitter (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:2 Cap:1 Eff:3 Lev:1 Con:3 | Blocked: no
+
+`DaemonEventEmitter._append()` calls `fs.appendFile()` concurrently. Under burst writes (a turn with many tool calls emitting `tool_call_started`, `tool_call_completed` pairs in rapid succession), concurrent appends can interleave JSONL lines, producing a corrupt log that `JSON.parse()` fails on. The failure is silent -- `emit()` is fire-and-forget and errors are swallowed.
+
+The fix is a per-file promise chain: `this._writers.set(path, (this._writers.get(path) ?? Promise.resolve()).then(() => fs.appendFile(...)))`. Each write chains onto the previous write for the same file, serializing them without a mutex. ~10-line change.
+
+Pattern source: OpenClaw `src/trajectory/runtime.ts` `QueuedFileWriter` per-session writer map.
+
+**Philosophy note:** The promise-chain approach is the right fix over a mutex or a lock file: it is purely functional, uses no shared mutable state beyond the Map, and composes cleanly with the existing fire-and-forget emit() contract. The Map entry should be cleaned up when the promise resolves to prevent unbounded accumulation -- determinism over cleverness, no hidden state.
+
+**Done looks like:** `DaemonEventEmitter._append()` uses a `Map<string, Promise<void>>` to serialize writes per file path. Existing tests pass. A new test asserts that 50 concurrent emits produce 50 valid JSONL lines in the correct order.
+
+---
+
+### Two-layer path validation for config-derived file paths (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:2 Cap:1 Eff:3 Lev:1 Con:3 | Blocked: no
+
+`workflowId` and `triggerId` values from config are validated at parse time for format correctness, but not at file-path construction time. If a malformed value slipped through (e.g. `wr/../../../etc/passwd`), file operations using those values as path segments could escape the intended directory. WorkTrain's `sessionId` values are `randomUUID()` (safe), but `workflowId` and `triggerId` are operator-supplied strings.
+
+The pattern: `assertSafeFileSegment(id: string): string` rejects `/`, `\`, and null bytes and returns the sanitized id or throws. Then `isPathInside(safeDir, resolvedPath)` as a second structural containment check. Also: add `fs.chmod(filePath, 0o600)` to sidecar writes in `persistTokens()` so session recovery files are not world-readable.
+
+Pattern source: OpenClaw `src/cron/run-log.ts` `assertSafeCronRunLogJobId()` + `isPathInside()`.
+
+**Philosophy note:** This is validate-at-boundaries in practice: `workflowId` and `triggerId` are external inputs (operator config) and must be re-validated at every boundary where they're used to construct a file path, not just at parse time. `assertSafeFileSegment()` should return a branded type (`SafeFileSegment`) so the compiler enforces that path construction only ever uses validated segments -- type safety as the first line of defense. `isPathInside()` is the runtime guard for cases where the type system can't help.
+
+**Done looks like:** A `src/infra/safe-path.ts` module exports `assertSafeFileSegment()`. Applied at all sites where `workflowId` or `triggerId` is used to construct a file path. `persistTokens()` adds `chmod 0o600` after the atomic rename. Tests cover the rejection cases.
+
+---
+
+### Spawn allowlist policy: restrict which workflows a session can spawn (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 8** | Cor:1 Cap:2 Eff:2 Lev:1 Con:2 | Blocked: no
+
+WorkTrain's `spawn_agent` tool allows a parent session to spawn any `workflowId` without restriction. There is no mechanism for an operator to limit which child workflows a given trigger's sessions may delegate to. A misconfigured or misbehaving agent could spawn arbitrary long-running sessions, consuming queue slots and API budget.
+
+A `spawnPolicy` field on `TriggerDefinition` (or on the `agentConfig` block) would let operators declare an allowlist: `allowedWorkflows: ['wr.review', 'wr.coding-task']` or `'*'` for unrestricted. `makeSpawnAgentTool()` checks the allowlist before calling `executeStartWorkflow()` and returns a typed error if the requested `workflowId` is not permitted.
+
+Pattern source: OpenClaw `src/agents/subagent-target-policy.ts` `resolveSubagentTargetPolicy()` -- pure function, `{ ok: true } | { ok: false, allowedText, error }`.
+
+**Philosophy note:** The allowlist check must be a pure function with a discriminated union result -- `{ ok: true } | { ok: false; allowedText: string; error: string }` -- not a boolean or an exception. Errors are data. The check belongs in `makeSpawnAgentTool()` before `executeStartWorkflow()` is called, not inside the engine. The allowed workflows type should use a discriminated union: `'*'` (unrestricted) vs `{ kind: 'allowlist'; workflows: readonly string[] }` -- make illegal states unrepresentable, no stringly-typed `'*'` mixed with arrays.
+
+**Things to hash out:**
+- Should this be on `TriggerDefinition` (per-trigger restriction) or on `agentConfig` (inheritable by child sessions)? Per-trigger is simpler; agentConfig inheritance is more flexible.
+- Default when absent: `'*'` (current behavior, no restriction) or an explicit opt-in? A safe default would restrict to the same `workflowId` as the parent, but that would break coordinator patterns that intentionally spawn different workflows.
 
 ---
 
@@ -1420,6 +1551,143 @@ Essential before WorkTrain manages more than 2-3 repos.
 
 ---
 
+### Self-improvement loop MVP: WorkTrain picks up and ships workrail issues end-to-end (May 8, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: yes (blocked by: convention enforcement in review, scope filter at dispatch, protected file gate, interpretation checkpoint operator approval, verification agent, resolver agent)
+
+The self-improvement loop is the vision's north star and the primary test of whether WorkTrain works. This item defines the minimum viable version: WorkTrain picks up a labeled workrail issue, runs the full pipeline, and produces a correct, convention-compliant, reviewed PR -- without the operator intervening between phases except at the interpretation checkpoint.
+
+The quality bar is non-negotiable: WorkTrain produces exemplary code that passes the same review standard it applies to others. Every finding gets fixed before merge, regardless of severity. No "we'll note it and move on."
+
+---
+
+**Full gate sequence:**
+
+```
+Issue labeled worktrain:ready on workrail repo
+        ↓
+[Gate 0: Scope filter] -- coordinator checks issue is safe to dispatch
+  PASS: single subsystem, no protected files, backlog Effort:3 or less
+  FAIL: comment on issue, remove label, do not dispatch
+  (pure TypeScript, no LLM, reads issue body + changed-files prediction)
+        ↓
+Adaptive coordinator: classify and select pipeline mode
+  (implement for scoped bugs/features, full for anything needing discovery)
+        ↓
+Discovery + shaping phases (if full pipeline)
+  Shaping output becomes the verifier's specification of "done"
+        ↓
+[Gate 1: Interpretation checkpoint -- ALWAYS requires operator approval]
+  Operator approves: coding begins
+  Operator edits: revised interpretation injected as coding context
+  Operator rejects: issue returned to queue, label removed
+  NOTE: no auto_confirm for the self-improvement loop, ever
+        ↓
+Coding phase (isolated worktree, branchStrategy: 'worktree')
+        ↓
+[Gate 2: Protected file check]
+  Checks git diff for: daemon-soul.md, triggers.yml,
+  src/v2/durable-core/ HMAC layer, docs/design/v2-core-design-locks.md,
+  src/daemon/ session lifecycle core
+  ANY HIT → stop immediately, escalate to operator, do not open PR
+  (deterministic script, no LLM)
+        ↓
+PR opened automatically
+        ↓
+[Gate 3: CI]
+  PASS → continue
+  FAIL → WorkTrain reads CI output, attempts one targeted fix,
+         pushes to same branch, re-runs CI
+  STILL FAILING → escalate to operator, do not proceed
+        ↓
+[Gate 4: Verification agent] -- independent QA agent, adversarial stance
+  Fed: original issue + shaped pitch (if exists) + implementation diff
+  Tools: Read, Glob, Grep, constrained Bash (npx vitest, git diff, git show only)
+  Job: prove each requirement is met with explicit evidence
+
+  VerificationRecord output contract:
+    requirementsCoveredCount: number
+    requirementsTotal: number
+    evidencePerRequirement: Array<{
+      requirement: string
+      evidence: string        // test output, grep result, etc.
+      confident: boolean
+    }>
+    gapsFound: ReadonlyArray<string>      // asked for, not implemented
+    unexpectedScope: ReadonlyArray<string> // implemented, not asked for
+    verdict: 'approved' | 'gaps_found' | 'disputed' | 'uncertain'
+
+  'approved' → proceed to review
+  'gaps_found' → back to coding agent with gaps as context (one retry only)
+  'uncertain' → escalate to operator
+  'disputed' → Resolver agent (see below)
+        ↓
+[Gate 4b: Resolver agent -- fires only on 'disputed']
+  Third independent agent, no stake in either position
+  Fed: original requirement text, coding agent's implementation rationale
+       (from session notes), verifier's specific objection + evidence
+  Tools: same constrained Bash as verifier
+  Job: determine ground truth -- does the code satisfy the requirement?
+
+  Resolver verdict (binding -- coding agent cannot argue back):
+    'satisfied' → proceed to review
+    'not_satisfied' → back to coding agent with resolver's rationale (final)
+    'requirement_ambiguous' → escalate to operator with:
+      original requirement + both agents' positions + resolver's analysis
+      + suggested clarification for the operator to add to the issue
+
+  NOTE: ACP (agent-to-agent real-time messaging) is a future enhancement
+  to this gate. When ACP ships, verifier and resolver could exchange
+  structured messages through the coordinator rather than using a batch
+  three-agent panel. The coordinator-mediated panel is the MVP approach.
+        ↓
+[Gate 5: wr.mr-review -- calibrated for workrail]
+  Loaded with: coding philosophy principles, daemon invariants doc,
+  design locks, commit message rules, neverthrow/assertNever conventions
+  ALL findings fixed before proceeding, regardless of severity
+  WorkTrain fixes, re-reviews until clean -- no threshold, no "note it"
+        ↓
+Auto-merge (squash, delete worktree)
+        ↓
+Issue closed, backlog item marked done
+```
+
+---
+
+**What needs to be built (in dependency order):**
+
+1. **Convention enforcement in wr.mr-review for workrail** -- workspace context that injects coding philosophy, design locks, and daemon invariants as explicit review criteria. Without this, Gate 5 is generic and toothless.
+
+2. **Scope filter at dispatch (Gate 0)** -- pure TypeScript coordinator check. Refuses dispatch if: protected files predicted in scope, issue touches multiple subsystems, issue is architectural. Reads issue body + label set.
+
+3. **Protected file gate (Gate 2)** -- post-coding delivery-layer script, runs `git diff --name-only` against a blocklist. Hard stop, no retry.
+
+4. **Interpretation checkpoint wired to operator approval (Gate 1)** -- in daemon sessions on the workrail repo, the interpretation checkpoint must never auto-confirm. Coordinator sets `requireInterpretationApproval: true` for this trigger.
+
+5. **Verification agent (Gate 4)** -- new agent role with dedicated system prompt (adversarial QA stance), constrained Bash tool variant, and `VerificationRecord` output contract enforced by the engine.
+
+6. **Resolver agent (Gate 4b)** -- new agent role, binding verdict, same constrained Bash. Coordinator spawns only on `disputed` verdict.
+
+7. **CI failure one-retry loop (Gate 3)** -- coordinator reads CI status via `gh`, spawns a targeted-fix session if failing, re-polls.
+
+---
+
+**Spawn depth:** The full gate sequence uses coordinator → coding → verifier → (if disputed) resolver. That's depth 3, hitting the current default `maxSubagentDepth: 3`. The workrail self-improvement trigger needs `maxSubagentDepth: 4` in `triggers.yml`.
+
+**MVP issue scope:** Start with issues that are: scoped to one file or directory, have Effort:3 in the backlog (hours to a day), and don't touch `src/v2/durable-core/` or `src/daemon/` session lifecycle. Good candidates: infra utilities, CLI commands, test coverage, observability additions.
+
+**Trust ramp:** For the first 10 issues, operator reviews the interpretation checkpoint output in full before approving. After 10 clean runs (no gaps found by verifier, no resolver invocations), interpretation checkpoint can be reviewed asynchronously (operator approves via `worktrain inbox`). After 20 clean runs, the gate timing can be relaxed further. The loop tightens based on track record, not a timer.
+
+**Things to hash out:**
+- The constrained Bash tool for the verifier/resolver is a new tool variant not yet in the codebase -- `makeConstrainedBashTool(allowedPrefixes: readonly string[])`. Where does it live and how is it enforced?
+- `requireInterpretationApproval: true` is not a current field on `TriggerDefinition`. Does it go on `agentConfig` or as a top-level trigger field?
+- How does the operator approve/reject at Gate 1 in practice? Via `worktrain inbox`? Via console? This needs to work reliably at 3am when the operator isn't watching.
+- The one-retry CI fix (Gate 3) spawns a child session -- that child needs access to CI failure output. Does the coordinator fetch it via `gh` and inject it as context, or does the child agent fetch it itself?
+
+---
+
 ### Demo repo feedback loop: WorkTrain improves itself via real task execution (Apr 20, 2026)
 
 **Status: idea** | Priority: high
@@ -1991,6 +2259,80 @@ This is already how mid-run resume works. The same mechanism extends naturally t
 
 ---
 
+### `withTimeout` + `withRetry` as first-class async boundary utilities (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:1 Eff:3 Lev:2 Con:3 | Blocked: no
+
+WorkTrain's daemon has no composable timeout or retry primitives. `AgentLoop` has a stall timer wired in internally; `PollingScheduler` has no error backoff; `startup-recovery.ts` makes one attempt per session with no retry. The vision says "cancellation/timeouts are first-class" and "overnight-safe" -- but the infrastructure for that is scattered or absent.
+
+The pattern (from `etienne-clone/src/types.ts`):
+
+```typescript
+withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>, ms: number, label: string): Promise<Result<T, TimeoutError>>
+withRetry<T, E>(fn: () => Promise<Result<T, E>>, config: RetryConfig): Promise<Result<T, E>>
+```
+
+`RetryConfig` has `retryOn: (error: unknown) => boolean` -- the caller decides what's retryable, not the primitive. `withTimeout` threads `AbortSignal` into the function so cancellation propagates correctly. Both return `Result` types, never throw.
+
+**Adaptation note:** etienne-clone rolls its own `Result<T,E>`; WorkTrain uses `neverthrow`. The `RetryConfig` shape and `retryOn` predicate are directly portable. The function bodies need to be rewritten against `ResultAsync` from neverthrow rather than copied verbatim.
+
+**Philosophy note:** "Higher-order functions as a tool" -- retry and timeout are cross-cutting behaviors that should be composed around functions, not scattered across call sites. "Cancellation/timeouts are first-class" is a stated coding principle. These primitives make it structurally impossible to call an async boundary without deciding upfront whether it can timeout or retry.
+
+**Done looks like:** `src/infra/async-boundaries.ts` exports `withTimeout()` and `withRetry()` using neverthrow `ResultAsync`. Used at: coordinator `callbackUrl` POST retries, polling error recovery, startup-recovery rehydrate attempts.
+
+---
+
+### `OrchestratorWorkflowAvailability` pattern: make missing-workflow states unrepresentable (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:2 Cap:1 Eff:3 Lev:1 Con:3 | Blocked: no
+
+WorkTrain's adaptive coordinator checks whether a requested workflow exists at dispatch time, but the check is implicit -- a missing workflow ID returns `workflow_not_found` from the engine at runtime, mid-session, after a session slot has been consumed. There is no compile-time or startup-time guarantee that the coordinator cannot route to a non-existent workflow.
+
+The pattern (from `etienne-clone/src/pipeline/orchestrator-workflow-selection.ts`):
+
+```typescript
+type OrchestratorWorkflowAvailability =
+  | { kind: 'standard_only' }
+  | { kind: 'standard_and_focused' }
+
+assessAvailableOrchestratorWorkflows(
+  availableWorkflowIds: readonly string[],
+  workflowIds: OrchestratorWorkflowIds,
+): Result<OrchestratorWorkflowAvailability, string>
+```
+
+The `standard=false` state cannot be constructed -- `assessAvailableOrchestratorWorkflows` returns `err` if the standard workflow is missing. The coordinator only ever holds a valid `OrchestratorWorkflowAvailability` value, so its dispatch logic cannot route to a missing workflow.
+
+**Philosophy note:** "Make illegal states unrepresentable" -- the type system enforces that routing only happens after availability is confirmed. A bare string `workflowId` can point to anything; a typed `WorkflowAvailability` discriminated union can only be constructed when the workflows actually exist. This is the difference between a label and a constraint.
+
+**Done looks like:** WorkTrain's adaptive coordinator calls `assessAvailableWorkflows(ctx, workflowIds)` at startup or pre-dispatch. Returns `Result<WorkflowAvailability, string>`. The dispatch function takes `WorkflowAvailability` as a parameter -- it is structurally impossible to call without first confirming availability.
+
+---
+
+### Per-session cost tracking: estimated spend visible in execution stats and console (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 8** | Cor:1 Cap:2 Eff:3 Lev:1 Con:3 | Blocked: no
+
+WorkTrain records `inputTokens` and `outputTokens` per session in `LlmTurnCompletedEvent` and step-level metrics, but never converts them to an estimated dollar cost. Operators have no way to see how much a session cost, which workflows are expensive, or when a stuck session has burned a disproportionate budget.
+
+The pattern (from `etienne-clone/src/observability/cost.ts`): `estimateCost(modelId, usage, env)` is a pure function that returns `Result<number, CostEstimationError>`. Pricing is overridable via `LLM_INPUT_COST_PER_1M` and `LLM_OUTPUT_COST_PER_1M` env vars (injected for testability). Token counts are already in `LlmTurnCompletedEvent` and the v2 session store.
+
+**Philosophy note:** "Observability as a constraint" -- cost is a first-class observable dimension of a session, not a post-hoc calculation. The env-injection pattern (`env: EnvRecord = process.env`) is already how WorkTrain tests env-dependent code. The function is pure and trivially testable.
+
+**Done looks like:** `src/observability/cost.ts` (port from etienne-clone, adapting to WorkTrain's model IDs). `estimatedCostUsd` added to `execution-stats.jsonl` rows and `SessionCompletedEvent`. Console session detail shows cost. Alert threshold emits `orchestrator_review_warning`-equivalent event when a session exceeds a configured per-workflow cost cap.
+
+**Things to hash out:**
+- Should cost alerts trigger escalation (surface to operator) or just log? A stuck session burning $5 should probably escalate.
+- Per-workflow cost caps belong in `TriggerDefinition.agentConfig` or in a separate `costPolicy` block?
+
+---
+
 ### Extensible output contract registration: coordinator-owned schemas, engine-enforced (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
@@ -2112,6 +2454,155 @@ The problem is not just "add an LLM to make the decision." An LLM making approva
 - What is the confidence threshold below which the synthetic gate escalates to a human rather than deciding? And how is that threshold configured per trigger?
 - How do you validate that a synthetic gate is actually performing the function of a human gate -- not just producing confident verdicts? Requires a calibration dataset of known-correct and known-incorrect artifacts with human ground truth.
 - Relationship to the `requireConfirmation` gate mechanism: the synthetic gate is the autonomous equivalent. It should produce the same typed routing signal the human confirmation gate produces, so the coordinator routing logic doesn't need to know which kind of gate fired.
+
+---
+
+### Multi-score deterministic workflow routing: replace string-matching coordinator dispatch with typed scoring (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+WorkTrain's adaptive coordinator selects which pipeline to run (quick_review, review_only, implement, full) based on task content. The current dispatch uses heuristics and LLM-assisted classification. This violates vision principle #1: zero LLM turns for routing. Coordinator decisions must be deterministic TypeScript code, not LLM reasoning.
+
+The pattern: compute independent typed scores (size, complexity, risk, breadth) over the task's structured metadata, classify the task into a typed shape discriminated union (`isolated_fix`, `small_cohesive_behavior`, `broad_or_risky`, etc.), find hard blockers (conditions that force a specific pipeline regardless of scores), and return a typed `WorkflowAssessment` with score breakdown, shape, blockers, and a human-readable reason string. No LLM call in the routing path.
+
+Pattern source: `etienne-clone/src/pipeline/orchestrator-workflow-selection.ts` -- `classifyMrShape()`, `assessWorkflowRoute()`, `chooseOrchestratorWorkflow()`. Also: `OrchestratorWorkflowAvailability` discriminated union ensures the "standard workflow missing" state cannot be constructed -- `assessAvailableOrchestratorWorkflows()` returns `Result<OrchestratorWorkflowAvailability, string>` so callers only hold valid states.
+
+**Philosophy note:** This is the vision's "control flow from data state" principle made concrete: routing decisions derive from an explicit typed state machine over task scores, not from an LLM's implicit reasoning. Exhaustiveness on the shape union (`assertNever` in the confidence function) makes the routing logic refactor-safe. The `WorkflowAssessment` return type (not a bare string) makes every decision traceable without reading session transcripts.
+
+**Done looks like:** The adaptive coordinator dispatches entirely from a `WorkflowAssessment` value produced by a pure TypeScript function over the task's metadata. No LLM call occurs before `runAdaptivePipeline()` selects a mode. A test can assert the routing decision for any task shape without mocking an LLM.
+
+**Things to hash out:**
+- What dimensions make sense for WorkTrain tasks? MR review uses size/cohesion/risk/breadth over file diffs. WorkTrain tasks may need different dimensions (specificity, ambiguity, scope breadth, ticket maturity).
+- Where does the input data come from? The task candidate (from queue poll) has title, body, labels, issue number. Is that enough to score confidently without an LLM?
+- Should hard blockers be configurable per-trigger (e.g. "tasks labeled `security` always use the full pipeline") or hardcoded in the assessment function?
+
+---
+
+### Required `reason` field on coordinator signals: typed audit trail for headless gate decisions (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+When an agent calls `signal_coordinator` with `kind: 'approval_needed'` or `kind: 'blocked'`, the coordinator receives a signal but not necessarily the agent's reasoning. The coordinator (and operator) must read the full session transcript to understand why the agent requested approval. At scale -- dozens of sessions per day -- transcript reading is impractical. Signals without stated reasoning are unauditable.
+
+Vision principle: "every decision visible in the session store." A signal that doesn't include the agent's stated reasoning violates this -- the decision (to pause and request approval) is visible, but the reason for it is buried in prose.
+
+The fix is structural: make `reason` a required field on `approval_needed` and `blocked` signal kinds. The engine or coordinator rejects signals that omit it. This is the same pattern as `SelfConfirmEvent.validationReason` in `etienne-clone/src/types.ts`, where the comment reads: "`validationReason` is REQUIRED -- it's the audit trail for headless gates."
+
+Pattern source: `etienne-clone/src/types.ts` `SelfConfirmEvent` -- `readonly validationReason: string` required (not optional) on the self-confirm event interface.
+
+**Philosophy note:** "Errors are data" applies to under-specified signals too. A signal with no stated reason is incomplete data -- the receiver cannot act on it deterministically. Making `reason` required at the schema level turns a runtime ambiguity into a compile-time constraint. Capability-based: the signal type declares what information it carries, enforced by the schema, not by convention.
+
+**Done looks like:** `CoordinatorSignalKindSchema` for `approval_needed` and `blocked` includes `reason: z.string().min(10)`. The `signal_emitted` daemon event includes the reason. `worktrain inbox` shows it. Coordinators can filter and route based on `reason` text without reading session transcripts.
+
+---
+
+### Typed finding extraction with multi-strategy fallback: enforce structured output contracts at coordinator boundaries (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+WorkTrain's coordinators read structured phase handoff artifacts (review verdicts, discovery summaries, shaped pitches) from session output. Today, if an agent doesn't produce a clean JSON handoff, the coordinator either fails hard or reads free-text that it can't reliably parse. There is no graceful degradation ladder for malformed or missing structured output.
+
+Vision principle: "structured outputs at every boundary" and "typed contracts make phases composable." This requires not just that the engine validates artifacts when they're present, but that the coordinator has a systematic recovery strategy when they aren't -- without silently accepting garbage.
+
+The pattern (from `etienne-clone/src/findings/extract.ts`):
+1. Try the ideal path: find the typed artifact in the last `complete_step` output
+2. Fallback: parse a JSON block from the agent's final text response, normalize field names and casing
+3. Fallback: reconstruct from observable side effects (e.g. tool calls that imply what the agent concluded)
+4. All paths return `Result<T, ExtractionError>` with a typed error union (`no_handoff_output`, `invalid_json`, `schema_mismatch`) -- never throw, never silently accept
+
+The normalization layer (`normalizeRawFindingsOutput`) handles the practical reality that agents produce `"APPROVE"` when the schema says `"approve"`, or `reviewFindings` when the field should be `findings`. This is boundary validation done right.
+
+**Philosophy note:** "Validate at boundaries, trust inside" -- this is exactly the boundary. The coordinator trusts the extracted artifact once it passes validation; it never trusts raw agent output. "Errors are data" -- `ExtractionError` is a typed discriminated union that lets coordinators route on failure kind, not parse error messages.
+
+**Done looks like:** Every coordinator phase that reads a structured handoff uses an `extractHandoff<T>()` function that applies the three-strategy fallback chain and returns `Result<T, HandoffExtractionError>`. The coordinator handles `err` cases explicitly -- escalate to operator, retry the phase, or degrade gracefully -- rather than crashing or silently accepting bad output.
+
+**Things to hash out:**
+- Strategy 3 (reconstruct from tool calls) is highly session-type-specific. Should each coordinator define its own reconstruction strategy, or is there a generic fallback (e.g. "use the last `complete_step` notes as free text")?
+- Should extraction errors produce a `report_issue` record automatically, or is that the coordinator's responsibility?
+
+---
+
+### `InteractionIntent` discriminated union: platform-neutral operator decision model (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+WorkTrain has no typed model for operator decisions on in-flight pipeline outcomes -- approving a PR, unblocking a stuck session, dropping an escalated finding, confirming an interpretation. Today, operator actions arrive as CLI commands (`worktrain tell`) or console HTTP calls, but the domain has no typed representation of what the operator actually decided. The coordinator cannot route on decision kind without parsing free text.
+
+The pattern (from `etienne-clone/src/messaging/types.ts`): `InteractionIntent` is an exhaustive discriminated union of everything an operator can decide -- `approve_all`, `skip`, `post_finding`, `drop_finding`, `edit_finding`, `batch_post`, `batch_drop`. Platform adapters (Slack buttons, console HTTP, CLI) translate operator input into these intents. The domain handler switches on them exhaustively with `assertNever`. Neither layer knows about the other.
+
+This directly addresses WorkTrain's open gap around human-in-the-loop for critical findings and stuck session escalation: the console or CLI emits a typed `OperatorIntent`, the coordinator handles it the same way regardless of channel.
+
+Pattern source: `etienne-clone/src/messaging/types.ts` `InteractionIntent` + `etienne-clone/src/messaging/review-handler.ts` `createReviewInteractionHandler()`.
+
+**Philosophy note:** "Make illegal states unrepresentable" -- a bare string `action=approve` can carry anything; a typed `{ kind: 'approve_all'; sessionId }` cannot. "Exhaustiveness everywhere" -- the switch on `intent.kind` with `assertNever` ensures adding a new decision kind forces every handler to be updated. "Capability-based" -- the operator is given exactly the decisions they can make, enforced by the type, not by convention.
+
+**Done looks like:** `OperatorIntent` discriminated union covers the decisions WorkTrain surfaces to operators: `approve_pr`, `block_pr`, `unblock_session`, `drop_escalation`, `confirm_interpretation`. Console and CLI translate input into `OperatorIntent` values. The coordinator handler switches on them. A test can assert coordinator behavior for any intent without mocking a UI.
+
+**Things to hash out:**
+- Which decisions should be in scope for v1? Not all decisions need to be interactive -- many can be autonomous. The union should cover only the cases where human judgment is genuinely required.
+- Should `OperatorIntent` carry a `reason?: string` (optional for human input, vs required for synthetic gates)? Or separate types for human vs synthetic decisions?
+
+---
+
+### `PendingDecision` store with pure state transitions: immutable approval state for operator-gated pipeline actions (May 7, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (needs InteractionIntent above)
+
+When a WorkTrain pipeline reaches a point requiring operator approval -- a critical finding before merge, an interpretation confirmation before coding, a PR before auto-merge -- it currently either blocks indefinitely (waiting for an outbox message) or skips the gate. There is no structured in-memory state tracking what's pending, what the operator decided, and what the disposition of each item is.
+
+The pattern (from `etienne-clone/src/messaging/pending-reviews.ts`): `PendingReview` is a fully immutable snapshot with `approvedFindings: ReadonlySet<FindingId>`, `droppedFindings: ReadonlySet<FindingId>`, `editedBodies: ReadonlyMap<FindingId, string>`, `status: 'pending' | 'posted' | 'skipped'`. All state transitions are pure functions `(state: PendingDecision) => PendingDecision` composed with `store.update(id, fn)` -- `approveFinding`, `dropFinding`, `editFinding`, `approveAllBySeverity`. The store is a thin `Map` wrapper with `add`, `get`, `update(id, fn)`, `cleanup(olderThanMs)`.
+
+Pattern source: `etienne-clone/src/messaging/pending-reviews.ts`.
+
+**Philosophy note:** "Derive state, don't accumulate it" -- each transition is a pure function over the current state, not an imperative mutation. `ReadonlySet` and `ReadonlyMap` enforce immutability at the type level. "Single source of state truth" -- the `PendingDecision` store is the one place that tracks what an operator has decided; no parallel flags or session-level booleans.
+
+**Done looks like:** `PendingDecisionStore` in `src/coordinator/pending-decisions.ts`. Pipeline sessions that reach an operator gate call `pendingDecisions.add(decision)`. The coordinator polls or subscribes and calls `pendingDecisions.update(id, applyIntent(intent))` when the operator acts. `cleanup(24 * 60 * 60 * 1000)` runs at startup to expire stale pending decisions.
+
+---
+
+### `BriefingDelivery` + `InteractionPort` ports: hexagonal adapter contract for operator notification channels (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:1 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: yes (needs InteractionIntent above)
+
+WorkTrain's notification path (when it ships) will need to deliver pipeline results to operators and receive their decisions back. If the notification logic is coupled to a specific channel (Slack, console, CLI), adding a second channel requires duplicating the entire delivery + interaction wiring. There is no current abstraction that separates "what to deliver" from "how to deliver it."
+
+The pattern (from `etienne-clone/src/messaging/port.ts`): two tiny focused interfaces -- `BriefingDelivery` (domain → adapter: `deliverBriefing`, `updateStatus`, `markCompleted`, `notifySkipped`) and `InteractionPort` (adapter → domain: `start`, `stop`, `onInteraction`). The adapter owns all layout decisions (threads, message IDs, button rendering). The domain never sees channel-specific types. Any channel -- Slack, console, webhook, CLI -- implements the same two interfaces.
+
+Pattern source: `etienne-clone/src/messaging/port.ts`.
+
+**Philosophy note:** "Keep interfaces small and focused" -- two interfaces with four methods each, no leakage of platform details into the domain. "Dependency injection for boundaries" -- the coordinator receives `BriefingDelivery` and `InteractionPort` as injected dependencies; swapping Slack for the console is a constructor argument change. "Capability-based architecture" -- the coordinator can only do what the `BriefingDelivery` interface exposes, not arbitrary channel operations.
+
+**Done looks like:** `PipelineDelivery` and `OperatorInteractionPort` interfaces in `src/coordinator/ports.ts`. Console HTTP adapter and CLI adapter each implement both. The coordinator takes them as constructor injections. Adding a Slack adapter requires only implementing the two interfaces, no coordinator changes.
+
+---
+
+### `CorrectionEvent` with typed `correctionType`: structured learning from operator edits to pipeline outputs (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: yes (needs PendingDecision store above)
+
+When an operator edits a WorkTrain output -- rewrites a PR description, changes a finding severity, adjusts a summary -- that edit is currently invisible to the system. The session event log records that the pipeline ran; it does not record what the operator thought was wrong with the output. This is the core gap in the per-run retrospective backlog item: there is no structured way to capture what the operator corrected.
+
+The pattern (from `etienne-clone/src/messaging/review-handler.ts` `emitCorrection()`): when an operator edits a finding, `CorrectionEvent` is emitted with a typed `correctionType: { textChanged, severityChanged, locationChanged, principleChanged, dropped }`. The event also carries `{ original, edited, context }`. Repeated correction patterns across sessions become training signal for improving prompts and workflows.
+
+Pattern source: `etienne-clone/src/messaging/review-handler.ts` `emitCorrection()` + `etienne-clone/src/types.ts` `CorrectionEvent`.
+
+**Philosophy note:** "Observability as a constraint" -- operator corrections are first-class events in the session store, not manual notes. "Errors are data" -- a correction is structured data about what the system got wrong, not a free-text annotation. The typed `correctionType` makes the correction machine-readable without LLM parsing.
+
+**Done looks like:** `PipelineCorrectionEvent` added to `DaemonEvent` union. When an operator edits a WorkTrain output via the `PendingDecision` flow, the correction is classified and emitted. `worktrain logs` surfaces corrections. A future analytics pass can aggregate correction patterns per workflow and per step to identify systematic output quality gaps.
 
 ---
 
