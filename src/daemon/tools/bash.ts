@@ -47,9 +47,9 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
           details: { stdout, stderr },
         };
       } catch (err: unknown) {
-        // ABORT_ERR is a string code -- it would fall through the numeric rawCode checks
-        // below and produce 'exit unknown'. Rethrow so _executeTools gets a clean error.
-        if ((err as { code?: unknown }).code === 'ABORT_ERR') throw err;
+        // AbortError falls through the numeric rawCode checks and produces 'exit unknown'.
+        // Rethrow so _executeTools gets a clean error.
+        if (err instanceof Error && err.name === 'AbortError') throw err;
 
         // Node's child_process.exec errors (ExecException) attach stdout, stderr,
         // code, and signal as own properties. Extract them so the agent can reason
