@@ -44,6 +44,7 @@ import {
 } from './cli/commands/index.js';
 import { writeStatsSummary } from './daemon/stats-summary.js';
 import type { ChildSessionResult, CoordinatorSpawnContext } from './coordinators/types.js';
+import { parseDaemonEvents, formatDiagnosticCard, formatDiagnosticJson } from './cli/commands/worktrain-diagnose.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -990,6 +991,36 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DIAGNOSE COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('diagnose <sessionId>')
+  .description(
+    'Print a failure card for a daemon session. Searches the last 7 days of daemon event logs. ' +
+    'Works without the daemon running. Accepts sessionId (UUID prefix) or workrailSessionId (sess_xxx).',
+  )
+  .option('--json', 'Output machine-readable JSON (full untruncated fields)')
+  .option('--ascii', 'Use ASCII-only output (no Unicode glyphs)')
+  .action((sessionId: string, options: { json?: boolean; ascii?: boolean }) => {
+    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+    const readFile = (filePath: string): string | null => {
+      try {
+        return fs.readFileSync(filePath, 'utf8');
+      } catch {
+        return null;
+      }
+    };
+    const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
+    if (options.json) {
+      process.stdout.write(formatDiagnosticJson(result) + '\n');
+    } else {
+      const card = formatDiagnosticCard(result, { ascii: options.ascii ?? false });
+      process.stdout.write(card + '\n');
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // HEALTH COMMAND (renamed from `status <sessionId>`)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1016,7 +1047,36 @@ program
     try {
       raw = fs.readFileSync(filePath, 'utf8');
     } catch {
-      process.stdout.write(`No events today. Is the daemon running? (Expected: ${filePath})\n`);
+      // Today's log doesn't exist -- fall through to cross-day diagnose path below.
+      raw = '';
+    }
+
+    // Check whether this session appears in today's log.
+    // WHY check before running health summary: if the session is not in today's log,
+    // runHealthSummary() would produce an empty/misleading result. For completed/prior-day
+    // sessions, parseDaemonEvents() provides a richer failure card across the last 7 days.
+    // Today's live sessions (actively running) continue to use runHealthSummary().
+    const sessionInTodayLog = raw.split('\n').some((line) => {
+      if (!line.trim()) return false;
+      try {
+        const obj = JSON.parse(line) as Record<string, unknown>;
+        const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
+        const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
+        return sid.startsWith(sessionId) || sid === sessionId ||
+          wrid.startsWith(sessionId) || wrid === sessionId;
+      } catch {
+        return false;
+      }
+    });
+
+    if (!sessionInTodayLog) {
+      // Cross-day delegation: session not in today's log, use diagnose failure card.
+      const readFile = (fp: string): string | null => {
+        try { return fs.readFileSync(fp, 'utf8'); } catch { return null; }
+      };
+      const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
+      const card = formatDiagnosticCard(result);
+      process.stdout.write(card + '\n');
       return;
     }
 

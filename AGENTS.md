@@ -263,6 +263,24 @@ Run all tests: `npx vitest run`. Run a specific file: `npx vitest run tests/path
 
 If you are working in a fresh worktree and `node_modules` or other required dependencies are missing, install them first and then run the necessary validation anyway. Missing dependencies in a new worktree are setup work, not a reason to skip verification.
 
+## Debugging daemon sessions
+
+When a daemon session fails or stops making progress, use `worktrain diagnose` to get a failure card -- category, evidence, and a suggested fix -- without reading raw JSONL files.
+
+```bash
+worktrain diagnose <sessionId>          # failure card (last 7 days)
+worktrain diagnose <sessionId> --json   # machine-readable JSON
+worktrain diagnose <sessionId> --ascii  # plain-terminal / pipe-safe output
+```
+
+`worktrain health <sessionId>` now also delegates to this for completed sessions from prior days (previously returned "No events today").
+
+Failure categories: `CONFIG` (bad model ID), `WORKFLOW` (stuck loop or timeout), `INFRA` (daemon stopped/crashed), `ORPHANED` (no terminal event), `SUCCESS`, `DEFAULT` (unrecognized).
+
+Source: `src/cli/commands/worktrain-diagnose.ts`. Design: `docs/design/worktrain-diagnose-ux-spec.md`.
+
+---
+
 ## Building and reloading
 
 ```bash
