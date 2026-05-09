@@ -44,7 +44,13 @@ import {
 } from './cli/commands/index.js';
 import { writeStatsSummary } from './daemon/stats-summary.js';
 import type { ChildSessionResult, CoordinatorSpawnContext } from './coordinators/types.js';
-import { parseDaemonEvents, formatDiagnosticCard, formatDiagnosticJson } from './cli/commands/worktrain-diagnose.js';
+import {
+  parseDaemonEvents,
+  analyzeFleet,
+  formatDiagnosticCard,
+  formatDiagnosticJson,
+  formatFleetSummary,
+} from './cli/commands/worktrain-diagnose.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -995,28 +1001,36 @@ program
 // ═══════════════════════════════════════════════════════════════════════════
 
 program
-  .command('diagnose <sessionId>')
+  .command('diagnose [sessionId]')
   .description(
-    'Print a failure card for a daemon session. Searches the last 7 days of daemon event logs. ' +
-    'Works without the daemon running. Accepts sessionId (UUID prefix) or workrailSessionId (sess_xxx).',
+    'Session diagnostics. No args: fleet summary with step bottleneck analysis and token burn. ' +
+    'Pass a sessionId for a per-session failure card with evidence and suggested fix. ' +
+    'Searches the last 7 days of daemon event logs. Works without the daemon running.',
   )
-  .option('--json', 'Output machine-readable JSON (full untruncated fields)')
+  .option('--workflow <id>', 'Filter fleet view by workflow ID (e.g. wr.discovery)')
+  .option('--json', 'Output machine-readable JSON (per-session only)')
   .option('--ascii', 'Use ASCII-only output (no Unicode glyphs)')
-  .action((sessionId: string, options: { json?: boolean; ascii?: boolean }) => {
+  .action((sessionId: string | undefined, options: { workflow?: string; json?: boolean; ascii?: boolean }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
     const readFile = (filePath: string): string | null => {
-      try {
-        return fs.readFileSync(filePath, 'utf8');
-      } catch {
-        return null;
-      }
+      try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
     };
-    const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
-    if (options.json) {
-      process.stdout.write(formatDiagnosticJson(result) + '\n');
+
+    if (sessionId !== undefined) {
+      // Per-session failure card
+      const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
+      if (options.json) {
+        process.stdout.write(formatDiagnosticJson(result) + '\n');
+      } else {
+        process.stdout.write(formatDiagnosticCard(result, { ascii: options.ascii ?? false }) + '\n');
+      }
     } else {
-      const card = formatDiagnosticCard(result, { ascii: options.ascii ?? false });
-      process.stdout.write(card + '\n');
+      // Fleet summary
+      const readDir = (dir: string): readonly string[] | null => {
+        try { return fs.readdirSync(dir); } catch { return null; }
+      };
+      const analysis = analyzeFleet(readDir, readFile, eventsDir, options.workflow);
+      process.stdout.write(formatFleetSummary(analysis, { ascii: options.ascii ?? false }) + '\n');
     }
   });
 

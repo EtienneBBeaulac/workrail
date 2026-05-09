@@ -265,19 +265,21 @@ If you are working in a fresh worktree and `node_modules` or other required depe
 
 ## Debugging daemon sessions
 
-When a daemon session fails or stops making progress, use `worktrain diagnose` to get a failure card -- category, evidence, and a suggested fix -- without reading raw JSONL files.
+`worktrain diagnose` is the single entry point for session observability.
 
 ```bash
-worktrain diagnose <sessionId>          # failure card (last 7 days)
-worktrain diagnose <sessionId> --json   # machine-readable JSON
-worktrain diagnose <sessionId> --ascii  # plain-terminal / pipe-safe output
+worktrain diagnose                        # fleet summary: outcome breakdown, per-workflow stats, token burn
+worktrain diagnose --workflow wr.discovery  # fleet filtered by workflow
+worktrain diagnose <sessionId>            # per-session failure card (last 7 days)
+worktrain diagnose <sessionId> --json     # machine-readable JSON
+worktrain diagnose <sessionId> --ascii    # plain-terminal / pipe-safe output
 ```
 
-`worktrain health <sessionId>` now also delegates to this for completed sessions from prior days (previously returned "No events today").
+`worktrain health <sessionId>` also delegates to diagnose for completed sessions from prior days.
 
 Failure categories: `CONFIG` (bad model ID), `WORKFLOW` (stuck loop or timeout), `INFRA` (daemon stopped/crashed), `ORPHANED` (no terminal event), `SUCCESS`, `DEFAULT` (unrecognized).
 
-Source: `src/cli/commands/worktrain-diagnose.ts`. Design: `docs/design/worktrain-diagnose-ux-spec.md`.
+Source: `src/cli/commands/worktrain-diagnose.ts`.
 
 ---
 
