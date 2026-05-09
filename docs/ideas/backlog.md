@@ -3418,6 +3418,26 @@ Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or co
 
 ---
 
+### wr.mr-review quality and architecture overhaul (May 8, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+The current `wr.mr-review` workflow produces findings that are often shallow, miss real issues present in the diff, and conflate pre-existing problems with changes introduced by the PR. In practice, reviews have missed incomplete migrations, attributed failures to the wrong root cause, and approved PRs with silent regressions in the commit history. The workflow runs as a single long-lived session reading the full diff in one pass, which limits how deeply any single concern can be investigated.
+
+The core gap: the review workflow does not spawn focused sub-agents to investigate suspicious areas. A reviewer that spots a potentially incomplete migration should be able to spawn a quick agent to grep the codebase for other sites that were not updated -- rather than noting it as a surface observation and moving on. Without targeted investigation, the review is pattern-matching on the diff rather than reasoning about system-wide impact.
+
+**Things to hash out:**
+- What should trigger spawning a sub-agent during review -- explicit workflow step, or reviewer judgment via `spawn_agent`?
+- Should sub-agents have narrow scope (e.g. "find all remaining `sessionId: string` in `src/daemon/`") or full workspace access?
+- How does the parent session synthesize sub-agent findings into the final verdict? What happens if a sub-agent returns inconclusive results?
+- What is the right decomposition of review concerns -- by file, by concern type, or by risk level?
+- How does the review workflow distinguish "pre-existing issue on main" from "regression introduced by this PR"?
+- What does a measurable acceptance criterion look like -- false negative rate, human reviewer agreement, or something else?
+
+---
+
 ### MR review session count inflation
 
 **Status: idea** | Priority: medium
