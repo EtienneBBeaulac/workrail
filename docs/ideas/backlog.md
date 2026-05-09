@@ -4808,7 +4808,7 @@ The session DAG shows structure but not meaning. When watching a session run in 
 
 ### Observability and logging as first-class citizens (Apr 17, 2026)
 
-**Status: idea** | Priority: high
+**Status: partial** -- `worktrain diagnose` shipped May 9, 2026 (PR #979). Deferred items tracked below.
 
 **Score: 11** | Cor:2 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
 
@@ -4842,6 +4842,17 @@ worktrain logs --format json            # machine-readable output
 - The `worktrain logs --session` command replays from the event store. How is this different from what the console already shows? Is the CLI version for non-console users or for programmatic processing?
 - Log rotation and retention -- how much disk space should logs consume, and who configures the retention policy?
 - "Silence = actively working" requires the agent loop to emit heartbeats. What is the heartbeat interval, and is this a new event type in the session store?
+
+**Delivered (May 9, 2026, PR #979):** `worktrain diagnose <sessionId>` -- scans last 7 days of daemon event logs, classifies sessions into CONFIG / WORKFLOW_STUCK / WORKFLOW_TIMEOUT / INFRA / ORPHANED / SUCCESS / DEFAULT, prints a failure card with evidence and suggested fix. `worktrain health <id>` now delegates to diagnose for prior-day sessions (previously returned "No events today"). `--json` and `--ascii` flags. Pure `parseDaemonEvents()` function with injected deps, 22 unit tests.
+
+**Still deferred:**
+- `worktrain failures` aggregate fleet view (which workflow/trigger fails most often)
+- `--since N` flag to widen the scan window beyond 7 days
+- `--verbose` flag for full step timeline (currently capped at 8 steps)
+- Conversation log `--deep` mode (full LLM turn text for stuck cases where argsSummary is truncated)
+- Push-based auto-write to outbox after each non-success session
+- Structured `failureCode` field in engine events (eliminate string-matching on `detail` field)
+- Console inline integration (show failure card per session in the UI)
 
 ---
 
