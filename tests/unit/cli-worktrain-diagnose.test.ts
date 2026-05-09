@@ -452,7 +452,7 @@ describe('formatDiagnosticCard', () => {
     };
     const card = formatDiagnosticCard(result, { noColor: true });
     expect(card).toContain('not found');
-    expect(card).toContain('--since');
+    expect(card).toContain('execution-stats.jsonl');
   });
 
   it('SUCCESS result does not show DEFAULT fallback text', () => {

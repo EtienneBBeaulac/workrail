@@ -1116,12 +1116,11 @@ program
       const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
       const filePath = path.join(eventsDir, `${date}.jsonl`);
 
-      let raw: string;
+      let raw = '';
       try {
         raw = fs.readFileSync(filePath, 'utf8');
       } catch {
-        process.stdout.write(`No events today. Is the daemon running? (Expected: ${filePath})\n`);
-        return;
+        // Today's log absent -- fall through to cross-day path below.
       }
 
       // WHY this shim block is inline: it is a temporary backward-compat bridge
@@ -1130,7 +1129,26 @@ program
       // migrate to `worktrain health <id>` -- extracting it would be premature.
       process.stderr.write(`\nNote: This is the old \`worktrain status <id>\` output. Use \`worktrain health <id>\` instead.\n\n`);
 
-      // Re-run the health summary logic (same code as the health command below).
+      const sessionInTodayLog = raw.split('\n').some((line) => {
+        if (!line.trim()) return false;
+        try {
+          const obj = JSON.parse(line) as Record<string, unknown>;
+          const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
+          const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
+          return sid.startsWith(sessionId) || sid === sessionId ||
+            wrid.startsWith(sessionId) || wrid === sessionId;
+        } catch { return false; }
+      });
+
+      if (!sessionInTodayLog) {
+        const readFile = (fp: string): string | null => {
+          try { return fs.readFileSync(fp, 'utf8'); } catch { return null; }
+        };
+        const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
+        process.stdout.write(formatDiagnosticCard(result) + '\n');
+        return;
+      }
+
       runHealthSummary(sessionId, raw);
       return;
     }

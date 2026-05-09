@@ -322,14 +322,16 @@ function classify(acc: SessionAccumulator): DiagnosticResult {
   const detailTruncated = detail.length >= 198; // detail field is capped at 200 chars by emitter
 
   // WORKFLOW: stuck
-  if (outcome === 'stuck' && acc.stuckReason !== null) {
+  // WHY fallback to 'no_progress' when outcome=stuck but no agent_stuck event: log ordering
+  // races (agent_stuck emitted after session_completed in the same flush) can lose the event.
+  if (outcome === 'stuck') {
     return {
       kind: 'WORKFLOW_STUCK',
       sessionId: acc.sessionId,
       workflowId: acc.workflowId,
       startedAt: acc.startedAt,
       durationMs,
-      stuckReason: acc.stuckReason,
+      stuckReason: acc.stuckReason ?? 'no_progress',
       stuckDetail: acc.stuckDetail ?? detail,
       toolName: acc.stuckToolName ?? undefined,
       argsSummary: acc.stuckArgsSummary ?? undefined,
@@ -359,7 +361,9 @@ function classify(acc: SessionAccumulator): DiagnosticResult {
   }
 
   // CONFIG: bad model ID or API key error
-  if (outcome === 'error' && /400|model identifier|invalid model|api.*key|authentication/i.test(detail)) {
+  // WHY not bare /400/: "400" matches unrelated strings like "Timeout after 400 attempts".
+  // Require model/key/auth context alongside the status code to avoid mis-classification.
+  if (outcome === 'error' && (/model identifier|invalid model|api.*key|authentication/i.test(detail) || /\b400\b.*model|\bmodel\b.*\b400\b/i.test(detail))) {
     return {
       kind: 'CONFIG_ERROR',
       sessionId: acc.sessionId,
@@ -708,10 +712,11 @@ function formatStepTimeline(steps: readonly StepRecord[], opts: FormatOptions): 
 
     const turnsStr = step.turns > 0 ? `${step.turns} turns` : '';
     const statusLabel = step.status === 'terminal' ? '  [STOPPED]' : '';
-    // WHY chalk.bold for terminal step (not chalk.red): Zone 3 → must not use red
-    // which is reserved for Zone 2 STUCK/error category label
+    // WHY no chalk.red on terminal step: Zone 3 → must not use red, which is reserved
+    // for Zone 2 STUCK/error category label (Von Restorff: two red elements cancel each other).
+    // Terminal step is plain text; the [STOPPED] label carries the semantic weight.
     const stepLine = step.status === 'terminal'
-      ? `  ${glyph}  step ${step.index}${turnsStr ? `  ${turnsStr}` : ''}${statusLabel}`
+      ? `  ${applyChalk(glyph, chalk.bold, opts)}  step ${step.index}${turnsStr ? `  ${turnsStr}` : ''}${statusLabel}`
       : `  ${glyph}  step ${step.index}${turnsStr ? `  ${turnsStr}` : ''}`;
 
     lines.push(stepLine);
@@ -732,7 +737,8 @@ function formatNotFound(result: DiagnosticNotFound, _opts: FormatOptions): strin
     `Session not found in the last ${result.daysBack} days.`,
     `Query: "${result.sessionIdQuery}"`,
     ``,
-    `Use --since N to widen the search, or verify the session ID.`,
+    `Verify the session ID, or check execution-stats.jsonl for older sessions:`,
+    `  cat ~/.workrail/data/execution-stats.jsonl | grep "${result.sessionIdQuery.slice(0, 8)}"`,
   ].join('\n');
 }
 
@@ -914,7 +920,7 @@ function formatDefault(result: DiagnosticDefault, opts: FormatOptions): string {
     `  Raw:     ${result.rawEventLine.slice(0, 200)}`,
     ``,
     `  No automated fix suggestion available for this failure type.`,
-    `  File an issue: https://github.com/exaudeus/workrail/issues`,
+    `  File an issue: https://github.com/EtienneBBeaulac/workrail/issues`,
     ``,
     formatMetricsLine(result.metrics),
     ``,
