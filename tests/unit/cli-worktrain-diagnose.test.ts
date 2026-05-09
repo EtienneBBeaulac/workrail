@@ -30,7 +30,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseDaemonEvents,
+  analyzeFleet,
+  resultCategory,
   formatDiagnosticCard,
+  formatFleetSummary,
   type DiagnosticResult,
   type SessionMetrics,
   type StepRecord,
@@ -468,5 +471,209 @@ describe('formatDiagnosticCard', () => {
     expect(card).not.toContain('No automated fix suggestion');
     expect(card).toContain('SUCCESS');
     expect(card).toContain('completed normally');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resultCategory() tests
+// ---------------------------------------------------------------------------
+
+describe('resultCategory', () => {
+  it('maps SUCCESS -> success', () => {
+    const result: DiagnosticResult = {
+      kind: 'SUCCESS', sessionId: 'a', workflowId: 'w', startedAt: 0, durationMs: 0,
+      metrics: { llmTurns: 0, stepAdvances: 0, toolCallsTotal: 0, toolCallsFailed: 0, inputTokens: 0, outputTokens: 0 },
+    };
+    expect(resultCategory(result)).toBe('success');
+  });
+
+  it('maps WORKFLOW_TIMEOUT -> workflow_timeout', () => {
+    const result: DiagnosticResult = {
+      kind: 'WORKFLOW_TIMEOUT', sessionId: 'a', workflowId: 'w', startedAt: 0, durationMs: 0,
+      timeoutReason: 'wall_clock', stepAdvances: 0, steps: [], processState: 'STOPPED',
+      metrics: { llmTurns: 5, stepAdvances: 0, toolCallsTotal: 0, toolCallsFailed: 0, inputTokens: 0, outputTokens: 0 },
+    };
+    expect(resultCategory(result)).toBe('workflow_timeout');
+  });
+
+  it('maps WORKFLOW_STUCK -> workflow_stuck', () => {
+    const result: DiagnosticResult = {
+      kind: 'WORKFLOW_STUCK', sessionId: 'a', workflowId: 'w', startedAt: 0, durationMs: 0,
+      stuckReason: 'repeated_tool_call', stuckDetail: 'stuck', steps: [], processState: 'STOPPED',
+      metrics: { llmTurns: 5, stepAdvances: 0, toolCallsTotal: 0, toolCallsFailed: 0, inputTokens: 0, outputTokens: 0 },
+    };
+    expect(resultCategory(result)).toBe('workflow_stuck');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// analyzeFleet() + formatFleetSummary() tests
+// ---------------------------------------------------------------------------
+
+describe('analyzeFleet', () => {
+  const FLEET_EVENTS_DIR = '/fleet/events';
+  const TODAY_FILE = `${FLEET_EVENTS_DIR}/2026-05-09.jsonl`;
+
+  function makeReadDir(files: Record<string, string>): (dir: string) => readonly string[] | null {
+    return (dir: string) => {
+      const entries = Object.keys(files)
+        .filter(p => p.startsWith(dir + '/'))
+        .map(p => p.slice(dir.length + 1));
+      return entries.length > 0 ? entries : null;
+    };
+  }
+
+  function makeReadFile(files: Record<string, string>): (path: string) => string | null {
+    return (path: string) => files[path] ?? null;
+  }
+
+  it('returns empty analysis when no files exist', () => {
+    const result = analyzeFleet(
+      makeReadDir({}),
+      makeReadFile({}),
+      FLEET_EVENTS_DIR,
+    );
+    expect(result.sessionCount).toBe(0);
+    expect(result.categoryBreakdown).toHaveLength(0);
+    expect(result.daysBack).toBe(7);
+  });
+
+  it('counts sessions by category', () => {
+    const lines = [
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_aaa', workflowId: 'wr.discovery', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_aaa', inputTokens: 100, outputTokens: 50, ts: 2000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_aaa', inputTokens: 100, outputTokens: 50, ts: 3000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_aaa', inputTokens: 100, outputTokens: 50, ts: 4000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_aaa', workflowId: 'wr.discovery', outcome: 'success', detail: '', ts: 5000 }),
+
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_bbb', workflowId: 'wr.discovery', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_bbb', inputTokens: 200, outputTokens: 80, ts: 2000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_bbb', inputTokens: 200, outputTokens: 80, ts: 3000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_bbb', inputTokens: 200, outputTokens: 80, ts: 4000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_bbb', workflowId: 'wr.discovery', outcome: 'timeout', detail: 'wall_clock', ts: 5000 }),
+    ].join('\n');
+
+    const files = { [TODAY_FILE]: lines };
+    const result = analyzeFleet(makeReadDir(files), makeReadFile(files), FLEET_EVENTS_DIR);
+
+    expect(result.sessionCount).toBe(2);
+    const cats = Object.fromEntries(result.categoryBreakdown);
+    expect(cats['success']).toBe(1);
+    expect(cats['workflow_timeout']).toBe(1);
+  });
+
+  it('filters by workflowFilter', () => {
+    const lines = [
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_disc', workflowId: 'wr.discovery', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_disc', inputTokens: 100, outputTokens: 50, ts: 2000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_disc', inputTokens: 100, outputTokens: 50, ts: 3000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_disc', inputTokens: 100, outputTokens: 50, ts: 4000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_disc', workflowId: 'wr.discovery', outcome: 'success', detail: '', ts: 5000 }),
+
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_code', workflowId: 'wr.coding-task', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_code', inputTokens: 100, outputTokens: 50, ts: 2000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_code', inputTokens: 100, outputTokens: 50, ts: 3000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_code', inputTokens: 100, outputTokens: 50, ts: 4000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_code', workflowId: 'wr.coding-task', outcome: 'success', detail: '', ts: 5000 }),
+    ].join('\n');
+
+    const files = { [TODAY_FILE]: lines };
+    const result = analyzeFleet(makeReadDir(files), makeReadFile(files), FLEET_EVENTS_DIR, 'wr.discovery');
+
+    expect(result.sessionCount).toBe(1);
+    expect(result.workflowStats[0]?.workflowId).toBe('wr.discovery');
+  });
+
+  it('excludes sessions with fewer than 3 LLM turns', () => {
+    const lines = [
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_tiny', workflowId: 'wr.test', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_tiny', inputTokens: 50, outputTokens: 10, ts: 2000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_tiny', workflowId: 'wr.test', outcome: 'success', detail: '', ts: 3000 }),
+    ].join('\n');
+
+    const files = { [TODAY_FILE]: lines };
+    const result = analyzeFleet(makeReadDir(files), makeReadFile(files), FLEET_EVENTS_DIR);
+    expect(result.sessionCount).toBe(0);
+  });
+
+  it('aggregates token burn and identifies timeout waste', () => {
+    const lines = [
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_ok', workflowId: 'wr.test', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_ok', inputTokens: 1000, outputTokens: 100, ts: 2000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_ok', inputTokens: 1000, outputTokens: 100, ts: 3000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_ok', inputTokens: 1000, outputTokens: 100, ts: 4000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_ok', workflowId: 'wr.test', outcome: 'success', detail: '', ts: 5000 }),
+
+      JSON.stringify({ kind: 'session_started', sessionId: 'sess_tmo', workflowId: 'wr.test', ts: 1000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_tmo', inputTokens: 5000, outputTokens: 500, ts: 2000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_tmo', inputTokens: 5000, outputTokens: 500, ts: 3000 }),
+      JSON.stringify({ kind: 'llm_turn_completed', sessionId: 'sess_tmo', inputTokens: 5000, outputTokens: 500, ts: 4000 }),
+      JSON.stringify({ kind: 'session_completed', sessionId: 'sess_tmo', workflowId: 'wr.test', outcome: 'timeout', detail: 'wall_clock', ts: 5000 }),
+    ].join('\n');
+
+    const files = { [TODAY_FILE]: lines };
+    const result = analyzeFleet(makeReadDir(files), makeReadFile(files), FLEET_EVENTS_DIR);
+
+    expect(result.totalTokens).toBe(3 * (1000 + 100) + 3 * (5000 + 500));
+    expect(result.timeoutTokens).toBe(3 * (5000 + 500));
+    expect(result.timeoutReasonCounts).toEqual([['wall_clock', 1]]);
+  });
+
+  it('respects daysBack parameter', () => {
+    const result = analyzeFleet(
+      makeReadDir({}),
+      makeReadFile({}),
+      FLEET_EVENTS_DIR,
+      undefined,
+      30,
+    );
+    expect(result.daysBack).toBe(30);
+  });
+});
+
+describe('formatFleetSummary', () => {
+  it('shows "no sessions" message when sessionCount is 0', () => {
+    const analysis = {
+      daysBack: 7,
+      sessionCount: 0,
+      categoryBreakdown: [] as const,
+      workflowStats: [] as const,
+      timeoutReasonCounts: [] as const,
+      totalTokens: 0,
+      timeoutTokens: 0,
+    };
+    const out = formatFleetSummary(analysis, { noColor: true });
+    expect(out).toContain('No sessions');
+    expect(out).toContain('7 days');
+  });
+
+  it('shows category breakdown with percentages', () => {
+    const analysis = {
+      daysBack: 7,
+      sessionCount: 4,
+      categoryBreakdown: [['workflow_timeout', 3], ['success', 1]] as const,
+      workflowStats: [] as const,
+      timeoutReasonCounts: [['wall_clock', 3]] as const,
+      totalTokens: 1_000_000,
+      timeoutTokens: 750_000,
+    };
+    const out = formatFleetSummary(analysis, { noColor: true });
+    expect(out).toContain('75%');
+    expect(out).toContain('25%');
+    expect(out).toContain('wall_clock');
+  });
+
+  it('includes daysBack in the header', () => {
+    const analysis = {
+      daysBack: 14,
+      sessionCount: 2,
+      categoryBreakdown: [['success', 2]] as const,
+      workflowStats: [] as const,
+      timeoutReasonCounts: [] as const,
+      totalTokens: 0,
+      timeoutTokens: 0,
+    };
+    const out = formatFleetSummary(analysis, { noColor: true });
+    expect(out).toContain('14 days');
   });
 });

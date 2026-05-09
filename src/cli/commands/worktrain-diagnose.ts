@@ -955,29 +955,49 @@ export function formatDiagnosticJson(result: DiagnosticResult): string {
 // Fleet analysis types
 // ---------------------------------------------------------------------------
 
+/**
+ * Typed category for a DiagnosticResult -- used in fleet analysis instead of
+ * string conversion. WHY a dedicated type: converting the discriminated union to
+ * a free-form string loses exhaustiveness. Using the result.kind directly as the
+ * grouping key preserves the union's guarantees and makes the category breakdown
+ * refactor-safe: adding a new DiagnosticResult variant forces updating all consumers.
+ */
+export type ResultCategory =
+  | 'success'
+  | 'config_error'
+  | 'workflow_stuck'
+  | 'workflow_timeout'
+  | 'infra_error'
+  | 'orphaned'
+  | 'default';
+
 export interface WorkflowStat {
   readonly workflowId: string;
   readonly total: number;
   readonly successCount: number;
   readonly avgDurationMs: number;
   readonly avgTurns: number;
-  readonly categoryBreakdown: ReadonlyMap<string, number>;
+  /** Sorted by count desc. */
+  readonly categoryBreakdown: ReadonlyArray<readonly [ResultCategory, number]>;
 }
 
 export interface FleetAnalysis {
+  /** How many days back the scan covered. */
+  readonly daysBack: number;
   /** Total sessions analysed (3+ LLM turns). */
   readonly sessionCount: number;
   /** Failure category -> count, sorted by count desc. */
-  readonly categoryBreakdown: ReadonlyArray<readonly [string, number]>;
-  /** Per-workflow stats. */
+  readonly categoryBreakdown: ReadonlyArray<readonly [ResultCategory, number]>;
+  /** Per-workflow stats, sorted by total desc. */
   readonly workflowStats: ReadonlyArray<WorkflowStat>;
   /**
-   * Which step sessions timed out on (from DiagnosticResult.pendingStep), sorted by frequency.
-   * WHY no per-step durations here: step names and durations require reading the WorkRail
-   * session store (snapshots), which is outside the daemon event log scope of this module.
-   * Per-step timing is available via the Python analysis script for now.
+   * Timeout reason -> count (wall_clock vs max_turns), sorted by count desc.
+   *
+   * WHY not step name: step names require reading the WorkRail session store
+   * (snapshot files), which is outside the daemon event log scope of this module.
+   * Use scripts/session-analysis.py for step-level timing analysis.
    */
-  readonly timeoutStepCounts: ReadonlyArray<readonly [string, number]>;
+  readonly timeoutReasonCounts: ReadonlyArray<readonly [string, number]>;
   /** Total tokens consumed. */
   readonly totalTokens: number;
   /** Tokens burned on sessions that timed out. */
@@ -985,165 +1005,154 @@ export interface FleetAnalysis {
 }
 
 // ---------------------------------------------------------------------------
+// resultCategory -- typed discriminant accessor (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a DiagnosticResult to its ResultCategory.
+ *
+ * WHY not a string: returning a typed ResultCategory keeps the fleet analysis
+ * refactor-safe. The compiler enforces exhaustive handling at every callsite.
+ * The default branch here becomes unreachable when all variants are covered.
+ */
+export function resultCategory(result: DiagnosticResult): ResultCategory {
+  switch (result.kind) {
+    case 'SUCCESS': return 'success';
+    case 'CONFIG_ERROR': return 'config_error';
+    case 'WORKFLOW_STUCK': return 'workflow_stuck';
+    case 'WORKFLOW_TIMEOUT': return 'workflow_timeout';
+    case 'INFRA_ERROR': return 'infra_error';
+    case 'ORPHANED': return 'orphaned';
+    case 'DEFAULT': return 'default';
+    case 'NOT_FOUND': return 'default';
+    case 'AMBIGUOUS': return 'default';
+    default: {
+      const _exhaustive: never = result;
+      // Safe fallback -- unreachable when all variants are handled.
+      return `default` as ResultCategory;
+      void _exhaustive;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // analyzeFleet -- pure, injected I/O
 // ---------------------------------------------------------------------------
 
 /**
- * Load all daemon event sessions from the events directory and derive fleet-level statistics.
+ * Scan daemon event logs and derive fleet-level statistics.
  *
- * @param readDir  - Injected: list file names in a directory. Returns null on error.
- * @param readFile - Injected: read a file. Returns null on error.
- * @param eventsDir - Absolute path to ~/.workrail/events/daemon/
- * @param workflowFilter - Optional: only include sessions for this workflowId.
+ * All I/O is injected -- this function is pure and fully testable.
+ *
+ * @param readDir       - Injected: list file names in a directory. Returns null on error.
+ * @param readFile      - Injected: read a file as UTF-8 string. Returns null on error.
+ * @param eventsDir     - Absolute path to the daemon events directory.
+ * @param workflowFilter - Optional: substring filter on workflowId.
+ * @param daysBack      - How many days to scan. Default: 7 (consistent with per-session default).
  */
 export function analyzeFleet(
   readDir: (dir: string) => readonly string[] | null,
   readFile: (path: string) => string | null,
   eventsDir: string,
   workflowFilter?: string,
+  daysBack = 7,
 ): FleetAnalysis {
-  // Collect all event lines keyed by sessionId across all daily files.
-  // WHY collect across all files first: parseDaemonEvents() already does per-session
-  // cross-file assembly; we just need to discover the full set of session IDs.
-  const sessionIds = new Set<string>();
+  // Discover all unique session IDs across all daily files.
+  // WHY scan all files first: parseDaemonEvents() does cross-file assembly per session;
+  // we only need the set of IDs to drive the per-session analysis pass.
   const fileNames = readDir(eventsDir) ?? [];
-
-  for (const fileName of fileNames) {
-    if (!fileName.endsWith('.jsonl')) continue;
-    const content = readFile(`${eventsDir}/${fileName}`);
-    if (!content) continue;
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const obj = JSON.parse(trimmed) as Record<string, unknown>;
-        const sid = (typeof obj['sessionId'] === 'string' ? obj['sessionId'] : null)
-          ?? (typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : null);
-        if (sid) sessionIds.add(sid);
-      } catch {
-        // malformed line -- skip
+  const sessionIds: ReadonlySet<string> = fileNames
+    .filter(f => f.endsWith('.jsonl'))
+    .reduce((acc: Set<string>, fileName) => {
+      const content = readFile(`${eventsDir}/${fileName}`);
+      if (!content) return acc;
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const obj = JSON.parse(trimmed) as Record<string, unknown>;
+          const sid = (typeof obj['sessionId'] === 'string' ? obj['sessionId'] : null)
+            ?? (typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : null);
+          if (sid) acc.add(sid);
+        } catch { /* malformed line -- skip */ }
       }
-    }
-  }
+      return acc;
+    }, new Set<string>());
 
-  // Analyse each unique session.
-  const results: Array<{ result: DiagnosticResult; turns: number }> = [];
+  // Analyse each session and filter to non-trivial results.
+  const analysed: ReadonlyArray<DiagnosticResult> = [...sessionIds]
+    .map(sid => parseDaemonEvents(sid, eventsDir, daysBack, readFile))
+    .filter((r): r is Exclude<DiagnosticResult, DiagnosticNotFound | DiagnosticAmbiguous> =>
+      r.kind !== 'NOT_FOUND' && r.kind !== 'AMBIGUOUS',
+    )
+    .filter(r => ('metrics' in r ? r.metrics.llmTurns : 0) >= 3)
+    .filter(r => !workflowFilter || ('workflowId' in r && r.workflowId.includes(workflowFilter)));
 
-  for (const sid of sessionIds) {
-    const result = parseDaemonEvents(sid, eventsDir, 14, readFile);
-    // Skip NOT_FOUND (shouldn't happen -- we found the ID in the files)
-    // and AMBIGUOUS (shouldn't happen -- we're using exact IDs from the logs)
-    if (result.kind === 'NOT_FOUND' || result.kind === 'AMBIGUOUS') continue;
+  // Category breakdown -- uses typed ResultCategory, not free-form strings.
+  const categoryBreakdown: ReadonlyArray<readonly [ResultCategory, number]> =
+    [...analysed.reduce((acc: Map<ResultCategory, number>, r) => {
+      const cat = resultCategory(r);
+      acc.set(cat, (acc.get(cat) ?? 0) + 1);
+      return acc;
+    }, new Map<ResultCategory, number>()).entries()]
+      .sort((a, b) => b[1] - a[1]);
 
-    const turns = 'metrics' in result ? result.metrics.llmTurns : 0;
-    if (turns < 3) continue; // skip trivial sessions
+  // Per-workflow stats.
+  const byWorkflow: ReadonlyMap<string, ReadonlyArray<DiagnosticResult>> =
+    analysed.reduce((acc: Map<string, DiagnosticResult[]>, r) => {
+      const wf = 'workflowId' in r ? r.workflowId : 'unknown';
+      const group = acc.get(wf) ?? [];
+      acc.set(wf, [...group, r]);
+      return acc;
+    }, new Map<string, DiagnosticResult[]>());
 
-    // Apply workflow filter
-    if (workflowFilter) {
-      const wf = 'workflowId' in result ? result.workflowId : '';
-      if (!wf.includes(workflowFilter)) continue;
-    }
+  const workflowStats: ReadonlyArray<WorkflowStat> = [...byWorkflow.entries()]
+    .map(([wfId, wfResults]) => {
+      const total = wfResults.length;
+      const catBreakdown: ReadonlyArray<readonly [ResultCategory, number]> =
+        [...wfResults.reduce((acc: Map<ResultCategory, number>, r) => {
+          const cat = resultCategory(r);
+          acc.set(cat, (acc.get(cat) ?? 0) + 1);
+          return acc;
+        }, new Map<ResultCategory, number>()).entries()]
+          .sort((a, b) => b[1] - a[1]);
+      return {
+        workflowId: wfId,
+        total,
+        successCount: wfResults.filter(r => r.kind === 'SUCCESS').length,
+        avgDurationMs: wfResults.reduce((a, r) => a + ('durationMs' in r ? r.durationMs : 0), 0) / total,
+        avgTurns: wfResults.reduce((a, r) => a + ('metrics' in r ? r.metrics.llmTurns : 0), 0) / total,
+        categoryBreakdown: catBreakdown,
+      };
+    })
+    .sort((a, b) => b.total - a.total);
 
-    results.push({ result, turns });
-  }
+  // Timeout reason breakdown.
+  const timeoutResults = analysed.filter(r => r.kind === 'WORKFLOW_TIMEOUT') as DiagnosticWorkflowTimeout[];
+  const timeoutReasonCounts: ReadonlyArray<readonly [string, number]> =
+    [...timeoutResults.reduce((acc: Map<string, number>, r) => {
+      acc.set(r.timeoutReason, (acc.get(r.timeoutReason) ?? 0) + 1);
+      return acc;
+    }, new Map<string, number>()).entries()]
+      .sort((a, b) => b[1] - a[1]);
 
-  // Derive category breakdown
-  const catCounts = new Map<string, number>();
-  for (const { result } of results) {
-    const cat = _resultCategory(result);
-    catCounts.set(cat, (catCounts.get(cat) ?? 0) + 1);
-  }
-  const categoryBreakdown = [...catCounts.entries()].sort((a, b) => b[1] - a[1]);
-
-  // Derive per-workflow stats
-  const wfGroups = new Map<string, Array<DiagnosticResult>>();
-  for (const { result } of results) {
-    const wf = 'workflowId' in result ? result.workflowId : 'unknown';
-    const group = wfGroups.get(wf) ?? [];
-    group.push(result);
-    wfGroups.set(wf, group);
-  }
-  const workflowStats: WorkflowStat[] = [];
-  for (const [wfId, wfResults] of wfGroups) {
-    const total = wfResults.length;
-    const successCount = wfResults.filter(r => r.kind === 'SUCCESS').length;
-    const durs = wfResults.map(r => 'durationMs' in r ? r.durationMs : 0);
-    const turnsArr = wfResults.map(r => 'metrics' in r ? r.metrics.llmTurns : 0);
-    const catMap = new Map<string, number>();
-    for (const r of wfResults) {
-      const c = _resultCategory(r);
-      catMap.set(c, (catMap.get(c) ?? 0) + 1);
-    }
-    workflowStats.push({
-      workflowId: wfId,
-      total,
-      successCount,
-      avgDurationMs: durs.reduce((a, b) => a + b, 0) / Math.max(total, 1),
-      avgTurns: turnsArr.reduce((a, b) => a + b, 0) / Math.max(total, 1),
-      categoryBreakdown: catMap,
-    });
-  }
-  workflowStats.sort((a, b) => b.total - a.total);
-
-  // Step bottleneck analysis for timeout sessions
-  const timeoutResults = results
-    .filter(({ result }) => _resultCategory(result).startsWith('timeout'))
-    .map(({ result }) => result);
-
-  const timeoutOnStep = new Map<string, number>();
-  for (const result of timeoutResults) {
-    const pending = _pendingStep(result);
-    if (pending) timeoutOnStep.set(pending, (timeoutOnStep.get(pending) ?? 0) + 1);
-  }
-  const timeoutStepCounts = [...timeoutOnStep.entries()].sort((a, b) => b[1] - a[1]);
-
-  // Token stats
-  let totalTokens = 0;
-  let timeoutTokens = 0;
-  for (const { result } of results) {
-    const tok = 'metrics' in result
-      ? result.metrics.inputTokens + result.metrics.outputTokens
-      : 0;
-    totalTokens += tok;
-    if (_resultCategory(result).startsWith('timeout')) timeoutTokens += tok;
-  }
+  // Token burn.
+  const totalTokens = analysed.reduce(
+    (a, r) => a + ('metrics' in r ? r.metrics.inputTokens + r.metrics.outputTokens : 0), 0,
+  );
+  const timeoutTokens = analysed
+    .filter(r => r.kind === 'WORKFLOW_TIMEOUT')
+    .reduce((a, r) => a + ('metrics' in r ? r.metrics.inputTokens + r.metrics.outputTokens : 0), 0);
 
   return {
-    sessionCount: results.length,
+    daysBack,
+    sessionCount: analysed.length,
     categoryBreakdown,
     workflowStats,
-    timeoutStepCounts,
+    timeoutReasonCounts,
     totalTokens,
     timeoutTokens,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Fleet analysis helpers (pure)
-// ---------------------------------------------------------------------------
-
-function _resultCategory(result: DiagnosticResult): string {
-  switch (result.kind) {
-    case 'SUCCESS': return 'success';
-    case 'NOT_FOUND': return 'not_found';
-    case 'AMBIGUOUS': return 'ambiguous';
-    case 'CONFIG_ERROR': return 'config/bad_model';
-    case 'WORKFLOW_STUCK': return `stuck/${result.stuckReason}/${result.toolName ?? '?'}`;
-    case 'WORKFLOW_TIMEOUT': return `timeout/${result.timeoutReason}`;
-    case 'INFRA_ERROR': return `infra/${result.infraReason}`;
-    case 'ORPHANED': return 'orphaned';
-    case 'DEFAULT': return `other/${result.outcome}`;
-    default: {
-      const _exhaustive: never = result;
-      return `unknown/${(_exhaustive as DiagnosticResult).kind}`;
-    }
-  }
-}
-
-function _pendingStep(result: DiagnosticResult): string | null {
-  if (result.kind === 'WORKFLOW_TIMEOUT') return result.timeoutReason ?? null;
-  if (result.kind === 'WORKFLOW_STUCK') return result.stuckReason ?? null;
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1155,18 +1164,18 @@ function _pendingStep(result: DiagnosticResult): string | null {
  * Pure function -- no I/O.
  */
 export function formatFleetSummary(analysis: FleetAnalysis, opts: FormatOptions = {}): string {
-  const lines: string[] = [];
-  const { sessionCount, categoryBreakdown, workflowStats, timeoutStepCounts, totalTokens, timeoutTokens } = analysis;
+  const { daysBack, sessionCount, categoryBreakdown, workflowStats, timeoutReasonCounts, totalTokens, timeoutTokens } = analysis;
 
   if (sessionCount === 0) {
-    return 'No sessions with 3+ LLM turns found in the last 14 days.';
+    return `No sessions with 3+ LLM turns found in the last ${daysBack} days.`;
   }
 
-  lines.push(applyChalk(`Fleet summary  (${sessionCount} sessions with 3+ turns)`, chalk.bold, opts));
+  const lines: string[] = [];
+  lines.push(applyChalk(`Fleet summary  (${sessionCount} sessions, last ${daysBack} days)`, chalk.bold, opts));
   lines.push('');
 
   // Category breakdown with bar chart
-  lines.push('Failure categories:');
+  lines.push('Outcome breakdown:');
   for (const [cat, count] of categoryBreakdown) {
     const pct = count / sessionCount * 100;
     const bar = _bar(pct, 25, opts);
@@ -1178,26 +1187,27 @@ export function formatFleetSummary(analysis: FleetAnalysis, opts: FormatOptions 
   lines.push('');
   lines.push('Per-workflow:');
   for (const wf of workflowStats) {
-    const successPct = Math.round(wf.successCount / wf.total * 100);
     lines.push('');
     lines.push(`  ${applyChalk(wf.workflowId, chalk.bold, opts)}  `
       + `(${wf.total} sessions, ${wf.successCount}/${wf.total} success, `
       + `avg ${_fmtDur(wf.avgDurationMs)}, avg ${Math.round(wf.avgTurns)} turns)`);
-    for (const [cat, count] of [...wf.categoryBreakdown.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+    for (const [cat, count] of wf.categoryBreakdown.slice(0, 5)) {
       lines.push(`    ${String(count).padStart(3)}  ${cat}`);
     }
   }
 
-  // Step bottleneck analysis
-  if (timeoutStepCounts.length > 0) {
-    const timeoutCount = categoryBreakdown.filter(([c]) => c.startsWith('timeout')).reduce((a, [, n]) => a + n, 0);
+  // Timeout reason breakdown
+  if (timeoutReasonCounts.length > 0) {
+    const timeoutCount = categoryBreakdown
+      .filter(([c]) => c === 'workflow_timeout')
+      .reduce((a, [, n]) => a + n, 0);
     lines.push('');
-    lines.push(`Timeout breakdown  (${timeoutCount} timeout sessions):`);
-    lines.push('');
-    lines.push('  Timeout reason:');
-    for (const [reason, count] of timeoutStepCounts.slice(0, 10)) {
+    lines.push(`Timeout reasons  (${timeoutCount} sessions):`);
+    for (const [reason, count] of timeoutReasonCounts) {
       lines.push(`    ${String(count).padStart(3)}  ${reason}`);
     }
+    lines.push('');
+    lines.push('  Note: use scripts/session-analysis.py for step-level breakdown.');
   }
 
   // Token burn
@@ -1205,9 +1215,9 @@ export function formatFleetSummary(analysis: FleetAnalysis, opts: FormatOptions 
   const avgPerSession = sessionCount > 0 ? Math.round(totalTokens / sessionCount) : 0;
   lines.push('');
   lines.push('Token burn:');
-  lines.push(`  Total:            ${_fmtTokens(totalTokens).padStart(18)}`);
-  lines.push(`  Burned on timeout: ${_fmtTokens(timeoutTokens).padStart(17)}  (${wastePct}% waste)`);
-  lines.push(`  Avg per session:   ${_fmtTokens(avgPerSession).padStart(17)}`);
+  lines.push(`  Total:             ${_fmtTokens(totalTokens).padStart(16)}`);
+  lines.push(`  Burned on timeout: ${_fmtTokens(timeoutTokens).padStart(16)}  (${wastePct}% waste)`);
+  lines.push(`  Avg per session:   ${_fmtTokens(avgPerSession).padStart(16)}`);
 
   return lines.join('\n');
 }
