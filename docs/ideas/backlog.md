@@ -4845,8 +4845,10 @@ worktrain logs --format json            # machine-readable output
 
 **Delivered (May 9, 2026, PR #979):** `worktrain diagnose <sessionId>` -- scans last 7 days of daemon event logs, classifies sessions into CONFIG / WORKFLOW_STUCK / WORKFLOW_TIMEOUT / INFRA / ORPHANED / SUCCESS / DEFAULT, prints a failure card with evidence and suggested fix. `worktrain health <id>` now delegates to diagnose for prior-day sessions (previously returned "No events today"). `--json` and `--ascii` flags. Pure `parseDaemonEvents()` function with injected deps, 22 unit tests.
 
+**Delivered (May 9, 2026, PR #982, #984):** `worktrain diagnose` (no args) shows fleet summary -- outcome breakdown, per-workflow stats, timeout reason counts, token burn. `--workflow` filter. `analyzeFleet()` is a pure typed function with injected deps; `ResultCategory` discriminated union enforces exhaustiveness. 34 unit tests total.
+
 **Still deferred:**
-- `worktrain failures` aggregate fleet view (which workflow/trigger fails most often)
+- Step-level duration analysis in fleet view: which workflow steps consume the most time, and where do sessions time out. Requires cross-referencing the WorkRail session store snapshots (`~/.workrail/data/snapshots/`) alongside daemon event logs. The daemon event log only has step advance counts, not step names or per-step durations. Partially addressed by `scripts/session-analysis.py` (dev tool, not integrated into the CLI). The full fix requires either: (a) emitting step names in `step_advanced` daemon events, or (b) a `analyzeSessionDeep()` function that reads both the daemon event log and the session store snapshots.
 - `--since N` flag to widen the scan window beyond 7 days
 - `--verbose` flag for full step timeline (currently capped at 8 steps)
 - Conversation log `--deep` mode (full LLM turn text for stuck cases where argsSummary is truncated)
