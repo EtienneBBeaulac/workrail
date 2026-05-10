@@ -2734,6 +2734,20 @@ When an MR review session (run by a WorkTrain agent) finds issues in a coding se
 
 ---
 
+### wr.discovery daemon sessions fail due to 30-minute default timeout (May 9, 2026)
+
+**Status: idea** | Priority: critical
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+Fleet analysis (May 9, 2026) of 75 daemon discovery sessions revealed: 6 sessions completed successfully in 17-43 minutes on the workrail codebase itself. 28+ sessions hit exactly 30.0 minutes -- the daemon's `DEFAULT_SESSION_TIMEOUT_MINUTES = 30` in `src/daemon/core/session-context.ts`. Sessions dispatched via the adaptive pipeline coordinator correctly get 55 minutes (`DISCOVERY_TIMEOUT_MS`) and succeed when they reach that budget. Sessions dispatched directly (via webhook trigger, `worktrain spawn`, or any path that doesn't go through the coordinator) inherit the 30-minute default and always fail.
+
+**Fix:** Raise `DEFAULT_SESSION_TIMEOUT_MINUTES` from 30 to 60 in `src/daemon/core/session-context.ts`. The successful sessions complete in 17-43 minutes; 60 minutes is sufficient headroom. Additionally, the `maxTurns=50` hits (~12 sessions) suggest some dispatch path is setting an explicit 50-turn cap -- trace the origin and raise or remove it.
+
+**Why this is the #1 MVP blocker:** wr.discovery completing reliably is a prerequisite for the full adaptive pipeline (discovery → shaping → coding → review → merge). Without it, every pipeline run fails at phase 1.
+
+---
+
 ### wr.discovery recommendation quality improvements v3.5 (May 6, 2026)
 
 **Status: done** | Shipped in PR #951 (feat/etienneb/discovery-workflow-v35, May 6, 2026)
