@@ -182,16 +182,16 @@ function makeSessionId(): string {
 describe('makeCompleteStepTool()', () => {
 
   describe('TC1: happy-path advance', () => {
-    it('returns { status: advanced, nextStep } and calls onAdvance', async () => {
+    it('returns { status: advanced, nextStep } and calls onAdvance with stepId', async () => {
       const sessionId = makeSessionId();
-      let advancedWith: { stepText: string; continueToken: string } | null = null;
+      let advancedWith: { stepText: string; continueToken: string; stepId?: string } | null = null;
       const { fake } = makeFakeCapturingExec(() => makeOkResponse({ continueToken: 'ct_nexttoken12345678901234567890' }));
 
       const tool = makeCompleteStepTool(
         sessionId,
         NULL_CTX,
         () => 'ct_current12345678901234567890',
-        (stepText, continueToken) => { advancedWith = { stepText, continueToken }; },
+        (stepText, continueToken, stepId) => { advancedWith = { stepText, continueToken, stepId }; },
         () => {},
         () => {},
         STUB_SCHEMAS,
@@ -204,6 +204,8 @@ describe('makeCompleteStepTool()', () => {
       expect(result.content[0].text).toContain('Step 2: Do More Work');
       expect(advancedWith).not.toBeNull();
       expect(advancedWith!.continueToken).toBe('ct_nexttoken12345678901234567890');
+      // pending.stepId from makeOkResponse fixture is 'step-2'
+      expect(advancedWith!.stepId).toBe('step-2');
     });
   });
 

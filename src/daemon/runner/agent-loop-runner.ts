@@ -251,7 +251,7 @@ export async function buildAgentReadySession(
       kind: 'step_advanced',
       sessionId,
       ...withWorkrailSession(state.workrailSessionId),
-      ...(state.lastCompletedStepId !== null ? { stepId: state.lastCompletedStepId } : {}),
+      ...(state.pendingStepIdAfterAdvance !== null ? { stepId: state.pendingStepIdAfterAdvance } : {}),
     });
   };
 

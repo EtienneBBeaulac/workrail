@@ -44,6 +44,25 @@ describe('advanceStep', () => {
     expect(state.currentContinueToken).toBe('token-1');
   });
 
+  it('stores pendingStepIdAfterAdvance when stepId is provided', () => {
+    const state = createSessionState('token-0');
+    advanceStep(state, 'Step 1 text', 'token-1', 'phase-1a-landscape');
+    expect(state.pendingStepIdAfterAdvance).toBe('phase-1a-landscape');
+  });
+
+  it('sets pendingStepIdAfterAdvance to null when stepId is absent', () => {
+    const state = createSessionState('token-0');
+    advanceStep(state, 'Step 1 text', 'token-1');
+    expect(state.pendingStepIdAfterAdvance).toBeNull();
+  });
+
+  it('overwrites pendingStepIdAfterAdvance on each advance', () => {
+    const state = createSessionState('token-0');
+    advanceStep(state, 'Step 1', 'token-1', 'phase-0-reframe');
+    advanceStep(state, 'Step 2', 'token-2', 'phase-1a-landscape');
+    expect(state.pendingStepIdAfterAdvance).toBe('phase-1a-landscape');
+  });
+
   it('accumulates multiple advances without losing earlier values', () => {
     const state = createSessionState('token-0');
     advanceStep(state, 'Step 1', 'token-1');
@@ -54,7 +73,7 @@ describe('advanceStep', () => {
     expect(state.currentContinueToken).toBe('token-2');
   });
 
-  it('only writes all three fields -- does not clobber other state', () => {
+  it('only writes the four fields -- does not clobber other state', () => {
     const state = createSessionState('token-0');
     state.turnCount = 5; // set separately
     advanceStep(state, 'Step 1', 'token-1');

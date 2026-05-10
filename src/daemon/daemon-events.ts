@@ -118,7 +118,10 @@ export interface StepAdvancedEvent {
   /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
   readonly workrailSessionId?: string;
   /**
-   * The workflow step ID that was just completed (e.g. 'phase-0-reframe').
+   * The ID of the workflow step the agent was assigned NEXT after this advance.
+   * Sourced from out.pending.stepId -- the step now pending in the engine after
+   * the advance was applied. NOT the step that just completed.
+   *
    * A correlation key -- maps this event to the workflow definition and session store.
    * Optional for backward compatibility with daemon logs written before this field existed.
    *

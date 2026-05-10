@@ -95,16 +95,12 @@ export interface SessionState {
   /** Number of complete LLM response turns since the agent loop started. */
   turnCount: number;
   /**
-   * The step ID that was most recently completed by advanceStep().
-   * Set to null before the first advance and between advances.
+   * The ID of the workflow step now pending after the most recent advance.
+   * Sourced from V2PendingStep.stepId (the NEXT step, not the completed one).
+   * Set to null before the first advance and when pending is absent.
    * Read by the agent-loop-runner emitter to include in step_advanced events.
-   *
-   * WHY on state (not passed directly to the emitter): the onAdvance callback has
-   * signature (stepText, continueToken) today; threading stepId directly would require
-   * changing the emitter's closure capture. Storing it on state keeps the emitter
-   * change minimal: read state.lastCompletedStepId at emit time.
    */
-  lastCompletedStepId: string | null;
+  pendingStepIdAfterAdvance: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +126,7 @@ export function createSessionState(initialToken: string): SessionState {
     pendingSteerParts: [],
     terminalSignal: null,
     turnCount: 0,
-    lastCompletedStepId: null,
+    pendingStepIdAfterAdvance: null,
   };
 }
 
@@ -143,18 +139,19 @@ export function createSessionState(initialToken: string): SessionState {
  *
  * WHY a named transition: combines four writes that must happen atomically --
  * pushing the step text to the steer queue, incrementing the advance count,
- * updating the continue token, and recording the completed step ID.
+ * updating the continue token, and recording the pending step ID for the emitter.
  *
  * Called by the onAdvance callback in buildAgentReadySession().
  *
- * @param stepId - The step ID that was just completed (from V2PendingStep.stepId).
- *   Optional -- absent when pending was null (final step completion path).
+ * @param pendingStepId - The step ID now pending after this advance (from V2PendingStep.stepId).
+ *   This is the NEXT step's ID, not the completed step's ID.
+ *   Optional -- absent when pending is null (final step completion path).
  */
-export function advanceStep(state: SessionState, stepText: string, continueToken: string, stepId?: string): void {
+export function advanceStep(state: SessionState, stepText: string, continueToken: string, pendingStepId?: string): void {
   state.pendingSteerParts.push(stepText);
   state.stepAdvanceCount++;
   state.currentContinueToken = continueToken;
-  state.lastCompletedStepId = stepId ?? null;
+  state.pendingStepIdAfterAdvance = pendingStepId ?? null;
 }
 
 /**
