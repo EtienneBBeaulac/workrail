@@ -151,6 +151,12 @@ export interface StepRecord {
   readonly status: 'completed' | 'terminal' | 'not_reached';
   /** Turn count for this step (turns between previous step_advanced and this one) */
   readonly turns: number;
+  /**
+   * The workflow step ID for this step (e.g. 'phase-0-reframe').
+   * Present when the daemon emitted stepId on the step_advanced event (requires daemon
+   * version that includes this field). Absent for sessions from older daemon versions.
+   */
+  readonly stepId?: string;
 }
 
 export type ProcessState = 'STOPPED' | 'RUNNING' | 'UNKNOWN';
@@ -180,6 +186,8 @@ interface SessionAccumulator {
   // Track LLM turns per step for step timeline
   turnsAtLastStep: number;
   stepTurnCounts: number[];
+  // Step IDs in order of completion (from step_advanced events, optional per event)
+  stepIds: Array<string | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +478,9 @@ function accumulateEvent(acc: SessionAccumulator, obj: Record<string, unknown>, 
       acc.stepTurnCounts.push(turnsForStep);
       acc.turnsAtLastStep = acc.llmTurns;
       acc.stepAdvances++;
+      // stepId is optional -- present only in daemon versions that emit it
+      const sid = typeof obj['stepId'] === 'string' ? obj['stepId'] : undefined;
+      acc.stepIds.push(sid);
       break;
     }
     case 'tool_call_started': {
@@ -535,6 +546,7 @@ function createAccumulator(sessionId: string): SessionAccumulator {
     lastEventKind: null,
     turnsAtLastStep: 0,
     stepTurnCounts: [],
+    stepIds: [],
   };
 }
 
@@ -552,7 +564,13 @@ function buildMetrics(acc: SessionAccumulator): SessionMetrics {
 function buildSteps(acc: SessionAccumulator): StepRecord[] {
   const steps: StepRecord[] = [];
   for (let i = 0; i < acc.stepTurnCounts.length; i++) {
-    steps.push({ index: i + 1, status: 'completed', turns: acc.stepTurnCounts[i] ?? 0 });
+    const stepId = acc.stepIds[i];
+    steps.push({
+      index: i + 1,
+      status: 'completed',
+      turns: acc.stepTurnCounts[i] ?? 0,
+      ...(stepId !== undefined ? { stepId } : {}),
+    });
   }
   // Add terminal step (the one that failed/timed out)
   if (acc.stepAdvances > 0 || acc.llmTurns > 0) {
@@ -561,6 +579,7 @@ function buildSteps(acc: SessionAccumulator): StepRecord[] {
       index: steps.length + 1,
       status: acc.completedEvent?.outcome === 'success' ? 'completed' : 'terminal',
       turns: turnsOnTerminalStep,
+      // Terminal step has no stepId -- it's the step the session was on when it stopped
     });
   }
   return steps;

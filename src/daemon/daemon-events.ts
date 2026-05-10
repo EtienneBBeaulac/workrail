@@ -117,6 +117,17 @@ export interface StepAdvancedEvent {
   readonly sessionId: RunId;
   /** The WorkRail session ID for correlation. Present when continueToken was decoded. */
   readonly workrailSessionId?: string;
+  /**
+   * The workflow step ID that was just completed (e.g. 'phase-0-reframe').
+   * A correlation key -- maps this event to the workflow definition and session store.
+   * Optional for backward compatibility with daemon logs written before this field existed.
+   *
+   * WHY stepId only (not stepTitle): stepId is a correlation key that belongs in the
+   * daemon event log. stepTitle is human-readable content that lives authoritatively
+   * in the workflow definition and session store -- duplicating it here would violate
+   * single source of state truth.
+   */
+  readonly stepId?: string;
 }
 
 /** Workflow run ended (success, error, or timeout). */

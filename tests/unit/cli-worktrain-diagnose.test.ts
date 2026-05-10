@@ -75,8 +75,8 @@ function toolCallStarted(sessionId: string, toolName: string, ts = 1100): string
   return JSON.stringify({ kind: 'tool_call_started', sessionId, toolName, argsSummary: 'args', ts });
 }
 
-function stepAdvanced(sessionId: string, ts = 1300): string {
-  return JSON.stringify({ kind: 'step_advanced', sessionId, ts });
+function stepAdvanced(sessionId: string, ts = 1300, stepId?: string): string {
+  return JSON.stringify({ kind: 'step_advanced', sessionId, ts, ...(stepId ? { stepId } : {}) });
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +280,44 @@ describe('parseDaemonEvents', () => {
     expect(() => parseDaemonEvents('sess_abc123', EVENTS_DIR, 7, readFile)).not.toThrow();
     const result = parseDaemonEvents('sess_abc123', EVENTS_DIR, 7, readFile);
     expect(result.kind).toBe('SUCCESS');
+  });
+
+  it('populates stepId on StepRecord when step_advanced event includes stepId', () => {
+    const readFile = makeReadFile({
+      [`${EVENTS_DIR}/${TODAY}.jsonl`]: [
+        sessionStarted('sess_abc123'),
+        llmTurn('sess_abc123', 100, 50, 1100),
+        stepAdvanced('sess_abc123', 1200, 'phase-0-reframe'),
+        llmTurn('sess_abc123', 100, 50, 1300),
+        stepAdvanced('sess_abc123', 1400, 'phase-1a-landscape'),
+        sessionCompleted('sess_abc123', 'timeout', 'wall_clock', 2000),
+      ].join('\n'),
+    });
+    const result = parseDaemonEvents('sess_abc123', EVENTS_DIR, 7, readFile);
+    expect(result.kind).toBe('WORKFLOW_TIMEOUT');
+    if (result.kind === 'WORKFLOW_TIMEOUT') {
+      expect(result.steps[0]?.stepId).toBe('phase-0-reframe');
+      expect(result.steps[1]?.stepId).toBe('phase-1a-landscape');
+      // Terminal step has no stepId
+      expect(result.steps[2]?.stepId).toBeUndefined();
+    }
+  });
+
+  it('handles step_advanced events without stepId (backward compat with old daemon logs)', () => {
+    const readFile = makeReadFile({
+      [`${EVENTS_DIR}/${TODAY}.jsonl`]: [
+        sessionStarted('sess_abc123'),
+        llmTurn('sess_abc123', 100, 50, 1100),
+        stepAdvanced('sess_abc123', 1200), // no stepId
+        sessionCompleted('sess_abc123', 'timeout', 'wall_clock', 2000),
+      ].join('\n'),
+    });
+    const result = parseDaemonEvents('sess_abc123', EVENTS_DIR, 7, readFile);
+    expect(result.kind).toBe('WORKFLOW_TIMEOUT');
+    if (result.kind === 'WORKFLOW_TIMEOUT') {
+      // stepId absent -- backward compat
+      expect(result.steps[0]?.stepId).toBeUndefined();
+    }
   });
 
   it('accumulates metrics across multiple turns and tool calls', () => {

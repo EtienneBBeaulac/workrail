@@ -244,10 +244,15 @@ export async function buildAgentReadySession(
   const MAX_ISSUE_SUMMARIES = 10;
   const STUCK_REPEAT_THRESHOLD = 3;
 
-  const onAdvance = (stepText: string, continueToken: string): void => {
-    advanceStep(state, stepText, continueToken);
+  const onAdvance = (stepText: string, continueToken: string, stepId?: string): void => {
+    advanceStep(state, stepText, continueToken, stepId);
     if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
-    emitter?.emit({ kind: 'step_advanced', sessionId, ...withWorkrailSession(state.workrailSessionId) });
+    emitter?.emit({
+      kind: 'step_advanced',
+      sessionId,
+      ...withWorkrailSession(state.workrailSessionId),
+      ...(state.lastCompletedStepId !== null ? { stepId: state.lastCompletedStepId } : {}),
+    });
   };
 
   const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {

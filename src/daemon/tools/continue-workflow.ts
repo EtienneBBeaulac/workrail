@@ -14,7 +14,7 @@ import { persistTokens, withWorkrailSession } from './_shared.js';
 export function makeContinueWorkflowTool(
   sessionId: RunId,
   ctx: V2ToolContext,
-  onAdvance: (nextStepText: string, continueToken: string) => void,
+  onAdvance: (nextStepText: string, continueToken: string, stepId?: string) => void,
   onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
@@ -150,7 +150,7 @@ export function makeContinueWorkflowTool(
         ? `## Next step: ${pending.title}\n\n${pending.prompt}\n\ncontinueToken: ${continueToken}`
         : `Step advanced. continueToken: ${continueToken}`;
 
-      onAdvance(stepText, continueToken);
+      onAdvance(stepText, continueToken, pending?.stepId);
 
       return {
         content: [{ type: 'text', text: stepText }],
@@ -201,7 +201,7 @@ export function makeCompleteStepTool(
   sessionId: RunId,
   ctx: V2ToolContext,
   getCurrentToken: () => string,
-  onAdvance: (nextStepText: string, continueToken: string) => void,
+  onAdvance: (nextStepText: string, continueToken: string, stepId?: string) => void,
   onComplete: (notes: string | undefined, artifacts?: readonly unknown[]) => void,
   onTokenUpdate: (t: string) => void,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -366,7 +366,7 @@ export function makeCompleteStepTool(
         ? `${JSON.stringify({ status: 'advanced', nextStep: pending.title })}\n\n## ${pending.title}\n\n${pending.prompt}`
         : JSON.stringify({ status: 'advanced', nextStep: nextStepTitle });
 
-      onAdvance(stepText, newContinueToken);
+      onAdvance(stepText, newContinueToken, pending?.stepId);
 
       return {
         content: [{ type: 'text', text: stepText }],

@@ -148,8 +148,14 @@ export interface SessionScope {
   /**
    * Called by `complete_step` / `continue_workflow` tools when the agent advances
    * to the next step. Updates mutable session state in runWorkflow().
+   *
+   * @param stepText - Prompt text for the next step (injected into agent via steer).
+   * @param continueToken - Updated continue token from the engine response.
+   * @param stepId - The step ID that was just completed (from V2PendingStep.stepId).
+   *   Stored on SessionState.lastCompletedStepId so the emitter can include it in
+   *   step_advanced events as a correlation key.
    */
-  readonly onAdvance: (stepText: string, continueToken: string) => void;
+  readonly onAdvance: (stepText: string, continueToken: string, stepId?: string) => void;
 
   /**
    * Called by `complete_step` tool when the workflow completes.
