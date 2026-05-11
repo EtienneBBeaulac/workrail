@@ -1,0 +1,62 @@
+{
+  "subagent": "2d_strategy_signals",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "signals": [
+    {
+      "signal": "VISION.md explicitly excludes agent-hierarchy frameworks (manager-of-managers) as a default architecture",
+      "code": "market_entering",
+      "detail": "Will NOT merge: 'Agent-hierarchy frameworks (manager-of-managers / nested planner trees) as a default architecture'. This is a deliberate anti-pattern stance -- OpenClaw prefers flat agent dispatch over deep orchestration trees. Direct contrast to WorkTrain's coordinator pipeline model.",
+      "source": "https://github.com/openclaw/openclaw/blob/main/VISION.md",
+      "tag": "official",
+      "time_period": "30-180_days"
+    },
+    {
+      "signal": "Plugin strategy: core stays lean, new capabilities go to ClawHub (external registry)",
+      "code": "capability_adding",
+      "detail": "VISION: 'Core stays lean; optional capability should usually ship as plugins. We are generally slimming down core while expanding what plugins can do.' ClawHub is the plugin marketplace. This is an ecosystem moat play.",
+      "source": "https://github.com/openclaw/openclaw/blob/main/VISION.md",
+      "tag": "official",
+      "time_period": "30-180_days"
+    },
+    {
+      "signal": "Memory: converging on one recommended default path (currently multiple memory options)",
+      "code": "motion_changing",
+      "detail": "VISION: 'Today we ship multiple memory options; over time we plan to converge on one recommended default path.' Currently one memory plugin slot active at a time.",
+      "source": "https://github.com/openclaw/openclaw/blob/main/VISION.md",
+      "tag": "official",
+      "time_period": "30-180_days"
+    },
+    {
+      "signal": "Governance: steipete-led, PSPDFKit connection, heavily individual-contributor model",
+      "code": "market_entering",
+      "detail": "Top contributor (steipete / Peter Steinberger) has 24k commits out of ~35k in 90 days -- extremely concentrated. Strong individual vision driver, not committee-driven. High bus factor, but also high velocity.",
+      "source": "GitHub contributor API",
+      "tag": "official",
+      "time_period": "last_30_days"
+    },
+    {
+      "signal": "Sponsored by OpenAI, GitHub, NVIDIA, Vercel -- broadly supported across the AI ecosystem",
+      "code": "capability_adding",
+      "detail": "Marquee sponsors listed in README. Signals ecosystem backing, not niche project.",
+      "source": "https://github.com/openclaw/openclaw/blob/main/README.md",
+      "tag": "official",
+      "time_period": "30-180_days"
+    },
+    {
+      "signal": "Windows (WSL2) + Linux systemd support -- cross-platform operator reach",
+      "code": "market_entering",
+      "detail": "schtasks.ts for Windows task scheduler, systemd.ts for Linux. Explicit WSL2 recommendation in README. WorkTrain is macOS-only today.",
+      "source": "https://github.com/openclaw/openclaw/tree/main/src/daemon",
+      "tag": "official",
+      "time_period": "180+_days"
+    },
+    {
+      "signal": "LLM-assisted exec approvals (announced): use LLM reasoning for tool approval policy",
+      "code": "capability_adding",
+      "detail": "Issue #79157: 'LLM-assisted exec approvals / policy reasoning'. Not yet shipped but filed as a feature, suggests direction toward runtime policy intelligence.",
+      "source": "https://github.com/openclaw/openclaw/issues/79157",
+      "tag": "announced_undated",
+      "time_period": "last_30_days"
+    }
+  ]
+}

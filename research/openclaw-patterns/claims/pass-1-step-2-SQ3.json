@@ -1,0 +1,52 @@
+{
+  "subQuestion": "SQ3",
+  "topic": "Context engine registry/delegate -- pluggable buildSystemPrompt()",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ3-C1",
+      "text": "The registry is a process-global singleton using Symbol.for('openclaw.contextEngineRegistryState') + resolveGlobalSingleton(). The singleton pattern ensures duplicated dist chunks still share one registry map. Map<id, { factory, owner }>.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/registry.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3",
+      "worktrain_adaptation": "WorkTrain doesn't need a plugin registry initially. The minimal seam is: extract a ContextAssembler interface with assemble(trigger, enricherResult, soul, workspaceCtx) -> string, provide DefaultContextAssembler that wraps the current buildSystemPrompt() pipeline, and inject it into buildAgentReadySession(). No global registry needed for Phase 1."
+    },
+    {
+      "id": "SQ3-C2",
+      "text": "resolveContextEngine() has a safe fallback chain: try configured engine id -> if unregistered, log + fallback to default engine id -> if default also fails, throw. Non-default failures are always degraded gracefully; only the default engine failing is a hard error.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/registry.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3",
+      "worktrain_adaptation": "Directly portable: WorkTrain's context assembler should always have a DefaultContextAssembler fallback that is the current hardcoded pipeline. Custom assemblers can be injected per-trigger (via agentConfig) with fallback to default."
+    },
+    {
+      "id": "SQ3-C3",
+      "text": "wrapContextEngineWithSessionKeyCompat() is a Proxy-based backward compatibility layer that strips unknown params (sessionKey, prompt) from method calls for old engines that reject them. Pattern: detect rejection via error message regex patterns, retry without the rejected key, cache which keys the engine rejected for future calls.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/registry.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3",
+      "worktrain_adaptation": "Not needed for WorkTrain Phase 1. The compat pattern is only needed when third-party plugins might use older interface versions. WorkTrain controls all implementors initially."
+    },
+    {
+      "id": "SQ3-C4",
+      "text": "ContextEngineFactory = (ctx: ContextEngineFactoryContext) => ContextEngine | Promise<ContextEngine>. ContextEngineFactoryContext has { config?, agentDir?, workspaceDir? }. Factories receive runtime context so they can initialize DB connections, load workspace-specific config, etc.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/registry.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3",
+      "worktrain_adaptation": "WorkTrain factory context: { trigger: WorkflowTrigger, enricherResult: EnricherResult, soulContent: string, workspaceContext: string | null }. The factory receives everything currently passed to buildSystemPrompt() -- the assembled prompt is the output."
+    },
+    {
+      "id": "SQ3-C5",
+      "text": "delegate.ts's delegateCompactionToRuntime() lazily imports the runtime compact module with a module-level promise (compactRuntimePromise ??= import(...)). This lazy-load-on-first-call pattern prevents the compact path from bloating startup even though it's rare.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/delegate.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3",
+      "worktrain_adaptation": "WorkTrain's context assembly is currently synchronous. If a future ContextAssembler needs async (e.g. vector search for prior notes), the lazy-import pattern from delegate.ts ensures the async path doesn't add startup overhead."
+    }
+  ]
+}

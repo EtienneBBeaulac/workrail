@@ -1,0 +1,34 @@
+{
+  "subQuestion": "SQ2",
+  "topic": "Trajectory write path and unified schema design",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ2-C1",
+      "text": "Trajectory writes use a QueuedFileWriter per session (keyed by filePath). The writer map is capped at MAX_TRAJECTORY_WRITERS=100 and evicts LRU when full. Each write is queued (non-blocking) and flushed asynchronously. A truncation sentinel is reserved (TRAJECTORY_RUNTIME_TRUNCATION_SENTINEL_RESERVE_BYTES=2048) so even a full file still has space for a final 'file full' marker.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/trajectory/runtime.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2",
+      "worktrain_adaptation": "WorkTrain's DaemonEventEmitter uses fs.appendFile() with no buffering or write queue. Under burst (many tool calls in quick succession), this can cause concurrent appends that corrupt JSONL ordering. Adopting a QueuedFileWriter (queue writes to a per-file Promise chain) would eliminate this. The pattern: Map<filePath, Promise<void>> where each write chains onto the previous."
+    },
+    {
+      "id": "SQ2-C2",
+      "text": "writeTrajectoryPointerBestEffort() writes a pointer file (<sessionFile>.trajectory) that links the session transcript file to the runtime trace file. The pointer file is created with O_EXCL (exclusive create -- fail if exists) so only the first writer wins. Contains { traceSchema, schemaVersion, sessionId, runtimeFile }. Symlinks in the pointer directory abort the write (security guard).",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/trajectory/runtime.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2",
+      "worktrain_adaptation": "WorkTrain needs a cross-reference mechanism between the daemon event log and the v2 session event store. A simple pointer file (~/.workrail/sessions/<sessionId>/daemon-trace.json -> { daemonEventLogPath, processSessionId }) would replace the current reliance on workrailSessionId correlation. O_EXCL creation prevents double-creation on crash-recovery."
+    },
+    {
+      "id": "SQ2-C3",
+      "text": "OpenClaw sanitizes trajectory data with normalizeTrajectoryData() which recursively truncates: strings at TRAJECTORY_RUNTIME_DATA_STRING_MAX_CHARS (32768), arrays at TRAJECTORY_RUNTIME_DATA_ARRAY_MAX_ITEMS (64), objects at TRAJECTORY_RUNTIME_DATA_OBJECT_MAX_KEYS (64), depth at TRAJECTORY_RUNTIME_DATA_MAX_DEPTH (6). All sizes are constants, making them easy to tune.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/trajectory/runtime.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2",
+      "worktrain_adaptation": "WorkTrain's DaemonEvent summaries are truncated ad-hoc (80 chars here, 200 there, 8KB there). A centralized sanitizeEventData() with named constants would make the truncation policy consistent and auditable. Direct adaptation: create src/daemon/event-sanitizer.ts with MAX_SUMMARY_CHARS, MAX_NOTES_CHARS, MAX_PAYLOAD_DEPTH constants."
+    }
+  ]
+}

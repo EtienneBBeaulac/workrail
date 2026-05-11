@@ -1,0 +1,61 @@
+{
+  "subQuestion": "SQ1",
+  "topic": "Service audit implementation",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ1-C1",
+      "text": "auditGatewayServiceConfig() is the top-level async function. It takes (env, command, platform, expectedToken, expectedManagedServiceEnvKeys, expectedPort) and accumulates a ServiceConfigIssue[] array by calling 5 independent synchronous audit sub-functions plus 2 async sub-functions (auditGatewayRuntime, auditSystemdUnit or auditLaunchdPlist). Returns { ok: issues.length === 0, issues }.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1",
+      "worktrain_adaptation": "WorkTrain's worktrain doctor can mirror this exact shape: auditDaemonConfig(env, plist, platform) -> ServiceConfigAudit. The accumulator pattern (collect issues into array, return { ok: issues.length === 0, issues }) is directly portable."
+    },
+    {
+      "id": "SQ1-C2",
+      "text": "SERVICE_AUDIT_CODES is a const object mapping human-readable names to kebab-case string codes. Pattern: `export const SERVICE_AUDIT_CODES = { gatewayCommandMissing: 'gateway-command-missing', ... } as const`. Each issue in ServiceConfigIssue carries { code, message, detail?, level?: 'recommended' | 'aggressive' }.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1",
+      "worktrain_adaptation": "WorkTrain DAEMON_AUDIT_CODES equivalent: { staleBinary: 'stale-binary', missingApiKey: 'missing-api-key', plistMismatch: 'plist-entrypoint-mismatch', portMismatch: 'port-mismatch', launchdMissingRunAtLoad: 'launchd-run-at-load', launchdMissingKeepAlive: 'launchd-keep-alive', apiKeyEmbedded: 'api-key-embedded' }. Levels: 'error' (blocking) | 'warning' (advisory) -- simpler than OpenClaw's recommended/aggressive split."
+    },
+    {
+      "id": "SQ1-C3",
+      "text": "checkTokenDrift() is a pure exported function (not async): takes { serviceToken, configToken } and returns ServiceConfigIssue | null. Pattern: pure function for single-check logic, called from the accumulator. The sync vs async split is explicit -- auditLaunchdPlist and auditGatewayRuntime need file I/O, everything else is pure.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1",
+      "worktrain_adaptation": "WorkTrain: checkStaleBinary({ binaryMtime, processStartedAt }) -> ServiceConfigIssue | null. Pure function, no I/O. Async path needed only for plist read and npm global path resolution."
+    },
+    {
+      "id": "SQ1-C4",
+      "text": "auditGatewayToken() detects embedded secrets by reading the command's environment map and checking for a specific key (OPENCLAW_GATEWAY_TOKEN). If found as an inline value (not file-sourced), pushes gatewayTokenEmbedded issue. Then checks for token drift (service token != config token) and pushes gatewayTokenMismatch separately. Two distinct issues for two distinct problems.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1",
+      "worktrain_adaptation": "WorkTrain's launchd plist bakes ANTHROPIC_API_KEY inline (known backlog bug). Direct adaptation: auditApiKeyEmbedded() reads the plist, checks if ANTHROPIC_API_KEY appears in the EnvironmentVariables dict, pushes apiKeyEmbedded issue with 'Fix: move to ~/.workrail/.env and reinstall daemon' as suggestedFix."
+    },
+    {
+      "id": "SQ1-C5",
+      "text": "auditGatewayRuntime() checks if the binary in programArguments[0] is a Bun runtime (isBunRuntime), a version-managed Node path (isVersionManagedNodePath), or a missing system Node. Cascades: first checks Bun (returns early), then checks version-managed, then checks for system Node fallback. Multiple issues can be pushed for the runtime check.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1",
+      "worktrain_adaptation": "WorkTrain stale-binary check: compare mtime of process.execPath with the installed npm global binary path. If mtime of plist-configured binary < mtime of installed binary, push staleBinary issue. No Bun check needed -- WorkTrain is Node-only."
+    },
+    {
+      "id": "SQ1-C6",
+      "text": "GatewayServiceCommand is typed as { programArguments, workingDirectory?, environment?, environmentValueSources?, sourcePath? } | null. The null case means 'service not installed'. All audit functions guard against null command. This is the input type for the entire audit -- it's a parsed plist representation, not the raw plist.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1",
+      "worktrain_adaptation": "WorkTrain: DaemonServiceCommand = { programArguments: string[]; environment?: Record<string, string>; sourcePath?: string } | null. Parse plist before audit -- audit receives the parsed struct, not raw XML. Null = daemon not installed (first-run check)."
+    }
+  ]
+}

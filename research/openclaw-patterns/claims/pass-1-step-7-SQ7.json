@@ -1,0 +1,70 @@
+{
+  "subQuestion": "SQ7",
+  "topic": "Additional patterns: subagent dispatch, infra utilities, env security",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ7-C1",
+      "text": "resolveSubagentTargetPolicy() implements a typed allowlist policy for which agents a parent can spawn. Takes { requesterAgentId, targetAgentId, requestedAgentId?, allowAgents? }. Default (no allowAgents configured): parent can only spawn into its own agent context. Explicit allowAgents: list of allowed target ids, or '*' for any. Returns { ok: true } or { ok: false, allowedText, error }.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/agents/subagent-target-policy.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's spawn_agent allows spawning any workflowId without a per-trigger allowlist. A spawnPolicy in TriggerDefinition (allowed_workflows: ['wr.review', 'wr.coding-task'] | '*') would let operators lock down which child workflows a parent can spawn. Prevents a rogue task from spawning arbitrary sessions. Direct adaptation of the allowlist pattern."
+    },
+    {
+      "id": "SQ7-C2",
+      "text": "buildPlatformRuntimeLogHints() returns platform-specific strings for where to find daemon logs. Darwin: launchd stdout/stderr paths + restart attempt log. Linux: journalctl command. Win32: schtasks query. Pattern: pure function, takes platform parameter (default process.platform), returns string[] for display.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/runtime-hints.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's worktrain daemon --start failure messages have no hints for where to find logs. This pure function pattern produces 'Launchd stdout: ~/Library/Logs/worktrain.stdout' style messages. Directly adaptable: buildWorkTrainLogHints(platform) -> string[]. Could be included in worktrain doctor output and in the CLI failure message."
+    },
+    {
+      "id": "SQ7-C3",
+      "text": "sleepWithAbort(ms, abortSignal?) from infra/backoff.ts: AbortSignal-aware sleep that rejects immediately on abort rather than waiting for the timer. Pattern: addEventListener('abort', ...) + clearTimeout in the abort handler. Cleans up listener on resolve. Handles already-aborted signal (check abortSignal.aborted before registering).",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/infra/backoff.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's polling scheduler uses setTimeout-based intervals with no AbortSignal awareness. The PollingScheduler.stop() just sets a flag -- it can't interrupt a sleep in progress. sleepWithAbort() would make stop() instant. Also useful in startup-recovery.ts where we currently have no way to abort in-progress recovery."
+    },
+    {
+      "id": "SQ7-C4",
+      "text": "computeBackoff(policy, attempt) from infra/backoff.ts: exponential backoff with jitter. BackoffPolicy = { initialMs, maxMs, factor, jitter }. Formula: min(maxMs, round(initialMs * factor^(attempt-1) + base * jitter * Math.random())). Pure function, no state.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/infra/backoff.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's delivery retry logic (callbackUrl POST failures) and polling-scheduler retry on error have no backoff -- they either retry immediately or not at all. computeBackoff() is a 15-line pure function that directly replaces the current retry-or-fail pattern. WorkTrain should adopt it for: callbackUrl POST retries, GitLab/GitHub API poll error recovery, crash-recovery rehydrate retries."
+    },
+    {
+      "id": "SQ7-C5",
+      "text": "sanitizeHostExecEnv() from infra/host-env-security.ts filters process.env before passing to child processes. Uses blockedKeys and blockedPrefixes from a policy file. The pattern: always sanitize env before execFile(), never pass process.env directly. Returns { env: Record<string,string>, rejectedOverrideBlockedKeys, rejectedOverrideInvalidKeys }.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/infra/host-env-security.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's makeBashTool passes environment from the agent session directly to execFile(). There's no sanitization step. A minimal sanitizeWorkTrainExecEnv() that strips common token/credential patterns (ANTHROPIC_API_KEY, AWS_SECRET_ACCESS_KEY, *_TOKEN patterns) from the env passed to Bash would prevent credential leakage through shell commands."
+    },
+    {
+      "id": "SQ7-C6",
+      "text": "The service-managed-env pattern (collectInlineManagedServiceEnvKeys, hasInlineEnvironmentSource, isEnvironmentFileOnlySource, hasEnvironmentFileSource) creates a typed discrimination between env values that are file-sourced vs inline-embedded. GatewayServiceEnvironmentValueSource = 'inline' | 'file' | 'inline-and-file'. The audit checks for inline values that should be file-sourced.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-managed-env.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's launchd plist bakes ANTHROPIC_API_KEY inline. The fix (move to ~/.workrail/.env) already exists in the backlog. The typed source discrimination pattern (inline | file | inline-and-file) is useful for the doctor audit: check if ANTHROPIC_API_KEY is in the plist EnvironmentVariables dict (inline) vs sourced from .env file (file-only)."
+    },
+    {
+      "id": "SQ7-C7",
+      "text": "CronRunLogEntry appends per-job run logs to per-job JSONL files. Path validation: assertSafeCronRunLogJobId() rejects jobIds containing '/', '\\\\', or null bytes. Then isPathInside(runsDir, resolvedPath) as a second check. Two layers of path validation for any file path derived from user input.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/cron/run-log.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ7",
+      "worktrain_adaptation": "WorkTrain's DAEMON_SESSIONS_DIR sidecar paths use sessionId (a randomUUID()) which is safe. But workflowId values come from trigger config and are not validated as path-safe. The two-layer validation pattern (reject dangerous chars, then isPathInside) should be added wherever workflowId or triggerId is used to construct file paths."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "subagent": "2b_commercial",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "notes": "OpenClaw is MIT-licensed open source with no paid tier visible in the repo. Commercial analysis is limited.",
+  "pricing": {
+    "model": "free_open_source",
+    "license": "MIT",
+    "source": "https://github.com/openclaw/openclaw/blob/main/LICENSE",
+    "tag": "official",
+    "time_period": "180+_days"
+  },
+  "funding": {
+    "sponsors": ["OpenAI", "GitHub", "NVIDIA", "Vercel", "Blacksmith", "Convex"],
+    "source": "https://github.com/openclaw/openclaw/blob/main/README.md",
+    "tag": "official",
+    "time_period": "last_30_days",
+    "note": "Listed as sponsors in README with logos. No funding round data visible in repo."
+  },
+  "commercial_signals": [
+    {
+      "signal": "ClawHub plugin registry (https://clawhub.ai) -- separate commercial surface for plugin discovery/publishing",
+      "tag": "official",
+      "source": "https://github.com/openclaw/openclaw/blob/main/VISION.md",
+      "time_period": "30-180_days"
+    },
+    {
+      "signal": "fly.io and Render deployment configs included -- suggests hosted/cloud deployment is a supported path",
+      "tag": "official",
+      "source": "https://github.com/openclaw/openclaw/blob/main/fly.toml",
+      "time_period": "180+_days"
+    }
+  ],
+  "revenue_model_inferences": {
+    "inference": "Likely freemium or ecosystem play -- core is MIT, ClawHub may be monetized. No SaaS tier visible in source.",
+    "confidence": "LOW -- not enough data in repo to confirm"
+  }
+}

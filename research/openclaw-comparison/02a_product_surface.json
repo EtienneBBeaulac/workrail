@@ -1,0 +1,153 @@
+{
+  "subagent": "2a_product_surface",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "repo": "https://github.com/openclaw/openclaw",
+  "behavioral_metrics": {
+    "stars": 369502,
+    "forks": 76260,
+    "fork_to_star_ratio_pct": 20.6,
+    "open_issues": 7498,
+    "commits_last_90_days": 34964,
+    "active_weeks_last_13": 13,
+    "default_branch": "main",
+    "license": "MIT",
+    "primary_language": "TypeScript (97.8% of code bytes)",
+    "secondary_languages": ["Swift (iOS/macOS)", "Kotlin (Android)", "Shell", "CSS"],
+    "top_contributor": "steipete (Peter Steinberger, PSPDFKit) -- 24533 commits",
+    "top_contributor_2": "vincentkoc -- 5130 commits",
+    "release_cadence": "daily CalVer (v2026.5.x), multiple releases per day on active days",
+    "notes": "fork-to-star ratio 20.6% is STRONG signal of active usage (threshold: 5%)"
+  },
+  "architecture": {
+    "style": "Gateway-centric monorepo with plugin/extension system",
+    "description": "Single persistent gateway process routes all inbound channel messages to per-agent session runners. Plugins extend core via typed SDK seams. Agents have isolated sessions, transcripts, and capability stores. ACP (Agent Control Protocol) handles inter-agent communication.",
+    "key_subsystems": [
+      "src/agents/ -- agent lifecycle, subagent spawning, depth/capability tracking",
+      "src/context-engine/ -- pluggable context assembly/compaction interface",
+      "src/tasks/ -- SQLite-backed task registry with delivery and notify policy",
+      "src/commitments/ -- LLM-extracted promise tracking with heartbeat delivery",
+      "src/trajectory/ -- unified session trace schema (runtime + transcript events)",
+      "src/daemon/ -- launchd/systemd service management, service audit, restart handoff",
+      "src/acp/ -- Agent Control Protocol for inter-agent session communication",
+      "src/channels/ -- 20+ messaging channel adapters",
+      "src/memory/ -- pluggable memory slot (one active at a time)",
+      "src/sessions/ -- session lifecycle, transcript management, session-id resolution",
+      "src/cron/ -- cron job scheduling with isolated runs and delivery"
+    ],
+    "confidence": "HIGH -- read source directly"
+  },
+  "feature_inventory": [
+    {
+      "feature": "Pluggable ContextEngine interface",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/types.ts",
+      "detail": "Full interface: bootstrap, maintain, ingest, ingestBatch, afterTurn, assemble, compact, prepareSubagentSpawn, onSubagentEnded, dispose. Token-budget-aware assembly. Safe transcript rewrite via runtime callback. Background vs foreground turn maintenance mode."
+    },
+    {
+      "feature": "SQLite-backed task registry with delivery/notify policy",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/tasks/task-registry.types.ts",
+      "detail": "TaskRecord with status (queued/running/succeeded/failed/timed_out/cancelled/lost), TaskDeliveryStatus, TaskNotifyPolicy (done_only/state_changes/silent), parentFlowId/parentTaskId for tree, terminalSummary, progressSummary. task-flow-registry for multi-step flows."
+    },
+    {
+      "feature": "Commitment extraction and heartbeat delivery",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/commitments/types.ts",
+      "detail": "LLM-extracted promises from conversation (event_check_in, deadline_check, care_check_in, open_loop). Due windows with timezone. Dedup key. Confidence score. Source: inferred_user_context or agent_promise. Heartbeat delivery via e2e test (commitments-heartbeat-policy.e2e.test.ts)."
+    },
+    {
+      "feature": "Subagent role model (main/orchestrator/leaf) + control scope",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/agents/subagent-capabilities.ts",
+      "detail": "Three roles: main, orchestrator, leaf. Control scope: children or none. Spawn depth tracked per-session in store. Depth resolution follows spawnedBy chain for inherited depth."
+    },
+    {
+      "feature": "ACP (Agent Control Protocol) for inter-agent communication",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/tree/main/src/acp",
+      "detail": "ACP handles session-mode and run-mode spawning. Parent stream relay (acp-spawn-parent-stream.ts). Session-interaction-mode. Persistent bindings for long-lived agent relationships."
+    },
+    {
+      "feature": "Trajectory trace schema",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/trajectory/types.ts",
+      "detail": "TrajectoryEvent with traceSchema, traceId, source (runtime|transcript|export), type, ts, seq, sessionId, sessionKey, runId, workspaceDir, provider, modelId. TrajectoryBundleManifest for export. Supports cleanup, export, metadata."
+    },
+    {
+      "feature": "Launchd/systemd service audit with typed issue codes",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/daemon/service-audit.ts",
+      "detail": "SERVICE_AUDIT_CODES: gatewayCommandMissing, gatewayEntrypointMismatch, gatewayPathMissing, gatewayTokenEmbedded, gatewayPortMismatch, gatewayRuntimeBun, gatewayRuntimeNodeVersionManager, launchdKeepAlive, systemdAfterNetworkOnline, etc. ServiceConfigAudit {ok, issues[]} returned from audit."
+    },
+    {
+      "feature": "Detached launchd restart handoff",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/daemon/launchd-restart-handoff.ts",
+      "detail": "scheduleDetachedLaunchdRestartHandoff: spawns a detached /bin/sh child that waits for the current process PID to exit, then kickstarts or bootstraps the launchd service. Handles kickstart + bootstrap fallback. Unref'd so parent can exit cleanly."
+    },
+    {
+      "feature": "Doctor --fix config repair",
+      "status": "shipped_verified",
+      "time_period": "last_30_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/CHANGELOG.md",
+      "detail": "Doctor --fix repairs: bad cron model overrides, token drift, stale binary paths, node runtime migration. SERVICE_AUDIT_CODES drive what doctor can auto-repair."
+    },
+    {
+      "feature": "Graduated crash recovery ladder for gateway",
+      "status": "announced_undated",
+      "time_period": "last_30_days",
+      "source": "https://github.com/openclaw/openclaw/issues/79165",
+      "detail": "Feature request (not yet shipped): graduated recovery ladder -- restart, config rollback, safe-mode, factory reset."
+    },
+    {
+      "feature": "Prompt cache observability",
+      "status": "shipped_verified",
+      "time_period": "30-180_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/context-engine/types.ts",
+      "detail": "ContextEnginePromptCacheInfo: retention, lastCallUsage, observation (broke, previousCacheRead, changes), lastCacheTouchAt, expiresAt. ContextEnginePromptCacheObservationChange codes: cacheRetention, model, streamStrategy, systemPrompt, tools, transport."
+    },
+    {
+      "feature": "Workspace-scoped agent isolation",
+      "status": "shipped_verified",
+      "time_period": "180+_days",
+      "source": "https://github.com/openclaw/openclaw/blob/main/src/agents/spawned-context.ts",
+      "detail": "resolveSpawnedWorkspaceInheritance: explicit workspace override, then target-agent workspace, then requester workspace. Cross-agent spawns use target agent's workspace. resolveIngressWorkspaceOverrideForSpawnedRun for spawn chain."
+    },
+    {
+      "feature": "Post-update hook system",
+      "status": "announced_undated",
+      "time_period": "last_30_days",
+      "source": "https://github.com/openclaw/openclaw/issues/79170",
+      "detail": "Feature request: hooks that run after openclaw updates itself."
+    },
+    {
+      "feature": "LLM-assisted exec approvals / policy reasoning",
+      "status": "announced_undated",
+      "time_period": "last_30_days",
+      "source": "https://github.com/openclaw/openclaw/issues/79157",
+      "detail": "Feature request: use an LLM to reason about whether to approve a tool exec call, not just rule-based allow/deny."
+    },
+    {
+      "feature": "Operator-grant gate for auto-upgrades",
+      "status": "announced_undated",
+      "time_period": "last_30_days",
+      "source": "https://github.com/openclaw/openclaw/issues/79194",
+      "detail": "Feature request: require explicit operator approval before auto-upgrading."
+    }
+  ],
+  "deployment_model": {
+    "style": "Self-hosted persistent gateway daemon",
+    "install": "npm install -g openclaw@latest && openclaw onboard --install-daemon",
+    "platforms": "macOS (launchd), Linux (systemd), Windows (WSL2 / schtasks)",
+    "docker": "Dockerfile + docker-compose.yml included",
+    "cloud_options": "fly.toml + render.yaml (fly.io and Render deployment configs present)"
+  }
+}

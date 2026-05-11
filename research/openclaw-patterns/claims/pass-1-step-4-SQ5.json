@@ -1,0 +1,43 @@
+{
+  "subQuestion": "SQ5",
+  "topic": "Cron patterns -- skip-if-running, last-run persistence, restart catchup",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ5-C1",
+      "text": "Skip-if-running is implemented via active-jobs.ts: a process-global Set<string> (CronActiveJobState) keyed by Symbol.for('openclaw.cron.activeJobs') + resolveGlobalSingleton(). markCronJobActive(jobId), clearCronJobActive(jobId), isCronJobActive(jobId). The bug in issue #79196 (cron tasks marked as lost after restart) is because this Set is in-memory only -- NOT persisted to disk. It's a known limitation.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/cron/active-jobs.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ5",
+      "worktrain_adaptation": "WorkTrain's PollingScheduler already has implicit skip-if-running via per-trigger KeyedAsyncQueue serialization. But the Set-based pattern from OpenClaw is useful for the daemon's startup recovery: WorkTrain's DAEMON_SESSIONS_DIR sidecars serve the same purpose but need cleanup on restart. The lesson from OpenClaw's bug: always persist the active-set before the process can crash, not just in-memory."
+    },
+    {
+      "id": "SQ5-C2",
+      "text": "CronRunLogEntry is an append-only JSONL per job (one file per jobId, not one global file): resolveCronRunLogPath({ storePath, jobId }) returns <runsDir>/<safeJobId>.jsonl. Path is validated with isPathInside(runsDir, resolvedPath) to prevent traversal. File is chmod 0o600.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/cron/run-log.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ5",
+      "worktrain_adaptation": "WorkTrain's execution-stats.jsonl is one global file. Per-session files (like the existing session sidecars) are a better pattern. The chmod 0o600 + isPathInside path validation is directly adoptable for any WorkTrain file writes in ~/.workrail/."
+    },
+    {
+      "id": "SQ5-C3",
+      "text": "On startup, cron ops.ts marks any job with state.runningAtMs set as 'interrupted' (not as crashed/failed). It sets job.state.lastRunStatus = 'error', consecutiveErrors++, and nextRunAtMs = undefined. One-shot 'at' jobs are disabled. Then reschedules from that point. This is the 'interrupted startup run' pattern -- distinct from a normal failure.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/cron/service/ops.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ5",
+      "worktrain_adaptation": "WorkTrain's startup recovery distinguishes 0-steps (discard) vs 1+-steps (resume). OpenClaw's interrupted-startup-run pattern adds a third category: 'interrupted mid-execution' -- mark the outcome, increment error count, and re-schedule rather than either resuming or discarding. Useful when a session is too far along to discard but not worth resuming."
+    },
+    {
+      "id": "SQ5-C4",
+      "text": "LRU cache for cron expression evaluation: Map<string, Cron> with max size 512. Key = `${timezone}\\u0000${expr}`. On cache miss, creates new Cron(); on cache hit, delete+re-insert to move to end for LRU eviction. O(1) amortized.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/cron/schedule.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ5",
+      "worktrain_adaptation": "WorkTrain's PollingScheduler doesn't cache computed next-run times. Not urgent, but the null-byte-separator key pattern (timezone + expr) for LRU is a clean idiom to adopt whenever WorkTrain starts computing next-poll times."
+    }
+  ]
+}

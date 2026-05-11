@@ -1,0 +1,43 @@
+{
+  "subQuestion": "SQ4",
+  "topic": "Task executor and registry portability",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ4-C1",
+      "text": "Task creation is split into createQueuedTaskRun() and createRunningTaskRun() -- two separate factories for the two initial states. Queued = caller knows the task will run but hasn't started. Running = caller is the executor and is already running it. This matches WorkTrain's pattern: a session can be enqueued or running.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/tasks/task-executor.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4",
+      "worktrain_adaptation": "WorkTrain session tracking could adopt the same two-factory pattern: createQueuedSession() when the trigger is accepted but waiting for the semaphore, createRunningSession() when runWorkflow() actually starts."
+    },
+    {
+      "id": "SQ4-C2",
+      "text": "DetachedTaskLifecycleRuntime is an interface with 8 methods (createQueuedTaskRun, createRunningTaskRun, startTaskRunByRunId, recordTaskRunProgressByRunId, finalizeTaskRunByRunId, completeTaskRunByRunId, failTaskRunByRunId, setDetachedTaskDeliveryStatusByRunId). The runtime is injectable via registerDetachedTaskRuntime() and has a DEFAULT impl. Test isolation uses setDetachedTaskLifecycleRuntime() + resetDetachedTaskLifecycleRuntimeForTests().",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/tasks/detached-task-runtime.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4",
+      "worktrain_adaptation": "The runtime-injection pattern for tests is directly valuable for WorkTrain. WorkTrain's runWorkflow() currently uses DAEMON_STATS_DIR injection for the same purpose but is less systematic. A SessionLifecycleRuntime interface would consolidate: createSession, markRunning, recordProgress, finalize, markStuck."
+    },
+    {
+      "id": "SQ4-C3",
+      "text": "The task registry (Map-based in-memory, restored from SQLite on startup) is completely independent of OpenClaw's session machinery. task-registry.ts imports only from ./task-executor.js, ./task-registry.types.js, ../infra/..., and ../logging/... -- no channel, agent, or gateway imports. It IS independently instantiable.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/tasks/task-registry.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4",
+      "worktrain_adaptation": "The task registry is portable to WorkTrain with only type substitutions. The SQLite store (task-flow-registry.store.sqlite.ts) would replace WorkTrain's execution-stats.jsonl. The Map-based in-memory layer above the store means no performance regression."
+    },
+    {
+      "id": "SQ4-C4",
+      "text": "TaskRecord has progressSummary?: string and terminalSummary?: string -- two distinct string fields for the current progress snapshot and the final outcome summary. These are separate from the task's status (queued/running/succeeded/failed). The pattern: status is the machine-readable state, summaries are human-readable annotations.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/tasks/task-registry.types.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4",
+      "worktrain_adaptation": "WorkTrain's execution-stats.jsonl records only outcome and stepCount. Adding progressSummary (current step name) and terminalSummary (lastStepNotes snippet) would make the worktrain status command useful without reading the session event store."
+    }
+  ]
+}

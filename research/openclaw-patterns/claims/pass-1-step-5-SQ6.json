@@ -1,0 +1,34 @@
+{
+  "subQuestion": "SQ6",
+  "topic": "Session lifecycle event schema comparison",
+  "fetched_at": "2026-05-07T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ6-C1",
+      "text": "OpenClaw's session-lifecycle-events.ts is minimal: SessionLifecycleEvent = { sessionKey, reason, parentSessionKey?, label?, displayName? }. A Set-based pub/sub with onSessionLifecycleEvent(listener) -> unsubscribe fn and emitSessionLifecycleEvent(event). All errors in listeners are swallowed. This is the SESSION layer -- it's about session creation/destruction, not tool calls.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/sessions/session-lifecycle-events.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ6",
+      "worktrain_adaptation": "WorkTrain's DaemonEvent covers both lifecycle (session_started, session_completed) and per-turn events (tool_called, llm_turn_started). These are the same events but OpenClaw splits them into session-layer vs trajectory-layer. This is actually a good architecture -- WorkTrain's single-file approach is fine for now but splitting into layers would simplify the trajectory schema unification."
+    },
+    {
+      "id": "SQ6-C2",
+      "text": "WorkTrain's DaemonEvent union has 20 kinds (DaemonStartedEvent through SignalEmittedEvent). All events carry a ts: number (added by _append()). The two-stream tool event architecture (coarse tool_called from inside tools + fine-grained tool_call_started/completed/failed from AgentLoopCallbacks) is documented in the WHY comments and is an intentional design decision.",
+      "source_url": "/Users/etienneb/git/personal/workrail/src/daemon/daemon-events.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ6",
+      "worktrain_adaptation": "WorkTrain's DaemonEvent is already well-designed. The primary gap is NOT schema quality -- it's storage split. The daemon event log (daily JSONL rotation) is separate from the v2 session event store (per-session directory). The schema fields (sessionId, workrailSessionId, workflowId, toolName, outcome) are already the right shape for a unified trajectory format."
+    },
+    {
+      "id": "SQ6-C3",
+      "text": "OpenClaw's trajectory TrajectoryEvent adds: traceId (random UUID per session), source ('runtime' | 'transcript' | 'export'), seq (monotonic integer per source), runId, provider, modelId, modelApi. These fields are absent from WorkTrain's DaemonEvent. The key difference: TrajectoryEvent is immutable-append with explicit sequencing (seq); DaemonEvent relies on file-append order + ts timestamp.",
+      "source_url": "https://github.com/openclaw/openclaw/blob/main/src/trajectory/types.ts",
+      "source_type": "source_code",
+      "confidence": "single-source",
+      "answers_subquestion": "SQ6",
+      "worktrain_adaptation": "WorkTrain should add to DaemonEvent: (1) runId -- a per-session UUID assigned at session start, distinct from both sessionId (process-local) and workrailSessionId (engine). This enables cross-store correlation without requiring the workrailSessionId to be decoded. (2) provider + modelId -- already available at session start, but not written to events."
+    }
+  ]
+}
