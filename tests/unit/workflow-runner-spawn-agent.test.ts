@@ -598,4 +598,46 @@ describe('makeSpawnAgentTool() parallel spawn (agents[])', () => {
     expect(parsed.kind).toBe('parallel');
     expect(parsed.results).toHaveLength(1);
   });
+
+  it('throws when agents array exceeds maxItems of 10', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const runWorkflowStub = async () => ({ _tag: 'success', workflowId: 'w', stopReason: 'done' } as any);
+    const tool = makeSpawnAgentTool('sess-1', FAKE_CTX, FAKE_API_KEY, 'parent', 0, 3, runWorkflowStub, FAKE_SCHEMAS);
+    await expect(tool.execute('call-1', makeParallelParams(11))).rejects.toThrow('exceeds maximum of 10');
+  });
+
+  it('throws when agents[N].context is not a plain object', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const runWorkflowStub = async () => ({ _tag: 'success', workflowId: 'w', stopReason: 'done' } as any);
+    const tool = makeSpawnAgentTool('sess-1', FAKE_CTX, FAKE_API_KEY, 'parent', 0, 3, runWorkflowStub, FAKE_SCHEMAS);
+    const params = { agents: [{ workflowId: 'w', goal: 'g', workspacePath: os.tmpdir(), context: 'not-an-object' }] };
+    await expect(tool.execute('call-1', params)).rejects.toThrow('agents[0].context must be a plain object');
+  });
+});
+
+// ── parseParams validation tests ─────────────────────────────────────────────
+
+describe('makeSpawnAgentTool() single-form validation errors', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const runWorkflowStub = async () => ({ _tag: 'success', workflowId: 'w', stopReason: 'done' } as any);
+
+  function makeTool() {
+    return makeSpawnAgentTool('sess-1', FAKE_CTX, FAKE_API_KEY, 'parent', 0, 3, runWorkflowStub, FAKE_SCHEMAS);
+  }
+
+  it('throws when workflowId is missing', async () => {
+    await expect(makeTool().execute('call-1', { goal: 'g', workspacePath: os.tmpdir() })).rejects.toThrow('workflowId must be a non-empty string');
+  });
+
+  it('throws when workflowId is empty string', async () => {
+    await expect(makeTool().execute('call-1', { workflowId: '', goal: 'g', workspacePath: os.tmpdir() })).rejects.toThrow('workflowId must be a non-empty string');
+  });
+
+  it('throws when goal is missing', async () => {
+    await expect(makeTool().execute('call-1', { workflowId: 'w', workspacePath: os.tmpdir() })).rejects.toThrow('goal must be a non-empty string');
+  });
+
+  it('throws when workspacePath is missing', async () => {
+    await expect(makeTool().execute('call-1', { workflowId: 'w', goal: 'g' })).rejects.toThrow('workspacePath must be a non-empty string');
+  });
 });

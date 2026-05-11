@@ -59,7 +59,7 @@ interface SingleSpawnResult {
  */
 type ParsedParams =
   | { readonly kind: 'single'; readonly spec: SingleSpawnSpec }
-  | { readonly kind: 'multi'; readonly agents: readonly SingleSpawnSpec[] };
+  | { readonly kind: 'parallel'; readonly agents: readonly SingleSpawnSpec[] };
 
 /**
  * Parse and validate the raw params from the LLM tool call.
@@ -79,11 +79,15 @@ function parseParams(raw: unknown): ParsedParams {
     if (rawAgents.length === 0) {
       throw new Error('spawn_agent: agents must be a non-empty array');
     }
+    if (rawAgents.length > 10) {
+      throw new Error(`spawn_agent: agents array length ${rawAgents.length} exceeds maximum of 10 concurrent sessions`);
+    }
     const agents: SingleSpawnSpec[] = rawAgents.map((item, i) => {
       const a = item as Record<string, unknown>;
       if (typeof a['workflowId'] !== 'string' || !a['workflowId']) throw new Error(`spawn_agent: agents[${i}].workflowId must be a non-empty string`);
       if (typeof a['goal'] !== 'string' || !a['goal']) throw new Error(`spawn_agent: agents[${i}].goal must be a non-empty string`);
       if (typeof a['workspacePath'] !== 'string' || !a['workspacePath']) throw new Error(`spawn_agent: agents[${i}].workspacePath must be a non-empty string`);
+      if (a['context'] !== undefined && (typeof a['context'] !== 'object' || a['context'] === null || Array.isArray(a['context']))) throw new Error(`spawn_agent: agents[${i}].context must be a plain object if provided`);
       return {
         workflowId: a['workflowId'],
         goal: a['goal'],
@@ -91,7 +95,7 @@ function parseParams(raw: unknown): ParsedParams {
         ...(a['context'] !== undefined ? { context: a['context'] as Readonly<Record<string, unknown>> } : {}),
       };
     });
-    return { kind: 'multi', agents };
+    return { kind: 'parallel', agents };
   }
 
   // scalar fields => single form
@@ -104,7 +108,7 @@ function parseParams(raw: unknown): ParsedParams {
       workflowId: p['workflowId'],
       goal: p['goal'],
       workspacePath: p['workspacePath'],
-      ...(p['context'] !== undefined ? { context: p['context'] as Readonly<Record<string, unknown>> } : {}),
+      ...(p['context'] !== undefined ? { context: p['context'] as Readonly<Record<string, unknown>> } : {}), // object type validated by JSON Schema at call boundary
     },
   };
 }
@@ -116,7 +120,7 @@ function parseParams(raw: unknown): ParsedParams {
 /**
  * Session-scoped dependencies injected into every spawnOne() call.
  *
- * WHY an object (not positional params): these 8 values are fixed for the
+ * WHY an object (not positional params): these 9 values are fixed for the
  * lifetime of a single execute() call -- they do not vary per-child in a
  * parallel batch. Grouping them eliminates the 10-param signature smell,
  * makes call sites readable, and means adding a new dep is a one-line change

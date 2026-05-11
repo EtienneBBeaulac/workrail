@@ -160,10 +160,15 @@ export function getSchemas(): Record<string, any> {
         },
         agents: {
           type: 'array',
+          // NOTE: top-level required[] is absent because the schema accepts two forms
+          // (single: workflowId/goal/workspacePath; parallel: agents[]). Required-field
+          // enforcement for each form lives in parseParams() in spawn-agent.ts.
           description: 'For parallel execution: array of child sessions to run simultaneously. ' +
             'Use instead of workflowId/goal/workspacePath. ' +
             'Returns { kind: "parallel", results: [{kind: "single", childSessionId, outcome, notes, artifacts?}] } in input order. ' +
-            'Budget maxSessionMinutes for max(child duration), not sum(child durations).',
+            'Budget maxSessionMinutes for max(child duration), not sum(child durations). ' +
+            'Maximum 10 agents per call.',
+          maxItems: 10,
           items: {
             type: 'object',
             properties: {

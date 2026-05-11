@@ -423,7 +423,6 @@ These principles guide all code decisions in this project. When writing, reviewi
 
 ## Things to avoid
 
-- Do not commit new `.md` documentation files unless explicitly authorized. You can create them locally, just do not commit them.
 - Do not remove existing `.md` files without authorization.
 - Do not use emojis in documentation.
 - Do not use em-dashes in MR descriptions.
