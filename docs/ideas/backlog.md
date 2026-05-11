@@ -1728,6 +1728,33 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### State-of-the-code context: pass diffs or transformations instead of full file contents (May 11, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:1 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+Agents currently read entire files to understand what the code looks like. On long sessions they re-read the same files repeatedly as context compacts -- each re-read consumes tokens proportional to file size rather than to what actually changed. The mental model the agent needs is not "what does this file look like" but "what did this file look like at the start, and what transformations have been applied since."
+
+**The core idea:** instead of injecting full file contents into the agent's context, inject a compact representation of code state as a sequence of transformations:
+
+- **Initial snapshot + diffs**: agent gets `file at session start` + `diff --unified` for each subsequent edit. Reading a 400-line file + three 20-line diffs is cheaper than re-reading the 400-line file four times.
+- **Semantic edit log**: instead of raw diffs, a structured log of named operations (`renamed function foo -> bar`, `extracted method baz from qux`, `added field X to interface Y`). This is higher-level than a diff and more token-efficient on large refactors.
+- **Incremental context injection**: the agent starts the session with a snapshot; each edit event appends a small delta. The agent always has a current view without re-reading.
+
+**Why this matters for WorkTrain specifically:** daemon sessions run for 30-60 minutes on large codebases. The coding-task workflow has a `session state recap` mechanism for step notes, but nothing equivalent for code state. An agent that edited 5 files in phase 1 has no compact way to re-orient to what it changed when phase 2 starts a fresh context window.
+
+**Things to hash out:**
+- Where does the transformation log live? In the WorkRail session store (as a new event type), in the agent's context variables, or as a sidecar file the agent writes to?
+- What is the unit of a "transformation"? File-level diffs are easy to generate but verbose. Semantic operations (rename, extract, add field) are compact but require parsing.
+- Does the agent write the transformation log itself (best-effort natural language) or does the daemon infer it from file-before/after hashes?
+- Is this a workflow authoring concern (authors declare which files to track) or a daemon infrastructure concern (all file writes are automatically tracked)?
+- How does this interact with the `Read` tool's read-before-write enforcement and `FileStateTracker`? The tracker already knows which files were read -- it could potentially emit deltas on write.
+
+**Related:** `FileStateTracker` in `src/daemon/session-scope.ts` already tracks per-session file read state (content + timestamp). Extending it to also track write state (diff since last read) would be the natural implementation seam.
+
+---
+
 ### Coordinator-managed typed output vocabulary: agent emits typed events, coordinator reacts per type (May 7, 2026)
 
 **Status: idea** | Priority: high

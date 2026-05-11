@@ -1,8 +1,9 @@
 /**
  * Factory for the spawn_agent tool used in daemon agent sessions.
  *
- * Spawns a child WorkRail session in-process, blocking the parent until the child completes.
- * Extracted from workflow-runner.ts. Zero behavior change.
+ * Spawns one or more child WorkRail sessions in-process. The single-spawn form
+ * blocks until one child completes; the parallel form runs N children concurrently
+ * via Promise.all and blocks until all complete.
  */
 
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
@@ -37,8 +38,8 @@ interface SingleSpawnSpec {
  * Result for a single spawned child session.
  *
  * WHY kind: 'single': allows callers to distinguish single vs parallel responses
- * without checking for the presence of .results vs .outcome. A discriminant on
- * the result shape makes the contract explicit and prevents silent misreads.
+ * without pattern-matching on which keys are present. A discriminant on the result
+ * shape makes the contract explicit and prevents silent misreads.
  */
 interface SingleSpawnResult {
   readonly kind: 'single';
@@ -50,17 +51,87 @@ interface SingleSpawnResult {
 }
 
 /**
- * Type guard for single-spawn params (scalar workflowId/goal/workspacePath).
+ * Parsed, validated representation of the params passed to execute().
  *
- * Returns true when `agents` is absent or not a non-empty array.
- * WHY: the empty-agents case (agents: []) is validated and throws BEFORE this
- * guard is called -- so by the time isSingleSpawn() runs, agents=[] has already
- * been rejected. This guard only distinguishes absent/non-array (single) from
- * non-empty array (multi).
+ * WHY a discriminated union (not runtime typeof checks): parsing once at the
+ * boundary produces typed values that the rest of execute() trusts without
+ * re-checking. "Validate at boundaries, trust inside."
  */
-function isSingleSpawn(params: unknown): params is SingleSpawnSpec {
-  const agents = (params as { agents?: unknown }).agents;
-  return !Array.isArray(agents) || agents.length === 0;
+type ParsedParams =
+  | { readonly kind: 'single'; readonly spec: SingleSpawnSpec }
+  | { readonly kind: 'multi'; readonly agents: readonly SingleSpawnSpec[] };
+
+/**
+ * Parse and validate the raw params from the LLM tool call.
+ *
+ * Throws with a descriptive message if any required field is missing or wrong type.
+ * Returns a ParsedParams discriminated union so all downstream code is typed.
+ *
+ * WHY this is the only place typeof checks appear: validation belongs at the
+ * boundary. Once this returns, the rest of execute() works with typed values only.
+ */
+function parseParams(raw: unknown): ParsedParams {
+  const p = raw as Record<string, unknown>;
+
+  // agents[] present and non-empty => parallel form
+  if (Array.isArray(p['agents'])) {
+    const rawAgents = p['agents'] as unknown[];
+    if (rawAgents.length === 0) {
+      throw new Error('spawn_agent: agents must be a non-empty array');
+    }
+    const agents: SingleSpawnSpec[] = rawAgents.map((item, i) => {
+      const a = item as Record<string, unknown>;
+      if (typeof a['workflowId'] !== 'string' || !a['workflowId']) throw new Error(`spawn_agent: agents[${i}].workflowId must be a non-empty string`);
+      if (typeof a['goal'] !== 'string' || !a['goal']) throw new Error(`spawn_agent: agents[${i}].goal must be a non-empty string`);
+      if (typeof a['workspacePath'] !== 'string' || !a['workspacePath']) throw new Error(`spawn_agent: agents[${i}].workspacePath must be a non-empty string`);
+      return {
+        workflowId: a['workflowId'],
+        goal: a['goal'],
+        workspacePath: a['workspacePath'],
+        ...(a['context'] !== undefined ? { context: a['context'] as Readonly<Record<string, unknown>> } : {}),
+      };
+    });
+    return { kind: 'multi', agents };
+  }
+
+  // scalar fields => single form
+  if (typeof p['workflowId'] !== 'string' || !p['workflowId']) throw new Error('spawn_agent: workflowId must be a non-empty string');
+  if (typeof p['goal'] !== 'string' || !p['goal']) throw new Error('spawn_agent: goal must be a non-empty string');
+  if (typeof p['workspacePath'] !== 'string' || !p['workspacePath']) throw new Error('spawn_agent: workspacePath must be a non-empty string');
+  return {
+    kind: 'single',
+    spec: {
+      workflowId: p['workflowId'],
+      goal: p['goal'],
+      workspacePath: p['workspacePath'],
+      ...(p['context'] !== undefined ? { context: p['context'] as Readonly<Record<string, unknown>> } : {}),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SpawnContext: session-scoped dependencies shared across all spawnOne() calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Session-scoped dependencies injected into every spawnOne() call.
+ *
+ * WHY an object (not positional params): these 8 values are fixed for the
+ * lifetime of a single execute() call -- they do not vary per-child in a
+ * parallel batch. Grouping them eliminates the 10-param signature smell,
+ * makes call sites readable, and means adding a new dep is a one-line change
+ * rather than a change at every call site.
+ */
+interface SpawnContext {
+  readonly ctx: V2ToolContext;
+  readonly apiKey: string;
+  readonly sessionId: RunId;
+  readonly thisWorkrailSessionId: string;
+  readonly currentDepth: number;
+  readonly maxDepth: number;
+  readonly runWorkflowFn: typeof runWorkflow;
+  readonly emitter: DaemonEventEmitter | undefined;
+  readonly activeSessionSet: ActiveSessionSet | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -70,35 +141,24 @@ function isSingleSpawn(params: unknown): params is SingleSpawnSpec {
 /**
  * Spawn a single child WorkRail session and return its result.
  *
- * WHY standalone function (not inline in execute()): both the single-spawn and
- * parallel-spawn paths call this. Extracting it eliminates duplication and makes
- * the core logic independently testable via the fake-runWorkflowFn stub pattern.
+ * WHY standalone function (not inline in execute()): both single and parallel
+ * dispatch paths call this. Extracting it eliminates duplication and makes the
+ * core logic independently testable via the fake-runWorkflowFn stub pattern.
  *
- * Never throws -- all failure paths return a SingleSpawnResult with outcome: 'error'.
+ * Never throws -- all failure paths return SingleSpawnResult with outcome: 'error'.
  * Errors are data; the caller decides what to do with each child's outcome.
  */
-async function spawnOne(
-  spec: SingleSpawnSpec,
-  ctx: V2ToolContext,
-  apiKey: string,
-  sessionId: RunId,
-  thisWorkrailSessionId: string,
-  currentDepth: number,
-  maxDepth: number,
-  runWorkflowFn: typeof runWorkflow,
-  emitter: DaemonEventEmitter | undefined,
-  activeSessionSet: ActiveSessionSet | undefined,
-): Promise<SingleSpawnResult> {
+async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<SingleSpawnResult> {
   // ---- Depth limit enforcement (synchronous, before any async work) ----
   // WHY check before executeStartWorkflow: fail fast at the boundary. A depth error
   // is a configuration issue, not a transient failure. No child session should be
   // created at all when the depth limit is exceeded.
-  if (currentDepth >= maxDepth) {
+  if (sc.currentDepth >= sc.maxDepth) {
     return {
       kind: 'single',
       childSessionId: null,
       outcome: 'error',
-      notes: `Max spawn depth exceeded (currentDepth=${currentDepth}, maxDepth=${maxDepth}). ` +
+      notes: `Max spawn depth exceeded (currentDepth=${sc.currentDepth}, maxDepth=${sc.maxDepth}). ` +
         `Cannot spawn a child session from this depth. ` +
         `Increase agentConfig.maxSubagentDepth if deeper delegation is intentional.`,
     };
@@ -111,12 +171,12 @@ async function spawnOne(
   // via parentSessionId. Adapts the proven pattern from console-routes.ts.
   const startResult = await executeStartWorkflow(
     { workflowId: spec.workflowId, workspacePath: spec.workspacePath, goal: spec.goal },
-    ctx,
+    sc.ctx,
     // WHY parentSessionId via internalContext: the public V2StartWorkflowInput schema
     // stays unchanged. parentSessionId is extracted in buildInitialEvents() to populate
     // session_created.data (typed, durable, DAG-queryable).
     // is_autonomous: 'true' marks the child as a daemon-owned session.
-    { is_autonomous: 'true', workspacePath: spec.workspacePath, parentSessionId: thisWorkrailSessionId, triggerSource: 'daemon' },
+    { is_autonomous: 'true', workspacePath: spec.workspacePath, parentSessionId: sc.thisWorkrailSessionId, triggerSource: 'daemon' },
   );
 
   if (startResult.isErr()) {
@@ -138,8 +198,8 @@ async function spawnOne(
   if (childContinueToken) {
     const decoded = await parseContinueTokenOrFail(
       childContinueToken,
-      ctx.v2.tokenCodecPorts,
-      ctx.v2.tokenAliasStore,
+      sc.ctx.v2.tokenCodecPorts,
+      sc.ctx.v2.tokenAliasStore,
     );
     if (decoded.isOk()) {
       childSessionId = decoded.value.sessionId;
@@ -165,10 +225,10 @@ async function spawnOne(
     context: spec.context,
     // WHY spawnDepth: child session constructs its own spawn_agent tool at depth+1.
     // This is the mechanism by which depth limits propagate through the tree.
-    spawnDepth: currentDepth + 1,
+    spawnDepth: sc.currentDepth + 1,
     // WHY parentSessionId: threads the parent link through runWorkflow -> executeStartWorkflow
     // for context_set injection (alongside the session_created.data written above).
-    parentSessionId: thisWorkrailSessionId,
+    parentSessionId: sc.thisWorkrailSessionId,
   };
   // WHY SessionSource: the session is already created above. runWorkflow() MUST NOT
   // call executeStartWorkflow() again (invariant). SessionSource replaces the removed
@@ -182,13 +242,13 @@ async function spawnOne(
     triggerSource: 'daemon',
   };
   const childSource: SessionSource = { kind: 'pre_allocated', trigger: childTrigger, session: childAllocatedSession };
-  const childResult = await runWorkflowFn(
+  const childResult = await sc.runWorkflowFn(
     childTrigger,
-    ctx,
-    apiKey,
+    sc.ctx,
+    sc.apiKey,
     undefined, // daemonRegistry: child sessions are not registered (no isLive tracking needed)
-    emitter,
-    activeSessionSet, // WHY: thread session set so child sessions are abortable on SIGTERM
+    sc.emitter,
+    sc.activeSessionSet, // WHY: thread session set so child sessions are abortable on SIGTERM
     undefined, // _statsDir: use default
     undefined, // _sessionsDir: use default
     childSource,
@@ -296,27 +356,17 @@ export function makeSpawnAgentTool(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: async (_toolCallId: string, params: any, _signal: AbortSignal): Promise<AgentToolResult<unknown>> => {
-      // ---- Empty-agents guard (MUST fire before isSingleSpawn dispatch) ----
-      // WHY first: isSingleSpawn([]) returns true (empty array treated as "no agents"),
-      // which would route to the single-spawn path and throw a confusing workflowId error.
-      const rawAgents = (params as { agents?: unknown }).agents;
-      if (Array.isArray(rawAgents) && rawAgents.length === 0) {
-        throw new Error('spawn_agent: agents must be a non-empty array');
-      }
+      // Parse and validate all inputs at the boundary. Everything below works with
+      // typed values only -- no typeof checks, no String() coercions, no as-casts.
+      const parsed = parseParams(params);
 
-      if (isSingleSpawn(params)) {
-        // ---- Single-spawn path ----
-        if (typeof params.workflowId !== 'string' || !params.workflowId) throw new Error('spawn_agent: workflowId must be a non-empty string');
-        if (typeof params.goal !== 'string' || !params.goal) throw new Error('spawn_agent: goal must be a non-empty string');
-        if (typeof params.workspacePath !== 'string' || !params.workspacePath) throw new Error('spawn_agent: workspacePath must be a non-empty string');
+      const sc: SpawnContext = { ctx, apiKey, sessionId, thisWorkrailSessionId, currentDepth, maxDepth, runWorkflowFn, emitter, activeSessionSet };
 
-        console.log(`[WorkflowRunner] Tool: spawn_agent sessionId=${sessionId} workflowId=${String(params.workflowId)} depth=${currentDepth}/${maxDepth}`);
-        emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent', summary: `${String(params.workflowId)} depth=${currentDepth}`, ...withWorkrailSession(thisWorkrailSessionId) });
+      if (parsed.kind === 'single') {
+        console.log(`[WorkflowRunner] Tool: spawn_agent sessionId=${sessionId} workflowId=${parsed.spec.workflowId} depth=${currentDepth}/${maxDepth}`);
+        emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent', summary: `${parsed.spec.workflowId} depth=${currentDepth}`, ...withWorkrailSession(thisWorkrailSessionId) });
 
-        const result = await spawnOne(
-          { workflowId: String(params.workflowId), goal: String(params.goal), workspacePath: String(params.workspacePath), context: params.context as Readonly<Record<string, unknown>> | undefined },
-          ctx, apiKey, sessionId, thisWorkrailSessionId, currentDepth, maxDepth, runWorkflowFn, emitter, activeSessionSet,
-        );
+        const result = await spawnOne(parsed.spec, sc);
 
         console.log(`[WorkflowRunner] spawn_agent completed: sessionId=${sessionId} childSessionId=${result.childSessionId ?? 'null'} outcome=${result.outcome}`);
         emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent_complete', summary: `outcome=${result.outcome} child=${result.childSessionId ?? 'null'}`, ...withWorkrailSession(thisWorkrailSessionId) });
@@ -324,27 +374,14 @@ export function makeSpawnAgentTool(
         return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
 
       } else {
-        // ---- Parallel-spawn path ----
         // WHY Promise.all: runs all child sessions concurrently. Wall-clock time is
         // max(child durations) instead of sum. AgentLoop._executeTools() is sequential,
         // so the parent loop is blocked for the full batch duration -- but the children
         // themselves run in parallel within that single blocked turn.
-        const agents = params.agents as readonly SingleSpawnSpec[];
+        console.log(`[WorkflowRunner] Tool: spawn_agent (parallel) sessionId=${sessionId} count=${parsed.agents.length} depth=${currentDepth}/${maxDepth}`);
+        emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent', summary: `parallel count=${parsed.agents.length} depth=${currentDepth}`, ...withWorkrailSession(thisWorkrailSessionId) });
 
-        // Validate each child spec before spawning any session.
-        for (let i = 0; i < agents.length; i++) {
-          const a = agents[i]!;
-          if (typeof a.workflowId !== 'string' || !a.workflowId) throw new Error(`spawn_agent: agents[${i}].workflowId must be a non-empty string`);
-          if (typeof a.goal !== 'string' || !a.goal) throw new Error(`spawn_agent: agents[${i}].goal must be a non-empty string`);
-          if (typeof a.workspacePath !== 'string' || !a.workspacePath) throw new Error(`spawn_agent: agents[${i}].workspacePath must be a non-empty string`);
-        }
-
-        console.log(`[WorkflowRunner] Tool: spawn_agent (parallel) sessionId=${sessionId} count=${agents.length} depth=${currentDepth}/${maxDepth}`);
-        emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'spawn_agent', summary: `parallel count=${agents.length} depth=${currentDepth}`, ...withWorkrailSession(thisWorkrailSessionId) });
-
-        const results = await Promise.all(
-          agents.map((spec) => spawnOne(spec, ctx, apiKey, sessionId, thisWorkrailSessionId, currentDepth, maxDepth, runWorkflowFn, emitter, activeSessionSet)),
-        );
+        const results = await Promise.all(parsed.agents.map((spec) => spawnOne(spec, sc)));
 
         const outcomes = results.map((r) => r.outcome).join(',');
         console.log(`[WorkflowRunner] spawn_agent (parallel) completed: sessionId=${sessionId} outcomes=[${outcomes}]`);
