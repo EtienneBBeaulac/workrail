@@ -2496,6 +2496,65 @@ Step-level `systemPrompt` overrides workflow-level for that step.
 - How does the engine signal to the agent that context was gathered successfully vs not found? Is this visible in the step prompt, or does the agent need to check `outputVar` itself?
 - Can a `context-gather` step block session start if a required source is unavailable, or should it always succeed (possibly with an empty result)?
 
+### Parallel spawn_agent: run multiple subagents simultaneously instead of sequentially (May 11, 2026)
+
+**Status: idea** | Priority: critical
+
+**Score: 14** | Cor:3 Cap:3 Eff:3 Lev:2 Con:3 | Blocked: no
+
+`spawn_agent` currently blocks the parent turn until the child session completes. When a workflow spawns multiple agents (e.g. wr.discovery phase-3b spawns 2-3 executor sessions for candidate generation), they run sequentially -- each ~20 minutes back-to-back. Total wall clock: 40-60 minutes of a 55-minute budget, leaving nothing for the remaining phases. The workflow is designed to run them simultaneously ("spawn SIMULTANEOUSLY" in the step instructions) but the tool doesn't support it.
+
+Extending `spawn_agent` to accept an array of sessions and internally `Promise.all` over them would cut 40-60 minutes of sequential delegation down to ~20 minutes (max of parallel). With a 55-minute discovery budget, the full pipeline would complete comfortably. This is a contained change: the agent's contract stays the same (call it, wait for all, get all results), the tool factories change internally, the workflow steps don't need rewriting.
+
+**This is the primary near-term fix for the wr.discovery timeout problem.** The 30-minute daemon default (filed separately as critical) should be fixed in parallel.
+
+**Things to hash out:**
+- API design: array overload on `spawn_agent` vs separate `spawn_agents_parallel` tool? Array is simpler for the agent; separate tool is more explicit.
+- Error semantics: if one child fails, do we return partial results or fail the whole call? Likely partial results with per-child outcome.
+- Order of results: does the result array match the input order or completion order? Input order is safer for the agent.
+- How does the agent express per-child goals when using parallel spawn? Each array element needs its own goal string and workflowId.
+
+---
+
+### Coordinator-managed fan-out with workflow-declared context injection (May 11, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+The full pipeline coordinator currently delegates all session spawning logic to the main agent. For workflows that do fan-out (spawn N subagents with different focus angles), the main agent constructs each agent's goal string inline, embedding synthesized context from earlier phases. This is correct when the goal strings require synthesized understanding only the main agent has. But it's unnecessary coordination overhead when the goal strings could be derived from the workflow definition plus prior phase artifacts.
+
+The vision: a workflow step declares `fanOut: { count: N, routineId: 'wr.routine-tension-driven-design', contextSlots: [...] }`. The coordinator reads the workflow declaration, injects the requested artifacts from prior phase outputs (e.g. `decisionCriteria`, `riskiestAssumption`, `idealEndState` from discovery phase-2), and spawns the N agents directly -- without the main agent writing individual goal strings. The main agent stays involved only for synthesis after the fan-out completes.
+
+This requires two things: (1) workflows to be more verbose about what context each subagent needs (not just "spawn 2-3 executors" as free text), and (2) the coordinator to understand how to resolve context references from prior phase artifacts. The workflow declaration would also specify what context from previous workflows to include/omit, giving the operator control over context injection granularity.
+
+**This is the longer-term correct architecture for coordinator-managed orchestration.** Parallel `spawn_agent` (above) is the near-term fix; this is what makes the coordinator fully autonomous at orchestration.
+
+**Things to hash out:**
+- Context injection spec: how does the workflow declare which prior-phase artifacts to pass to each subagent? A `contextSlots` array with dot-path references to session context variables? A typed `ContextBundle` declaration per fan-out arm?
+- When does the coordinator generate goal strings vs. the main agent? The key question: can the coordinator generate goal strings that are "good enough" without the main agent's synthesized priors, given access to the prior phase artifacts? This depends heavily on the workflow. For review/challenge workflows (give each agent a different adversarial angle), the coordinator can probably handle it. For synthesis-dependent workflows (each agent's angle must be grounded in what the main agent learned), the main agent still needs to write the brief.
+- Cross-workflow context: sometimes the context needed for a fan-out arm comes from a previous pipeline phase (e.g. discovery → shaping → coding). The coordinator would need a structured way to pass phase artifacts across session boundaries. This is related to the PipelineRunContext work already in the coordinator.
+- How verbose is too verbose? If every fan-out step requires a detailed workflow declaration, workflow authoring becomes significantly more complex. The right balance may be: simple fan-outs (identical routine, different angles) use coordinator-managed injection; complex fan-outs (bespoke per-arm instructions) keep the main agent in the loop.
+
+---
+
+### Async spawn_agent: non-blocking delegation for long-running subagents (May 11, 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 9** | Cor:1 Cap:2 Eff:1 Lev:2 Con:2 | Blocked: no
+
+`spawn_agent` blocks the parent session until the child completes. For short child sessions (seconds to a few minutes) this is fine. For long child sessions (10-20+ minutes), the parent's budget is consumed waiting. An async variant -- `spawn_agent` returns a handle immediately, the parent continues working and polls or is notified when the child completes -- would allow the parent to do other work in parallel.
+
+This is a more significant change than parallel `spawn_agent` (above) because it changes the agent's programming model: the agent must now write logic to check handles and wait for results, rather than calling the tool and reading the result inline. Workflows that use `spawn_agent` today assume blocking semantics; they would need to be rewritten to use the async variant.
+
+This is the right long-term direction for truly concurrent multi-agent workflows. But parallel `spawn_agent` (run N blocking children simultaneously) solves the immediate wr.discovery bottleneck without changing the agent's programming model, so async `spawn_agent` is not needed urgently.
+
+**Things to hash out:**
+- What does the agent do while waiting? It could do other workflow steps that don't depend on the child's output. But most fan-out patterns require all children to complete before synthesis can start -- so the "do other work" window may be small in practice.
+- Handle API: `spawn_agent_async` returns a `{ handle }`. The agent calls `await_agent(handle)` or `check_agent(handle)`. What does `check_agent` return for a still-running child? A progress signal? The steer mechanism already exists for pushing updates to running sessions.
+- Cooperative completion interaction: once cooperative completion is implemented (see session-budget-cooperative-completion.md), an async child that pauses creates a parent that is waiting on a handle that never resolves. How does this compose?
+
 ---
 
 ## WorkRail MCP Server
