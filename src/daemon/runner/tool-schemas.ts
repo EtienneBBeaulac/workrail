@@ -143,23 +143,40 @@ export function getSchemas(): Record<string, any> {
       properties: {
         workflowId: {
           type: 'string',
-          description: 'ID of the workflow to run in the child session (e.g. "wr.discovery").',
+          description: 'ID of the workflow to run in the child session (e.g. "wr.discovery"). Used for single-spawn form only.',
         },
         goal: {
           type: 'string',
-          description: 'One-sentence description of what the child session should accomplish.',
+          description: 'One-sentence description of what the child session should accomplish. Used for single-spawn form only.',
         },
         workspacePath: {
           type: 'string',
-          description: 'Absolute path to the workspace directory for the child session.',
+          description: 'Absolute path to the workspace directory for the child session. Used for single-spawn form only.',
         },
         context: {
           type: 'object',
           additionalProperties: true,
-          description: 'Optional initial context variables to pass to the child workflow.',
+          description: 'Optional initial context variables to pass to the child workflow. Used for single-spawn form only.',
+        },
+        agents: {
+          type: 'array',
+          description: 'For parallel execution: array of child sessions to run simultaneously. ' +
+            'Use instead of workflowId/goal/workspacePath. ' +
+            'Returns { kind: "parallel", results: [{kind: "single", childSessionId, outcome, notes, artifacts?}] } in input order. ' +
+            'Budget maxSessionMinutes for max(child duration), not sum(child durations).',
+          items: {
+            type: 'object',
+            properties: {
+              workflowId: { type: 'string', description: 'Workflow ID for this child session.' },
+              goal: { type: 'string', description: 'Goal for this child session.' },
+              workspacePath: { type: 'string', description: 'Workspace path for this child session.' },
+              context: { type: 'object', additionalProperties: true, description: 'Optional context variables.' },
+            },
+            required: ['workflowId', 'goal', 'workspacePath'],
+            additionalProperties: false,
+          },
         },
       },
-      required: ['workflowId', 'goal', 'workspacePath'],
       additionalProperties: false,
     },
   };

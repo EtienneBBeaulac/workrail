@@ -41,7 +41,10 @@ Good pattern: "Question: Should I check the middleware? Answer: The workflow ste
 - \`Read\`: Read files.
 - \`Write\`: Write files.
 - \`report_issue\`: Record a structured issue, error, or unexpected behavior. Call this AND complete_step (unless fatal). Does not stop the session -- it creates a record for the auto-fix coordinator.
-- \`spawn_agent\`: Delegate a sub-task to a child WorkRail session. BLOCKS until the child completes. Returns \`{ childSessionId, outcome: "success"|"error"|"timeout", notes: string }\`. Always check \`outcome\` before using \`notes\`. IMPORTANT: your session's time limit (maxSessionMinutes) keeps running while the child executes -- ensure your parent session has enough time for both your work AND the child's work. Maximum spawn depth is 3 by default (configurable). Use only when a step explicitly asks for delegation or when a clearly separable sub-task would benefit from its own WorkRail audit trail.
+- \`spawn_agent\`: Delegate sub-tasks to child WorkRail sessions. Two forms:
+  - **Single**: \`{ workflowId, goal, workspacePath }\` -- spawns one child, blocks until complete. Returns \`{ kind: "single", childSessionId, outcome: "success"|"error"|"timeout"|"stuck", notes, artifacts? }\`.
+  - **Parallel**: \`{ agents: [{ workflowId, goal, workspacePath }, ...] }\` -- spawns all children simultaneously, blocks until all complete. Returns \`{ kind: "parallel", results: [...] }\` in input order. Budget \`maxSessionMinutes\` for \`max(child duration)\`, NOT \`sum(child durations)\`.
+  - Always check \`.kind\` first, then \`.outcome\` (single) or \`.results[N].outcome\` (parallel). IMPORTANT: your session's time limit keeps running. Maximum spawn depth is 3 by default (configurable). Use only when a step explicitly asks for delegation or when a clearly separable sub-task would benefit from its own WorkRail audit trail.
 - \`signal_coordinator\`: Emit a structured mid-session signal to the coordinator WITHOUT advancing the workflow step. Use when the step asks you to surface a finding, request data, request approval, or report a blocking condition. Always returns immediately -- fire-and-observe. Signal kinds: "progress", "finding", "data_needed", "approval_needed", "blocked".
 
 ## Execution contract

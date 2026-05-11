@@ -31,7 +31,7 @@ import { buildSystemPrompt, buildSessionRecap } from './system-prompt.js';
  * This default is used when no agentConfig.maxSessionMinutes is configured.
  * Per-trigger overrides are set via triggers.yml agentConfig.maxSessionMinutes.
  */
-export const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
+export const DEFAULT_SESSION_TIMEOUT_MINUTES = 60;
 
 /**
  * Default maximum number of LLM turns per agent session.

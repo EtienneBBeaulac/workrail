@@ -13,7 +13,7 @@
  * - COORDINATOR_SPAWN_CUTOFF_MS is checked before every spawn point.
  *
  * Timeout constants (hardcoded, never LLM-computed -- pitch invariant 17):
- * - Discovery: 55 minutes
+ * - Discovery: 60 minutes
  * - Shaping: 35 minutes
  * - Coding: 65 minutes
  * - Review (child): 25 minutes
@@ -37,8 +37,8 @@ import type { PipelineRunContext, PhaseRecord } from './pipeline-run-context.js'
 // TIMEOUT CONSTANTS (hardcoded, never LLM-computed)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Discovery session timeout: 55 minutes -- workrail codebase needs more time on complex questions. */
-export const DISCOVERY_TIMEOUT_MS = 55 * 60 * 1000;
+/** Discovery session timeout: 60 minutes -- workrail codebase needs more time on complex questions. */
+export const DISCOVERY_TIMEOUT_MS = 60 * 60 * 1000;
 
 /** Shaping session timeout: 35 minutes. */
 export const SHAPING_TIMEOUT_MS = 35 * 60 * 1000;
