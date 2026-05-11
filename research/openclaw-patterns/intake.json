@@ -1,0 +1,16 @@
+{
+  "sessionId": "openclaw-patterns",
+  "q1_question": "What specific, directly-adaptable code patterns from OpenClaw's source can WorkTrain implement quickly to meaningfully improve -- across any part of the system?",
+  "q2_mode": "understanding",
+  "q3_priors": "The competitive analysis identified three urgent areas (worktrain doctor, unified event schema, pluggable context assembly) but OpenClaw has 80+ source directories. The quick-win patterns likely extend well beyond those three. OpenClaw is battle-tested at scale (369k stars, 35k commits/90days) so any subsystem they've hardened is worth reading carefully.",
+  "q4_good_enough": "For each pattern found: enough source detail to write a GitHub issue with clear acceptance criteria and a concrete implementation sketch. At least 8-10 distinct patterns across different parts of WorkTrain (not just daemon). Patterns should be extractable without importing OpenClaw's infrastructure.",
+  "q5_out_of_scope": [
+    "Channel adapters (WhatsApp, Telegram, etc.) -- not relevant to WorkTrain",
+    "Voice/TTS/media subsystems",
+    "UI/Canvas/web frontend",
+    "ClawHub plugin registry internals",
+    "OpenClaw-specific config formats that don't translate"
+  ],
+  "q6_source_preferences": "Primary: GitHub source via gh CLI. Focus on: src/daemon/, src/agents/, src/tasks/, src/context-engine/, src/trajectory/, src/sessions/, src/commitments/, src/acp/, src/cron/, src/security/, src/tools/. Read actual implementation files, not just type definitions.",
+  "q7_run_mode": "deep"
+}

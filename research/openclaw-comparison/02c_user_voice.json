@@ -1,0 +1,64 @@
+{
+  "subagent": "2c_user_voice",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "sources": ["GitHub issues (sampled 30 most-recently-updated open issues)", "CHANGELOG fix mentions"],
+  "top_complaints": [
+    {
+      "theme": "Cron jobs lost after restart -- activeJobIds not persisted",
+      "cluster_size": 1,
+      "verbatim": "[Bug] Cron tasks marked as lost after gateway restart — activeJobIds not persisted",
+      "issue": 79196,
+      "time_period": "last_30_days"
+    },
+    {
+      "theme": "Stale binary after update -- no warning that running process is old",
+      "cluster_size": 1,
+      "verbatim": "After npm build, openclaw daemon --start launches the old binary. No warning.",
+      "source": "backlog item described in AGENTS context",
+      "time_period": "last_30_days"
+    },
+    {
+      "theme": "Plugin metadata rescans make status --json take ~27s",
+      "cluster_size": 1,
+      "verbatim": "Repeated plugin metadata rescans make `openclaw status --json` take ~27s on 2026.5.7",
+      "issue": 79129,
+      "time_period": "last_30_days"
+    },
+    {
+      "theme": "Gateway --json commands emit no JSON on connection failure",
+      "cluster_size": 1,
+      "verbatim": "Gateway-backed --json commands emit no JSON on connection failure",
+      "issue": 79108,
+      "time_period": "last_30_days"
+    },
+    {
+      "theme": "Channel config silent deprecation + CLI breakage",
+      "cluster_size": 1,
+      "verbatim": "Config UX: silent deprecation + CLI breakage on invalid config + protected path blocking",
+      "issue": 79117,
+      "time_period": "last_30_days"
+    },
+    {
+      "theme": "Context assembly invalidation bugs (stale history after reset)",
+      "cluster_size": 1,
+      "verbatim": "Agents/context engine: invalidate cached assembled context views when source history shrinks or assembly fails",
+      "source": "CHANGELOG fix",
+      "time_period": "last_30_days"
+    }
+  ],
+  "top_praises": [
+    {
+      "theme": "Daily shipping cadence / high velocity",
+      "evidence": "369k stars, 76k forks, 35k commits in 90 days -- community clearly values the pace",
+      "source": "GitHub metrics"
+    },
+    {
+      "theme": "Multi-channel reach (20+ messaging platforms)",
+      "evidence": "Explicit in README as primary differentiator; high community interest in channel additions",
+      "source": "https://github.com/openclaw/openclaw/blob/main/README.md"
+    }
+  ],
+  "switch_in_narratives": [],
+  "switch_out_narratives": [],
+  "notes": "G2/Capterra/Reddit not checked -- out of scope for this analysis focus. GitHub issues are the primary user-voice source for an open-source project."
+}

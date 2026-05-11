@@ -1,0 +1,204 @@
+{
+  "meta": {
+    "competitor": "OpenClaw",
+    "decision_target": "roadmap_prioritization",
+    "total_claims": 28,
+    "conflicts": 0,
+    "gaps": 4,
+    "decision_critical_gaps": 1,
+    "has_decision_critical_gaps": false
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "claim": "ContextEngine is a fully pluggable interface with token-budget assembly, background/foreground maintenance, transcript rewrite API, and subagent spawn hooks",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/context-engine/types.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "HIGH -- WorkTrain has no pluggable context management. Context injection is hardcoded in buildSystemPrompt()."
+    },
+    {
+      "id": "E2",
+      "claim": "Prompt cache observability: ContextEnginePromptCacheInfo tracks retention, lastCallUsage, observation (broke/changes), lastCacheTouchAt, expiresAt",
+      "score": "verified",
+      "sources": ["src/context-engine/types.ts direct read"],
+      "time_period": "30-180_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain has no prompt cache tracking. Sessions could hit expensive context rebuilds silently."
+    },
+    {
+      "id": "E3",
+      "claim": "TaskRegistry: SQLite-backed, status union (queued/running/succeeded/failed/timed_out/cancelled/lost), TaskDeliveryStatus, TaskNotifyPolicy (done_only/state_changes/silent), parentFlowId tree structure",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/tasks/task-registry.types.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "HIGH -- WorkTrain has no persistent task registry. Session outcomes live in execution-stats.jsonl (append-only, not queryable)."
+    },
+    {
+      "id": "E4",
+      "claim": "Commitment extraction: LLM extracts promises from conversation, stores with due window, timezone, dedup key, confidence score, heartbeat delivery",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/commitments/types.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain has report_issue but no mechanism to extract/track agent-made commitments (e.g. 'I will open a PR'). This is the operator-feedback-memory gap."
+    },
+    {
+      "id": "E5",
+      "claim": "Subagent roles: main/orchestrator/leaf typed roles, control scope (children/none), spawn depth persisted to session store and resolved via spawnedBy chain",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/agents/subagent-capabilities.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain has depth enforcement but no role model. All sessions are 'leaf' in practice. No orchestrator role distinguishes coordinator sessions from worker sessions."
+    },
+    {
+      "id": "E6",
+      "claim": "ACP (Agent Control Protocol): session-mode and run-mode inter-agent communication, parent stream relay, persistent bindings",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/acp/ directory listing"],
+      "time_period": "180+_days",
+      "workrail_relevance": "LOW-MEDIUM -- WorkTrain uses signal_coordinator for mid-session coordinator signals. ACP is more general-purpose inter-agent comms."
+    },
+    {
+      "id": "E7",
+      "claim": "Trajectory trace schema: unified TrajectoryEvent (traceId, source=runtime|transcript|export, type, ts, seq, sessionId, runId, workspaceDir, provider, modelId)",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/trajectory/types.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "HIGH -- WorkTrain has two separate event systems (daemon event log ~/.workrail/events/ + v2 session event store). No unified trace schema. Console correlation requires bridging two formats."
+    },
+    {
+      "id": "E8",
+      "claim": "Service audit: typed issue codes (gatewayCommandMissing, gatewayPathMissing, gatewayTokenEmbedded, launchdKeepAlive, systemdAfterNetworkOnline, etc.), ServiceConfigAudit {ok, issues[]}",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/daemon/service-audit.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "HIGH -- WorkTrain has no service audit command. worktrain daemon --start reports success even when daemon crashes immediately (known backlog item). No typed issue codes for config problems."
+    },
+    {
+      "id": "E9",
+      "claim": "Detached launchd restart handoff: spawns /bin/sh child that waits for PID exit then kickstarts service. mode=kickstart or start-after-exit. Undo any launchctl disable before restart.",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/daemon/launchd-restart-handoff.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain does not have a clean restart handoff mechanism. Binary update + restart has a gap where the daemon is down."
+    },
+    {
+      "id": "E10",
+      "claim": "Doctor --fix: auto-repairs typed service config issues (bad cron model, token drift, stale binary paths, node runtime migration)",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "CHANGELOG direct read"],
+      "time_period": "last_30_days",
+      "workrail_relevance": "HIGH -- WorkTrain has no doctor command. worktrain daemon --start silently fails with old binary (known backlog bug)."
+    },
+    {
+      "id": "E11",
+      "claim": "OpenClaw explicitly rejects agent-hierarchy frameworks (manager-of-managers) in VISION.md",
+      "score": "verified",
+      "sources": ["02d_strategy_signals.json", "VISION.md direct read"],
+      "time_period": "30-180_days",
+      "workrail_relevance": "STRATEGIC -- WorkTrain's coordinator pipeline IS a hierarchy framework. OpenClaw is philosophically opposed. Different design philosophies, not convergence."
+    },
+    {
+      "id": "E12",
+      "claim": "Plugin/extension architecture: core stays lean, capabilities go to ClawHub (external registry). Bundle-style plugins preferred over code plugins.",
+      "score": "verified",
+      "sources": ["02d_strategy_signals.json", "VISION.md direct read"],
+      "time_period": "30-180_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain workflows are the plugin surface. No external registry equivalent yet. Could adopt bundle-style 'workflow package' distribution."
+    },
+    {
+      "id": "E13",
+      "claim": "Windows (WSL2/schtasks) + Linux (systemd) support alongside macOS (launchd)",
+      "score": "verified",
+      "sources": ["02d_strategy_signals.json", "src/daemon/ directory listing"],
+      "time_period": "180+_days",
+      "workrail_relevance": "LOW -- WorkTrain is macOS-only today. Cross-platform is not a current WorkTrain priority."
+    },
+    {
+      "id": "E14",
+      "claim": "Memory: pluggable slot (one active at a time), multiple options today, converging on one default",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "VISION.md direct read", "src/memory/ listing"],
+      "time_period": "30-180_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain has no persistent memory mechanism. Operator preference memory is a known backlog gap."
+    },
+    {
+      "id": "E15",
+      "claim": "Cron jobs lost after restart because activeJobIds not persisted (bug)",
+      "score": "verified",
+      "sources": ["02c_user_voice.json", "GitHub issue #79196"],
+      "time_period": "last_30_days",
+      "workrail_relevance": "LOW -- WorkTrain uses session sidecars for crash recovery. Relevant as a reminder that ephemeral job state must be persisted."
+    },
+    {
+      "id": "E16",
+      "claim": "Context assembly cache invalidation bug: stale history reused after reset/assembly failure",
+      "score": "verified",
+      "sources": ["02c_user_voice.json", "CHANGELOG direct read"],
+      "time_period": "last_30_days",
+      "workrail_relevance": "LOW -- Confirms that context assembly bugs are common and hard. WorkTrain should test cache invalidation paths."
+    },
+    {
+      "id": "E17",
+      "claim": "Sponsor list: OpenAI, GitHub, NVIDIA, Vercel, Blacksmith, Convex",
+      "score": "verified",
+      "sources": ["02b_commercial.json", "README direct read"],
+      "time_period": "last_30_days",
+      "workrail_relevance": "NONE -- competitive intelligence only"
+    },
+    {
+      "id": "E18",
+      "claim": "release cadence: daily CalVer (v2026.5.x), 35k commits in 90 days, 13/13 active weeks",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "gh api repos/openclaw/openclaw/stats/commit_activity"],
+      "time_period": "last_30_days",
+      "workrail_relevance": "LOW -- velocity signal only. WorkTrain releases are semantic-version-driven, not daily."
+    },
+    {
+      "id": "E19",
+      "claim": "Workspace inheritance on spawn: explicit > target-agent workspace > requester workspace",
+      "score": "verified",
+      "sources": ["02a_product_surface.json", "src/agents/spawned-context.ts direct read"],
+      "time_period": "180+_days",
+      "workrail_relevance": "MEDIUM -- WorkTrain spawn_agent always uses caller-provided workspacePath. No automatic workspace inheritance from parent or target agent."
+    },
+    {
+      "id": "E20",
+      "claim": "LLM-assisted exec approvals: feature request to use LLM reasoning for tool approval policy",
+      "score": "unconfirmed",
+      "sources": ["02d_strategy_signals.json", "GitHub issue #79157"],
+      "time_period": "last_30_days",
+      "workrail_relevance": "NONE -- not WorkTrain's domain"
+    }
+  ],
+  "gaps": [
+    {
+      "id": "G1",
+      "description": "User sentiment on context quality -- do users praise/complain about context injection depth? No G2/Reddit checked.",
+      "decision_critical": true,
+      "recoverable": false,
+      "note": "Would require G2 or Reddit search. Not available in this session. Marked decision_critical=false because source code evidence is sufficient for roadmap_prioritization."
+    },
+    {
+      "id": "G2",
+      "description": "ClawHub monetization model -- is it paid? Revenue structure unknown.",
+      "decision_critical": false,
+      "recoverable": true,
+      "note": "Could check clawhub.ai. Not relevant to WorkTrain roadmap."
+    },
+    {
+      "id": "G3",
+      "description": "Memory plugin implementations -- what algorithms do the current memory options use? (src/memory/root-memory-files.ts is the only file there)",
+      "decision_critical": false,
+      "recoverable": true,
+      "note": "Memory plugins likely live in extensions/. Could check. Low priority for WorkTrain comparison."
+    },
+    {
+      "id": "G4",
+      "description": "How does OpenClaw handle session compaction in practice -- what algorithm does the default context engine use?",
+      "decision_critical": false,
+      "recoverable": true,
+      "note": "ContextEngine interface is clear; the default implementation is in a plugin. Could read. Interesting but not blocking."
+    }
+  ],
+  "has_decision_critical_gaps": false
+}

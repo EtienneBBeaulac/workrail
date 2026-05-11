@@ -1,0 +1,53 @@
+{
+  "priors": [
+    {
+      "id": "P1",
+      "claim": "The service audit pattern (typed issue codes + doctor --fix) is directly portable to WorkTrain with minimal adaptation",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Corroborated by SQ1-C1 through SQ1-C6. auditGatewayServiceConfig() accumulator pattern is directly portable. GatewayServiceCommand -> DaemonServiceCommand substitution is trivial."
+    },
+    {
+      "id": "P2",
+      "claim": "OpenClaw's task registry uses SQLite and the schema is simple enough to adapt for WorkTrain's execution-stats use case",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Corroborated by SQ4-C3. Registry has no channel/agent/gateway imports -- IS independently instantiable. The SQLite store replaces execution-stats.jsonl directly."
+    },
+    {
+      "id": "P3",
+      "claim": "The commitment extraction pattern (LLM-extracted promises from conversation) requires a different LLM call and is not a quick win",
+      "tag": "prior:unverified",
+      "source": "agent",
+      "notes": "Not investigated in this pass -- out of scope for quick-win pattern extraction."
+    },
+    {
+      "id": "P4",
+      "claim": "OpenClaw's cron subsystem has patterns relevant to WorkTrain's polling scheduler",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Corroborated by SQ5-C1 through SQ5-C4. sleepWithAbort (from infra/backoff.ts) and the interrupted-startup-run pattern are the most relevant. The skip-if-running in-memory Set confirms the known limitation (issue #79196)."
+    },
+    {
+      "id": "P5",
+      "claim": "The subagent depth/role model is more complex in OpenClaw and not a quick adaptation",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Confirmed by SQ7-C1: the subagent TARGET POLICY (resolveSubagentTargetPolicy) IS a quick win. The full role model (orchestrator/leaf) is complex, but the allowlist policy is a standalone pure function."
+    },
+    {
+      "id": "P6",
+      "claim": "OpenClaw's security subsystem has patterns for input validation / prompt injection scanning that WorkTrain could use for webhook payloads",
+      "tag": "falsified-pending-review",
+      "source": "agent",
+      "notes": "Issue #79168 requested content-based prompt injection scanning -- confirmed NOT shipped. The infra/host-env-security.ts pattern IS useful but for exec env sanitization (bash tool), not webhook payload injection scanning."
+    },
+    {
+      "id": "P7",
+      "claim": "OpenClaw's restart/recovery handling is more sophisticated than WorkTrain's, particularly the PID-wait pattern for clean handoff",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Corroborated. The PID-wait launchd restart handoff IS directly applicable. But the more immediately useful pattern is sleepWithAbort() for PollingScheduler.stop() and the pointer-file cross-reference for session event correlation (SQ2-C2)."
+    }
+  ]
+}

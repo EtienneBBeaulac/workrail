@@ -1,0 +1,79 @@
+{
+  "_note": "WorkRail cannot register live cron jobs. This file is a configuration document for the operator to configure monitoring alerts and calendar reminders based on the triggers listed here.",
+  "analysis_id": "openclaw-roadmap_prioritization-2026-05-07",
+  "competitor": "OpenClaw",
+  "decision_target": "roadmap_prioritization",
+  "staleness_date": "2026-08-05",
+  "time_based_triggers": [
+    {
+      "id": "quarterly-full-rerun",
+      "type": "time",
+      "schedule": "every 90 days",
+      "next_due": "2026-08-05",
+      "action": "full re-run of wr.competitive-analysis from step 0",
+      "rationale": "OpenClaw ships daily. Architecture and strategic signals can shift significantly in 90 days."
+    },
+    {
+      "id": "monthly-lightweight-refresh",
+      "type": "time",
+      "schedule": "every 30 days",
+      "next_due": "2026-06-07",
+      "action": "re-run subagents 2a (product surface) and 2d (strategy signals) only; update 03_evidence_base.json if new shipped features found",
+      "rationale": "Daily CalVer releases mean the product surface changes fast. Monthly spot-check catches new shipped features without full re-run cost."
+    }
+  ],
+  "event_based_triggers": [
+    {
+      "id": "coding-agent-skill-contents",
+      "type": "event",
+      "trigger": "skills/coding-agent/ directory contents change materially in openclaw/openclaw main branch",
+      "monitoring": "watch https://github.com/openclaw/openclaw/tree/main/skills/coding-agent -- check for step enforcement logic, typed phase contracts, or workflow definitions",
+      "action": "immediately re-run steps 5-7 (synthesis → red hat → decision artifacts); escalate coding-agent and distribution-gap findings to urgent",
+      "priority": "HIGH -- this is the single most important event trigger from the current analysis",
+      "rationale": "The synthesis's most-likely premortem scenario activates if this directory gains multi-phase step enforcement. Changes the competitive timeline from 'watch closely' to 'act now'."
+    },
+    {
+      "id": "acquisition-signal",
+      "type": "event",
+      "trigger": "GitHub, OpenAI, or any other sponsor announces acquisition of openclaw org or steipete",
+      "action": "full re-run immediately; threat level escalates from 'architectural library' to 'platform threat'",
+      "priority": "HIGH"
+    },
+    {
+      "id": "major-version-release",
+      "type": "event",
+      "trigger": "OpenClaw releases a version tagged with a major feature announcement for autonomous coding / dev pipeline capability",
+      "monitoring": "watch https://github.com/openclaw/openclaw/releases and https://openclaw.ai blog",
+      "action": "re-run steps 2a + 5-7",
+      "priority": "MEDIUM"
+    },
+    {
+      "id": "funding-round",
+      "type": "event",
+      "trigger": "OpenClaw announces a funding round (Series A or later) from a strategic investor",
+      "action": "re-run steps 5-7 with updated commercial framing; reconsider stay_community commercial threat verdict",
+      "priority": "MEDIUM"
+    },
+    {
+      "id": "leadership-change",
+      "type": "event",
+      "trigger": "steipete leaves the project or a new lead contributor with a different architectural philosophy emerges",
+      "action": "re-read VISION.md; re-run step 5 threat read; E11 (hierarchy rejection) verdict may flip",
+      "priority": "MEDIUM",
+      "rationale": "Current governance is extremely concentrated. A leadership change could reverse the 'will not merge agent-hierarchy' stance quickly."
+    },
+    {
+      "id": "decision-imminent",
+      "type": "event",
+      "trigger": "WorkTrain team is about to make a roadmap decision that this analysis was meant to inform (e.g. prioritizing ContextEngine vs worktrain doctor vs trajectory schema)",
+      "action": "re-read 07_decision_ledger.md; verify urgent items have not been superseded by new evidence",
+      "priority": "HIGH"
+    }
+  ],
+  "open_questions_for_next_run": [
+    "What are the contents of skills/coding-agent/? Is it a flat agent prompt or does it contain multi-phase step enforcement?",
+    "Has OpenClaw shipped any ClawHub plugin that adds structured coding pipeline execution?",
+    "Have any of the three urgent items (ContextEngine, unified trajectory, worktrain doctor) been addressed in WorkTrain by re-run time?",
+    "Are there documented examples of WorkTrain's typed-phase contracts catching failures that a flat agent would have missed? (ACH Alternative B -- currently unsupported)"
+  ]
+}

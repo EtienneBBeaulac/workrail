@@ -218,7 +218,8 @@ If you are unsure whether a planning doc needs updating, it probably does.
 
 ### Feature-specific plans
 
-- `docs/plans/` -- initiative-specific canonical plan and design docs (v2 design, validation, prompt fragments, content coherence, etc.)
+- `docs/plans/` -- initiative-specific canonical plan and design docs (v2 design, validation, prompt fragments, content coherence, etc.). **This is the canonical home for live design specs of unshipped work** -- if you produce a design spec or implementation plan for a feature that has not yet shipped, commit it here, not in `docs/design/`.
+- `docs/design/` -- design artifacts produced during workflow execution (design candidates, review findings, verification docs). These are working papers -- once the work ships, they can be deleted.
 - `docs/features/` -- feature documentation (loops, external workflow repos, etc.)
 
 ## Workflow authoring

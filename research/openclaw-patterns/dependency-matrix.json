@@ -1,0 +1,56 @@
+{
+  "subQuestions": [
+    {
+      "id": "SQ1",
+      "question": "What does OpenClaw's full service audit implementation look like, and what is the minimal portable version for WorkTrain?",
+      "dependsOn": [],
+      "sourceMapEntries": [1, 2],
+      "notes": "Covers doctor/audit pattern. Independent -- no other sub-questions needed first."
+    },
+    {
+      "id": "SQ2",
+      "question": "How does OpenClaw write trajectory/trace events in practice, and what would a unified WorkTrain event schema look like?",
+      "dependsOn": ["SQ6"],
+      "sourceMapEntries": [4, 6],
+      "notes": "Depends on SQ6 (session lifecycle events) to understand what WorkTrain currently writes before designing the unified format."
+    },
+    {
+      "id": "SQ3",
+      "question": "How does OpenClaw's context engine registry/delegate work, and what is the minimal seam WorkTrain needs to make buildSystemPrompt() pluggable?",
+      "dependsOn": [],
+      "sourceMapEntries": [5],
+      "notes": "Independent. The interface is known; this is about the dispatch mechanism."
+    },
+    {
+      "id": "SQ4",
+      "question": "How does OpenClaw's task executor and registry work, and is the execution model portable to WorkTrain's daemon without the full OpenClaw session machinery?",
+      "dependsOn": [],
+      "sourceMapEntries": [3],
+      "notes": "Independent. Focused on portability of the task registry pattern."
+    },
+    {
+      "id": "SQ5",
+      "question": "What patterns does OpenClaw's cron subsystem use for interval management, skip-if-running, and last-run persistence -- and which apply to WorkTrain's PollingScheduler?",
+      "dependsOn": [],
+      "sourceMapEntries": [8],
+      "notes": "Independent. PollingScheduler is WorkTrain's equivalent."
+    },
+    {
+      "id": "SQ6",
+      "question": "What does OpenClaw's session lifecycle event schema look like in practice (not just types), and how does it compare to WorkTrain's current daemon event log format?",
+      "dependsOn": [],
+      "sourceMapEntries": [6],
+      "notes": "Foundational for SQ2. Read this first."
+    },
+    {
+      "id": "SQ7",
+      "question": "What additional quick-win patterns exist in OpenClaw's subagent dispatch, security, or other subsystems that were not covered in the competitive analysis?",
+      "dependsOn": ["SQ1", "SQ3", "SQ4"],
+      "sourceMapEntries": [7],
+      "notes": "Catch-all for patterns outside the three urgent items. Depends on the others to know what's already covered."
+    }
+  ],
+  "regime": "depth_serial",
+  "topologicalOrder": ["SQ1", "SQ3", "SQ4", "SQ5", "SQ6", "SQ2", "SQ7"],
+  "regimeReason": "SQ2 depends on SQ6; SQ7 depends on SQ1, SQ3, SQ4. Serial order required."
+}
