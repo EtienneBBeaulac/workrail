@@ -158,22 +158,6 @@ export interface CoordinatorDeps {
      * write code and must be isolated so delivery can open a PR against a clean branch.
      */
     branchStrategy?: 'worktree' | 'none',
-    /**
-     * Effective workspace path for the agent -- the directory the agent actually works in.
-     *
-     * WHY separate from `workspace`:
-     * `workspace` is used by the enricher (listRecentSessions) and must be the main
-     * checkout path so prior session context is found by the correct git-root hash.
-     * `effectiveWorkspacePath` is set on AllocatedSession.sessionWorkspacePath and
-     * used by buildPreAgentSession() for tool sandboxing (file-read/write scope).
-     *
-     * When the coordinator owns a shared pipeline worktree, pass:
-     *   workspace = opts.workspace (main checkout, enricher-correct)
-     *   effectiveWorkspacePath = activeWorkspacePath (worktree, agent working dir)
-     *
-     * When undefined (normal single-workspace sessions), both paths are the same.
-     */
-    effectiveWorkspacePath?: string,
   ) => Promise<Result<string, string>>;
 
   /**

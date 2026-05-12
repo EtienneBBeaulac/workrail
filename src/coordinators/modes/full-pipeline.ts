@@ -254,9 +254,9 @@ export async function runFullPipeline(
 /**
  * Core FULL pipeline logic (extracted so pitch archival and worktree cleanup are always in finally).
  *
- * @param activeWorkspacePath - The shared pipeline worktree path. All sessions and path
- *   construction within this function must use this, not opts.workspace.
- *   opts.workspace is used only for coordinator-internal operations (writePhaseRecord, etc.).
+ * @param activeWorkspacePath - The shared pipeline worktree path. All session spawns and
+ *   within-session path construction (pitchPath, archiveDir, delivery) use this path.
+ *   opts.workspace is reserved for coordinator-internal operations (writePhaseRecord etc.).
  */
 async function runFullPipelineCore(
   deps: AdaptiveCoordinatorDeps,
@@ -279,12 +279,9 @@ async function runFullPipelineCore(
   const discoverySpawnResult = await deps.spawnSession(
     'wr.discovery',
     opts.goal,
-    opts.workspace,
+    activeWorkspacePath,
     undefined,
     { maxSessionMinutes: Math.ceil(DISCOVERY_TIMEOUT_MS / 60_000) },
-    undefined,
-    undefined,
-    activeWorkspacePath,
   );
 
   if (discoverySpawnResult.kind === 'err') {
@@ -381,12 +378,9 @@ async function runFullPipelineCore(
   const shapingSpawnResult = await deps.spawnSession(
     'wr.shaping',
     opts.goal,
-    opts.workspace,
+    activeWorkspacePath,
     shapingContext,
     { maxSessionMinutes: Math.ceil(SHAPING_TIMEOUT_MS / 60_000) },
-    undefined,
-    undefined,
-    activeWorkspacePath,
   );
 
   if (shapingSpawnResult.kind === 'err') {
@@ -469,12 +463,9 @@ async function runFullPipelineCore(
     const uxSpawnResult = await deps.spawnSession(
       'wr.ui-ux-design',
       opts.goal,
-      opts.workspace,
+      activeWorkspacePath,
       { shapingComplete: true },
       { maxSessionMinutes: Math.ceil(REVIEW_TIMEOUT_MS / 60_000) },
-      undefined,
-      undefined,
-      activeWorkspacePath,
     );
 
     if (uxSpawnResult.kind === 'err') {
@@ -572,15 +563,9 @@ async function runFullPipelineCore(
   const codingSpawnResult = await deps.spawnSession(
     'wr.coding-task',
     opts.goal,
-    opts.workspace,
+    activeWorkspacePath,
     codingContext,
     { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
-    undefined,
-    // WHY no branchStrategy: the coordinator owns the shared worktree. The coding session
-    // works directly in the shared worktree (activeWorkspacePath) -- no per-session
-    // worktree creation needed. Delivery uses the coordinator-known branch worktrain/<runId>.
-    undefined,
-    activeWorkspacePath,
   );
 
   if (codingSpawnResult.kind === 'err') {
@@ -698,5 +683,5 @@ async function runFullPipelineCore(
   deps.stderr(`[full-pipeline] PR detected: ${prUrl}`);
 
   // ── Stage 7: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, activeWorkspacePath, prUrl, coordinatorStartMs, 0, runId, priorArtifacts, opts.workspace);
+  return runReviewAndVerdictCycle(deps, activeWorkspacePath, prUrl, coordinatorStartMs, 0, runId, priorArtifacts);
 }

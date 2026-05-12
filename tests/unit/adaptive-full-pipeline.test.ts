@@ -597,12 +597,11 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     expect(callOrder.indexOf('createPipelineWorktree')).toBeLessThan(callOrder.indexOf('spawnSession'));
   });
 
-  it('AC2: ALL session types use opts.workspace (enricher-correct) as workspace arg and worktree as effectiveWorkspacePath', async () => {
-    // This test runs the pipeline far enough to spawn review sessions so all session types
-    // are covered. Review/fix sessions use opts.workspace as workspace (3rd arg, enricher path)
-    // and activeWorkspacePath as effectiveWorkspacePath (8th arg, agent working dir) --
-    // identical to phase sessions. There is no "review uses worktree as workspace" special case.
-    const spawnCalls: Array<{ workflowId: string; workspace: string; effectiveWorkspacePath: string | undefined }> = [];
+  it('AC2: ALL session types use the shared worktree path as workspace (enricher resolves git-common-dir)', async () => {
+    // With the enricher fix, all sessions use activeWorkspacePath (the worktree) directly.
+    // The enricher resolves git rev-parse --git-common-dir from that path, so it finds
+    // the same repo root hash as the main checkout -- no separate "enricher workspace" needed.
+    const spawnCalls: Array<{ workflowId: string; workspace: string }> = [];
     let agentCallCount = 0;
     const reviewVerdictArtifact = {
       kind: 'wr.review_verdict', verdict: 'clean', confidence: 'high', summary: 'LGTM.', findings: [],
@@ -610,10 +609,8 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async (
         workflowId: string, _goal: string, workspace: string,
-        _ctx: unknown, _ac: unknown, _pid: unknown, _bs: unknown,
-        effectiveWorkspacePath?: string,
       ) => {
-        spawnCalls.push({ workflowId, workspace, effectiveWorkspacePath });
+        spawnCalls.push({ workflowId, workspace });
         return nok(nextHandle());
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
@@ -633,19 +630,18 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     expect(outcome.kind).toBe('merged');
     expect(spawnCalls.length).toBeGreaterThan(0);
 
-    // ALL sessions: workspace = opts.workspace (enricher-correct main checkout, arg 3)
-    //              effectiveWorkspacePath = worktree path (agent working dir, arg 8)
-    // This applies to discovery, shaping, coding AND review/fix sessions.
+    // ALL sessions use activeWorkspacePath (the shared worktree) as their workspace.
+    // No session uses opts.workspace directly -- all routing through the worktree is correct
+    // because the enricher resolves git-common-dir and finds the same repo root hash.
     for (const s of spawnCalls) {
-      expect(s.workspace).toBe('/workspace');
-      expect(s.effectiveWorkspacePath).toBe('/fake/worktree/test-run-id');
+      expect(s.workspace).toBe('/fake/worktree/test-run-id');
+      expect(s.workspace).not.toBe('/workspace');
     }
 
-    // Confirm review session was actually spawned (not just phase sessions)
+    // Confirm review session was actually spawned and uses the worktree
     const reviewSession = spawnCalls.find((c) => c.workflowId === 'wr.mr-review');
     expect(reviewSession).toBeDefined();
-    expect(reviewSession?.workspace).toBe('/workspace');
-    expect(reviewSession?.effectiveWorkspacePath).toBe('/fake/worktree/test-run-id');
+    expect(reviewSession?.workspace).toBe('/fake/worktree/test-run-id');
   });
 
   it('AC3: pitchPath in coding context points to worktree (not opts.workspace)', async () => {
@@ -790,16 +786,12 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     await runFullPipeline(deps, makeOpts(), Date.now());
 
     expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
-    // All sessions must reference the prior worktree as effectiveWorkspacePath (arg 8).
-    // workspace (arg 3) = opts.workspace for all session types (enricher-correct).
-    // effectiveWorkspacePath (arg 8) = prior worktree for all session types (agent working dir).
+    // All sessions use the prior worktree path as their workspace.
+    // Enricher correctness is handled by resolveRepoRootHash() in infra.ts, not by callers.
     const spawnCalls = vi.mocked(deps.spawnSession).mock.calls;
     expect(spawnCalls.length).toBeGreaterThan(0);
     for (const call of spawnCalls) {
-      // workspace (arg 3, index 2) = opts.workspace for all session types (enricher-correct main checkout)
-      expect(call[2]).toBe('/workspace');
-      // effectiveWorkspacePath (arg 8, index 7) = prior worktree for all session types
-      expect(call[7]).toBe('/fake/prior-worktree');
+      expect(call[2]).toBe('/fake/prior-worktree');
     }
   });
 

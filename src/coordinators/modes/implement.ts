@@ -150,8 +150,8 @@ export async function runImplementPipeline(
  * Core IMPLEMENT pipeline logic (extracted so pitch archival and worktree cleanup are always in finally).
  *
  * @param pitchPath - Absolute path to the pitch file inside the shared worktree.
- * @param activeWorkspacePath - The shared pipeline worktree path. All sessions use this.
- *   opts.workspace is used only for coordinator-internal operations (writePhaseRecord, etc.).
+ * @param activeWorkspacePath - The shared pipeline worktree path for all session spawns
+ *   and within-session path construction. opts.workspace is for coordinator-internal ops.
  */
 async function runImplementCore(
   deps: AdaptiveCoordinatorDeps,
@@ -175,12 +175,8 @@ async function runImplementCore(
     const uxSpawnResult = await deps.spawnSession(
       'wr.ui-ux-design',
       opts.goal,
-      opts.workspace,
-      { pitchPath },
-      undefined,
-      undefined,
-      undefined,
       activeWorkspacePath,
+      { pitchPath },
     );
 
     if (uxSpawnResult.kind === 'err') {
@@ -226,17 +222,11 @@ async function runImplementCore(
   deps.stderr(`[implement] Spawning wr.coding-task`);
 
   // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13).
-  // WHY no branchStrategy: the coordinator owns the shared worktree. The coding session
-  // works in activeWorkspacePath -- no per-session worktree creation needed.
   const codingSpawnResult = await deps.spawnSession(
     'wr.coding-task',
     opts.goal,
-    opts.workspace,
-    { pitchPath },
-    undefined,
-    undefined,
-    undefined,
     activeWorkspacePath,
+    { pitchPath },
   );
 
   if (codingSpawnResult.kind === 'err') {
@@ -346,5 +336,5 @@ async function runImplementCore(
   deps.stderr(`[implement] PR detected: ${prUrl}`);
 
   // ── Stage 4: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, activeWorkspacePath, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts, opts.workspace);
+  return runReviewAndVerdictCycle(deps, activeWorkspacePath, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts);
 }

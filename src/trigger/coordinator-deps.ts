@@ -242,7 +242,6 @@ export function createCoordinatorDeps(
       agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
       parentSessionId?: string,
       branchStrategy?: 'worktree' | 'none',
-      effectiveWorkspacePath?: string,
     ) => {
       // WHY in-process (not HTTP): the coordinator runs inside the daemon process.
       // POSTing to /api/v2/auto/dispatch would go out-of-process to itself, hitting
@@ -320,14 +319,6 @@ export function createCoordinatorDeps(
         firstStepPrompt: r.pending?.prompt ?? '',
         isComplete: r.isComplete,
         triggerSource: 'daemon',
-        // When the coordinator owns a shared pipeline worktree, effectiveWorkspacePath is
-        // the worktree path where the agent should work. trigger.workspacePath (= workspace)
-        // stays as the main checkout so the enricher finds prior session context correctly.
-        // buildPreAgentSession() reads sessionWorkspacePath from AllocatedSession to override
-        // the agent's working directory without changing the enricher's git-root hash.
-        ...(effectiveWorkspacePath !== undefined && effectiveWorkspacePath !== workspace
-          ? { sessionWorkspacePath: effectiveWorkspacePath }
-          : {}),
       };
       const source: SessionSource = { kind: 'pre_allocated', trigger, session: allocatedSession };
       dispatch(trigger, source);

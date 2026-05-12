@@ -1,7 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as nodePath from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fromPromise } from 'neverthrow';
+
+const execFileAsync = promisify(execFile);
 import type { ResultAsync } from 'neverthrow';
 import { ok, err } from '../runtime/result.js';
 import type { Result } from '../runtime/result.js';
@@ -155,11 +159,11 @@ export function createListRecentSessions(): (
         return err(`listRecentSessions: ${result.error.message}`);
       }
 
-      // Compute sha256:<hex> hash of workspacePath to match observations.repoRootHash format.
-      // WHY: HealthySessionSummary stores a sha256 hash (not raw path) for workspace filtering.
-      // Sessions with null repoRootHash pass through for backward compat (recorded before the
-      // observation feature was added). Strict workspace filtering is a planned v2 improvement.
-      const workspaceHash = `sha256:${createHash('sha256').update(workspacePath).digest('hex')}`;
+      // Resolve the canonical repo root hash the same way workspace-anchor does:
+      // git rev-parse --git-common-dir resolves any git worktree to the shared .git dir,
+      // so all worktrees of the same repo produce the same hash as the main checkout.
+      // Falls back to hashing the raw workspacePath for non-git directories.
+      const workspaceHash = await resolveRepoRootHash(workspacePath);
 
       const notes: SessionNote[] = result.value
         .filter((s) =>
@@ -184,3 +188,37 @@ export function createListRecentSessions(): (
   };
 }
 
+// ---------------------------------------------------------------------------
+// resolveRepoRootHash
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the repo-root hash for workspace filtering, using the same algorithm
+ * as LocalWorkspaceAnchorV2 so sessions recorded from any worktree match sessions
+ * recorded from the main checkout.
+ *
+ * Uses `git rev-parse --path-format=absolute --git-common-dir` to find the canonical
+ * .git directory shared by all worktrees, strips the trailing /.git, then hashes the
+ * result. Falls back to hashing the raw workspacePath for non-git directories or when
+ * git is unavailable (preserves existing behavior for those cases).
+ */
+async function resolveRepoRootHash(workspacePath: string): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd: workspacePath, timeout: 5_000 },
+    );
+    const gitCommonDir = stdout.trim();
+    if (gitCommonDir) {
+      const repoRoot = gitCommonDir.replace(/\/\.git\/?$/, '').trim();
+      if (repoRoot) {
+        return `sha256:${createHash('sha256').update(repoRoot).digest('hex')}`;
+      }
+    }
+  } catch {
+    // Not a git directory, git not installed, or command timed out.
+    // Fall through to the raw-path hash below.
+  }
+  return `sha256:${createHash('sha256').update(workspacePath).digest('hex')}`;
+}
