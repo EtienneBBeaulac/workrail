@@ -37,9 +37,11 @@ export const MAX_FIX_ITERATIONS = 2;
  *
  * Shared by IMPLEMENT mode (implement.ts) and FULL pipeline mode (full-pipeline.ts).
  *
- * @param workspace - The workspace path for all session spawns, merge operations,
- *   and outbox writes. Callers pass activeWorkspacePath (the shared pipeline worktree)
- *   so review/fix/re-review sessions all operate in the same isolated workspace as coding.
+ * @param workspace - The effective workspace for agent tool sandboxing (the shared pipeline
+ *   worktree when coordinator-owned isolation is in use). Fix agents write changes here.
+ * @param mainWorkspace - The main repo checkout path used as trigger.workspacePath for enricher
+ *   correctness and git/merge operations. When equal to workspace (e.g. QUICK_REVIEW mode),
+ *   both paths are the same and enricher behavior is unchanged.
  * @param iteration - Current fix loop iteration (0 = first review)
  */
 export async function runReviewAndVerdictCycle(
@@ -50,7 +52,13 @@ export async function runReviewAndVerdictCycle(
   iteration: number,
   runId = '',
   priorArtifacts: readonly PhaseHandoffArtifact[] = [],
+  mainWorkspace?: string,
 ): Promise<PipelineOutcome> {
+  // WHY effectiveMainWorkspace: review/fix sessions need trigger.workspacePath = main checkout
+  // so the enricher finds prior session notes by the correct git-root hash. The agent's
+  // working directory (tool sandboxing) remains workspace (the shared worktree).
+  // When mainWorkspace is absent (standalone review mode), workspace is used for both.
+  const effectiveMainWorkspace = mainWorkspace ?? workspace;
   const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'review');
   if (cutoffCheck) return cutoffCheck;
 
@@ -67,8 +75,12 @@ export async function runReviewAndVerdictCycle(
   const reviewSpawnResult = await deps.spawnSession(
     'wr.mr-review',
     reviewGoal,
-    workspace,
+    effectiveMainWorkspace,
     reviewContext,
+    undefined,
+    undefined,
+    undefined,
+    workspace !== effectiveMainWorkspace ? workspace : undefined,
   );
 
   if (reviewSpawnResult.kind === 'err') {
@@ -135,7 +147,7 @@ export async function runReviewAndVerdictCycle(
       deps.stderr(`[review-cycle] Verdict clean -- merging PR`);
       const prNum = extractPrNumberFromUrl(prUrl);
       if (prNum !== null) {
-        const mergeResult = await deps.mergePR(prNum, workspace);
+        const mergeResult = await deps.mergePR(prNum, effectiveMainWorkspace);
         if (mergeResult.kind === 'err') {
           deps.stderr(`[WARN review-cycle] mergePR failed (PR will remain open for manual merge): ${mergeResult.error}`);
         }
@@ -176,8 +188,12 @@ export async function runReviewAndVerdictCycle(
       const fixSpawnResult = await deps.spawnSession(
         'wr.coding-task',
         fixGoal,
-        workspace,
+        effectiveMainWorkspace,
         fixContext,
+        undefined,
+        undefined,
+        undefined,
+        workspace !== effectiveMainWorkspace ? workspace : undefined,
       );
 
       if (fixSpawnResult.kind === 'err') {
@@ -207,12 +223,12 @@ export async function runReviewAndVerdictCycle(
       }
 
       deps.stderr(`[review-cycle] Fix iteration ${iteration + 1} complete -- re-reviewing`);
-      return runReviewAndVerdictCycle(deps, workspace, prUrl, coordinatorStartMs, iteration + 1, runId, priorArtifacts);
+      return runReviewAndVerdictCycle(deps, workspace, prUrl, coordinatorStartMs, iteration + 1, runId, priorArtifacts, mainWorkspace);
     }
 
     case 'blocking':
     case 'unknown': {
-      return runAuditChain(deps, workspace, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings, priorArtifacts);
+      return runAuditChain(deps, workspace, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings, priorArtifacts, mainWorkspace);
     }
   }
 }
@@ -231,8 +247,8 @@ export async function runReviewAndVerdictCycle(
  * 2. Re-review with wr.mr-review
  * 3. If still Critical/blocking: post to Human Outbox, do NOT auto-merge
  *
- * @param workspace - The workspace path for all session spawns, merge operations,
- *   and outbox writes. Callers pass activeWorkspacePath (the shared pipeline worktree).
+ * @param workspace - The effective workspace for agent tool sandboxing (shared pipeline worktree).
+ * @param mainWorkspace - The main repo checkout path for enricher correctness. See runReviewAndVerdictCycle.
  * @param findings - Raw findings from the verdict artifact, if available.
  *   Used to select the audit workflow. Absent on the keyword-scan path (safe default applies).
  */
@@ -244,7 +260,9 @@ export async function runAuditChain(
   severity: 'blocking' | 'unknown',
   findings?: ReviewVerdictArtifactV1['findings'],
   priorArtifacts: readonly PhaseHandoffArtifact[] = [],
+  mainWorkspace?: string,
 ): Promise<PipelineOutcome> {
+  const effectiveMainWorkspace = mainWorkspace ?? workspace;
   deps.stderr(`[audit-chain] ${severity.toUpperCase()} finding -- running audit chain`);
 
   const auditCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'audit');
@@ -260,8 +278,12 @@ export async function runAuditChain(
   const auditSpawnResult = await deps.spawnSession(
     auditWorkflow,
     `Audit PR before merge: ${prUrl}`,
-    workspace,
+    effectiveMainWorkspace,
     { prUrl, severity },
+    undefined,
+    undefined,
+    undefined,
+    workspace !== effectiveMainWorkspace ? workspace : undefined,
   );
 
   if (auditSpawnResult.kind === 'err') {
@@ -326,8 +348,12 @@ export async function runAuditChain(
   const reReviewSpawnResult = await deps.spawnSession(
     'wr.mr-review',
     `Re-review after audit: ${prUrl}`,
-    workspace,
+    effectiveMainWorkspace,
     { prUrl, auditComplete: true },
+    undefined,
+    undefined,
+    undefined,
+    workspace !== effectiveMainWorkspace ? workspace : undefined,
   );
 
   if (reReviewSpawnResult.kind === 'err') {
@@ -425,7 +451,7 @@ export async function runAuditChain(
     deps.stderr(`[audit-chain] Post-audit verdict acceptable (${reFindings.severity}) -- merging`);
     const prNumAudit = extractPrNumberFromUrl(prUrl);
     if (prNumAudit !== null) {
-      const mergeResultAudit = await deps.mergePR(prNumAudit, workspace);
+      const mergeResultAudit = await deps.mergePR(prNumAudit, effectiveMainWorkspace);
       if (mergeResultAudit.kind === 'err') {
         deps.stderr(`[WARN audit-chain] mergePR failed (PR will remain open for manual merge): ${mergeResultAudit.error}`);
       }

@@ -514,12 +514,11 @@ describe('runAuditChain', () => {
 
     // Must dispatch wr.production-readiness-audit as the audit workflow
     expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
-    expect(deps.spawnSession).toHaveBeenCalledWith(
-      'wr.production-readiness-audit',
-      expect.any(String),
-      '/workspace',
-      expect.objectContaining({ prUrl: 'https://github.com/org/repo/pull/42', severity: 'blocking' }),
-    );
+    // Check the first 4 positional args (workflowId, goal, workspace, context)
+    const auditCall = vi.mocked(deps.spawnSession).mock.calls.find(c => c[0] === 'wr.production-readiness-audit');
+    expect(auditCall).toBeDefined();
+    expect(auditCall?.[2]).toBe('/workspace');
+    expect(auditCall?.[3]).toMatchObject({ prUrl: 'https://github.com/org/repo/pull/42', severity: 'blocking' });
   });
 
   it('merges PR when post-audit re-review returns clean verdict', async () => {

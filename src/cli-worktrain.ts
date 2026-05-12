@@ -2270,23 +2270,21 @@ runCommand
         return { stdout: result.stdout, stderr: '' };
       },
 
-      createPipelineWorktree: async (workspace: string, runId: string, baseBranch = 'main') => {
-        const worktreePath = path.join(os.homedir(), '.workrail', 'worktrees', runId);
-        const branchName = `worktrain/${runId}`;
-        try {
-          await fs.promises.mkdir(path.join(os.homedir(), '.workrail', 'worktrees'), { recursive: true });
-          await execFilePromise('git', ['-C', workspace, 'fetch', 'origin', baseBranch], {});
-          await execFilePromise('git', ['-C', workspace, 'worktree', 'add', worktreePath, '-b', branchName, `origin/${baseBranch}`], {});
-          return neOk(worktreePath);
-        } catch (e) {
-          return neErr(`createPipelineWorktree failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
+      // WHY returns ok(workspace) instead of creating a real git worktree:
+      // The CLI pipeline dispatches sessions via HTTP to the daemon (/api/v2/auto/dispatch).
+      // The HTTP endpoint cannot forward effectiveWorkspacePath to the daemon's runWorkflow(),
+      // so sessions always work in the trigger.workspacePath (the `workspace` arg passed to
+      // spawnSession, which is opts.workspace -- the main checkout). Creating a real isolated
+      // worktree would be unused: sessions never see it, and delivery would run git operations
+      // against an empty worktree while changes are in the main checkout. Returning opts.workspace
+      // here makes activeWorkspacePath = opts.workspace throughout, so all paths are consistent.
+      createPipelineWorktree: async (workspace: string, _runId: string, _baseBranch = 'main') => {
+        return neOk(workspace);
       },
 
-      removePipelineWorktree: async (workspace: string, worktreePath: string) => {
-        try {
-          await execFilePromise('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath], {});
-        } catch { /* best-effort */ }
+      // WHY no-op: no real worktree was created (see createPipelineWorktree above).
+      removePipelineWorktree: async (_workspace: string, _worktreePath: string) => {
+        // no-op: CLI pipeline uses main checkout as activeWorkspacePath, no worktree to remove
       },
     };
 
