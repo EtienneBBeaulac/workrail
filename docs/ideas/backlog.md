@@ -2203,6 +2203,42 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
 
+### Shared pipeline worktree: one isolated workspace for the entire task lifecycle (May 11, 2026)
+
+**Status: idea** | Priority: critical -- MVP blocker
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+Today the pipeline creates a `branchStrategy: 'worktree'` for the coding session only. Discovery writes a design doc to the main workspace. Shaping reads it and writes a pitch. Coding forks from `main` into an isolated worktree -- but if that worktree was created from `main` before discovery's design doc or shaping's pitch were committed, the coding agent cannot see them. The pipeline's file handoffs are silently broken the moment any phase writes to disk rather than committing.
+
+The root cause: each phase session has its own workspace view. There is no shared persistent workspace for the full pipeline run.
+
+**The fix:** the coordinator creates one worktree at the start of the entire pipeline run, before the first session is spawned. All sessions in that pipeline -- discovery, shaping, coding, review -- use the same worktree path as their `workspacePath`. The branch is coordinator-created (deterministic name, e.g. `worktrain/<runId>`), not agent-created. When the pipeline completes, the coordinator owns delivery (already wired as of PR #1003) and cleanup.
+
+**What this enables:**
+- Discovery writes a design doc: shaping sees it immediately (same filesystem)
+- Shaping writes `current-pitch.md`: coding sees it immediately (same filesystem)
+- Coding's changes accumulate on the same branch: the PR represents the full pipeline's work
+- `pollForPR()` uses a coordinator-known branch name -- no artifact parsing needed
+- `runCoordinatorDelivery()` knows the branch before the coding session even starts
+
+**What this replaces:**
+- `spawnSession(branchStrategy: 'worktree')` passing: coordinator creates the worktree, daemon just uses the path
+- `CodingHandoffArtifactV1.branchName` for `pollForPR()`: coordinator already knows the branch name
+- The current delivery architecture (PR #1003) is still correct -- just the branch source changes
+
+**Things to hash out:**
+- Where does worktree creation live? In `runAdaptivePipeline()` before routing, or in each mode executor's prologue? Coordinator-level is cleaner (one cleanup path) but requires passing `effectiveWorkspacePath` through `AdaptivePipelineOpts`.
+- Do discovery and shaping sessions need isolation too, or just coding? Discovery/shaping are read-heavy and don't commit code -- they benefit from the shared workspace for file handoffs but don't need branch isolation for their own work. Giving all phases the same worktree path is simplest.
+- Commit strategy: should discovery or shaping commit their output files (design doc, pitch) to the worktree branch? Or leave them as uncommitted working-directory files? Uncommitted is simpler -- the coding agent picks them up directly. Committed means the history is cleaner and crash recovery can restore them.
+- Cleanup: coordinator's `finally` block (already present in `runFullPipeline`) calls `git worktree remove` after `PipelineOutcome`. Startup recovery prunes stale worktrees on daemon restart (already implemented).
+
+**Relationship to existing entries:**
+- Blocks or supersedes `branchStrategy: 'worktree'` on `spawnSession` (PR #1003) -- that was the right interim fix, but this is the architectural resolution.
+- The coordinator delivery architecture (PR #1003) is unchanged -- `runCoordinatorDelivery()` still runs git commit + gh pr create after the coding session. The branch just comes from the coordinator-created worktree instead of the agent-reported artifact.
+
+---
+
 ### Reliable synthetic human gates: mimicking operator approval and refusal in autonomous pipelines (May 6, 2026)
 
 **Status: idea** | Priority: high
