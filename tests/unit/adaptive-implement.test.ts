@@ -510,7 +510,7 @@ describe('runAuditChain', () => {
     });
 
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
-    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
+    await runAuditChain(deps, opts.workspace, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
 
     // Must dispatch wr.production-readiness-audit as the audit workflow
     expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
@@ -536,7 +536,7 @@ describe('runAuditChain', () => {
     });
 
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
-    const outcome = await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
+    const outcome = await runAuditChain(deps, opts.workspace, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
 
     expect(outcome.kind).toBe('merged');
     if (outcome.kind === 'merged') {
@@ -563,7 +563,7 @@ describe('runAuditChain', () => {
     });
 
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix auth bug', dryRun: false };
-    const outcome = await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
+    const outcome = await runAuditChain(deps, opts.workspace, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking');
 
     // Must NOT merge
     expect(outcome.kind).toBe('escalated');
@@ -601,7 +601,7 @@ describe('runAuditChain - findingCategory routing', () => {
 
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix arch issue', dryRun: false };
     const findings = [{ severity: 'critical' as const, summary: 'Tight coupling in auth module', findingCategory: 'architecture' as const }];
-    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
+    await runAuditChain(deps, opts.workspace, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
 
     expect(spawnedWorkflows).toContain('wr.architecture-scalability-audit');
     expect(spawnedWorkflows).not.toContain('wr.production-readiness-audit');
@@ -625,7 +625,7 @@ describe('runAuditChain - findingCategory routing', () => {
 
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix security issue', dryRun: false };
     const findings = [{ severity: 'critical' as const, summary: 'SQL injection risk', findingCategory: 'security' as const }];
-    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
+    await runAuditChain(deps, opts.workspace, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
 
     expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
     expect(spawnedWorkflows).not.toContain('wr.architecture-scalability-audit');
@@ -650,7 +650,7 @@ describe('runAuditChain - findingCategory routing', () => {
     const opts: AdaptivePipelineOpts = { workspace: '/workspace', goal: 'Fix issue', dryRun: false };
     // findings items have no findingCategory (optional field omitted)
     const findings = [{ severity: 'critical' as const, summary: 'Some critical finding' }];
-    await runAuditChain(deps, opts, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
+    await runAuditChain(deps, opts.workspace, 'https://github.com/org/repo/pull/42', Date.now(), 'blocking', findings);
 
     expect(spawnedWorkflows).toContain('wr.production-readiness-audit');
     expect(spawnedWorkflows).not.toContain('wr.architecture-scalability-audit');

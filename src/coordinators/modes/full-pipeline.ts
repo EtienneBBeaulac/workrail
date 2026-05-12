@@ -751,5 +751,5 @@ async function runFullPipelineCore(
   deps.stderr(`[full-pipeline] PR detected: ${prUrl}`);
 
   // ── Stage 7: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, priorArtifacts, activeWorkspacePath);
+  return runReviewAndVerdictCycle(deps, activeWorkspacePath, prUrl, coordinatorStartMs, 0, runId, priorArtifacts);
 }

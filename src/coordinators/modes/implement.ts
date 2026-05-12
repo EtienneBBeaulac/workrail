@@ -376,5 +376,5 @@ async function runImplementCore(
   deps.stderr(`[implement] PR detected: ${prUrl}`);
 
   // ── Stage 4: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts, activeWorkspacePath);
+  return runReviewAndVerdictCycle(deps, activeWorkspacePath, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts);
 }
