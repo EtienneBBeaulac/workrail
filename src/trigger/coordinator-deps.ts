@@ -764,7 +764,7 @@ export function createCoordinatorDeps(
         if (candidates.length > 1) {
           process.stderr.write(
             `[WARN coordinator] ${candidates.length} in-progress pipeline runs found -- resuming newest (${candidates[0]!.runId}). ` +
-            `Others: ${candidates.slice(1).map(c => c.runId).join(', ')}. Run 'worktrain cleanup' to clear stale runs.\n`,
+            `Others: ${candidates.slice(1).map(c => c.runId).join(', ')}. To reset, delete the stale context files from ${runsDir}.\n`,
           );
         }
         return ok(candidates[0]!.runId);
@@ -896,7 +896,12 @@ export function createCoordinatorDeps(
     removePipelineWorktree: async (workspace: string, worktreePath: string) => {
       try {
         await execFileAsync('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath], {});
-      } catch { /* best-effort -- logged by caller */ }
+      } catch (e) {
+        process.stderr.write(
+          `[WARN coordinator] removePipelineWorktree failed for ${worktreePath}: ` +
+          `${e instanceof Error ? e.message : String(e)}\n`,
+        );
+      }
     },
   };
 }

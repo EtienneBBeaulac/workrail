@@ -597,8 +597,16 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     expect(callOrder.indexOf('createPipelineWorktree')).toBeLessThan(callOrder.indexOf('spawnSession'));
   });
 
-  it('AC2: discovery/shaping/coding sessions use opts.workspace and pass worktree as effectiveWorkspacePath; review sessions use worktree as workspace', async () => {
+  it('AC2: ALL session types use opts.workspace (enricher-correct) as workspace arg and worktree as effectiveWorkspacePath', async () => {
+    // This test runs the pipeline far enough to spawn review sessions so all session types
+    // are covered. Review/fix sessions use opts.workspace as workspace (3rd arg, enricher path)
+    // and activeWorkspacePath as effectiveWorkspacePath (8th arg, agent working dir) --
+    // identical to phase sessions. There is no "review uses worktree as workspace" special case.
     const spawnCalls: Array<{ workflowId: string; workspace: string; effectiveWorkspacePath: string | undefined }> = [];
+    let agentCallCount = 0;
+    const reviewVerdictArtifact = {
+      kind: 'wr.review_verdict', verdict: 'clean', confidence: 'high', summary: 'LGTM.', findings: [],
+    };
     const deps = makeFakeDeps({
       spawnSession: vi.fn().mockImplementation(async (
         workflowId: string, _goal: string, workspace: string,
@@ -609,27 +617,35 @@ describe('runFullPipeline - shared pipeline worktree', () => {
         return nok(nextHandle());
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        agentCallCount++;
+        if (agentCallCount >= 4) return { recapMarkdown: 'Review complete. Clean verdict.', artifacts: [reviewVerdictArtifact] };
+        if (agentCallCount === 3) return {
+          recapMarkdown: 'Coding done.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): impl","prTitle":"feat(mcp): impl","prBody":"body","followUpTickets":[],"filesChanged":["f.ts"]}\n```',
+          artifacts: [{ kind: 'wr.coding_handoff', version: 1, branchName: 'worktrain/test-run-id', keyDecisions: [], knownLimitations: [], testsAdded: [], filesChanged: ['f.ts'] }],
+        };
+        return { recapMarkdown: 'Session completed successfully. All steps passed with no issues found.', artifacts: [] };
+      }),
     });
 
-    await runFullPipeline(deps, makeOpts(), Date.now());
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
 
+    expect(outcome.kind).toBe('merged');
     expect(spawnCalls.length).toBeGreaterThan(0);
 
-    // Phase sessions (discovery, shaping, coding, ux): workspace=opts.workspace, effectiveWorkspacePath=worktree
-    const phaseSessions = spawnCalls.filter(
-      (c) => ['wr.discovery', 'wr.shaping', 'wr.coding-task', 'wr.ui-ux-design'].includes(c.workflowId),
-    );
-    for (const s of phaseSessions) {
+    // ALL sessions: workspace = opts.workspace (enricher-correct main checkout, arg 3)
+    //              effectiveWorkspacePath = worktree path (agent working dir, arg 8)
+    // This applies to discovery, shaping, coding AND review/fix sessions.
+    for (const s of spawnCalls) {
       expect(s.workspace).toBe('/workspace');
       expect(s.effectiveWorkspacePath).toBe('/fake/worktree/test-run-id');
     }
 
-    // All sessions must reference the shared worktree in some capacity (never a stale or missing path)
-    for (const s of spawnCalls) {
-      const usesWorktree = s.workspace === '/fake/worktree/test-run-id' || s.effectiveWorkspacePath === '/fake/worktree/test-run-id';
-      expect(usesWorktree).toBe(true);
-    }
+    // Confirm review session was actually spawned (not just phase sessions)
+    const reviewSession = spawnCalls.find((c) => c.workflowId === 'wr.mr-review');
+    expect(reviewSession).toBeDefined();
+    expect(reviewSession?.workspace).toBe('/workspace');
+    expect(reviewSession?.effectiveWorkspacePath).toBe('/fake/worktree/test-run-id');
   });
 
   it('AC3: pitchPath in coding context points to worktree (not opts.workspace)', async () => {
@@ -774,16 +790,16 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     await runFullPipeline(deps, makeOpts(), Date.now());
 
     expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
-    // All sessions must reference the prior worktree (either as workspace or effectiveWorkspacePath).
-    // discovery/shaping/ux/coding sessions: workspace = opts.workspace, effectiveWorkspacePath = prior worktree (arg 7)
-    // review/fix sessions: workspace = prior worktree (arg 2, from implement-shared's effectiveWorkspace)
+    // All sessions must reference the prior worktree as effectiveWorkspacePath (arg 8).
+    // workspace (arg 3) = opts.workspace for all session types (enricher-correct).
+    // effectiveWorkspacePath (arg 8) = prior worktree for all session types (agent working dir).
     const spawnCalls = vi.mocked(deps.spawnSession).mock.calls;
     expect(spawnCalls.length).toBeGreaterThan(0);
     for (const call of spawnCalls) {
-      const usesWorktree = call[2] === '/fake/prior-worktree' || call[7] === '/fake/prior-worktree';
-      expect(usesWorktree).toBe(true);
-      // No session should silently ignore the prior worktree and use a fresh path
-      expect(call[2]).not.toBe('/fake/worktree/test-run-id');
+      // workspace (arg 3, index 2) = opts.workspace for all session types (enricher-correct main checkout)
+      expect(call[2]).toBe('/workspace');
+      // effectiveWorkspacePath (arg 8, index 7) = prior worktree for all session types
+      expect(call[7]).toBe('/fake/prior-worktree');
     }
   });
 

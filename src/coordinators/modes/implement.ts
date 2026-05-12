@@ -39,6 +39,7 @@ import { buildPhaseResult } from '../pipeline-run-context.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
 import { isCodingHandoffArtifact, CodingHandoffArtifactV1Schema } from '../../v2/durable-core/schemas/artifacts/index.js';
 import { runCoordinatorDelivery } from '../coordinator-delivery.js';
+import { setupPipelineWorktree } from '../coordinator-worktree.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -93,11 +94,8 @@ export async function runImplementPipeline(
   const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
   const runId = priorRunId ?? deps.generateRunId();
 
-  // ── Shared pipeline worktree (same pattern as full-pipeline.ts) ───────
-  let activeWorkspacePath: string;
-  let worktreeCreated = false;
+  // ── Shared pipeline worktree ──────────────────────────────────────────
   let priorWorktreePath: string | undefined;
-
   if (priorRunId) {
     const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
     if (existingCtx.isOk() && existingCtx.value !== null) {
@@ -105,41 +103,13 @@ export async function runImplementPipeline(
     }
   }
 
-  if (priorWorktreePath !== undefined) {
-    if (!deps.fileExists(priorWorktreePath)) {
-      deps.stderr(`[implement] Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}`);
-      return {
-        kind: 'escalated',
-        escalationReason: {
-          phase: 'init',
-          reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
-            `Delete ${opts.workspace}/.workrail/pipeline-runs/${runId}-context.json to start fresh.`,
-        },
-      };
-    }
-    deps.stderr(`[implement] Crash recovery: reusing existing worktree at ${priorWorktreePath}`);
-    activeWorkspacePath = priorWorktreePath;
-  } else {
-    const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
-    if (worktreeResult.isErr()) {
-      deps.stderr(`[implement] FATAL: failed to create pipeline worktree: ${worktreeResult.error}`);
-      return {
-        kind: 'escalated',
-        escalationReason: { phase: 'init', reason: `Pipeline worktree creation failed: ${worktreeResult.error}` },
-      };
-    }
-    activeWorkspacePath = worktreeResult.value;
-    worktreeCreated = true;
-
-    if (!priorRunId) {
-      const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT', activeWorkspacePath);
-      if (initResult.isErr()) {
-        deps.stderr(`[implement] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
-        await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);
-        return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
-      }
-    }
-  }
+  // Lifecycle (crash recovery, creation, context persistence) is handled by
+  // setupPipelineWorktree() in coordinator-worktree.ts.
+  const worktreeSetup = await setupPipelineWorktree(
+    deps, opts.workspace, runId, priorWorktreePath, 'IMPLEMENT', opts.goal, '[implement]',
+  );
+  if (worktreeSetup.kind === 'failed') return worktreeSetup.outcome;
+  const { activeWorkspacePath, worktreeCreated } = worktreeSetup;
 
   // ── Pitch archival setup (uses activeWorkspacePath) ───────────────────
   // In IMPLEMENT mode, the pitch exists in the shared worktree (the operator placed it

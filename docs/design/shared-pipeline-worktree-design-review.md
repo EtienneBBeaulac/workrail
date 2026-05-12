@@ -21,12 +21,12 @@
 
 | Failure Mode | Coverage | Risk |
 |---|---|---|
-| Crash between worktree creation and context write | **GAP RESOLVED:** use `WORKTREES_DIR` (not a new directory) so startup recovery's 24h prune handles orphaned worktrees automatically. | Low |
+| Crash between worktree creation and context write | **Known gap (follow-up ticket 3):** startup recovery reads `DAEMON_SESSIONS_DIR` session sidecars to find orphaned worktrees -- pipeline context files are not scanned, so pipeline worktrees have no automated GC. Orphaned worktrees accumulate until manually removed. See `final-verification-findings.md`. | Medium |
 | Crash recovery creates second worktree | Handled: existence check via `fs.access(worktreePath)` before reuse. Escalate with clear message if missing. | Low |
 | AGENTS.md/CLAUDE.md absent from worktree | Not a failure mode. Committed files are present in every git worktree checkout. | None |
 | Concurrent pipelines for same workspace | Not a failure mode. Each run gets a separate `runId` → separate worktree path and branch. | None |
 
-**Highest-risk:** Orphaned pipeline worktrees if a new `pipeline-worktrees/` directory were used. **Resolved by design:** use existing `WORKTREES_DIR`.
+**Highest-risk:** Pipeline worktree orphans from crashes -- startup recovery does not scan pipeline context files and cannot GC them automatically. Tracked in follow-up ticket 3.
 
 ---
 
@@ -66,7 +66,7 @@ If `priorRunId` is found but `worktreePath` is absent in `PipelineRunContext` (o
 
 ## Recommended Revisions
 
-1. **Use `WORKTREES_DIR` for pipeline worktrees** -- `createPipelineWorktree` creates the worktree at `WORKTREES_DIR/<runId>`, not a new `pipeline-worktrees/` directory. Startup recovery handles orphan cleanup for free.
+1. **Use `WORKTREES_DIR` for pipeline worktrees** -- `createPipelineWorktree` creates the worktree at `WORKTREES_DIR/<runId>`, not a new `pipeline-worktrees/` directory. Note: startup recovery does NOT automatically handle orphan cleanup for pipeline worktrees (it scans session sidecars, not pipeline context files). Automated GC is a follow-up ticket.
 
 2. **Persist `worktreePath` via extended `createPipelineContext`** -- add `worktreePath?: string` as an optional 5th parameter. Pass the created path immediately after `createPipelineWorktree` succeeds. No new dep method needed.
 

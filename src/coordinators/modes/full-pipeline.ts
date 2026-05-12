@@ -50,6 +50,7 @@ import { runReviewAndVerdictCycle } from './implement-shared.js';
 import { touchesUI } from './implement.js';
 import type { CoordinatorSpawnContext } from '../types.js';
 import { runCoordinatorDelivery } from '../coordinator-delivery.js';
+import { setupPipelineWorktree } from '../coordinator-worktree.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -202,68 +203,14 @@ export async function runFullPipeline(
     : `[full-pipeline] Starting new run ${runId}`);
 
   // ── Shared pipeline worktree ──────────────────────────────────────────
-  // The coordinator creates one isolated git worktree before any session spawns.
-  // All phases (discovery, shaping, coding, review) use this as their workspacePath
-  // so file handoffs (design docs, pitch file) are visible across phases.
-  //
-  // Crash recovery: if a prior run's worktreePath is present in the context file and
-  // exists on disk, reuse it. If the path is present but missing on disk, escalate
-  // (the operator can delete the context file to start fresh).
-  //
-  // WHY worktreeCreated tracks creation separately from activeWorkspacePath:
-  // removePipelineWorktree must only run if the worktree was actually created --
-  // not if we reused a prior run's worktree (the prior run's finally block will remove it)
-  // and not if creation failed (nothing to remove).
-  let activeWorkspacePath: string;
-  let worktreeCreated = false;
-
-  if (priorWorktreePath !== undefined) {
-    // Crash resume: prior run has a worktreePath persisted.
-    if (!deps.fileExists(priorWorktreePath)) {
-      deps.stderr(`[full-pipeline] Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}`);
-      return {
-        kind: 'escalated',
-        escalationReason: {
-          phase: 'init',
-          reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
-            `Delete ${opts.workspace}/.workrail/pipeline-runs/${runId}-context.json to start fresh.`,
-        },
-      };
-    }
-    deps.stderr(`[full-pipeline] Crash recovery: reusing existing worktree at ${priorWorktreePath}`);
-    activeWorkspacePath = priorWorktreePath;
-    // WHY worktreeCreated stays false: this run did not create the worktree.
-    // Removal is the responsibility of whichever run created it (or startup recovery).
-  } else {
-    // New run: create the shared worktree.
-    const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
-    if (worktreeResult.isErr()) {
-      deps.stderr(`[full-pipeline] FATAL: failed to create pipeline worktree: ${worktreeResult.error}`);
-      return {
-        kind: 'escalated',
-        escalationReason: { phase: 'init', reason: `Pipeline worktree creation failed: ${worktreeResult.error}` },
-      };
-    }
-    activeWorkspacePath = worktreeResult.value;
-    worktreeCreated = true;
-
-    // Persist worktreePath atomically in the initial context file so crash recovery
-    // can find and reuse the worktree on the next run. Called only for new runs --
-    // resumed runs already have a context file.
-    if (!priorRunId) {
-      const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL', activeWorkspacePath);
-      if (initResult.isErr()) {
-        deps.stderr(`[full-pipeline] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
-        // Worktree was created but context write failed. Remove the worktree immediately
-        // (we are still in the setup path, before any session spawns).
-        await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);
-        return {
-          kind: 'escalated',
-          escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` },
-        };
-      }
-    }
-  }
+  // Lifecycle (crash recovery, creation, context persistence) is handled by
+  // setupPipelineWorktree() in coordinator-worktree.ts. See that module for
+  // detailed invariant documentation.
+  const worktreeSetup = await setupPipelineWorktree(
+    deps, opts.workspace, runId, priorWorktreePath, 'FULL', opts.goal, '[full-pipeline]',
+  );
+  if (worktreeSetup.kind === 'failed') return worktreeSetup.outcome;
+  const { activeWorkspacePath, worktreeCreated } = worktreeSetup;
 
   // ── Pitch archival setup ──────────────────────────────────────────────
   // pitchPath and archiveDir use activeWorkspacePath (the shared worktree) because
