@@ -154,6 +154,18 @@ export interface PipelineRunContext {
    */
   readonly status?: 'in_progress' | 'completed';
   /**
+   * Absolute path to the shared git worktree for this pipeline run.
+   * Written atomically with the initial context file immediately after the worktree is created.
+   *
+   * WHY optional (not required): backward-compatible with pre-feature context files that
+   * predate this field. New runs always write this field. Absent = pre-feature context;
+   * fall through to fresh worktree creation on resume.
+   *
+   * Used by crash recovery: if present and the path exists on disk, the coordinator reuses
+   * the existing worktree instead of creating a second one.
+   */
+  readonly worktreePath?: string;
+  /**
    * DELIBERATE SCOPE CONSTRAINT: flat linear-pipeline object.
    * Epic-mode extends this by replacing phases with tasks: { [taskId]: TaskRecord }.
    * Do not add inline logic that assumes exactly one of each phase type.
@@ -259,6 +271,8 @@ export const PipelineRunContextSchema = z.object({
   startedAt: z.string(),
   pipelineMode: z.enum(['FULL', 'IMPLEMENT', 'REVIEW_ONLY', 'QUICK_REVIEW']),
   status: z.enum(['in_progress', 'completed']).optional(),
+  // Optional for backward-compat with pre-feature context files. New runs always include it.
+  worktreePath: z.string().min(1).optional(),
   phases: z.object({
     discovery: DiscoveryPhaseRecordSchema.optional(),
     shaping: ShapingPhaseRecordSchema.optional(),

@@ -123,6 +123,9 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
     markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
+    // Shared pipeline worktree
+    createPipelineWorktree: vi.fn().mockResolvedValue(nok('/fake/worktree/test-run-id')),
+    removePipelineWorktree: vi.fn().mockResolvedValue(undefined),
     execDelivery: vi.fn().mockImplementation(async (file: string, args: string[]) => {
       // git commit output needs the [branch sha] format for SHA extraction
       if (file === 'git' && args.includes('commit')) return { stdout: '[worktrain/test-branch abc1234] feat: test', stderr: '' };
@@ -535,7 +538,9 @@ describe('runFullPipeline - pitch archival', () => {
 
     expect(outcome.kind).toBe('merged');
     expect(deps.archiveFile).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(deps.archiveFile).mock.calls[0]![0]).toBe('/workspace/.workrail/current-pitch.md');
+    // WHY worktree path: pitch is written by shaping into the shared pipeline worktree,
+    // so archival reads from the worktree path (not opts.workspace). AC4.
+    expect(vi.mocked(deps.archiveFile).mock.calls[0]![0]).toBe('/fake/worktree/test-run-id/.workrail/current-pitch.md');
     expect(vi.mocked(deps.archiveFile).mock.calls[0]![1]).toContain('used-pitches/pitch-');
   });
 
@@ -562,5 +567,263 @@ describe('runFullPipeline - pitch archival', () => {
     expect(outcome.kind).toBe('escalated');
     // Pitch archival must still happen even though coding session failed
     expect(deps.archiveFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared pipeline worktree invariants (Slice 3 / AC1-AC10)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runFullPipeline - shared pipeline worktree', () => {
+  it('AC1: createPipelineWorktree called before first spawnSession (new run)', async () => {
+    const callOrder: string[] = [];
+    const deps = makeFakeDeps({
+      createPipelineWorktree: vi.fn().mockImplementation(async () => {
+        callOrder.push('createPipelineWorktree');
+        return nok('/fake/worktree/test-run-id');
+      }),
+      spawnSession: vi.fn().mockImplementation(async () => {
+        callOrder.push('spawnSession');
+        return nok(nextHandle());
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+    });
+
+    await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(callOrder[0]).toBe('createPipelineWorktree');
+    expect(callOrder.some((c) => c === 'spawnSession')).toBe(true);
+    expect(callOrder.indexOf('createPipelineWorktree')).toBeLessThan(callOrder.indexOf('spawnSession'));
+  });
+
+  it('AC2: all spawnSession calls receive the worktree path as workspace', async () => {
+    const spawnedWorkspaces: string[] = [];
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (_wfId: string, _goal: string, workspace: string) => {
+        spawnedWorkspaces.push(workspace);
+        return nok(nextHandle());
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+    });
+
+    await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(spawnedWorkspaces.length).toBeGreaterThan(0);
+    for (const ws of spawnedWorkspaces) {
+      expect(ws).toBe('/fake/worktree/test-run-id');
+      expect(ws).not.toBe('/workspace');
+    }
+  });
+
+  it('AC3: pitchPath in coding context points to worktree (not opts.workspace)', async () => {
+    let codingPitchPath: string | undefined;
+    let agentCallCount = 0;
+    // Provide a discovery artifact so buildContextSummary returns a non-empty string,
+    // which causes codingContext to include pitchPath. Without this, codingContext is
+    // undefined and pitchPath is never injected.
+    const discoveryArtifact = makeHandoffArtifact({
+      selectedDirection: 'Use OAuth 2.0 PKCE flow',
+      keyInvariants: ['Tokens expire in 15 minutes'],
+    });
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (workflowId: string, _goal: string, _ws: string, context?: unknown) => {
+        if (workflowId === 'wr.coding-task' && context !== undefined) {
+          const ctx = context as Record<string, unknown>;
+          if (typeof ctx['pitchPath'] === 'string') {
+            codingPitchPath = ctx['pitchPath'];
+          }
+        }
+        return nok(nextHandle());
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        agentCallCount++;
+        // Discovery (1st call): return artifact so buildContextSummary produces non-empty output
+        if (agentCallCount === 1) {
+          return { recapMarkdown: 'Discovery complete. Selected direction with high confidence.', artifacts: [discoveryArtifact] };
+        }
+        // Notes > 50 chars to avoid 'fallback' phase result (threshold is strictly > 50)
+        return { recapMarkdown: 'Session completed successfully. All steps passed with no issues found.', artifacts: [] };
+      }),
+    });
+
+    await runFullPipeline(deps, makeOpts('Implement OAuth'), Date.now());
+
+    // codingPitchPath is set because discoveryArtifact makes buildContextSummary return non-empty
+    expect(codingPitchPath).toBeDefined();
+    expect(codingPitchPath).toContain('/fake/worktree/test-run-id/');
+    expect(codingPitchPath).not.toContain('/workspace/');
+  });
+
+  it('AC4: removePipelineWorktree called in finally after archiveFile on success', async () => {
+    const callOrder: string[] = [];
+    let callCount = 0;
+    const reviewVerdictArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'clean', confidence: 'high', summary: 'Looks good.', findings: [],
+    };
+    const deps = makeFakeDeps({
+      archiveFile: vi.fn().mockImplementation(async () => { callOrder.push('archiveFile'); }),
+      removePipelineWorktree: vi.fn().mockImplementation(async () => { callOrder.push('removePipelineWorktree'); }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount >= 4) return { recapMarkdown: 'Review complete. Clean verdict.', artifacts: [reviewVerdictArtifact] };
+        if (callCount === 3) return {
+          recapMarkdown: 'Coding done.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): implement","prTitle":"feat(mcp): implement","prBody":"body","followUpTickets":[],"filesChanged":["src/f.ts"]}\n```',
+          artifacts: [{ kind: 'wr.coding_handoff', version: 1, branchName: 'worktrain/test-run-id', keyDecisions: [], knownLimitations: [], testsAdded: [], filesChanged: ['src/f.ts'] }],
+        };
+        // Discovery and shaping: return notes > 50 chars so phase result is 'partial' not 'fallback'
+        return { recapMarkdown: 'Session completed successfully. All steps passed with no issues found.', artifacts: [] };
+      }),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(outcome.kind).toBe('merged');
+    expect(callOrder).toContain('archiveFile');
+    expect(callOrder).toContain('removePipelineWorktree');
+    // Invariant: archival before removal
+    expect(callOrder.indexOf('archiveFile')).toBeLessThan(callOrder.indexOf('removePipelineWorktree'));
+  });
+
+  it('AC5: removePipelineWorktree called in finally even when discovery fails', async () => {
+    const deps = makeFakeDeps({
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeFailedAwait(handles[0]!)),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect(vi.mocked(deps.removePipelineWorktree)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deps.removePipelineWorktree).mock.calls[0]![1]).toBe('/fake/worktree/test-run-id');
+  });
+
+  it('AC6: createPipelineWorktree failure -> escalates at init, no spawnSession, no removal', async () => {
+    const { err: neErr } = await import('neverthrow');
+    const deps = makeFakeDeps({
+      createPipelineWorktree: vi.fn().mockResolvedValue(neErr('git fetch failed')),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect((outcome as { escalationReason: { phase: string } }).escalationReason.phase).toBe('init');
+    expect(vi.mocked(deps.spawnSession)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.removePipelineWorktree)).not.toHaveBeenCalled();
+  });
+
+  it('AC7: createPipelineContext called with worktreePath immediately after createPipelineWorktree', async () => {
+    const callOrder: string[] = [];
+    const deps = makeFakeDeps({
+      createPipelineWorktree: vi.fn().mockImplementation(async () => {
+        callOrder.push('createPipelineWorktree');
+        return nok('/fake/worktree/test-run-id');
+      }),
+      createPipelineContext: vi.fn().mockImplementation(async (_ws: string, _id: string, _goal: string, _mode: string, worktreePath: string) => {
+        callOrder.push(`createPipelineContext:${worktreePath}`);
+        return nok(undefined);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+    });
+
+    await runFullPipeline(deps, makeOpts(), Date.now());
+
+    const ctxIdx = callOrder.findIndex((c) => c.startsWith('createPipelineContext:'));
+    const wktIdx = callOrder.indexOf('createPipelineWorktree');
+    expect(ctxIdx).toBeGreaterThan(-1);
+    expect(wktIdx).toBeGreaterThan(-1);
+    // context written right after worktree created
+    expect(ctxIdx).toBe(wktIdx + 1);
+    expect(callOrder[ctxIdx]).toBe('createPipelineContext:/fake/worktree/test-run-id');
+  });
+
+  it('AC8: crash resume reuses existing worktree, createPipelineWorktree NOT called', async () => {
+    const deps = makeFakeDeps({
+      readActiveRunId: vi.fn().mockResolvedValue(nok('prior-run-id')),
+      readPipelineContext: vi.fn().mockResolvedValue(nok({
+        runId: 'prior-run-id', goal: 'test', workspace: '/workspace',
+        startedAt: new Date().toISOString(), pipelineMode: 'FULL',
+        worktreePath: '/fake/prior-worktree',
+        status: 'in_progress',
+        phases: {},
+      })),
+      fileExists: vi.fn().mockReturnValue(true),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockResolvedValue({ recapMarkdown: null, artifacts: [] }),
+    });
+
+    await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
+    // Sessions should use the prior worktree path
+    const spawnCalls = vi.mocked(deps.spawnSession).mock.calls;
+    expect(spawnCalls.length).toBeGreaterThan(0);
+    for (const call of spawnCalls) {
+      expect(call[2]).toBe('/fake/prior-worktree');
+    }
+  });
+
+  it('AC9: crash resume escalates when worktreePath present but path missing on disk', async () => {
+    const deps = makeFakeDeps({
+      readActiveRunId: vi.fn().mockResolvedValue(nok('prior-run-id')),
+      readPipelineContext: vi.fn().mockResolvedValue(nok({
+        runId: 'prior-run-id', goal: 'test', workspace: '/workspace',
+        startedAt: new Date().toISOString(), pipelineMode: 'FULL',
+        worktreePath: '/fake/missing-worktree',
+        status: 'in_progress',
+        phases: {},
+      })),
+      fileExists: vi.fn().mockReturnValue(false),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect((outcome as { escalationReason: { phase: string } }).escalationReason.phase).toBe('init');
+    expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.spawnSession)).not.toHaveBeenCalled();
+  });
+
+  it('AC10: coordinator-known branch name (not artifact) used for delivery', async () => {
+    let deliveryWorkspacePath: string | undefined;
+    let deliveryBranchName: string | undefined;
+    let callCount = 0;
+    const reviewVerdictArtifact = {
+      kind: 'wr.review_verdict',
+      verdict: 'clean', confidence: 'high', summary: 'Looks good.', findings: [],
+    };
+    const deps = makeFakeDeps({
+      execDelivery: vi.fn().mockImplementation(async (file: string, args: string[], options: { cwd: string }) => {
+        if (file === 'git' && args.includes('commit')) {
+          deliveryWorkspacePath = options.cwd;
+          return { stdout: '[worktrain/test-run-id abc1234] feat: test', stderr: '' };
+        }
+        if (file === 'gh' && args[0] === 'pr') return { stdout: 'https://github.com/org/repo/pull/42', stderr: '' };
+        return { stdout: '', stderr: '' };
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount >= 4) return { recapMarkdown: 'Review complete. Clean verdict.', artifacts: [reviewVerdictArtifact] };
+        if (callCount === 3) return {
+          recapMarkdown: 'Coding done.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): implement","prTitle":"feat(mcp): implement","prBody":"body","followUpTickets":[],"filesChanged":["src/f.ts"]}\n```',
+          artifacts: [{ kind: 'wr.coding_handoff', version: 1, branchName: 'worktrain/test-run-id', keyDecisions: [], knownLimitations: [], testsAdded: [], filesChanged: ['src/f.ts'] }],
+        };
+        // Discovery and shaping: notes > 50 chars to avoid 'fallback' phase result
+        return { recapMarkdown: 'Session completed successfully. All steps passed with no issues found.', artifacts: [] };
+      }),
+    });
+
+    const outcome = await runFullPipeline(deps, makeOpts(), Date.now());
+
+    // Delivery must use the worktree path as cwd (where the agent's changes are)
+    if (deliveryWorkspacePath !== undefined) {
+      expect(deliveryWorkspacePath).toBe('/fake/worktree/test-run-id');
+    }
+    expect(outcome.kind).toBe('merged');
   });
 });

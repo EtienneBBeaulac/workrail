@@ -129,6 +129,9 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
     markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
+    // Shared pipeline worktree
+    createPipelineWorktree: vi.fn().mockResolvedValue(nok('/fake/worktree/test-run-id')),
+    removePipelineWorktree: vi.fn().mockResolvedValue(undefined),
     execDelivery: vi.fn().mockImplementation(async (file: string, args: string[]) => {
       if (file === 'git' && args.includes('commit')) return { stdout: '[worktrain/test-branch abc1234] feat: test', stderr: '' };
       if (file === 'gh' && args[0] === 'pr') return { stdout: 'https://github.com/org/repo/pull/42', stderr: '' };
@@ -202,7 +205,8 @@ describe('runImplementPipeline - pitch archival', () => {
 
     expect(outcome.kind).toBe('merged');
     expect(deps.archiveFile).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(deps.archiveFile).mock.calls[0]![0]).toBe('/workspace/.workrail/current-pitch.md');
+    // WHY worktree path: pitch is inside the shared pipeline worktree (AC3/AC4 from spec)
+    expect(vi.mocked(deps.archiveFile).mock.calls[0]![0]).toBe('/fake/worktree/test-run-id/.workrail/current-pitch.md');
     expect(vi.mocked(deps.archiveFile).mock.calls[0]![1]).toContain('used-pitches/pitch-');
   });
 
@@ -465,15 +469,13 @@ describe('runImplementPipeline - happy path', () => {
     }
     // mergePR was called with the PR number extracted from the pollForPR URL
     expect(deps.mergePR).toHaveBeenCalledWith(42, expect.any(String));
-    // wr.coding-task was spawned with pitchPath in context and branchStrategy:'worktree'
+    // wr.coding-task was spawned with pitchPath in context and the shared worktree path
+    // (no branchStrategy -- coordinator owns the worktree, not the session)
     expect(deps.spawnSession).toHaveBeenCalledWith(
       'wr.coding-task',
       expect.any(String),
-      '/workspace',
-      expect.objectContaining({ pitchPath: '/workspace/.workrail/current-pitch.md' }),
-      undefined,
-      undefined,
-      'worktree',
+      '/fake/worktree/test-run-id',
+      expect.objectContaining({ pitchPath: '/fake/worktree/test-run-id/.workrail/current-pitch.md' }),
     );
   });
 });
@@ -706,5 +708,134 @@ describe('runImplementPipeline - mergePR soft-fail paths', () => {
     expect(vi.mocked(deps.stderr)).toHaveBeenCalledWith(
       expect.stringContaining('mergePR failed'),
     );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared pipeline worktree invariants (AC11 mirrors AC1-AC10 from full-pipeline)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('runImplementPipeline - shared pipeline worktree', () => {
+  it('createPipelineWorktree called before spawnSession (new run)', async () => {
+    const callOrder: string[] = [];
+    const deps = makeFakeDeps({
+      createPipelineWorktree: vi.fn().mockImplementation(async () => {
+        callOrder.push('createPipelineWorktree');
+        return nok('/fake/worktree/test-run-id');
+      }),
+      spawnSession: vi.fn().mockImplementation(async () => {
+        callOrder.push('spawnSession');
+        return nok(`h${Math.random()}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: makePhaseAwareAgentResult(() => ({ recapMarkdown: 'LGTM.', artifacts: [] })),
+    });
+
+    await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(callOrder[0]).toBe('createPipelineWorktree');
+    expect(callOrder.indexOf('createPipelineWorktree')).toBeLessThan(callOrder.indexOf('spawnSession'));
+  });
+
+  it('coding session receives worktree path as workspace (not opts.workspace)', async () => {
+    const spawnedWorkspaces: string[] = [];
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockImplementation(async (_wfId: string, _goal: string, workspace: string) => {
+        spawnedWorkspaces.push(workspace);
+        return nok(`h${Math.random()}`);
+      }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: makePhaseAwareAgentResult(() => ({ recapMarkdown: 'LGTM.', artifacts: [] })),
+    });
+
+    await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(spawnedWorkspaces.every((ws) => ws === '/fake/worktree/test-run-id')).toBe(true);
+    expect(spawnedWorkspaces.every((ws) => ws !== '/workspace')).toBe(true);
+  });
+
+  it('removePipelineWorktree called in finally after archiveFile', async () => {
+    const callOrder: string[] = [];
+    const deps = makeFakeDeps({
+      archiveFile: vi.fn().mockImplementation(async () => { callOrder.push('archiveFile'); }),
+      removePipelineWorktree: vi.fn().mockImplementation(async () => { callOrder.push('removePipelineWorktree'); }),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: makePhaseAwareAgentResult(() => ({ recapMarkdown: 'LGTM.', artifacts: [] })),
+    });
+
+    await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(callOrder).toContain('archiveFile');
+    expect(callOrder).toContain('removePipelineWorktree');
+    expect(callOrder.indexOf('archiveFile')).toBeLessThan(callOrder.indexOf('removePipelineWorktree'));
+  });
+
+  it('removePipelineWorktree called even when coding session fails', async () => {
+    const deps = makeFakeDeps({
+      spawnSession: vi.fn().mockResolvedValue(err('connection refused')),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect(vi.mocked(deps.removePipelineWorktree)).toHaveBeenCalledTimes(1);
+  });
+
+  it('createPipelineWorktree failure -> escalates at init, no spawnSession', async () => {
+    const { err: neErr } = await import('neverthrow');
+    const deps = makeFakeDeps({
+      createPipelineWorktree: vi.fn().mockResolvedValue(neErr('git not available')),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect((outcome as { escalationReason: { phase: string } }).escalationReason.phase).toBe('init');
+    expect(vi.mocked(deps.spawnSession)).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.removePipelineWorktree)).not.toHaveBeenCalled();
+  });
+
+  it('crash resume: prior worktreePath exists -> createPipelineWorktree NOT called', async () => {
+    const deps = makeFakeDeps({
+      readActiveRunId: vi.fn().mockResolvedValue(nok('prior-run-id')),
+      readPipelineContext: vi.fn().mockResolvedValue(nok({
+        runId: 'prior-run-id', goal: 'test', workspace: '/workspace',
+        startedAt: new Date().toISOString(), pipelineMode: 'IMPLEMENT',
+        worktreePath: '/fake/prior-worktree',
+        status: 'in_progress',
+        phases: {},
+      })),
+      fileExists: vi.fn().mockReturnValue(true),
+      awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
+      getAgentResult: makePhaseAwareAgentResult(() => ({ recapMarkdown: 'LGTM.', artifacts: [] })),
+    });
+
+    await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
+    const spawnCalls = vi.mocked(deps.spawnSession).mock.calls;
+    for (const call of spawnCalls) {
+      expect(call[2]).toBe('/fake/prior-worktree');
+    }
+  });
+
+  it('crash resume: prior worktreePath missing on disk -> escalates', async () => {
+    const deps = makeFakeDeps({
+      readActiveRunId: vi.fn().mockResolvedValue(nok('prior-run-id')),
+      readPipelineContext: vi.fn().mockResolvedValue(nok({
+        runId: 'prior-run-id', goal: 'test', workspace: '/workspace',
+        startedAt: new Date().toISOString(), pipelineMode: 'IMPLEMENT',
+        worktreePath: '/fake/missing-worktree',
+        status: 'in_progress',
+        phases: {},
+      })),
+      fileExists: vi.fn().mockReturnValue(false),
+    });
+
+    const outcome = await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
+
+    expect(outcome.kind).toBe('escalated');
+    expect((outcome as { escalationReason: { phase: string } }).escalationReason.phase).toBe('init');
+    expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
   });
 });

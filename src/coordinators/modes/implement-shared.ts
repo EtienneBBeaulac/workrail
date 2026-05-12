@@ -38,6 +38,9 @@ export const MAX_FIX_ITERATIONS = 2;
  * Shared by IMPLEMENT mode (implement.ts) and FULL pipeline mode (full-pipeline.ts).
  *
  * @param iteration - Current fix loop iteration (0 = first review)
+ * @param activeWorkspacePath - Effective workspace for session spawns (defaults to opts.workspace).
+ *   When the coordinator owns a shared pipeline worktree, pass the worktree path here so
+ *   review/fix/re-review sessions all operate in the same isolated workspace as coding.
  */
 export async function runReviewAndVerdictCycle(
   deps: AdaptiveCoordinatorDeps,
@@ -47,7 +50,10 @@ export async function runReviewAndVerdictCycle(
   iteration: number,
   runId = '',
   priorArtifacts: readonly PhaseHandoffArtifact[] = [],
+  activeWorkspacePath?: string,
 ): Promise<PipelineOutcome> {
+  // Use the effective workspace path. Defaults to opts.workspace for backward compat.
+  const effectiveWorkspace = activeWorkspacePath ?? opts.workspace;
   const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'review');
   if (cutoffCheck) return cutoffCheck;
 
@@ -64,7 +70,7 @@ export async function runReviewAndVerdictCycle(
   const reviewSpawnResult = await deps.spawnSession(
     'wr.mr-review',
     reviewGoal,
-    opts.workspace,
+    effectiveWorkspace,
     reviewContext,
   );
 
@@ -173,7 +179,7 @@ export async function runReviewAndVerdictCycle(
       const fixSpawnResult = await deps.spawnSession(
         'wr.coding-task',
         fixGoal,
-        opts.workspace,
+        effectiveWorkspace,
         fixContext,
       );
 
@@ -204,12 +210,12 @@ export async function runReviewAndVerdictCycle(
       }
 
       deps.stderr(`[review-cycle] Fix iteration ${iteration + 1} complete -- re-reviewing`);
-      return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, iteration + 1, runId, priorArtifacts);
+      return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, iteration + 1, runId, priorArtifacts, activeWorkspacePath);
     }
 
     case 'blocking':
     case 'unknown': {
-      return runAuditChain(deps, opts, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings, priorArtifacts);
+      return runAuditChain(deps, opts, prUrl, coordinatorStartMs, findings.severity, rawVerdict?.findings, priorArtifacts, activeWorkspacePath);
     }
   }
 }
@@ -239,7 +245,9 @@ export async function runAuditChain(
   severity: 'blocking' | 'unknown',
   findings?: ReviewVerdictArtifactV1['findings'],
   priorArtifacts: readonly PhaseHandoffArtifact[] = [],
+  activeWorkspacePath?: string,
 ): Promise<PipelineOutcome> {
+  const effectiveWorkspace = activeWorkspacePath ?? opts.workspace;
   deps.stderr(`[audit-chain] ${severity.toUpperCase()} finding -- running audit chain`);
 
   const auditCutoff = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'audit');
@@ -255,7 +263,7 @@ export async function runAuditChain(
   const auditSpawnResult = await deps.spawnSession(
     auditWorkflow,
     `Audit PR before merge: ${prUrl}`,
-    opts.workspace,
+    effectiveWorkspace,
     { prUrl, severity },
   );
 
@@ -321,7 +329,7 @@ export async function runAuditChain(
   const reReviewSpawnResult = await deps.spawnSession(
     'wr.mr-review',
     `Re-review after audit: ${prUrl}`,
-    opts.workspace,
+    effectiveWorkspace,
     { prUrl, auditComplete: true },
   );
 

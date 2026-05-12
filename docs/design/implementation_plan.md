@@ -1,192 +1,271 @@
-# Implementation Plan: WorkTrain System Prompt Preamble + report_issue Tool
+# Implementation Plan: Shared Pipeline Worktree
 
-## Problem Statement
+## Problem statement
 
-The WorkTrain daemon's system prompt preamble is thin (15 lines) and relies on the soul file for behavioral guidance. This leaves unattended agents without explicit direction on self-directed reasoning, the oracle hierarchy, or what to do when things go wrong. Additionally, there is no structured way for agents to record issues/errors for a future auto-fix coordinator -- failures either go unrecorded or end up buried in step notes.
+The coordinator pipeline creates a `branchStrategy: 'worktree'` for the coding session only. Discovery writes design docs and shaping writes `current-pitch.md` to `opts.workspace` (main checkout). The coding session's worktree is forked from `main` AFTER these files were written -- they are never committed, so they are absent from the worktree. Pipeline file handoffs are silently broken.
 
----
+Secondary problem: `opts.workspace` is used as an implicit workspace reference throughout `full-pipeline.ts` and `implement.ts` for path construction (`pitchPath`, `archiveDir`), delivery, and spawnSession calls. After introducing a shared worktree, every such reference must be audited and updated to the correct workspace value.
 
-## Acceptance Criteria
+## Acceptance criteria
 
-1. `buildSystemPrompt()` output contains a richer preamble (~55 lines) that:
-   - Opens with "You are WorkRail Auto, an autonomous agent..." (existing test assertion preserved)
-   - Includes `## Your tools` section listing all 5 tools (existing test assertion)
-   - Includes `## Execution contract` section (existing test assertion)
-   - Adds `## What you are`, `## Your oracle`, `## Self-directed reasoning`, `## The workflow is the contract`, `## Silent failure is the worst outcome`, `## Tools are your hands not your voice`, `## You don't have a user` sections
-   - All existing `workflow-runner-system-prompt.test.ts` tests pass without modification
+1. When `runFullPipeline` runs, all phase sessions (discovery, shaping, coding, review, UX gate) receive the coordinator-created worktree path as their `workspacePath`.
+2. Shaping writes `.workrail/current-pitch.md` to the shared worktree; coding reads it from the same absolute path without any copy step.
+3. The coordinator's `finally` block: (a) archives the pitch from the shared worktree path, then (b) removes the shared worktree. Both happen on success AND on failure.
+4. Crash recovery: if `PipelineRunContext.worktreePath` is present and the path exists on disk, the pipeline resumes using the existing worktree instead of creating a second one.
+5. `runImplementPipeline` applies the same pattern.
+6. No per-session `branchStrategy: 'worktree'` is passed for coordinator-spawned sessions.
+7. All existing tests continue to pass. New tests cover all new invariants.
+8. `runCoordinatorDelivery` is called with `worktreePath` as `workspacePath`, not `opts.workspace`.
 
-2. `makeReportIssueTool(sessionId, emitter?, issuesDirOverride?)` is exported from `workflow-runner.ts`:
-   - Tool name: `report_issue`
-   - Input schema accepts: `kind` (5-value literal enum), `severity` (4-value literal enum), `summary` (string, required), `context` (string, optional), `toolName` (string, optional), `command` (string, optional), `suggestedFix` (string, optional), `continueToken` (string, optional)
-   - `execute()` appends one JSON line to `~/.workrail/issues/<sessionId>.jsonl` (or `issuesDirOverride/<sessionId>.jsonl` in tests) -- fire-and-forget (void+catch)
-   - `execute()` emits a `DaemonEventEmitter` event with `kind: 'issue_reported'`
-   - For non-fatal severity: returns `"Issue recorded (severity=<severity>). Continue with your work unless this is fatal."`
-   - For fatal severity: returns `"FATAL issue recorded. Call continue_workflow with notes explaining the blocker, then the session will end."`
-   - Wired into `runWorkflow()` tools array
+## Non-goals
 
-3. `IssueReportedEvent` is added to `DaemonEvent` union in `daemon-events.ts`:
-   - `kind: 'issue_reported'`, `sessionId: string`, `issueKind` (5-value literal union), `severity` (4-value literal union), `summary: string`, `continueToken?: string`
+- No changes to the daemon's per-session worktree mechanism (`buildPreAgentSession`)
+- No changes to `QUICK_REVIEW` or `REVIEW_ONLY` modes
+- No changes to the WorkRail engine, MCP server, or session store
+- `CodingHandoffArtifactV1.branchName` is NOT made optional in this PR (follow-up ticket)
+- `worktrain run pipeline` CLI command wiring is NOT in scope
+- Startup recovery for pipeline-worktree orphans is NOT in scope (follow-up ticket)
 
-4. `npm run build` succeeds (no TS errors)
-5. `npx vitest run` passes (all existing tests + new tests)
+## Philosophy-driven constraints
 
----
-
-## Non-Goals
-
-- No auto-fix coordinator implementation
-- No IssueStore class (YAGNI -- extract when coordinator needs it)
-- No changes to `soul-template.ts`, `triggers.yml`, or `src/v2/`
-- No changes to the soul file template/default
-- No changes to AgentLoop behavior (fatal severity does not abort the loop)
-- No async changes to `buildSystemPrompt()` (must remain synchronous and pure)
-
----
-
-## Philosophy-Driven Constraints
-
-- `buildSystemPrompt()` must remain a pure, synchronous function (no I/O, no side effects)
-- All `DaemonEvent` variants must use `readonly` fields only
-- `IssueReportedEvent.issueKind` and `.severity` must be literal union types (not `string`)
-- JSONL write must be fire-and-forget: `void appendIssueAsync().catch(() => {})`
-- `mkdir({ recursive: true })` before every appendFile (handles missing dir silently)
-- `issuesDirOverride` parameter for test isolation (mirrors DaemonEventEmitter constructor)
-
----
+- **DI for boundaries:** `createPipelineWorktree` and `removePipelineWorktree` must be dep methods
+- **Make illegal states unrepresentable:** `createPipelineWorktree` returns `Result<string, string>` -- no code path reaches `spawnSession` with undefined worktree path; `worktreeCreated` boolean flag prevents `removePipelineWorktree` being called when creation never succeeded
+- **Single source of state truth:** `PipelineRunContext.worktreePath` is the durable path; no separate file
+- **Functional core, imperative shell:** finally block has explicit, ordered cleanup steps; pitch archival before worktree removal is an invariant, not a convention
+- **Architectural fix over patch:** introduce `activeWorkspacePath` to replace scattered `opts.workspace` references for within-session path construction
 
 ## Invariants
 
-1. `buildSystemPrompt()` is pure and synchronous -- verified by existing tests calling it directly
-2. `'You are WorkRail Auto'` is present in `buildSystemPrompt()` output -- verified by test L29
-3. `'## Your tools'` is present in `buildSystemPrompt()` output -- verified by test L30
-4. `'## Execution contract'` is present in `buildSystemPrompt()` output -- verified by test L32
-5. All `DaemonEvent` variants use `readonly` fields -- verified by TS compiler
-6. `DaemonEvent` union is exhaustive -- TS compiler enforces at every switch site
-7. `report_issue.execute()` never throws -- returns `AgentToolResult` always
-8. JSONL write never blocks `execute()` return -- `void` Promise
+1. Worktree created BEFORE first `spawnSession` call
+2. `worktreePath` persisted atomically in `createPipelineContext` call immediately after creation
+3. Pitch archival runs BEFORE worktree removal in the `finally` block (pitch is inside the worktree)
+4. Worktree removal runs in `finally` block ONLY if worktree was successfully created (`worktreeCreated` flag)
+5. `branchStrategy` is NOT passed for any coordinator-spawned session
+6. Crash resume: check `fs.access(worktreePath)` before reusing; escalate with clear message if path missing
+7. All path construction using the within-session workspace (`pitchPath`, `archiveDir`, delivery `workspacePath`) uses `activeWorkspacePath` (the worktree path), not `opts.workspace`
+8. `opts.workspace` is used ONLY for coordinator-owned operations: `readActiveRunId`, `readPipelineContext`, `writePhaseRecord`, `markPipelineRunComplete`, `createPipelineContext` (context file storage), and git commands run by `createPipelineWorktree`/`removePipelineWorktree`
 
----
+## Selected approach
 
-## Selected Approach + Rationale
+### New types and interface changes
 
-**Part 1:** Module-private `BASE_SYSTEM_PROMPT` string constant defined above `buildSystemPrompt()`. The function uses it as the start of the lines array. Rationale: named constant is readable as a document; testable via `buildSystemPrompt()` output; follows `soul-template.ts` precedent for stable-content constants.
+**`AdaptiveCoordinatorDeps` (adaptive-pipeline.ts):**
+```typescript
+createPipelineWorktree(
+  workspace: string,
+  runId: string,
+  baseBranch?: string,  // default: 'main'
+): Promise<Result<string, string>>;  // ok(worktreePath) | err(reason)
 
-**Part 2:** `makeReportIssueTool(sessionId, emitter?, issuesDirOverride?)` inline tool factory following the exact shape of `makeReadTool`/`makeWriteTool`. Private `appendIssueAsync()` helper for JSONL write. `issuesDirOverride` for test isolation (hybrid of inline factory + runner-up's dirOverride). Rationale: YAGNI -- no IssueStore class until coordinator exists; hybrid resolves testability without over-engineering.
+removePipelineWorktree(
+  workspace: string,
+  worktreePath: string,
+): Promise<void>;  // best-effort, never throws
+```
 
-**Runner-up:** IssueStore class (Candidate B). Lost to YAGNI -- one caller, no coordinator yet.
+**`PipelineRunContext` (pipeline-run-context.ts):**
+```typescript
+// new optional field (optional for backward compat with pre-feature context files)
+readonly worktreePath?: string;
+```
+Zod schema: `worktreePath: z.string().optional()`.
 
----
+**`createPipelineContext` (adaptive-pipeline.ts + coordinator-deps.ts):**
+```typescript
+createPipelineContext(
+  workspace: string,
+  runId: string,
+  goal: string,
+  pipelineMode: PipelineRunContext['pipelineMode'],
+  worktreePath: string,  // required for new callers -- NOT optional
+): Promise<Result<void, string>>;
+```
+Note: the 5th param is typed as required in `AdaptiveCoordinatorDeps`. Pre-feature callers in `implement.ts` always pass the value because `createPipelineWorktree` runs first. The Zod schema field remains optional for backward-compat deserialization of old context files.
 
-## Vertical Slices
+### Implementation in coordinator-deps.ts
 
-### Slice 1: Create feature branch
-- Create `feat/worktrain-system-prompt-and-report-issue` from current main
-- Verify clean state
+```typescript
+createPipelineWorktree: async (workspace, runId, baseBranch = 'main') => {
+  const worktreePath = path.join(WORKTREES_DIR, runId);
+  const branchName = `worktrain/${runId}`;
+  try {
+    await fs.promises.mkdir(WORKTREES_DIR, { recursive: true });
+    await execFileAsync('git', ['-C', workspace, 'fetch', 'origin', baseBranch]);
+    await execFileAsync('git', ['-C', workspace, 'worktree', 'add',
+      worktreePath, '-b', branchName, `origin/${baseBranch}`]);
+    return ok(worktreePath);
+  } catch (e) {
+    return err(`createPipelineWorktree failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+},
 
-### Slice 2: Add IssueReportedEvent to daemon-events.ts
-- Add `IssueReportedEvent` interface
-- Add to `DaemonEvent` union
-- Verify TS compiles
+removePipelineWorktree: async (workspace, worktreePath) => {
+  try {
+    await execFileAsync('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath]);
+  } catch { /* best-effort */ }
+},
+```
 
-### Slice 3: Replace buildSystemPrompt() preamble
-- Define `BASE_SYSTEM_PROMPT` constant above `buildSystemPrompt()`
-- Replace lines 1087-1108 to use the constant
-- Verify all existing system-prompt tests pass
+### Changes to full-pipeline.ts and implement.ts
 
-### Slice 4: Implement makeReportIssueTool
-- Add private `appendIssueAsync()` helper
-- Add `makeReportIssueTool()` factory
-- Wire into `runWorkflow()` tools array
+Pattern for `runFullPipeline` / `runImplementPipeline` (the outer wrapper):
 
-### Slice 5: Tests
-- Add tests for `makeReportIssueTool` -- verify JSONL write with temp dir, verify event emitted, verify return strings, verify fatal vs non-fatal
-- Verify all existing tests still pass
+```typescript
+// Before runFullPipelineCore call:
+let worktreeCreated = false;
+let activeWorkspacePath = opts.workspace;  // fallback until worktree is ready
 
-### Slice 6: Build + full test run
-- `npm run build` -- zero errors
-- `npx vitest run` -- all pass
+// After worktree creation in core (or in outer function for implement):
+// see runFullPipelineCore below
 
-### Slice 7: PR
-- Commit with conventional commit message
-- Open PR to main
+// In the finally block:
+try {
+  if (pitchPath was from activeWorkspacePath) {
+    await deps.mkdir(archiveDir, { recursive: true });
+    await deps.archiveFile(pitchPath, archivePath);  // FIRST: archive before removal
+  }
+} catch { /* log */ }
+if (worktreeCreated) {
+  await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);  // SECOND
+}
+```
 
----
+Pattern for `runFullPipelineCore` / `runImplementCore`:
 
-## Test Design
+```typescript
+// Step 0: Create worktree
+const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
+if (worktreeResult.isErr()) {
+  return { kind: 'escalated', escalationReason: { phase: 'init', reason: worktreeResult.error } };
+}
+const activeWorkspacePath = worktreeResult.value;
+worktreeCreated = true;  // signal to finally block
 
-### Existing tests (must pass unchanged)
-- `tests/unit/workflow-runner-system-prompt.test.ts` -- all 11 tests
-- `tests/unit/daemon-events.test.ts` -- all existing tests
+// Step 1: Persist worktreePath in context immediately (5th param required)
+await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL', activeWorkspacePath);
 
-### New tests to add
-File: `tests/unit/workflow-runner-report-issue.test.ts`
+// Step N: pitchPath uses activeWorkspacePath (not opts.workspace)
+const pitchPath = activeWorkspacePath + '/.workrail/current-pitch.md';
+const archiveDir = activeWorkspacePath + '/.workrail/used-pitches';
 
-Test cases:
-1. `makeReportIssueTool` -- returns correct tool name and description
-2. `execute()` with non-fatal severity -- returns confirmation string with severity
-3. `execute()` with fatal severity -- returns FATAL message
-4. `execute()` -- writes JSON line to issuesDirOverride/<sessionId>.jsonl
-5. `execute()` -- written JSON contains kind, severity, summary, ts, sessionId
-6. `execute()` -- creates dir if it doesn't exist (mkdir recursive)
-7. `execute()` -- emits `issue_reported` event via emitter
-8. `execute()` -- optional fields (context, toolName, command, suggestedFix, continueToken) present in JSON when provided
-9. `execute()` -- does not throw when write fails (fire-and-forget)
+// All spawnSession calls: workspace = activeWorkspacePath (not opts.workspace)
+deps.spawnSession('wr.discovery', opts.goal, activeWorkspacePath, ...);
+deps.spawnSession('wr.shaping', opts.goal, activeWorkspacePath, ...);
+deps.spawnSession('wr.coding-task', opts.goal, activeWorkspacePath, { pitchPath, ... }, ...);  // no branchStrategy
+deps.spawnSession('wr.mr-review', opts.goal, activeWorkspacePath, ...);
+deps.spawnSession('wr.ui-ux-design', opts.goal, activeWorkspacePath, ...);  // UX gate
 
----
+// Delivery: uses activeWorkspacePath
+runCoordinatorDelivery(deps, recapMarkdown, branchName, activeWorkspacePath);
 
-## Risk Register
+// opts.workspace references preserved for:
+// - writePhaseRecord(opts.workspace, runId, ...)
+// - readPipelineContext(opts.workspace, runId)
+// - markPipelineRunComplete(opts.workspace, runId)
+```
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| BASE_SYSTEM_PROMPT missing required test strings | Low | High (CI break) | Include `'You are WorkRail Auto'`, `'## Your tools'`, `'## Execution contract'` explicitly; tests catch immediately |
-| IssueReportedEvent `issueKind` vs tool input `kind` confusion | Low | Medium (runtime behavior ok, TS shape wrong) | Use `issueKind` in event interface; keep `kind` in input schema |
-| Silent JSONL write failure not caught in tests | Low | Low (fire-and-forget is intentional) | issuesDirOverride isolates write path; test case #9 verifies no throw |
-| Agent ignores fatal severity | Medium | Medium (tokens wasted) | Out of scope; coordinator detects post-hoc |
+### Crash resume path
 
----
+```typescript
+if (priorRunId) {
+  const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
+  if (existingCtx.isOk() && existingCtx.value?.worktreePath) {
+    const priorWorktreePath = existingCtx.value.worktreePath;
+    try {
+      await fs.promises.access(priorWorktreePath);
+      // Worktree exists -- reuse it
+      activeWorkspacePath = priorWorktreePath;
+      worktreeCreated = true;  // finally block will clean up
+    } catch {
+      return { kind: 'escalated', escalationReason: {
+        phase: 'init',
+        reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
+                `Delete ${opts.workspace}/.workrail/pipeline-runs/${priorRunId}-context.json to start fresh.`
+      }};
+    }
+  }
+  // If worktreePath absent from context (old-format context): fall through to create fresh worktree
+}
+```
 
-## PR Packaging Strategy
+## Vertical slices
 
-Single PR: `feat/worktrain-system-prompt-and-report-issue`
-- All 3 files changed: `src/daemon/workflow-runner.ts`, `src/daemon/daemon-events.ts`, `tests/unit/workflow-runner-report-issue.test.ts`
-- Commit message: `feat(console): richer daemon system prompt and report_issue tool`
+### Slice 1: Schema and interface layer (no behavior change)
+- Add `worktreePath?: string` to `PipelineRunContext` + Zod schema (optional)
+- Add `createPipelineWorktree` and `removePipelineWorktree` to `AdaptiveCoordinatorDeps`
+- Change `createPipelineContext` 5th param from optional to required (`worktreePath: string`)
+- **AC:** `npm run build` passes; all existing tests pass (no callers yet supply 5th param -- will be compile errors resolved in Slice 3/4)
 
-Wait -- scope is `daemon`, not `console`. Correct commit message:
-`feat(mcp): richer daemon system prompt and report_issue tool for auto-fix coordinator`
+### Slice 2: Implement new dep methods in coordinator-deps.ts
+- Implement `createPipelineWorktree` and `removePipelineWorktree`
+- Update `createPipelineContext` implementation to include `worktreePath` in initial object
+- Update fake `AdaptiveCoordinatorDeps` in test files to add stub implementations (return `ok('')` / no-op)
+- **AC:** `npm run build` passes; all existing tests pass
 
-Actually these are daemon changes. The allowed scopes from CLAUDE.md are: `console`, `mcp`, `workflows`, `engine`, `schema`, `docs`. The daemon lives under `mcp` in this codebase (daemon is part of the WorkRail server). Use scope `mcp`.
+### Slice 3: Wire into full-pipeline.ts
+- Introduce `worktreeCreated: boolean` and `activeWorkspacePath` variables
+- Create worktree before discovery; persist to context (5th param)
+- Replace ALL `opts.workspace` path-construction references with `activeWorkspacePath`:
+  - `pitchPath` (lines 216, 553)
+  - `archiveDir` (line 217)
+  - All `spawnSession` workspace args (lines 274, 373, 458, 558)
+  - `runCoordinatorDelivery` workspace arg (line 645)
+  - UX gate `spawnSession` (line 458)
+- Preserve `opts.workspace` for: `readActiveRunId`, `readPipelineContext`, `writePhaseRecord`, `markPipelineRunComplete`
+- Finally block: pitch archival from `activeWorkspacePath` FIRST, then `removePipelineWorktree` if `worktreeCreated`
+- Crash resume: existence check before reuse
+- **AC:** existing tests pass; new tests added; `npm run build` passes
 
----
+### Slice 4: Wire into implement.ts
+- Same pattern: `worktreeCreated`, `activeWorkspacePath`, replace path-construction references
+- `pitchPath` arg to `runImplementCore` must be `worktreePath`-relative: derive it inside core after worktree creation rather than constructing in the outer `runImplementPipeline`
+- **AC:** existing tests pass; new tests added
 
-## Philosophy Alignment Per Slice
+### Slice 5: Test coverage for all new invariants
+Tests to add in `adaptive-full-pipeline.test.ts`:
+1. `createPipelineWorktree` called with `(opts.workspace, runId)` before first `spawnSession`
+2. All `spawnSession` calls receive `worktreePath` as workspace (not `opts.workspace`)
+3. `pitchPath` in coding context points to `worktreePath` (not `opts.workspace`)
+4. `runCoordinatorDelivery` receives `worktreePath` as 4th arg
+5. `removePipelineWorktree` called in finally on success (after `archiveFile`)
+6. `removePipelineWorktree` called in finally on discovery escalation
+7. `createPipelineWorktree` failure → escalated at `init`; `spawnSession` not called; `removePipelineWorktree` not called
+8. Crash resume: prior `worktreePath` in context + existence check passes → `createPipelineWorktree` NOT called; all sessions receive prior `worktreePath`
+9. Crash resume: prior `worktreePath` in context + existence check fails → escalated at `init`
+10. Old-format context (no `worktreePath`): falls through to fresh worktree creation
 
-### Slice 2 (daemon-events.ts)
-- Exhaustiveness everywhere -> satisfied (new union variant, TS enforces handling)
-- Make illegal states unrepresentable -> satisfied (literal unions for issueKind/severity)
-- Immutability by default -> satisfied (readonly fields)
+Mirror all tests in `adaptive-implement.test.ts`.
 
-### Slice 3 (BASE_SYSTEM_PROMPT)
-- Functional core, imperative shell -> satisfied (buildSystemPrompt remains pure)
-- Immutability by default -> satisfied (const)
-- Document why not what -> satisfied (JSDoc on constant)
-- YAGNI with discipline -> satisfied (no speculative additions)
+## Test design
 
-### Slice 4 (makeReportIssueTool)
-- Observability as a constraint -> satisfied (fire-and-forget, never blocks)
-- Errors are data -> satisfied (execute() returns AgentToolResult, never throws)
-- Prefer fakes over mocks -> satisfied (issuesDirOverride for tests)
-- YAGNI with discipline -> satisfied (no IssueStore class)
-- Exhaustiveness everywhere -> satisfied (return value handles all severity levels)
+All tests use fully-injected fakes. `createPipelineWorktree` and `removePipelineWorktree` added to `makeFakeDeps`:
+```typescript
+createPipelineWorktree: vi.fn().mockResolvedValue(ok('/fake/worktree')),
+removePipelineWorktree: vi.fn().mockResolvedValue(undefined),
+```
 
-### Slice 5 (tests)
-- Prefer fakes over mocks -> satisfied (temp dir, no fs mocking)
-- Determinism -> satisfied (all test writes go to unique temp dirs)
+Crash resume tests inject a fake `readPipelineContext` that returns a context with `worktreePath` set. The `fileExists` dep (used by `routeTask`) is separate from the `fs.access` call in crash resume -- the crash resume check uses the `deps.fileExists` method or a new `deps.worktreeExists` dep (design decision: use existing `fileExists` dep to avoid proliferating dep methods).
 
----
+## Risk register
 
-## Summary
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| Orphaned pipeline worktrees if daemon crashes before context write | Low | Known gap; startup recovery for pipeline worktrees is a follow-up ticket |
+| `opts.workspace` reference missed in a spawnSession or path construction | Medium | Invariant 8 lists all allowed `opts.workspace` uses; Slice 3/4 explicitly enumerate every line number to update |
+| Pitch archival before worktree removal ordering violated by future change | Low | Documented invariant 3; test 5 verifies call ordering via mock call order inspection |
+| Crash resume existence check uses wrong dep method | Low | Use `deps.fileExists` (already in deps) rather than a new method |
 
-- `estimatedPRCount`: 1
-- `planConfidenceBand`: High
-- `unresolvedUnknownCount`: 0
-- `followUpTickets`: Extract IssueStore class when auto-fix coordinator is built
+## PR packaging strategy
+
+Single PR. All 5 slices are logically coupled. User explicitly requested single PR.
+
+## Follow-up tickets
+
+1. Make `CodingHandoffArtifactV1.branchName` optional (redundant for delivery routing)
+2. Wire `worktrain run pipeline` CLI command with new dep methods
+3. Startup recovery for pipeline worktrees (scan `pipeline-runs/` for in-progress contexts with stale worktrees)
+4. Per-phase commit strategy for richer crash recovery and audit trail
+
+## Plan confidence: High
+
+All blocking audit findings resolved with confirmed primary-evidence verification. No remaining unresolved questions.

@@ -85,50 +85,92 @@ export function touchesUI(goal: string): boolean {
 export async function runImplementPipeline(
   deps: AdaptiveCoordinatorDeps,
   opts: AdaptivePipelineOpts,
-  pitchPath: string,
+  _pitchPath: string,  // WHY _: was opts.workspace-relative; now derived from activeWorkspacePath inside
   coordinatorStartMs: number,
 ): Promise<PipelineOutcome> {
   deps.stderr(`[implement] Starting IMPLEMENT pipeline for workspace=${opts.workspace}`);
-
-  // ── Stage 0: Pitch archival setup ─────────────────────────────────────
-  // Build the archive path now so it's available in the finally block
-  const archiveDir = opts.workspace + '/.workrail/used-pitches';
-  const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
-  const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
   const activeRunResult = await deps.readActiveRunId(opts.workspace);
   const priorRunId = activeRunResult.isOk() ? activeRunResult.value : null;
   const runId = priorRunId ?? deps.generateRunId();
 
-  const initResult = priorRunId
-    ? okResult(undefined)  // existing context file already initialized on prior run
-    : await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT');
-  if (initResult.isErr()) {
-    deps.stderr(`[implement] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
-    return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+  // ── Shared pipeline worktree (same pattern as full-pipeline.ts) ───────
+  let activeWorkspacePath: string;
+  let worktreeCreated = false;
+  let priorWorktreePath: string | undefined;
+
+  if (priorRunId) {
+    const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
+    if (existingCtx.isOk() && existingCtx.value !== null) {
+      priorWorktreePath = existingCtx.value.worktreePath;
+    }
   }
+
+  if (priorWorktreePath !== undefined) {
+    if (!deps.fileExists(priorWorktreePath)) {
+      deps.stderr(`[implement] Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}`);
+      return {
+        kind: 'escalated',
+        escalationReason: {
+          phase: 'init',
+          reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
+            `Delete ${opts.workspace}/.workrail/pipeline-runs/${runId}-context.json to start fresh.`,
+        },
+      };
+    }
+    deps.stderr(`[implement] Crash recovery: reusing existing worktree at ${priorWorktreePath}`);
+    activeWorkspacePath = priorWorktreePath;
+  } else {
+    const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
+    if (worktreeResult.isErr()) {
+      deps.stderr(`[implement] FATAL: failed to create pipeline worktree: ${worktreeResult.error}`);
+      return {
+        kind: 'escalated',
+        escalationReason: { phase: 'init', reason: `Pipeline worktree creation failed: ${worktreeResult.error}` },
+      };
+    }
+    activeWorkspacePath = worktreeResult.value;
+    worktreeCreated = true;
+
+    if (!priorRunId) {
+      const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'IMPLEMENT', activeWorkspacePath);
+      if (initResult.isErr()) {
+        deps.stderr(`[implement] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
+        await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);
+        return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+      }
+    }
+  }
+
+  // ── Pitch archival setup (uses activeWorkspacePath) ───────────────────
+  // In IMPLEMENT mode, the pitch exists in the shared worktree (the operator placed it
+  // there, or it was written by a prior shaping session). pitchPath is derived from
+  // activeWorkspacePath so both the archival and coding session use the same absolute path.
+  const effectivePitchPath = activeWorkspacePath + '/.workrail/current-pitch.md';
+  const archiveDir = activeWorkspacePath + '/.workrail/used-pitches';
+  const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
+  const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
   let outcome: PipelineOutcome;
 
   try {
-    outcome = await runImplementCore(deps, opts, pitchPath, coordinatorStartMs, runId);
+    outcome = await runImplementCore(deps, opts, effectivePitchPath, coordinatorStartMs, runId, activeWorkspacePath);
     const markResult = await deps.markPipelineRunComplete(opts.workspace, runId);
     if (markResult.isErr()) {
       deps.stderr(`[WARN implement] markPipelineRunComplete failed -- next run may resume this one: ${markResult.error}`);
     }
   } finally {
-    // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
-    // WHY finally: if outcome is escalated (coding session failed, review failed,
-    // etc.), the pitch must still be archived so it doesn't route future tasks
-    // to IMPLEMENT mode incorrectly. (Pitch invariant 11: "success or failure".)
+    // ── Pitch archival THEN worktree removal (ordering is an invariant) ──
     try {
       await deps.mkdir(archiveDir, { recursive: true });
-      await deps.archiveFile(pitchPath, archivePath);
+      await deps.archiveFile(effectivePitchPath, archivePath);
       deps.stderr(`[implement] Pitch archived to ${archivePath}`);
     } catch (e) {
-      // Archive failure is logged but must not override the pipeline outcome.
-      // WHY: if we throw here, the coordinator would have no outcome to return.
       deps.stderr(`[WARN implement] Failed to archive pitch.md: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (worktreeCreated) {
+      await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);
+      deps.stderr(`[implement] Pipeline worktree removed: ${activeWorkspacePath}`);
     }
   }
 
@@ -136,7 +178,11 @@ export async function runImplementPipeline(
 }
 
 /**
- * Core IMPLEMENT pipeline logic (extracted so pitch archival is always in finally).
+ * Core IMPLEMENT pipeline logic (extracted so pitch archival and worktree cleanup are always in finally).
+ *
+ * @param pitchPath - Absolute path to the pitch file inside the shared worktree.
+ * @param activeWorkspacePath - The shared pipeline worktree path. All sessions use this.
+ *   opts.workspace is used only for coordinator-internal operations (writePhaseRecord, etc.).
  */
 async function runImplementCore(
   deps: AdaptiveCoordinatorDeps,
@@ -144,6 +190,7 @@ async function runImplementCore(
   pitchPath: string,
   coordinatorStartMs: number,
   runId: string,
+  activeWorkspacePath: string,
 ): Promise<PipelineOutcome> {
   // IMPLEMENT mode starts with the pitch already shaped -- no prior phase artifacts to restore.
   // priorArtifacts starts empty; coding handoff will be accumulated below.
@@ -156,7 +203,7 @@ async function runImplementCore(
     const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'ux-gate');
     if (cutoffCheck) return cutoffCheck;
 
-    const uxSpawnResult = await deps.spawnSession('wr.ui-ux-design', opts.goal, opts.workspace, { pitchPath });
+    const uxSpawnResult = await deps.spawnSession('wr.ui-ux-design', opts.goal, activeWorkspacePath, { pitchPath });
 
     if (uxSpawnResult.kind === 'err') {
       deps.stderr(`[implement] UX gate spawn failed: ${uxSpawnResult.error}`);
@@ -200,11 +247,10 @@ async function runImplementCore(
 
   deps.stderr(`[implement] Spawning wr.coding-task`);
 
-  // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13)
-  // WHY branchStrategy:'worktree': coding sessions write code and need an isolated branch
-  // so delivery can open a PR against it. Discovery/shaping/review sessions do NOT get
-  // branchStrategy -- they are read-heavy and must not create worktrees.
-  const codingSpawnResult = await deps.spawnSession('wr.coding-task', opts.goal, opts.workspace, { pitchPath }, undefined, undefined, 'worktree');
+  // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13).
+  // WHY no branchStrategy: the coordinator owns the shared worktree. The coding session
+  // works in activeWorkspacePath -- no per-session worktree creation needed.
+  const codingSpawnResult = await deps.spawnSession('wr.coding-task', opts.goal, activeWorkspacePath, { pitchPath });
 
   if (codingSpawnResult.kind === 'err') {
     return {
@@ -265,21 +311,11 @@ async function runImplementCore(
   }
 
   // ── Stage 3: Coordinator-owned delivery (commit + PR creation) ──────────
-  // WHY before pollForPR: delivery must run before we can poll for the PR.
-  // WHY branchName from artifact (not codingHandle): the artifact carries the actual
-  // branch the coding agent worked on. codingHandle is a sess_* WorkRail session ID --
-  // unrelated to the git branch name.
-  const branchName = codingArtifact?.branchName;
-  if (!branchName) {
-    deps.stderr('[implement] FATAL: coding handoff artifact missing branchName -- cannot locate PR');
-    return {
-      kind: 'escalated',
-      escalationReason: { phase: 'pr-detection', reason: 'coding handoff artifact missing branchName -- cannot deliver or locate PR' },
-    };
-  }
-
+  // WHY coordinator-known branch (not artifact): the coordinator created the worktree
+  // on branch worktrain/<runId> before any session ran. The branch name is deterministic.
+  const branchName = `worktrain/${runId}`;
   deps.stderr(`[implement] Running coordinator delivery for branch: ${branchName}`);
-  const deliveryResult = await runCoordinatorDelivery(deps, codingAgentResult.recapMarkdown, branchName, opts.workspace);
+  const deliveryResult = await runCoordinatorDelivery(deps, codingAgentResult.recapMarkdown, branchName, activeWorkspacePath);
   if (deliveryResult.kind === 'err') {
     deps.stderr(`[implement] Delivery failed: ${deliveryResult.error}`);
     return {
@@ -323,5 +359,5 @@ async function runImplementCore(
   deps.stderr(`[implement] PR detected: ${prUrl}`);
 
   // ── Stage 4: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts);
+  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, updatedPriorArtifacts, activeWorkspacePath);
 }

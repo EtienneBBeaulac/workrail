@@ -188,10 +188,12 @@ export async function runFullPipeline(
   const runId = priorRunId ?? deps.generateRunId();
 
   let initialPriorArtifacts: readonly PhaseHandoffArtifact[] = [];
+  let priorWorktreePath: string | undefined;
   if (priorRunId) {
     const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
     if (existingCtx.isOk() && existingCtx.value !== null) {
       initialPriorArtifacts = extractPriorArtifactsFromContext(existingCtx.value);
+      priorWorktreePath = existingCtx.value.worktreePath;
     }
   }
 
@@ -199,49 +201,103 @@ export async function runFullPipeline(
     ? `[full-pipeline] Resuming prior run ${priorRunId} with ${initialPriorArtifacts.length} artifact(s)`
     : `[full-pipeline] Starting new run ${runId}`);
 
-  // Initialize the context file for new runs only -- crash-resumed runs already have one.
-  // Awaited: if this fails we escalate immediately rather than running the pipeline
-  // without durability. An operator can fix the storage issue and resume.
-  if (!priorRunId) {
-    const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL');
-    if (initResult.isErr()) {
-      deps.stderr(`[full-pipeline] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
-      return { kind: 'escalated', escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` } };
+  // ── Shared pipeline worktree ──────────────────────────────────────────
+  // The coordinator creates one isolated git worktree before any session spawns.
+  // All phases (discovery, shaping, coding, review) use this as their workspacePath
+  // so file handoffs (design docs, pitch file) are visible across phases.
+  //
+  // Crash recovery: if a prior run's worktreePath is present in the context file and
+  // exists on disk, reuse it. If the path is present but missing on disk, escalate
+  // (the operator can delete the context file to start fresh).
+  //
+  // WHY worktreeCreated tracks creation separately from activeWorkspacePath:
+  // removePipelineWorktree must only run if the worktree was actually created --
+  // not if we reused a prior run's worktree (the prior run's finally block will remove it)
+  // and not if creation failed (nothing to remove).
+  let activeWorkspacePath: string;
+  let worktreeCreated = false;
+
+  if (priorWorktreePath !== undefined) {
+    // Crash resume: prior run has a worktreePath persisted.
+    if (!deps.fileExists(priorWorktreePath)) {
+      deps.stderr(`[full-pipeline] Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}`);
+      return {
+        kind: 'escalated',
+        escalationReason: {
+          phase: 'init',
+          reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
+            `Delete ${opts.workspace}/.workrail/pipeline-runs/${runId}-context.json to start fresh.`,
+        },
+      };
+    }
+    deps.stderr(`[full-pipeline] Crash recovery: reusing existing worktree at ${priorWorktreePath}`);
+    activeWorkspacePath = priorWorktreePath;
+    // WHY worktreeCreated stays false: this run did not create the worktree.
+    // Removal is the responsibility of whichever run created it (or startup recovery).
+  } else {
+    // New run: create the shared worktree.
+    const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
+    if (worktreeResult.isErr()) {
+      deps.stderr(`[full-pipeline] FATAL: failed to create pipeline worktree: ${worktreeResult.error}`);
+      return {
+        kind: 'escalated',
+        escalationReason: { phase: 'init', reason: `Pipeline worktree creation failed: ${worktreeResult.error}` },
+      };
+    }
+    activeWorkspacePath = worktreeResult.value;
+    worktreeCreated = true;
+
+    // Persist worktreePath atomically in the initial context file so crash recovery
+    // can find and reuse the worktree on the next run. Called only for new runs --
+    // resumed runs already have a context file.
+    if (!priorRunId) {
+      const initResult = await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL', activeWorkspacePath);
+      if (initResult.isErr()) {
+        deps.stderr(`[full-pipeline] FATAL: failed to initialize PipelineRunContext: ${initResult.error}`);
+        // Worktree was created but context write failed. Remove the worktree immediately
+        // (we are still in the setup path, before any session spawns).
+        await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);
+        return {
+          kind: 'escalated',
+          escalationReason: { phase: 'init', reason: `PipelineRunContext initialization failed: ${initResult.error}` },
+        };
+      }
     }
   }
 
   // ── Pitch archival setup ──────────────────────────────────────────────
-  // Build the archive path now so it's available in the finally block.
-  // The shaping session creates current-pitch.md; we archive it on success or failure.
-  const pitchPath = opts.workspace + '/.workrail/current-pitch.md';
-  const archiveDir = opts.workspace + '/.workrail/used-pitches';
+  // pitchPath and archiveDir use activeWorkspacePath (the shared worktree) because
+  // shaping writes current-pitch.md into the worktree's working directory.
+  const pitchPath = activeWorkspacePath + '/.workrail/current-pitch.md';
+  const archiveDir = activeWorkspacePath + '/.workrail/used-pitches';
   const archiveTimestamp = deps.nowIso().replace(/[:.]/g, '-');
   const archivePath = archiveDir + '/pitch-' + archiveTimestamp + '.md';
 
   let outcome: PipelineOutcome;
 
   try {
-    outcome = await runFullPipelineCore(deps, opts, coordinatorStartMs, runId, initialPriorArtifacts);
+    outcome = await runFullPipelineCore(deps, opts, coordinatorStartMs, runId, initialPriorArtifacts, activeWorkspacePath);
     // Mark complete so the next scan doesn't resume this run for a different goal.
-    // Awaited so a failure is visible before the finally block runs, but does NOT
-    // override the outcome -- the pipeline succeeded regardless of marking.
     const markResult = await deps.markPipelineRunComplete(opts.workspace, runId);
     if (markResult.isErr()) {
       deps.stderr(`[WARN full-pipeline] markPipelineRunComplete failed -- next run may resume this one: ${markResult.error}`);
     }
   } finally {
-    // ── Pitch archival (ALWAYS -- success or failure) ──────────────────
-    // WHY finally: if outcome is escalated (discovery failed, shaping failed,
-    // coding failed, etc.), the pitch must still be archived so it doesn't
-    // incorrectly route future tasks to IMPLEMENT mode. (Pitch invariant 11.)
+    // ── Pitch archival THEN worktree removal (ordering is an invariant) ──
+    // Pitch archival must run BEFORE worktree removal because the pitch lives inside
+    // the worktree. If we removed the worktree first, the pitch would be gone.
+    // (Pitch invariant 11: archive on success OR failure so future routing is correct.)
     try {
       await deps.mkdir(archiveDir, { recursive: true });
       await deps.archiveFile(pitchPath, archivePath);
       deps.stderr(`[full-pipeline] Pitch archived to ${archivePath}`);
     } catch (e) {
-      // Archive failure is logged but must not override the pipeline outcome.
-      // WHY: if we throw here, the coordinator would have no outcome to return.
       deps.stderr(`[WARN full-pipeline] Failed to archive pitch.md: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    // Remove the shared worktree only if this run created it.
+    if (worktreeCreated) {
+      await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);
+      deps.stderr(`[full-pipeline] Pipeline worktree removed: ${activeWorkspacePath}`);
     }
   }
 
@@ -249,7 +305,11 @@ export async function runFullPipeline(
 }
 
 /**
- * Core FULL pipeline logic (extracted so pitch archival is always in finally).
+ * Core FULL pipeline logic (extracted so pitch archival and worktree cleanup are always in finally).
+ *
+ * @param activeWorkspacePath - The shared pipeline worktree path. All sessions and path
+ *   construction within this function must use this, not opts.workspace.
+ *   opts.workspace is used only for coordinator-internal operations (writePhaseRecord, etc.).
  */
 async function runFullPipelineCore(
   deps: AdaptiveCoordinatorDeps,
@@ -257,6 +317,7 @@ async function runFullPipelineCore(
   coordinatorStartMs: number,
   runId: string,
   initialPriorArtifacts: readonly PhaseHandoffArtifact[],
+  activeWorkspacePath: string,
 ): Promise<PipelineOutcome> {
   // priorArtifacts accumulates phase handoffs as the pipeline progresses.
   // WHY spread (not push): immutability by default.
@@ -271,7 +332,7 @@ async function runFullPipelineCore(
   const discoverySpawnResult = await deps.spawnSession(
     'wr.discovery',
     opts.goal,
-    opts.workspace,
+    activeWorkspacePath,
     undefined,
     { maxSessionMinutes: Math.ceil(DISCOVERY_TIMEOUT_MS / 60_000) },
   );
@@ -370,7 +431,7 @@ async function runFullPipelineCore(
   const shapingSpawnResult = await deps.spawnSession(
     'wr.shaping',
     opts.goal,
-    opts.workspace,
+    activeWorkspacePath,
     shapingContext,
     { maxSessionMinutes: Math.ceil(SHAPING_TIMEOUT_MS / 60_000) },
   );
@@ -455,7 +516,7 @@ async function runFullPipelineCore(
     const uxSpawnResult = await deps.spawnSession(
       'wr.ui-ux-design',
       opts.goal,
-      opts.workspace,
+      activeWorkspacePath,
       { shapingComplete: true },
       { maxSessionMinutes: Math.ceil(REVIEW_TIMEOUT_MS / 60_000) },
     );
@@ -550,16 +611,17 @@ async function runFullPipelineCore(
   const codingWarnings = discoveryPartialWarning + shapingPartialWarning;
   const codingFullContext = (codingContextSummary + codingWarnings).trim();
   const codingContext: CoordinatorSpawnContext | undefined = codingFullContext
-    ? { pitchPath: opts.workspace + '/.workrail/current-pitch.md', assembledContextSummary: codingFullContext }
+    ? { pitchPath: activeWorkspacePath + '/.workrail/current-pitch.md', assembledContextSummary: codingFullContext }
     : undefined;
   const codingSpawnResult = await deps.spawnSession(
     'wr.coding-task',
     opts.goal,
-    opts.workspace,
+    activeWorkspacePath,
     codingContext,
     { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
-    undefined,
-    'worktree', // WHY: coding sessions write code and need an isolated branch for delivery
+    // WHY no branchStrategy: the coordinator owns the shared worktree. The coding session
+    // works directly in the shared worktree (activeWorkspacePath) -- no per-session
+    // worktree creation needed. Delivery uses the coordinator-known branch worktrain/<runId>.
   );
 
   if (codingSpawnResult.kind === 'err') {
@@ -632,17 +694,12 @@ async function runFullPipelineCore(
   }
 
   // ── Stage 6: Coordinator-owned delivery (commit + PR creation) ───────
-  const branchName = codingArtifact?.branchName;
-  if (!branchName) {
-    deps.stderr('[full-pipeline] FATAL: coding handoff artifact missing branchName -- cannot deliver or locate PR');
-    return {
-      kind: 'escalated',
-      escalationReason: { phase: 'pr-detection', reason: 'coding handoff artifact missing branchName -- cannot deliver or locate PR' },
-    };
-  }
-
+  // WHY coordinator-known branch (not artifact): the coordinator created the worktree
+  // on branch worktrain/<runId> before any session ran. The branch name is deterministic
+  // and does not depend on the coding agent reporting it correctly.
+  const branchName = `worktrain/${runId}`;
   deps.stderr(`[full-pipeline] Running coordinator delivery for branch: ${branchName}`);
-  const deliveryResult = await runCoordinatorDelivery(deps, codingAgentResult.recapMarkdown, branchName, opts.workspace);
+  const deliveryResult = await runCoordinatorDelivery(deps, codingAgentResult.recapMarkdown, branchName, activeWorkspacePath);
   if (deliveryResult.kind === 'err') {
     deps.stderr(`[full-pipeline] Delivery failed: ${deliveryResult.error}`);
     return {
@@ -682,5 +739,5 @@ async function runFullPipelineCore(
   deps.stderr(`[full-pipeline] PR detected: ${prUrl}`);
 
   // ── Stage 7: Review + verdict routing ────────────────────────────────
-  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, priorArtifacts);
+  return runReviewAndVerdictCycle(deps, opts, prUrl, coordinatorStartMs, 0, runId, priorArtifacts, activeWorkspacePath);
 }

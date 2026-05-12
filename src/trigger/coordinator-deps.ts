@@ -800,13 +800,17 @@ export function createCoordinatorDeps(
       }
     },
 
-    createPipelineContext: async (workspace, runId, goal, pipelineMode) => {
+    createPipelineContext: async (workspace, runId, goal, pipelineMode, worktreePath) => {
       const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
       const filePath = path.join(runsDir, `${runId}-context.json`);
       const tmpPath = filePath + '.tmp';
       try {
         await fs.promises.mkdir(runsDir, { recursive: true });
-        const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, phases: {} };
+        const initial = {
+          runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode,
+          worktreePath,
+          phases: {},
+        };
         await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
         await fs.promises.rename(tmpPath, filePath);
         return ok(undefined);
@@ -859,6 +863,31 @@ export function createCoordinatorDeps(
     ) => {
       const result = await execFileAsync(file, args, options);
       return { stdout: result.stdout, stderr: '' };
+    },
+
+    createPipelineWorktree: async (workspace: string, runId: string, baseBranch = 'main') => {
+      const worktreePath = path.join(os.homedir(), '.workrail', 'worktrees', runId);
+      const branchName = `worktrain/${runId}`;
+      try {
+        await fs.promises.mkdir(path.join(os.homedir(), '.workrail', 'worktrees'), { recursive: true });
+        await execFileAsync('git', ['-C', workspace, 'fetch', 'origin', baseBranch], {});
+        await execFileAsync('git', [
+          '-C', workspace,
+          'worktree', 'add',
+          worktreePath,
+          '-b', branchName,
+          `origin/${baseBranch}`,
+        ], {});
+        return ok(worktreePath);
+      } catch (e) {
+        return err(`createPipelineWorktree failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+
+    removePipelineWorktree: async (workspace: string, worktreePath: string) => {
+      try {
+        await execFileAsync('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath], {});
+      } catch { /* best-effort -- logged by caller */ }
     },
   };
 }
