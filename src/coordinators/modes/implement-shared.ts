@@ -18,6 +18,7 @@ import type { ReviewVerdictArtifactV1 } from '../../v2/durable-core/schemas/arti
 import { parseReviewVerdictArtifact } from '../../v2/durable-core/schemas/artifacts/review-verdict.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
 import { buildContextSummary } from '../context-assembly.js';
+import { extractPrNumberFromUrl } from '../coordinator-delivery.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -127,9 +128,19 @@ export async function runReviewAndVerdictCycle(
   );
 
   switch (findings.severity) {
-    case 'clean':
+    case 'clean': {
       deps.stderr(`[review-cycle] Verdict clean -- merging PR`);
+      const prNum = extractPrNumberFromUrl(prUrl);
+      if (prNum !== null) {
+        const mergeResult = await deps.mergePR(prNum, opts.workspace);
+        if (mergeResult.kind === 'err') {
+          deps.stderr(`[WARN review-cycle] mergePR failed (PR will remain open for manual merge): ${mergeResult.error}`);
+        }
+      } else {
+        deps.stderr(`[WARN review-cycle] Could not extract PR number from URL ${prUrl} -- skipping auto-merge`);
+      }
       return { kind: 'merged', prUrl };
+    }
 
     case 'minor': {
       if (iteration >= MAX_FIX_ITERATIONS) {
@@ -407,6 +418,15 @@ export async function runAuditChain(
 
   if (reFindings.severity === 'clean' || reFindings.severity === 'minor') {
     deps.stderr(`[audit-chain] Post-audit verdict acceptable (${reFindings.severity}) -- merging`);
+    const prNumAudit = extractPrNumberFromUrl(prUrl);
+    if (prNumAudit !== null) {
+      const mergeResultAudit = await deps.mergePR(prNumAudit, opts.workspace);
+      if (mergeResultAudit.kind === 'err') {
+        deps.stderr(`[WARN audit-chain] mergePR failed (PR will remain open for manual merge): ${mergeResultAudit.error}`);
+      }
+    } else {
+      deps.stderr(`[WARN audit-chain] Could not extract PR number from URL ${prUrl} -- skipping auto-merge`);
+    }
     return { kind: 'merged', prUrl };
   }
 

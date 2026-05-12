@@ -5,12 +5,12 @@
  * tasks without a pre-existing pitch. This is the most complex mode executor.
  *
  * Step sequence:
- * 1. Spawn wr.discovery session (35 minute timeout)
+ * 1. Spawn wr.discovery session (60 minute timeout)
  * 2. Context bridge: read wr.discovery_handoff artifact from discovery result
  *    - If found and valid: inject { selectedDirection, designDocPath, assembledContextSummary }
  *    - Fallback: use lastStepNotes as assembledContextSummary only if length > 50 chars
  *    - No artifact AND short notes: proceed with no assembledContextSummary
- * 3. Spawn wr.shaping session with discovery context (35 minute timeout)
+ * 3. Spawn wr.shaping session with discovery context (35 minute timeout -- shaping unchanged)
  * 4. [UX Gate] If goal contains UI-touching signals AND complexity is Large:
  *    - Dispatch wr.ui-ux-design
  *    - Require human outbox acknowledgment (poll 24 hours; timeout -> escalate)
@@ -49,6 +49,7 @@ import { buildPhaseResult } from '../pipeline-run-context.js';
 import { runReviewAndVerdictCycle } from './implement-shared.js';
 import { touchesUI } from './implement.js';
 import type { CoordinatorSpawnContext } from '../types.js';
+import { runCoordinatorDelivery } from '../coordinator-delivery.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -557,6 +558,8 @@ async function runFullPipelineCore(
     opts.workspace,
     codingContext,
     { maxSessionMinutes: Math.ceil(CODING_TIMEOUT_MS / 60_000) },
+    undefined,
+    'worktree', // WHY: coding sessions write code and need an isolated branch for delivery
   );
 
   if (codingSpawnResult.kind === 'err') {
@@ -628,13 +631,32 @@ async function runFullPipelineCore(
     };
   }
 
-  // ── Stage 6: Poll for PR ──────────────────────────────────────────────
-  const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
-  deps.stderr(`[full-pipeline] Polling for PR on branch pattern: ${branchPattern}`);
+  // ── Stage 6: Coordinator-owned delivery (commit + PR creation) ───────
+  const branchName = codingArtifact?.branchName;
+  if (!branchName) {
+    deps.stderr('[full-pipeline] FATAL: coding handoff artifact missing branchName -- cannot deliver or locate PR');
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'pr-detection', reason: 'coding handoff artifact missing branchName -- cannot deliver or locate PR' },
+    };
+  }
+
+  deps.stderr(`[full-pipeline] Running coordinator delivery for branch: ${branchName}`);
+  const deliveryResult = await runCoordinatorDelivery(deps, codingAgentResult.recapMarkdown, branchName, opts.workspace);
+  if (deliveryResult.kind === 'err') {
+    deps.stderr(`[full-pipeline] Delivery failed: ${deliveryResult.error}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'delivery', reason: `coordinator delivery failed: ${deliveryResult.error}` },
+    };
+  }
+
+  // ── Stage 7: Poll for PR ──────────────────────────────────────────────
+  deps.stderr(`[full-pipeline] Polling for PR on branch: ${branchName}`);
 
   let prUrl: string | null;
   try {
-    prUrl = await deps.pollForPR(branchPattern, PR_POLL_TIMEOUT_MS);
+    prUrl = await deps.pollForPR(branchName, PR_POLL_TIMEOUT_MS);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
@@ -648,7 +670,7 @@ async function runFullPipelineCore(
       kind: 'escalated',
       escalationReason: {
         phase: 'pr-detection',
-        reason: `no PR found matching ${branchPattern} within ${PR_POLL_TIMEOUT_MS / 60000} minutes`,
+        reason: `no PR found matching branch ${branchName} within ${PR_POLL_TIMEOUT_MS / 60000} minutes`,
       },
     };
   }

@@ -241,6 +241,7 @@ export function createCoordinatorDeps(
       context?: CoordinatorSpawnContext,
       agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
       parentSessionId?: string,
+      branchStrategy?: 'worktree' | 'none',
     ) => {
       // WHY in-process (not HTTP): the coordinator runs inside the daemon process.
       // POSTing to /api/v2/auto/dispatch would go out-of-process to itself, hitting
@@ -309,6 +310,7 @@ export function createCoordinatorDeps(
         // Widen coordinator-typed context to the daemon's generic map at this boundary.
         context: context as Readonly<Record<string, unknown>> | undefined,
         ...(agentConfig !== undefined ? { agentConfig } : {}),
+        ...(branchStrategy !== undefined ? { branchStrategy } : {}),
       };
       const r = startResult.value.response;
       const allocatedSession: AllocatedSession = {
@@ -848,6 +850,15 @@ export function createCoordinatorDeps(
         try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
         return err(`writePhaseRecord failed: ${msg}`);
       }
+    },
+
+    execDelivery: async (
+      file: string,
+      args: string[],
+      options: { cwd: string; timeout: number },
+    ) => {
+      const result = await execFileAsync(file, args, options);
+      return { stdout: result.stdout, stderr: '' };
     },
   };
 }

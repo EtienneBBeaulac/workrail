@@ -1728,6 +1728,81 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### Parallel tool execution in AgentLoop (May 11, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:1 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+`AgentLoop._executeTools()` runs a sequential `for` loop regardless of how many tool_use blocks the LLM returns in a single response. `toolExecution: 'sequential'` is the only accepted value. When the LLM requests multiple reads, globs, or greps in one turn, they execute one by one.
+
+This is fine for tools with ordering requirements (`complete_step` must return the next prompt before Bash acts on it), but it is needlessly slow for independent I/O -- reading 5 files, running 3 greps, or fetching 4 URLs. Discovery and research workflows are the worst cases: they spend the majority of their turns on file reads that have zero ordering dependencies.
+
+The fix is a `toolExecution: 'parallel'` strategy in `AgentLoop._executeTools()` that `Promise.all`s over the tool_use blocks when no ordering constraint exists. The sequential path stays as-is. Callers opt in via `AgentLoopOptions.toolExecution`.
+
+**Design confirmed by Claude Code research (May 11, 2026, research/wr-research-ccloop-001/brief.md):**
+
+Claude Code uses exactly this pattern. Key findings:
+- Tool safety is **four-axis**, not binary: `isConcurrencySafe`, `isReadOnly`, `isDestructive`, `interruptBehavior` -- all per-invocation methods, all fail-closed defaults
+- `partitionToolCalls()` groups consecutive `isConcurrencySafe=true` tools into one batch; singleton batches for non-safe tools
+- `runToolsConcurrently(cap=10)` runs each batch via a bounded executor (implementation in `utils/generators.ts`, not yet fetched -- the cap=10 implementation details are unverified)
+- **BashTool uses dynamic per-command analysis** (`checkReadOnlyConstraints()`) rather than a static flag -- needed for correct Bash classification
+
+**Confirmed tool safety values:**
+| Tool | isConcurrencySafe | isReadOnly |
+|---|---|---|
+| Read / FileReadTool | true | true |
+| Glob | true | true |
+| Grep | true | true |
+| WebFetch / WebSearchTool | true | true |
+| BashTool | dynamic (per-command) | dynamic |
+| Edit / FileEditTool | false | false |
+| Write / FileWriteTool | false | false |
+
+**Implementation path (non-streaming, most adoptable):** add `isConcurrencySafe(): boolean` and `isReadOnly(): boolean` methods to `AgentTool` interface (fail-closed: default false), then wrap `_executeTools()` with `partitionToolCalls()` + `runToolsConcurrently()`. The sequential path remains as the fallback.
+
+**Open question:** how `utils/generators.ts`'s `all()` implements the concurrency cap (semaphore? backpressure? simple Promise.all with limit?). Must fetch before implementing to avoid wrong cap semantics.
+
+**Relationship to parallel spawn_agent:** `spawn_agent` solved this at the session-spawn level. This item solves it at the within-session tool level -- complementary.
+
+**Expected impact:** wr.discovery sessions that read 20+ files per turn would complete in `max(file_read_times)` instead of `sum(file_read_times)`. Rough estimate: 30-50% wall-clock reduction on read-heavy phases.
+
+---
+
+### Token-velocity stuck detection: add diminishing-returns check as complement to repeated-tool-call heuristic (May 11, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:1 Eff:3 Lev:2 Con:3 | Blocked: no
+
+WorkRail's current stuck detection catches the "spinning on the same tool call" failure mode (`repeated_tool_call` heuristic: same tool + same args 3x). It does not catch the "model producing diminishing output each turn" failure mode -- where the agent keeps calling the LLM but each response is smaller and less meaningful than the last.
+
+Claude Code research (May 11, 2026, `research/wr-research-ccloop-001/brief.md`, Finding 5) confirmed Claude Code uses a `BudgetTracker` diminishing-returns check: if `continuationCount >= 3` AND the last two token deltas are both `< 500 tokens`, the loop stops. This catches sessions that are technically making progress (new tokens each turn) but producing nothing useful.
+
+**Implementation:** Track the last N output token counts in the `AgentLoop` or in `SessionState`. After each LLM turn, check if `turnCount >= 3` and `lastTwoOutputTokenDeltas.every(d => d < 500)`. If true, fire the stuck signal with `reason: 'token_velocity'`. Subject to `stuckAbortPolicy` (abort vs notify_only) same as existing heuristics.
+
+**The two heuristics are complementary, not competing:** `repeated_tool_call` catches "stuck on one tool call"; `token_velocity` catches "running but producing nothing". Both should be active.
+
+**Note:** WorkRail's prior analysis ("Claude Code has more sophisticated stuck detection") was falsified by the research. Claude Code has NO dedicated stuck detector beyond these two mechanisms. WorkRail is not inferior -- it addresses a different failure mode. This item adds coverage of the second failure mode.
+
+---
+
+### Three-level AbortController hierarchy for parallel batch isolation (May 11, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: parallel tool execution backlog item
+
+WorkRail's current abort model is two-level: session `AbortController` (propagated to LLM calls) and per-tool `AbortSignal` (passed to `tool.execute()`). When running tools in parallel batches (once the parallel tool execution item ships), a tool failure in the batch should abort sibling tools in the same batch -- but NOT abort the entire session. There is currently no "batch-scoped" abort level.
+
+Claude Code research (May 11, 2026, `research/wr-research-ccloop-001/brief.md`, Finding 3) confirmed Claude Code uses a three-level hierarchy: **session AbortController > siblingAbortController (scoped per concurrent batch) > per-tool controller**. Key asymmetry: only `BashTool` errors cascade to sibling batch members -- read-tool errors do not. This allows batch-level error isolation without killing the session.
+
+**Implementation:** When `runToolsConcurrently()` executes a batch, create a `siblingAbortController` scoped to that batch. If a Bash tool throws (or returns `isError: true` with a fatal result), signal `siblingAbortController` to abort sibling tools still in-flight. Read/Glob/Grep errors do NOT cascade. Session `AbortController` is unchanged -- only the batch-scoped controller is signaled.
+
+**Blocked by:** parallel tool execution item (no batches = no batch-scoped abort needed).
+
+---
+
 ### State-of-the-code context: pass diffs or transformations instead of full file contents (May 11, 2026)
 
 **Status: idea** | Priority: medium

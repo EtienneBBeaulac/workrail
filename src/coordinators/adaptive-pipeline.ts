@@ -225,6 +225,21 @@ export interface AdaptiveCoordinatorDeps extends CoordinatorDeps {
    * makes illegal states unrepresentable -- the phase name and record type are coupled.
    */
   writePhaseRecord(workspace: string, runId: string, entry: PhaseRecord): Promise<Result<void, string>>;
+
+  /**
+   * Execute a child process for delivery operations (git, gh).
+   * Injected so delivery is testable without real git/gh calls.
+   *
+   * WHY separate from execFileAsync on the outer deps: AdaptiveCoordinatorDeps does not
+   * expose execFileAsync directly. Adding a typed delivery-scoped execFn here is the
+   * minimal DI surface needed by runCoordinatorDelivery() without leaking the full
+   * execFileAsync to every coordinator.
+   */
+  execDelivery: (
+    file: string,
+    args: string[],
+    options: { cwd: string; timeout: number },
+  ) => Promise<{ stdout: string; stderr: string }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

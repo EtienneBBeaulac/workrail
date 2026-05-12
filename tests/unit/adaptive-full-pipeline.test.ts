@@ -77,11 +77,24 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
   return {
     spawnSession: vi.fn().mockImplementation(async () => ok(nextHandle())),
     awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-    getAgentResult: vi.fn().mockResolvedValue({
-      // Notes > 50 chars so phases produce 'partial' (not 'fallback') by default,
-      // allowing the pipeline to continue in tests that don't care about phase quality.
-      recapMarkdown: 'APPROVE -- LGTM. No findings. Session completed successfully with all steps passing.',
-      artifacts: [],
+    getAgentResult: vi.fn().mockImplementation(async () => {
+      // Default: return partial notes + a wr.coding_handoff artifact.
+      // The coding phase (call #3 in a FULL pipeline: discovery=1, shaping=2, coding=3)
+      // needs a branchName in the artifact for coordinator delivery + pollForPR to work.
+      // We always include it so all phases get a partial-quality result and the pipeline
+      // advances without per-test setup in tests that don't care about artifact details.
+      return {
+        recapMarkdown: 'APPROVE -- LGTM. No findings. Session completed successfully with all steps passing.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): implement feature","prTitle":"feat(mcp): implement feature","prBody":"## Summary\\n- Implements feature\\n\\n## Test plan\\n- [ ] Tests pass","followUpTickets":[],"filesChanged":["src/feature.ts"]}\n```',
+        artifacts: [{
+          kind: 'wr.coding_handoff',
+          version: 1,
+          branchName: 'worktrain/test-branch',
+          keyDecisions: ['Used standard pattern'],
+          knownLimitations: [],
+          testsAdded: [],
+          filesChanged: ['src/feature.ts'],
+        }],
+      };
     }),
     listOpenPRs: vi.fn().mockResolvedValue([]),
     mergePR: vi.fn().mockResolvedValue(ok(undefined)),
@@ -110,6 +123,13 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
     markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
+    execDelivery: vi.fn().mockImplementation(async (file: string, args: string[]) => {
+      // git commit output needs the [branch sha] format for SHA extraction
+      if (file === 'git' && args.includes('commit')) return { stdout: '[worktrain/test-branch abc1234] feat: test', stderr: '' };
+      // gh pr create returns the PR URL
+      if (file === 'gh' && args[0] === 'pr') return { stdout: 'https://github.com/org/repo/pull/42', stderr: '' };
+      return { stdout: '', stderr: '' };
+    }),
     ...overrides,
   };
 }
@@ -434,11 +454,18 @@ describe('runFullPipeline - happy path', () => {
       // Review phase: returns wr.review_verdict artifact for clean merge.
       getAgentResult: vi.fn().mockImplementation(async () => {
         callCount++;
-        // First 3 calls = discovery, shaping, coding (partial notes, no artifact)
         // 4th call = review (verdict artifact)
         if (callCount >= 4) {
           return { recapMarkdown: 'Review complete. Clean verdict.', artifacts: [reviewVerdictArtifact] };
         }
+        // 3rd call = coding: must include wr.coding_handoff with branchName + delivery handoff JSON in notes
+        if (callCount === 3) {
+          return {
+            recapMarkdown: 'Coding done.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): implement feature","prTitle":"feat(mcp): implement feature","prBody":"body","followUpTickets":[],"filesChanged":["src/feature.ts"]}\n```',
+            artifacts: [{ kind: 'wr.coding_handoff', version: 1, branchName: 'worktrain/test-branch', keyDecisions: [], knownLimitations: [], testsAdded: [], filesChanged: ['src/feature.ts'] }],
+          };
+        }
+        // Calls 1-2 = discovery, shaping (partial notes, no artifact)
         return {
           recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready for next phase.',
           artifacts: [],
@@ -460,11 +487,10 @@ describe('runFullPipeline - happy path', () => {
         return ok(nextHandle());
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
-      // Notes > 50 chars so all phases produce 'partial' (not 'fallback'), allowing pipeline to complete
-      getAgentResult: vi.fn().mockResolvedValue({
-        recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready for next phase.',
-        artifacts: [],
-      }),
+      // Notes > 50 chars so all phases produce 'partial' (not 'fallback'), allowing pipeline to complete.
+      // The default mock (defined in makeFakeDeps) already includes a wr.coding_handoff artifact.
+      // This test doesn't need to override getAgentResult -- use the default.
+
     });
 
     await runFullPipeline(deps, makeOpts('Implement OAuth token rotation'), Date.now());
@@ -500,6 +526,7 @@ describe('runFullPipeline - pitch archival', () => {
       getAgentResult: vi.fn().mockImplementation(async () => {
         callCount++;
         if (callCount >= 4) return { recapMarkdown: 'Review complete.', artifacts: [reviewVerdictArtifact] };
+        if (callCount === 3) return { recapMarkdown: 'Coding done.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): implement","prTitle":"feat(mcp): implement","prBody":"body","followUpTickets":[],"filesChanged":["src/f.ts"]}\n```', artifacts: [{ kind: 'wr.coding_handoff', version: 1, branchName: 'worktrain/test-branch', keyDecisions: [], knownLimitations: [], testsAdded: [], filesChanged: ['src/f.ts'] }] };
         return { recapMarkdown: 'Session completed successfully. All steps passed. Output is complete and ready.', artifacts: [] };
       }),
     });

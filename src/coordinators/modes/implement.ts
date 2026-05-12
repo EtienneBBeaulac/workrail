@@ -38,6 +38,7 @@ import type { CoordinatorSpawnContext } from '../types.js';
 import { buildPhaseResult } from '../pipeline-run-context.js';
 import type { PhaseHandoffArtifact } from '../../v2/durable-core/schemas/artifacts/index.js';
 import { isCodingHandoffArtifact, CodingHandoffArtifactV1Schema } from '../../v2/durable-core/schemas/artifacts/index.js';
+import { runCoordinatorDelivery } from '../coordinator-delivery.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -200,7 +201,10 @@ async function runImplementCore(
   deps.stderr(`[implement] Spawning wr.coding-task`);
 
   // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13)
-  const codingSpawnResult = await deps.spawnSession('wr.coding-task', opts.goal, opts.workspace, { pitchPath });
+  // WHY branchStrategy:'worktree': coding sessions write code and need an isolated branch
+  // so delivery can open a PR against it. Discovery/shaping/review sessions do NOT get
+  // branchStrategy -- they are read-heavy and must not create worktrees.
+  const codingSpawnResult = await deps.spawnSession('wr.coding-task', opts.goal, opts.workspace, { pitchPath }, undefined, undefined, 'worktree');
 
   if (codingSpawnResult.kind === 'err') {
     return {
@@ -260,13 +264,36 @@ async function runImplementCore(
     };
   }
 
-  // ── Stage 3: Poll for PR ──────────────────────────────────────────────
-  const branchPattern = `worktrain/${codingHandle.slice(0, 16)}`;
-  deps.stderr(`[implement] Polling for PR on branch pattern: ${branchPattern}`);
+  // ── Stage 3: Coordinator-owned delivery (commit + PR creation) ──────────
+  // WHY before pollForPR: delivery must run before we can poll for the PR.
+  // WHY branchName from artifact (not codingHandle): the artifact carries the actual
+  // branch the coding agent worked on. codingHandle is a sess_* WorkRail session ID --
+  // unrelated to the git branch name.
+  const branchName = codingArtifact?.branchName;
+  if (!branchName) {
+    deps.stderr('[implement] FATAL: coding handoff artifact missing branchName -- cannot locate PR');
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'pr-detection', reason: 'coding handoff artifact missing branchName -- cannot deliver or locate PR' },
+    };
+  }
+
+  deps.stderr(`[implement] Running coordinator delivery for branch: ${branchName}`);
+  const deliveryResult = await runCoordinatorDelivery(deps, codingAgentResult.recapMarkdown, branchName, opts.workspace);
+  if (deliveryResult.kind === 'err') {
+    deps.stderr(`[implement] Delivery failed: ${deliveryResult.error}`);
+    return {
+      kind: 'escalated',
+      escalationReason: { phase: 'delivery', reason: `coordinator delivery failed: ${deliveryResult.error}` },
+    };
+  }
+
+  // ── Stage 4: Poll for PR ─────────────────────────────────────────────
+  deps.stderr(`[implement] Polling for PR on branch: ${branchName}`);
 
   let prUrl: string | null;
   try {
-    prUrl = await deps.pollForPR(branchPattern, PR_POLL_TIMEOUT_MS);
+    prUrl = await deps.pollForPR(branchName, PR_POLL_TIMEOUT_MS);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
@@ -280,7 +307,7 @@ async function runImplementCore(
       kind: 'escalated',
       escalationReason: {
         phase: 'pr-detection',
-        reason: `no PR found matching ${branchPattern} within ${PR_POLL_TIMEOUT_MS / 60000} minutes`,
+        reason: `no PR found matching branch ${branchName} within ${PR_POLL_TIMEOUT_MS / 60000} minutes`,
       },
     };
   }

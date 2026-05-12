@@ -66,8 +66,20 @@ function makePhaseAwareAgentResult(
   return vi.fn().mockImplementation(async () => {
     callCount++;
     if (callCount === 1) {
-      // First call = coding phase -- must return long notes so quality gate passes
-      return { recapMarkdown: 'Coding completed successfully. All implementation steps finished. Output is ready for review.', artifacts: [] };
+      // First call = coding phase -- must return long notes so quality gate passes,
+      // and a wr.coding_handoff artifact with branchName for coordinator delivery.
+      return {
+        recapMarkdown: 'Coding completed successfully. All implementation steps finished. Output is ready for review.\n```json\n{"commitType":"feat","commitScope":"mcp","commitSubject":"feat(mcp): implement auth feature","prTitle":"feat(mcp): implement auth feature","prBody":"## Summary\\n- Implements auth\\n\\n## Test plan\\n- [ ] Tests pass","followUpTickets":[],"filesChanged":["src/auth.ts"]}\n```',
+        artifacts: [{
+          kind: 'wr.coding_handoff',
+          version: 1,
+          branchName: 'worktrain/test-branch',
+          keyDecisions: ['Used JWT for auth'],
+          knownLimitations: [],
+          testsAdded: ['tests/unit/auth.test.ts'],
+          filesChanged: ['src/auth.ts'],
+        }],
+      };
     }
     return reviewBehavior();
   });
@@ -117,6 +129,11 @@ function makeFakeDeps(overrides: Partial<AdaptiveCoordinatorDeps> = {}): Adaptiv
     createPipelineContext: vi.fn().mockResolvedValue(nok(undefined)),
     markPipelineRunComplete: vi.fn().mockResolvedValue(nok(undefined)),
     writePhaseRecord: vi.fn().mockResolvedValue(nok(undefined)),
+    execDelivery: vi.fn().mockImplementation(async (file: string, args: string[]) => {
+      if (file === 'git' && args.includes('commit')) return { stdout: '[worktrain/test-branch abc1234] feat: test', stderr: '' };
+      if (file === 'gh' && args[0] === 'pr') return { stdout: 'https://github.com/org/repo/pull/42', stderr: '' };
+      return { stdout: '', stderr: '' };
+    }),
     ...overrides,
   };
   return deps;
@@ -441,12 +458,15 @@ describe('runImplementPipeline - happy path', () => {
     if (outcome.kind === 'merged') {
       expect(outcome.prUrl).toBeTruthy();
     }
-    // wr.coding-task was spawned with pitchPath in context
+    // wr.coding-task was spawned with pitchPath in context and branchStrategy:'worktree'
     expect(deps.spawnSession).toHaveBeenCalledWith(
       'wr.coding-task',
       expect.any(String),
       '/workspace',
       expect.objectContaining({ pitchPath: '/workspace/.workrail/current-pitch.md' }),
+      undefined,
+      undefined,
+      'worktree',
     );
   });
 });

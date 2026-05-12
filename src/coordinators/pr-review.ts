@@ -151,6 +151,13 @@ export interface CoordinatorDeps {
     context?: CoordinatorSpawnContext,
     agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
     parentSessionId?: string,
+    /**
+     * Branch isolation strategy for this session.
+     * WHY only coding sessions pass 'worktree': discovery, shaping, and review sessions
+     * are read-heavy and do not write code -- no branch isolation required. Coding sessions
+     * write code and must be isolated so delivery can open a PR against a clean branch.
+     */
+    branchStrategy?: 'worktree' | 'none',
   ) => Promise<Result<string, string>>;
 
   /**
