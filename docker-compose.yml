@@ -62,7 +62,8 @@ services:
     environment:
       POSTGRES_DB: workflow_db
       POSTGRES_USER: workflow_user
-      POSTGRES_PASSWORD: workflow_password
+      # Set POSTGRES_PASSWORD in your shell or a local .env file -- do not hardcode here.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-workflow_password_local_dev_only}
     ports:
       - "5432:5432"
     volumes:

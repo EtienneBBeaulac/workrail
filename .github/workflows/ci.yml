@@ -233,12 +233,11 @@ jobs:
         run: npm run typecheck
 
   # ============================================================================
-  # INFORMATIONAL: Security Audit (warns but doesn't block)
+  # REQUIRED: Security Audit (blocks merge on high/critical vulnerabilities)
   # ============================================================================
   security:
     name: Security Audit
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout code
@@ -260,11 +259,11 @@ jobs:
         run: |
           echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          npm audit --audit-level=high 2>&1 | tee audit-results.txt || true
+          npm audit --audit-level=high 2>&1 | tee audit-results.txt
           if grep -q "found 0 vulnerabilities" audit-results.txt; then
             echo "No high/critical vulnerabilities found." >> $GITHUB_STEP_SUMMARY
           else
-            echo "Review audit results above for potential vulnerabilities." >> $GITHUB_STEP_SUMMARY
+            echo "High or critical vulnerabilities detected -- merge blocked." >> $GITHUB_STEP_SUMMARY
           fi
 
   # ============================================================================
@@ -535,7 +534,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [ changes, ci-policy, lockfile, build-artifact, semantic-release-dry-run, typecheck, verify-generated, validate-workflows, build-and-test, contract-tests, e2e-tests ]
+    needs: [ changes, ci-policy, lockfile, build-artifact, semantic-release-dry-run, typecheck, verify-generated, validate-workflows, build-and-test, contract-tests, e2e-tests, security ]
     if: always()
     steps:
       - name: Check required jobs
@@ -620,6 +619,14 @@ jobs:
             exit 1
           fi
           echo "- E2E Tests: PASSED" >> $GITHUB_STEP_SUMMARY
+
+          # Check security audit
+          if [[ "${{ needs.security.result }}" != "success" ]]; then
+            echo "- Security Audit: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Security audit found high/critical vulnerabilities"
+            exit 1
+          fi
+          echo "- Security Audit: PASSED" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "All required CI checks passed." >> $GITHUB_STEP_SUMMARY
