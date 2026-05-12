@@ -1,0 +1,19 @@
+{
+  "sessionId": "wr-research-ccloop-001",
+  "timestamp": "2026-05-12T00:00:00Z",
+  "q1_question": "What agent loop patterns does Claude Code use (parallel tool execution, safety model, abort handling, context management, delivery/commit flow, stuck detection) that WorkRail's daemon AgentLoop should adopt or adapt?",
+  "q2_mode": "understanding",
+  "q2_decision_deadline": null,
+  "q2_decision_owner": null,
+  "q3_beliefs": "WorkRail's AgentLoop is sequential-only for tool execution; Claude Code likely supports parallel tool execution with some safety classification; Claude Code likely has sophisticated context compaction; stuck detection in Claude Code may use more signals than WorkRail's repeated_tool_call heuristic; delivery/commit flow in WorkRail's daemon is a known gap (B1+B6)",
+  "q4_good_enough": "Specific, actionable patterns with code-level detail: data structures, algorithm descriptions, safety classifications, and concrete adoption recommendations for each of the 7 key questions",
+  "q5_out_of_scope": [
+    "Claude Code UI/frontend code",
+    "Claude Code authentication/billing",
+    "Claude Code installation/packaging",
+    "Claude Code non-agent features (file editing UI, etc.)",
+    "General LLM API usage patterns not specific to agent loop"
+  ],
+  "q6_source_preferences": "GitHub repo https://github.com/codeaashu/claude-code and Reddit megathread https://www.reddit.com/r/ClaudeAI/comments/1s9d9j9/claude_code_source_leak_megathread/",
+  "q7_run_mode": "deep"
+}

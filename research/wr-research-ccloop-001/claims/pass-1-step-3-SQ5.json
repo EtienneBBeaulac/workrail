@@ -1,0 +1,51 @@
+{
+  "subQuestionId": "SQ5",
+  "title": "Delivery/commit flow",
+  "fetchedAt": "2026-05-12T00:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/coordinator/coordinatorMode.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ5-C1",
+      "text": "Claude Code uses a coordinator/worker model for multi-agent tasks. The coordinator spawns workers via AgentTool, receives results as `<task-notification>` XML in user-role messages, then synthesizes and either continues workers (SendMessageTool) or spawns new ones.",
+      "sourceRef": "coordinatorMode.ts:116-370 (system prompt text)",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C2",
+      "text": "Workers are instructed to self-verify before reporting done: 'Run relevant tests and typecheck, then commit your changes and report the hash'. Commit is part of the worker's responsibility — not a separate post-task hook.",
+      "sourceRef": "coordinatorMode.ts:328",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C3",
+      "text": "Task results flow back as XML inside user messages: `<task-notification><task-id>...<status>...<summary>...<result>...<usage>...`. The coordinator reads these and synthesizes. This is protocol-level, not code-level injection.",
+      "sourceRef": "coordinatorMode.ts:143-165",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C4",
+      "text": "LocalAgentTaskState tracks: toolUseCount, latestInputTokens, cumulativeOutputTokens, recentActivities (last 5). This is a sliding window progress tracker for UI display, not for session decisions.",
+      "sourceRef": "LocalAgentTask.tsx:41-56",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C5",
+      "text": "Task state machine: retrieved -> running -> (completed|failed|killed). 'evictAfter' timestamp is set at terminal transitions for GC. 'retain' flag blocks eviction when UI is viewing the task.",
+      "sourceRef": "LocalAgentTask.tsx:116-148",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C6",
+      "text": "Pending messages (queued mid-turn via SendMessage) are stored in task.pendingMessages array and drained at tool-round boundaries. This is the mechanism for the coordinator to inject follow-up prompts while a worker is in progress.",
+      "sourceRef": "LocalAgentTask.tsx:162-192",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C7",
+      "text": "The coordinator system prompt explicitly forbids anti-patterns: 'Based on your findings' delegation, fabricating agent results, serializing work that could be parallel. It instructs the coordinator to synthesize findings into self-contained specs before delegating.",
+      "sourceRef": "coordinatorMode.ts:258-270",
+      "confidence": "single-source"
+    }
+  ]
+}

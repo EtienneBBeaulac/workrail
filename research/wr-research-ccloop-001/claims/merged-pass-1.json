@@ -1,0 +1,348 @@
+{
+  "passNumber": 1,
+  "mergedAt": "2026-05-12T01:30:00Z",
+  "corroborationNote": "All claims sourced from a single hostname (raw.githubusercontent.com/codeaashu/claude-code). No cross-hostname corroboration available. All single-source claims remain single-source. Inferred claims (derived across multiple files from the same repo) remain inferred. No claims promoted to verified.",
+  "claimCounts": {
+    "verified": 0,
+    "single-source": 47,
+    "inferred": 2
+  },
+  "claims": [
+    {
+      "id": "SQ1-C1",
+      "subQuestion": "SQ1",
+      "text": "Parallel execution is gated on a per-tool boolean method `isConcurrencySafe(input)`. Default in buildTool() is false (fail-closed). Tools must opt in.",
+      "sourceRef": "Tool.ts:402, toolOrchestration.ts:98-107",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C2",
+      "subQuestion": "SQ1",
+      "text": "Tool calls are partitioned into batches via `partitionToolCalls()`. Consecutive concurrency-safe tools form one batch; any non-safe tool forms a singleton batch. This preserves order: parallel reads run together, writes are isolated.",
+      "sourceRef": "toolOrchestration.ts:91-116",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C3",
+      "subQuestion": "SQ1",
+      "text": "Concurrent batches are run with `runToolsConcurrently()` which uses a custom `all()` utility with a concurrency cap. Default cap is 10, configurable via CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY env var.",
+      "sourceRef": "toolOrchestration.ts:8-11, 152-177",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C4",
+      "subQuestion": "SQ1",
+      "text": "There is also a `StreamingToolExecutor` class that starts executing tools as their ToolUseBlock arrives during streaming (before the model finishes). It uses the same isConcurrencySafe predicate but processes the queue continuously as tools stream in.",
+      "sourceRef": "StreamingToolExecutor.ts:40-135",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C5",
+      "subQuestion": "SQ1",
+      "text": "StreamingToolExecutor maintains tool status as: queued -> executing -> completed -> yielded. Results are emitted in declaration order (not completion order), which preserves the transcript's causal integrity for the model.",
+      "sourceRef": "StreamingToolExecutor.ts:19-20, 412-439",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C6",
+      "subQuestion": "SQ1",
+      "text": "Context modifiers from tool results (context-mutating tool results) are deferred and applied after all parallel tools complete. They are not supported for concurrent tools (comment: 'None are actively being used').",
+      "sourceRef": "toolOrchestration.ts:31-63, StreamingToolExecutor.ts:387-395",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C7",
+      "subQuestion": "SQ1",
+      "text": "The query loop receives tool results via an async generator. Whether using StreamingToolExecutor or runTools (non-streaming), the interface is identical: `for await (const update of toolUpdates)`. This abstracts both modes behind a common stream.",
+      "sourceRef": "query.ts:1380-1408",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C1",
+      "subQuestion": "SQ2",
+      "text": "The safety classification interface has two orthogonal axes: `isConcurrencySafe(input)` and `isReadOnly(input)`. Both are per-input methods, not static flags. Default for both via buildTool() is false (fail-closed).",
+      "sourceRef": "Tool.ts:402-405, Tool.ts:750-760",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C2",
+      "subQuestion": "SQ2",
+      "text": "A third safety axis `isDestructive(input)` flags irreversible operations (delete, overwrite, send). Defaults to false. Separate from isConcurrencySafe.",
+      "sourceRef": "Tool.ts:407-408",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C3",
+      "subQuestion": "SQ2",
+      "text": "Tool classification matrix: GlobTool/GrepTool/FileReadTool/WebSearchTool -> isConcurrencySafe=true, isReadOnly=true. FileEditTool/FileWriteTool -> isConcurrencySafe=false (default). BashTool -> isConcurrencySafe delegates to isReadOnly(input) -- dynamic per-command analysis.",
+      "sourceRef": "GlobTool.ts:76-81, GrepTool.ts:183-188, FileReadTool.ts:373-376, WebSearchTool.ts:200-205, BashTool.tsx:434-441",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C4",
+      "subQuestion": "SQ2",
+      "text": "BashTool's isReadOnly(input) is dynamic: it calls checkReadOnlyConstraints() with a compound-command-has-cd check. Commands like grep/find/ls qualify; git push/rm/write ops do not. Per-invocation runtime analysis of the shell command string.",
+      "sourceRef": "BashTool.tsx:437-441",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C5",
+      "subQuestion": "SQ2",
+      "text": "The `interruptBehavior()` method is a fourth safety dimension: it controls what happens when a new user message arrives while this tool is running. 'cancel' = stop immediately; 'block' = keep running. Default is 'block'. Per-tool-type, not per-invocation.",
+      "sourceRef": "Tool.ts:411-416",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C6",
+      "subQuestion": "SQ2",
+      "text": "Only BashTool errors abort sibling tools in a concurrent batch. Read/WebFetch/etc errors do NOT abort siblings -- intentional asymmetry: Bash commands often have dependency chains, reads are independent.",
+      "sourceRef": "StreamingToolExecutor.ts:360-368",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C1",
+      "subQuestion": "SQ3",
+      "text": "Three-level AbortController hierarchy: (1) session AbortController on ToolUseContext; (2) siblingAbortController (child of session, scoped to one concurrent batch); (3) per-tool toolAbortController (child of sibling). Aborting session ends turn; aborting sibling kills batch subprocesses; aborting per-tool kills one subprocess.",
+      "sourceRef": "StreamingToolExecutor.ts:44-64, 295-302",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C2",
+      "subQuestion": "SQ3",
+      "text": "siblingAbortController fires when any Bash tool in the batch errors but does NOT propagate to the parent session AbortController. The turn continues to collect all tool results before the model can respond.",
+      "sourceRef": "StreamingToolExecutor.ts:304-315",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C3",
+      "subQuestion": "SQ3",
+      "text": "When a per-tool toolAbortController fires for reasons OTHER than 'sibling_error' (e.g. permission denied, user interrupt), it DOES propagate to the parent session AbortController. This ends the turn.",
+      "sourceRef": "StreamingToolExecutor.ts:304-315",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C4",
+      "subQuestion": "SQ3",
+      "text": "When abort fires during streaming, `streamingToolExecutor.getRemainingResults()` is called to collect synthetic tool_result blocks for all queued/in-progress tools. Without this, the API would see tool_use blocks with no matching tool_result (protocol error).",
+      "sourceRef": "query.ts:1015-1030",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C5",
+      "subQuestion": "SQ3",
+      "text": "Abort reason determines synthetic error message: 'user_interrupted' -> REJECT_MESSAGE (permission-flavored); 'sibling_error' -> message naming failed sibling tool; 'streaming_fallback' -> generic cancellation.",
+      "sourceRef": "StreamingToolExecutor.ts:155-165",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C6",
+      "subQuestion": "SQ3",
+      "text": "For non-streaming parallel execution (runToolsConcurrently), there is no per-tool abort. The shared toolUseContext.abortController is checked at the START of each tool execution. If aborted, returns CANCEL_MESSAGE immediately -- no mid-execution abort for non-streaming parallel tools.",
+      "sourceRef": "toolExecution.ts:415-450",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C7",
+      "subQuestion": "SQ3",
+      "text": "interruptBehavior 'cancel' vs 'block' is specifically for user submitting a NEW message while a tool executes. If 'block', the abort signal does NOT fire for it even on user interrupt. Only 'cancel' tools can be mid-execution aborted by user interrupt.",
+      "sourceRef": "StreamingToolExecutor.ts:219-228",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C1",
+      "subQuestion": "SQ4",
+      "text": "Token budget tracking uses a `BudgetTracker` struct with: continuationCount, lastDeltaTokens, lastGlobalTurnTokens, startedAt. Pure value object, created fresh per query loop via createBudgetTracker().",
+      "sourceRef": "tokenBudget.ts:6-18",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C2",
+      "subQuestion": "SQ4",
+      "text": "When under 90% of token budget, engine sends 'continue' decision with nudge message injected as a meta user message to push the model to continue.",
+      "sourceRef": "tokenBudget.ts:64-77, query.ts:1316-1340",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C3",
+      "subQuestion": "SQ4",
+      "text": "Diminishing returns detection: if continuationCount >= 3 AND the last two delta token increments are both < 500, the engine stops continuing regardless of budget percentage.",
+      "sourceRef": "tokenBudget.ts:59-63",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C4",
+      "subQuestion": "SQ4",
+      "text": "Context compaction has four strategies: (1) autocompact (proactive threshold-based), (2) reactive compact (triggered on prompt-too-long API error), (3) snip (selective pruning), (4) context-collapse (staged collapse of read/search messages). Layered, not mutually exclusive.",
+      "sourceRef": "query.ts:280, 400-447, 453-543, 1062-1183",
+      "confidence": "inferred"
+    },
+    {
+      "id": "SQ4-C5",
+      "subQuestion": "SQ4",
+      "text": "autocompact runs before every API call; result replaces messagesForQuery with postCompactMessages. Tracking struct resets on each compact.",
+      "sourceRef": "query.ts:453-543",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C6",
+      "subQuestion": "SQ4",
+      "text": "After a compact boundary, messages before the boundary are released for GC. Boundary message index is spliced out so only post-boundary messages are kept.",
+      "sourceRef": "QueryEngine.ts:926-929",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C7",
+      "subQuestion": "SQ4",
+      "text": "Tool result size bounded by per-tool `maxResultSizeChars`. Results exceeding the threshold are persisted to disk and replaced with a file-path pointer. FileReadTool sets maxResultSizeChars=Infinity to disable disk offload.",
+      "sourceRef": "Tool.ts:463-466, query.ts:379-394",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C1",
+      "subQuestion": "SQ5",
+      "text": "Claude Code uses a coordinator/worker model. Coordinator spawns workers via AgentTool, receives results as `<task-notification>` XML in user-role messages, then synthesizes and continues workers (SendMessageTool) or spawns new ones.",
+      "sourceRef": "coordinatorMode.ts:116-370",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C2",
+      "subQuestion": "SQ5",
+      "text": "Workers self-verify before reporting done: 'Run relevant tests and typecheck, then commit your changes and report the hash'. Commit is part of the worker's responsibility -- not a separate post-task hook.",
+      "sourceRef": "coordinatorMode.ts:328",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C3",
+      "subQuestion": "SQ5",
+      "text": "Task results flow back as XML inside user messages: `<task-notification><task-id>...<status>...<summary>...<result>...<usage>...`. Protocol-level, not code-level injection.",
+      "sourceRef": "coordinatorMode.ts:143-165",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C4",
+      "subQuestion": "SQ5",
+      "text": "LocalAgentTaskState tracks: toolUseCount, latestInputTokens, cumulativeOutputTokens, recentActivities (last 5). Sliding window progress tracker for UI display, not for session decisions.",
+      "sourceRef": "LocalAgentTask.tsx:41-56",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C5",
+      "subQuestion": "SQ5",
+      "text": "Task state machine: retrieved -> running -> (completed|failed|killed). 'evictAfter' timestamp set at terminal transitions for GC. 'retain' flag blocks eviction when UI is viewing the task.",
+      "sourceRef": "LocalAgentTask.tsx:116-148",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C6",
+      "subQuestion": "SQ5",
+      "text": "Pending messages (queued mid-turn via SendMessage) stored in task.pendingMessages array and drained at tool-round boundaries. Mechanism for coordinator to inject follow-up prompts while worker is in progress.",
+      "sourceRef": "LocalAgentTask.tsx:162-192",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ5-C7",
+      "subQuestion": "SQ5",
+      "text": "Coordinator system prompt explicitly forbids: 'Based on your findings' delegation, fabricating agent results, serializing parallel work. Instructs coordinator to synthesize findings into self-contained specs before delegating.",
+      "sourceRef": "coordinatorMode.ts:258-270",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C1",
+      "subQuestion": "SQ6",
+      "text": "Claude Code has no dedicated 'stuck detector'. Uses two mechanisms: (1) maxTurns hard limit with attachment message, (2) token budget diminishing-returns detection (delta < 500 tokens for 3+ continuations).",
+      "sourceRef": "query.ts:1704-1711, tokenBudget.ts:59-63",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C2",
+      "subQuestion": "SQ6",
+      "text": "Terminal transition type enumerates all exit reasons as a discriminated union: 'completed', 'blocking_limit', 'image_error', 'model_error', 'aborted_streaming', 'aborted_tools', 'prompt_too_long', 'stop_hook_prevented', 'hook_stopped', 'max_turns'.",
+      "sourceRef": "transitions.ts:9-22",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C3",
+      "subQuestion": "SQ6",
+      "text": "Continue transition reasons enumerate why the loop iterated: 'tool_use', 'reactive_compact_retry', 'max_output_tokens_recovery', 'max_output_tokens_escalate', 'collapse_drain_retry', 'stop_hook_blocking', 'token_budget_continuation', 'queued_command'.",
+      "sourceRef": "transitions.ts:27-37",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C4",
+      "subQuestion": "SQ6",
+      "text": "Stop hooks are external scripts that run after each turn. They receive conversation context and can return blocking errors (force another turn), prevent continuation (halt session), or pass through. Primary extensibility point for custom stall-checkers.",
+      "sourceRef": "stopHooks.ts:65-473",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C5",
+      "subQuestion": "SQ6",
+      "text": "Stop hook infinite-loop prevention: hasAttemptedReactiveCompact flag stays true through stop-hook retry. Prevents compact -> 413 -> hook blocking -> compact spiral.",
+      "sourceRef": "query.ts:1295-1298",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C6",
+      "subQuestion": "SQ6",
+      "text": "Query loop tracks `turnCount` across iterations. maxTurns checked after every tool batch. When exceeded, max_turns_reached attachment yielded and loop returns { reason: 'max_turns', turnCount }.",
+      "sourceRef": "query.ts:1704-1712",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C7",
+      "subQuestion": "SQ6",
+      "text": "During stop hook execution, abort signal is polled after each hook result. If aborted mid-hook, returns { preventContinuation: true } immediately, terminating the session. Prevents runaway hook loops from blocking clean shutdown.",
+      "sourceRef": "stopHooks.ts:283-294",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C1",
+      "subQuestion": "SQ7",
+      "text": "Tool results exceeding maxResultSizeChars are NOT truncated -- persisted to disk and replaced with a file-path pointer message wrapped in <persisted-output> tags. Avoids information loss.",
+      "sourceRef": "toolResultStorage.ts:268-310, Tool.ts:463-466",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C2",
+      "subQuestion": "SQ7",
+      "text": "Per-tool maxResultSizeChars: FileReadTool=Infinity, GlobTool=100_000, GrepTool=20_000, FileEditTool=100_000, FileWriteTool=100_000, WebSearchTool=100_000, BashTool=30_000.",
+      "sourceRef": "FileReadTool.ts:342, GlobTool.ts:60, GrepTool.ts:164, FileEditTool.ts:89, BashTool.tsx:424",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C3",
+      "subQuestion": "SQ7",
+      "text": "Empty tool result content is replaced with `(<toolName> completed with no output)` before being sent to the model. Prevents the model from emitting a stop-sequence on empty tool results.",
+      "sourceRef": "toolResultStorage.ts (isToolResultContentEmpty guard)",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C4",
+      "subQuestion": "SQ7",
+      "text": "Errors wrapped in `<tool_use_error>...</tool_use_error>` XML tags and sent as tool_result with `is_error: true`. Format: `Error calling tool (<toolName>): <errorMessage>`. Input validation errors use `InputValidationError:` prefix.",
+      "sourceRef": "toolExecution.ts:479-481, 670-671",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C5",
+      "subQuestion": "SQ7",
+      "text": "classifyToolError() maps error types to PII-safe strings: TelemetrySafeError, Node.js errno codes (ENOENT/EACCES), named Error subclasses, generic 'unknown'. Prevents accidental PII in error telemetry.",
+      "sourceRef": "toolExecution.ts:140-170",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C6",
+      "subQuestion": "SQ7",
+      "text": "ToolResult<T>.contextModifier is only honored for non-concurrency-safe tools -- explicitly deferred and applied after all parallel tools complete. Comment: 'None are actively being used'.",
+      "sourceRef": "Tool.ts:321-335, toolOrchestration.ts:31-63",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C7",
+      "subQuestion": "SQ7",
+      "text": "Image content blocks in tool results bypass disk-offload entirely -- sent as-is to API regardless of size.",
+      "sourceRef": "toolResultStorage.ts:301-303",
+      "confidence": "single-source"
+    }
+  ]
+}

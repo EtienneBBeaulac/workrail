@@ -1,0 +1,57 @@
+{
+  "sessionId": "wr-research-ccloop-001",
+  "subQuestions": [
+    {
+      "id": "SQ1",
+      "question": "How does Claude Code implement parallel tool execution, and what is the data structure / algorithm used to decide which tools run in parallel vs sequentially?",
+      "primarySources": ["S1", "S3", "S4"],
+      "dependsOn": [],
+      "notes": "Foundation question -- answers SQ2 and SQ3 depend on knowing how parallelism is implemented"
+    },
+    {
+      "id": "SQ2",
+      "question": "What is Claude Code's safety classification model for tools -- what fields/annotations distinguish parallel-safe from sequential-only tools, and how are ordering constraints enforced?",
+      "primarySources": ["S3", "S4"],
+      "dependsOn": ["SQ1"],
+      "notes": "Requires knowing the tool type structure from SQ1 first"
+    },
+    {
+      "id": "SQ3",
+      "question": "How does Claude Code handle abort and cancellation for in-flight parallel tool calls -- what primitives and propagation patterns does it use?",
+      "primarySources": ["S1", "S2"],
+      "dependsOn": ["SQ1"],
+      "notes": "Requires knowing the parallel execution mechanism from SQ1"
+    },
+    {
+      "id": "SQ4",
+      "question": "How does Claude Code manage context window pressure -- does it have compaction, summarization, or truncation strategies in the agent loop?",
+      "primarySources": ["S5", "S1"],
+      "dependsOn": [],
+      "notes": "Independent -- context management is orthogonal to tool parallelism"
+    },
+    {
+      "id": "SQ5",
+      "question": "How does Claude Code handle the delivery/commit flow after a session or subagent task completes -- is it in the loop, post-processing, or something else?",
+      "primarySources": ["S6", "S8"],
+      "dependsOn": [],
+      "notes": "Independent -- delivery flow is a session lifecycle concern, not parallel execution"
+    },
+    {
+      "id": "SQ6",
+      "question": "What stuck and stall detection patterns does Claude Code use beyond WorkRail's existing repeated_tool_call heuristic and stallTimeoutMs timer?",
+      "primarySources": ["S2", "S7", "S1"],
+      "dependsOn": [],
+      "notes": "Independent -- stuck detection is a control flow concern"
+    },
+    {
+      "id": "SQ7",
+      "question": "What tool result formatting, size truncation, and error handling patterns does Claude Code use that WorkRail should adopt?",
+      "primarySources": ["S1", "S3"],
+      "dependsOn": ["SQ1"],
+      "notes": "Depends on understanding tool execution model from SQ1"
+    }
+  ],
+  "regimeDecision": "depth_serial",
+  "regimeRationale": "SQ2, SQ3, and SQ7 all depend on SQ1. Topological order: SQ1 -> (SQ2, SQ3, SQ7) in parallel; SQ4, SQ5, SQ6 independent and can run in any order alongside.",
+  "topologicalOrder": ["SQ1", "SQ4", "SQ5", "SQ6", "SQ2", "SQ3", "SQ7"]
+}

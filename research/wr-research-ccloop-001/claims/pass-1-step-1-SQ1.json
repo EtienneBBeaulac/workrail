@@ -1,0 +1,51 @@
+{
+  "subQuestionId": "SQ1",
+  "title": "Parallel tool execution implementation",
+  "fetchedAt": "2026-05-12T00:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/services/tools/toolOrchestration.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ1-C1",
+      "text": "Parallel execution is gated on a per-tool boolean method `isConcurrencySafe(input)`. Default in buildTool() is false (fail-closed). Tools must opt in.",
+      "sourceRef": "Tool.ts:402, toolOrchestration.ts:98-107",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C2",
+      "text": "Tool calls are partitioned into batches via `partitionToolCalls()`. Consecutive concurrency-safe tools form one batch; any non-safe tool forms a singleton batch. This preserves order: parallel reads run together, writes are isolated.",
+      "sourceRef": "toolOrchestration.ts:91-116",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C3",
+      "text": "Concurrent batches are run with `runToolsConcurrently()` which uses a custom `all()` utility with a concurrency cap. Default cap is 10, configurable via CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY env var.",
+      "sourceRef": "toolOrchestration.ts:8-11, 152-177",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C4",
+      "text": "There is also a `StreamingToolExecutor` class that starts executing tools as their ToolUseBlock arrives during streaming (before the model finishes). It uses the same isConcurrencySafe predicate but processes the queue continuously as tools stream in.",
+      "sourceRef": "StreamingToolExecutor.ts:40-135",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C5",
+      "text": "StreamingToolExecutor maintains tool status as: queued -> executing -> completed -> yielded. Results are emitted in declaration order (not completion order), which preserves the transcript's causal integrity for the model.",
+      "sourceRef": "StreamingToolExecutor.ts:19-20, 412-439",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C6",
+      "text": "Context modifiers from tool results (context-mutating tool results) are deferred and applied after all parallel tools complete. They are not supported for concurrent tools (comment: 'None are actively being used').",
+      "sourceRef": "toolOrchestration.ts:31-63, StreamingToolExecutor.ts:387-395",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ1-C7",
+      "text": "The query loop receives tool results via an async generator. Whether using StreamingToolExecutor or runTools (non-streaming), the interface is identical: `for await (const update of toolUpdates)`. This abstracts both modes behind a common stream.",
+      "sourceRef": "query.ts:1380-1408",
+      "confidence": "single-source"
+    }
+  ]
+}

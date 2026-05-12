@@ -1,0 +1,51 @@
+{
+  "subQuestionId": "SQ4",
+  "title": "Context management and compaction",
+  "fetchedAt": "2026-05-12T00:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/query/tokenBudget.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ4-C1",
+      "text": "Token budget tracking uses a `BudgetTracker` struct with: continuationCount, lastDeltaTokens, lastGlobalTurnTokens, startedAt. This is a pure value object, not a global; it is created fresh per query loop via createBudgetTracker().",
+      "sourceRef": "tokenBudget.ts:6-18",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C2",
+      "text": "When a token budget is configured and the agent is under 90% of the budget, the engine sends a 'continue' decision with a nudge message injected as a meta user message ('Output token limit hit. Resume directly - no apology...') to push the model to continue.",
+      "sourceRef": "tokenBudget.ts:64-77, query.ts:1316-1340",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C3",
+      "text": "Diminishing returns detection: if continuationCount >= 3 AND the last two delta token increments are both < 500, the engine stops continuing regardless of budget percentage.",
+      "sourceRef": "tokenBudget.ts:59-63",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C4",
+      "text": "Context compaction has four strategies: (1) autocompact (proactive threshold-based), (2) reactive compact (triggered on prompt-too-long API error), (3) snip (selective pruning of non-essential messages), (4) context-collapse (staged collapse of read/search messages). These are layered, not mutually exclusive.",
+      "sourceRef": "query.ts:280, 400-447, 453-543, 1062-1183",
+      "confidence": "inferred"
+    },
+    {
+      "id": "SQ4-C5",
+      "text": "autocompact runs before every API call; its result (if fired) replaces messagesForQuery with postCompactMessages. The tracking struct resets on each compact so per-compact turn counts are accurate.",
+      "sourceRef": "query.ts:453-543",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C6",
+      "text": "After a compact boundary, messages before the boundary are released for GC. The boundary message index is spliced out so only post-boundary messages are kept in mutableMessages.",
+      "sourceRef": "QueryEngine.ts:926-929",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ4-C7",
+      "text": "Tool result size is bounded by a per-tool `maxResultSizeChars` field. Tools with large results (default) get their output persisted to disk and replaced with a file-path pointer. Tools where circular reads would result (e.g. FileReadTool) set maxResultSizeChars to Infinity to disable disk offload.",
+      "sourceRef": "Tool.ts:463-466, query.ts:379-394",
+      "confidence": "single-source"
+    }
+  ]
+}

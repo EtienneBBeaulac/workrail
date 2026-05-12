@@ -1,0 +1,45 @@
+{
+  "subQuestionId": "SQ2",
+  "title": "Tool safety classification system",
+  "fetchedAt": "2026-05-12T01:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/Tool.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ2-C1",
+      "text": "The safety classification interface has two orthogonal axes: `isConcurrencySafe(input)` (may run alongside other concurrent-safe tools) and `isReadOnly(input)` (does not mutate any state). Both are per-input methods, not static flags -- a BashTool call may be read-only (grep) or not (rm). Default for both via buildTool() is false (fail-closed).",
+      "sourceRef": "Tool.ts:402-405, Tool.ts:750-760",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C2",
+      "text": "A third safety axis `isDestructive(input)` flags irreversible operations (delete, overwrite, send). Defaults to false. This is separate from isConcurrencySafe -- a tool can be non-destructive but also not concurrency-safe (e.g. one that builds an index).",
+      "sourceRef": "Tool.ts:407-408",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C3",
+      "text": "Tool classification matrix (confirmed from individual tool files): GlobTool -> isConcurrencySafe=true, isReadOnly=true. GrepTool -> isConcurrencySafe=true, isReadOnly=true. FileReadTool -> isConcurrencySafe=true, isReadOnly=true, maxResultSizeChars=Infinity. WebSearchTool -> isConcurrencySafe=true, isReadOnly=true. FileEditTool -> no isConcurrencySafe override (defaults false). FileWriteTool -> no isConcurrencySafe override (defaults false). BashTool -> isConcurrencySafe delegates to isReadOnly(input) -- dynamic based on command analysis.",
+      "sourceRef": "GlobTool.ts:76-81, GrepTool.ts:183-188, FileReadTool.ts:373-376, WebSearchTool.ts:200-205, BashTool.tsx:434-441",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C4",
+      "text": "BashTool's isReadOnly(input) is dynamic: it calls checkReadOnlyConstraints() with a compound-command-has-cd check. Commands like grep/find/ls qualify; git push/rm/write ops do not. This is the most sophisticated safety classification -- not a static flag but a per-invocation runtime analysis of the shell command string.",
+      "sourceRef": "BashTool.tsx:437-441",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C5",
+      "text": "The `interruptBehavior()` method is a fourth safety dimension, independent of concurrency: it controls what happens when a new user message arrives while this tool is running. 'cancel' = stop immediately and discard result; 'block' = keep running, new message waits. Default is 'block'. This is per-tool-type, not per-invocation.",
+      "sourceRef": "Tool.ts:411-416",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ2-C6",
+      "text": "Batch-only Bash errors cascade via a siblingAbortController: only BashTool errors abort sibling tools in a concurrent batch. Read/WebFetch/etc errors do NOT abort siblings -- the comment explains 'one failure shouldn't nuke the rest' for independent reads. This is an intentional asymmetry: Bash commands often have dependency chains, reads are independent.",
+      "sourceRef": "StreamingToolExecutor.ts:360-368",
+      "confidence": "single-source"
+    }
+  ]
+}

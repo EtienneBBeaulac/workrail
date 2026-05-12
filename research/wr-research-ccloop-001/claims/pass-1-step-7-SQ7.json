@@ -1,0 +1,51 @@
+{
+  "subQuestionId": "SQ7",
+  "title": "Tool result formatting and error handling",
+  "fetchedAt": "2026-05-12T01:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/utils/toolResultStorage.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ7-C1",
+      "text": "Tool results that exceed maxResultSizeChars are NOT truncated -- they are persisted to disk and replaced with a file-path pointer message. The model sees '<persisted-output>...</persisted-output>' with the path and a preview. This avoids information loss at the cost of requiring the agent to re-read the file if needed. The default global threshold is MAX_TOOL_RESULT_BYTES (not truncation).",
+      "sourceRef": "toolResultStorage.ts:268-310, Tool.ts:463-466",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C2",
+      "text": "Per-tool maxResultSizeChars observed values: FileReadTool=Infinity (never persisted -- self-bounds via its own maxTokens parameter), GlobTool=100_000, GrepTool=20_000, FileEditTool=100_000, FileWriteTool=100_000, WebSearchTool=100_000, BashTool=30_000. The 30K limit for Bash reflects that shell output is typically logs/stdout, not rich data.",
+      "sourceRef": "FileReadTool.ts:342, GlobTool.ts:60, GrepTool.ts:164, FileEditTool.ts:89, BashTool.tsx:424",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C3",
+      "text": "Empty tool result content is a special case: if a tool produces empty output, the content is replaced with `(<toolName> completed with no output)` before being sent to the model. This prevents a model behavior where a bare tool_result with no text causes the model to emit a stop-sequence and end its turn with zero output.",
+      "sourceRef": "toolResultStorage.ts (isToolResultContentEmpty guard)",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C4",
+      "text": "Errors are wrapped in `<tool_use_error>...</tool_use_error>` XML tags and sent as tool_result with `is_error: true`. The format is `Error calling tool (<toolName>): <errorMessage>`. For input validation errors, the format is `<tool_use_error>InputValidationError: <zodError></tool_use_error>`. The is_error flag is an Anthropic API convention that the model recognizes.",
+      "sourceRef": "toolExecution.ts:479-481, 670-671",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C5",
+      "text": "Error classification for telemetry is done via classifyToolError() which maps error types to safe strings: TelemetrySafeError (custom type for PII-safe messages), Node.js errno codes (ENOENT, EACCES), named Error subclasses, and generic 'unknown'. This prevents accidental PII logging in error telemetry.",
+      "sourceRef": "toolExecution.ts:140-170",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C6",
+      "text": "The ToolResult<T> type returned by tool.call() includes a `contextModifier` field for context-mutating results. However, contextModifier is ONLY honored for non-concurrency-safe tools -- it is explicitly deferred and applied after all parallel tools complete. The comment states 'None are actively being used', suggesting this is a reserved API for future use.",
+      "sourceRef": "Tool.ts:321-335, toolOrchestration.ts:31-63",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ7-C7",
+      "text": "Image content blocks in tool results bypass the disk-offload path entirely -- they are sent as-is to the API regardless of size. The maybePersistLargeToolResult() function explicitly returns the original block unchanged if the content contains image blocks.",
+      "sourceRef": "toolResultStorage.ts:301-303",
+      "confidence": "single-source"
+    }
+  ]
+}

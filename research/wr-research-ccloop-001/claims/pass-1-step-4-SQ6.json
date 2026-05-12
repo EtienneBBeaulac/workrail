@@ -1,0 +1,51 @@
+{
+  "subQuestionId": "SQ6",
+  "title": "Stuck/stall detection",
+  "fetchedAt": "2026-05-12T00:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/query/stopHooks.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ6-C1",
+      "text": "Claude Code has no dedicated 'stuck detector'. It uses two mechanisms instead: (1) maxTurns hard limit with an attachment message, (2) token budget diminishing-returns detection (delta < 500 tokens for 3+ continuations).",
+      "sourceRef": "query.ts:1704-1711, tokenBudget.ts:59-63",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C2",
+      "text": "The Terminal transition type enumerates all exit reasons as a discriminated union: 'completed', 'blocking_limit', 'image_error', 'model_error', 'aborted_streaming', 'aborted_tools', 'prompt_too_long', 'stop_hook_prevented', 'hook_stopped', 'max_turns'. This is the exhaustive set of 'how did the session end'.",
+      "sourceRef": "transitions.ts:9-22",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C3",
+      "text": "Continue transition reasons enumerate why the loop iterated: 'tool_use', 'reactive_compact_retry', 'max_output_tokens_recovery', 'max_output_tokens_escalate', 'collapse_drain_retry', 'stop_hook_blocking', 'token_budget_continuation', 'queued_command'. These are carried on loop State and usable for test assertions.",
+      "sourceRef": "transitions.ts:27-37",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C4",
+      "text": "Stop hooks are external scripts (executables) that run after each turn. They receive the conversation context and can return blocking errors (force another turn), prevent continuation (halt session), or pass through. This is the primary extensibility point for stall detection - users can plug in custom stall-checkers via hooks.",
+      "sourceRef": "stopHooks.ts:65-473",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C5",
+      "text": "Stop hook infinite-loop prevention: if reactive compact already ran and a stop-hook retry still 413s, the hasAttemptedReactiveCompact flag stays true. The loop does not reset it on stop-hook blocking continue, preventing a compact -> 413 -> hook blocking -> compact spiral.",
+      "sourceRef": "query.ts:1295-1298",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C6",
+      "text": "The query loop tracks `turnCount` across iterations. maxTurns is checked after every tool batch. When exceeded, a `max_turns_reached` attachment is yielded and the loop returns { reason: 'max_turns', turnCount }.",
+      "sourceRef": "query.ts:1704-1712",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ6-C7",
+      "text": "During stop hook execution, the loop polls the abort signal after each hook result. If aborted mid-hook, it returns { preventContinuation: true } immediately, which terminates the session. This prevents runaway hook loops from blocking clean shutdown.",
+      "sourceRef": "stopHooks.ts:283-294",
+      "confidence": "single-source"
+    }
+  ]
+}

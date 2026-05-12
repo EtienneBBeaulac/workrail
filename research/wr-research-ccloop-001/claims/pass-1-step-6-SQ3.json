@@ -1,0 +1,51 @@
+{
+  "subQuestionId": "SQ3",
+  "title": "Abort/cancellation model for parallel tools",
+  "fetchedAt": "2026-05-12T01:00:00Z",
+  "sourceUrl": "https://github.com/codeaashu/claude-code/blob/main/src/services/tools/StreamingToolExecutor.ts",
+  "sourceType": "source_code",
+  "claims": [
+    {
+      "id": "SQ3-C1",
+      "text": "There is a three-level AbortController hierarchy: (1) parent/session AbortController on ToolUseContext -- aborting this ends the entire turn; (2) siblingAbortController -- child of parent, scoped to a single concurrent batch, fires when any Bash tool in that batch errors; (3) per-tool toolAbortController -- child of sibling, kills only one tool's subprocess.",
+      "sourceRef": "StreamingToolExecutor.ts:44-64, 295-302",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C2",
+      "text": "When a tool's AbortController fires with reason 'sibling_error' (Bash error in batch), the toolAbortController does NOT propagate up to the parent query AbortController. Aborting the sibling controller kills subprocesses but the query loop continues. This is intentional: the turn needs to collect all tool results before the model can respond.",
+      "sourceRef": "StreamingToolExecutor.ts:304-315",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C3",
+      "text": "When a per-tool toolAbortController fires for a reason OTHER than 'sibling_error' (e.g. permission denied, user interrupt), it DOES propagate up to the parent query AbortController via an abort event listener. This is the path for permission rejection or ESC to end the turn.",
+      "sourceRef": "StreamingToolExecutor.ts:304-315",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C4",
+      "text": "When abort fires during streaming (before tool execution), the streaming path calls `streamingToolExecutor.getRemainingResults()` to collect synthetic tool_result blocks for all queued/in-progress tools. Without this, the API would see tool_use blocks with no matching tool_result, which is a protocol error.",
+      "sourceRef": "query.ts:1015-1030",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C5",
+      "text": "The per-tool abort reason determines the synthetic error message content: 'user_interrupted' produces REJECT_MESSAGE (permission-flavored: 'user does not want to proceed'); 'sibling_error' produces a message naming the failed sibling tool; 'streaming_fallback' produces a generic cancellation message.",
+      "sourceRef": "StreamingToolExecutor.ts:155-165",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C6",
+      "text": "For non-streaming parallel execution (runToolsConcurrently via the all() utility), there is no per-tool abort -- the shared toolUseContext.abortController is checked at the START of each tool execution. If aborted, it returns CANCEL_MESSAGE immediately. There is no mid-execution abort path for non-streaming parallel tools.",
+      "sourceRef": "toolExecution.ts:415-450",
+      "confidence": "single-source"
+    },
+    {
+      "id": "SQ3-C7",
+      "text": "The interruptBehavior 'cancel' vs 'block' distinction is specifically for the case of a user submitting a NEW message while a tool is executing. If the tool's interruptBehavior is 'block', the abort signal does NOT fire for it even on user interrupt. Only 'cancel' tools can be mid-execution aborted by user interrupt.",
+      "sourceRef": "StreamingToolExecutor.ts:219-228",
+      "confidence": "single-source"
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "sessionId": "wr-research-ccloop-001",
+  "lastUpdated": "2026-05-12T01:30:00Z",
+  "priors": [
+    {
+      "id": "P1",
+      "claim": "WorkRail's AgentLoop only supports sequential tool execution (toolExecution: 'sequential')",
+      "tag": "prior:verified",
+      "source": "user",
+      "notes": "Stated in task context; verifiable against src/daemon/agent-loop.ts"
+    },
+    {
+      "id": "P2",
+      "claim": "Claude Code supports parallel tool execution for some tool calls",
+      "tag": "corroborated",
+      "source": "user",
+      "notes": "Confirmed by SQ1-C1, SQ1-C2, SQ1-C3, SQ1-C4. Parallel execution via partitionToolCalls + runToolsConcurrently + StreamingToolExecutor. Corroborated by multiple single-source claims from toolOrchestration.ts and StreamingToolExecutor.ts."
+    },
+    {
+      "id": "P3",
+      "claim": "WorkRail's stuck detection uses a repeated_tool_call heuristic (same tool+args 3x in a row)",
+      "tag": "prior:verified",
+      "source": "user",
+      "notes": "Stated in task context"
+    },
+    {
+      "id": "P4",
+      "claim": "WorkRail stall detection uses a stallTimeoutMs timer that resets before each LLM call",
+      "tag": "prior:verified",
+      "source": "user",
+      "notes": "Stated in task context"
+    },
+    {
+      "id": "P5",
+      "claim": "WorkRail coordinator-spawned sessions have a delivery gap (never commit/PR/merge) -- B1+B6",
+      "tag": "prior:verified",
+      "source": "user",
+      "notes": "Stated as known gap B1+B6 in task context"
+    },
+    {
+      "id": "P6",
+      "claim": "WorkRail tools THROW on failure and the AgentLoop catches them and returns isError tool_results",
+      "tag": "prior:verified",
+      "source": "user",
+      "notes": "Stated in task context"
+    },
+    {
+      "id": "P7",
+      "claim": "Claude Code has a context compaction/summarization strategy for managing context window pressure",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Confirmed by SQ4-C4, SQ4-C5. Claude Code has FOUR layered compaction strategies (autocompact, reactive-compact, snip, context-collapse). More sophisticated than a simple summarization."
+    },
+    {
+      "id": "P8",
+      "claim": "Claude Code uses an AbortController or similar cancellation primitive for in-flight tool calls",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Confirmed by SQ3-C1 through SQ3-C7. Three-level AbortController hierarchy: session > sibling-batch > per-tool. More sophisticated than expected -- not a single controller but a hierarchical cascade."
+    },
+    {
+      "id": "P9",
+      "claim": "Claude Code's parallel tool execution has a safety classification system distinguishing read-only vs mutating tools",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Confirmed by SQ2-C1 through SQ2-C6. Four-axis classification: isConcurrencySafe, isReadOnly, isDestructive, interruptBehavior. BashTool uses dynamic per-command analysis, not static flags."
+    },
+    {
+      "id": "P10",
+      "claim": "Claude Code handles delivery/commit flow inside the agent loop, not as a post-processing step",
+      "tag": "corroborated",
+      "source": "agent",
+      "notes": "Confirmed by SQ5-C2. Workers self-verify and commit as part of their task execution ('Run relevant tests and typecheck, then commit your changes and report the hash'). No separate post-task hook -- commit is inside the worker."
+    },
+    {
+      "id": "P11",
+      "claim": "Claude Code has more sophisticated stuck/stall detection than WorkRail (e.g., progress metrics, token velocity checks)",
+      "tag": "falsified-pending-review",
+      "source": "agent",
+      "notes": "Partially falsified. Claude Code has NO dedicated stuck detector (SQ6-C1). It uses maxTurns + token-budget diminishing-returns (SQ4-C3). WorkRail's repeated_tool_call heuristic is actually comparable sophistication. The 'more sophisticated' premise is wrong -- different approaches, neither clearly superior. WorkRail lacks the token-velocity check; Claude Code lacks the exact-repeat heuristic."
+    },
+    {
+      "id": "P12",
+      "claim": "The leaked Claude Code source is available and browsable at https://github.com/codeaashu/claude-code",
+      "tag": "corroborated",
+      "source": "user",
+      "notes": "Confirmed -- multiple source files successfully fetched from raw.githubusercontent.com/codeaashu/claude-code/main/src/. All key files (Tool.ts, tools.ts, toolOrchestration.ts, StreamingToolExecutor.ts, toolExecution.ts, query.ts, tokenBudget.ts, transitions.ts, stopHooks.ts, coordinatorMode.ts, LocalAgentTask.tsx) are accessible."
+    }
+  ]
+}
