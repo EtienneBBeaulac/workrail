@@ -2203,6 +2203,16 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
 
+### Coordinator-owned delivery: full pipeline produces commits, PRs, and merges (May 11, 2026)
+
+**Status: done** | Shipped PR #1003 (May 11, 2026)
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+Three sub-failures fixed: (1) coding sessions now get `branchStrategy:'worktree'` via `spawnSession()` so they run on an isolated branch; (2) new `runCoordinatorDelivery()` reads the `HandoffArtifact` from `recapMarkdown` and calls `runDelivery()` for git commit + gh pr create; (3) `deps.mergePR()` now called on clean and post-audit-clean verdicts -- the hollow `{ kind: 'merged' }` is gone. `CodingHandoffArtifactV1.branchName` used for `pollForPR()` to fix the `sess_*` handle vs branch name mismatch. Missing `branchName` escalates immediately instead of burning 5 minutes. New `execDelivery` dep on `AdaptiveCoordinatorDeps` for testable DI.
+
+---
+
 ### Shared pipeline worktree: one isolated workspace for the entire task lifecycle (May 11, 2026)
 
 **Status: idea** | Priority: critical -- MVP blocker
@@ -2636,7 +2646,7 @@ Step-level `systemPrompt` overrides workflow-level for that step.
 
 ### Parallel spawn_agent: run multiple subagents simultaneously instead of sequentially (May 11, 2026)
 
-**Status: idea** | Priority: critical
+**Status: done** | Shipped PR #994 (May 11, 2026)
 
 **Score: 14** | Cor:3 Cap:3 Eff:3 Lev:2 Con:3 | Blocked: no
 
@@ -2933,7 +2943,7 @@ When an MR review session (run by a WorkTrain agent) finds issues in a coding se
 
 ### wr.discovery daemon sessions fail due to 30-minute default timeout (May 9, 2026)
 
-**Status: idea** | Priority: critical
+**Status: done** | Shipped May 11, 2026: `DEFAULT_SESSION_TIMEOUT_MINUTES` 30→60 (`session-context.ts`), `DISCOVERY_TIMEOUT_MS` 55→60 min (`adaptive-pipeline.ts`), shipped in PR #994.
 
 **Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
 
