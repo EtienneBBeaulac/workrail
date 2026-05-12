@@ -57,19 +57,22 @@ export function extractPrNumberFromUrl(prUrl: string): number | null {
  * Reads the HandoffArtifact from the final step's notes (recapMarkdown), then delegates
  * to runDelivery() from delivery-action.ts for the actual git/gh operations.
  *
- * Returns ok(void) on success or skipped delivery.
+ * Returns ok(prUrl | null) on success -- prUrl is the opened PR URL when autoOpenPR:true
+ * succeeds, null when delivery committed but did not open a PR.
  * Returns err(reason) when delivery fails -- callers should escalate.
  *
  * WHY recapMarkdown (not CodingHandoffArtifactV1): see module-level WHY comment.
- * WHY Result return (not void): errors are data; callers must handle delivery failures
- * explicitly rather than swallowing them.
+ * WHY Result<string|null> (not void): the PR URL from runDelivery() is needed by callers
+ * to drive the review cycle. Discarding it and re-fetching via pollForPR() introduces a
+ * race: if GitHub's indexing lags behind gh pr create returning, pollForPR() may time out
+ * on a PR that was successfully created. The URL returned by gh pr create is authoritative.
  */
 export async function runCoordinatorDelivery(
   deps: AdaptiveCoordinatorDeps,
   recapMarkdown: string | null,
   branchName: string,
   workspacePath: string,
-): Promise<Result<void, string>> {
+): Promise<Result<string | null, string>> {
   if (!recapMarkdown) {
     deps.stderr(
       '[WARN coordinator-delivery] recapMarkdown is null -- coding session produced no step notes. ' +
@@ -77,6 +80,7 @@ export async function runCoordinatorDelivery(
     );
     return err('coding session produced no step notes; cannot parse HandoffArtifact');
   }
+
 
   const parseResult = parseHandoffArtifact(recapMarkdown);
   if (parseResult.kind === 'err') {
@@ -122,5 +126,5 @@ export async function runCoordinatorDelivery(
     `[coordinator-delivery] Delivery complete. ` +
     `Branch: ${branchName} | PR: ${prUrl ?? 'not opened'}`,
   );
-  return ok(undefined);
+  return ok(prUrl);
 }

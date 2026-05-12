@@ -288,28 +288,36 @@ async function runImplementCore(
     };
   }
 
-  // ── Stage 4: Poll for PR ─────────────────────────────────────────────
-  deps.stderr(`[implement] Polling for PR on branch: ${branchName}`);
+  // ── Stage 4: Resolve PR URL ──────────────────────────────────────────
+  // WHY prefer delivery URL over pollForPR: runCoordinatorDelivery returns the PR URL
+  // directly from gh pr create output. Using it avoids a redundant poll and eliminates
+  // the race where GitHub API indexing lags behind PR creation, causing pollForPR to
+  // time out on a successfully-created PR.
+  let prUrl: string | null = deliveryResult.value;
 
-  let prUrl: string | null;
-  try {
-    prUrl = await deps.pollForPR(branchName, PR_POLL_TIMEOUT_MS);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
-    return {
-      kind: 'escalated',
-      escalationReason: { phase: 'pr-detection', reason: `pollForPR threw: ${msg}` },
-    };
-  }
   if (!prUrl) {
-    return {
-      kind: 'escalated',
-      escalationReason: {
-        phase: 'pr-detection',
-        reason: `no PR found matching branch ${branchName} within ${PR_POLL_TIMEOUT_MS / 60000} minutes`,
-      },
-    };
+    // autoOpenPR returned committed-only (no PR opened) -- fall back to polling.
+    // This path fires when delivery committed but gh pr create was skipped.
+    deps.stderr(`[implement] No PR URL from delivery -- polling for PR on branch: ${branchName}`);
+    try {
+      prUrl = await deps.pollForPR(branchName, PR_POLL_TIMEOUT_MS);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
+      return {
+        kind: 'escalated',
+        escalationReason: { phase: 'pr-detection', reason: `pollForPR threw: ${msg}` },
+      };
+    }
+    if (!prUrl) {
+      return {
+        kind: 'escalated',
+        escalationReason: {
+          phase: 'pr-detection',
+          reason: `no PR found matching branch ${branchName} within ${PR_POLL_TIMEOUT_MS / 60000} minutes`,
+        },
+      };
+    }
   }
 
   deps.stderr(`[implement] PR detected: ${prUrl}`);

@@ -651,19 +651,23 @@ async function runFullPipelineCore(
     };
   }
 
-  // ── Stage 7: Poll for PR ──────────────────────────────────────────────
-  deps.stderr(`[full-pipeline] Polling for PR on branch: ${branchName}`);
+  // ── Stage 7: Resolve PR URL ───────────────────────────────────────────
+  // WHY prefer delivery URL: runCoordinatorDelivery returns the PR URL from gh pr create
+  // directly. Avoids redundant polling and the GitHub indexing lag race.
+  let prUrl: string | null = deliveryResult.value;
 
-  let prUrl: string | null;
-  try {
-    prUrl = await deps.pollForPR(branchName, PR_POLL_TIMEOUT_MS);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
-    return {
-      kind: 'escalated',
-      escalationReason: { phase: 'pr-detection', reason: `pollForPR threw: ${msg}` },
-    };
+  if (!prUrl) {
+    deps.stderr(`[full-pipeline] No PR URL from delivery -- polling for PR on branch: ${branchName}`);
+    try {
+      prUrl = await deps.pollForPR(branchName, PR_POLL_TIMEOUT_MS);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      deps.stderr(`[coordinator] pollForPR threw: ${msg}`);
+      return {
+        kind: 'escalated',
+        escalationReason: { phase: 'pr-detection', reason: `pollForPR threw: ${msg}` },
+      };
+    }
   }
   if (!prUrl) {
     return {
