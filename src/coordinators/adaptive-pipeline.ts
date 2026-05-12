@@ -308,7 +308,6 @@ export interface ModeExecutors {
   readonly runImplement: (
     deps: AdaptiveCoordinatorDeps,
     opts: AdaptivePipelineOpts,
-    pitchPath: string,
     coordinatorStartMs: number,
   ) => Promise<PipelineOutcome>;
 
@@ -464,7 +463,7 @@ export async function runAdaptivePipeline(
       return executors.runReviewOnly(deps, opts, pipelineMode.prNumbers, coordinatorStartMs);
 
     case 'IMPLEMENT':
-      return executors.runImplement(deps, opts, pipelineMode.pitchPath, coordinatorStartMs);
+      return executors.runImplement(deps, opts, coordinatorStartMs);
 
     case 'FULL':
       return executors.runFull(deps, opts, coordinatorStartMs);

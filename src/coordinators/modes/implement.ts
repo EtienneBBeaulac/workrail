@@ -85,7 +85,6 @@ export function touchesUI(goal: string): boolean {
 export async function runImplementPipeline(
   deps: AdaptiveCoordinatorDeps,
   opts: AdaptivePipelineOpts,
-  _pitchPath: string,  // WHY _: was opts.workspace-relative; now derived from activeWorkspacePath inside
   coordinatorStartMs: number,
 ): Promise<PipelineOutcome> {
   deps.stderr(`[implement] Starting IMPLEMENT pipeline for workspace=${opts.workspace}`);
