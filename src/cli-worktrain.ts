@@ -25,6 +25,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 
+import { ok as neOk, err as neErr } from 'neverthrow';
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
 import { loadDaemonEnv } from './daemon/daemon-env.js';
 import { createContextAssembler } from './context-assembly/index.js';
@@ -1819,6 +1820,485 @@ runCommand
     });
 
     process.exit(result.hasErrors ? 1 : 0);
+  });
+
+/**
+ * worktrain run pipeline
+ *
+ * Adaptive pipeline coordinator. Routes tasks to QUICK_REVIEW, REVIEW_ONLY,
+ * IMPLEMENT, or FULL mode based on static signals in the goal and workspace state,
+ * then executes the appropriate pipeline phases end-to-end.
+ *
+ * Requires the WorkTrain daemon to be running: worktrain daemon
+ * (session dispatch uses HTTP to the daemon's /api/v2/auto/dispatch endpoint)
+ */
+runCommand
+  .command('pipeline')
+  .description('Run the adaptive pipeline coordinator for a task goal')
+  .requiredOption('-W, --workspace <path>', 'Absolute path to the git workspace')
+  .requiredOption('-g, --goal <text>', 'One-sentence goal for the pipeline')
+  .option('-m, --mode <mode>', 'Pipeline mode override: QUICK_REVIEW, REVIEW_ONLY, IMPLEMENT, FULL')
+  .option('--dry-run', 'Print planned actions without dispatching sessions')
+  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
+  .action(async (options: { workspace: string; goal: string; mode?: string; dryRun?: boolean; port?: number }) => {
+    const {
+      executeWorktrainPipelineCommand,
+    } = await import('./cli/commands/worktrain-pipeline.js');
+    const {
+      discoverConsolePort,
+    } = await import('./coordinators/pr-review.js');
+    const { execFile: execFileRaw } = await import('child_process');
+    const execFilePromise = promisify(execFileRaw);
+
+    // Discover console port (daemon HTTP server)
+    const port = await discoverConsolePort(
+      {
+        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+        homedir: os.homedir,
+        joinPath: path.join,
+      },
+      options.port,
+    );
+
+    // ── HTTP-based session dispatch (requires running daemon) ────────────────
+    const httpSpawnSession = async (
+      workflowId: string,
+      goal: string,
+      workspace: string,
+      context?: CoordinatorSpawnContext,
+      _agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
+      parentSessionId?: string,
+    ) => {
+      const url = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
+      try {
+        const response = await globalThis.fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workflowId, goal,
+            workspacePath: workspace,
+            ...(context !== undefined ? { context } : {}),
+            ...(parentSessionId !== undefined ? { parentSessionId } : {}),
+          }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const body = await response.json() as Record<string, unknown>;
+        if (!response.ok) {
+          const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
+          if (response.status === 503) {
+            return { kind: 'err' as const, error: `WorkTrain daemon is not ready: ${errMsg}` };
+          }
+          return { kind: 'err' as const, error: `Dispatch failed: ${errMsg}` };
+        }
+        if (body['success'] !== true || typeof body['data'] !== 'object') {
+          return { kind: 'err' as const, error: 'Unexpected response from dispatch endpoint' };
+        }
+        const data = body['data'] as Record<string, unknown>;
+        const handle = typeof data['sessionHandle'] === 'string' ? data['sessionHandle'] : '';
+        if (!handle) {
+          return { kind: 'err' as const, error: 'Dispatch succeeded but no session handle returned' };
+        }
+        return { kind: 'ok' as const, value: handle };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const isConnRefused = msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
+        if (isConnRefused) {
+          return { kind: 'err' as const, error: `Could not connect to WorkTrain daemon on port ${port}. Ensure the daemon is running with: worktrain daemon` };
+        }
+        return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
+      }
+    };
+
+    const httpGetAgentResult = async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
+      const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
+      try {
+        const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
+        const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
+        if (!sessionRes.ok) return emptyResult;
+        const sessionBody = await sessionRes.json() as Record<string, unknown>;
+        if (sessionBody['success'] !== true) return emptyResult;
+        const data = sessionBody['data'] as Record<string, unknown> | undefined;
+        if (!data) return emptyResult;
+        const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
+        if (!Array.isArray(runs) || runs.length === 0) return emptyResult;
+        const firstRun = runs[0] as Record<string, unknown>;
+        const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string' ? firstRun['preferredTipNodeId'] : null;
+        if (!tipNodeId) return emptyResult;
+        const allNodes = Array.isArray(firstRun['nodes']) ? (firstRun['nodes'] as Array<Record<string, unknown>>) : [];
+        const allNodeIds = allNodes
+          .map((n) => (typeof n['nodeId'] === 'string' ? n['nodeId'] : null))
+          .filter((id): id is string => id !== null);
+        const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
+        const baseNodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/`;
+        let recap: string | null = null;
+        const collectedArtifacts: unknown[] = [];
+        for (const nodeId of nodeIdsToFetch) {
+          try {
+            const nodeRes = await globalThis.fetch(baseNodeUrl + encodeURIComponent(nodeId), { signal: AbortSignal.timeout(30_000) });
+            if (!nodeRes.ok) continue;
+            const nodeBody = await nodeRes.json() as Record<string, unknown>;
+            if (nodeBody['success'] !== true) continue;
+            const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
+            if (!nodeData) continue;
+            if (nodeId === tipNodeId) {
+              recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
+            }
+            const nodeArtifacts = nodeData['artifacts'];
+            if (Array.isArray(nodeArtifacts) && nodeArtifacts.length > 0) {
+              collectedArtifacts.push(...nodeArtifacts);
+            }
+          } catch { continue; }
+        }
+        return { recapMarkdown: recap, artifacts: collectedArtifacts };
+      } catch {
+        return emptyResult;
+      }
+    };
+
+    const httpGetChildSessionResult = async (handle: string, _coordinatorSessionId?: string): Promise<ChildSessionResult> => {
+      const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
+      try {
+        const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
+        if (!sessionRes.ok) return { kind: 'failed', reason: 'error', message: `Session fetch HTTP ${sessionRes.status}` };
+        const sessionBody = await sessionRes.json() as Record<string, unknown>;
+        const data = sessionBody['data'] as Record<string, unknown> | null | undefined;
+        const runs = (data?.['runs'] ?? sessionBody['runs']) as Array<Record<string, unknown>> | null | undefined;
+        const runStatus = runs?.[0]?.['status'] as string | null | undefined;
+        if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
+          const agentResult = await httpGetAgentResult(handle);
+          return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
+        }
+        if (runStatus === 'blocked') {
+          return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
+        }
+        return { kind: 'timed_out', message: `Child session ${handle.slice(0, 16)} has no terminal run status` };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { kind: 'failed', reason: 'error', message: `Exception in getChildSessionResult: ${msg}` };
+      }
+    };
+
+    const deps = {
+      spawnSession: httpSpawnSession,
+
+      contextAssembler: createContextAssembler({
+        execGit: async (args: readonly string[], cwd: string) => {
+          try {
+            const { stdout } = await execFileAsync('git', [...args], { cwd });
+            return { kind: 'ok' as const, value: stdout };
+          } catch (e) {
+            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        execGh: async (args: readonly string[], cwd: string) => {
+          try {
+            const { stdout } = await execFileAsync('gh', [...args], { cwd });
+            return { kind: 'ok' as const, value: stdout };
+          } catch (e) {
+            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        listRecentSessions: createListRecentSessions(),
+        nowIso: () => new Date().toISOString(),
+      }),
+
+      awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
+        const { executeWorktrainAwaitCommand } = await import('./cli/commands/worktrain-await.js');
+        let resolvedResult: import('./cli/commands/worktrain-await.js').AwaitResult | null = null;
+        await executeWorktrainAwaitCommand(
+          {
+            fetch: (url: string) => globalThis.fetch(url),
+            readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+            stdout: (line: string) => {
+              try { resolvedResult = JSON.parse(line) as import('./cli/commands/worktrain-await.js').AwaitResult; } catch { /* ignore */ }
+            },
+            stderr: (line: string) => process.stderr.write(line + '\n'),
+            homedir: os.homedir,
+            joinPath: path.join,
+            sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+          },
+          { sessions: [...handles].join(','), mode: 'all', timeout: `${Math.round(timeoutMs / 1000)}s`, port },
+        );
+        return resolvedResult ?? {
+          results: [...handles].map((h) => ({ handle: h, outcome: 'failed' as const, status: null, durationMs: 0 })),
+          allSucceeded: false,
+        };
+      },
+
+      getAgentResult: httpGetAgentResult,
+      getChildSessionResult: httpGetChildSessionResult,
+
+      spawnAndAwait: async (
+        workflowId: string,
+        goal: string,
+        workspace: string,
+        opts?: { readonly coordinatorSessionId?: string; readonly timeoutMs?: number; readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }> },
+      ): Promise<ChildSessionResult> => {
+        const spawnResult = await httpSpawnSession(workflowId, goal, workspace, undefined, undefined, opts?.coordinatorSessionId);
+        if (spawnResult.kind === 'err') {
+          return { kind: 'failed', reason: 'error', message: spawnResult.error };
+        }
+        const handle = spawnResult.value;
+        const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+        const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+        const POLL_INTERVAL_MS = 5_000;
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          try {
+            const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
+            const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(10_000) });
+            if (sessionRes.ok) {
+              const body = await sessionRes.json() as Record<string, unknown>;
+              const data = body['data'] as Record<string, unknown> | null | undefined;
+              const runs = (data?.['runs'] ?? body['runs']) as Array<Record<string, unknown>> | null | undefined;
+              const status = runs?.[0]?.['status'] as string | null | undefined;
+              if (status === 'complete' || status === 'complete_with_gaps' || status === 'blocked') break;
+            }
+          } catch { /* continue polling */ }
+          await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+        }
+        if (Date.now() >= deadline) {
+          return { kind: 'timed_out', message: `Session ${handle.slice(0, 16)} timed out after ${timeoutMs}ms` };
+        }
+        return httpGetChildSessionResult(handle, opts?.coordinatorSessionId);
+      },
+
+      listOpenPRs: async (workspace: string) => {
+        try {
+          const { stdout } = await execFilePromise('gh', ['pr', 'list', '--json', 'number,title,headRefName'], { cwd: workspace, timeout: 30_000 });
+          const parsed = JSON.parse(stdout) as Array<{ number: number; title: string; headRefName: string }>;
+          return parsed.map((p) => ({ number: p.number, title: p.title, headRef: p.headRefName }));
+        } catch {
+          return [];
+        }
+      },
+
+      mergePR: async (prNumber: number, workspace: string) => {
+        try {
+          await execFilePromise('gh', ['pr', 'merge', String(prNumber), '--squash', '--auto'], { cwd: workspace, timeout: 60_000 });
+          return { kind: 'ok' as const, value: undefined };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return { kind: 'err' as const, error: msg };
+        }
+      },
+
+      writeFile: async (filePath: string, content: string) => {
+        await fs.promises.writeFile(filePath, content, 'utf-8');
+      },
+      readFile: (filePath: string) => fs.promises.readFile(filePath, 'utf-8'),
+      appendFile: (filePath: string, content: string) => fs.promises.appendFile(filePath, content, 'utf-8'),
+      mkdir: (dirPath: string, opts: { recursive: boolean }) => fs.promises.mkdir(dirPath, opts),
+      homedir: os.homedir,
+      joinPath: path.join,
+      nowIso: () => new Date().toISOString(),
+      generateId: () => randomUUID(),
+      stderr: (line: string) => process.stderr.write(line + '\n'),
+      now: () => Date.now(),
+      stdout: (line: string) => process.stdout.write(line + '\n'),
+      pathIsAbsolute: path.isAbsolute,
+      statPath: (p: string) => fs.promises.stat(p),
+      port,
+
+      // ── AdaptiveCoordinatorDeps extensions ────────────────────────────────
+
+      fileExists: (p: string): boolean => fs.existsSync(p),
+
+      archiveFile: (src: string, dest: string): Promise<void> => fs.promises.rename(src, dest),
+
+      pollForPR: async (branchPattern: string, timeoutMs: number): Promise<string | null> => {
+        const pollIntervalMs = 30_000;
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          try {
+            const { stdout } = await execFilePromise(
+              'gh',
+              ['pr', 'list', '--head', branchPattern, '--json', 'url', '--limit', '1'],
+              { timeout: 30_000 },
+            );
+            const parsed = JSON.parse(stdout) as Array<{ url: string }>;
+            if (parsed.length > 0 && parsed[0]?.url) return parsed[0].url;
+          } catch { /* continue polling */ }
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) break;
+          await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
+        }
+        return null;
+      },
+
+      postToOutbox: async (message: string, metadata: Readonly<Record<string, unknown>>): Promise<void> => {
+        const workrailDir = path.join(os.homedir(), '.workrail');
+        const outboxPath = path.join(workrailDir, 'outbox.jsonl');
+        await fs.promises.mkdir(workrailDir, { recursive: true });
+        const entry = JSON.stringify({ id: randomUUID(), message, metadata, timestamp: new Date().toISOString() });
+        await fs.promises.appendFile(outboxPath, entry + '\n', 'utf-8');
+      },
+
+      pollOutboxAck: async (requestId: string, timeoutMs: number): Promise<'acked' | 'timeout'> => {
+        const pollIntervalMs = 5 * 60 * 1000;
+        const workrailDir = path.join(os.homedir(), '.workrail');
+        const outboxPath = path.join(workrailDir, 'outbox.jsonl');
+        const cursorPath = path.join(workrailDir, 'inbox-cursor.json');
+        let snapshotCount = 0;
+        try {
+          const outboxContent = await fs.promises.readFile(outboxPath, 'utf-8');
+          snapshotCount = outboxContent.split('\n').filter((l) => l.trim() !== '').length;
+        } catch { /* outbox doesn't exist yet */ }
+        void requestId;
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) break;
+          await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
+          try {
+            const cursorContent = await fs.promises.readFile(cursorPath, 'utf-8');
+            const cursor = JSON.parse(cursorContent) as { lastReadCount?: number };
+            if (typeof cursor.lastReadCount === 'number' && cursor.lastReadCount > snapshotCount) return 'acked';
+          } catch { /* not yet acked */ }
+        }
+        return 'timeout';
+      },
+
+      generateRunId: () => randomUUID(),
+
+      readActiveRunId: async (workspace: string) => {
+        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+        try {
+          const entries = await fs.promises.readdir(runsDir);
+          const candidates: Array<{ runId: string; startedAt: string }> = [];
+          for (const entry of entries) {
+            if (!entry.endsWith('-context.json')) continue;
+            try {
+              const raw = await fs.promises.readFile(path.join(runsDir, entry), 'utf-8');
+              const ctx = JSON.parse(raw) as unknown;
+              if (typeof ctx !== 'object' || ctx === null) continue;
+              const c = ctx as Record<string, unknown>;
+              if (typeof c['runId'] !== 'string') continue;
+              if (c['status'] === 'completed') continue;
+              candidates.push({ runId: c['runId'] as string, startedAt: String(c['startedAt'] ?? '') });
+            } catch { continue; }
+          }
+          if (candidates.length === 0) return neOk(null);
+          candidates.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+          return neOk(candidates[0]!.runId);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return neOk(null);
+          const msg = e instanceof Error ? e.message : String(e);
+          return neErr(`readActiveRunId failed: ${msg}`);
+        }
+      },
+
+      readPipelineContext: async (workspace: string, runId: string) => {
+        const { parsePipelineRunContext } = await import('./coordinators/pipeline-run-context.js');
+        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+        const filePath = path.join(runsDir, `${runId}-context.json`);
+        try {
+          const raw = await fs.promises.readFile(filePath, 'utf-8');
+          const parsed = JSON.parse(raw) as unknown;
+          return parsePipelineRunContext(parsed);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return neOk(null);
+          const msg = e instanceof Error ? e.message : String(e);
+          return neErr(`readPipelineContext failed: ${msg}`);
+        }
+      },
+
+      markPipelineRunComplete: async (workspace: string, runId: string) => {
+        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+        const filePath = path.join(runsDir, `${runId}-context.json`);
+        const tmpPath = filePath + '.tmp';
+        try {
+          const raw = await fs.promises.readFile(filePath, 'utf-8');
+          const existing = JSON.parse(raw) as Record<string, unknown>;
+          const updated = { ...existing, status: 'completed' };
+          await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+          await fs.promises.rename(tmpPath, filePath);
+          return neOk(undefined);
+        } catch (e) {
+          try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+          return neErr(`markPipelineRunComplete failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+
+      createPipelineContext: async (
+        workspace: string, runId: string, goal: string,
+        pipelineMode: import('./coordinators/pipeline-run-context.js').PipelineRunContext['pipelineMode'],
+        worktreePath: string,
+      ) => {
+        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+        const filePath = path.join(runsDir, `${runId}-context.json`);
+        const tmpPath = filePath + '.tmp';
+        try {
+          await fs.promises.mkdir(runsDir, { recursive: true });
+          const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, worktreePath, phases: {} };
+          await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
+          await fs.promises.rename(tmpPath, filePath);
+          return neOk(undefined);
+        } catch (e) {
+          try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+          return neErr(`createPipelineContext failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+
+      writePhaseRecord: async (workspace: string, runId: string, entry: import('./coordinators/pipeline-run-context.js').PhaseRecord) => {
+        const { parsePipelineRunContext } = await import('./coordinators/pipeline-run-context.js');
+        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
+        const filePath = path.join(runsDir, `${runId}-context.json`);
+        const tmpPath = filePath + '.tmp';
+        try {
+          await fs.promises.mkdir(runsDir, { recursive: true });
+          const raw = await fs.promises.readFile(filePath, 'utf-8');
+          const parsed = JSON.parse(raw) as unknown;
+          const existing = parsePipelineRunContext(parsed);
+          if (existing.isErr() || existing.value === null) {
+            return neErr(`writePhaseRecord: context file missing or invalid for runId=${runId}`);
+          }
+          const updated = { ...existing.value, phases: { ...existing.value.phases, [entry.phase]: entry.record } };
+          await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+          await fs.promises.rename(tmpPath, filePath);
+          return neOk(undefined);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
+          return neErr(`writePhaseRecord failed: ${msg}`);
+        }
+      },
+
+      execDelivery: async (file: string, args: string[], options: { cwd: string; timeout: number }) => {
+        const result = await execFilePromise(file, args, options);
+        return { stdout: result.stdout, stderr: '' };
+      },
+
+      createPipelineWorktree: async (workspace: string, runId: string, baseBranch = 'main') => {
+        const worktreePath = path.join(os.homedir(), '.workrail', 'worktrees', runId);
+        const branchName = `worktrain/${runId}`;
+        try {
+          await fs.promises.mkdir(path.join(os.homedir(), '.workrail', 'worktrees'), { recursive: true });
+          await execFilePromise('git', ['-C', workspace, 'fetch', 'origin', baseBranch], {});
+          await execFilePromise('git', ['-C', workspace, 'worktree', 'add', worktreePath, '-b', branchName, `origin/${baseBranch}`], {});
+          return neOk(worktreePath);
+        } catch (e) {
+          return neErr(`createPipelineWorktree failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+
+      removePipelineWorktree: async (workspace: string, worktreePath: string) => {
+        try {
+          await execFilePromise('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath], {});
+        } catch { /* best-effort */ }
+      },
+    };
+
+    const result = await executeWorktrainPipelineCommand(deps, {
+      workspace: options.workspace,
+      goal: options.goal,
+      mode: options.mode,
+      dryRun: options.dryRun ?? false,
+      port: options.port,
+    });
+
+    interpretCliResultWithoutDI(result);
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
