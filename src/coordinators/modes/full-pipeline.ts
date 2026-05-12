@@ -207,7 +207,7 @@ export async function runFullPipeline(
   // setupPipelineWorktree() in coordinator-worktree.ts. See that module for
   // detailed invariant documentation.
   const worktreeSetup = await setupPipelineWorktree(
-    deps, opts.workspace, runId, priorWorktreePath, 'FULL', opts.goal, '[full-pipeline]',
+    deps, opts.workspace, runId, priorWorktreePath, 'FULL', opts.goal,
   );
   if (worktreeSetup.kind === 'failed') return worktreeSetup.outcome;
   const { activeWorkspacePath, worktreeCreated } = worktreeSetup;

@@ -99,8 +99,16 @@ export const CodingHandoffArtifactV1Schema = z
     kind: z.literal('wr.coding_handoff'),
     version: z.literal(1),
 
-    /** Git branch containing the changes produced by this coding session. */
-    branchName: z.string().min(1),
+    /**
+     * Git branch containing the changes produced by this coding session.
+     *
+     * WHY optional: when the coordinator owns the pipeline worktree, it determines
+     * the branch name deterministically as `worktrain/<runId>` before the coding session
+     * starts -- the coordinator no longer reads this field for delivery routing. The field
+     * is retained for audit purposes (reviewer can confirm the agent worked on the expected
+     * branch) and backward compatibility with sessions from before the shared-worktree feature.
+     */
+    branchName: z.string().min(1).optional(),
 
     /**
      * Architectural decisions made during coding and WHY.

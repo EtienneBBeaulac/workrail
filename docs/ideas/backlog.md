@@ -2215,7 +2215,7 @@ Three sub-failures fixed: (1) coding sessions now get `branchStrategy:'worktree'
 
 ### Shared pipeline worktree: one isolated workspace for the entire task lifecycle (May 11, 2026)
 
-**Status: idea** | Priority: critical -- MVP blocker
+**Status: done** | Shipped PR #1005 (May 12, 2026)
 
 **Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
 

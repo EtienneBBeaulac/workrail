@@ -106,7 +106,7 @@ export async function runImplementPipeline(
   // Lifecycle (crash recovery, creation, context persistence) is handled by
   // setupPipelineWorktree() in coordinator-worktree.ts.
   const worktreeSetup = await setupPipelineWorktree(
-    deps, opts.workspace, runId, priorWorktreePath, 'IMPLEMENT', opts.goal, '[implement]',
+    deps, opts.workspace, runId, priorWorktreePath, 'IMPLEMENT', opts.goal,
   );
   if (worktreeSetup.kind === 'failed') return worktreeSetup.outcome;
   const { activeWorkspacePath, worktreeCreated } = worktreeSetup;
