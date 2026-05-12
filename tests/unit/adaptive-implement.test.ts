@@ -469,13 +469,20 @@ describe('runImplementPipeline - happy path', () => {
     }
     // mergePR was called with the PR number extracted from the pollForPR URL
     expect(deps.mergePR).toHaveBeenCalledWith(42, expect.any(String));
-    // wr.coding-task was spawned with pitchPath in context and the shared worktree path
+    // wr.coding-task was spawned with:
+    // - workspace = opts.workspace (main checkout, enricher-correct)
+    // - pitchPath in context (belt-and-suspenders, pitch invariant 13)
+    // - effectiveWorkspacePath (arg 7) = shared worktree path for tool sandboxing
     // (no branchStrategy -- coordinator owns the worktree, not the session)
     expect(deps.spawnSession).toHaveBeenCalledWith(
       'wr.coding-task',
       expect.any(String),
-      '/fake/worktree/test-run-id',
+      '/workspace',
       expect.objectContaining({ pitchPath: '/fake/worktree/test-run-id/.workrail/current-pitch.md' }),
+      undefined,
+      undefined,
+      undefined,
+      '/fake/worktree/test-run-id',
     );
   });
 });
@@ -737,11 +744,15 @@ describe('runImplementPipeline - shared pipeline worktree', () => {
     expect(callOrder.indexOf('createPipelineWorktree')).toBeLessThan(callOrder.indexOf('spawnSession'));
   });
 
-  it('coding session receives worktree path as workspace (not opts.workspace)', async () => {
-    const spawnedWorkspaces: string[] = [];
+  it('coding/ux sessions use opts.workspace and pass worktree as effectiveWorkspacePath; review sessions use worktree as workspace', async () => {
+    const spawnCalls: Array<{ workflowId: string; workspace: string; effectiveWorkspacePath: string | undefined }> = [];
     const deps = makeFakeDeps({
-      spawnSession: vi.fn().mockImplementation(async (_wfId: string, _goal: string, workspace: string) => {
-        spawnedWorkspaces.push(workspace);
+      spawnSession: vi.fn().mockImplementation(async (
+        workflowId: string, _goal: string, workspace: string,
+        _ctx: unknown, _ac: unknown, _pid: unknown, _bs: unknown,
+        effectiveWorkspacePath?: string,
+      ) => {
+        spawnCalls.push({ workflowId, workspace, effectiveWorkspacePath });
         return nok(`h${Math.random()}`);
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
@@ -750,8 +761,23 @@ describe('runImplementPipeline - shared pipeline worktree', () => {
 
     await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
 
-    expect(spawnedWorkspaces.every((ws) => ws === '/fake/worktree/test-run-id')).toBe(true);
-    expect(spawnedWorkspaces.every((ws) => ws !== '/workspace')).toBe(true);
+    expect(spawnCalls.length).toBeGreaterThan(0);
+
+    // Phase sessions (coding, ux-gate) spawned by implement.ts:
+    // workspace = opts.workspace (enricher-correct), effectiveWorkspacePath = shared worktree
+    const phaseSessions = spawnCalls.filter(
+      (c) => ['wr.coding-task', 'wr.ui-ux-design'].includes(c.workflowId),
+    );
+    for (const s of phaseSessions) {
+      expect(s.workspace).toBe('/workspace');
+      expect(s.effectiveWorkspacePath).toBe('/fake/worktree/test-run-id');
+    }
+
+    // All sessions must reference the shared worktree in some capacity (never a missing/stale path)
+    for (const s of spawnCalls) {
+      const usesWorktree = s.workspace === '/fake/worktree/test-run-id' || s.effectiveWorkspacePath === '/fake/worktree/test-run-id';
+      expect(usesWorktree).toBe(true);
+    }
   });
 
   it('removePipelineWorktree called in finally after archiveFile', async () => {
@@ -813,9 +839,15 @@ describe('runImplementPipeline - shared pipeline worktree', () => {
     await runImplementPipeline(deps, makeOpts(), '/workspace/.workrail/current-pitch.md', Date.now());
 
     expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
+    // All sessions must reference the prior worktree (either as workspace or effectiveWorkspacePath).
+    // coding/ux sessions: workspace = opts.workspace, effectiveWorkspacePath = prior worktree (arg 7)
+    // review/fix sessions: workspace = prior worktree (arg 2, from implement-shared's effectiveWorkspace)
     const spawnCalls = vi.mocked(deps.spawnSession).mock.calls;
     for (const call of spawnCalls) {
-      expect(call[2]).toBe('/fake/prior-worktree');
+      const usesWorktree = call[2] === '/fake/prior-worktree' || call[7] === '/fake/prior-worktree';
+      expect(usesWorktree).toBe(true);
+      // No session should silently ignore the prior worktree and use a fresh path
+      expect(call[2]).not.toBe('/fake/worktree/test-run-id');
     }
   });
 

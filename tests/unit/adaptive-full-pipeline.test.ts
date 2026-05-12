@@ -597,11 +597,15 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     expect(callOrder.indexOf('createPipelineWorktree')).toBeLessThan(callOrder.indexOf('spawnSession'));
   });
 
-  it('AC2: all spawnSession calls receive the worktree path as workspace', async () => {
-    const spawnedWorkspaces: string[] = [];
+  it('AC2: discovery/shaping/coding sessions use opts.workspace and pass worktree as effectiveWorkspacePath; review sessions use worktree as workspace', async () => {
+    const spawnCalls: Array<{ workflowId: string; workspace: string; effectiveWorkspacePath: string | undefined }> = [];
     const deps = makeFakeDeps({
-      spawnSession: vi.fn().mockImplementation(async (_wfId: string, _goal: string, workspace: string) => {
-        spawnedWorkspaces.push(workspace);
+      spawnSession: vi.fn().mockImplementation(async (
+        workflowId: string, _goal: string, workspace: string,
+        _ctx: unknown, _ac: unknown, _pid: unknown, _bs: unknown,
+        effectiveWorkspacePath?: string,
+      ) => {
+        spawnCalls.push({ workflowId, workspace, effectiveWorkspacePath });
         return nok(nextHandle());
       }),
       awaitSessions: vi.fn().mockImplementation(async (handles: readonly string[]) => makeSuccessAwait(handles[0]!)),
@@ -610,10 +614,21 @@ describe('runFullPipeline - shared pipeline worktree', () => {
 
     await runFullPipeline(deps, makeOpts(), Date.now());
 
-    expect(spawnedWorkspaces.length).toBeGreaterThan(0);
-    for (const ws of spawnedWorkspaces) {
-      expect(ws).toBe('/fake/worktree/test-run-id');
-      expect(ws).not.toBe('/workspace');
+    expect(spawnCalls.length).toBeGreaterThan(0);
+
+    // Phase sessions (discovery, shaping, coding, ux): workspace=opts.workspace, effectiveWorkspacePath=worktree
+    const phaseSessions = spawnCalls.filter(
+      (c) => ['wr.discovery', 'wr.shaping', 'wr.coding-task', 'wr.ui-ux-design'].includes(c.workflowId),
+    );
+    for (const s of phaseSessions) {
+      expect(s.workspace).toBe('/workspace');
+      expect(s.effectiveWorkspacePath).toBe('/fake/worktree/test-run-id');
+    }
+
+    // All sessions must reference the shared worktree in some capacity (never a stale or missing path)
+    for (const s of spawnCalls) {
+      const usesWorktree = s.workspace === '/fake/worktree/test-run-id' || s.effectiveWorkspacePath === '/fake/worktree/test-run-id';
+      expect(usesWorktree).toBe(true);
     }
   });
 
@@ -759,11 +774,16 @@ describe('runFullPipeline - shared pipeline worktree', () => {
     await runFullPipeline(deps, makeOpts(), Date.now());
 
     expect(vi.mocked(deps.createPipelineWorktree)).not.toHaveBeenCalled();
-    // Sessions should use the prior worktree path
+    // All sessions must reference the prior worktree (either as workspace or effectiveWorkspacePath).
+    // discovery/shaping/ux/coding sessions: workspace = opts.workspace, effectiveWorkspacePath = prior worktree (arg 7)
+    // review/fix sessions: workspace = prior worktree (arg 2, from implement-shared's effectiveWorkspace)
     const spawnCalls = vi.mocked(deps.spawnSession).mock.calls;
     expect(spawnCalls.length).toBeGreaterThan(0);
     for (const call of spawnCalls) {
-      expect(call[2]).toBe('/fake/prior-worktree');
+      const usesWorktree = call[2] === '/fake/prior-worktree' || call[7] === '/fake/prior-worktree';
+      expect(usesWorktree).toBe(true);
+      // No session should silently ignore the prior worktree and use a fresh path
+      expect(call[2]).not.toBe('/fake/worktree/test-run-id');
     }
   });
 

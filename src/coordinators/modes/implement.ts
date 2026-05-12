@@ -203,7 +203,16 @@ async function runImplementCore(
     const cutoffCheck = checkSpawnCutoff(coordinatorStartMs, deps.now(), 'ux-gate');
     if (cutoffCheck) return cutoffCheck;
 
-    const uxSpawnResult = await deps.spawnSession('wr.ui-ux-design', opts.goal, activeWorkspacePath, { pitchPath });
+    const uxSpawnResult = await deps.spawnSession(
+      'wr.ui-ux-design',
+      opts.goal,
+      opts.workspace,
+      { pitchPath },
+      undefined,
+      undefined,
+      undefined,
+      activeWorkspacePath,
+    );
 
     if (uxSpawnResult.kind === 'err') {
       deps.stderr(`[implement] UX gate spawn failed: ${uxSpawnResult.error}`);
@@ -250,7 +259,16 @@ async function runImplementCore(
   // Belt-and-suspenders: pass pitchPath explicitly (pitch invariant 13).
   // WHY no branchStrategy: the coordinator owns the shared worktree. The coding session
   // works in activeWorkspacePath -- no per-session worktree creation needed.
-  const codingSpawnResult = await deps.spawnSession('wr.coding-task', opts.goal, activeWorkspacePath, { pitchPath });
+  const codingSpawnResult = await deps.spawnSession(
+    'wr.coding-task',
+    opts.goal,
+    opts.workspace,
+    { pitchPath },
+    undefined,
+    undefined,
+    undefined,
+    activeWorkspacePath,
+  );
 
   if (codingSpawnResult.kind === 'err') {
     return {
