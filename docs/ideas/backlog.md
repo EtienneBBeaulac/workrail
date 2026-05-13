@@ -1724,6 +1724,66 @@ Combined with the `DEFAULT_MAX_TURNS` cap, this provides defense-in-depth agains
 
 ---
 
+### Branch dependency tracking: prevent accidental stacking and handle intentional stacking correctly (May 8, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+WorkTrain creates branches and opens PRs without tracking whether a branch was created from main or from another in-flight PR branch. When a branch is accidentally based on a pending PR branch, two problems follow: (1) squash-merging the base PR absorbs the dependent PR's commits, making the dependent PR either empty or conflicted; (2) CI on the dependent PR tests the combined diff, not just the intended change. This has already caused real merge failures and required manual rebases. When stacking is intentional (PR B genuinely depends on PR A), WorkTrain has no mechanism to enforce merge order or automatically rebase B after A lands.
+
+**Things to hash out:**
+- Should WorkTrain enforce "always branch from main" as a hard rule, or support intentional stacking with explicit dependency metadata?
+- If stacking is allowed, what is the right representation for a stack dependency -- a field in the session store, a git note, or a GitHub PR relationship?
+- When the base PR merges, who is responsible for rebasing dependents -- the coordinator, a post-merge hook, or a separate `worktrain rebase` command?
+- What should happen to a dependent branch mid-session when its base merges? Should the daemon interrupt the session, or let it finish and rebase at the end?
+
+---
+
+### Worktree and branch lifecycle management (May 12, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+WorkTrain has no tooling to surface the state of worktrees and branches relative to main. Worktrees persist after their branch's PR is squash-merged with no signal that they are safe to delete. No inventory of which branches have genuinely unmerged work vs. fully superseded content. Daemon-spawned worktrees under `~/.workrail/worktrees/` are opaque -- no indication of which session created them or whether cleanup is safe.
+
+**Things to hash out:**
+- What is the authoritative source of truth for "is this worktree safe to delete" -- the session store, the git graph, or both?
+- Squash-merged branches leave no ancestry trace. What is the detection mechanism? PR close status via GitHub API, or file-content comparison with main?
+- Should the inventory tool be reactive (shows current state on demand) or proactive (daemon monitors and alerts when stale worktrees accumulate)?
+
+---
+
+### Startup recovery for coordinator-owned pipeline worktrees (May 12, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:2 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
+
+The daemon's startup recovery scans `DAEMON_SESSIONS_DIR` for orphaned session sidecars and reaps their worktrees. But coordinator-owned pipeline worktrees (`~/.workrail/worktrees/<runId>`) are not linked to session sidecars -- they're linked to pipeline context files (`{workspace}/.workrail/pipeline-runs/{runId}-context.json`). A daemon crash between `createPipelineWorktree` and `createPipelineContext` leaves an orphaned worktree with no automated cleanup. Accumulates silently.
+
+**Things to hash out:**
+- Scan `pipeline-runs/` for in-progress context files and check if their `worktreePath` still exists -- any path that exists but has no live pipeline run is eligible for cleanup.
+- Age threshold: same 24h as session worktrees, or different?
+- Should cleanup be part of `runStartupRecovery()` or a separate scheduled GC?
+
+---
+
+### worktrain run pipeline CLI agentConfig and branchStrategy forwarding (May 12, 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 7** | Cor:1 Cap:2 Eff:3 Lev:1 Con:3 | Blocked: no
+
+The `worktrain run pipeline` CLI command dispatches sessions via HTTP to the daemon's `/api/v2/auto/dispatch` endpoint. The HTTP endpoint doesn't accept `agentConfig` or `branchStrategy` -- those come from the trigger definition on the daemon side. So per-phase timeouts (discovery=60min, coding=65min) and worktree isolation are silently dropped when running the pipeline via CLI. Sessions fall back to the daemon's trigger defaults instead of the coordinator's phase-specific config.
+
+**Things to hash out:**
+- Extend `/api/v2/auto/dispatch` to accept `agentConfig` (maxSessionMinutes, maxTurns) as request body fields and forward them to the spawned session.
+- Or: accept that CLI pipeline runs use trigger defaults and document the limitation.
+
+---
+
 ## Shared / Engine
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
@@ -2196,6 +2256,24 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 - How is `daemon:down` distinguished from "daemon is up but this session is not currently running"? What is the heartbeat protocol?
 - Should `active:tool` surface the tool name? Some tool names (file paths, bash commands) could leak sensitive workspace content in the console UI.
 - What is the retention policy for status events -- does the console show only the live state, or a history of status transitions?
+
+---
+
+### Model tier abstraction: cheap / medium / expensive (May 7, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**The problem:** Triggers hardcode provider-specific model IDs (`amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0`). When inference profile naming conventions change, or when switching providers/regions, every trigger must be updated manually. The daemon's adaptive coordinator already makes implicit cost/quality tradeoffs (Haiku for routing, Sonnet for coding) but has no first-class mechanism to express them -- it's locked to whatever IDs are in `agentConfig.model`.
+
+**The idea:** Introduce a tier abstraction. Triggers and workflow phases declare a tier (`cheap | medium | expensive`). The daemon resolves tiers to concrete model IDs from a tier map in `~/.workrail/config.json`. The adaptive coordinator picks tiers per phase: cheap for classification and routing, medium for coding, expensive for architectural review. Changing provider or region means updating the tier map once.
+
+**Things to hash out:**
+- Where does the tier map live? `~/.workrail/config.json` (global) vs. `triggers.yml` (per-workspace) vs. both with cascade.
+- Does the tier map need to carry both a Bedrock and a direct-API model per tier, or does one path own the daemon?
+- Should the adaptive coordinator receive the tier map as a dependency, or should it always spawn sessions with explicit `agentConfig.model` set by the coordinator?
+- How do you handle models that exist on one provider but not another (e.g. Opus available on Bedrock but not direct API under certain rate limits)?
 
 ---
 
@@ -5344,23 +5422,6 @@ The agent is expensive, inconsistent, and slow. Scripts are free, deterministic,
 
 **Status: partial** -- raw model ID (`agentConfig.model`) shipped in `triggers.yml`. Two gaps remain: (1) no validation at trigger parse or startup -- a bad model ID is only caught when the first LLM call fires; (2) every trigger hardcodes a provider-specific ID, which breaks when the inference profile naming convention changes (e.g. `us.anthropic.claude-haiku-4-5-20251001` vs `us.anthropic.claude-haiku-4-5-20251001-v1:0`).
 
-### Model tier abstraction: cheap / medium / expensive (May 7, 2026)
-
-**Status: idea** | Priority: medium
-
-**Score: 11** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
-
-**The problem:** Triggers hardcode provider-specific model IDs (`amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0`). When inference profile naming conventions change, or when switching providers/regions, every trigger must be updated manually. The daemon's adaptive coordinator already makes implicit cost/quality tradeoffs (Haiku for routing, Sonnet for coding) but has no first-class mechanism to express them -- it's locked to whatever IDs are in `agentConfig.model`.
-
-**The idea:** Introduce a tier abstraction. Triggers and workflow phases declare a tier (`cheap | medium | expensive`). The daemon resolves tiers to concrete model IDs from a tier map in `~/.workrail/config.json`. The adaptive coordinator picks tiers per phase: cheap for classification and routing, medium for coding, expensive for architectural review. Changing provider or region means updating the tier map once.
-
-**Validation is a prerequisite.** Before tiers make sense, bad model IDs need to be caught at startup rather than at first LLM call. See "Model ID validation at daemon startup" below.
-
-**Things to hash out:**
-- Where does the tier map live? `~/.workrail/config.json` (global) vs. `triggers.yml` (per-workspace) vs. both with cascade.
-- Does the tier map need to carry both a Bedrock and a direct-API model per tier, or does one path own the daemon?
-- Should the adaptive coordinator receive the tier map as a dependency, or should it always spawn sessions with explicit `agentConfig.model` set by the coordinator?
-- How do you handle models that exist on one provider but not another (e.g. Opus available on Bedrock but not direct API under certain rate limits)?
 
 ### Multi-agent support (spawn_agent + coordinator sessions)
 
@@ -5394,41 +5455,6 @@ The agent is expensive, inconsistent, and slow. Scripts are free, deterministic,
 - Phase 1c conditional fragment: when `architectureStartsFromScratch = true`, blocks adapting existing violations as valid design candidates
 - Phase 8 post-implementation retrospective: runs for all tasks (no complexity gate); four practical questions applicable to any task; requires 2-4 concrete observations with explicit disposition
 
----
-
-### Branch dependency tracking: prevent accidental stacking and handle intentional stacking correctly (May 8, 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
-
-WorkTrain creates branches and opens PRs without tracking whether a branch was created from main or from another in-flight PR branch. When a branch is accidentally based on a pending PR branch, two problems follow: (1) squash-merging the base PR absorbs the dependent PR's commits, making the dependent PR either empty or conflicted; (2) CI on the dependent PR tests the combined diff, not just the intended change. This has already caused real merge failures and required manual rebases. When stacking is intentional (PR B genuinely depends on PR A), WorkTrain has no mechanism to enforce merge order or automatically rebase B after A lands.
-
-**Things to hash out:**
-- Should WorkTrain enforce "always branch from main" as a hard rule, or support intentional stacking with explicit dependency metadata?
-- If stacking is allowed, what is the right representation for a stack dependency -- a field in the session store, a git note, or a GitHub PR relationship?
-- When the base PR merges, who is responsible for rebasing dependents -- the coordinator, a post-merge hook, or a separate `worktrain rebase` command?
-- One candidate approach for the accidental case: detect at branch creation time whether HEAD is on a pending PR branch and warn or block. For the intentional case, this would be wrong -- some work genuinely depends on an unmerged PR and the stack is correct. The distinction needs to be explicit, not inferred. Take with a large grain of salt.
-- What should happen to a dependent branch mid-session when its base merges? Should the daemon interrupt the session, or let it finish and rebase at the end?
-
----
-
-### Worktree and branch lifecycle management
-
-WorkTrain has no tooling to surface the state of worktrees and branches relative to main. Doing this manually today requires running git commands across every registered worktree, cross-referencing merged PR lists, and inspecting each branch's unique commits to determine if the work landed. Pain points observed in practice:
-
-- Worktrees persist after their branch's PR is squash-merged -- no signal that they are safe to delete
-- No inventory of which branches have genuinely unmerged work vs. fully superseded content
-- Abandoned in-progress branches have no attached context about why they were abandoned or what state they were in
-- Daemon-spawned worktrees under `~/.workrail/worktrees/` are opaque -- no indication of which session created them or whether cleanup is safe
-
-**Things to hash out:**
-- What is the authoritative source of truth for "is this worktree safe to delete" -- the session store, the git graph, or both?
-- Squash-merged branches leave no ancestry trace. What is the detection mechanism? Is it based on PR close status in the GitHub API, or on file-content comparison with main?
-- Should the inventory tool be reactive (shows current state on demand) or proactive (daemon monitors worktree state and alerts when stale ones accumulate)?
-- How does this entry relate to the "Worktree lifecycle management" and "Git worktrees and branch management" entries elsewhere in the backlog? Are these the same problem captured multiple times, or genuinely different aspects?
-
----
 
 
 ## WorkRail usage report as a mercury-mobile team script (May 4, 2026)
