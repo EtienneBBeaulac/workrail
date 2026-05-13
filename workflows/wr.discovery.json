@@ -1,7 +1,7 @@
 {
   "id": "wr.discovery",
   "name": "Discovery Workflow",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "metricsProfile": "research",
   "validatedAgainstSpecVersion": 3,
   "description": "Use this to explore and think through a problem end-to-end. Moves between landscape exploration, problem framing, candidate generation, adversarial challenge, and uncertainty resolution.",
@@ -1284,6 +1284,9 @@
           "The design doc reads like a coherent human artifact.",
           "The final answer tells me what to do next or what was learned."
         ]
+      },
+      "outputContract": {
+        "contractRef": "wr.contracts.discovery_handoff"
       },
       "requireConfirmation": true
     }

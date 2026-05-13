@@ -151,6 +151,8 @@ Agents no longer participate in SHA tracking. `outcome-success.ts` now always em
 
 Issue #241 (TTL eviction across multiple files + new tests) was classified as Small, skipping design review, planning audit, and verification loops. Consider requiring human confirmation on Small classification before bypassing phases.
 
+**Note (May 13, 2026):** Risk is non-linear for the self-improvement use case. When WorkTrain modifies WorkTrain, a behavioral change that bypasses design review can affect every future session. A misclassified Small is not just a quality gap -- it is a compounding correctness risk for the loop itself. Should be treated as higher priority in that context than score 9 implies.
+
 ---
 
 ### Daemon binary stale after rebuild, no indication to user
@@ -345,15 +347,35 @@ The open question: should `partial` also escalate, or is "proceed with warning" 
 
 ### Lifecycle integration tests: assert each workflow emits expected handoff artifact (May 5, 2026)
 
-**Status: idea** | Priority: medium
+**Status: done** | Shipped May 13, 2026
 
 **Score: 8** | Cor:2 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
 
-Issue #934 (living work context) required "lifecycle integration tests asserting each of the 4 workflows (wr.shaping, wr.coding-task, wr.discovery, mr-review) emits expected artifact at final step." PR #939 shipped the adversarial behavioral test (proves the chain works end-to-end) and the `contractRef` validation test (proves no unregistered refs ship), but did not ship per-workflow lifecycle harness tests that run each workflow through compilation + stepping and assert the final step emits the correct artifact kind.
+Shipped in `tests/lifecycle/pipeline-artifact-emission.lifecycle.test.ts`. All four pipeline workflows (wr.discovery, wr.shaping, wr.coding-task, wr.mr-review) now have lifecycle harness tests that walk to the final step and assert the expected artifact kind. Fixtures are validated against live Zod schemas in `beforeAll` so schema drift fails CI before the lifecycle test even runs.
 
-Without these tests: a workflow prompt change that removes or breaks the artifact emission instruction would pass all existing tests (smoke test only checks compilation, not artifact emission) until a real pipeline run catches it.
+Also shipped alongside this: `wr.discovery` v3.6.0 adds `outputContract: { contractRef: "wr.contracts.discovery_handoff" }` on `phase-7-handoff` -- the final step was the only pipeline-critical workflow missing engine-enforced artifact emission. `wr.mr-review` v2.8.0 (May 13, same session) changed `required: false` to the default `required: true` on phase-6-final-handoff.
 
-**Done looks like:** `tests/lifecycle/` tests that run `wr.shaping`, `wr.coding-task`, `wr.discovery`, and `mr-review-workflow` through the lifecycle harness and assert the final step produces an artifact with the expected `kind` field.
+---
+
+### MR review: check class placement and responsibility scope of changed code (May 13, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:2 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
+
+The MR review workflow checks whether code is correct, but it does not currently check whether new code belongs where it was placed. An agent can write a method that works correctly but was added to the wrong class, or to a class that is growing too large and acquiring too many responsibilities. These placement issues pass correctness review and only surface later when the class becomes unmaintainable.
+
+Two specific checks are missing today:
+1. **Class fit**: does the added code truly belong to the class it was placed in, or should it be extracted into a different class, a standalone function, or a different module? The reviewer should flag cases where new methods don't match the class's stated purpose or require access to state the class doesn't own.
+2. **Class size and responsibility creep**: if the class receiving new code is already large (e.g. 500+ lines, 15+ public methods) or has multiple unrelated concerns, the review should surface this. The coding agent's work may be locally correct but may be the wrong place to add it.
+
+The coordinator-deps.ts refactor session (May 13, 2026) is a concrete example: the class reached 834 lines and mixed session-reading, session-spawning, and infrastructure before the issue was caught in a separate review pass rather than at PR time.
+
+**Things to hash out:**
+- What heuristics define "wrong class"? The step prompt needs concrete signals: does the method access state the class doesn't own? Does it duplicate capability that exists elsewhere? Does it have no cohesion with the class's other methods?
+- How does the reviewer distinguish "correct placement but class needs refactoring" (scope of current PR) from "wrong placement" (should have gone elsewhere)?
+- What is the output contract? A finding with findingCategory='architecture' pointing to the specific method and the suggested alternative location?
+- Should this be a new reviewer family in Phase 3 or an addition to an existing family (e.g. `patterns_architecture`)?
 
 ---
 
@@ -1011,13 +1033,9 @@ Five dimensions, each scored 1-3. Score = sum (max 15). Items marked **Blocked**
 
 ### `spawnAndAwait` duplicates ~90 lines of polling logic from `awaitSessions` (Apr 30, 2026)
 
-**Status: tech debt** | Priority: low
+**Status: done** | Fixed May 13, 2026 (coordinator-deps class refactor)
 
-**Score: 8** | Cor:1 Cap:1 Eff:2 Lev:1 Con:3 | Blocked: no
-
-`spawnAndAwait` in `coordinator-deps.ts` contains an inline polling loop (~90 lines) that duplicates the logic in `awaitSessions`. The WHY comment explains a real construction-time constraint: object literals cannot reference sibling methods by name during construction. But this constraint applies to methods on the returned object -- it does not apply to closure-level functions, which are already used for `fetchAgentResult` and `fetchChildSessionResult`.
-
-**Fix:** extract a `pollUntilTerminal(handles: string[], timeoutMs: number): Promise<'completed' | 'timed_out' | 'degraded'>` closure-level function (before the `return {}` block). Have both `awaitSessions` and `spawnAndAwait` call it. This eliminates the duplication without violating the construction-time constraint.
+`spawnAndAwait` now calls `this.reader.awaitSessions()` directly -- duplication eliminated. The original construction-time constraint (object literals can't reference sibling methods) is gone because `coordinator-deps.ts` was converted from a factory returning an object literal to a class (`CoordinatorDepsImpl`). `spawnAndAwait` also remains dead code (no production callers) -- follow-up ticket to remove it is in the backlog.
 
 **GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/921
 
@@ -1483,6 +1501,8 @@ Demo repo tasks (worktrain:ready issues)
 
 **Note (May 5, 2026):** PR #939 shipped *coordinator-level* pipeline crash recovery: `active-run.json` pointer + `PipelineRunContext` file allow the next coordinator startup to restore prior phase artifacts and resume without re-running completed phases. This item is about *agent session* crash recovery (the agent itself dies mid-session, worktree state, step advances). Both layers are needed.
 
+**Note (May 13, 2026):** The current policy in `session-recovery-policy.ts` is `stepAdvances >= 1 -> resume, else -> discard`. A 55-minute discovery session that reads the full codebase and produces zero step advances gets silently discarded on crash -- the `evaluateRecovery()` function returns 'discard' with no other signals. This is a real loss for overnight sessions. The "borderline" case (0 advances but > 5 LLM turns) is documented in this item as a "things to hash out" question but is not yet implemented. The current code does not distinguish between "crashed in the first 30 seconds" and "crashed after 55 minutes of work." See the existing "Session is at step 0 with 0 advances but > 5 LLM turns: borderline" criterion above -- this should be the next extension to `evaluateRecovery()`.
+
 **The problem:** A daemon crash loop kills all in-flight sessions. The queue correctly detects the sidecar and skips re-dispatch for the TTL window, but when the sidecar expires the session is re-dispatched from scratch with zero context. An agent that spent 10 min in Phase 0, read codebase files, and formed a plan loses all of that work.
 
 **What we want:** WorkTrain detects orphaned sessions on startup and makes an autonomous decision: resume if meaningful progress was made, discard and re-dispatch from scratch if too early to be worth resuming.
@@ -1538,6 +1558,30 @@ The coordinator should detect and recover automatically:
 - Git state management before recovery: `.git/index.lock` cleanup requires knowing the owning PID is dead. On macOS this is `lsof`; on Linux it is different. Is cross-platform git recovery in scope?
 - Should the coordinator attempt git state cleanup even when it did not originally dispatch the session (e.g. a session manually started via CLI)?
 - Who owns the N-retry limit configuration -- the coordinator script, the trigger definition, or a daemon-level policy?
+
+---
+
+### Screenshot capture and ingestion for UI pipeline runs (May 13, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+When a pipeline run involves UI work, the agent currently has no way to see what it produced. It can read source code and run tests, but it cannot observe rendered output. A coding agent that implements a UI change cannot verify the result is visually correct without seeing it. The review agent reviewing a UI PR has the same blind spot -- it can catch structural issues in the diff but not broken layouts, missing states, or visual regressions.
+
+This matters for the UX gate (FULL pipeline, `touchesUI: true`): the gate dispatches `wr.ui-ux-design` before coding, but if neither the coding agent nor the review agent can see the rendered result, the design spec is advisory at best.
+
+**What's needed:** a mechanism for agents to (1) trigger a screenshot capture of the running application at a known URL or component, and (2) ingest that screenshot as a multimodal input so Claude's vision capability can be used to evaluate it. The agent could compare the rendered output to the design spec, verify loading/error states, and surface visual issues as findings.
+
+**Things to hash out:**
+- What captures the screenshot -- a Bash tool call to a headless browser (Playwright, Puppeteer), a `screenshot` tool primitive, or an external service?
+- What is the trigger: agent-initiated (calls a tool), step-directive (step prompt instructs capture at a specific URL), or coordinator-initiated (coordinator captures before spawning the review session)?
+- How does the agent receive the screenshot -- as a base64 artifact in the tool response, as a file path it then reads with the Read tool, or as a direct image content block in the next message?
+- Should screenshot capture be a first-class daemon tool (like Bash/Read) or a capability that workflows declare in their `wr.features.*` section?
+- What is the security boundary? Headless browser access means the agent can interact with any reachable URL. Is the scope restricted to localhost, or is broader access acceptable?
+- How does this interact with the existing `wr.ui-ux-design` workflow -- should the design workflow produce a reference screenshot as part of its handoff artifact for the review agent to compare against?
+
+**Relationship:** Closely coupled with the UX gate in the FULL pipeline and the UX/UI impact detection item below.
 
 ---
 
@@ -2280,6 +2324,110 @@ Surface in: `worktrain status`, `worktrain health <sessionId>`, console session 
 ## WorkTrain Daemon -- Coordinator patterns
 
 Coordinator design patterns for WorkTrain's autonomous pipeline.
+
+### Remove `spawnAndAwait` dead code from `CoordinatorDepsImpl` (May 13, 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 7** | Cor:1 Cap:1 Eff:3 Lev:1 Con:3 | Blocked: no
+
+`spawnAndAwait` on `CoordinatorDepsImpl` has no production callers. The only callers are in the CLI path (`cli-worktrain.ts`) which implements it separately over HTTP -- they never call the in-process `CoordinatorDepsImpl.spawnAndAwait`. The method exists on the `CoordinatorDeps` interface but no coordinator mode ever calls `deps.spawnAndAwait()` directly; they all use the explicit `spawnSession` + `awaitSessions` + `getChildSessionResult` composition.
+
+Removing it from `CoordinatorDepsImpl` (and optionally from the interface if the CLI doesn't need it there) would eliminate ~20 lines and make the dead path explicit.
+
+**Done looks like:** `spawnAndAwait` removed from `CoordinatorDepsImpl`. If the interface declaration remains (for the CLI path), it can stay on `CoordinatorDeps` but with a note that the in-process implementation delegates to `spawnSession + awaitSessions + getChildSessionResult`.
+
+---
+
+### Integration test: coordinator-deps end-to-end session spawn and dispatch (May 13, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:3 Cap:1 Eff:2 Lev:2 Con:2 | Blocked: no
+
+The coordinator-deps path (`startTriggerListener` → `createCoordinatorDeps(dispatch)` → `router.setCoordinatorDeps()` → `dispatchAdaptivePipeline()` → `spawnSession` → `executeStartWorkflow` + `dispatch()`) has no integration test. Every test in this chain uses either a fake `AdaptiveCoordinatorDeps` with mocked `spawnSession`, or a fake `runWorkflowFn` that never runs. The dispatch wiring, session store write, token decoding, and `router.dispatch()` → `runWorkflow` path are never exercised together.
+
+This means a bug in the construction sequence (e.g. `setCoordinatorDeps` not called, dispatch bound to wrong router instance, session store write fails silently) would not be caught by any test -- it would only surface in a real daemon run.
+
+The unit tests for the pieces exist: `coordinator-direct-store.test.ts` tests `SessionReader` in isolation, and `trigger-router.test.ts` tests `TriggerRouter.dispatch()` with a fake `runWorkflowFn`. What's missing is a test that wires them together with a real (or realistic in-memory) engine: start a listener, fire a trigger, assert that a session was created in the store and `runWorkflow` was called with the correct trigger.
+
+**Done looks like:** An integration test in `tests/integration/` that:
+1. Constructs a `V2ToolContext` with real in-memory stores (using `InMemorySessionEventLogStore`, `InMemorySnapshotStore`)
+2. Calls `startTriggerListener` with `WORKRAIL_TRIGGERS_ENABLED=true`, a real apiKey stub, and a fake `runWorkflowFn`
+3. Posts to `POST /webhook/:triggerId` via the Express app
+4. Asserts that `runWorkflowFn` was called with the correct `workflowId`, `goal`, and `workspacePath`
+5. Asserts that a session was created in the store (session_created event present)
+
+**Things to hash out:**
+- Should this use `InMemorySessionEventLogStore` from `tests/fakes/v2/` (already exists) or a temp-dir real store?
+- The test needs a real `executeStartWorkflow` call -- does that require the full pinned workflow store, or can it use a minimal stub workflow?
+- How does the test handle the async dispatch (runWorkflow runs in the background after the 202 response)?
+
+---
+
+### Keyword scan is the only active review routing path -- typed verdict is dead code (May 13, 2026)
+
+**Status: bug** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:2 Lev:3 Con:3 | Blocked: no
+
+`parseFindingsFromNotes()` in `src/coordinators/pr-review.ts` is the ONLY active parser path for review verdicts. The code itself documents this: "the JSON block parser is aspirational -- no live workflow emits `## COORDINATOR_OUTPUT`." So whether a PR gets auto-merged, gets a fix iteration, dispatches `wr.production-readiness-audit`, or escalates to the human outbox is currently decided by regex pattern matching on the review agent's prose. The typed `wr.review_verdict` artifact path in `readVerdictArtifact()` is wired up in the coordinator but never fires in practice because `wr.mr-review` does not reliably emit that artifact.
+
+This violates the core pipeline invariant ("typed contracts at phase boundaries, not free-text scraping") in the most consequential place: the merge/no-merge decision. A review session that writes "this is not a blocking issue" may not match the negation heuristic (`/\b(?:not|no|without)\b.{0,30}\bblocking\b/i`), triggering an audit chain on a clean PR. Unknown severity defaults to 'blocking' (conservative but incorrect routing). This is probabilistic routing pretending to be deterministic.
+
+The lifecycle integration tests item (below) is the test-side of this: per-workflow lifecycle harness tests would catch a workflow that emits no artifact before it reaches production. But the fix is making the workflow reliably emit the artifact, not just testing that it does.
+
+**Done looks like:** `wr.mr-review` consistently emits a `wr.review_verdict` artifact as its final step output. `readVerdictArtifact()` succeeds on real pipeline runs. `parseFindingsFromNotes()` remains as a fallback but is no longer the primary path. The coordinator's merge/no-merge decision is driven by the typed artifact.
+
+**Leverage:** the fix also unblocks reliable `findingCategory`-based audit routing (currently the `wr.architecture-scalability-audit` vs `wr.production-readiness-audit` split can only fire when the typed artifact path succeeds).
+
+**Partial progress (May 13, 2026):** `wr.mr-review` v2.8.0 changed `outputContract.required` from `false` to the default `true`. The engine now enforces the artifact at advance time -- the agent gets a retryable blocked response if it omits the artifact. The lifecycle test for `wr.mr-review` is shipped. What remains: confirming `readVerdictArtifact()` fires on real pipeline runs (requires an actual pipeline execution, not testable in CI). `parseFindingsFromNotes()` is still the fallback and will remain so until empirically confirmed unnecessary.
+
+---
+
+### Agent decision checkpoints: surface low-confidence architectural decisions for operator review (May 13, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Agents currently have no first-class way to flag a decision they made under uncertainty. The available tools are `report_issue` (errors), `signal_coordinator` (mid-session observations), and `complete_step` (advancement). None is designed for "I made an architectural decision I'm not fully confident in -- a human should review it before this merges." The result: agents either silently accept a questionable tradeoff (labeling it a "known limitation" in the handoff) or they block the entire session on an issue that could have been reviewed post-session. Both outcomes are wrong.
+
+The concrete failure mode surfaced in the coordinator-deps.ts refactor (May 13, 2026): the session accepted `dispatch:null` and a `ctx.v2 ? ... : null` guard as "accepted tensions" even though both were fixable architectural problems. A decision checkpoint would have surfaced them explicitly -- "I accepted this but I'm not confident it's right" -- so a reviewer or the operator could address them before merge rather than after.
+
+**Things to hash out:**
+
+- **Where does flagging live?** Options: (a) a new `flag_decision` tool the agent calls explicitly; (b) the coordinator reads `keyDecisions` from the coding handoff artifact and posts low-confidence ones to the outbox; (c) `signal_coordinator` with `kind: 'approval_needed'` is already the right mechanism -- it just needs a consumption side (see `signal_coordinator has no active consumer` item). Option (c) is the least-new-surface approach.
+- **What triggers flagging?** Self-assessed confidence is unreliable (agents label their most dangerous assumptions as low-severity to avoid triggering gates). A better trigger: explicit structural signals -- a decision that touches a protected file, mentions "workaround", "circular dep", "accepted tension", or "structural constraint", or adds a null check on a field that was just asserted non-nullable.
+- **What is the response path?** Without `worktrain inbox` or a console UI, flagging decisions is noise. This item is blocked on the consumption side of `signal_coordinator` / outbox ack.
+- **Is this session-level or PR-level?** The agent could flag during the session (before the PR is created), or the coordinator could surface decisions for operator review between coding and review phases. PR-level is cleaner -- the reviewer agent could be given the flagged decisions as part of its context.
+- **Relationship to interpretation checkpoint**: the interpretation checkpoint (PR #962) catches ambiguous task understanding before coding starts. This item catches ambiguous architectural choices made during coding. Different problem, different hook point.
+
+**Blocked by:** `signal_coordinator` has no active consumer (outbox ack not yet implemented). Flag this as a dependency if building the `signal_coordinator` path.
+
+---
+
+### `signal_coordinator` has no active consumer (May 13, 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 6** | Cor:1 Cap:2 Eff:2 Lev:1 Con:3 | Blocked: no
+
+`signal_coordinator` writes structured signals to `~/.workrail/signals/<sessionId>.jsonl` and the daemon event stream. The tool is exposed to agents and documented in the system prompt. But no coordinator currently reads those signals during execution -- the sidecar files are written and never consumed. The signals are purely observational: visible in the console's event stream, but not acted on by any coordinator logic.
+
+Similarly, `pollOutboxAck()` (used by the UX gate in FULL pipeline for large-complexity UI tasks) polls a JSONL cursor for a human acknowledgment. But there is no `worktrain inbox` command or UI for the operator to actually respond to an outbox entry. Without it, the UX gate either waits 24 hours and escalates, or is a dead code path.
+
+Neither is a correctness bug -- skipping signals is silent, the UX gate escalates cleanly on timeout. But both represent infrastructure built without the consumption side, so the features they enable (mid-session coordinator reaction, human-in-the-loop approvals) are not actually available.
+
+**Done looks like (signal_coordinator):** at least one coordinator reads signal sidecar files -- either polling during `awaitSessions()` or post-session -- and routes based on signal kind (e.g. `approval_needed` pauses the pipeline, `blocked` triggers early escalation).
+
+**Done looks like (outbox ack):** `worktrain inbox` command that lists unacknowledged outbox entries and lets the operator respond. Response is written back in a format `pollOutboxAck()` can detect.
+
+**Things to hash out:**
+- Is the right consumption model polling (coordinator checks the sidecar file periodically) or push (agent emits signal, coordinator callback fires mid-await)?
+- For the outbox ack: is a CLI command the right interface, or should the console web UI surface this?
+
+---
 
 ### Coordinator-owned delivery: full pipeline produces commits, PRs, and merges (May 11, 2026)
 

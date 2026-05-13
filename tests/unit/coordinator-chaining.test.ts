@@ -91,24 +91,12 @@ describe('ChildSessionResult type', () => {
     }
   });
 
-  it('await_degraded variant has kind and message', () => {
-    const result: ChildSessionResult = {
-      kind: 'await_degraded',
-      message: 'ConsoleService unavailable',
-    };
-    expect(result.kind).toBe('await_degraded');
-    if (result.kind === 'await_degraded') {
-      expect(result.message).toContain('ConsoleService');
-    }
-  });
-
-  it('exhaustive switch handles all 4 variants', () => {
+  it('exhaustive switch handles all 3 variants', () => {
     function handleResult(r: ChildSessionResult): string {
       switch (r.kind) {
         case 'success': return `success: ${r.notes ?? '(no notes)'}`;
         case 'failed': return `failed: ${r.reason}`;
         case 'timed_out': return `timed_out: ${r.message}`;
-        case 'await_degraded': return `await_degraded: ${r.message}`;
       }
     }
 
@@ -116,14 +104,12 @@ describe('ChildSessionResult type', () => {
       { kind: 'success', notes: 'LGTM', artifacts: [] },
       { kind: 'failed', reason: 'error', message: 'err' },
       { kind: 'timed_out', message: 'timeout' },
-      { kind: 'await_degraded', message: 'degraded' },
     ];
 
     const handled = results.map(handleResult);
     expect(handled[0]).toBe('success: LGTM');
     expect(handled[1]).toBe('failed: error');
     expect(handled[2]).toBe('timed_out: timeout');
-    expect(handled[3]).toBe('await_degraded: degraded');
   });
 });
 
@@ -138,18 +124,18 @@ describe('ChildSessionResult type', () => {
  * Minimal fake implementation of getChildSessionResult behavior.
  *
  * Mirrors the mapping logic in fetchChildSessionResult in coordinator-deps.ts.
- * Used to verify the expected outcome mapping without importing coordinator-deps.ts
- * (which requires a full V2ToolContext and ConsoleService).
+ * Used to verify the interface contract (correct ChildSessionResult returned per
+ * session status) without importing coordinator-deps.ts (which requires a full
+ * V2ToolContext).
+ *
+ * Note: consoleServiceNull parameter removed -- the in-process coordinator now
+ * reads the session store directly via ctx.v2.sessionStore. await_degraded is gone.
  */
 function fakeGetChildSessionResult(
   runStatus: string | null,
-  consoleServiceNull: boolean,
   recapMarkdown: string | null = null,
   artifacts: readonly unknown[] = [],
 ): ChildSessionResult {
-  if (consoleServiceNull) {
-    return { kind: 'await_degraded', message: 'ConsoleService unavailable -- cannot read child session outcome' };
-  }
   if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
     return { kind: 'success', notes: recapMarkdown, artifacts };
   }
@@ -164,16 +150,8 @@ function fakeGetChildSessionResult(
 }
 
 describe('getChildSessionResult outcome mapping', () => {
-  it('returns await_degraded when consoleService is null', () => {
-    const result = fakeGetChildSessionResult(null, true);
-    expect(result.kind).toBe('await_degraded');
-    if (result.kind === 'await_degraded') {
-      expect(result.message).toContain('ConsoleService');
-    }
-  });
-
   it('returns success when status is complete', () => {
-    const result = fakeGetChildSessionResult('complete', false, 'APPROVE -- LGTM.', [{ kind: 'wr.review_verdict' }]);
+    const result = fakeGetChildSessionResult('complete', 'APPROVE -- LGTM.', [{ kind: 'wr.review_verdict' }]);
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
       expect(result.notes).toBe('APPROVE -- LGTM.');
@@ -182,7 +160,7 @@ describe('getChildSessionResult outcome mapping', () => {
   });
 
   it('returns success when status is complete_with_gaps', () => {
-    const result = fakeGetChildSessionResult('complete_with_gaps', false, 'Done with some gaps.', []);
+    const result = fakeGetChildSessionResult('complete_with_gaps', 'Done with some gaps.', []);
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
       expect(result.notes).toBe('Done with some gaps.');
@@ -190,7 +168,7 @@ describe('getChildSessionResult outcome mapping', () => {
   });
 
   it('returns failed/stuck when status is blocked', () => {
-    const result = fakeGetChildSessionResult('blocked', false);
+    const result = fakeGetChildSessionResult('blocked');
     expect(result.kind).toBe('failed');
     if (result.kind === 'failed') {
       expect(result.reason).toBe('stuck');
@@ -198,7 +176,7 @@ describe('getChildSessionResult outcome mapping', () => {
   });
 
   it('returns timed_out when status is null (no run yet)', () => {
-    const result = fakeGetChildSessionResult(null, false);
+    const result = fakeGetChildSessionResult(null);
     expect(result.kind).toBe('timed_out');
     if (result.kind === 'timed_out') {
       expect(result.message).toContain('no terminal run status');
@@ -206,7 +184,7 @@ describe('getChildSessionResult outcome mapping', () => {
   });
 
   it('returns timed_out when status is in_progress (still running)', () => {
-    const result = fakeGetChildSessionResult('in_progress', false);
+    const result = fakeGetChildSessionResult('in_progress');
     expect(result.kind).toBe('timed_out');
     if (result.kind === 'timed_out') {
       expect(result.message).toContain('in_progress');
@@ -214,7 +192,7 @@ describe('getChildSessionResult outcome mapping', () => {
   });
 
   it('success with null notes propagates null', () => {
-    const result = fakeGetChildSessionResult('complete', false, null, []);
+    const result = fakeGetChildSessionResult('complete', null, []);
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
       expect(result.notes).toBeNull();

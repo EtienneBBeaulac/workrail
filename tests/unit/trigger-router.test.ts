@@ -37,6 +37,29 @@ import { tmpPath } from '../helpers/platform.js';
 
 /** Minimal fake V2ToolContext -- the trigger module only passes it through to runWorkflow(). */
 const FAKE_CTX = {} as V2ToolContext;
+
+/**
+ * Fake V2ToolContext with minimal v2 stubs -- used for startTriggerListener tests
+ * that reach the coordinator construction path (WORKRAIL_TRIGGERS_ENABLED=true).
+ * The stores are never actually called by these tests; they just need to be present
+ * so createCoordinatorDeps doesn't fail with missing_v2_context.
+ */
+const FAKE_CTX_WITH_V2: V2ToolContext = {
+  ...({} as V2ToolContext),
+  v2: {
+    sessionStore: {
+      load: () => { throw new Error('not expected in this test'); },
+      loadValidatedPrefix: () => { throw new Error('not expected in this test'); },
+    } as never,
+    snapshotStore: {
+      getExecutionSnapshotV1: () => { throw new Error('not expected in this test'); },
+      putExecutionSnapshotV1: () => { throw new Error('not expected in this test'); },
+    } as never,
+    tokenCodecPorts: {} as never,
+    tokenAliasStore: {} as never,
+  } as never,
+};
+
 const FAKE_API_KEY = 'test-api-key';
 
 function makeTrigger(overrides: Partial<TriggerDefinition> = {}): TriggerDefinition {
@@ -563,9 +586,24 @@ describe('startTriggerListener feature flag', () => {
     expect((result as { _kind: string; error: { kind: string } }).error.kind).toBe('missing_api_key');
   });
 
+  it('returns missing_v2_context error when ctx.v2 is absent and flag is enabled', async () => {
+    // FAKE_CTX has no v2 -- valid apiKey gets past missing_api_key but hits the v2 guard.
+    const result = await startTriggerListener(FAKE_CTX, {
+      workspacePath: '/nonexistent',
+      apiKey: 'test-key',
+      env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
+      runWorkflowFn: vi.fn(),
+    });
+    expect(result).not.toBeNull();
+    if (result === null) return;
+    expect('_kind' in result).toBe(true);
+    if (!('_kind' in result)) return;
+    expect((result as { _kind: string; error: { kind: string } }).error.kind).toBe('missing_v2_context');
+  });
+
   it('starts with empty config when triggers.yml is missing', async () => {
     const { fn } = makeFakeRunWorkflow();
-    const result = await startTriggerListener(FAKE_CTX, {
+    const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
       workspacePath: tmpPath('nonexistent-workspace-xyz'),
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -629,7 +667,7 @@ describe('startTriggerListener workflowId validation', () => {
     // Resolver: no workflows known
     const getWorkflowByIdFn = vi.fn().mockResolvedValue(false);
 
-    const result = await startTriggerListener(FAKE_CTX, {
+    const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -662,7 +700,7 @@ describe('startTriggerListener workflowId validation', () => {
     // Resolver: this workflow is known
     const getWorkflowByIdFn = vi.fn().mockResolvedValue(true);
 
-    const result = await startTriggerListener(FAKE_CTX, {
+    const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -708,7 +746,7 @@ describe('startTriggerListener workflowId validation', () => {
       id === 'wr.coding-task',
     );
 
-    const result = await startTriggerListener(FAKE_CTX, {
+    const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -736,7 +774,7 @@ describe('startTriggerListener workflowId validation', () => {
     const { fn: runWorkflowFn } = makeFakeRunWorkflow();
 
     // No getWorkflowByIdFn -- validation should be skipped
-    const result = await startTriggerListener(FAKE_CTX, {
+    const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },
@@ -767,7 +805,7 @@ describe('startTriggerListener workflowId validation', () => {
     // Resolver throws an error
     const getWorkflowByIdFn = vi.fn().mockRejectedValue(new Error('Storage I/O error'));
 
-    const result = await startTriggerListener(FAKE_CTX, {
+    const result = await startTriggerListener(FAKE_CTX_WITH_V2, {
       workspacePath: wsDir,
       apiKey: 'test-key',
       env: { WORKRAIL_TRIGGERS_ENABLED: 'true' },

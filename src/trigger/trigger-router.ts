@@ -401,7 +401,7 @@ export class TriggerRouter {
   private readonly emitter: DaemonEventEmitter | undefined;
   private readonly notificationService: NotificationService | undefined;
   private readonly _activeSessionSet: ActiveSessionSet | undefined;
-  private readonly _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
+  private _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
 
   /**
@@ -529,6 +529,28 @@ export class TriggerRouter {
     }
     this.semaphore = new Semaphore(this._maxConcurrentSessions);
     console.log(`[TriggerRouter] maxConcurrentSessions=${this._maxConcurrentSessions}`);
+  }
+
+  /**
+   * Bind coordinator deps after construction.
+   *
+   * Called at the composition root (startTriggerListener) after createCoordinatorDeps()
+   * has been built with this router's dispatch function. Symmetric to how CoordinatorDepsImpl
+   * previously used setDispatch() on the coords side -- but this direction eliminates the
+   * nullable dispatch field on CoordinatorDepsImpl, making dispatch a required constructor
+   * parameter there.
+   *
+   * WHY mutable (not constructor parameter): coordinatorDeps requires router.dispatch, and
+   * router requires coordinatorDeps as a constructor arg for dispatchAdaptivePipeline wiring.
+   * One side must hold the setter. Moving it here makes CoordinatorDepsImpl's dispatch
+   * required and non-nullable -- the illegal state is unrepresentable on that side.
+   */
+  setCoordinatorDeps(deps: AdaptiveCoordinatorDeps): void {
+    if (this._coordinatorDeps !== undefined) {
+      process.stderr.write('[WARN TriggerRouter] setCoordinatorDeps() called more than once -- ignoring reassignment\n');
+      return;
+    }
+    this._coordinatorDeps = deps;
   }
 
   /** Current count of active (running) runWorkflow() calls. */

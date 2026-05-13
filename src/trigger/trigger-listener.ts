@@ -59,7 +59,8 @@ export type TriggerListenerError =
   | TriggerStoreError
   | { readonly kind: 'port_conflict'; readonly port: number }
   | { readonly kind: 'feature_disabled' }
-  | { readonly kind: 'missing_api_key' };
+  | { readonly kind: 'missing_api_key' }
+  | { readonly kind: 'missing_v2_context' };
 
 export interface TriggerListenerHandle {
   readonly port: number;
@@ -392,47 +393,18 @@ export async function startTriggerListener(
   // fs/exec/HTTP implementations. This pattern mirrors the pr-review command in
   // cli-worktrain.ts (lines 958-1244), which uses the same deps interface.
   //
-  // WHY createCoordinatorDeps + setDispatch (not inline): the method implementations
-  // are extracted into coordinator-deps.ts to reduce this function's line count.
-  // The circular construction order (coordinatorDeps before TriggerRouter, but spawnSession
-  // needs router.dispatch) is resolved via setDispatch() -- called once, immediately after
-  // router construction. See coordinator-deps.ts for the WHY comment.
   // ---------------------------------------------------------------------------
-  const execFileAsync = promisify(execFile);
-
-  // WHY in-process ConsoleService (not HTTP): awaitSessions and getAgentResult previously
-  // made HTTP calls to http://127.0.0.1:3456 (the daemon's own console API) from inside
-  // the daemon process. This caused silent all-failed returns on ECONNREFUSED and a
-  // race condition where sessions created in-process by spawnSession() were not yet
-  // visible via HTTP when the first poll fired. ConsoleService provides the same data
-  // via direct store access, eliminating both failure modes.
-  //
-  // A second ConsoleService instance has no correctness issue -- the summary cache
-  // is instance-scoped and mtime-invalidated. The instance is cheap to construct.
-  //
-  // WHY lazy import: avoids circular dependency at module load time.
-  const { ConsoleService } = await import('../v2/usecases/console-service.js');
-  let consoleService: InstanceType<typeof ConsoleService> | null = null;
-  if (!ctx.v2?.dataDir || !ctx.v2?.directoryListing) {
-    process.stderr.write(
-      '[CRITICAL trigger-listener:reason=consoleService_unavailable] ctx.v2.dataDir or ctx.v2.directoryListing not available -- awaitSessions and getAgentResult will degrade to all-failed / empty results\n',
-    );
-  } else {
-    consoleService = new ConsoleService({
-      directoryListing: ctx.v2.directoryListing,
-      dataDir: ctx.v2.dataDir,
-      sessionStore: ctx.v2.sessionStore,
-      snapshotStore: ctx.v2.snapshotStore,
-      pinnedWorkflowStore: ctx.v2.pinnedStore,
-    });
+  // Validate ctx.v2: coordinator session-reading requires sessionStore + snapshotStore.
+  // When WORKRAIL_TRIGGERS_ENABLED=true but ctx.v2 is absent, that is a misconfiguration --
+  // fail fast with a clear error rather than silently degrading coordinator capability.
+  // ---------------------------------------------------------------------------
+  if (!ctx.v2) {
+    return { _kind: 'err', error: { kind: 'missing_v2_context' } };
   }
 
-  const coordinatorDeps = createCoordinatorDeps({ ctx, execFileAsync, consoleService });
+  const execFileAsync = promisify(execFile);
 
   // Mode executors: map the pipeline function names to the ModeExecutors interface.
-  // WHY these names: the ModeExecutors interface uses short names (runQuickReview, etc.)
-  // while the mode module exports use the longer Pipeline suffix. This mapping follows
-  // the same pattern as src/cli/commands/worktrain-pipeline.ts.
   const modeExecutors: ModeExecutors = {
     runQuickReview: runQuickReviewPipeline,
     runReviewOnly: runReviewOnlyPipeline,
@@ -440,21 +412,16 @@ export async function startTriggerListener(
     runFull: runFullPipeline,
   };
 
-  // Create router and Express app
-  // WHY enricherDeps bound here: trigger-listener.ts is the composition root for the
-  // production daemon. Binding the enricher here (not inside runWorkflow) keeps the
-  // production wiring explicit and testable -- tests that pass a fake runWorkflowFn
-  // bypass this wiring entirely and are unaffected.
+  // Construction order: router first (no coordinatorDeps yet), then coords with dispatch,
+  // then router.setCoordinatorDeps(). This breaks the circular dep while keeping dispatch
+  // a required non-nullable field on CoordinatorDepsImpl.
   const enricherDeps = createWorkflowEnricherDeps();
   const baseRunWorkflow = options.runWorkflowFn ?? runWorkflow;
   const runWorkflowFn: RunWorkflowFn = (trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet, _statsDir, _sessionsDir, source) =>
     baseRunWorkflow(trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet, _statsDir, _sessionsDir, source, enricherDeps);
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, activeSessionSet, coordinatorDeps, modeExecutors);
-  // Bind the router's dispatch function so spawnSession can dispatch in-process.
-  // WHY after construction: coordinatorDeps must be created before TriggerRouter (it's
-  // a constructor arg), so dispatch can only be bound after the router exists.
-  // setDispatch() is called exactly once here; see coordinator-deps.ts for the WHY.
-  coordinatorDeps.setDispatch(router.dispatch.bind(router));
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, activeSessionSet, undefined, modeExecutors);
+  const coordinatorDeps = createCoordinatorDeps({ ctx, execFileAsync, dispatch: router.dispatch.bind(router) });
+  router.setCoordinatorDeps(coordinatorDeps);
   const app = createTriggerApp(router);
 
   // Create and start the polling scheduler.

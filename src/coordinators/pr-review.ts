@@ -199,16 +199,11 @@ export interface CoordinatorDeps {
   /**
    * Map a completed session handle to a typed ChildSessionResult.
    *
-   * WHY on CoordinatorDeps (not a free function):
-   * Requires access to ConsoleService for session status polling and artifact
-   * retrieval. Injecting it here keeps coordinator logic free of direct I/O imports.
-   *
    * Call sequence:
-   * 1. If ConsoleService is unavailable -> return `kind: 'await_degraded'`
-   * 2. Query ConsoleService.getSessionDetail(handle) once (expects terminal session)
-   * 3. Map terminal status to ChildSessionResult outcome
-   * 4. Call getAgentResult(handle) for notes and artifacts on success
-   * 5. Return the mapped result
+   * 1. Read session terminal status directly from the session/snapshot store
+   * 2. Map terminal status to ChildSessionResult outcome
+   * 3. Call getAgentResult(handle) for notes and artifacts on success
+   * 4. Return the mapped result
    *
    * INVARIANT: this method does NOT call awaitSessions. The caller must call
    * awaitSessions first to ensure the session has reached a terminal state.

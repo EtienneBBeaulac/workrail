@@ -10,8 +10,9 @@
  *
  * Design invariants:
  * - ChildSessionResult is a discriminated union -- all switch statements must be exhaustive.
- * - await_degraded is distinct from failed -- it signals infrastructure unavailability,
- *   not a child session failure. Coordinators must handle it separately from failed.
+ * - The in-process coordinator (coordinator-deps.ts) reads the session store directly via
+ *   ctx.v2.sessionStore; there is no nullable infrastructure that can produce a degraded
+ *   await. The await_degraded variant has been removed.
  *
  * WHY delivery_failed is NOT a reason variant here:
  * Sessions spawned via spawnSession/spawnAndAwait construct a WorkflowTrigger with no
@@ -69,8 +70,10 @@ export interface CoordinatorSpawnContext {
  * - success: child session ran to completion
  * - failed: child session reached a terminal failure state (blocked or stuck)
  * - timed_out: coordinator gave up waiting; child may still be running
- * - await_degraded: the await infrastructure was unavailable (ConsoleService null);
- *   child session was never polled -- outcome is unknown
+ *
+ * WHY await_degraded is absent: the in-process coordinator reads the session store
+ * directly via ctx.v2.sessionStore, which is always available when the daemon is
+ * running. There is no nullable infrastructure that could produce a degraded await.
  */
 export type ChildSessionResult =
   | {
@@ -84,7 +87,7 @@ export type ChildSessionResult =
       readonly kind: 'failed';
       /**
        * Reason for failure:
-       * - error: unexpected error (blocked session, ConsoleService error, etc.)
+       * - error: unexpected error (store error, session in unexpected state)
        * - stuck: session reached a blocked/stuck terminal state
        */
       readonly reason: 'error' | 'stuck';
@@ -93,10 +96,5 @@ export type ChildSessionResult =
   | {
       readonly kind: 'timed_out';
       /** Human-readable message explaining the timeout context. */
-      readonly message: string;
-    }
-  | {
-      readonly kind: 'await_degraded';
-      /** Human-readable message explaining why the await was degraded. */
       readonly message: string;
     };
