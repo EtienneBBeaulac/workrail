@@ -2287,7 +2287,7 @@ Coordinator design patterns for WorkTrain's autonomous pipeline.
 
 **Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
 
-Three sub-failures fixed: (1) coding sessions now get `branchStrategy:'worktree'` via `spawnSession()` so they run on an isolated branch; (2) new `runCoordinatorDelivery()` reads the `HandoffArtifact` from `recapMarkdown` and calls `runDelivery()` for git commit + gh pr create; (3) `deps.mergePR()` now called on clean and post-audit-clean verdicts -- the hollow `{ kind: 'merged' }` is gone. `CodingHandoffArtifactV1.branchName` used for `pollForPR()` to fix the `sess_*` handle vs branch name mismatch. Missing `branchName` escalates immediately instead of burning 5 minutes. New `execDelivery` dep on `AdaptiveCoordinatorDeps` for testable DI.
+Three sub-failures fixed: (1) coding sessions get an isolated branch via `spawnSession(branchStrategy:'worktree')` [later superseded by PR #1005 shared worktree]; (2) new `runCoordinatorDelivery()` reads the `HandoffArtifact` from `recapMarkdown` and calls `runDelivery()` for git commit + gh pr create; (3) `deps.mergePR()` now called on clean and post-audit-clean verdicts -- the hollow `{ kind: 'merged' }` is gone. `CodingHandoffArtifactV1.branchName` used for `pollForPR()` [later superseded by coordinator-known `worktrain/<runId>` branch in PR #1005]. New `execDelivery` dep on `AdaptiveCoordinatorDeps` for testable DI.
 
 ---
 
@@ -2299,31 +2299,7 @@ Three sub-failures fixed: (1) coding sessions now get `branchStrategy:'worktree'
 
 Today the pipeline creates a `branchStrategy: 'worktree'` for the coding session only. Discovery writes a design doc to the main workspace. Shaping reads it and writes a pitch. Coding forks from `main` into an isolated worktree -- but if that worktree was created from `main` before discovery's design doc or shaping's pitch were committed, the coding agent cannot see them. The pipeline's file handoffs are silently broken the moment any phase writes to disk rather than committing.
 
-The root cause: each phase session has its own workspace view. There is no shared persistent workspace for the full pipeline run.
-
-**The fix:** the coordinator creates one worktree at the start of the entire pipeline run, before the first session is spawned. All sessions in that pipeline -- discovery, shaping, coding, review -- use the same worktree path as their `workspacePath`. The branch is coordinator-created (deterministic name, e.g. `worktrain/<runId>`), not agent-created. When the pipeline completes, the coordinator owns delivery (already wired as of PR #1003) and cleanup.
-
-**What this enables:**
-- Discovery writes a design doc: shaping sees it immediately (same filesystem)
-- Shaping writes `current-pitch.md`: coding sees it immediately (same filesystem)
-- Coding's changes accumulate on the same branch: the PR represents the full pipeline's work
-- `pollForPR()` uses a coordinator-known branch name -- no artifact parsing needed
-- `runCoordinatorDelivery()` knows the branch before the coding session even starts
-
-**What this replaces:**
-- `spawnSession(branchStrategy: 'worktree')` passing: coordinator creates the worktree, daemon just uses the path
-- `CodingHandoffArtifactV1.branchName` for `pollForPR()`: coordinator already knows the branch name
-- The current delivery architecture (PR #1003) is still correct -- just the branch source changes
-
-**Things to hash out:**
-- Where does worktree creation live? In `runAdaptivePipeline()` before routing, or in each mode executor's prologue? Coordinator-level is cleaner (one cleanup path) but requires passing `effectiveWorkspacePath` through `AdaptivePipelineOpts`.
-- Do discovery and shaping sessions need isolation too, or just coding? Discovery/shaping are read-heavy and don't commit code -- they benefit from the shared workspace for file handoffs but don't need branch isolation for their own work. Giving all phases the same worktree path is simplest.
-- Commit strategy: should discovery or shaping commit their output files (design doc, pitch) to the worktree branch? Or leave them as uncommitted working-directory files? Uncommitted is simpler -- the coding agent picks them up directly. Committed means the history is cleaner and crash recovery can restore them.
-- Cleanup: coordinator's `finally` block (already present in `runFullPipeline`) calls `git worktree remove` after `PipelineOutcome`. Startup recovery prunes stale worktrees on daemon restart (already implemented).
-
-**Relationship to existing entries:**
-- Blocks or supersedes `branchStrategy: 'worktree'` on `spawnSession` (PR #1003) -- that was the right interim fix, but this is the architectural resolution.
-- The coordinator delivery architecture (PR #1003) is unchanged -- `runCoordinatorDelivery()` still runs git commit + gh pr create after the coding session. The branch just comes from the coordinator-created worktree instead of the agent-reported artifact.
+**Shipped in PR #1005.** Coordinator creates one worktree (`worktrain/<runId>`) before the first session spawns. All phases use it as `workspacePath`. Branch name is coordinator-determined -- `CodingHandoffArtifactV1.branchName` is now optional (used for audit only). Enricher correctly resolves git-common-dir so all worktree sessions find prior session context. `setupPipelineWorktree()` in `coordinator-worktree.ts` handles crash recovery, creation, and context persistence for both FULL and IMPLEMENT modes.
 
 ---
 
