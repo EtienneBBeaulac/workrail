@@ -2451,11 +2451,29 @@ Today the pipeline creates a `branchStrategy: 'worktree'` for the coding session
 
 ---
 
+### coding-task workflow v1.6.0: forward-facing constraint gates from three sources (May 14, 2026)
+
+**Status: shipped** | Priority: medium
+
+**Shipped (PRs #1013, #1015, May 14, 2026):** Phase 0 constraint derivation expanded to explicitly collect from three sources: general coding philosophy (`[PHILOSOPHY]`), observed codebase conventions (`[CONVENTION]`), and explicit team/project rules (`[TEAM_RULE]`). Two new assessments: `type-design-gate` (nullable fields encoding distinct states must use explicit variants) and `interface-responsibility-gate` (one-sentence responsibility check before extending any interface). `phase-0-6-design-constraints` now has three independently-scoped consequences -- one targeted remediation per gate. `phase-1b-design-deep` converted from `templateCall` to inline `promptBlocks` to explicitly thread `derivedConstraints` into candidate generation. This required also shipping multiple assessment consequences per step (see next item).
+
+---
+
+### Multiple assessment consequences per step (May 14, 2026)
+
+**Status: shipped** | Priority: medium
+
+**Shipped (PR #1013, May 14, 2026):** The engine previously allowed at most one `assessmentConsequence` per step, forcing authors to merge all remediation guidance into one composite string. Each consequence now fires independently. New optional `forAssessment` field on the trigger scopes a consequence to a specific named assessment, preventing cross-gate false-fires when multiple assessments on the same step share a level name. Validated at compile time. Schema `maxItems` raised from 1 to 10.
+
+---
+
 ### Reliable synthetic human gates: mimicking operator approval and refusal in autonomous pipelines (May 6, 2026)
 
-**Status: idea** | Priority: high
+**Status: partially shipped** | Priority: high
 
 **Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**Shipped (PRs #1009, #1011, #1015, May 14, 2026):** The gate infrastructure is in place. Daemon sessions now park at `requireConfirmation` steps (`_tag: 'gate_parked'`). The coordinator spawns `wr.gate-eval-generic` to evaluate the gate, reads the parked step's actual notes and typed artifacts from the session store (`readStepOutput` dep on `GateEvaluatorDeps`), and resumes the session with the verdict injected into the step prompt. `WorkflowRunGateParked` carries `workrailSessionId: SessionId` so the coordinator can look up step output directly from the typed result without a second sidecar read. Notes are truncated to 4000 chars before injection to stay within context budget. **What remains:** `wr.gate-eval-generic` workflow content does not yet use `stepNotes`/`stepArtifacts` context keys -- verdicts will be uncertain until the workflow is authored to leverage the step output. The "typed criteria", "cross-family challenger", and "calibration dataset" goals are still open.
 
 WorkTrain's pipeline has several points where a human operator would naturally approve, reject, or redirect -- confirming an interpretation before coding starts, approving a direction from discovery, accepting a shaped pitch. In guided MCP sessions these gates fire as `requireConfirmation` steps. In fully autonomous daemon sessions, they either don't fire or surface to the operator outbox and wait indefinitely. There is currently no reliable mechanism for the coordinator to make these gate decisions autonomously in a way that is trustworthy enough to substitute for human judgment.
 
@@ -2480,6 +2498,8 @@ The problem is not just "add an LLM to make the decision." An LLM making approva
 - What is the confidence threshold below which the synthetic gate escalates to a human rather than deciding? And how is that threshold configured per trigger?
 - How do you validate that a synthetic gate is actually performing the function of a human gate -- not just producing confident verdicts? Requires a calibration dataset of known-correct and known-incorrect artifacts with human ground truth.
 - Relationship to the `requireConfirmation` gate mechanism: the synthetic gate is the autonomous equivalent. It should produce the same typed routing signal the human confirmation gate produces, so the coordinator routing logic doesn't need to know which kind of gate fired.
+
+**Next concrete step:** Update `wr.gate-eval-generic` workflow to use the `stepNotes` and `stepArtifacts` context keys now injected by `evaluateGate()`. Currently the evaluator ignores them and always returns `uncertain`. The data pipe is built (PR #1015); the workflow content needs to be authored to evaluate the actual step output.
 
 ---
 
