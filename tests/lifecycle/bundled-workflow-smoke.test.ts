@@ -135,6 +135,9 @@ function analyzeWorkflowWithAssessments(definition: WorkflowDefinition): Workflo
 function usesTemplateCalls(steps: readonly StepDefinition[]): boolean {
   for (const step of steps) {
     if ((step as any).templateCall) return true;
+    // v2 loop body lives at step.body; v1-style loop body at step.loop.steps
+    const body = (step as any).body;
+    if (body && usesTemplateCalls(body)) return true;
     const loopDef = (step as any).loop;
     if (loopDef?.steps && usesTemplateCalls(loopDef.steps)) return true;
   }

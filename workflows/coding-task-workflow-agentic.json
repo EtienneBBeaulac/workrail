@@ -1,7 +1,7 @@
 {
   "id": "wr.coding-task",
   "name": "Agentic Task Dev Workflow",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "about": "## Agentic Coding Task Workflow\n\nThis workflow structures the full lifecycle of a software implementation task: from understanding and classifying the work, through architecture decisions and incremental implementation, to final verification and handoff.\n\n### What it does\n\nThe workflow guides an AI agent through a disciplined plan-then-execute process. It begins by analyzing the task to determine complexity, risk, and the right level of rigor (QUICK, STANDARD, or THOROUGH). For non-trivial tasks, it then gathers codebase context, surfaces invariants and non-goals, generates competing design candidates, and selects an approach before writing a single line of code. Implementation proceeds slice by slice, with built-in verification gates after each slice. A final integration verification pass confirms acceptance criteria are met before handoff.\n\n### Upstream context (Phase 0.5)\n\nPhase 0.5 looks for any upstream document that has already defined what to build -- a Shape Up pitch, PRD, BRD, RFC, design doc, user story with acceptance criteria, Jira epic, or equivalent. The agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, Memory MCP) to find it. If found, two flags are set: `upstreamSpecDetected` (something exists) and `solutionFixed` (whether the document commits to a specific technical direction). When `solutionFixed = true`, design ideation phases (1a-1c) are skipped and Phase 1d translates the upstream constraints directly into an engineering approach. When `solutionFixed = false`, design ideation runs normally but is constrained by whatever the upstream document does specify. The plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.\n\n### When to use it\n\nUse this workflow whenever you are implementing a feature, fixing a non-trivial bug, or making an architectural change in a real codebase. It is especially valuable when:\n- The task touches multiple files or systems\n- There is meaningful risk of regressions or invariant violations\n- You want the agent to surface trade-offs and commit to a reasoned design decision rather than guessing\n- You need a resumable, auditable record of what was decided and why\n\nFor quick one-liner fixes or very small changes, the workflow includes a fast path that skips heavyweight planning.\n\n### What it produces\n\n- An `implementation_plan.md` artifact covering the selected approach, vertical slices, test design, and philosophy alignment\n- A `spec.md` for large or high-risk tasks, capturing observable behavior and acceptance criteria\n- Step-level notes in WorkRail that serve as a durable execution log\n- A PR-ready handoff summary with acceptance criteria status, invariant proofs, and follow-up tickets\n\n### How to get good results\n\n- Provide a clear task description and at least partial acceptance criteria before starting\n- If you have coding philosophy or project conventions configured in session rules or Memory MCP, the workflow will apply them automatically as a design lens\n- Let the workflow classify complexity and rigor itself; override only if the classification is clearly wrong\n- For large or high-risk tasks, review the architecture decision step before implementation begins",
   "examples": [
@@ -130,14 +130,50 @@
     },
     {
       "id": "constraint-derivation-gate",
-      "purpose": "Ensures constraints derived from codebase patterns are specific enough to falsify wrong design candidates -- not generic aspirations that provide false confidence without blocking anything.",
+      "purpose": "Ensures the agent consulted all three constraint sources (philosophy, codebase conventions, team/project rules) and produced constraints specific enough to falsify wrong candidates.",
       "dimensions": [
         {
           "id": "constraint_specificity",
-          "purpose": "Each derived constraint names a specific observed pattern, the components it governs, and the prohibited alternative. A constraint like 'follow existing patterns' is vague. A specific constraint names the pattern and what it forbids.",
+          "purpose": "Each constraint names a specific subject, the rule it implies, and the prohibited alternative. 'Follow patterns' is vague; it cannot falsify a wrong candidate. Score low if any constraint is vague; high if all are specific.",
           "levels": [
-            "vague",
-            "specific"
+            "low",
+            "high"
+          ]
+        },
+        {
+          "id": "constraint_source_coverage",
+          "purpose": "All three sources checked: philosophy, codebase conventions, team/project rules. A source with no constraints must be explicitly justified -- silent omission is not acceptable. Score low if any source is unchecked without justification; high otherwise.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "type-design-gate",
+      "purpose": "Ensures no proposed type uses nullable fields to encode distinct states. Nullable fields that represent two or more states make illegal combinations representable and violate make-illegal-states-unrepresentable.",
+      "dimensions": [
+        {
+          "id": "type_design_soundness",
+          "purpose": "Every proposed type checked for nullable fields encoding distinct states. If loading/absent/error are encoded as nullable fields, the type must use explicit variants. Score low if any such type exists; high if all types are sound.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interface-responsibility-gate",
+      "purpose": "Ensures the agent has stated the one-sentence responsibility of every interface it plans to extend, and has verified that new behavior does not violate that responsibility. An unstated responsibility is a silent coupling risk.",
+      "dimensions": [
+        {
+          "id": "interface_responsibility_stated",
+          "purpose": "For every interface or service to be extended: its responsibility is one sentence and the new behavior does not violate it. Score low if any responsibility is unstated or violated; high if all are stated and verified.",
+          "levels": [
+            "low",
+            "high"
           ]
         }
       ]
@@ -166,7 +202,7 @@
     {
       "id": "phase-0-understand-and-classify",
       "title": "Phase 0: Understand & Classify",
-      "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`\n\n**Architecture alignment check (do this last, after candidateFiles is known):**\n\nFor each candidate file, scan for violations of the philosophy you just discovered. Name each violation explicitly and specifically (e.g. \"runWorkflow() is 4900 lines -- violates compose-with-small-pure-functions\", \"tool factories use params: any -- violates validate-at-boundaries\"). Do not assert absence without checking. If you found no violations, list the principles you checked and why each passes.\n\nThen decide:\n- `architectureViolations`: list of specific violations found (may be empty)\n- `architectureStartsFromScratch`: true if violations are significant enough that the correct design starts from the user's philosophy rather than adapting the existing code. False if violations are minor or out of scope for this task.\n\nIf `architectureStartsFromScratch` is true, the design phase will be constrained: Candidate A (simplest) must still honor the philosophy -- adapting an existing violation is not a valid candidate. Record this now so the design phase uses it.\n\n**Constraint Derivation (mandatory after architecture check, before leaving Phase 0):**\n\nThe architecture check above finds violations in existing code. This step converts what you observed into forward-facing rules that will gate your design.\n\nFor each structural pattern you observed in the candidate files, write the rule it implies for NEW code. A rule must be specific: name the pattern, the component(s) it governs, and what it forbids. Generic rules ('follow existing patterns') fail the constraint-specificity gate.\n\nExamples of specific constraints:\n- 'All display strings are pre-computed in the Reducer via DateFormatterService -- never computed in ViewModel, UseCase, or Repository'\n- 'DateFormatterService is responsible for: takes a date value, returns a formatted string -- it must not receive or reference UI model types'\n- 'Every new Repository method must be suspend fun and return Result<T> -- synchronous return types are not allowed in this layer'\n\nIf you observed no constraining patterns (genuinely no relevant conventions in this codebase for this task), explicitly state what you checked and why nothing constraining was found. Empty constraints are valid only with justification.\n\nStore as `derivedConstraints`: array of strings. Each string is one specific forward-facing rule.\n\nThese constraints will be used in Phase 0-6 for a pre-design gate and must be cited by each design candidate in Phase 1b.",
+      "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`\n\n**Architecture alignment check (do this last, after candidateFiles is known):**\n\nFor each candidate file, scan for violations of the philosophy you just discovered. Name each violation explicitly and specifically (e.g. \"runWorkflow() is 4900 lines -- violates compose-with-small-pure-functions\", \"tool factories use params: any -- violates validate-at-boundaries\"). Do not assert absence without checking. If you found no violations, list the principles you checked and why each passes.\n\nThen decide:\n- `architectureViolations`: list of specific violations found (may be empty)\n- `architectureStartsFromScratch`: true if violations are significant enough that the correct design starts from the user's philosophy rather than adapting the existing code. False if violations are minor or out of scope for this task.\n\nIf `architectureStartsFromScratch` is true, the design phase will be constrained: Candidate A (simplest) must still honor the philosophy -- adapting an existing violation is not a valid candidate. Record this now so the design phase uses it.\n\n**Constraint Derivation (mandatory after architecture check, before leaving Phase 0):**\n\nThe architecture check above finds violations in existing code. This step converts what you observed into forward-facing rules that will gate your design -- before a single candidate is written.\n\nCollect constraints from all three sources. Each source catches different failure modes:\n\n**Source 1 -- General coding philosophy** (from session rules, AGENTS.md, CLAUDE.md): What principles from the philosophy apply specifically to this task? Do not list all principles -- only ones that constrain your design space. Example: 'make illegal states unrepresentable' applied here means: 'the loading/error/success states must not be encoded as three nullable fields.'\n\n**Source 2 -- Codebase conventions** (from observed patterns in candidate files): For each recurring pattern you observed, write the rule it implies for new code. Example: 'FormattedDates is always computed in the Reducer' implies 'all display strings must be pre-computed in the Reducer -- never in ViewModel, UseCase, or call site.'\n\n**Source 3 -- Explicit team/project rules** (from AGENTS.md conventions, ADRs, architecture docs, README): Read these if present. Explicit documented rules have higher authority than inferred conventions. Example from a project doc: 'Repository methods must be suspend fun returning Result<T> -- synchronous or nullable-returning methods are not allowed in this layer.'\n\nA constraint is specific when: it names the subject (which component/layer/type), the rule (what must/must not happen), and the prohibited alternative. Generic constraints ('follow patterns', 'maintain separation') fail the specificity gate.\n\nIf a source has no applicable constraints for this task, state what you checked and why. Empty is valid with justification; empty without justification fails the coverage gate.\n\nStore as `derivedConstraints`: array of strings tagged with source. Format: '[PHILOSOPHY] rule text' | '[CONVENTION] rule text' | '[TEAM_RULE] rule text'\n\nThese constraints gate Phase 0-6 and must be cited by each design candidate in Phase 1b.",
       "requireConfirmation": {
         "or": [
           {
@@ -251,10 +287,10 @@
           "The three checks are mandatory -- do not skip them even if they feel redundant with Phase 0."
         ],
         "procedure": [
-          "1. **Constraint quality check.** Read `derivedConstraints`. For each constraint: could it fail to block a wrong candidate? If yes, it is too vague -- rewrite it. A specific constraint names the pattern, the components, and the prohibited alternative.",
-          "2. **Nullable field gate.** For every type you plan to propose: does it have a nullable field? If yes, does it represent two distinct states? Name the illegal states this nullable type makes representable. Record the finding.",
-          "3. **Interface responsibility gate.** For every interface you plan to extend: state its responsibility in one sentence ('X takes Y, returns Z'). Does the behavior you are adding violate that? Name the violation if yes.",
-          "4. Set `constraintGatePassed` to true if all three checks passed with no violations, false otherwise."
+          "1. **Constraint quality + coverage check.** Read `derivedConstraints`. For each constraint: is it specific enough to falsify a wrong candidate? If vague, rewrite it. Then verify all three sources (PHILOSOPHY, CONVENTION, TEAM_RULE) are represented or explicitly justified as empty.",
+          "2. **Nullable field gate.** For every type you plan to propose or modify: does it have a nullable or optional field? If yes, does that field represent two distinct states? Name every illegal state combination the nullable type makes representable.",
+          "3. **Interface responsibility gate.** For every interface, abstract class, or service you plan to extend: write its responsibility in one sentence ('X takes Y, returns Z'). Does the behavior you are adding violate that responsibility?",
+          "4. Set `constraintGatePassed` to true only if all three checks produced no blocking violations."
         ],
         "outputRequired": {
           "derivedConstraints": "Refined constraint list after quality check -- each constraint is specific enough to falsify a wrong candidate",
@@ -270,16 +306,18 @@
         ]
       },
       "assessmentRefs": [
-        "constraint-derivation-gate"
+        "constraint-derivation-gate",
+        "type-design-gate",
+        "interface-responsibility-gate"
       ],
       "assessmentConsequences": [
         {
           "when": {
-            "anyEqualsLevel": "vague"
+            "anyEqualsLevel": "low"
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "Rewrite the vague constraints so each names the specific pattern, the component(s) it governs, and the prohibited alternative. A constraint that could apply to any codebase is not specific enough to gate design candidates."
+            "guidance": "Address whichever gate scored low: constraint_specificity -- rewrite vague constraints to name subject, rule, and prohibited alternative. constraint_source_coverage -- justify any unchecked source (philosophy, conventions, team rules). type_design_soundness -- redesign nullable fields encoding distinct states as explicit variants. interface_responsibility_stated -- state one-sentence responsibility for each interface you extend and verify no violation."
           }
         }
       ],
@@ -331,7 +369,7 @@
     },
     {
       "id": "phase-1b-design-deep",
-      "title": "Phase 1b: Design Generation (Injected Routine — Tension-Driven Design)",
+      "title": "Phase 1b: Design Candidates (Tension-Driven, Constraint-Anchored)",
       "runCondition": {
         "and": [
           {
@@ -348,12 +386,32 @@
           }
         ]
       },
-      "templateCall": {
-        "templateId": "wr.templates.routine.tension-driven-design",
-        "args": {
-          "deliverableName": "design-candidates.md"
-        }
-      }
+      "promptBlocks": {
+        "goal": "Generate design candidates that resolve the identified tensions differently -- each anchored to the derivedConstraints from Phase 0-6 and the user's coding philosophy.",
+        "constraints": [
+          "Read `derivedConstraints` from context before generating any candidate. Every candidate must satisfy or explicitly exempt each constraint.",
+          "A candidate that violates a TEAM_RULE or CONVENTION constraint is not a valid candidate -- remove it or revise it before including it.",
+          "A candidate that violates a PHILOSOPHY constraint should be called out explicitly as a tradeoff, not silently ignored.",
+          "Generate candidates that vary how they resolve tensions -- not just surface variations of the same approach.",
+          "Do not generate more than 4 candidates. Quality over quantity.",
+          "Write output to `design-candidates.md`."
+        ],
+        "procedure": [
+          "1. **Orient from constraints.** Read `derivedConstraints`. For each constraint tagged [TEAM_RULE] or [CONVENTION], write one sentence: 'Candidate X must satisfy this because...' or 'This constraint rules out approach Y because...' This orientation step is not optional -- it is what makes the candidates grounded rather than generic.",
+          "2. **Discover tensions.** Read the candidate files and the problem description. What are the real tensions the design must resolve? (e.g. type safety vs ergonomics, performance vs simplicity, consistency with existing pattern vs improving on it.) List 2-4 tensions explicitly.",
+          "3. **Generate candidates.** For each candidate: (a) one-sentence summary of the approach; (b) which tensions it resolves and which it accepts; (c) which derivedConstraints it satisfies and how; (d) which derivedConstraints it conflicts with and why that conflict is acceptable or why the constraint might be wrong.",
+          "4. **Mandatory candidates (standalone mode):** (a) simplest change that satisfies criteria without new architecture; (b) the approach that most faithfully extends the existing codebase pattern while satisfying derivedConstraints.",
+          "5. **Compare.** Rank candidates by how well each serves the philosophy and satisfies the derivedConstraints. Note which constraint violations are tradeoffs vs disqualifiers.",
+          "6. Write to `design-candidates.md` with the structure: Tensions | Candidates | Constraint Satisfaction Matrix | Recommendation."
+        ],
+        "verify": [
+          "Every candidate in design-candidates.md explicitly addresses each derivedConstraint (satisfies it, exempts it with justification, or flags a tradeoff).",
+          "No candidate silently violates a [TEAM_RULE] constraint.",
+          "The tensions section names at least 2 real tensions specific to this task.",
+          "The recommended candidate is the one that best satisfies derivedConstraints, not just the one with fewest downsides."
+        ]
+      },
+      "requireConfirmation": false
     },
     {
       "id": "phase-1c-challenge-and-select",
