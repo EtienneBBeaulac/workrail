@@ -79,6 +79,8 @@ export async function resumeFromGate(
   emitter?: DaemonEventEmitter,
   activeSessionSet?: ActiveSessionSet,
   sessionsDir: string = DAEMON_SESSIONS_DIR,
+  // Optional injection point for testing -- defaults to the real implementation.
+  _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
 ): Promise<Result<void, ResumeFromGateError>> {
   const sidecarPath = path.join(sessionsDir, `${sessionId}.json`);
 
@@ -112,7 +114,7 @@ export async function resumeFromGate(
   }
 
   // ---- Step 2: Rehydrate (no context -- silently discarded by handleRehydrateIntent) ----
-  const rehydrateResult = await executeContinueWorkflow(
+  const rehydrateResult = await _executeContinueWorkflowFn(
     { continueToken: gateToken, intent: 'rehydrate' },
     ctx,
   );
