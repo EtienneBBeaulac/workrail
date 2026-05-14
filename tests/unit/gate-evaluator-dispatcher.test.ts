@@ -6,6 +6,7 @@
  * timeout, uncertain on spawn failure, uncertain on malformed artifact.
  */
 
+import * as os from 'node:os';
 import { describe, it, expect } from 'vitest';
 import { evaluateGate } from '../../src/coordinators/gate-evaluator-dispatcher.js';
 import type { GateEvaluatorDeps } from '../../src/coordinators/gate-evaluator-dispatcher.js';
@@ -44,7 +45,7 @@ function makeVerdictArtifact(verdict: 'approved' | 'rejected' | 'uncertain' = 'a
 // ---------------------------------------------------------------------------
 
 describe('evaluateGate()', () => {
-  const WORKSPACE = '/tmp/test-workspace';
+  const WORKSPACE = os.tmpdir();
   const STEP_ID = 'frame-gate';
   const WORKFLOW_ID = 'wr.shaping';
   const ARTIFACT = { stepId: STEP_ID, workflowId: WORKFLOW_ID, goal: 'Design a CLI tool' };

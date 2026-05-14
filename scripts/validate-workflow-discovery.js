@@ -137,7 +137,7 @@ function shouldSkipWorkflowFile(relativePath, isAgenticEnabled, isV2Enabled) {
   return false;
 }
 
-function collectWorkflowFiles(dir) {
+function collectWorkflowFiles(dir, { excludeDirNames = [] } = {}) {
   /** @type {string[]} */
   const results = [];
 
@@ -147,6 +147,7 @@ function collectWorkflowFiles(dir) {
     for (const entry of entries) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        if (excludeDirNames.includes(entry.name)) continue;
         scan(full);
         continue;
       }
@@ -161,7 +162,9 @@ function collectWorkflowFiles(dir) {
 }
 
 function buildExpectedIdsFromRepoWorkflowsDir({ workflowsDir, isAgenticEnabled, isV2Enabled }) {
-  const allFiles = collectWorkflowFiles(workflowsDir);
+  // Exclude 'internal' -- coordinator-internal workflows are not expected in list_workflows.
+  // They are checked separately via workflow_get in validateVariant().
+  const allFiles = collectWorkflowFiles(workflowsDir, { excludeDirNames: ['internal', 'examples'] });
 
   /** @type {Map<string, Array<{file: string, isAgentic: boolean}>>} */
   const byId = new Map();
@@ -252,8 +255,34 @@ async function validateVariant(variant) {
       }
     }
 
-    // 2) For every eligible workflow file in repo workflows dir, it must show up in list
+    const listed = new Set(ids);
+
+    // 2) Internal workflows must be findable via workflow_get (not in list, but accessible by ID)
     const repoWorkflowsDir = path.resolve(__dirname, '..', 'workflows');
+    const internalDir = path.join(repoWorkflowsDir, 'internal');
+    if (fs.existsSync(internalDir)) {
+      const internalFiles = collectWorkflowFiles(internalDir);
+      for (const filePath of internalFiles) {
+        let definition;
+        try {
+          definition = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        } catch {
+          continue; // skip unreadable files
+        }
+        const id = definition.id;
+        if (!id) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const wf = await workflowService.getWorkflowById(id);
+        if (!wf) {
+          errors.push(`Internal workflow id '${id}' from 'internal/${path.basename(filePath)}' is not findable via workflow_get`);
+        }
+        if (listed.has(id)) {
+          errors.push(`Internal workflow id '${id}' should not appear in workflow_list but does`);
+        }
+      }
+    }
+
+    // 3) For every non-internal eligible workflow file in repo, it must show up in list
     if (!fs.existsSync(repoWorkflowsDir)) {
       errors.push(`Missing workflows directory at ${repoWorkflowsDir}`);
     } else {
@@ -263,7 +292,6 @@ async function validateVariant(variant) {
         isV2Enabled,
       });
 
-      const listed = new Set(ids);
       for (const [id, file] of expected.entries()) {
         if (!listed.has(id)) {
           errors.push(`Workflow id '${id}' from '${file}' did not appear in workflow_list`);

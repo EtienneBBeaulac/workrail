@@ -36,7 +36,7 @@ function makeSidecar(overrides: Record<string, unknown> = {}): string {
     },
     workflowId: 'wr.shaping',
     goal: 'Design a CLI tool for task tracking',
-    workspacePath: '/tmp/test-workspace',
+    workspacePath: os.tmpdir(),
     ...overrides,
   }, null, 2);
 }
@@ -302,6 +302,6 @@ describe('resumeFromGate()', () => {
 
     expect(capturedWorkflowId).toBe('wr.shaping');
     expect(capturedGoal).toBe('Design a CLI tool for task tracking');
-    expect(capturedWorkspacePath).toBe('/tmp/test-workspace');
+    expect(capturedWorkspacePath).toBe(os.tmpdir());
   });
 });
