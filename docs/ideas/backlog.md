@@ -165,6 +165,25 @@ After `npm run build`, `worktrain daemon --start` launches the old binary. No wa
 
 ---
 
+### Console does not start automatically alongside the daemon or MCP server (May 14, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:1 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+`worktrain daemon` and `worktrain console` are separate commands the operator must start independently. Running the daemon without the console means there is no way to observe what sessions are happening or inspect failures. The operator has to remember to start both, and if they start a new terminal tab they have to remember which command they omitted. The MCP server has the same gap: `workrail start` gives Claude Code access to workflows but the operator has no dashboard to watch running sessions.
+
+This creates friction for the self-improvement loop and overnight-safe operation: the operator should be able to start one thing and have full observability without managing multiple process lifecycles.
+
+**Things to hash out:**
+- Should the console be a flag on the daemon command (`worktrain daemon --with-console`) or should the daemon always start it on a well-known port?
+- Should the MCP server also auto-start the console, or only the daemon?
+- The console and daemon are currently separate processes by design (the console is read-only, the daemon does the work). Does auto-starting the console change this separation, or is it just a lifecycle convenience?
+- What port conflict behavior is correct if the operator has already started the console separately?
+- Should this be launchd-managed (always running when the daemon is installed) or only when the daemon is actively started by the operator?
+
+---
+
 ### `worktrain daemon --start` reports success even when daemon crashes immediately
 
 **Status: done** | Shipped PR #898 (Apr 30, 2026)
@@ -1430,27 +1449,16 @@ Should land before WorkTrain is used in team repos with strict PR templates.
 
 **Score: 11** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
 
-In the FULL and IMPLEMENT pipeline modes, the coordinator currently runs delivery (git commit + `gh pr create`) before review. Review then runs on the open PR. This ordering has a real cost: WorkTrain opens a PR that is visibly broken or low-quality before the review agent has had a chance to flag problems. Human reviewers may see the PR before WorkTrain finishes its own review cycle. In the worst case, a reviewer comments before WorkTrain's fix loop completes, and the conversation interleaves with autonomous commits.
+In the FULL and IMPLEMENT pipeline modes, the coordinator creates the PR before running review. This means WorkTrain opens a PR that is visibly incomplete or low-quality before the review agent has flagged any problems. Human reviewers on the repo see the PR and may comment before WorkTrain finishes its own review cycle. The conversations interleave with autonomous fix commits.
 
-The better default is: **run review on the committed branch before opening the PR**. The reviewer sees the code; WorkTrain fixes what needs fixing; only then is the PR opened (clean, review-passed, with a summary that includes what was already addressed). For most workflows this is strictly better for humans watching the repo.
-
-That said, some setups want the current behavior: CI runs on the PR, not on a branch push, so the PR must exist before review to get test results. Others want to open a draft PR early as a checkpoint. The right answer is a configurable delivery policy, not a hard-coded sequence.
-
-**What needs to exist:**
-
-A `deliveryPolicy` field on the trigger definition (or as a workflow-level default) with at least two modes:
-- `review_then_pr` (proposed default): commit to branch, run review on branch, fix loop, then `gh pr create` at the end
-- `pr_then_review` (current behavior): create PR immediately after coding, run review on the open PR
-
-The coordinator's `runFullPipelineCore` and `runImplementPipeline` would need to split delivery into two parts: a pre-review commit step (push branch) and a post-review PR creation step. The branch exists for the reviewer to run `gh pr view --web` or diff against, but no PR is open until the review cycle passes.
+The more intuitive ordering for humans watching the repo: review the code on the branch, fix what needs fixing, then open the PR only when it is ready. But some setups require the PR to exist first -- CI only runs on PRs, not branch pushes. The right timing is not the same for everyone, and there is currently no way to configure it.
 
 **Things to hash out:**
 
-- Does `review_then_pr` require pushing the branch before spawning the review session, or can the reviewer work entirely from the local worktree? The reviewer may need to run `gh` CLI commands that require a remote branch, so a push (without PR) is probably required.
-- What is the retry token for `pr_then_review` when `gh pr create` is rate-limited or fails? Currently delivery failure escalates; this behavior should stay the same regardless of mode.
-- Does `deliveryPolicy` belong on the trigger definition or should it be a per-pipeline-run override that the operator can pass via `modeOverride`?
-- Should `review_then_pr` also apply to the PR body? The coding agent's `HandoffArtifact.prBody` is the source of truth today. Under `review_then_pr`, the review agent's summary of what was addressed should be appended before the PR is opened.
-- Draft PR as a third mode (`draft_pr_then_review`): create a draft PR immediately (satisfies CI triggers), run review on it, fix, un-draft on pass. Worth a separate entry if this pattern is needed.
+- What granularity does configuration need? Per-trigger, per-workspace, per-pipeline-mode, or all of the above?
+- Some teams need CI to run before review -- does this mean the PR must be created before the review session in those setups?
+- Should the draft PR state be a third option (satisfies CI trigger without showing as a review target)?
+- If the PR is opened after review, how does the review agent reference the code? It would need a remote branch (git push without PR), not a PR URL.
 
 ---
 
@@ -2378,11 +2386,7 @@ Coordinator design patterns for WorkTrain's autonomous pipeline.
 
 **Score: 7** | Cor:1 Cap:1 Eff:3 Lev:1 Con:3 | Blocked: no
 
-`spawnAndAwait` on `CoordinatorDepsImpl` has no production callers. The only callers are in the CLI path (`cli-worktrain.ts`) which implements it separately over HTTP -- they never call the in-process `CoordinatorDepsImpl.spawnAndAwait`. The method exists on the `CoordinatorDeps` interface but no coordinator mode ever calls `deps.spawnAndAwait()` directly; they all use the explicit `spawnSession` + `awaitSessions` + `getChildSessionResult` composition.
-
-Removing it from `CoordinatorDepsImpl` (and optionally from the interface if the CLI doesn't need it there) would eliminate ~20 lines and make the dead path explicit.
-
-**Done looks like:** `spawnAndAwait` removed from `CoordinatorDepsImpl`. If the interface declaration remains (for the CLI path), it can stay on `CoordinatorDeps` but with a note that the in-process implementation delegates to `spawnSession + awaitSessions + getChildSessionResult`.
+`spawnAndAwait` on `CoordinatorDepsImpl` has no production callers. The only callers are in the CLI path (`cli-worktrain.ts`) which implements the same behavior separately over HTTP -- they never call the in-process `CoordinatorDepsImpl.spawnAndAwait`. The method exists on the `CoordinatorDeps` interface but no coordinator mode ever calls `deps.spawnAndAwait()` directly; they all use the explicit `spawnSession` + `awaitSessions` + `getChildSessionResult` composition. Dead code that silently suggests a convenience path that isn't actually used.
 
 ---
 
@@ -2394,21 +2398,11 @@ Removing it from `CoordinatorDepsImpl` (and optionally from the interface if the
 
 The coordinator-deps path (`startTriggerListener` → `createCoordinatorDeps(dispatch)` → `router.setCoordinatorDeps()` → `dispatchAdaptivePipeline()` → `spawnSession` → `executeStartWorkflow` + `dispatch()`) has no integration test. Every test in this chain uses either a fake `AdaptiveCoordinatorDeps` with mocked `spawnSession`, or a fake `runWorkflowFn` that never runs. The dispatch wiring, session store write, token decoding, and `router.dispatch()` → `runWorkflow` path are never exercised together.
 
-This means a bug in the construction sequence (e.g. `setCoordinatorDeps` not called, dispatch bound to wrong router instance, session store write fails silently) would not be caught by any test -- it would only surface in a real daemon run.
-
-The unit tests for the pieces exist: `coordinator-direct-store.test.ts` tests `SessionReader` in isolation, and `trigger-router.test.ts` tests `TriggerRouter.dispatch()` with a fake `runWorkflowFn`. What's missing is a test that wires them together with a real (or realistic in-memory) engine: start a listener, fire a trigger, assert that a session was created in the store and `runWorkflow` was called with the correct trigger.
-
-**Done looks like:** An integration test in `tests/integration/` that:
-1. Constructs a `V2ToolContext` with real in-memory stores (using `InMemorySessionEventLogStore`, `InMemorySnapshotStore`)
-2. Calls `startTriggerListener` with `WORKRAIL_TRIGGERS_ENABLED=true`, a real apiKey stub, and a fake `runWorkflowFn`
-3. Posts to `POST /webhook/:triggerId` via the Express app
-4. Asserts that `runWorkflowFn` was called with the correct `workflowId`, `goal`, and `workspacePath`
-5. Asserts that a session was created in the store (session_created event present)
+A bug in the construction sequence (e.g. `setCoordinatorDeps` not called, dispatch bound to wrong router instance, session store write fails silently) would not be caught by any test -- it would only surface in a real daemon run.
 
 **Things to hash out:**
-- Should this use `InMemorySessionEventLogStore` from `tests/fakes/v2/` (already exists) or a temp-dir real store?
-- The test needs a real `executeStartWorkflow` call -- does that require the full pinned workflow store, or can it use a minimal stub workflow?
-- How does the test handle the async dispatch (runWorkflow runs in the background after the 202 response)?
+- How do you wire the async dispatch (runWorkflow fires in the background after the 202 response) in a deterministic test? Does the test need to poll, or inject a synchronous fake runWorkflowFn?
+- Should the test use the real in-memory stores already used in other integration tests, or would a simpler scope (just the HTTP → queue → dispatch path without a real session store write) give more signal per complexity unit?
 
 ---
 
@@ -2422,11 +2416,9 @@ The unit tests for the pieces exist: `coordinator-direct-store.test.ts` tests `S
 
 This violates the core pipeline invariant ("typed contracts at phase boundaries, not free-text scraping") in the most consequential place: the merge/no-merge decision. A review session that writes "this is not a blocking issue" may not match the negation heuristic (`/\b(?:not|no|without)\b.{0,30}\bblocking\b/i`), triggering an audit chain on a clean PR. Unknown severity defaults to 'blocking' (conservative but incorrect routing). This is probabilistic routing pretending to be deterministic.
 
-The lifecycle integration tests item (below) is the test-side of this: per-workflow lifecycle harness tests would catch a workflow that emits no artifact before it reaches production. But the fix is making the workflow reliably emit the artifact, not just testing that it does.
+The lifecycle integration tests item (below) is the test-side of this: per-workflow lifecycle harness tests would catch a workflow that emits no artifact before it reaches production.
 
-**Done looks like:** `wr.mr-review` consistently emits a `wr.review_verdict` artifact as its final step output. `readVerdictArtifact()` succeeds on real pipeline runs. `parseFindingsFromNotes()` remains as a fallback but is no longer the primary path. The coordinator's merge/no-merge decision is driven by the typed artifact.
-
-**Leverage:** the fix also unblocks reliable `findingCategory`-based audit routing (currently the `wr.architecture-scalability-audit` vs `wr.production-readiness-audit` split can only fire when the typed artifact path succeeds).
+**Leverage:** also unblocks reliable `findingCategory`-based audit routing (currently the `wr.architecture-scalability-audit` vs `wr.production-readiness-audit` split can only fire when the typed artifact path succeeds).
 
 **Partial progress (May 13, 2026):** `wr.mr-review` v2.8.0 changed `outputContract.required` from `false` to the default `true`. The engine now enforces the artifact at advance time -- the agent gets a retryable blocked response if it omits the artifact. The lifecycle test for `wr.mr-review` is shipped. What remains: confirming `readVerdictArtifact()` fires on real pipeline runs (requires an actual pipeline execution, not testable in CI). `parseFindingsFromNotes()` is still the fallback and will remain so until empirically confirmed unnecessary.
 
