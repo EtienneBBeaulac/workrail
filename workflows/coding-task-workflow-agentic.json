@@ -1,7 +1,7 @@
 {
   "id": "wr.coding-task",
   "name": "Agentic Task Dev Workflow",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "about": "## Agentic Coding Task Workflow\n\nThis workflow structures the full lifecycle of a software implementation task: from understanding and classifying the work, through architecture decisions and incremental implementation, to final verification and handoff.\n\n### What it does\n\nThe workflow guides an AI agent through a disciplined plan-then-execute process. It begins by analyzing the task to determine complexity, risk, and the right level of rigor (QUICK, STANDARD, or THOROUGH). For non-trivial tasks, it then gathers codebase context, surfaces invariants and non-goals, generates competing design candidates, and selects an approach before writing a single line of code. Implementation proceeds slice by slice, with built-in verification gates after each slice. A final integration verification pass confirms acceptance criteria are met before handoff.\n\n### Upstream context (Phase 0.5)\n\nPhase 0.5 looks for any upstream document that has already defined what to build -- a Shape Up pitch, PRD, BRD, RFC, design doc, user story with acceptance criteria, Jira epic, or equivalent. The agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, Memory MCP) to find it. If found, two flags are set: `upstreamSpecDetected` (something exists) and `solutionFixed` (whether the document commits to a specific technical direction). When `solutionFixed = true`, design ideation phases (1a-1c) are skipped and Phase 1d translates the upstream constraints directly into an engineering approach. When `solutionFixed = false`, design ideation runs normally but is constrained by whatever the upstream document does specify. The plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.\n\n### When to use it\n\nUse this workflow whenever you are implementing a feature, fixing a non-trivial bug, or making an architectural change in a real codebase. It is especially valuable when:\n- The task touches multiple files or systems\n- There is meaningful risk of regressions or invariant violations\n- You want the agent to surface trade-offs and commit to a reasoned design decision rather than guessing\n- You need a resumable, auditable record of what was decided and why\n\nFor quick one-liner fixes or very small changes, the workflow includes a fast path that skips heavyweight planning.\n\n### What it produces\n\n- An `implementation_plan.md` artifact covering the selected approach, vertical slices, test design, and philosophy alignment\n- A `spec.md` for large or high-risk tasks, capturing observable behavior and acceptance criteria\n- Step-level notes in WorkRail that serve as a durable execution log\n- A PR-ready handoff summary with acceptance criteria status, invariant proofs, and follow-up tickets\n\n### How to get good results\n\n- Provide a clear task description and at least partial acceptance criteria before starting\n- If you have coding philosophy or project conventions configured in session rules or Memory MCP, the workflow will apply them automatically as a design lens\n- Let the workflow classify complexity and rigor itself; override only if the classification is clearly wrong\n- For large or high-risk tasks, review the architecture decision step before implementation begins",
   "examples": [
@@ -127,6 +127,20 @@
           ]
         }
       ]
+    },
+    {
+      "id": "constraint-derivation-gate",
+      "purpose": "Ensures constraints derived from codebase patterns are specific enough to falsify wrong design candidates -- not generic aspirations that provide false confidence without blocking anything.",
+      "dimensions": [
+        {
+          "id": "constraint_specificity",
+          "purpose": "Each derived constraint names a specific observed pattern, the components it governs, and the prohibited alternative. A constraint like 'follow existing patterns' is vague. A specific constraint names the pattern and what it forbids.",
+          "levels": [
+            "vague",
+            "specific"
+          ]
+        }
+      ]
     }
   ],
   "preconditions": [
@@ -152,7 +166,7 @@
     {
       "id": "phase-0-understand-and-classify",
       "title": "Phase 0: Understand & Classify",
-      "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`\n\n**Architecture alignment check (do this last, after candidateFiles is known):**\n\nFor each candidate file, scan for violations of the philosophy you just discovered. Name each violation explicitly and specifically (e.g. \"runWorkflow() is 4900 lines -- violates compose-with-small-pure-functions\", \"tool factories use params: any -- violates validate-at-boundaries\"). Do not assert absence without checking. If you found no violations, list the principles you checked and why each passes.\n\nThen decide:\n- `architectureViolations`: list of specific violations found (may be empty)\n- `architectureStartsFromScratch`: true if violations are significant enough that the correct design starts from the user's philosophy rather than adapting the existing code. False if violations are minor or out of scope for this task.\n\nIf `architectureStartsFromScratch` is true, the design phase will be constrained: Candidate A (simplest) must still honor the philosophy -- adapting an existing violation is not a valid candidate. Record this now so the design phase uses it.",
+      "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`\n\n**Architecture alignment check (do this last, after candidateFiles is known):**\n\nFor each candidate file, scan for violations of the philosophy you just discovered. Name each violation explicitly and specifically (e.g. \"runWorkflow() is 4900 lines -- violates compose-with-small-pure-functions\", \"tool factories use params: any -- violates validate-at-boundaries\"). Do not assert absence without checking. If you found no violations, list the principles you checked and why each passes.\n\nThen decide:\n- `architectureViolations`: list of specific violations found (may be empty)\n- `architectureStartsFromScratch`: true if violations are significant enough that the correct design starts from the user's philosophy rather than adapting the existing code. False if violations are minor or out of scope for this task.\n\nIf `architectureStartsFromScratch` is true, the design phase will be constrained: Candidate A (simplest) must still honor the philosophy -- adapting an existing violation is not a valid candidate. Record this now so the design phase uses it.\n\n**Constraint Derivation (mandatory after architecture check, before leaving Phase 0):**\n\nThe architecture check above finds violations in existing code. This step converts what you observed into forward-facing rules that will gate your design.\n\nFor each structural pattern you observed in the candidate files, write the rule it implies for NEW code. A rule must be specific: name the pattern, the component(s) it governs, and what it forbids. Generic rules ('follow existing patterns') fail the constraint-specificity gate.\n\nExamples of specific constraints:\n- 'All display strings are pre-computed in the Reducer via DateFormatterService -- never computed in ViewModel, UseCase, or Repository'\n- 'DateFormatterService is responsible for: takes a date value, returns a formatted string -- it must not receive or reference UI model types'\n- 'Every new Repository method must be suspend fun and return Result<T> -- synchronous return types are not allowed in this layer'\n\nIf you observed no constraining patterns (genuinely no relevant conventions in this codebase for this task), explicitly state what you checked and why nothing constraining was found. Empty constraints are valid only with justification.\n\nStore as `derivedConstraints`: array of strings. Each string is one specific forward-facing rule.\n\nThese constraints will be used in Phase 0-6 for a pre-design gate and must be cited by each design candidate in Phase 1b.",
       "requireConfirmation": {
         "or": [
           {
@@ -211,6 +225,64 @@
       "id": "phase-0-5-upstream-context",
       "title": "Phase 0.5: Locate Upstream Context",
       "prompt": "Before you start designing, find out what has already been decided upstream. Use whatever tools you have -- repo search, WebFetch, MCP integrations (Confluence, Notion, Google Docs, Glean, Linear, Jira), Memory MCP, whatever is available.\n\nLook for any document that describes this work: a pitch, PRD, BRD, RFC, design doc, user story with acceptance criteria, epic, Jira ticket, or equivalent. Also scan for URLs in the task description -- if someone linked a document, read it.\n\nIf nothing relevant exists, say so and move on. Do not fabricate context.\n\nIf you find something, read it and commit to three questions:\n\n1. **Is the problem fixed?** Does this document commit to a specific problem or need -- or is the framing still open?\n2. **Is the solution fixed?** Does this document commit to a specific technical direction -- or is that still yours to decide?\n3. **What are the hard boundaries?** Extract any explicit effort bounds, out-of-scope exclusions, required constraints, acceptance criteria, or invariants that must hold. Free-form summary -- do not force a schema onto it.\n\nFor the two booleans: if you are genuinely uncertain, default `solutionFixed = false`. Running design ideation when it wasn't strictly needed is a smaller cost than skipping it when it was.\n\nCapture:\n- `upstreamSpecDetected` (boolean)\n- `upstreamSource` (string: where you found it, or 'none')\n- `upstreamContext` (string: short summary of what you found and why it's relevant)\n- `problemFixed` (boolean)\n- `solutionFixed` (boolean)\n- `upstreamBoundaries` (string: the hard constraints extracted -- effort bound, out-of-scope items, required invariants, acceptance criteria)",
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-0-6-design-constraints",
+      "title": "Phase 0-6: Pre-Design Constraint Gate",
+      "runCondition": {
+        "and": [
+          {
+            "var": "rigorMode",
+            "not_equals": "QUICK"
+          },
+          {
+            "var": "taskComplexity",
+            "not_equals": "Small"
+          }
+        ]
+      },
+      "promptBlocks": {
+        "goal": "Verify derived constraints are actionable gates, not placeholders. Then apply three forward-facing checks before any design candidate is generated.",
+        "constraints": [
+          "Do not generate design candidates in this step. This step only checks and gates.",
+          "Each check is independent -- a failure in one does not skip the others.",
+          "If any check fails, record what specifically failed before advancing.",
+          "The three checks are mandatory -- do not skip them even if they feel redundant with Phase 0."
+        ],
+        "procedure": [
+          "1. **Constraint quality check.** Read `derivedConstraints`. For each constraint: could it fail to block a wrong candidate? If yes, it is too vague -- rewrite it. A specific constraint names the pattern, the components, and the prohibited alternative.",
+          "2. **Nullable field gate.** For every type you plan to propose: does it have a nullable field? If yes, does it represent two distinct states? Name the illegal states this nullable type makes representable. Record the finding.",
+          "3. **Interface responsibility gate.** For every interface you plan to extend: state its responsibility in one sentence ('X takes Y, returns Z'). Does the behavior you are adding violate that? Name the violation if yes.",
+          "4. Set `constraintGatePassed` to true if all three checks passed with no violations, false otherwise."
+        ],
+        "outputRequired": {
+          "derivedConstraints": "Refined constraint list after quality check -- each constraint is specific enough to falsify a wrong candidate",
+          "nullableFieldFindings": "For each proposed type: the nullable fields found and whether they encode distinct states",
+          "interfaceResponsibilities": "For each interface to be extended: one-sentence responsibility and verdict on whether new behavior violates it",
+          "constraintGatePassed": "true if no violations found, false if candidates must be constrained"
+        },
+        "verify": [
+          "Each constraint in derivedConstraints names a specific pattern, the components it governs, and the prohibited alternative.",
+          "Every type you plan to propose has been checked for nullable fields encoding distinct states.",
+          "Every interface you plan to extend has a stated responsibility.",
+          "If constraintGatePassed is false, the violations are named explicitly -- not summarized as 'some concerns exist'."
+        ]
+      },
+      "assessmentRefs": [
+        "constraint-derivation-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "vague"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "Rewrite the vague constraints so each names the specific pattern, the component(s) it governs, and the prohibited alternative. A constraint that could apply to any codebase is not specific enough to gate design candidates."
+          }
+        }
+      ],
       "requireConfirmation": false
     },
     {
@@ -326,6 +398,22 @@
             "equals": true
           },
           "text": "Architecture-first constraint is active (`architectureStartsFromScratch = true`). Before selecting a candidate, verify: does the leading option start from the user's philosophy, or does it adapt an existing violation? Adapting a code structure that was already identified as a philosophy violation is NOT a valid candidate -- even as Candidate A (simplest). The simplest valid candidate is the simplest design that honors the philosophy."
+        },
+        {
+          "id": "phase-1c-constraint-citation",
+          "when": {
+            "and": [
+              {
+                "var": "rigorMode",
+                "not_equals": "QUICK"
+              },
+              {
+                "var": "taskComplexity",
+                "not_equals": "Small"
+              }
+            ]
+          },
+          "text": "\n\n**Constraint citation check (fires when phase-0-6 ran):** Before selecting a direction, verify that each candidate in `design-candidates.md` explicitly cites which `derivedConstraints` it satisfies. A candidate that does not address a derived constraint either satisfies it by construction (state why) or violates it (which disqualifies it unless the constraint is wrong). If a candidate violates a derived constraint, that is a structural finding -- not a tradeoff to accept."
         }
       ],
       "assessmentRefs": [
