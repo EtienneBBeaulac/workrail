@@ -54,6 +54,13 @@ interface WorkflowIndexEntry {
   filename: string;
   definition: WorkflowDefinition;
   lastModified: number;
+  /**
+   * When true, this workflow lives in the 'internal/' subdirectory.
+   * Internal workflows are findable by getWorkflowById but excluded from
+   * list_workflows output -- they are coordinator-internal infrastructure,
+   * not user-facing workflows.
+   */
+  isInternal?: boolean;
 }
 
 interface FileWorkflowStorageOptions {
@@ -192,6 +199,35 @@ export class FileWorkflowStorage implements IWorkflowStorage {
       });
     }
 
+    // ---- Internal workflows ----
+    // Scan {baseDirReal}/internal/ separately. These workflows are NOT in the main
+    // scan (findWorkflowJsonFiles excludes the 'internal' subdirectory) so they
+    // never appear in list_workflows, but they ARE findable by getWorkflowById for
+    // coordinator use (e.g. wr.gate-eval-generic spawned by GateEvaluatorDispatcher).
+    const internalDir = path.join(this.baseDirReal, 'internal');
+    if (existsSync(internalDir)) {
+      const internalFiles = await findWorkflowJsonFiles(internalDir);
+      for (const filePath of internalFiles) {
+        try {
+          const stats = await fs.stat(filePath);
+          if (stats.size > this.maxFileSize) continue;
+          const raw = await fs.readFile(filePath, 'utf-8');
+          const definition = JSON.parse(raw) as WorkflowDefinition;
+          if (!definition.id) continue;
+          const relFile = path.relative(this.baseDirReal, filePath);
+          index.set(definition.id, {
+            id: definition.id,
+            filename: relFile,
+            definition,
+            lastModified: stats.mtimeMs,
+            isInternal: true,
+          });
+        } catch {
+          // Skip unreadable internal files -- same policy as main scan
+        }
+      }
+    }
+
     return index;
   }
 
@@ -242,8 +278,11 @@ export class FileWorkflowStorage implements IWorkflowStorage {
     const index = await this.getWorkflowIndex();
     const workflows: Workflow[] = [];
 
-    // Use cached definitions from index when available
+    // Use cached definitions from index when available.
+    // Skip internal workflows -- they are coordinator-internal infrastructure
+    // excluded from list_workflows output.
     for (const entry of index.values()) {
+      if (entry.isInternal) continue;
       const workflow = createWorkflow(entry.definition, this.source);
       workflows.push(workflow);
     }

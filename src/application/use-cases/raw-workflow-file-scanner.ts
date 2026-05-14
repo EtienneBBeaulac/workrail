@@ -18,7 +18,11 @@ export async function findWorkflowJsonFiles(baseDirReal: string): Promise<string
   async function scan(currentDir: string) {
     const entries = await fs.readdir(currentDir, { withFileTypes: true });
     const jsonFiles = entries.filter((e) => e.isFile() && e.name.endsWith('.json'));
-    const subDirs = entries.filter((e) => e.isDirectory() && e.name !== 'examples');
+    // WHY 'internal' excluded: workflows/internal/ contains coordinator-internal
+    // infrastructure workflows (e.g. wr.gate-eval-generic) that should never appear
+    // in list_workflows output. They are found by getWorkflowById via a separate scan.
+    // WHY 'examples' excluded: pre-existing exclusion for example/demo files.
+    const subDirs = entries.filter((e) => e.isDirectory() && e.name !== 'examples' && e.name !== 'internal');
 
     for (const f of jsonFiles) {
       files.push(path.join(currentDir, f.name));
