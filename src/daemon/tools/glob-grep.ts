@@ -12,11 +12,12 @@ import { glob as tinyGlob } from 'tinyglobby';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { GLOB_ALWAYS_EXCLUDE, withWorkrailSession } from './_shared.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 const execFileAsync = promisify(execFile);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeGlobTool(workspacePath: string, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeGlobTool(workspacePath: string, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
   return {
     name: 'Glob',
     description:
@@ -82,7 +83,7 @@ export function makeGlobTool(workspacePath: string, schemas: Record<string, any>
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeGrepTool(workspacePath: string, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeGrepTool(workspacePath: string, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
   return {
     name: 'Grep',
     description:

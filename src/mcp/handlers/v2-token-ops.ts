@@ -53,6 +53,7 @@ import {
   asSessionId,
   asWorkflowHashRef,
 } from '../../v2/durable-core/ids/index.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 // Branded token input types (compile-time guarantee of token kind)
 export type StateTokenInput = ParsedTokenV1Binary & {
@@ -73,7 +74,7 @@ export type CheckpointTokenInput = ParsedTokenV1Binary & {
  * No need for separate state/ack parsing or scope-matching assertions.
  */
 export interface ContinueTokenResolved {
-  readonly sessionId: string;
+  readonly sessionId: SessionId;
   readonly runId: string;
   readonly nodeId: string;
   readonly attemptId: string;
@@ -395,7 +396,7 @@ export function parseContinueTokenOrFail(
   }
 
   return okAsync({
-    sessionId: entry.sessionId,
+    sessionId: asSessionId(entry.sessionId),
     runId: entry.runId,
     nodeId: entry.nodeId,
     attemptId: entry.attemptId,

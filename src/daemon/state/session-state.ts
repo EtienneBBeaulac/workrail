@@ -22,7 +22,6 @@
 
 import type { TerminalSignal } from './terminal-signal.js';
 import type { SessionId } from '../../v2/durable-core/ids/index.js';
-import { asSessionId } from '../../v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // SessionState interface
@@ -197,8 +196,8 @@ export function updateToken(state: SessionState, token: string): void {
  *
  * Called by buildPreAgentSession() after parseContinueTokenOrFail() succeeds.
  */
-export function setSessionId(state: SessionState, id: string): void {
-  state.workrailSessionId = asSessionId(id);
+export function setSessionId(state: SessionState, id: SessionId): void {
+  state.workrailSessionId = id;
 }
 
 /**

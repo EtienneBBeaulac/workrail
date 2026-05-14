@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { appendIssueAsync, type IssueRecord } from './_shared.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 /**
  * Build the report_issue tool.
@@ -31,7 +32,7 @@ import { appendIssueAsync, type IssueRecord } from './_shared.js';
 export function makeReportIssueTool(
   sessionId: RunId,
   emitter?: DaemonEventEmitter,
-  workrailSessionId?: string | null,
+  workrailSessionId?: SessionId | null,
   issuesDirOverride?: string,
   onIssueSummary?: (summary: string) => void,
 ): AgentTool {

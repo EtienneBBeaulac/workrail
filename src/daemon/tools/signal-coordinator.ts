@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import { appendSignalAsync, type SignalRecord, withWorkrailSession } from './_shared.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 /**
  * Directory that holds per-session signal JSONL files.
@@ -61,7 +62,7 @@ export const DAEMON_SIGNALS_DIR = path.join(os.homedir(), '.workrail', 'signals'
 export function makeSignalCoordinatorTool(
   sessionId: RunId,
   emitter?: DaemonEventEmitter,
-  workrailSessionId?: string | null,
+  workrailSessionId?: SessionId | null,
   signalsDirOverride?: string,
 ): AgentTool {
   const signalsDir = signalsDirOverride ?? DAEMON_SIGNALS_DIR;
