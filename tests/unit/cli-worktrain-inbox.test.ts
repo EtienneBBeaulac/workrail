@@ -273,23 +273,40 @@ describe('executeWorktrainInboxCommand', () => {
 
   // ── --watch flag ─────────────────────────────────────────────────────────
 
-  it('--watch prints stub message and returns success', async () => {
+  it('--watch runs one poll cycle and stops cleanly when sleep throws SIGINT', async () => {
+    fsState.files.set(outboxPath, makeOutbox([{ message: 'hello from watch' }]));
     const printed: string[] = [];
-    const deps = makeTestDeps(fsState, { print: (line) => printed.push(line) });
+    let sleepCalls = 0;
+    // Simulate Ctrl-C by having sleep emit SIGINT after the first poll.
+    const deps = makeTestDeps(fsState, {
+      print: (line) => printed.push(line),
+      sleep: async (_ms: number) => {
+        sleepCalls++;
+        process.emit('SIGINT');
+      },
+    });
     const result = await executeWorktrainInboxCommand(deps, { watch: true });
 
     expect(result.kind).toBe('success');
-    expect(printed.some((line) => line.toLowerCase().includes('not yet implemented'))).toBe(true);
+    expect(sleepCalls).toBe(1);
+    // Should have printed the message from the first poll cycle
+    expect(printed.some((line) => line.includes('hello from watch'))).toBe(true);
   });
 
-  it('--watch does not read outbox or write cursor', async () => {
-    fsState.files.set(outboxPath, makeOutbox([{ message: 'test' }]));
-
-    const deps = makeTestDeps(fsState);
+  it('--watch reads outbox and writes cursor on each poll cycle', async () => {
+    fsState.files.set(outboxPath, makeOutbox([{ message: 'test msg' }]));
+    let sleepCalls = 0;
+    const deps = makeTestDeps(fsState, {
+      sleep: async (_ms: number) => {
+        sleepCalls++;
+        process.emit('SIGINT');
+      },
+    });
     await executeWorktrainInboxCommand(deps, { watch: true });
 
-    // Cursor should not have been written
-    expect(fsState.files.has(cursorPath)).toBe(false);
+    // Cursor should have been updated after the poll cycle
+    expect(fsState.files.has(cursorPath)).toBe(true);
+    expect(sleepCalls).toBe(1);
   });
 
   // ── Cursor write failure (non-fatal) ─────────────────────────────────────

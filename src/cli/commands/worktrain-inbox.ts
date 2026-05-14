@@ -63,6 +63,12 @@ export interface WorktrainInboxCommandDeps {
   readonly joinPath: (...paths: string[]) => string;
   /** Print a line to stdout. */
   readonly print: (line: string) => void;
+  /**
+   * Sleep for the given number of milliseconds.
+   * Used by --watch to poll at a fixed interval.
+   * Injected so tests can override to a no-op.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -94,18 +100,50 @@ export async function executeWorktrainInboxCommand(
   deps: WorktrainInboxCommandDeps,
   opts: WorktrainInboxCommandOpts = {},
 ): Promise<CliResult> {
-  // --watch is a planned feature but requires the daemon coordinator loop.
-  // Accept the flag and print a clear stub rather than silently no-op.
-  if (opts.watch) {
-    deps.print('Watch mode is not yet implemented (requires the daemon coordinator loop).');
-    deps.print('Run `worktrain inbox` without --watch to read queued messages now.');
-    return success({ message: 'Watch mode not yet implemented.' });
-  }
-
   const workrailDir = deps.joinPath(deps.homedir(), '.workrail');
   const outboxPath = deps.joinPath(workrailDir, 'outbox.jsonl');
   const cursorPath = deps.joinPath(workrailDir, 'inbox-cursor.json');
 
+  if (opts.watch) {
+    // Poll every 2 seconds. Print new messages and update cursor on each cycle.
+    // Exits cleanly on SIGINT (Ctrl-C) -- the process.on('SIGINT') handler lets
+    // the current poll complete, then the while-loop exits on the next check.
+    deps.print('Watching for new messages (Ctrl-C to stop)...');
+    const sleepFn = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    let running = true;
+    const onSigint = () => { running = false; };
+    process.once('SIGINT', onSigint);
+
+    while (running) {
+      await readAndPrint(deps, outboxPath, cursorPath, workrailDir, true);
+      if (!running) break;
+      await sleepFn(2000);
+    }
+
+    process.removeListener('SIGINT', onSigint);
+    deps.print('');
+    deps.print('Stopped watching.');
+    return success({ message: 'Watch stopped.' });
+  }
+
+  const result = await readAndPrint(deps, outboxPath, cursorPath, workrailDir);
+  return result;
+}
+
+/**
+ * Read outbox, print unread messages, and update cursor.
+ * Shared by both single-run and --watch polling paths.
+ *
+ * @param silentOnEmpty - When true (watch mode), suppress "No new messages." to
+ *   avoid printing it every 2 seconds when nothing is happening.
+ */
+async function readAndPrint(
+  deps: WorktrainInboxCommandDeps,
+  outboxPath: string,
+  cursorPath: string,
+  workrailDir: string,
+  silentOnEmpty = false,
+): Promise<CliResult> {
   // ── Read outbox ──────────────────────────────────────────────────────────
 
   let outboxContent: string;
@@ -169,9 +207,7 @@ export async function executeWorktrainInboxCommand(
     deps.print(`Warning: skipped ${malformedCount} malformed line(s) in outbox.jsonl.`);
   }
 
-  if (newCount === 0) {
-    deps.print('No new messages.');
-  } else {
+  if (newCount > 0) {
     for (const msg of unread) {
       deps.print(`[${msg.timestamp}] ${msg.message}`);
     }
@@ -192,6 +228,10 @@ export async function executeWorktrainInboxCommand(
     deps.print(
       `Warning: could not update read cursor: ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+
+  if (newCount === 0 && !silentOnEmpty) {
+    deps.print('No new messages.');
   }
 
   return success({ message: `${newCount} new message(s).` });

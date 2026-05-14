@@ -62,6 +62,18 @@ export {
 } from './discovery-handoff.js';
 
 export {
+  // Gate Verdict -- produced by independent evaluator sessions; consumed by coordinator
+  // WHY NOT in PhaseHandoffArtifact: gate verdict is a coordinator-read artifact, not a
+  // phase-to-phase handoff. It is produced by a gate evaluator child session and read by
+  // GateEvaluatorDispatcher to decide whether to resume or escalate a parked session.
+  GATE_VERDICT_CONTRACT_REF,
+  GateVerdictArtifactV1Schema,
+  isGateVerdictArtifact,
+  parseGateVerdictArtifact,
+  type GateVerdictArtifactV1,
+} from './gate-verdict.js';
+
+export {
   // Phase Handoff (Shaping + Coding + union)
   SHAPING_HANDOFF_CONTRACT_REF,
   ShapingHandoffArtifactV1Schema,
@@ -88,6 +100,7 @@ export const ARTIFACT_CONTRACT_REFS = [
   'wr.contracts.discovery_handoff',
   'wr.contracts.shaping_handoff',
   'wr.contracts.coding_handoff',
+  'wr.contracts.gate_verdict',
 ] as const;
 
 export type ArtifactContractRef = (typeof ARTIFACT_CONTRACT_REFS)[number];
