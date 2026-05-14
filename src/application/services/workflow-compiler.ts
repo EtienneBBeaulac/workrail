@@ -311,23 +311,34 @@ export class WorkflowCompiler {
         ));
       }
 
-      if (assessmentConsequences.length > 1) {
-        return err(Err.invalidState(
-          `Step '${step.id}' declares ${assessmentConsequences.length} assessment consequences. V1 supports exactly one assessment consequence per step.`
-        ));
-      }
-
       const allLevelsAcrossRefs = (workflow.definition.assessments ?? [])
         .filter(candidate => typedStep.assessmentRefs!.includes(candidate.id))
         .flatMap(assessment => assessment.dimensions.flatMap(d => d.levels));
 
       for (const consequence of assessmentConsequences) {
         const trigger = consequence.when;
-        if (!allLevelsAcrossRefs.includes(trigger.anyEqualsLevel)) {
+
+        // When forAssessment is set, validate it names a declared assessmentRef.
+        if (trigger.forAssessment !== undefined) {
+          if (!typedStep.assessmentRefs!.includes(trigger.forAssessment)) {
+            return err(Err.invalidState(
+              `Step '${step.id}' declares consequence with forAssessment '${trigger.forAssessment}' that is not in the step's assessmentRefs`
+            ));
+          }
+          // Validate the level exists in the scoped assessment only.
+          const scopedAssessment = (workflow.definition.assessments ?? []).find(a => a.id === trigger.forAssessment);
+          const scopedLevels = scopedAssessment?.dimensions.flatMap(d => d.levels) ?? [];
+          if (!scopedLevels.includes(trigger.anyEqualsLevel)) {
+            return err(Err.invalidState(
+              `Step '${step.id}' declares consequence with anyEqualsLevel '${trigger.anyEqualsLevel}' that is not declared in assessment '${trigger.forAssessment}'`
+            ));
+          }
+        } else if (!allLevelsAcrossRefs.includes(trigger.anyEqualsLevel)) {
           return err(Err.invalidState(
             `Step '${step.id}' declares consequence with anyEqualsLevel '${trigger.anyEqualsLevel}' that is not declared in any dimension of any referenced assessment`
           ));
         }
+
         if (consequence.effect.kind !== 'require_followup') {
           return err(Err.invalidState(
             `Step '${step.id}' declares unsupported assessment consequence effect '${String((consequence.effect as { kind?: unknown }).kind)}'`

@@ -88,6 +88,11 @@ export interface AssessmentDefinition {
 /**
  * Trigger condition for an assessment consequence.
  * Fires when ANY dimension in the submitted assessment equals anyEqualsLevel.
+ *
+ * When forAssessment is specified, only the named assessment is checked.
+ * When absent, any recorded assessment that has a matching dimension fires the consequence.
+ * Use forAssessment when a step declares multiple assessmentRefs and each consequence
+ * should be scoped to a specific gate's verdict rather than any gate reaching that level.
  */
 export interface AssessmentConsequenceTriggerDefinition {
   /**
@@ -95,6 +100,12 @@ export interface AssessmentConsequenceTriggerDefinition {
    * For single-dimension assessments this is equivalent to an exact match.
    */
   readonly anyEqualsLevel: string;
+  /**
+   * Optional: scope this consequence to a specific assessment ID.
+   * When present, only the named assessment is checked for the level match.
+   * Must be one of the assessmentRefs declared on the same step.
+   */
+  readonly forAssessment?: string;
 }
 
 export interface AssessmentFollowupRequiredEffectDefinition {

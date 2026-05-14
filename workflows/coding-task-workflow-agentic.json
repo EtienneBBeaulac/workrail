@@ -312,12 +312,24 @@
       ],
       "assessmentConsequences": [
         {
-          "when": {
-            "anyEqualsLevel": "low"
-          },
+          "when": { "anyEqualsLevel": "low", "forAssessment": "constraint-derivation-gate" },
           "effect": {
             "kind": "require_followup",
-            "guidance": "Address whichever gate scored low: constraint_specificity -- rewrite vague constraints to name subject, rule, and prohibited alternative. constraint_source_coverage -- justify any unchecked source (philosophy, conventions, team rules). type_design_soundness -- redesign nullable fields encoding distinct states as explicit variants. interface_responsibility_stated -- state one-sentence responsibility for each interface you extend and verify no violation."
+            "guidance": "One or more constraints scored low on specificity or source coverage. Rewrite vague constraints to name the specific subject, rule, and prohibited alternative. For any unchecked source (philosophy, codebase conventions, team/project rules): explicitly state what you checked and why no constraints apply, or add the missing constraints."
+          }
+        },
+        {
+          "when": { "anyEqualsLevel": "low", "forAssessment": "type-design-gate" },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "At least one proposed type has a nullable or optional field that encodes semantically distinct states. Redesign that type: replace the nullable field with explicit state variants (a discriminated union or sealed class) so that illegal state combinations cannot be constructed."
+          }
+        },
+        {
+          "when": { "anyEqualsLevel": "low", "forAssessment": "interface-responsibility-gate" },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "At least one interface you plan to extend has an unstated responsibility. For each interface: write one sentence stating what it takes, what it returns, and what invariant it preserves. Then verify the new behavior does not violate that responsibility before proceeding to design."
           }
         }
       ],
