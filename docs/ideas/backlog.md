@@ -2448,7 +2448,7 @@ The concrete failure mode surfaced in the coordinator-deps.ts refactor (May 13, 
 
 ### `signal_coordinator` has no active consumer (May 13, 2026)
 
-**Status: idea** | Priority: low
+**Status: partial** | Near-term mitigation shipped PR #1011 (May 14, 2026)
 
 **Score: 6** | Cor:1 Cap:2 Eff:2 Lev:1 Con:3 | Blocked: no
 
@@ -2457,6 +2457,8 @@ The concrete failure mode surfaced in the coordinator-deps.ts refactor (May 13, 
 Similarly, `pollOutboxAck()` (used by the UX gate in FULL pipeline for large-complexity UI tasks) polls a JSONL cursor for a human acknowledgment. But there is no `worktrain inbox` command or UI for the operator to actually respond to an outbox entry. Without it, the UX gate either waits 24 hours and escalates, or is a dead code path.
 
 Neither is a correctness bug -- skipping signals is silent, the UX gate escalates cleanly on timeout. But both represent infrastructure built without the consumption side, so the features they enable (mid-session coordinator reaction, human-in-the-loop approvals) are not actually available.
+
+**Shipped (PR #1011):** `worktrain inbox --watch` now polls outbox.jsonl every 2s and updates the cursor. The operator can read outbox entries in real time and the cursor update makes `pollOutboxAck()` return `'acked'` when the operator has read the message. The `signal_coordinator` sidecar consumer remains unbuilt.
 
 **Done looks like (signal_coordinator):** at least one coordinator reads signal sidecar files -- either polling during `awaitSessions()` or post-session -- and routes based on signal kind (e.g. `approval_needed` pauses the pipeline, `blocked` triggers early escalation).
 
@@ -4720,11 +4722,13 @@ The same session that found the issues verifies the fixes. No context reconstruc
 
 ### Coordinatable workflow steps: confirmation points the coordinator can satisfy (Apr 18, 2026)
 
-**Status: idea** | Priority: medium -- needs discovery before implementation
+**Status: partial** | Foundation shipped PR #1009 + #1011 (May 14, 2026)
 
 **Score: 8** | Cor:1 Cap:2 Eff:2 Lev:2 Con:1 | Blocked: no
 
 Workflows already have `requireConfirmation: true` on certain steps -- these are natural coordination points. Right now they pause for a human. The idea is to make them also pausable-for-a-coordinator, so a coordinator (or another agent) can be the one that responds instead of a human.
+
+**Shipped (PR #1009 + #1011):** Daemon sessions now pause at requireConfirmation steps (`_tag: 'gate_parked'`) instead of silently bypassing them. The coordinator spawns `wr.gate-eval-generic` to evaluate the gate and calls `resumeFromGate()` to resume the session with the verdict injected into the step prompt. The `POST /sessions/:id/steer` endpoint exists on the daemon's port-3200 server. The `worktrain inbox --watch` gives the operator a real-time view of outbox entries. **What remains:** the evaluator only receives step metadata (not actual step output) so it always returns `'uncertain'` -- see "Gate evaluator receives no actual step output" backlog item. The synthetic gate evaluation is therefore not yet meaningful.
 
 **The vision:** a workflow reaches a `requireConfirmation` step. In MCP mode (human-driven), it behaves exactly as today -- pauses and waits. In daemon/coordinator mode, instead of blocking forever, the coordinator can:
 - Inject a synthesized answer based on external work it just did ("architecture review found X, proceed with approach A")
