@@ -140,12 +140,8 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     // Phase 1b-quick: lightweight inline design
     expect(stepIds).toContain('phase-1b-design-quick');
 
-    // Phase 1b-deep: expanded routine steps (5 from tension-driven-design)
-    const routine = loadRoutineJson('tension-driven-design.json');
-    for (const routineStep of routine.steps) {
-      const expandedId = `phase-1b-design-deep.${routineStep.id}`;
-      expect(stepIds, `Expected '${expandedId}' in compiled steps`).toContain(expandedId);
-    }
+    // Phase 1b-deep: constraint-anchored inline design step (was templateCall, now inline promptBlocks)
+    expect(stepIds).toContain('phase-1b-design-deep');
 
     // Phase 1c: challenge and select
     expect(stepIds).toContain('phase-1c-challenge-and-select');
@@ -177,9 +173,8 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     });
   });
 
-  it('deep design routine steps inherit compound runCondition (not Small AND not QUICK)', () => {
+  it('deep design step has compound runCondition (not Small AND not QUICK AND solutionFixed != true)', () => {
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
-    const routine = loadRoutineJson('tension-driven-design.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
@@ -192,12 +187,9 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
       ],
     };
 
-    for (const routineStep of routine.steps) {
-      const expandedId = `phase-1b-design-deep.${routineStep.id}`;
-      const step = steps.find(s => s.id === expandedId) as WorkflowStepDefinition;
-      expect(step, `Expected '${expandedId}' to exist`).toBeDefined();
-      expect(step.runCondition).toEqual(expectedRunCondition);
-    }
+    const deepStep = steps.find(s => s.id === 'phase-1b-design-deep') as WorkflowStepDefinition;
+    expect(deepStep, 'Expected phase-1b-design-deep to exist').toBeDefined();
+    expect(deepStep.runCondition).toEqual(expectedRunCondition);
   });
 
   it('both design paths produce design-candidates.md as unified output contract', () => {
@@ -210,9 +202,9 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const quickStep = steps.find(s => s.id === 'phase-1b-design-quick') as WorkflowStepDefinition;
     expect(quickStep.prompt).toContain('design-candidates.md');
 
-    // Deep path's final step also writes to design-candidates.md (via routine arg)
-    const deliverStep = steps.find(s => s.id === 'phase-1b-design-deep.step-deliver') as WorkflowStepDefinition;
-    expect(deliverStep.prompt).toContain('design-candidates.md');
+    // Deep path (inline promptBlocks) also writes to design-candidates.md
+    const deepStep = steps.find(s => s.id === 'phase-1b-design-deep') as WorkflowStepDefinition;
+    expect(deepStep.prompt).toContain('design-candidates.md');
 
     // Challenge step reads from design-candidates.md
     const selectStep = steps.find(s => s.id === 'phase-1c-challenge-and-select') as WorkflowStepDefinition;
@@ -247,19 +239,17 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     expect(stepIds).toContain('phase-7-final-verification');
   });
 
-  it('arg substitution works in the deep design path (deliverableName)', () => {
+  it('deep design step prompt references derivedConstraints for constraint-anchored candidates', () => {
     const workflow = loadTopLevelWorkflowJson('coding-task-workflow-agentic.json');
 
     const result = resolveDefinitionSteps(workflow.steps, workflow.features ?? []);
     const steps = result._unsafeUnwrap().steps;
 
-    const deliverStep = steps.find(
-      s => s.id === 'phase-1b-design-deep.step-deliver',
-    ) as WorkflowStepDefinition;
-
-    expect(deliverStep).toBeDefined();
-    expect(deliverStep.prompt).toContain('design-candidates.md');
-    expect(deliverStep.prompt).not.toContain('{deliverableName}');
+    const deepStep = steps.find(s => s.id === 'phase-1b-design-deep') as WorkflowStepDefinition;
+    expect(deepStep).toBeDefined();
+    // Prompt must reference derivedConstraints and the output file
+    expect(deepStep.prompt).toContain('derivedConstraints');
+    expect(deepStep.prompt).toContain('design-candidates.md');
   });
 });
 
