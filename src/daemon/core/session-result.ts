@@ -145,6 +145,7 @@ export function buildSessionResult(
         gateToken: signal.gateToken,
         stepId: signal.stepId,
         stopReason: 'gate_parked',
+        sessionId: String(sessionId),
       };
     }
     if (signal.kind === 'timeout') {

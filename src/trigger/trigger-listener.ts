@@ -5,8 +5,9 @@
  * webhook events and dispatches them to TriggerRouter.
  *
  * Routes:
- *   POST /webhook/:triggerId  -- Accepts incoming webhook, returns 202 immediately
- *   GET  /health              -- Health check, returns 200 { status: "ok" }
+ *   POST /webhook/:triggerId        -- Accepts incoming webhook, returns 202 immediately
+ *   GET  /health                    -- Health check, returns 200 { status: "ok" }
+ *   POST /sessions/:sessionId/steer -- Inject text into a running session's next turn
  *
  * Design notes:
  * - Feature flag WORKRAIL_TRIGGERS_ENABLED=true must be set for the listener to start.
@@ -139,7 +140,7 @@ export interface StartTriggerListenerOptions {
  * Create the Express application with all routes registered.
  * No I/O is performed -- the router is fully injected.
  */
-export function createTriggerApp(router: TriggerRouter): express.Application {
+export function createTriggerApp(router: TriggerRouter, activeSessionSet?: ActiveSessionSet): express.Application {
   const app = express();
 
   // Capture raw body BEFORE JSON parsing so HMAC validation has the original bytes.
@@ -220,6 +221,31 @@ export function createTriggerApp(router: TriggerRouter): express.Application {
 
     // 202 Accepted: enqueued for background processing
     res.status(202).json({ status: 'accepted', triggerId });
+  });
+
+  // Steer endpoint: inject text into a running session's next agent turn.
+  // Used by coordinators to deliver gate evaluation verdicts and by operators
+  // sending mid-session messages. Runs on the daemon's own port (3200) because
+  // the daemon's activeSessionSet lives in this process -- not in the standalone
+  // console (which is a separate read-only process).
+  app.post('/sessions/:sessionId/steer', express.json(), (req, res) => {
+    if (!activeSessionSet) {
+      res.status(503).json({ error: 'Steer not available: activeSessionSet not provided to createTriggerApp' });
+      return;
+    }
+    const { sessionId } = req.params as { sessionId: string };
+    const { text } = req.body as { text?: unknown };
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      res.status(400).json({ error: 'text is required and must be a non-empty string' });
+      return;
+    }
+    const handle = activeSessionSet.get(sessionId as import('../daemon/daemon-events.js').RunId);
+    if (!handle) {
+      res.status(404).json({ error: `Session not found: ${sessionId}` });
+      return;
+    }
+    handle.steer(text);
+    res.status(200).json({ status: 'ok' });
   });
 
   return app;
@@ -422,7 +448,7 @@ export async function startTriggerListener(
   const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, activeSessionSet, undefined, modeExecutors);
   const coordinatorDeps = createCoordinatorDeps({ ctx, execFileAsync, dispatch: router.dispatch.bind(router) });
   router.setCoordinatorDeps(coordinatorDeps);
-  const app = createTriggerApp(router);
+  const app = createTriggerApp(router, activeSessionSet);
 
   // Create and start the polling scheduler.
   // The scheduler manages polling loops for all gitlab_poll triggers.

@@ -129,9 +129,17 @@ export async function resumeFromGate(
 
   const rehydrated = rehydrateResult.value.response;
 
-  // Rehydrate returns 'ok' or 'blocked'. Never 'gate_checkpoint' -- handleRehydrateIntent
-  // does not produce that response kind. When PR 3+ adds paused_awaiting_gate engine state,
-  // the rehydrate path may need updating.
+  // Defensive gate_checkpoint guard for type narrowing. handleRehydrateIntent returns
+  // 'ok' or 'blocked' -- never 'gate_checkpoint' -- but the type system sees the full
+  // V2ContinueWorkflowOutputSchema union which includes gate_checkpoint from PR 1.
+  if (rehydrated.kind === 'gate_checkpoint') {
+    // This path is unreachable in practice (rehydrate never returns gate_checkpoint),
+    // but is required for TypeScript narrowing. Log and discard.
+    console.warn(`[GateResume] Unexpected gate_checkpoint rehydrate response for session ${sessionId}. Discarding.`);
+    await fs.unlink(sidecarPath).catch(() => {});
+    return err({ kind: 'no_pending_step', message: `Gate session ${sessionId} returned unexpected gate_checkpoint on rehydrate` });
+  }
+
   if (rehydrated.isComplete) {
     await fs.unlink(sidecarPath).catch(() => {});
     return err({ kind: 'no_pending_step', message: `Gate session ${sessionId} is already complete` });

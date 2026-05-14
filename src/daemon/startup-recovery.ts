@@ -362,13 +362,16 @@ export async function runStartupRecovery(
           }
 
           // Gate checkpoint: detect via sidecar gateState before calling rehydrate.
-          // This avoids an unnecessary network/engine call for sessions paused at a gate.
-          // TODO(PR 2): route to gate evaluation dispatch instead of discarding.
+          // WHY discard (not re-evaluate): startup recovery doesn't have the trigger context
+          // needed to choose an evaluator workflow. The trigger router handles live gate
+          // evaluation because it has the full trigger definition and workspacePath.
+          // On a restart, the trigger will re-fire on the next poll cycle, creating a fresh
+          // session that will reach the gate again and be evaluated normally.
           if (session.gateState?.kind === 'gate_checkpoint') {
             console.log(
-              `[WorkflowRunner] Startup recovery: session ${session.sessionId} is paused at ` +
-              `gate checkpoint (step '${session.gateState.stepId}'). Discarding -- coordinator ` +
-              `gate evaluation not yet implemented.`,
+              `[WorkflowRunner] Startup recovery: session ${session.sessionId} was parked at ` +
+              `gate checkpoint (step '${session.gateState.stepId}'). Discarding -- ` +
+              `the trigger will re-fire on the next poll cycle for fresh evaluation.`,
             );
             break;
           }

@@ -43,6 +43,8 @@ import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
 import { runAdaptivePipeline } from '../coordinators/adaptive-pipeline.js';
 import { DispatchDeduplicator } from './dispatch-deduplicator.js';
+import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS } from '../coordinators/gate-evaluator-dispatcher.js';
+import { resumeFromGate } from '../daemon/gate-resume.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -802,12 +804,83 @@ export class TriggerRouter {
           // TODO(follow-up): add onStuck: trigger hook support here
         );
       } else if (result._tag === 'gate_parked') {
-        // Session parked at a requireConfirmation gate. Sidecar is retained for startup recovery.
-        // PR 2 will add coordinator gate evaluation dispatch here.
+        // Session parked at a requireConfirmation gate. Spawn the gate evaluator session,
+        // get a typed verdict, then resume the parked session with the verdict injected.
+        // WHY fire-and-forget: gate evaluation may take up to DEFAULT_GATE_EVAL_TIMEOUT_MS
+        // (30 min). The trigger queue slot was already released when runWorkflow() returned.
+        // WHY coordinator is the dispatcher (not startup recovery): startup recovery doesn't
+        // have the trigger context needed to choose an evaluator workflow. The trigger router
+        // does -- it knows the trigger definition and workspacePath.
+        const sessionId = result.sessionId;
+        const stepId = result.stepId;
         console.log(
           `[TriggerRouter] Workflow parked at gate: triggerId=${trigger.id} ` +
-          `workflowId=${trigger.workflowId} stepId=${result.stepId}`,
+          `workflowId=${trigger.workflowId} stepId=${stepId} sessionId=${sessionId}`,
         );
+
+        if (sessionId && this._coordinatorDeps) {
+          const deps = this._coordinatorDeps;
+          const ctx = this.ctx;
+          const apiKey = this.apiKey;
+          const activeSessionSet = this._activeSessionSet;
+          const emitter = this.emitter;
+
+          // Dispatch gate evaluation fire-and-forget.
+          void (async () => {
+            try {
+              const verdict = await evaluateGate(
+                {
+                  spawnSession: (wfId, goal, workspace, context, agentConfig) =>
+                    deps.spawnSession(wfId, goal, workspace, context, agentConfig),
+                  awaitSessions: (handles, timeoutMs) => deps.awaitSessions(handles, timeoutMs),
+                  getAgentResult: (handle) => deps.getAgentResult(handle),
+                  stderr: (line) => process.stderr.write(line + '\n'),
+                },
+                { stepId, workflowId: workflowTrigger.workflowId },
+                'wr.gate-eval-generic',
+                workflowTrigger.workspacePath,
+                stepId,
+                undefined,
+                DEFAULT_GATE_EVAL_TIMEOUT_MS,
+              );
+
+              const resumeResult = await resumeFromGate(
+                sessionId,
+                verdict,
+                ctx,
+                apiKey,
+                this.runWorkflowFn,
+                undefined,
+                emitter,
+                activeSessionSet,
+              );
+
+              if (resumeResult.kind === 'err') {
+                console.warn(
+                  `[TriggerRouter] Gate resume failed for session ${sessionId}: ${resumeResult.error.message}`,
+                );
+              } else {
+                console.log(
+                  `[TriggerRouter] Gate resumed: triggerId=${trigger.id} sessionId=${sessionId} ` +
+                  `verdict=${verdict.verdict}`,
+                );
+              }
+            } catch (e) {
+              console.error(
+                `[TriggerRouter] Gate evaluation threw for session ${sessionId}: ` +
+                `${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          })();
+        } else {
+          // coordinatorDeps not set -- gate evaluation requires coordinator infrastructure.
+          // This should not happen in production (coordinatorDeps is always set when
+          // WORKRAIL_TRIGGERS_ENABLED=true), but log clearly if it does.
+          console.warn(
+            `[TriggerRouter] Gate parked but coordinatorDeps not available -- cannot evaluate. ` +
+            `workflowId=${trigger.workflowId} sessionId=${sessionId}`,
+          );
+        }
       } else {
         // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
         // this will fail to compile, forcing the developer to handle the new case.

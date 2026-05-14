@@ -25,7 +25,6 @@ import type { V2ToolContext } from '../../mcp/types.js';
 // TODO: runWorkflow is imported from src/daemon/ -- remaining coupling to address when browser dispatch is redesigned
 import { runWorkflow } from '../../daemon/workflow-runner.js';
 import type { SessionSource, AllocatedSession } from '../../daemon/types.js';
-import type { ActiveSessionSet } from '../../daemon/active-sessions.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
@@ -138,16 +137,6 @@ export function mountConsoleRoutes(
   toolCallsPerfFile?: string,
   serverVersion?: string,
   v2ToolContext?: V2ToolContext,
-  /**
-   * The ActiveSessionSet shared with TriggerRouter. When provided, enables
-   * POST /api/v2/sessions/:sessionId/steer for coordinator-to-session injection.
-   * When absent (standalone console without daemon), the steer endpoint returns 503.
-   *
-   * WHY the same instance: trigger-listener.ts comment line 383 explicitly notes
-   * "Both TriggerRouter and the console route layer need the SAME instance."
-   * The instance is created once in trigger-listener.ts and passed here.
-   */
-  activeSessionSet?: ActiveSessionSet,
 ): () => void {
   // SSE state: per-instance, not module-level (see comment block above).
   const sseClients = new Set<Response>();
@@ -984,7 +973,7 @@ export function mountConsoleRoutes(
       apiKey ?? '',
       undefined,   // daemonRegistry -- not available in this path
       undefined,   // emitter -- not available in this path
-      undefined,   // activeSessionSet -- not applicable in standalone console
+      undefined,   // activeSessionSet -- no session registry in standalone console (steer not available here)
       undefined,   // _statsDir -- use default
       undefined,   // _sessionsDir -- use default
       source,
@@ -1030,47 +1019,9 @@ export function mountConsoleRoutes(
     res.json({ success: true, data: { triggers: [] } });
   });
 
-  // ---------------------------------------------------------------------------
-  // Steer endpoint
-  //
-  // POST /api/v2/sessions/:sessionId/steer
-  //
-  // Injects text into a running daemon session's next agent turn. Used by
-  // coordinators to deliver gate evaluation verdicts to parked sessions, and
-  // by operators to send mid-session messages.
-  //
-  // Requires the same ActiveSessionSet instance as TriggerRouter -- created
-  // once in trigger-listener.ts and passed to both.
-  //
-  // Returns:
-  //   200 { status: 'ok' } -- steer queued for next agent turn
-  //   400 { error: 'text is required' } -- body missing or text is empty
-  //   404 { error: 'session not found' } -- session not active in this process
-  //   503 { error: 'steer not available ...' } -- no activeSessionSet injected
-  // ---------------------------------------------------------------------------
-  app.post('/api/v2/sessions/:sessionId/steer', express.json(), (req: Request, res: Response) => {
-    if (!activeSessionSet) {
-      res.status(503).json({ error: 'Steer not available in standalone console mode. Run worktrain console alongside worktrain daemon.' });
-      return;
-    }
-
-    const { sessionId } = req.params as { sessionId: string };
-    const { text } = req.body as { text?: unknown };
-
-    if (typeof text !== 'string' || text.trim().length === 0) {
-      res.status(400).json({ error: 'text is required and must be a non-empty string' });
-      return;
-    }
-
-    const handle = activeSessionSet.get(sessionId as import('../../daemon/daemon-events.js').RunId);
-    if (!handle) {
-      res.status(404).json({ error: `Session not found: ${sessionId}` });
-      return;
-    }
-
-    handle.steer(text);
-    res.status(200).json({ status: 'ok' });
-  });
+  // Note: POST /sessions/:sessionId/steer is served by the daemon's trigger listener
+  // (port 3200), not here. The standalone console runs in a separate process and does
+  // not have access to the daemon's ActiveSessionSet. See trigger-listener.ts createTriggerApp().
 
   // --- Static file serving for Console UI ---
 

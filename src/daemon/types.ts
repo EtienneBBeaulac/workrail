@@ -419,6 +419,12 @@ export interface WorkflowRunGateParked {
   readonly gateToken: string;
   readonly stepId: string;
   readonly stopReason: string;
+  /**
+   * The daemon-local session UUID -- keys the sidecar file that resumeFromGate reads.
+   * WHY on the result: the trigger router calls resumeFromGate(sessionId, verdict) after
+   * gate evaluation; it needs this ID to find the right sidecar.
+   */
+  readonly sessionId: string;
 }
 
 /** Result of a runWorkflow() call. Never throws. */

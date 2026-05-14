@@ -18,6 +18,7 @@
 import type { GateVerdictArtifactV1 } from '../v2/durable-core/schemas/artifacts/index.js';
 import { isGateVerdictArtifact, parseGateVerdictArtifact } from '../v2/durable-core/schemas/artifacts/index.js';
 import type { Result } from '../runtime/result.js';
+import type { AwaitResult } from '../cli/commands/worktrain-await.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,10 +58,7 @@ export interface GateEvaluatorDeps {
   readonly awaitSessions: (
     handles: readonly string[],
     timeoutMs: number,
-  ) => Promise<{
-    results: Array<{ handle: string; outcome: 'success' | 'failed' | 'timeout'; status: string | null; durationMs: number }>;
-    allSucceeded: boolean;
-  }>;
+  ) => Promise<AwaitResult>;
   readonly getAgentResult: (
     sessionHandle: string,
   ) => Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }>;

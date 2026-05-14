@@ -161,7 +161,10 @@ export class SessionReader {
       if (isBlocked) return { kind: 'blocked' };
 
       // Gate checkpoint: tip is a gate_checkpoint node -- session paused awaiting evaluation.
-      // TODO(PR 2): coordinator reads paused_at_gate and dispatches gate evaluator session.
+      // TriggerRouter handles gate evaluation when runWorkflow() returns gate_parked.
+      // This SessionStatus variant surfaces gate state for awaitSessions() callers (e.g.
+      // coordinators polling child sessions). gateToken requires replayFromRecordedAdvance
+      // to mint -- callers that need it should use resumeFromGate() via TriggerRouter instead.
       if (tipNodeKind === 'gate_checkpoint') {
         const tipNode = tip ? run.nodesById[tip] : undefined;
         const gateSnapshotRef = tipNode ? asSnapshotRef(asSha256Digest(tipNode.snapshotRef)) : undefined;
@@ -171,7 +174,6 @@ export class SessionReader {
             // gateCheckpoint is a typed field on EnginePayloadV1 -- no cast needed.
             const gatePayload = gateSnapshot.value.enginePayload.gateCheckpoint;
             const stepId = gatePayload?.stepId ?? '';
-            // gateToken requires calling replayFromRecordedAdvance to mint. Stub for PR 2.
             return { kind: 'paused_at_gate', stepId, gateToken: null };
           }
         }
@@ -269,7 +271,10 @@ export class SessionReader {
     // Gate checkpoint: session paused at a requireConfirmation gate. PR 2 will dispatch
     // the gate evaluator; for now, treat as failed to unblock the coordinator.
     if (statusResult.kind === 'paused_at_gate') {
-      return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} paused at gate checkpoint (step '${statusResult.stepId}'). Gate evaluation not yet implemented.` };
+      // Gate evaluation for child sessions spawned by spawn_agent is not yet wired.
+      // The TriggerRouter handles top-level gate evaluation; child session gates escalate
+      // to the parent as 'stuck' so the parent can report_issue and the operator is notified.
+      return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} paused at gate checkpoint (step '${statusResult.stepId}'). Parent session should report_issue.` };
     }
     if (statusResult.kind === 'hard_fail') {
       process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] fetchChildSessionResult: ${statusResult.message}\n`);

@@ -295,7 +295,7 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
       kind: 'single',
       childSessionId,
       outcome: 'stuck',
-      notes: `Child session parked at gate checkpoint (step: '${childResult.stepId}'). Gate evaluation not yet implemented.`,
+      notes: `Child session parked at gate checkpoint (step: '${childResult.stepId}'). Gate evaluation for spawned child sessions is handled at the coordinator level (TriggerRouter) for top-level sessions; child session gates surface as stuck so the parent can report_issue.`,
     };
   } else {
     // Compile-time exhaustiveness guard. If ChildWorkflowRunResult gains a new variant
