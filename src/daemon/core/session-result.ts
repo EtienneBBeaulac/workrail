@@ -146,6 +146,7 @@ export function buildSessionResult(
         stepId: signal.stepId,
         stopReason: 'gate_parked',
         sessionId: String(sessionId),
+        ...(state.workrailSessionId !== null ? { workrailSessionId: state.workrailSessionId } : {}),
       };
     }
     if (signal.kind === 'timeout') {

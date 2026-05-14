@@ -181,7 +181,7 @@ describe('evaluateGate()', () => {
     });
 
     const CUSTOM_TIMEOUT = 5 * 60 * 1000;
-    await evaluateGate(deps, ARTIFACT, 'wr.gate-eval-generic', WORKSPACE, STEP_ID, undefined, CUSTOM_TIMEOUT);
+    await evaluateGate(deps, ARTIFACT, 'wr.gate-eval-generic', WORKSPACE, STEP_ID, undefined, undefined, CUSTOM_TIMEOUT);
 
     expect(capturedTimeout).toBe(CUSTOM_TIMEOUT);
   });
@@ -195,5 +195,100 @@ describe('evaluateGate()', () => {
 
     expect(verdict.verdict).toBe('uncertain');
     expect(verdict.rationale).toMatch(/session store unavailable/);
+  });
+});
+
+describe('evaluateGate() -- readStepOutput enrichment', () => {
+  const WORKSPACE = os.tmpdir();
+  const STEP_ID = 'design-gate';
+  const WR_SESSION_ID = 'sess_abc123';
+
+  function makeVerdictArtifact() {
+    return {
+      kind: 'wr.gate_verdict',
+      version: 1,
+      verdict: 'approved' as const,
+      confidence: 'high' as const,
+      rationale: 'Step output is complete and meets quality standards.',
+    };
+  }
+
+  function makeDepsWithOutput(overrides: Partial<GateEvaluatorDeps> = {}): GateEvaluatorDeps {
+    return {
+      spawnSession: async () => ({ kind: 'ok', value: 'sess_evaluator_001' }),
+      awaitSessions: async () => ({
+        results: [{ handle: 'sess_evaluator_001', outcome: 'success', status: 'complete', durationMs: 100 }],
+        allSucceeded: true,
+      }),
+      getAgentResult: async () => ({ recapMarkdown: null, artifacts: [makeVerdictArtifact()] }),
+      stderr: () => {},
+      ...overrides,
+    };
+  }
+
+  it('injects stepNotes into spawnSession context when readStepOutput returns notes', async () => {
+    let capturedContext: Record<string, unknown> | undefined;
+    const deps = makeDepsWithOutput({
+      spawnSession: async (_wfId, _goal, _workspace, context) => {
+        capturedContext = context as Record<string, unknown>;
+        return { kind: 'ok', value: 'sess_evaluator_001' };
+      },
+      readStepOutput: async () => ({ recapMarkdown: 'The design candidate A uses a sealed class.', artifacts: [] }),
+    });
+
+    await evaluateGate(deps, {}, 'wr.gate-eval-generic', WORKSPACE, STEP_ID, WR_SESSION_ID);
+
+    expect(capturedContext?.stepNotes).toBe('The design candidate A uses a sealed class.');
+  });
+
+  it('proceeds with metadata-only context when readStepOutput returns null', async () => {
+    let capturedContext: Record<string, unknown> | undefined;
+    const deps = makeDepsWithOutput({
+      spawnSession: async (_wfId, _goal, _workspace, context) => {
+        capturedContext = context as Record<string, unknown>;
+        return { kind: 'ok', value: 'sess_evaluator_001' };
+      },
+      readStepOutput: async () => null,
+    });
+
+    await evaluateGate(deps, {}, 'wr.gate-eval-generic', WORKSPACE, STEP_ID, WR_SESSION_ID);
+
+    expect(capturedContext?.stepNotes).toBeUndefined();
+    expect(capturedContext?.stepId).toBe(STEP_ID);
+  });
+
+  it('proceeds with metadata-only context when readStepOutput throws', async () => {
+    let capturedContext: Record<string, unknown> | undefined;
+    const deps = makeDepsWithOutput({
+      spawnSession: async (_wfId, _goal, _workspace, context) => {
+        capturedContext = context as Record<string, unknown>;
+        return { kind: 'ok', value: 'sess_evaluator_001' };
+      },
+      readStepOutput: async () => { throw new Error('session store unavailable'); },
+    });
+
+    await evaluateGate(deps, {}, 'wr.gate-eval-generic', WORKSPACE, STEP_ID, WR_SESSION_ID);
+
+    // Should not throw and should proceed without stepNotes
+    expect(capturedContext?.stepNotes).toBeUndefined();
+    expect(capturedContext?.stepId).toBe(STEP_ID);
+  });
+
+  it('truncates stepNotes exceeding 4000 characters', async () => {
+    const longNotes = 'x'.repeat(5000);
+    let capturedContext: Record<string, unknown> | undefined;
+    const deps = makeDepsWithOutput({
+      spawnSession: async (_wfId, _goal, _workspace, context) => {
+        capturedContext = context as Record<string, unknown>;
+        return { kind: 'ok', value: 'sess_evaluator_001' };
+      },
+      readStepOutput: async () => ({ recapMarkdown: longNotes, artifacts: [] }),
+    });
+
+    await evaluateGate(deps, {}, 'wr.gate-eval-generic', WORKSPACE, STEP_ID, WR_SESSION_ID);
+
+    const injectedNotes = capturedContext?.stepNotes as string;
+    expect(injectedNotes.length).toBeLessThan(5000);
+    expect(injectedNotes).toContain('[truncated]');
   });
 });

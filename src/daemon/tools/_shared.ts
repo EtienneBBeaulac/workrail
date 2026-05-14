@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ok, err } from '../../runtime/result.js';
 import type { Result } from '../../runtime/result.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -52,7 +53,7 @@ export const GLOB_ALWAYS_EXCLUDE = ['**/node_modules/**', '**/.git/**', '**/dist
  * returns. All subsequent events include it when available, via this helper.
  * Returns an empty object when sid is null so callers can spread unconditionally.
  */
-export function withWorkrailSession(sid: string | null | undefined): { workrailSessionId?: string } {
+export function withWorkrailSession(sid: SessionId | string | null | undefined): { workrailSessionId?: string } {
   return sid != null ? { workrailSessionId: sid } : {};
 }
 
@@ -93,6 +94,7 @@ export async function persistTokens(
     readonly gateToken: string;
     readonly stepId: string;
   },
+  workrailSessionId?: SessionId | null,
 ): Promise<Result<void, PersistTokensError>> {
   try {
     await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
@@ -110,6 +112,7 @@ export async function persistTokens(
           workspacePath: recoveryContext.workspacePath,
         } : {}),
         ...(gateState !== undefined ? { gateState } : {}),
+        ...(workrailSessionId != null ? { workrailSessionId } : {}),
       },
       null,
       2,

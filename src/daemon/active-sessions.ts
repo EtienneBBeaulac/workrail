@@ -12,6 +12,7 @@
 
 import type { AgentLoop } from './agent-loop.js';
 import type { RunId } from './daemon-events.js';
+import type { SessionId } from '../v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // SessionHandle interface
@@ -24,7 +25,7 @@ export interface SessionHandle {
    * Set via setWorkrailSessionId() after the continueToken is decoded.
    * Null until decoding completes (~50ms after session start).
    */
-  readonly workrailSessionId: string | null;
+  readonly workrailSessionId: SessionId | null;
   /** Inject text into the session's next agent turn. */
   steer(text: string): void;
   /**
@@ -32,7 +33,7 @@ export interface SessionHandle {
    * Called from buildPreAgentSession() after parseContinueTokenOrFail() succeeds.
    * Idempotent: second call is a no-op (first writer wins).
    */
-  setWorkrailSessionId(workrailSessionId: string): void;
+  setWorkrailSessionId(workrailSessionId: SessionId): void;
   /**
    * Wire in the AgentLoop reference for abort capability.
    * Must be called after `const agent = new AgentLoop(...)`.
@@ -57,7 +58,7 @@ export interface SessionHandle {
 
 class SessionHandleImpl implements SessionHandle {
   readonly sessionId: RunId;
-  private _workrailSessionId: string | null = null;
+  private _workrailSessionId: SessionId | null = null;
   private readonly _onSteer: (text: string) => void;
   private _agent: AgentLoop | null = null;
   private readonly _set: ActiveSessionSet;
@@ -68,7 +69,7 @@ class SessionHandleImpl implements SessionHandle {
     this._set = set;
   }
 
-  get workrailSessionId(): string | null {
+  get workrailSessionId(): SessionId | null {
     return this._workrailSessionId;
   }
 
@@ -76,7 +77,7 @@ class SessionHandleImpl implements SessionHandle {
     this._onSteer(text);
   }
 
-  setWorkrailSessionId(workrailSessionId: string): void {
+  setWorkrailSessionId(workrailSessionId: SessionId): void {
     if (this._workrailSessionId === null) {
       this._workrailSessionId = workrailSessionId;
     }

@@ -828,12 +828,12 @@ export class TriggerRouter {
           // Dispatch gate evaluation fire-and-forget.
           void (async () => {
             try {
-              // WHY goal/workflowId as artifact context: the trigger router doesn't have
-              // direct access to the step's output artifacts without reading the session
-              // store (which requires the workrail session ID, not the sidecar session ID).
-              // Passing the goal and workflow ID gives the evaluator enough context to
-              // apply general quality standards. A future iteration can enrich this by
-              // reading the session store for the completed step's notes and typed artifacts.
+              // workrailSessionId is carried directly on the typed result -- no sidecar read needed.
+              // WHY on the result (not sidecar): WorkflowRunGateParked.workrailSessionId is the
+              // branded SessionId populated by buildSessionResult from state.workrailSessionId.
+              // The typed result is the single source of truth; the sidecar is for crash recovery only.
+              const gateWorkrailSessionId = result.workrailSessionId;
+
               const artifactContext = {
                 stepId,
                 workflowId: workflowTrigger.workflowId,
@@ -846,12 +846,14 @@ export class TriggerRouter {
                   awaitSessions: (handles, timeoutMs) => deps.awaitSessions(handles, timeoutMs),
                   getAgentResult: (handle) => deps.getAgentResult(handle),
                   stderr: (line) => process.stderr.write(line + '\n'),
+                  readStepOutput: (wrSessionId) => deps.getAgentResult(wrSessionId),
                 },
                 artifactContext,
                 'wr.gate-eval-generic',
                 workflowTrigger.workspacePath,
                 stepId,
-                undefined,
+                gateWorkrailSessionId,
+                undefined, // criteria
                 DEFAULT_GATE_EVAL_TIMEOUT_MS,
               );
 

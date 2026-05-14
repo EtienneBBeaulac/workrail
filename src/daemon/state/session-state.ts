@@ -21,6 +21,8 @@
  */
 
 import type { TerminalSignal } from './terminal-signal.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
+import { asSessionId } from '../../v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // SessionState interface
@@ -61,7 +63,7 @@ export interface SessionState {
    * Starts null; populated by setSessionId(). Used to key DaemonRegistry,
    * ActiveSessionSet, and event emission.
    */
-  workrailSessionId: string | null;
+  workrailSessionId: SessionId | null;
   /**
    * Number of times advanceStep() was called (workflow step advances in the agent loop).
    * Used for stuck detection Signal 2 and recorded in execution stats as stepCount.
@@ -196,7 +198,7 @@ export function updateToken(state: SessionState, token: string): void {
  * Called by buildPreAgentSession() after parseContinueTokenOrFail() succeeds.
  */
 export function setSessionId(state: SessionState, id: string): void {
-  state.workrailSessionId = id;
+  state.workrailSessionId = asSessionId(id);
 }
 
 /**

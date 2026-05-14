@@ -22,6 +22,7 @@
 import type { ReadFileState } from './types.js';
 import type { ActiveSessionSet } from './active-sessions.js';
 import type { DaemonEventEmitter, RunId } from './daemon-events.js';
+import type { SessionId } from '../v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // FileStateTracker
@@ -234,7 +235,7 @@ export interface SessionScope {
    * The WorkRail session ID (decoded from the continue token), or null if the
    * session has not yet been started.
    */
-  readonly workrailSessionId: string | null;
+  readonly workrailSessionId: SessionId | null;
 
   /**
    * Event emitter for daemon observability events. May be undefined in

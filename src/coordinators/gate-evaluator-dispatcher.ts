@@ -19,6 +19,7 @@ import type { GateVerdictArtifactV1 } from '../v2/durable-core/schemas/artifacts
 import { isGateVerdictArtifact, parseGateVerdictArtifact } from '../v2/durable-core/schemas/artifacts/index.js';
 import type { Result } from '../runtime/result.js';
 import type { AwaitResult } from '../cli/commands/worktrain-await.js';
+import type { SessionId } from '../v2/durable-core/ids/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,6 +64,15 @@ export interface GateEvaluatorDeps {
     sessionHandle: string,
   ) => Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }>;
   readonly stderr: (line: string) => void;
+  /**
+   * Optional: read the step output (notes + artifacts) for a parked session.
+   * When present, evaluateGate enriches the evaluator context with the parked
+   * step's actual output so the evaluator can make a substantive verdict.
+   * When absent or when it returns null, evaluateGate falls back to metadata-only context.
+   */
+  readonly readStepOutput?: (
+    workrailSessionId: SessionId,
+  ) => Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] } | null>;
 }
 
 /** Default gate evaluation timeout: 30 minutes. */
@@ -72,6 +82,9 @@ export const DEFAULT_GATE_EVAL_TIMEOUT_MS = 30 * 60 * 1000;
 // evaluateGate
 // ---------------------------------------------------------------------------
 
+/** Max characters of step notes injected into evaluator context. Prevents context budget overrun. */
+const MAX_STEP_NOTES_CHARS = 4000;
+
 /**
  * Spawn an independent evaluator session and return a typed GateVerdict.
  *
@@ -80,12 +93,19 @@ export const DEFAULT_GATE_EVAL_TIMEOUT_MS = 30 * 60 * 1000;
  * not have access to the parent session's conversation history -- isolation
  * is enforced by passing only the artifact object, not a session ID or handle.
  *
- * @param deps - Injectable coordinator deps (spawnSession, awaitSessions, getAgentResult)
+ * When deps.readStepOutput is provided and workrailSessionId is set, evaluateGate
+ * reads the parked step's actual notes and artifacts from the session store and
+ * injects them as 'stepNotes' and 'stepArtifacts' context variables. This allows
+ * the evaluator to make a substantive verdict rather than relying on metadata only.
+ * If readStepOutput fails or returns null, the function falls back to metadata-only context.
+ *
+ * @param deps - Injectable coordinator deps (spawnSession, awaitSessions, getAgentResult, readStepOutput?)
  * @param artifact - The typed artifact from the gate step to evaluate (as unknown to
  *   allow callers to pass coordinator-side artifacts before type-checking)
  * @param evaluatorWorkflowId - WorkRail workflow ID for the evaluator (e.g. 'wr.gate-eval-generic')
  * @param workspace - Absolute path to the workspace for the evaluator session
  * @param stepId - The ID of the step whose gate fired (for verdict attribution)
+ * @param workrailSessionId - WorkRail session ID of the parked session (for step output lookup)
  * @param criteria - Optional free-text evaluation criteria injected as context
  * @param timeoutMs - Max wait time for the evaluator session (default 30 min)
  */
@@ -95,6 +115,7 @@ export async function evaluateGate(
   evaluatorWorkflowId: string,
   workspace: string,
   stepId: string,
+  workrailSessionId?: SessionId,
   criteria?: string,
   timeoutMs: number = DEFAULT_GATE_EVAL_TIMEOUT_MS,
 ): Promise<GateVerdict> {
@@ -114,6 +135,21 @@ export async function evaluateGate(
     stepId,
     ...(criteria !== undefined ? { criteria } : {}),
   };
+
+  // Enrich context with actual step output when available.
+  // WHY truncate: context has a budget; uncapped notes could trigger context_budget_exceeded.
+  // WHY stepArtifacts as JSON string: context values are scalar; objects would be stringified anyway.
+  if (workrailSessionId && deps.readStepOutput) {
+    const stepOutput = await deps.readStepOutput(workrailSessionId).catch(() => null);
+    if (stepOutput?.recapMarkdown) {
+      context.stepNotes = stepOutput.recapMarkdown.length > MAX_STEP_NOTES_CHARS
+        ? stepOutput.recapMarkdown.slice(0, MAX_STEP_NOTES_CHARS) + '\n[truncated]'
+        : stepOutput.recapMarkdown;
+    }
+    if (stepOutput?.artifacts && stepOutput.artifacts.length > 0) {
+      context.stepArtifacts = JSON.stringify(stepOutput.artifacts);
+    }
+  }
 
   const goal = `Evaluate the gate artifact for step '${stepId}' and produce a wr.gate_verdict artifact.`;
 

@@ -29,6 +29,7 @@
  * and detect file modification between read and write.
  */
 import type { RunId } from './daemon-events.js';
+import type { SessionId } from '../v2/durable-core/ids/index.js';
 export type { RunId } from './daemon-events.js';
 
 export type ReadFileState = { content: string; timestamp: number; isPartialView: boolean };
@@ -425,6 +426,13 @@ export interface WorkflowRunGateParked {
    * gate evaluation; it needs this ID to find the right sidecar.
    */
   readonly sessionId: string;
+  /**
+   * The WorkRail session ID (sess_* branded ID) of the parked session.
+   * WHY on the result: lets the coordinator read the parked step's output from the
+   * session store without a second sidecar disk read. Absent when the WorkRail session
+   * ID was not yet decoded at gate time (e.g. agent crashed before token decode).
+   */
+  readonly workrailSessionId?: SessionId;
 }
 
 /** Result of a runWorkflow() call. Never throws. */
