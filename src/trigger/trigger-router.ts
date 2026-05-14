@@ -828,6 +828,17 @@ export class TriggerRouter {
           // Dispatch gate evaluation fire-and-forget.
           void (async () => {
             try {
+              // WHY goal/workflowId as artifact context: the trigger router doesn't have
+              // direct access to the step's output artifacts without reading the session
+              // store (which requires the workrail session ID, not the sidecar session ID).
+              // Passing the goal and workflow ID gives the evaluator enough context to
+              // apply general quality standards. A future iteration can enrich this by
+              // reading the session store for the completed step's notes and typed artifacts.
+              const artifactContext = {
+                stepId,
+                workflowId: workflowTrigger.workflowId,
+                goal: workflowTrigger.goal,
+              };
               const verdict = await evaluateGate(
                 {
                   spawnSession: (wfId, goal, workspace, context, agentConfig) =>
@@ -836,7 +847,7 @@ export class TriggerRouter {
                   getAgentResult: (handle) => deps.getAgentResult(handle),
                   stderr: (line) => process.stderr.write(line + '\n'),
                 },
-                { stepId, workflowId: workflowTrigger.workflowId },
+                artifactContext,
                 'wr.gate-eval-generic',
                 workflowTrigger.workspacePath,
                 stepId,

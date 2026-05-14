@@ -151,13 +151,14 @@ export function advanceAndRecord(args: {
       });
     }
 
-    // Gate checkpoint: coordinator is calling continue_workflow on a gate_checkpoint node.
-    // This is the resume path -- implemented in PR 2. For now, return a clear error.
-    // TODO(PR 2): implement resume_from_gate MCP tool and handle gate resumption here.
+    // Gate checkpoint node: resumed via resumeFromGate() in src/daemon/gate-resume.ts,
+    // which calls executeContinueWorkflow({intent:'rehydrate'}) then fires a fresh
+    // runWorkflow(pre_allocated) call. Direct continue_workflow on a gate_checkpoint
+    // node from an MCP client is not a supported path.
     if (nodeCreated.data.nodeKind === 'gate_checkpoint') {
       return neErrorAsync({
         kind: 'invariant_violation' as const,
-        message: 'Gate checkpoint resumption is not yet implemented. Use resume_from_gate (available in a future release).',
+        message: 'Gate checkpoint nodes are resumed via resumeFromGate() in src/daemon/gate-resume.ts, not via continue_workflow directly.',
       } as InternalError);
     }
 
