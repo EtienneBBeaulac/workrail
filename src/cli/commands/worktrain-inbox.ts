@@ -121,7 +121,6 @@ export async function executeWorktrainInboxCommand(
     }
 
     process.removeListener('SIGINT', onSigint);
-    deps.print('');
     deps.print('Stopped watching.');
     return success({ message: 'Watch stopped.' });
   }

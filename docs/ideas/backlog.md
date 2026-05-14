@@ -1289,6 +1289,23 @@ The `github_queue_poll` trigger has a 5-minute latency floor. Assigning an issue
 
 ---
 
+### Gate evaluator receives no actual step output (May 14, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+When a daemon session parks at a `requireConfirmation` gate, the coordinator spawns `wr.gate-eval-generic` to evaluate whether the completed step's output meets quality standards. Currently the evaluator receives only metadata (`{ stepId, workflowId, goal }`) -- not the actual step notes or typed artifacts. The evaluator has nothing substantive to evaluate and correctly returns `'uncertain'` every time. This means every gate escalates to the operator rather than auto-approving even when the output is clearly good.
+
+The step's notes and typed artifacts are durable in the session event log, but there is currently no path from `WorkflowRunGateParked` to the session store read needed to retrieve them.
+
+**Things to hash out:**
+- What is the minimal artifact the evaluator needs? Just the completed step's notes, or all accumulated session notes plus any typed artifacts from the gate step?
+- How does the coordinator identify which session to read from? `WorkflowRunGateParked` carries the daemon-local UUID but the session store is keyed by the workrail `sess_*` ID.
+- Should enrichment happen at the trigger-router level (coordinator reads session store before calling evaluateGate) or inside evaluateGate itself (evaluator receives a session handle it can query)?
+
+---
+
 ### Gate 2 follow-up: per-trigger gh CLI token for delivery (Apr 20, 2026)
 
 **Status: idea** | Priority: medium
@@ -1404,6 +1421,36 @@ Should land before WorkTrain is used in team repos with strict PR templates.
 - Who is responsible for updating the injected template when the repo's template changes? Is this pulled fresh at dispatch time, or cached?
 - GitLab MR templates have a different discovery path than GitHub PR templates. Should both providers be handled by the same abstraction, or is each provider responsible for its own template resolution?
 - Should WorkTrain ever skip template injection if the agent's own `prBody` output already satisfies the template structure? Or is injection always mandatory?
+
+---
+
+### Configurable delivery timing: review-before-PR as the default (May 13, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:3 Cap:1 Eff:2 Lev:2 Con:3 | Blocked: no
+
+In the FULL and IMPLEMENT pipeline modes, the coordinator currently runs delivery (git commit + `gh pr create`) before review. Review then runs on the open PR. This ordering has a real cost: WorkTrain opens a PR that is visibly broken or low-quality before the review agent has had a chance to flag problems. Human reviewers may see the PR before WorkTrain finishes its own review cycle. In the worst case, a reviewer comments before WorkTrain's fix loop completes, and the conversation interleaves with autonomous commits.
+
+The better default is: **run review on the committed branch before opening the PR**. The reviewer sees the code; WorkTrain fixes what needs fixing; only then is the PR opened (clean, review-passed, with a summary that includes what was already addressed). For most workflows this is strictly better for humans watching the repo.
+
+That said, some setups want the current behavior: CI runs on the PR, not on a branch push, so the PR must exist before review to get test results. Others want to open a draft PR early as a checkpoint. The right answer is a configurable delivery policy, not a hard-coded sequence.
+
+**What needs to exist:**
+
+A `deliveryPolicy` field on the trigger definition (or as a workflow-level default) with at least two modes:
+- `review_then_pr` (proposed default): commit to branch, run review on branch, fix loop, then `gh pr create` at the end
+- `pr_then_review` (current behavior): create PR immediately after coding, run review on the open PR
+
+The coordinator's `runFullPipelineCore` and `runImplementPipeline` would need to split delivery into two parts: a pre-review commit step (push branch) and a post-review PR creation step. The branch exists for the reviewer to run `gh pr view --web` or diff against, but no PR is open until the review cycle passes.
+
+**Things to hash out:**
+
+- Does `review_then_pr` require pushing the branch before spawning the review session, or can the reviewer work entirely from the local worktree? The reviewer may need to run `gh` CLI commands that require a remote branch, so a push (without PR) is probably required.
+- What is the retry token for `pr_then_review` when `gh pr create` is rate-limited or fails? Currently delivery failure escalates; this behavior should stay the same regardless of mode.
+- Does `deliveryPolicy` belong on the trigger definition or should it be a per-pipeline-run override that the operator can pass via `modeOverride`?
+- Should `review_then_pr` also apply to the PR body? The coding agent's `HandoffArtifact.prBody` is the source of truth today. Under `review_then_pr`, the review agent's summary of what was addressed should be appended before the PR is opened.
+- Draft PR as a third mode (`draft_pr_then_review`): create a draft PR immediately (satisfies CI triggers), run review on it, fix, un-draft on pass. Worth a separate entry if this pattern is needed.
 
 ---
 

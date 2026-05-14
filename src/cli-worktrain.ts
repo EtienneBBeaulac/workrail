@@ -176,7 +176,7 @@ program
 program
   .command('inbox')
   .description('Read unread messages from the WorkTrain daemon (~/.workrail/outbox.jsonl)')
-  .option('-w, --watch', 'Watch for new messages in real time (not yet implemented)')
+  .option('-w, --watch', 'Watch for new messages in real time (polls every 2s, Ctrl-C to stop)')
   .action(async (options: { watch?: boolean }) => {
     const result = await executeWorktrainInboxCommand(
       {

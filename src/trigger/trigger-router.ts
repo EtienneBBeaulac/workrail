@@ -43,7 +43,7 @@ import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
 import { runAdaptivePipeline } from '../coordinators/adaptive-pipeline.js';
 import { DispatchDeduplicator } from './dispatch-deduplicator.js';
-import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS } from '../coordinators/gate-evaluator-dispatcher.js';
+import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS, DEFAULT_GATE_EVALUATOR_WORKFLOW_ID } from '../coordinators/gate-evaluator-dispatcher.js';
 import { resumeFromGate } from '../daemon/gate-resume.js';
 
 /**
@@ -848,7 +848,7 @@ export class TriggerRouter {
                   stderr: (line) => process.stderr.write(line + '\n'),
                 },
                 artifactContext,
-                'wr.gate-eval-generic',
+                DEFAULT_GATE_EVALUATOR_WORKFLOW_ID,
                 workflowTrigger.workspacePath,
                 stepId,
                 undefined,
