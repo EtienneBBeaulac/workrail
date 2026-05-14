@@ -26,9 +26,10 @@
       "title": "Evaluate Artifact",
       "requireConfirmation": false,
       "prompt": "You are an independent gate evaluator. You have been given a serialized artifact to evaluate and a set of criteria.\n\nYour job is to:\n1. Understand what the artifact claims\n2. Evaluate whether those claims meet the criteria\n3. Reach a clear verdict: 'approved', 'rejected', or 'uncertain'\n\n**Artifact (JSON):**\n{{artifact}}\n\n**Step being evaluated:** {{stepId}}\n\n**Evaluation criteria:**\n{{criteria}}\n\n**Important constraints:**\n- Evaluate ONLY what is present in the artifact. Do not infer the producing session's intent from outside context.\n- If the criteria field is empty, apply general quality standards: is the output substantive, complete, and internally consistent?\n- 'uncertain' is correct when you genuinely cannot determine whether criteria are met from the artifact alone.\n- Do not guess at missing information. Note gaps explicitly.\n\nIn your notes, write:\n1. What the artifact claims / contains (2-3 sentences)\n2. How it maps to each criterion (or to quality standards if no criteria)\n3. Your verdict and rationale\n4. Your confidence level: high / medium / low",
-      "outputRequired": {
-        "evaluation": "3-part assessment: what the artifact contains, how it maps to criteria, your verdict with rationale"
-      }
+      "guidance": [
+        "Your notes must include: (1) what the artifact contains, (2) how it maps to criteria, (3) your verdict with rationale, (4) your confidence level.",
+        "Minimum note length: 3 sentences. Generic one-liners are not acceptable."
+      ]
     },
     {
       "id": "emit-verdict",
