@@ -38,7 +38,7 @@ export interface ValidatedAdvanceInputs {
   readonly outputContract: OutputContract | undefined;
   readonly notesMarkdown: string | undefined;
   readonly artifacts: readonly unknown[];
-  readonly triggeredAssessmentConsequence: TriggeredAssessmentConsequenceV1 | undefined;
+  readonly triggeredAssessmentConsequences: readonly TriggeredAssessmentConsequenceV1[];
   readonly stepAssessments: readonly AssessmentDefinition[];
   readonly autonomy: 'guided' | 'full_auto_stop_on_user_deps' | 'full_auto_never_stop';
   readonly riskPolicy: 'conservative' | 'balanced' | 'aggressive';
@@ -116,7 +116,7 @@ export function validateAdvanceInputs(args: {
         artifacts: inputOutput?.artifacts ?? [],
       })
     : undefined;
-  const triggeredAssessmentConsequence = evaluateAssessmentConsequences({
+  const triggeredAssessmentConsequences = evaluateAssessmentConsequences({
     step: typedStep,
     recordedAssessments: assessmentValidation?.recordedAssessments ?? [],
   });
@@ -172,7 +172,7 @@ export function validateAdvanceInputs(args: {
     outputContract,
     notesMarkdown: inputOutput?.notesMarkdown,
     artifacts: inputOutput?.artifacts ?? [],
-    triggeredAssessmentConsequence,
+    triggeredAssessmentConsequences,
     stepAssessments,
     autonomy,
     riskPolicy,

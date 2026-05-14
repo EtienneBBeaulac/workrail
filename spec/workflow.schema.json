@@ -472,12 +472,12 @@
         },
         "assessmentConsequences": {
           "type": "array",
-          "description": "Step-local assessment consequence declarations. V1 supports at most one exact-match follow-up consequence.",
+          "description": "Step-local assessment consequence declarations. Each consequence fires independently when its trigger level matches. Use forAssessment to scope a consequence to a specific assessmentRef when multiple assessments are declared on the same step.",
           "items": {
             "$ref": "#/$defs/assessmentConsequence"
           },
           "minItems": 1,
-          "maxItems": 1
+          "maxItems": 10
         },
         "notesOptional": {
           "type": "boolean",
@@ -1086,12 +1086,18 @@
     },
     "assessmentConsequenceTrigger": {
       "type": "object",
-      "description": "Fires when ANY dimension in the submitted assessment equals the given level. The consequence blocks advancement until the agent addresses all dimensions that scored at that level.",
+      "description": "Fires when ANY dimension in the submitted assessment equals the given level. The consequence blocks advancement until the agent addresses all dimensions that scored at that level. Use forAssessment to scope the consequence to a specific assessment when a step declares multiple assessmentRefs.",
       "properties": {
         "anyEqualsLevel": {
           "type": "string",
           "minLength": 1,
           "maxLength": 64
+        },
+        "forAssessment": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Optional: scope this consequence to a specific assessment ID. Must be one of the assessmentRefs declared on the same step. When absent, any recorded assessment matching anyEqualsLevel fires the consequence."
         }
       },
       "required": ["anyEqualsLevel"],

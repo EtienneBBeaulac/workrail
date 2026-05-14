@@ -908,11 +908,6 @@ export class ValidationEngine {
         return;
       }
 
-      if (step.assessmentConsequences.length > 1) {
-        issues.push(`${stepLabel}: v1 assessment support allows exactly one assessment consequence per step`);
-        suggestions.push(`Reduce assessmentConsequences on ${stepLabel} to a single declaration`);
-      }
-
       const referencedDefinitions = assessments.filter(assessment => step.assessmentRefs!.includes(assessment.id));
       if (referencedDefinitions.length === 0) return;
 
@@ -920,14 +915,38 @@ export class ValidationEngine {
         const trigger = consequence.when;
         const effect = consequence.effect;
 
-        const allLevels = referencedDefinitions.flatMap(def => def.dimensions.flatMap(d => d.levels));
-        if (!allLevels.includes(trigger.anyEqualsLevel)) {
-          issues.push(
-            `${stepLabel}: assessment consequence anyEqualsLevel '${trigger.anyEqualsLevel}' is not declared in any dimension of any referenced assessment`
-          );
-          suggestions.push(
-            `Use a level declared in one of the dimensions: ${[...new Set(allLevels)].join(', ')}`
-          );
+        if (trigger.forAssessment !== undefined) {
+          // forAssessment must name a declared assessmentRef.
+          if (!step.assessmentRefs!.includes(trigger.forAssessment)) {
+            issues.push(
+              `${stepLabel}: assessment consequence forAssessment '${trigger.forAssessment}' is not in the step's assessmentRefs`
+            );
+            suggestions.push(
+              `Use one of the declared assessmentRefs: ${step.assessmentRefs!.join(', ')}`
+            );
+          } else {
+            // Level must exist in the scoped assessment.
+            const scopedDef = referencedDefinitions.find(d => d.id === trigger.forAssessment);
+            const scopedLevels = scopedDef?.dimensions.flatMap(d => d.levels) ?? [];
+            if (!scopedLevels.includes(trigger.anyEqualsLevel)) {
+              issues.push(
+                `${stepLabel}: assessment consequence anyEqualsLevel '${trigger.anyEqualsLevel}' is not declared in assessment '${trigger.forAssessment}'`
+              );
+              suggestions.push(
+                `Use a level declared in '${trigger.forAssessment}': ${[...new Set(scopedLevels)].join(', ')}`
+              );
+            }
+          }
+        } else {
+          const allLevels = referencedDefinitions.flatMap(def => def.dimensions.flatMap(d => d.levels));
+          if (!allLevels.includes(trigger.anyEqualsLevel)) {
+            issues.push(
+              `${stepLabel}: assessment consequence anyEqualsLevel '${trigger.anyEqualsLevel}' is not declared in any dimension of any referenced assessment`
+            );
+            suggestions.push(
+              `Use a level declared in one of the dimensions: ${[...new Set(allLevels)].join(', ')}`
+            );
+          }
         }
 
         if (effect.kind !== 'require_followup') {

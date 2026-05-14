@@ -129,15 +129,15 @@ export function buildBlockedOutcome(args: {
     extraEventsToAppend.push(assessmentEventRes.value);
   }
 
-  if (validated?.triggeredAssessmentConsequence) {
+  for (const consequence of validated?.triggeredAssessmentConsequences ?? []) {
     const consequenceEventRes = buildAssessmentConsequenceAppliedEvent({
       sessionId: String(sessionId),
       attemptId: String(attemptId),
       scope: { runId: String(runId), nodeId: String(currentNodeId) },
-      assessmentId: validated.triggeredAssessmentConsequence.assessmentId,
-      dimensionId: validated.triggeredAssessmentConsequence.firstMatchedDimensionId,
-      level: validated.triggeredAssessmentConsequence.triggerLevel,
-      guidance: validated.triggeredAssessmentConsequence.guidance,
+      assessmentId: consequence.assessmentId,
+      dimensionId: consequence.dimensionId,
+      level: consequence.triggerLevel,
+      guidance: consequence.guidance,
       minted: { eventId: idFactory.mintEventId() },
     });
     if (consequenceEventRes.isErr()) {

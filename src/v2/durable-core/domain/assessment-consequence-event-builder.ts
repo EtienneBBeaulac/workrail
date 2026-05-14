@@ -26,11 +26,15 @@ export function buildAssessmentConsequenceAppliedEvent(args: {
     return err({ code: 'ASSESSMENT_CONSEQUENCE_EVENT_INVARIANT_VIOLATION', message: 'assessment consequence fields are required' });
   }
 
+  // WHY include assessmentId+dimensionId in the dedupeKey: multiple consequences can fire
+  // in one attempt (one per declared assessmentConsequence that matches). Each must produce
+  // a distinct event. Using assessmentId:dimensionId makes the key unique per consequence
+  // AND idempotent on retry -- the same consequence always produces the same key.
   return ok({
     v: 1,
     eventId: args.minted.eventId,
     kind: EVENT_KIND.ASSESSMENT_CONSEQUENCE_APPLIED,
-    dedupeKey: `assessment_consequence_applied:${args.sessionId}:${args.scope.nodeId}:${args.attemptId}` as DomainEventV1['dedupeKey'],
+    dedupeKey: `assessment_consequence_applied:${args.sessionId}:${args.scope.nodeId}:${args.attemptId}:${args.assessmentId}:${args.dimensionId}` as DomainEventV1['dedupeKey'],
     scope: { runId: args.scope.runId, nodeId: args.scope.nodeId },
     data: {
       attemptId: args.attemptId,

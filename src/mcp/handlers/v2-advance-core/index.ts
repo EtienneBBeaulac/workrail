@@ -269,13 +269,13 @@ export function executeAdvanceCore(args: {
     const rawReasonsWithAssessmentRes = detectBlockingReasonsV1({
       outputRequirement,
       missingNotes,
-      assessmentFollowupRequired: v.triggeredAssessmentConsequence
-        ? {
-            assessmentId: v.triggeredAssessmentConsequence.assessmentId,
-            dimensionId: v.triggeredAssessmentConsequence.firstMatchedDimensionId,
-            level: v.triggeredAssessmentConsequence.triggerLevel,
-            guidance: v.triggeredAssessmentConsequence.guidance,
-          }
+      assessmentFollowupsRequired: v.triggeredAssessmentConsequences.length > 0
+        ? v.triggeredAssessmentConsequences.map(c => ({
+            assessmentId: c.assessmentId,
+            dimensionId: c.dimensionId,
+            level: c.triggerLevel,
+            guidance: c.guidance,
+          }))
         : undefined,
     });
     if (rawReasonsWithAssessmentRes.isErr()) {

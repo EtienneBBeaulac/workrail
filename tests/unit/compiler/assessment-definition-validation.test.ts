@@ -385,4 +385,72 @@ describe('assessment declarations — workflow compiler', () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().message).toContain("anyEqualsLevel 'medium'");
   });
+
+  it('accepts multiple assessment consequences on the same step', () => {
+    const workflow = mkWorkflow({
+      assessments: [
+        {
+          id: 'constraint_gate',
+          purpose: 'Constraint gate.',
+          dimensions: [{ id: 'specificity', purpose: 'Specificity', levels: ['low', 'high'] }],
+        },
+        {
+          id: 'type_gate',
+          purpose: 'Type gate.',
+          dimensions: [{ id: 'soundness', purpose: 'Type soundness', levels: ['low', 'high'] }],
+        },
+      ],
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Step 1',
+          prompt: 'Assess.',
+          assessmentRefs: ['constraint_gate', 'type_gate'],
+          assessmentConsequences: [
+            {
+              when: { anyEqualsLevel: 'low', forAssessment: 'constraint_gate' },
+              effect: { kind: 'require_followup', guidance: 'Fix constraints.' },
+            },
+            {
+              when: { anyEqualsLevel: 'low', forAssessment: 'type_gate' },
+              effect: { kind: 'require_followup', guidance: 'Fix types.' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = compiler.compile(workflow);
+    expect(result.isOk()).toBe(true);
+  });
+
+  it('fails fast when forAssessment references an unknown assessmentRef', () => {
+    const workflow = mkWorkflow({
+      assessments: [
+        {
+          id: 'readiness_gate',
+          purpose: 'Readiness gate.',
+          dimensions: [{ id: 'confidence', purpose: 'Confidence', levels: ['low', 'high'] }],
+        },
+      ],
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Step 1',
+          prompt: 'Assess.',
+          assessmentRefs: ['readiness_gate'],
+          assessmentConsequences: [
+            {
+              when: { anyEqualsLevel: 'low', forAssessment: 'unknown_gate' },
+              effect: { kind: 'require_followup', guidance: 'Fix.' },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = compiler.compile(workflow);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().message).toContain("forAssessment 'unknown_gate'");
+  });
 });
