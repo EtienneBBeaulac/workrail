@@ -21,6 +21,7 @@ import type { SessionScope } from '../session-scope.js';
 import type { SessionHandle } from '../active-sessions.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import type { DaemonRegistry } from '../../v2/infra/in-memory/daemon-registry/index.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 import type { WorkflowRunResult } from '../types.js';
 import type { ReadFileState } from '../types.js';
 import Anthropic from '@anthropic-ai/sdk';
@@ -56,7 +57,7 @@ export const WORKTREES_DIR = path.join(os.homedir(), '.workrail', 'worktrees');
  */
 export interface PreAgentSession {
   readonly sessionId: RunId;
-  readonly workrailSessionId: string | null;
+  readonly workrailSessionId: SessionId | null;
   readonly continueToken: string;
   readonly checkpointToken: string | null;
   readonly sessionWorkspacePath: string;
@@ -94,7 +95,7 @@ export type PreAgentSessionResult =
   | {
       readonly kind: 'complete';
       readonly result: WorkflowRunResult;
-      readonly workrailSessionId: string | null;
+      readonly workrailSessionId: SessionId | null;
       readonly handle: SessionHandle | undefined;
     };
 
@@ -149,7 +150,7 @@ export type SessionOutcome =
 /** Context for finalizing a completed runWorkflow() session. */
 export interface FinalizationContext {
   readonly sessionId: RunId;
-  readonly workrailSessionId: string | null;
+  readonly workrailSessionId: SessionId | null;
   readonly startMs: number;
   readonly stepAdvanceCount: number;
   readonly branchStrategy: 'worktree' | 'none' | undefined;

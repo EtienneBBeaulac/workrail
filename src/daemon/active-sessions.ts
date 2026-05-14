@@ -133,7 +133,7 @@ export class ActiveSessionSet {
 
   /**
    * Iterate all active session handles (for shutdown event emission and abort).
-   * Each handle carries both sessionId (RunId) and workrailSessionId (string | null).
+   * Each handle carries both sessionId (RunId) and workrailSessionId (SessionId | null).
    */
   handles(): IterableIterator<SessionHandle> {
     return this._handles.values();

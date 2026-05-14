@@ -11,6 +11,7 @@ import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import type { ReadFileState } from '../types.js';
 import { READ_SIZE_CAP_BYTES, findActualString, withWorkrailSession } from './_shared.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 
 /**
  * Resolve a (possibly relative) file path against workspacePath and verify it
@@ -36,7 +37,7 @@ function resolveWithinWorkspace(filePath: string, workspacePath: string, toolNam
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeReadTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeReadTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
   return {
     name: 'Read',
     description:
@@ -93,7 +94,7 @@ export function makeReadTool(workspacePath: string, readFileState: Map<string, R
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeWriteTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeWriteTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
   return {
     name: 'Write',
     description:
@@ -155,7 +156,7 @@ export function makeWriteTool(workspacePath: string, readFileState: Map<string, 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeEditTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: string | null): AgentTool {
+export function makeEditTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
   return {
     name: 'Edit',
     description:

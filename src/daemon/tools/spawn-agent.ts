@@ -13,6 +13,7 @@ import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
+import type { SessionId } from '../../v2/durable-core/ids/index.js';
 // WHY import type: runWorkflow is passed as a parameter (runWorkflowFn), not called
 // directly. The type reference is erased at compile time -- no runtime circular dep.
 import type { runWorkflow } from '../workflow-runner.js';
@@ -43,7 +44,7 @@ interface SingleSpawnSpec {
  */
 interface SingleSpawnResult {
   readonly kind: 'single';
-  readonly childSessionId: string | null;
+  readonly childSessionId: SessionId | null;
   readonly outcome: 'success' | 'error' | 'timeout' | 'stuck';
   readonly notes: string;
   readonly artifacts?: readonly unknown[];
@@ -197,7 +198,7 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   // V2StartWorkflowOutputSchema would be a public API change (GAP-7 territory).
   // Token decode via the alias store is the correct in-process path.
   // On decode failure: proceed with childSessionId = null (observable in logs).
-  let childSessionId: string | null = null;
+  let childSessionId: SessionId | null = null;
   const childContinueToken = startResult.value.response.continueToken ?? '';
   if (childContinueToken) {
     const decoded = await parseContinueTokenOrFail(
