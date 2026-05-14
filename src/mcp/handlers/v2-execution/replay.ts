@@ -33,7 +33,8 @@ import { deriveNextIntent } from '../v2-state-conversion.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { projectAssessmentsV2 } from '../../../v2/projections/assessments.js';
-import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
+import { assertOutput, assertContinueTokenPresence, assertGateCheckpointInvariants } from '../../assert-output.js';
+import type { V2ContinueWorkflowGateCheckpointOutput } from '../../output-schemas.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 
 
@@ -167,9 +168,9 @@ export function buildAdvancedReplayResponse(args: {
             retryContinueToken,
             validation,
             assessmentFollowup,
-          } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+          },
           assertContinueTokenPresence,
-        );
+        ) as z.infer<typeof V2ContinueWorkflowOutputSchema>;
         return okAsync(out);
       })
     );
@@ -214,9 +215,9 @@ export function buildAdvancedReplayResponse(args: {
         nextIntent,
         nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),
         stepContext,
-      } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+      },
       assertContinueTokenPresence,
-    );
+    ) as z.infer<typeof V2ContinueWorkflowOutputSchema>;
     return okAsync(out);
   });
 }
@@ -320,6 +321,64 @@ export function replayFromRecordedAdvance(args: {
       kind: 'invariant_violation' as const,
       message: 'Missing node_created for advanced toNodeId.',
     });
+  }
+
+  // Gate checkpoint: session is paused pending coordinator evaluation.
+  // Mint a gateToken (the continueToken for the gate_checkpoint node) so the
+  // coordinator (PR 2) can call resume_from_gate with it.
+  if (toNode.data.nodeKind === 'gate_checkpoint') {
+    return snapshotStore
+      .getExecutionSnapshotV1(toNode.data.snapshotRef)
+      .mapErr((cause) => ({ kind: 'snapshot_load_failed' as const, cause }))
+      .andThen((toSnapshot) => {
+        if (!toSnapshot) {
+          return neErrorAsync({
+            kind: 'invariant_violation' as const,
+            message: 'Missing execution snapshot for gate_checkpoint node.',
+          });
+        }
+
+        const nextAttemptIdRes = attemptIdForNextNode(attemptId, sha256);
+        if (nextAttemptIdRes.isErr()) {
+          return neErrorAsync({ kind: 'invariant_violation' as const, message: nextAttemptIdRes.error.message });
+        }
+
+        const wfRefRes = deriveWorkflowHashRef(workflowHash);
+        if (wfRefRes.isErr()) {
+          return neErrorAsync({ kind: 'precondition_failed' as const, message: wfRefRes.error.message, suggestion: '' });
+        }
+
+        return mintContinueAndCheckpointTokens({
+          entry: {
+            sessionId: String(sessionId),
+            runId: String(runId),
+            nodeId: String(toNodeId),
+            attemptId: String(nextAttemptIdRes.value),
+            workflowHashRef: String(wfRefRes.value),
+          },
+          ports: tokenCodecPorts,
+          aliasStore,
+          entropy,
+        }).mapErr((cause) => ({ kind: 'token_signing_failed' as const, cause: cause as never }))
+          .andThen((tokens) => {
+            // Gate metadata is a typed field on EnginePayloadV1.
+            const gatePayload = toSnapshot.enginePayload.gateCheckpoint;
+            if (!gatePayload) {
+              return neErrorAsync({
+                kind: 'invariant_violation' as const,
+                message: 'Missing gateCheckpoint payload on gate_checkpoint node snapshot.',
+              });
+            }
+            const stepId = gatePayload.stepId;
+            const gateKind = gatePayload.gateKind;
+
+            const out = assertOutput<V2ContinueWorkflowGateCheckpointOutput>(
+              { kind: 'gate_checkpoint' as const, gateToken: tokens.continueToken, stepId, gateKind },
+              assertGateCheckpointInvariants,
+            ) as z.infer<typeof V2ContinueWorkflowOutputSchema>;
+            return okAsync(out);
+          });
+      });
   }
 
   return snapshotStore

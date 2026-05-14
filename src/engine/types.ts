@@ -121,7 +121,14 @@ export interface StepResponseBlocked extends StepResponseBase {
   readonly retryAckToken: AckToken | null;
 }
 
-export type StepResponse = StepResponseOk | StepResponseBlocked;
+export interface StepResponseGateCheckpoint {
+  readonly kind: 'gate_checkpoint';
+  readonly gateToken: string;
+  readonly stepId: string;
+  readonly gateKind: 'confirmation_required';
+}
+
+export type StepResponse = StepResponseOk | StepResponseBlocked | StepResponseGateCheckpoint;
 
 // ---------------------------------------------------------------------------
 // Checkpoint response

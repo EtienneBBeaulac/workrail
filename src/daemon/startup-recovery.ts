@@ -126,6 +126,7 @@ export async function readAllDaemonSessions(
         workflowId?: unknown;
         goal?: unknown;
         workspacePath?: unknown;
+        gateState?: unknown;
       };
 
       if (typeof parsed.continueToken !== 'string' || typeof parsed.ts !== 'number') {
@@ -148,6 +149,23 @@ export async function readAllDaemonSessions(
         ...(typeof parsed.workflowId === 'string' ? { workflowId: parsed.workflowId } : {}),
         ...(typeof parsed.goal === 'string' ? { goal: parsed.goal } : {}),
         ...(typeof parsed.workspacePath === 'string' ? { workspacePath: parsed.workspacePath } : {}),
+        // gateState: present when session was paused at a requireConfirmation gate.
+        // Validated as a typed object to prevent partial/corrupt data from being used.
+        ...(
+          parsed.gateState !== null &&
+          typeof parsed.gateState === 'object' &&
+          (parsed.gateState as Record<string, unknown>)['kind'] === 'gate_checkpoint' &&
+          typeof (parsed.gateState as Record<string, unknown>)['gateToken'] === 'string' &&
+          typeof (parsed.gateState as Record<string, unknown>)['stepId'] === 'string'
+            ? {
+                gateState: {
+                  kind: 'gate_checkpoint' as const,
+                  gateToken: (parsed.gateState as Record<string, unknown>)['gateToken'] as string,
+                  stepId: (parsed.gateState as Record<string, unknown>)['stepId'] as string,
+                },
+              }
+            : {}
+        ),
       });
     } catch (err: unknown) {
       console.warn(
@@ -343,6 +361,18 @@ export async function runStartupRecovery(
             }
           }
 
+          // Gate checkpoint: detect via sidecar gateState before calling rehydrate.
+          // This avoids an unnecessary network/engine call for sessions paused at a gate.
+          // TODO(PR 2): route to gate evaluation dispatch instead of discarding.
+          if (session.gateState?.kind === 'gate_checkpoint') {
+            console.log(
+              `[WorkflowRunner] Startup recovery: session ${session.sessionId} is paused at ` +
+              `gate checkpoint (step '${session.gateState.stepId}'). Discarding -- coordinator ` +
+              `gate evaluation not yet implemented.`,
+            );
+            break;
+          }
+
           // Rehydrate: call executeContinueWorkflow with intent: 'rehydrate' to get the current
           // step prompt and a fresh continueToken, without advancing the session.
           let rehydrateResult: Awaited<ReturnType<typeof _executeContinueWorkflowFn>>;
@@ -368,6 +398,19 @@ export async function runStartupRecovery(
           }
 
           const rehydrated = rehydrateResult.value.response;
+
+          // Defensive gate_checkpoint guard: rehydrating a gate_checkpoint node returns { kind: 'ok' }
+          // in PR 1 because engineState remains 'running' with the pending step intact. The sidecar
+          // gateState check above catches all gated sessions with a sidecar entry. This guard catches
+          // any edge case where the rehydrate response is 'gate_checkpoint' (not expected in PR 1 but
+          // required for type narrowing and forward-compatibility when PR 2 adds paused_awaiting_gate).
+          if (rehydrated.kind === 'gate_checkpoint') {
+            console.log(
+              `[WorkflowRunner] Startup recovery: session ${session.sessionId} rehydrated as gate_checkpoint ` +
+              `(step '${rehydrated.stepId}'). Discarding -- gate evaluation not yet implemented.`,
+            );
+            break;
+          }
 
           // Only resume if the session has a pending step. isComplete=true means nothing to do.
           if (rehydrated.isComplete || !rehydrated.pending) {

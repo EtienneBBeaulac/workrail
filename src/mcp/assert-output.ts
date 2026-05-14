@@ -135,9 +135,34 @@ type ContinueTokenHolder = {
  * and V2StartWorkflowOutputSchema. Runs in dev/test only via assertOutput().
  *
  * Throws if pending is non-null but continueToken is absent.
+ * Only valid for 'ok' and 'blocked' response variants -- each response variant
+ * owns its invariant check. Use assertGateCheckpointInvariants for gate_checkpoint.
  */
 export function assertContinueTokenPresence(data: ContinueTokenHolder): void {
   if (data.pending != null && data.continueToken == null) {
     throw new Error('assertOutput: continueToken is required when a pending step exists');
+  }
+}
+
+type GateCheckpointHolder = {
+  readonly gateToken: string;
+  readonly stepId: string;
+};
+
+/**
+ * Assert invariants specific to gate_checkpoint responses.
+ *
+ * WHY a separate assertion (not reusing assertContinueTokenPresence): gate_checkpoint
+ * has a different contract -- gateToken and stepId are required, pending and
+ * continueToken are absent. Making pending optional in ContinueTokenHolder to
+ * accommodate gate_checkpoint would weaken the constraint for all callers.
+ * Each response variant owns its invariant check.
+ */
+export function assertGateCheckpointInvariants(data: GateCheckpointHolder): void {
+  if (!data.gateToken) {
+    throw new Error('assertOutput: gateToken is required on gate_checkpoint response');
+  }
+  if (!data.stepId) {
+    throw new Error('assertOutput: stepId is required on gate_checkpoint response');
   }
 }

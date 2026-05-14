@@ -801,6 +801,13 @@ export class TriggerRouter {
           `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
           // TODO(follow-up): add onStuck: trigger hook support here
         );
+      } else if (result._tag === 'gate_parked') {
+        // Session parked at a requireConfirmation gate. Sidecar is retained for startup recovery.
+        // PR 2 will add coordinator gate evaluation dispatch here.
+        console.log(
+          `[TriggerRouter] Workflow parked at gate: triggerId=${trigger.id} ` +
+          `workflowId=${trigger.workflowId} stepId=${result.stepId}`,
+        );
       } else {
         // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
         // this will fail to compile, forcing the developer to handle the new case.
@@ -909,6 +916,11 @@ export class TriggerRouter {
           `[TriggerRouter] Dispatch stuck: workflowId=${workflowTrigger.workflowId} ` +
           `reason=${result.reason} message=${result.message}`,
           // TODO(follow-up): add onStuck: trigger hook support here
+        );
+      } else if (result._tag === 'gate_parked') {
+        console.log(
+          `[TriggerRouter] Dispatch parked at gate: workflowId=${workflowTrigger.workflowId} ` +
+          `stepId=${result.stepId}`,
         );
       } else {
         // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant

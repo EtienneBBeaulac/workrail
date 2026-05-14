@@ -88,6 +88,11 @@ export async function persistTokens(
     readonly goal: string;
     readonly workspacePath: string;
   },
+  gateState?: {
+    readonly kind: 'gate_checkpoint';
+    readonly gateToken: string;
+    readonly stepId: string;
+  },
 ): Promise<Result<void, PersistTokensError>> {
   try {
     await fs.mkdir(DAEMON_SESSIONS_DIR, { recursive: true });
@@ -104,6 +109,7 @@ export async function persistTokens(
           goal: recoveryContext.goal,
           workspacePath: recoveryContext.workspacePath,
         } : {}),
+        ...(gateState !== undefined ? { gateState } : {}),
       },
       null,
       2,

@@ -66,6 +66,8 @@ export async function finalizeSession(
       await fs.unlink(path.join(ctx.sessionsDir, `${ctx.sessionId}.json`)).catch(() => {});
       break;
     case 'retain_for_delivery':
+    case 'retain_for_gate':
+      // Sidecar is owned by the delivery pipeline or startup recovery respectively.
       break;
     default:
       assertNever(lifecycle);

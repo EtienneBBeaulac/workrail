@@ -737,6 +737,7 @@ const NODE_KIND_LABELS: Record<ConsoleNodeDetail['nodeKind'], { label: string; c
   step: { label: 'Step', color: 'var(--accent)' },
   checkpoint: { label: 'Checkpoint', color: 'var(--success)' },
   blocked_attempt: { label: 'Blocked', color: 'var(--error)' },
+  gate_checkpoint: { label: 'Gate', color: 'var(--info, #60a5fa)' },
 };
 
 function KindBadge({ kind }: { kind: ConsoleNodeDetail['nodeKind'] }) {

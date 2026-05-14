@@ -401,8 +401,28 @@ export interface WorkflowDeliveryFailed {
   readonly deliveryError: string;
 }
 
+/**
+ * Session parked at a requireConfirmation gate awaiting coordinator evaluation.
+ *
+ * WHY a separate discriminant (not 'success'): a gated session completed its step
+ * with valid output but did NOT advance to the next step -- the coordinator must
+ * evaluate the gate and resume the session. Collapsing this into 'success' would
+ * make it impossible to distinguish "job done" from "parked at gate", breaking
+ * the sidecar lifecycle (success sidecar is deleted; gate sidecar must be retained).
+ *
+ * gateToken: the continueToken for the gate_checkpoint node. The coordinator
+ * passes this to resume_from_gate (PR 2) once gate evaluation completes.
+ */
+export interface WorkflowRunGateParked {
+  readonly _tag: 'gate_parked';
+  readonly workflowId: string;
+  readonly gateToken: string;
+  readonly stepId: string;
+  readonly stopReason: string;
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed | WorkflowRunGateParked;
 
 // ---------------------------------------------------------------------------
 // WorkflowContextSlots
@@ -444,7 +464,7 @@ export function extractContextSlots(context: Readonly<Record<string, unknown>> |
  * suppresses any compile-time error from a missing update -- only the assertNever guard
  * catches the omission at runtime. Keep these two unions in sync atomically.
  */
-export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck;
+export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowRunGateParked;
 
 // ---------------------------------------------------------------------------
 // OrphanedSession (crash recovery)
@@ -494,6 +514,19 @@ export interface OrphanedSession {
    * Absent in old-format sidecars (backward compat).
    */
   readonly workspacePath?: string;
+  /**
+   * Gate checkpoint state persisted when the session reached a requireConfirmation step.
+   * Present when the session is paused at a gate awaiting coordinator evaluation.
+   * Absent for running sessions and old-format sidecars (backward compat).
+   *
+   * WHY stored in sidecar: allows runStartupRecovery() to detect and handle gate-paused
+   * sessions without scanning the session event log.
+   */
+  readonly gateState?: {
+    readonly kind: 'gate_checkpoint';
+    readonly gateToken: string;
+    readonly stepId: string;
+  };
 }
 
 

@@ -10,6 +10,7 @@ import type { JsonValue, JsonObject } from '../../../v2/durable-core/canonical/j
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import type { AssessmentDefinition, OutputContract, WorkflowStepDefinition } from '../../../types/workflow-definition.js';
 import type { ValidationCriteria } from '../../../types/validation.js';
+import type { Condition } from '../../../utils/condition-evaluator.js';
 
 import type { TriggeredAssessmentConsequenceV1 } from './assessment-consequences.js';
 
@@ -51,6 +52,13 @@ export interface ValidatedAdvanceInputs {
    * - Otherwise → false (notes are required; omitting them blocks the advance)
    */
   readonly notesOptional: boolean;
+  /**
+   * The raw requireConfirmation value from the step definition.
+   * Can be a boolean or a condition object evaluated against mergedContext.
+   * Undefined when the step has no requireConfirmation declared.
+   * Used by executeAdvanceCore to detect whether a gate checkpoint should fire.
+   */
+  readonly requireConfirmation: boolean | Condition | undefined;
 }
 
 export function validateAdvanceInputs(args: {
@@ -170,5 +178,6 @@ export function validateAdvanceInputs(args: {
     riskPolicy,
     effectivePrefs,
     notesOptional,
+    requireConfirmation: typedStep?.requireConfirmation,
   });
 }

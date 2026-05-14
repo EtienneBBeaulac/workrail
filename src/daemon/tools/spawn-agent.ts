@@ -287,6 +287,16 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
       notes: childResult.message,
       ...(childResult.issueSummaries !== undefined ? { issueSummaries: childResult.issueSummaries } : {}),
     };
+  } else if (childResult._tag === 'gate_parked') {
+    // Child session parked at a requireConfirmation gate. Coordinator evaluation not yet
+    // implemented (PR 2). Surface as 'stuck' outcome so the parent session knows the child
+    // did not complete. The parent may report_issue and the coordinator can investigate.
+    return {
+      kind: 'single',
+      childSessionId,
+      outcome: 'stuck',
+      notes: `Child session parked at gate checkpoint (step: '${childResult.stepId}'). Gate evaluation not yet implemented.`,
+    };
   } else {
     // Compile-time exhaustiveness guard. If ChildWorkflowRunResult gains a new variant
     // without a corresponding branch above, TypeScript will emit a compile error here.

@@ -47,7 +47,7 @@ type BuildAppendPlanArgs = {
     }
   | {
       readonly kind: 'advanced';
-      readonly toNodeKind: 'step' | 'blocked_attempt' | undefined;
+      readonly toNodeKind: 'step' | 'blocked_attempt' | 'gate_checkpoint' | undefined;
       readonly snapshotRef: import('../../../v2/durable-core/ids/index.js').SnapshotRef;
       readonly outputsToAppend: readonly OutputToAppend[];
     }

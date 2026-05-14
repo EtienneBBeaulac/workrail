@@ -272,6 +272,9 @@ export async function buildAgentReadySession(
       }
     },
     onSteer: (text: string) => { state.pendingSteerParts.push(text); },
+    onGateParked: (gateToken: string, stepId: string) => {
+      setTerminalSignal(state, { kind: 'gate_parked', gateToken, stepId });
+    },
     getCurrentToken: () => state.currentContinueToken,
     sessionWorkspacePath,
     spawnCurrentDepth: preAgentSession.spawnCurrentDepth,

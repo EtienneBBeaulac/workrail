@@ -20,6 +20,7 @@ const NODE_KIND_STYLES: Record<ConsoleDagNode['nodeKind'], { bg: string; border:
   step: { bg: '#1f1c10', border: '#f4c430' },
   checkpoint: { bg: '#1a3d2e', border: '#22c55e' },
   blocked_attempt: { bg: '#3d1a1a', border: '#ef4444' },
+  gate_checkpoint: { bg: '#1a2a3d', border: '#60a5fa' },
 };
 
 export function RunDag({ run, onNodeClick }: Props) {

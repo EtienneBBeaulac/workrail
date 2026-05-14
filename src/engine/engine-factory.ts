@@ -40,6 +40,7 @@ import type {
   StepResponse,
   StepResponseOk,
   StepResponseBlocked,
+  StepResponseGateCheckpoint,
   PendingStep,
   BlockerCode,
   CheckpointResponse,
@@ -200,8 +201,12 @@ function mapStartOutput(out: StartOutput): StepResponseOk {
   };
 }
 
-/** Map continue_workflow output (discriminated union: 'ok' | 'blocked'). */
+/** Map continue_workflow output (discriminated union: 'ok' | 'blocked' | 'gate_checkpoint'). */
 function mapContinueOutput(out: ContinueOutput): StepResponse {
+  if (out.kind === 'gate_checkpoint') {
+    return { kind: 'gate_checkpoint', gateToken: out.gateToken, stepId: out.stepId, gateKind: out.gateKind };
+  }
+
   const ct = out.continueToken ?? '';
   const base = {
     stateToken: asStateToken(ct),

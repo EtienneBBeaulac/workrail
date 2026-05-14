@@ -26,7 +26,14 @@ import type { SessionState } from './session-state.js';
  */
 export type TerminalSignal =
   | { readonly kind: 'stuck'; readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall' }
-  | { readonly kind: 'timeout'; readonly reason: 'wall_clock' | 'max_turns' };
+  | { readonly kind: 'timeout'; readonly reason: 'wall_clock' | 'max_turns' }
+  /**
+   * Session parked at a requireConfirmation gate, awaiting coordinator evaluation.
+   * The agent returned normally (end_turn) but did not advance -- the gate fires
+   * before the next step is injected. The coordinator (PR 2) reads gateToken to
+   * resume the session after gate evaluation completes.
+   */
+  | { readonly kind: 'gate_parked'; readonly gateToken: string; readonly stepId: string };
 
 /**
  * Set the terminal signal for a session (first-writer-wins).

@@ -154,9 +154,26 @@ export const EngineStateV1Schema = z
 
 export type EnginePayloadV1 = z.infer<typeof EnginePayloadV1Schema>;
 
+/**
+ * Gate checkpoint metadata stored alongside the enginePayload when a gate_checkpoint node
+ * is created. This is a typed extension of EnginePayloadV1 that carries gate identity.
+ *
+ * WHY on enginePayload (not engineState): the engineState remains 'running' in PR 1
+ * to avoid requiring a new EngineStateV1 variant across all projection consumers. The
+ * gate metadata is stored here so it survives snapshot serialization via the typed schema.
+ * This field will be superseded when the paused_awaiting_gate EngineStateV1 variant is
+ * added in a follow-up PR -- at that point, gateCheckpoint can be encoded in the state.
+ */
+const GateCheckpointPayloadV1Schema = z.object({
+  stepId: z.string().min(1),
+  gateKind: z.literal('confirmation_required'),
+}).strict();
+
 export const EnginePayloadV1Schema = z.object({
   v: z.literal(1),
   engineState: EngineStateV1Schema,
+  /** Present only when this snapshot was written for a gate_checkpoint node. */
+  gateCheckpoint: GateCheckpointPayloadV1Schema.optional(),
 }).strict();
 
 /**

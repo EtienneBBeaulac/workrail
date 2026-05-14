@@ -259,4 +259,16 @@ export interface SessionScope {
    */
   readonly activeSessionSet: ActiveSessionSet | undefined;
 
+  /**
+   * Called by `complete_step` / `continue_workflow` when the engine returns a
+   * gate_checkpoint response. Sets the terminal signal so buildSessionResult()
+   * produces _tag: 'gate_parked' and sidecardLifecycleFor() retains the sidecar.
+   *
+   * WHY a callback (not direct state mutation): follows the same pattern as
+   * onAdvance, onComplete, onTokenUpdate -- keeps the tool factory decoupled from
+   * SessionState and TerminalSignal while still allowing the orchestration layer
+   * to observe the gate event.
+   */
+  readonly onGateParked: (gateToken: string, stepId: string) => void;
+
 }

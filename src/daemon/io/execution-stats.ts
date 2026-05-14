@@ -41,7 +41,7 @@ export function writeExecutionStats(
   sessionId: string,
   workflowId: string,
   startMs: number,
-  outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'unknown',
+  outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'gate_parked' | 'unknown',
   stepCount: number,
 ): void {
   const endMs = Date.now();

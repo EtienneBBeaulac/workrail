@@ -486,11 +486,31 @@ const V2ContinueWorkflowBlockedSchema = z.object({
     .optional(),
 });
 
+/**
+ * gate_checkpoint: returned when a daemon (autonomous) session reaches a step
+ * with requireConfirmation. The step's output was valid but the coordinator must
+ * evaluate the gate before the session can advance to the next step.
+ *
+ * gateToken: the continueToken for the gate_checkpoint node -- the coordinator
+ * passes this to resume_from_gate (PR 2) once the gate evaluation completes.
+ * stepId: the ID of the step whose gate fired.
+ * gateKind: 'confirmation_required' -- the only gate kind in PR 1.
+ */
+const V2ContinueWorkflowGateCheckpointSchema = z.object({
+  kind: z.literal('gate_checkpoint'),
+  gateToken: z.string().min(1),
+  stepId: z.string().min(1),
+  gateKind: z.literal('confirmation_required'),
+});
+
+export type V2ContinueWorkflowGateCheckpointOutput = z.infer<typeof V2ContinueWorkflowGateCheckpointSchema>;
+
 export const V2ContinueWorkflowOutputSchema = z.discriminatedUnion('kind', [
   V2ContinueWorkflowOkSchema,
   V2ContinueWorkflowBlockedSchema,
+  V2ContinueWorkflowGateCheckpointSchema,
 ]).refine(
-  (data) => (data.pending ? data.continueToken != null : true),
+  (data) => (data.kind === 'gate_checkpoint' || (data.pending ? data.continueToken != null : true)),
   { message: 'continueToken is required when a pending step exists' }
 );
 

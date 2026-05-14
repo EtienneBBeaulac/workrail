@@ -75,7 +75,7 @@ export interface ConsoleSessionListResponse {
 
 export interface ConsoleDagNode {
   readonly nodeId: string;
-  readonly nodeKind: 'step' | 'checkpoint' | 'blocked_attempt';
+  readonly nodeKind: 'step' | 'checkpoint' | 'blocked_attempt' | 'gate_checkpoint';
   readonly parentNodeId: string | null;
   readonly createdAtEventIndex: number;
   readonly isPreferredTip: boolean;
@@ -339,7 +339,7 @@ export interface ConsoleWorktreeListResponse {
 
 export interface ConsoleNodeDetail {
   readonly nodeId: string;
-  readonly nodeKind: 'step' | 'checkpoint' | 'blocked_attempt';
+  readonly nodeKind: 'step' | 'checkpoint' | 'blocked_attempt' | 'gate_checkpoint';
   readonly parentNodeId: string | null;
   readonly createdAtEventIndex: number;
   readonly isPreferredTip: boolean;

@@ -50,7 +50,7 @@ function buildNodeCreatedEvent(args: {
   runId: string;
   toNodeId: string;
   fromNodeId: string;
-  toNodeKind: 'step' | 'blocked_attempt';
+  toNodeKind: 'step' | 'blocked_attempt' | 'gate_checkpoint';
   workflowHash: WorkflowHash;
   snapshotRef: SnapshotRef;
   eventId: string;
@@ -207,7 +207,7 @@ export type AckAdvanceAppendPlanArgs = {
   readonly nextEventIndex: number;
   readonly extraEventsToAppend?: readonly EventToAppendV1[];
   readonly outcome: { kind: 'advanced'; toNodeId: string };
-  readonly toNodeKind: 'step' | 'blocked_attempt';
+  readonly toNodeKind: 'step' | 'blocked_attempt' | 'gate_checkpoint';
   readonly toNodeId: string;
   readonly snapshotRef: SnapshotRef;
   readonly causeKind: 'intentional_fork' | 'non_tip_advance';
@@ -259,8 +259,8 @@ export function buildAckAdvanceAppendPlanV1(args: AckAdvanceAppendPlanArgs): Res
     outputsToAppend,
   } = args;
 
-  if (toNodeKind !== 'step' && toNodeKind !== 'blocked_attempt') {
-    return err({ code: 'INVARIANT_VIOLATION', message: 'toNodeKind must be step|blocked_attempt' });
+  if (toNodeKind !== 'step' && toNodeKind !== 'blocked_attempt' && toNodeKind !== 'gate_checkpoint') {
+    return err({ code: 'INVARIANT_VIOLATION', message: 'toNodeKind must be step|blocked_attempt|gate_checkpoint' });
   }
 
   // Build advance_recorded event

@@ -29,12 +29,13 @@ import { DEFAULT_SESSION_TIMEOUT_MINUTES, DEFAULT_MAX_TURNS } from './session-co
  * HTTP callback POST failed. The stats should reflect that the work was done.
  * See WorkflowDeliveryFailed and invariants doc section 1.3.
  */
-export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | 'error' | 'timeout' | 'stuck' {
+export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | 'error' | 'timeout' | 'stuck' | 'gate_parked' {
   switch (tag) {
     case 'success': return 'success';
     case 'error': return 'error';
     case 'timeout': return 'timeout';
     case 'stuck': return 'stuck';
+    case 'gate_parked': return 'gate_parked'; // parked at gate; not success, not error
     case 'delivery_failed': return 'success'; // workflow succeeded; only POST failed
     default: return assertNever(tag);
   }
@@ -54,7 +55,13 @@ export function tagToStatsOutcome(tag: WorkflowRunResult['_tag']): 'success' | '
  */
 export type SidecarLifecycle =
   | { readonly kind: 'delete_now' }
-  | { readonly kind: 'retain_for_delivery' };
+  | { readonly kind: 'retain_for_delivery' }
+  /**
+   * Session parked at a gate: sidecar must be retained so startup recovery can detect
+   * and handle the gated session on daemon restart.
+   * Sidecar is cleaned up by startup recovery after the session is discarded or resumed.
+   */
+  | { readonly kind: 'retain_for_gate' };
 
 /**
  * Determine the correct sidecar lifecycle action for a completed session.
@@ -78,6 +85,10 @@ export function sidecardLifecycleFor(
       return branchStrategy === 'worktree'
         ? { kind: 'retain_for_delivery' }
         : { kind: 'delete_now' };
+    case 'gate_parked':
+      // Sidecar must survive so startup recovery can detect and handle the gated session.
+      // Coordinator (PR 2) or startup recovery cleans it up after the gate resolves.
+      return { kind: 'retain_for_gate' };
     case 'error':
     case 'timeout':
     case 'stuck':
@@ -125,6 +136,15 @@ export function buildSessionResult(
         message: `Session aborted: stuck heuristic fired (${signal.reason})`,
         stopReason: 'aborted',
         ...(state.issueSummaries.length > 0 ? { issueSummaries: [...state.issueSummaries] } : {}),
+      };
+    }
+    if (signal.kind === 'gate_parked') {
+      return {
+        _tag: 'gate_parked',
+        workflowId: trigger.workflowId,
+        gateToken: signal.gateToken,
+        stepId: signal.stepId,
+        stopReason: 'gate_parked',
       };
     }
     if (signal.kind === 'timeout') {

@@ -22,6 +22,7 @@ export function makeContinueWorkflowTool(
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: string | null,
+  onGateParked: (gateToken: string, stepId: string) => void = () => { /* no-op for callers that predate gate support */ },
 ): AgentTool {
   return {
     name: 'continue_workflow',
@@ -65,6 +66,32 @@ export function makeContinueWorkflowTool(
       }
 
       const out = result.value.response;
+
+      // Gate checkpoint: session is paused pending coordinator evaluation.
+      // WHY persist gateState BEFORE returning: sidecar write must succeed before the
+      // agent receives the park message. If gateState is not written and the daemon
+      // crashes, startup recovery won't know the session is gated and may incorrectly
+      // resume via the agent loop.
+      // WHY NOT call onAdvance: the step did NOT advance to the next workflow step.
+      // Calling onAdvance would erroneously tell the agent loop to continue.
+      if (out.kind === 'gate_checkpoint') {
+        // Persist gateState to sidecar BEFORE signalling the terminal state.
+        // Ordering: sidecar write must succeed before onGateParked fires so that
+        // if the daemon crashes between now and agent loop exit, startup recovery
+        // can detect the gate from the sidecar rather than relying on in-memory state.
+        const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
+        const persistResult = await persistTokens(sessionId, '', null, undefined, undefined, gateState);
+        if (persistResult.kind === 'err') {
+          console.warn(`[WorkflowRunner] persistTokens failed (continue_workflow gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
+        }
+        // Signal the terminal state -- buildSessionResult() produces _tag: 'gate_parked',
+        // sidecardLifecycleFor() retains the sidecar. First-writer-wins, same as stuck/timeout.
+        onGateParked(out.gateToken, out.stepId);
+        return {
+          content: [{ type: 'text', text: `Gate checkpoint reached at step '${out.stepId}'. Session paused awaiting coordinator evaluation. Do not call continue_workflow or complete_step again -- the coordinator will resume this session.` }],
+          details: out,
+        };
+      }
 
       // Persist tokens atomically before returning -- crash safety invariant.
       // WHY continueToken vs retryToken: for a blocked response, nextCall.params.continueToken
@@ -210,6 +237,7 @@ export function makeCompleteStepTool(
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: string | null,
+  onGateParked: (gateToken: string, stepId: string) => void = () => { /* no-op for callers that predate gate support */ },
 ): AgentTool {
   return {
     name: 'complete_step',
@@ -275,6 +303,25 @@ export function makeCompleteStepTool(
       }
 
       const out = result.value.response;
+
+      // Gate checkpoint: session is paused pending coordinator evaluation.
+      // WHY persist before returning: sidecar write AFTER session store append (O2 invariant).
+      // The gate_checkpoint_recorded event is already in the session store (written by the
+      // engine in Slice 3). Writing gateState here ensures crash recovery can detect the
+      // paused session without scanning the event log.
+      // WHY NOT call onAdvance: the step did NOT advance to the next workflow step.
+      if (out.kind === 'gate_checkpoint') {
+        const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
+        const persistResult = await persistTokens(sessionId, '', null, undefined, undefined, gateState);
+        if (persistResult.kind === 'err') {
+          console.warn(`[WorkflowRunner] persistTokens failed (complete_step gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
+        }
+        onGateParked(out.gateToken, out.stepId);
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ status: 'gate_checkpoint', stepId: out.stepId, gateKind: out.gateKind }) + '\n\nGate checkpoint reached. Session paused awaiting coordinator evaluation. Do not call complete_step again -- the coordinator will resume this session.' }],
+          details: out,
+        };
+      }
 
       // Persist tokens atomically before returning -- crash safety invariant.
       // WHY this must happen before onAdvance/onTokenUpdate: a crash between

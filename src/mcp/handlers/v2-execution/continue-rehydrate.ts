@@ -164,16 +164,16 @@ export function handleRehydrateIntent(args: {
 
             const parsed = assertOutput(
               {
-                kind: 'ok',
+                kind: 'ok' as const,
                 isComplete,
                 pending: null,
                 preferences,
                 nextIntent,
                 nextCall: null,
                 ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
-              } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+              },
               assertContinueTokenPresence,
-            );
+            ) as z.infer<typeof V2ContinueWorkflowOutputSchema>;
             return okAsync({ response: parsed });
           }
 
@@ -222,7 +222,7 @@ export function handleRehydrateIntent(args: {
 
               const parsed = assertOutput(
                 {
-                  kind: 'ok',
+                  kind: 'ok' as const,
                   continueToken: continueTokenValue,
                   checkpointToken: checkpointTokenValue,
                   isComplete,
@@ -231,9 +231,9 @@ export function handleRehydrateIntent(args: {
                   nextIntent,
                   nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
                   ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
-                } as z.infer<typeof V2ContinueWorkflowOutputSchema>,
+                },
                 assertContinueTokenPresence,
-              );
+              ) as z.infer<typeof V2ContinueWorkflowOutputSchema>;
               return okAsync({ response: parsed, contentEnvelope });
             });
         });

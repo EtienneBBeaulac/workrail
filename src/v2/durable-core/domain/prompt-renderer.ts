@@ -495,7 +495,6 @@ export function renderPendingPrompt(args: {
     });
   }
   const agentRole = step.agentRole;
-  const requireConfirmation = Boolean(step.requireConfirmation);
   const functionReferences = step.functionReferences ?? [];
 
   // Extract output contract requirements (system-injected, not prompt-authored)
@@ -543,6 +542,14 @@ export function renderPendingPrompt(args: {
 
   // Loop vars take precedence over session context (they are derived from it but more specific)
   const renderContext: Record<string, unknown> = { ...sessionContext, ...loopRenderContext };
+
+  // Evaluate requireConfirmation after renderContext is built so that condition-form values
+  // (e.g. { var: 'taskComplexity', equals: 'Large' }) are evaluated against live session context.
+  // Boolean(conditionObject) would always be true -- we need evaluateCondition() here.
+  const rc = step.requireConfirmation;
+  const requireConfirmation = rc === true || rc === false || rc === undefined
+    ? Boolean(rc)
+    : evaluateCondition(rc, renderContext);
 
   // Resolve both prompt and title — titles are agent-visible (inspect output, UI headers).
   // prompt is optional (steps may use promptBlocks instead); default to '' so the resolver

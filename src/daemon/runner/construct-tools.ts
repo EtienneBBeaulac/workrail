@@ -52,7 +52,7 @@ export function constructTools(
   runWorkflowFn: typeof runWorkflow,
 ): readonly AgentTool[] {
   const {
-    fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported,
+    fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported, onGateParked,
     getCurrentToken, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth,
     emitter, activeSessionSet,
   } = scope;
@@ -76,8 +76,9 @@ export function constructTools(
       executeContinueWorkflow,
       emitter,
       workrailSid,
+      onGateParked,
     ),
-    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid),
+    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked),
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
     // must target the isolated worktree, not the main checkout.
     makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),

@@ -105,7 +105,7 @@ export interface NotificationConfig {
 export interface NotificationPayload {
   readonly event: 'session_completed';
   readonly workflowId: string;
-  readonly outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'delivery_failed';
+  readonly outcome: 'success' | 'error' | 'timeout' | 'stuck' | 'delivery_failed' | 'gate_parked';
   readonly detail: string;
   readonly goal: string;
   readonly timestamp: string;
@@ -132,6 +132,8 @@ export function buildNotificationBody(result: WorkflowRunResult, goal: string): 
       return `Session timed out: ${truncated}`;
     case 'stuck':
       return `Session stuck (${result.reason}): ${truncated}`;
+    case 'gate_parked':
+      return `Session paused at gate (step: ${result.stepId}): ${truncated}`;
     case 'delivery_failed':
       return `Session completed but result delivery failed: ${truncated}`;
   }
@@ -157,6 +159,8 @@ export function buildDetail(result: WorkflowRunResult): string {
       return result.message;
     case 'stuck':
       return result.message;
+    case 'gate_parked':
+      return `stepId: ${result.stepId}; gateToken present: ${result.gateToken.length > 0}`;
     case 'delivery_failed':
       return `stopReason: ${result.stopReason}; deliveryError: ${result.deliveryError}`;
   }

@@ -134,7 +134,7 @@ export interface WorkflowStepDefinition {
   readonly agentRole?: string;
   readonly guidance?: readonly string[];
   readonly askForFiles?: boolean;
-  readonly requireConfirmation?: boolean;
+  readonly requireConfirmation?: boolean | Condition;
   readonly runCondition?: Readonly<Record<string, unknown>>;
   /** 
    * @deprecated Use outputContract for typed artifact validation instead.

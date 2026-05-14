@@ -29,7 +29,8 @@ import type { Sha256PortV2 } from '../../../v2/ports/sha256.port.js';
 import type { JsonValue } from '../../../v2/durable-core/canonical/json-types.js';
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import type { ValidationResult } from '../../../types/validation.js';
-import type { ConditionContext } from '../../../utils/condition-evaluator.js';
+import type { ConditionContext, Condition } from '../../../utils/condition-evaluator.js';
+import { evaluateCondition } from '../../../utils/condition-evaluator.js';
 
 import { createWorkflow } from '../../../types/workflow.js';
 import { derivePendingStep } from '../../../v2/durable-core/projections/snapshot-state.js';
@@ -47,6 +48,7 @@ import { withTimeout } from '../shared/with-timeout.js';
 import { validateAdvanceInputs, type ValidatedAdvanceInputs } from './input-validation.js';
 import { buildBlockedOutcome } from './outcome-blocked.js';
 import { buildSuccessOutcome } from './outcome-success.js';
+import { buildGateCheckpointOutcome } from './outcome-gate-checkpoint.js';
 
 // ── AdvanceMode: the single branching discriminant ────────────────────
 
@@ -297,10 +299,44 @@ export function executeAdvanceCore(args: {
       return buildBlockedOutcome({ mode, snap, ctx, computed, v, lock, ports, lockedIndex: args.lockedIndex });
     }
 
+    // ── 5b. Gate checkpoint path ────────────────────────────────────────
+    //
+    // WHY after blocked: gate fires only on valid output (no blocking reasons).
+    // WHY mode.kind === 'fresh' guard: retries must not re-trigger the gate. A
+    // session retrying after a prior block gets a normal success advance here.
+    // WHY autonomy !== 'guided' guard: MCP sessions (guided) pause for the human
+    // via the standard requireConfirmation flow. Only daemon sessions get gate_checkpoint.
+
+    if (mode.kind === 'fresh' && v.autonomy !== 'guided' && isGateRequired(v.requireConfirmation, v.mergedContext as ConditionContext)) {
+      return buildGateCheckpointOutcome({ snap, ctx, stepId: v.pendingStep.stepId, lock, ports, lockedIndex: args.lockedIndex });
+    }
+
     // ── 6. Success path ─────────────────────────────────────────────────
 
     return buildSuccessOutcome({ mode, ctx, computed, v, lock, ports, lockedIndex: args.lockedIndex });
   });
+}
+
+// ── Gate detection helper ─────────────────────────────────────────────
+
+/**
+ * Return true if the step's requireConfirmation gate should fire.
+ *
+ * Handles both boolean and condition-object forms:
+ * - boolean true → gate fires unconditionally
+ * - condition object → evaluated against mergedContext (same evaluator as runCondition)
+ * - undefined / false → no gate
+ *
+ * WHY a separate helper: keeps the detection logic readable and independently
+ * testable without requiring a full advance setup.
+ */
+function isGateRequired(
+  requireConfirmation: boolean | Condition | undefined,
+  context: ConditionContext,
+): boolean {
+  if (requireConfirmation === undefined || requireConfirmation === false) return false;
+  if (requireConfirmation === true) return true;
+  return evaluateCondition(requireConfirmation, context);
 }
 
 // ── Pending step derivation (mode-specific) ───────────────────────────

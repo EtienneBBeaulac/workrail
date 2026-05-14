@@ -889,6 +889,8 @@ function formatNodeKind(nodeKind: ConsoleDagNode['nodeKind']): string {
       return 'Checkpoint';
     case 'step':
       return 'Step';
+    case 'gate_checkpoint':
+      return 'Gate';
   }
 }
 

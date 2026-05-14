@@ -68,7 +68,22 @@ export interface CoordinatorDepsDependencies {
 export type SessionStatus =
   | { readonly kind: 'complete' | 'blocked' | 'in_progress' }
   | { readonly kind: 'retry' }
-  | { readonly kind: 'hard_fail'; readonly message: string };
+  | { readonly kind: 'hard_fail'; readonly message: string }
+  /**
+   * Session is paused at a gate checkpoint (requireConfirmation step in autonomous mode).
+   * The coordinator must dispatch a gate evaluator session and resume the paused session
+   * with the verdict. PR 2 wires this up -- for now treated the same as 'blocked' (terminal).
+   */
+  | {
+      readonly kind: 'paused_at_gate';
+      readonly stepId: string;
+      /**
+       * The continueToken for the gate_checkpoint node -- the coordinator passes this to
+       * resume_from_gate (PR 2). Null in PR 1: requires calling replayFromRecordedAdvance
+       * on the gate node to mint. Any caller that reads gateToken must handle null.
+       */
+      readonly gateToken: string | null;
+    };
 
 // ---------------------------------------------------------------------------
 // SessionReader
@@ -144,6 +159,24 @@ export class SessionReader {
         prefs.autonomy !== AUTONOMY_MODE.FULL_AUTO_NEVER_STOP && (blockedByTopology || hasBlockingCategoryGap);
 
       if (isBlocked) return { kind: 'blocked' };
+
+      // Gate checkpoint: tip is a gate_checkpoint node -- session paused awaiting evaluation.
+      // TODO(PR 2): coordinator reads paused_at_gate and dispatches gate evaluator session.
+      if (tipNodeKind === 'gate_checkpoint') {
+        const tipNode = tip ? run.nodesById[tip] : undefined;
+        const gateSnapshotRef = tipNode ? asSnapshotRef(asSha256Digest(tipNode.snapshotRef)) : undefined;
+        if (gateSnapshotRef) {
+          const gateSnapshot = await this.snapshotStore.getExecutionSnapshotV1(gateSnapshotRef);
+          if (gateSnapshot.isOk() && gateSnapshot.value) {
+            // gateCheckpoint is a typed field on EnginePayloadV1 -- no cast needed.
+            const gatePayload = gateSnapshot.value.enginePayload.gateCheckpoint;
+            const stepId = gatePayload?.stepId ?? '';
+            // gateToken requires calling replayFromRecordedAdvance to mint. Stub for PR 2.
+            return { kind: 'paused_at_gate', stepId, gateToken: null };
+          }
+        }
+        return { kind: 'paused_at_gate', stepId: '', gateToken: null };
+      }
     }
 
     // Completion: requires the tip node's execution snapshot.
@@ -233,6 +266,11 @@ export class SessionReader {
     if (statusResult.kind === 'blocked') {
       return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
     }
+    // Gate checkpoint: session paused at a requireConfirmation gate. PR 2 will dispatch
+    // the gate evaluator; for now, treat as failed to unblock the coordinator.
+    if (statusResult.kind === 'paused_at_gate') {
+      return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} paused at gate checkpoint (step '${statusResult.stepId}'). Gate evaluation not yet implemented.` };
+    }
     if (statusResult.kind === 'hard_fail') {
       process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] fetchChildSessionResult: ${statusResult.message}\n`);
       return { kind: 'failed', reason: 'error', message: statusResult.message };
@@ -261,6 +299,10 @@ export class SessionReader {
             pending.delete(handle);
           } else if (statusResult.kind === 'blocked') {
             results.set(handle, { handle, outcome: 'failed', status: 'blocked', durationMs: Date.now() - startMs });
+            pending.delete(handle);
+          } else if (statusResult.kind === 'paused_at_gate') {
+            // Gate checkpoint: treat as terminal for now. PR 2 will dispatch the gate evaluator.
+            results.set(handle, { handle, outcome: 'failed', status: 'paused_at_gate', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'hard_fail') {
             process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] awaitSessions: ${statusResult.message}\n`);

@@ -15,7 +15,7 @@ const snapshotRefSchema = sha256DigestSchema
   .transform((v) => asSnapshotRef(asSha256Digest(v)))
   .describe('SnapshotRef (content-addressed sha256 ref)');
 
-export const NodeKindSchema = z.enum(['step', 'checkpoint', 'blocked_attempt']);
+export const NodeKindSchema = z.enum(['step', 'checkpoint', 'blocked_attempt', 'gate_checkpoint']);
 
 export const NodeCreatedDataV1Schema = z.object({
   nodeKind: NodeKindSchema,

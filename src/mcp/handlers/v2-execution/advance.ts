@@ -151,6 +151,16 @@ export function advanceAndRecord(args: {
       });
     }
 
+    // Gate checkpoint: coordinator is calling continue_workflow on a gate_checkpoint node.
+    // This is the resume path -- implemented in PR 2. For now, return a clear error.
+    // TODO(PR 2): implement resume_from_gate MCP tool and handle gate resumption here.
+    if (nodeCreated.data.nodeKind === 'gate_checkpoint') {
+      return neErrorAsync({
+        kind: 'invariant_violation' as const,
+        message: 'Gate checkpoint resumption is not yet implemented. Use resume_from_gate (available in a future release).',
+      } as InternalError);
+    }
+
     // Fresh advance
     return executeAdvanceCore({
       mode: { kind: 'fresh', sourceNodeId: nodeId, snapshot: snap },
