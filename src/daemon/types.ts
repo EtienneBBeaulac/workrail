@@ -316,7 +316,7 @@ export interface WorkflowRunSuccess {
   readonly lastStepArtifacts?: readonly unknown[];
   /**
    * The isolated worktree path created by runWorkflow() for this session.
-   * Present only when trigger.branchStrategy === 'worktree'.
+   * Present when trigger.branchStrategy === 'worktree' or 'read-only'.
    * Absent for 'none' strategy (session used trigger.workspacePath directly).
    *
    * WHY this field exists: delivery (git add, git commit, git push, gh pr create) runs
@@ -326,7 +326,7 @@ export interface WorkflowRunSuccess {
   readonly sessionWorkspacePath?: string;
   /**
    * The process-local session UUID for this workflow run.
-   * Present only when trigger.branchStrategy === 'worktree'.
+   * Present when trigger.branchStrategy === 'worktree' or 'read-only'.
    * Absent for 'none' strategy.
    *
    * WHY this field exists: trigger-router.ts uses sessionId for branch assertion before
@@ -498,6 +498,12 @@ export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | Workflow
 export interface WorkflowContextSlots {
   /** Coordinator-assembled prior phase context (discovery/shaping/coding handoffs). */
   readonly assembledContextSummary?: string;
+  /**
+   * The head branch name of the PR being reviewed. Injected by buildGitHubWorkflowTrigger()
+   * from GitHubPR.head.ref so branchStrategy:'read-only' can checkout the PR branch.
+   * Only present for github_prs_poll triggers reviewing a PR (absent for issues).
+   */
+  readonly prBranch?: string;
 }
 
 export function extractContextSlots(context: Readonly<Record<string, unknown>> | undefined): WorkflowContextSlots {
@@ -505,7 +511,10 @@ export function extractContextSlots(context: Readonly<Record<string, unknown>> |
   const assembledContextSummary = typeof context['assembledContextSummary'] === 'string'
     ? context['assembledContextSummary']
     : undefined;
-  return { assembledContextSummary };
+  const prBranch = typeof context['prBranch'] === 'string'
+    ? context['prBranch']
+    : undefined;
+  return { assembledContextSummary, prBranch };
 }
 
 /**

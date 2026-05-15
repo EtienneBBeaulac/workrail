@@ -698,24 +698,6 @@ export interface TriggerDefinition {
   readonly branchStrategy?: 'worktree' | 'none' | 'read-only';
 
   /**
-   * Optional reviewer identity for creating GitHub PENDING draft reviews after a
-   * successful review session. When present, `maybeRunPostWorkflowActions()` in
-   * TriggerRouter calls the GitHub REST API to create a draft review under this
-   * identity after the session emits a valid `wr.review_verdict` artifact.
-   *
-   * WHY a sub-object (not two flat fields): keeps the two related fields together
-   * and makes `reviewerIdentity` presence the single feature flag -- no separate
-   * `autoPostDraftReview` boolean that could be set inconsistently.
-   *
-   * Both fields are already resolved from environment at parse time (same pattern
-   * as `hmacSecret`). Never contains raw `$SECRET_NAME` refs at runtime.
-   *
-   * In YAML:
-   *   reviewerIdentity:
-   *     githubToken: $GITHUB_REVIEWER_TOKEN
-   *     githubLogin: etienneb
-   */
-  /**
    * Platform-agnostic reviewer identity. The `platform` field discriminates
    * which ReviewApprovalAdapter implementation is used at dispatch time.
    * New platforms (e.g. 'jira', 'linear') are added as new union members

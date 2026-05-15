@@ -34,7 +34,7 @@ export function buildGateCheckpointOutcome(args: {
   const gateSnapshotRes = buildGateCheckpointSnapshot({
     priorSnapshot: snap,
     stepId: args.stepId,
-    gateKind: args.gateKind ?? 'coordinator_eval',
+    gateKind: args.gateKind,
   });
   if (gateSnapshotRes.isErr()) {
     return neErrorAsync({ kind: 'invariant_violation' as const, message: gateSnapshotRes.error.message });

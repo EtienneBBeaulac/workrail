@@ -1373,8 +1373,10 @@ function validateAndResolveTrigger(
     if (!rawPlatform) {
       return err({ kind: 'missing_field', field: 'reviewerIdentity.platform', triggerId: rawId });
     }
-    if (rawPlatform !== 'github' && rawPlatform !== 'gitlab') {
-      return err({ kind: 'invalid_field_value', field: `reviewerIdentity.platform (must be "github" or "gitlab", got: "${rawPlatform}")`, triggerId: rawId });
+    if (rawPlatform !== 'github') {
+      // Only 'github' has a ReviewApprovalAdapter implementation. 'gitlab' is in the type
+      // union for future use -- using it now would silently call GitHub API endpoints.
+      return err({ kind: 'invalid_field_value', field: `reviewerIdentity.platform (only "github" is supported; "gitlab" is planned but not yet implemented, got: "${rawPlatform}")`, triggerId: rawId });
     }
     if (!rawToken) {
       return err({ kind: 'missing_field', field: 'reviewerIdentity.token', triggerId: rawId });

@@ -1117,10 +1117,18 @@ export class TriggerRouter {
                 }
               })();
             } else {
+              // workrailSessionId should always be set for daemon sessions -- this is a defensive
+              // fallback. Post to outbox so the operator has an observable signal.
               console.warn(
-                `[TriggerRouter] human_approval gate parked but workrailSessionId or ctx.v2 not available. ` +
+                `[TriggerRouter] human_approval gate: workrailSessionId or ctx.v2 unavailable. ` +
                 `workflowId=${trigger.workflowId} sessionId=${sessionId}`,
               );
+              if (this._coordinatorDeps) {
+                void this._coordinatorDeps.postToOutbox(
+                  `human_approval gate session ${sessionId} could not create draft review: workrailSessionId or ctx.v2 unavailable.`,
+                  { sessionId, stepId, workflowId: workflowTrigger.workflowId },
+                );
+              }
             }
             break;
           }

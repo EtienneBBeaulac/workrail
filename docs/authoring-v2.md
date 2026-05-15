@@ -291,6 +291,25 @@ Capture (at final handoff only):
   (same accumulation rule as commit steps -- full list, not just final-step SHAs)
 ```
 
+### Gate kind: coordinator_eval vs human_approval
+
+`requireConfirmation` accepts an object form that declares *what kind* of gate the step needs:
+
+```json
+{ "requireConfirmation": { "kind": "coordinator_eval" } }
+{ "requireConfirmation": { "kind": "human_approval" } }
+```
+
+**`coordinator_eval`** (default when `requireConfirmation: true`): the autonomous evaluator (`wr.gate-eval-generic`) runs independently and produces a typed verdict. The session resumes automatically based on that verdict. Use this for quality gates within autonomous pipelines where no human needs to be involved.
+
+**`human_approval`**: the session parks and waits for a human operator to act. When `reviewerIdentity` is configured on the trigger, WorkTrain creates a GitHub PENDING draft review and the operator publishes it. The act of publishing is the approval. Use this on the final handoff step of review workflows where the operator must approve findings before they are posted.
+
+The boolean form (`requireConfirmation: true`) is equivalent to `{ "kind": "coordinator_eval" }`.
+
+MCP sessions are unaffected by gate kind -- `requireConfirmation` never fires for MCP sessions (only daemon sessions with `is_autonomous: 'true'` context).
+
+---
+
 ### Assessment-gate authoring (v1)
 
 Assessment gates are now a shipped authoring/runtime feature, but the first slice is intentionally narrow.

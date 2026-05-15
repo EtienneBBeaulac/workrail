@@ -342,6 +342,34 @@ describe('sync coverage: validateTriggerStrict mirrors validateAndResolveTrigger
     expect(issues.find((i) => i.rule === 'invalid-model-format')).toBeUndefined();
   });
 
+  describe('rule: reviewer-identity-without-read-only (warning)', () => {
+    it('fires when reviewerIdentity is set but branchStrategy is not read-only', () => {
+      const trigger = makeTrigger({
+        reviewerIdentity: { platform: 'github', token: 'ghp_test', login: 'etienneb' },
+        branchStrategy: 'none',
+      });
+      const issues = validateTriggerStrict(trigger);
+      const rule = issues.find((i) => i.rule === 'reviewer-identity-without-read-only');
+      expect(rule).toBeDefined();
+      expect(rule!.severity).toBe('warning');
+    });
+
+    it('does not fire when reviewerIdentity is set and branchStrategy is read-only', () => {
+      const trigger = makeTrigger({
+        reviewerIdentity: { platform: 'github', token: 'ghp_test', login: 'etienneb' },
+        branchStrategy: 'read-only',
+      });
+      const issues = validateTriggerStrict(trigger);
+      expect(issues.find((i) => i.rule === 'reviewer-identity-without-read-only')).toBeUndefined();
+    });
+
+    it('does not fire when reviewerIdentity is absent', () => {
+      const trigger = makeTrigger({ branchStrategy: 'none' });
+      const issues = validateTriggerStrict(trigger);
+      expect(issues.find((i) => i.rule === 'reviewer-identity-without-read-only')).toBeUndefined();
+    });
+  });
+
   it('clean trigger produces no error-severity issues', () => {
     // A fully valid trigger should produce no errors (may have warnings for missing limits).
     const trigger = makeTrigger({

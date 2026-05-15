@@ -297,7 +297,7 @@ const gitDeliveryStage: DeliveryStage = {
  * WHY best-effort (catch + log): cleanup failure must never affect the workflow result.
  * A non-removable worktree will be reaped by runStartupRecovery() after 24h.
  *
- * Only runs when branchStrategy === 'worktree' and sessionWorkspacePath is present.
+ * Only runs when branchStrategy === 'worktree' or 'read-only' and sessionWorkspacePath is present.
  */
 /**
  * Stage 2b: Record commit SHAs into the session event log after delivery.
@@ -412,7 +412,7 @@ const cleanupWorktreeStage: DeliveryStage = {
  * (direct) sessions; worktree sessions defer both sidecar and conversation file deletion
  * to this point after delivery completes.
  *
- * Only runs when branchStrategy === 'worktree' and sessionId is present.
+ * Only runs when branchStrategy === 'worktree' or 'read-only' and sessionId is present.
  *
  * WHY sessionId guard (not sessionWorkspacePath): sessionId and sessionWorkspacePath
  * are co-present -- both are set or both are absent for worktree sessions (see

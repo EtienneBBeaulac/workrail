@@ -23,6 +23,7 @@ import { buildAgentClient } from '../core/index.js';
 import { persistTokens } from '../tools/_shared.js';
 import { ActiveSessionSet } from '../active-sessions.js';
 import type { WorkflowTrigger, SessionSource, ReadFileState } from '../types.js';
+import { extractContextSlots } from '../types.js';
 import type { PreAgentSessionResult } from './runner-types.js';
 import { WORKTREES_DIR } from './runner-types.js';
 
@@ -217,7 +218,7 @@ export async function buildPreAgentSession(
     // 'read-only': checkout the PR's existing branch in an isolated worktree (--detach).
     // No new branch is created; no push occurs after the session.
     // The PR branch name must be in trigger.context.prBranch (injected by buildGitHubWorkflowTrigger).
-    const prBranch = (trigger.context as Record<string, unknown> | undefined)?.['prBranch'];
+    const { prBranch } = extractContextSlots(trigger.context);
     if (typeof prBranch !== 'string' || !prBranch) {
       const msg = 'branchStrategy:read-only requires context.prBranch (the PR head branch). ' +
         'Ensure the trigger uses github_prs_poll with a reviewerLogin so prBranch is injected.';
