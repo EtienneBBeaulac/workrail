@@ -1,0 +1,71 @@
+{
+  "subQuestion": "SQ6",
+  "question": "What does the workflow structure need to enforce that the agent cannot be trusted to self-enforce? What are the structural guardrails?",
+  "fetchedAt": "2026-05-15T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ6-C1",
+      "text": "From SQ3-SQ5 synthesis: LLMs CANNOT be trusted to self-enforce the following without structural enforcement: (A) reading intent before commenting on correctness -- without a forced sequential step, LLMs skip to surface findings; (B) checking only what the PR introduces (not pre-existing issues) -- without explicit diff-scoping in the prompt, LLMs comment on the codebase, not the change; (C) calibrating severity -- without a forced output schema with enumerated severity levels, LLMs use weasel words ('may be a problem,' 'consider') instead of clear severity classification; (D) stopping when they don't understand something -- LLMs always write findings rather than ask questions.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C2",
+      "text": "Structural guardrail 1: INTENT GATE. Before any reviewer produces findings, the workflow must force an intent check: 'Does this PR match the stated ticket/issue?' and 'Is this the right place for this change?' This step must precede all other steps and its output must be consumed by subsequent steps. If intent is misaligned, the workflow should surface this as a blocker BEFORE running the detailed reviewers.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C3",
+      "text": "Structural guardrail 2: DIFF SCOPE ENFORCEMENT. Every reviewer prompt must explicitly constrain findings to code introduced by the PR (not pre-existing issues). This cannot be prompt-level advice ('please only comment on new code') -- it must be a structural constraint: the reviewer receives only the diff, not the full file, unless context is explicitly needed. This prevents the pre-existing issue attribution failure mode (SQ3-C8).",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C4",
+      "text": "Structural guardrail 3: FORCED OUTPUT SCHEMA. Each reviewer must produce findings in a schema with: (a) severity enum (blocker | suggestion | nit), (b) category (correctness | security | design | style), (c) specific location (file + line range), (d) reasoning (why is this a finding?), (e) recommendation (what should the author do?). Without structural enforcement of (e), LLMs produce vague findings ('this seems problematic'). Without structural enforcement of (a), findings lose signal-to-noise ratio.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C5",
+      "text": "Structural guardrail 4: SYNTHESIS STEP WITH DEDUPLICATION. The workflow must have a mandatory synthesis step that: (a) deduplicates findings across reviewers that point to the same issue, (b) resolves severity conflicts (if two reviewers disagree on severity, surface the disagreement rather than picking one), (c) enforces a maximum finding count (e.g., no more than 5 blockers before the list is considered noisy), (d) produces the final summary in a fixed format. Without this step, the combined reviewer output is raw and often contradictory.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C6",
+      "text": "Structural guardrail 5: KNOWLEDGE GAP PROTOCOL. The workflow must include a dedicated 'questions before findings' step or reviewer. When a reviewer encounters code it does not understand, the workflow must force it to produce a QUESTION, not a finding. This maps to the Google guide principle ('if you can't understand the code, ask before reviewing it') and directly addresses the LLM failure mode of writing findings about misunderstood code.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C7",
+      "text": "EASE 2026 structural implication: Since developer acceptance of LLM findings is influenced by workflow pressures (not just finding quality), the workflow must make it EASY for developers to act on high-priority findings. This implies: (a) findings must be ordered by impact (blockers first), (b) high-priority findings must include specific, actionable remediation guidance, not just problem identification. The workflow structure must enforce finding prioritization in the output.",
+      "sourceUrl": "https://arxiv.org/abs/2604.24525",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C8",
+      "text": "Structural guardrail 6: CONDITIONAL EARLY TERMINATION. If the intent check (Guardrail 1) concludes the PR has a fundamental design problem (wrong approach, wrong place for the change), the workflow should surface this BEFORE running the detailed reviewers and potentially prompt for author clarification. This mirrors the Google guide's 'Step One' finding: major design problems should be flagged immediately, before reviewing the rest -- because the rest may be thrown away.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/navigate.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ6"
+    }
+  ]
+}

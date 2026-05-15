@@ -1,0 +1,47 @@
+[
+  {
+    "claimId": "sq3-c1",
+    "text": "LangGraph typed state contracts: child subgraph declares its output via TypedDict schema (e.g. `class SubgraphOutput(TypedDict): result: str; confidence: float`). When parent uses different schemas, a transformation function maps child output fields to parent state fields: `def call_subgraph(state: ParentState): response = subgraph.invoke({'child_input': state['messages']}); return {'parent_result': response['result']}`. The transformation is pure Python -- no JSON Schema validation at runtime, just Python type annotations. This means the contract is enforced by the Python type checker (mypy/pyright) at development time, not at runtime by the engine.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md",
+    "source_type": "primary_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq3-c2",
+    "text": "OpenAI Agents SDK `output_type` parameter: when `output_type=MyPydanticModel` is set on an Agent, `Runner.run()` returns a `RunResult` where `run_result.final_output` is typed as `MyPydanticModel` (via `output_type`). The `as_tool` wrapper calls `custom_output_extractor` or falls back to reading `run_result.final_output` -- if it's not a string, it is returned directly (the parent receives a Python typed object as the tool result). There is NO JSON Schema validation against a declared contract at the engine level -- the contract is enforced by the Pydantic model's validation when the LLM's structured output is parsed.",
+    "source_url": "https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq3-c3",
+    "text": "WorkRail's current artifact contract system (ArtifactRefPayloadV1Schema, OutputContractSchema) validates child artifact type at step completion, but the artifacts themselves are `unknown[]` when accessed via ChildWorkflowRunResult.lastStepArtifacts. The typed artifact contracts are registered in the artifact registry and validated by artifact-contract-validator.ts at step advance time -- but this validation runs inside the child session. The parent session receives lastStepArtifacts as `readonly unknown[]` with no structural contract guarantee at the parent boundary. This is the key gap: there is NO mechanism for the parent workflow definition to declare 'I expect child to return a wr.review_verdict artifact' and have the engine validate this at spawn time or result injection time.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/daemon/types.ts",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq3-c4",
+    "text": "OpenAI Agents SDK `ToolsToFinalOutputResult`: the tool_use_behavior field on Agent can include `stop_at_tool_names` -- a list of tool names that, when called, terminate the run and return the tool's output as `final_output`. This is a lightweight alternative to `output_type`: the agent calls a specific tool to signal 'I am done and here is my result'. The tool result becomes the final typed output. This pattern avoids Pydantic and works with any JSON-serializable structure. Directly applicable to WorkRail: child session can call a 'return_result' tool that signals completion and passes typed JSON to the parent.",
+    "source_url": "https://openai.github.io/openai-agents-python/agents/",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq3-c5",
+    "text": "WorkRail ArtifactContractRef is a registered typed artifact reference (e.g. 'wr.review_verdict', 'wr.phase_handoff'). The artifact-contract-validator.ts validates artifact payloads against these registered contracts at step advance time. The contracts are JSON Schema-backed and enforced at runtime by the engine. This is the most principled typed result contract mechanism across all frameworks surveyed -- it is schema-validated at the engine level, not just Python-typed. The gap is that this validation only happens inside the child session, not at the parent boundary when child output is injected.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/domain/artifact-contract-validator.ts",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  }
+]

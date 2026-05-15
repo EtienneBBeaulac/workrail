@@ -1,0 +1,43 @@
+{
+  "subQuestions": [
+    {
+      "id": "SQ1",
+      "question": "What do great human reviewers do that mediocre ones don't? What dimensions do they check, and in what order?",
+      "dependsOn": [],
+      "rationale": "Foundation -- defines the target behavior we want agents to match. Must be answered first."
+    },
+    {
+      "id": "SQ2",
+      "question": "What does empirical research say review comments are actually useful for? What percentage of review value is correctness vs. design vs. style?",
+      "dependsOn": [],
+      "rationale": "Independent of SQ1 -- draws on Bacchelli & Bird, Bosu et al. Informs which reviewer specializations matter most."
+    },
+    {
+      "id": "SQ3",
+      "question": "What are the documented failure modes of LLM code reviewers? (verbosity, false positives, surface pattern-matching, missing intent, pre-existing issue attribution)",
+      "dependsOn": [],
+      "rationale": "Independent -- draws on EASE 2026 and similar empirical work. Defines the gap we need to close."
+    },
+    {
+      "id": "SQ4",
+      "question": "What prompt and instruction techniques demonstrably improve LLM review quality? Which are validated vs. speculative?",
+      "dependsOn": ["SQ3"],
+      "rationale": "Depends on SQ3 -- you need to know the failure modes before evaluating whether a technique fixes them."
+    },
+    {
+      "id": "SQ5",
+      "question": "How should reviewer specialization be structured? What role boundaries maximize finding depth without overlap noise?",
+      "dependsOn": ["SQ1", "SQ2"],
+      "rationale": "Depends on SQ1 (what great reviewers do) and SQ2 (what review value comes from) -- specialization design requires knowing what dimensions matter."
+    },
+    {
+      "id": "SQ6",
+      "question": "What does the workflow structure need to enforce that the agent cannot be trusted to self-enforce? What are the structural guardrails?",
+      "dependsOn": ["SQ3", "SQ4", "SQ5"],
+      "rationale": "Synthesis question -- requires knowing failure modes, technique effectiveness, and specialization design."
+    }
+  ],
+  "regime": "depth_serial",
+  "regimeRationale": "SQ4 depends on SQ3; SQ5 depends on SQ1 and SQ2; SQ6 depends on SQ3, SQ4, and SQ5. At least three dependency edges exist, so regime = depth_serial.",
+  "topologicalOrder": ["SQ1", "SQ2", "SQ3", "SQ4", "SQ5", "SQ6"]
+}

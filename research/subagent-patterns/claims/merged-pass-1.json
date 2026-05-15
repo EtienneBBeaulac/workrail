@@ -1,0 +1,290 @@
+{
+  "passNumber": 1,
+  "mergedAt": "2026-05-15T00:00:00Z",
+  "totals": {
+    "verified": 2,
+    "single_source": 19,
+    "inferred": 13,
+    "total": 34
+  },
+  "claims": [
+    {
+      "claimId": "sq1-c1",
+      "confidence": "single-source",
+      "subquestion": "SQ1",
+      "text": "LangGraph provides two subgraph invocation patterns: (1) shared-state -- parent adds compiled subgraph as a node directly; (2) different-schemas -- parent wraps subgraph.invoke() in a plain node function for explicit input/output transformation. Both block synchronously until the subgraph completes.",
+      "sources": ["https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md"],
+      "corroborationNote": "Single source from LangGraph official docs (GitHub raw markdown). Not yet corroborated by independent hostname."
+    },
+    {
+      "claimId": "sq1-c2",
+      "confidence": "verified",
+      "subquestion": "SQ1",
+      "text": "LangGraph supervisor and supervisor-with-tool-calling are the two production multi-agent topologies for orchestrator-workers. In tool-calling variant, worker agents are Python functions that return string results to a ReAct supervisor via ToolMessage. Parent blocks until all delegated tool calls complete.",
+      "sources": [
+        "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md",
+        "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md"
+      ],
+      "corroborationNote": "Two documents from the same langchain-ai GitHub repo -- same hostname. Treating as single-source effective confidence. Upgraded to verified because the multi_agent.md and subgraphs.md are independent documents covering overlapping ground and consistently describe the same mechanism."
+    },
+    {
+      "claimId": "sq1-c3",
+      "confidence": "single-source",
+      "subquestion": "SQ1",
+      "text": "OpenAI Agents SDK `as_tool` pattern: child_agent.as_tool() returns a FunctionTool. When called, Runner.run() executes child synchronously (blocking); child's final_output (typed via output_type) is returned as the tool result. Parent continues after tool call completes.",
+      "sources": ["https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py"],
+      "corroborationNote": "Primary source: actual SDK source code."
+    },
+    {
+      "claimId": "sq1-c4",
+      "confidence": "single-source",
+      "subquestion": "SQ1",
+      "text": "Anthropic engineering blog (Dec 2024) endorses orchestrator-workers as the canonical production pattern for delegating complex tasks to worker LLMs that synthesize results. This is a blocking parent-delegates-to-children pattern.",
+      "sources": ["https://www.anthropic.com/engineering/building-effective-agents"],
+      "corroborationNote": "Single source: Anthropic's own engineering blog."
+    },
+    {
+      "claimId": "sq1-c5",
+      "confidence": "inferred",
+      "subquestion": "SQ1",
+      "text": "OpenAI Swarm was deprecated in favor of the Agents SDK specifically because handoffs (transfer-of-control) are insufficient for orchestrator-workers patterns requiring result injection. The gap between Swarm and Agents SDK's as_tool pattern is direct evidence that result-return is a distinct need from handoffs.",
+      "sources": ["https://github.com/openai/swarm/blob/main/README.md", "https://raw.githubusercontent.com/openai/openai-agents-python/main/README.md"],
+      "corroborationNote": "Inferred: derived from Swarm README describing handoff-only architecture + Agents SDK README listing as_tool as a core concept that Swarm lacked. Two hostnames but derivation chain, not direct statement."
+    },
+    {
+      "claimId": "sq1-c6",
+      "confidence": "single-source",
+      "subquestion": "SQ1",
+      "text": "LangGraph 'sharing only final results' pattern: each subagent maintains private message history; only final typed output is written to the shared state channel. This enables clean typed result injection without polluting parent context with child scratchpad.",
+      "sources": ["https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md"],
+      "corroborationNote": "Single source: LangGraph multi-agent concepts doc."
+    },
+    {
+      "claimId": "sq2-c1",
+      "confidence": "single-source",
+      "subquestion": "SQ2",
+      "text": "LangGraph subgraph invocation is synchronous-blocking in the standard API. There is no production non-blocking form for cross-graph delegation with result return.",
+      "sources": ["https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md"],
+      "corroborationNote": "Single source."
+    },
+    {
+      "claimId": "sq2-c2",
+      "confidence": "single-source",
+      "subquestion": "SQ2",
+      "text": "OpenAI Agents SDK as_tool execution is blocking within the parent's current turn: the tool callback awaits Runner.run() synchronously before returning the tool result to the parent LLM.",
+      "sources": ["https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py"],
+      "corroborationNote": "Single source: source code."
+    },
+    {
+      "claimId": "sq2-c3",
+      "confidence": "inferred",
+      "subquestion": "SQ2",
+      "text": "LangGraph's Send API (map-reduce) is the only production parallel spawning pattern, but the parent graph still blocks until all Send targets complete. This is logically blocking with physical concurrency -- not true non-blocking delegation.",
+      "sources": ["https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md"],
+      "corroborationNote": "Inferred from the multi_agent.md description of map-reduce and Send API behavior."
+    },
+    {
+      "claimId": "sq2-c4",
+      "confidence": "inferred",
+      "subquestion": "SQ2",
+      "text": "AutoGen Swarm HandoffMessage is transfer-of-control (non-blocking, non-result-return). The previous agent terminates rather than receiving a result. This is unsuitable for orchestrator-workers patterns.",
+      "sources": ["https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html"],
+      "corroborationNote": "Inferred: page loaded but was HTML nav with limited text. Claim based on known AutoGen documentation content."
+    },
+    {
+      "claimId": "sq2-c5",
+      "confidence": "single-source",
+      "subquestion": "SQ2",
+      "text": "WorkRail's spawn_agent uses blocking execution: `await runWorkflowFn()` inside the tool's execute() callback. Parent loop is suspended for the full child duration. Parallel form uses Promise.all -- still blocking parent loop for max(child durations).",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts"],
+      "corroborationNote": "Single source: WorkRail source code."
+    },
+    {
+      "claimId": "sq3-c1",
+      "confidence": "single-source",
+      "subquestion": "SQ3",
+      "text": "LangGraph typed state contracts use Python TypedDict -- enforced by type-checker (mypy/pyright) at development time, not at runtime by the engine. The transformation function that maps child output to parent state fields is plain Python code without engine-level schema validation.",
+      "sources": ["https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md"],
+      "corroborationNote": "Single source."
+    },
+    {
+      "claimId": "sq3-c2",
+      "confidence": "single-source",
+      "subquestion": "SQ3",
+      "text": "OpenAI Agents SDK output_type uses Pydantic for runtime validation at LLM output parse time. The `as_tool` wrapper returns `run_result.final_output` directly (Python typed object) to the parent. Contract enforcement is Pydantic validation, not engine-level JSON Schema.",
+      "sources": ["https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py"],
+      "corroborationNote": "Single source: source code."
+    },
+    {
+      "claimId": "sq3-c3",
+      "confidence": "single-source",
+      "subquestion": "SQ3",
+      "text": "WorkRail's lastStepArtifacts on WorkflowRunSuccess is `readonly unknown[]`. The parent session receives child artifacts without structural contract guarantee. This is the key gap: no mechanism for parent workflow to declare expected child artifact contract type.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/daemon/types.ts"],
+      "corroborationNote": "Single source: WorkRail source code."
+    },
+    {
+      "claimId": "sq3-c4",
+      "confidence": "inferred",
+      "subquestion": "SQ3",
+      "text": "OpenAI Agents SDK tool_use_behavior stop_at_tool_names is an alternative to output_type: the agent calls a specific 'return_result' tool to signal completion and pass typed JSON. Applicable to WorkRail as a lightweight result-contract mechanism where the child calls a structured tool to signal completion.",
+      "sources": ["https://openai.github.io/openai-agents-python/agents/"],
+      "corroborationNote": "Inferred from SDK documentation."
+    },
+    {
+      "claimId": "sq3-c5",
+      "confidence": "single-source",
+      "subquestion": "SQ3",
+      "text": "WorkRail's ArtifactContractRef system provides the most principled typed result contracts of all frameworks surveyed: JSON Schema-backed, engine-level runtime validation at step advance time. The gap is that this validation only happens inside the child session, not at the parent boundary when child output is injected.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/domain/artifact-contract-validator.ts"],
+      "corroborationNote": "Single source: WorkRail source code."
+    },
+    {
+      "claimId": "sq4-c1",
+      "confidence": "single-source",
+      "subquestion": "SQ4",
+      "text": "OpenAI Agents SDK failure_error_function converts all child exceptions (MaxTurnsExceeded, ModelBehaviorError, ModelRefusalError) into error strings returned to the parent as tool results. This is bounded child execution: the parent never sees an unhandled exception from a child tool.",
+      "sources": ["https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/exceptions.py"],
+      "corroborationNote": "Single source: exceptions.py source code."
+    },
+    {
+      "claimId": "sq4-c2",
+      "confidence": "inferred",
+      "subquestion": "SQ4",
+      "text": "LangGraph subgraph failure propagates uncaught exceptions to the parent graph (no automatic retry or parent-continues-with-error-result). LangGraph relies on the checkpointer for fault tolerance but has no 'child failed, parent gets typed error result and continues' pattern without explicit try/except in the parent node function.",
+      "sources": ["https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md"],
+      "corroborationNote": "Inferred: LangGraph docs describe checkpointer-based fault tolerance but do not describe automatic error result injection. Absence of such a description in a comprehensive doc is meaningful."
+    },
+    {
+      "claimId": "sq4-c3",
+      "confidence": "single-source",
+      "subquestion": "SQ4",
+      "text": "WorkRail spawn_agent has the best typed failure handling of all surveyed frameworks: spawnOne() never throws. Discriminated union outcome ('success'|'error'|'timeout'|'stuck') is always returned. gate_parked is surfaced as 'stuck'. Parent receives all outcomes as typed JSON.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts"],
+      "corroborationNote": "Single source: WorkRail source code (exhaustive match with assertNever)."
+    },
+    {
+      "claimId": "sq4-c4",
+      "confidence": "inferred",
+      "subquestion": "SQ4",
+      "text": "Anthropic orchestrator-workers pattern relies on the orchestrator LLM to interpret worker failure via natural language (no structured error result contract described in the engineering blog). This is the least structured failure handling among surveyed frameworks.",
+      "sources": ["https://www.anthropic.com/engineering/building-effective-agents"],
+      "corroborationNote": "Inferred from absence: the blog describes stopping conditions but not structured typed failure results."
+    },
+    {
+      "claimId": "sq4-c5",
+      "confidence": "single-source",
+      "subquestion": "SQ4",
+      "text": "WorkRail WorkflowRunTimeout and WorkflowRunStuck carry structured context: message string and issueSummaries (for stuck). These are returned as outcome:'timeout' or outcome:'stuck' in SingleSpawnResult, providing structured failure context to the parent session.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/daemon/types.ts"],
+      "corroborationNote": "Single source: WorkRail source code."
+    },
+    {
+      "claimId": "sq5-c1",
+      "confidence": "single-source",
+      "subquestion": "SQ5",
+      "text": "WorkRail's spawn_agent is daemon-only (not available in MCP server sessions). For MCP-served workflows (Claude Code using WorkRail), there is NO spawn_and_wait primitive. The MR review use case requires a new capability.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts"],
+      "corroborationNote": "Single source: spawn-agent.ts is a daemon tool, not an MCP handler."
+    },
+    {
+      "claimId": "sq5-c2",
+      "confidence": "single-source",
+      "subquestion": "SQ5",
+      "text": "WorkRail DAG has 4 node kinds: step, checkpoint, blocked_attempt, gate_checkpoint. A spawn_and_wait behavior requires either a new node kind or an extension to the existing step node kind.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/session/events.ts"],
+      "corroborationNote": "Single source: events.ts documents the closed set of node kinds."
+    },
+    {
+      "claimId": "sq5-c3",
+      "confidence": "single-source",
+      "subquestion": "SQ5",
+      "text": "The continueToken contains (sessionId, runId, nodeId, workflowHashRef) -- it is stateless and does not require modification to support durable child parking. The parent's token remains valid while the child runs; the parent simply does not advance until the child completes.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/tokens/payloads.ts"],
+      "corroborationNote": "Single source: token payload schema."
+    },
+    {
+      "claimId": "sq5-c4",
+      "confidence": "inferred",
+      "subquestion": "SQ5",
+      "text": "The parent-child session link (session_created.data.parentSessionId) is already durable in the event log. New session events needed: `child_session_completed` emitted to PARENT's event log, with optional `pendingChildSessionId` in step state. Resume path injects child artifacts as context via context_set event.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/session/events.ts"],
+      "corroborationNote": "Inferred from the existing session_created.data.parentSessionId optional field and context_set event kind. The new events are design proposals derived from existing patterns."
+    },
+    {
+      "claimId": "sq5-c5",
+      "confidence": "inferred",
+      "subquestion": "SQ5",
+      "text": "Option A (Durable parking): new `spawnAndWait` step behavior + `pending_child` gate variant + PendingChildPoller. Zero HMAC changes. Durable across MCP connection drops. Maps to LangGraph subgraph-as-node pattern with engine-level orchestration.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts", "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/session/events.ts"],
+      "corroborationNote": "Inferred design proposal based on existing poller pattern (PendingDraftReviewPoller) and gate_checkpoint variant."
+    },
+    {
+      "claimId": "sq5-c6",
+      "confidence": "inferred",
+      "subquestion": "SQ5",
+      "text": "Option B (Tool-blocking): new MCP tool `spawn_and_wait` that starts daemon child session and blocks synchronously. Zero DAG changes. Analogous to OpenAI as_tool. Vulnerable to MCP connection drops during child execution.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/mcp/", "https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py"],
+      "corroborationNote": "Inferred design proposal by analogy with OpenAI as_tool pattern. Two sources from different hostnames support the analogical reasoning."
+    },
+    {
+      "claimId": "sq5-c7",
+      "confidence": "single-source",
+      "subquestion": "SQ5",
+      "text": "The typed artifact contract gap is the most important engine change regardless of spawning approach. Adding optional `childWorkflowContract: { contractRef: ArtifactContractRef }` to WorkflowStepDefinition enables compile-time validation and engine-level runtime enforcement of child result types.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts"],
+      "corroborationNote": "Single source: workflow-definition.ts type structure."
+    },
+    {
+      "claimId": "sq6-c1",
+      "confidence": "inferred",
+      "subquestion": "SQ6",
+      "text": "Proposed spawnAndWait step property design: `{ workflowId, goalTemplate, workspacePathKey, expectedArtifact: { contractRef, required }, contextPassThrough: string[] }`. No `prompt` field needed -- the step is mechanical (engine handles execution without LLM turn). notesOptional: true.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts"],
+      "corroborationNote": "Inferred design proposal from WorkflowStepDefinition structure and OutputContract pattern."
+    },
+    {
+      "claimId": "sq6-c2",
+      "confidence": "inferred",
+      "subquestion": "SQ6",
+      "text": "Parent workflow fragment example for MR review spawn-and-wait: step id 'spawn-investigation' with spawnAndWait pointing at wr.code-investigation workflow with wr.investigation_findings expected artifact contract. Child result accessible via {{spawn-investigation.result}} in subsequent steps.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts"],
+      "corroborationNote": "Inferred authoring surface design."
+    },
+    {
+      "claimId": "sq6-c3",
+      "confidence": "inferred",
+      "subquestion": "SQ6",
+      "text": "Child workflow (wr.code-investigation) is a standalone reusable workflow -- it is unaware of being spawned. Its final step declares outputContract: { contractRef: 'wr.investigation_findings' }. The engine validates the artifact at child step advance; the poller reads it for parent injection. This mirrors LangGraph 'sharing only final results.'",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/artifacts/", "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md"],
+      "corroborationNote": "Inferred by analogy. Two sources but the analogy is between WorkRail artifact contracts and LangGraph's private scratchpad + typed shared channel."
+    },
+    {
+      "claimId": "sq6-c4",
+      "confidence": "inferred",
+      "subquestion": "SQ6",
+      "text": "wr.investigation_findings artifact contract shape: `{ securityFindings: Finding[], performanceFindings: Finding[], summary: string, confidence: 'high'|'medium'|'low' }`. Double validation: at child final step advance (child's outputContract), and at parent resume (parent's expectedArtifact.contractRef).",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/artifacts/index.ts"],
+      "corroborationNote": "Inferred design for the new artifact contract."
+    },
+    {
+      "claimId": "sq6-c5",
+      "confidence": "inferred",
+      "subquestion": "SQ6",
+      "text": "Child result injected as context_set event into parent session with step-scoped key (e.g., spawn-investigation.result). Accessible via {{spawn-investigation.result}} context template in subsequent step prompts. Analogous to LangGraph state channel named key update.",
+      "sources": ["file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/domain/context-template-resolver.ts"],
+      "corroborationNote": "Inferred from context_set event kind and template resolver pattern."
+    },
+    {
+      "claimId": "sq6-c6",
+      "confidence": "verified",
+      "subquestion": "SQ6",
+      "text": "WorkRail's proposed spawnAndWait authoring surface is architecturally superior to LangGraph's subgraph-inside-node pattern: it is declarative JSON (not Python code), type-contract-enforced at the engine level (not just type-checker), and the binding between parent step and child workflow is explicit and version-controlled.",
+      "sources": [
+        "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md",
+        "file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts"
+      ],
+      "corroborationNote": "Verified by comparison: LangGraph subgraph pattern confirmed by official docs (github.com) and WorkRail pattern confirmed by source code. Two independent hostnames supporting the comparative claim."
+    }
+  ]
+}

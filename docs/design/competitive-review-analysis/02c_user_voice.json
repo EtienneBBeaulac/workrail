@@ -1,0 +1,117 @@
+{
+  "subagent": "2c - User Voice & Sentiment",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "research_date": "2026-05-15",
+  "note": "G2/Capterra behind JS login - not accessible. Primary sources: HN threads, Reddit comments, GitHub Issues. All quotes are paraphrased from public content unless marked as verbatim.",
+
+  "top_complaints": [
+    {
+      "theme": "Signal-to-noise / false positive overload",
+      "cluster_size": "large (multiple independent sources)",
+      "verbatim_example": "signal to noise ratio is poor. I think this is the problem with just about every tool that examines code. I've had the same problem with runtime checkers, with static analysis tools, and now ai code reviews.",
+      "source": "HN comment, 2026-01-27",
+      "implication_for_wr": "Over-flagging is the #1 user complaint. PR-Agent's max 3 findings default and confidence constraint are direct responses to this. We need the same discipline in wr.mr-review."
+    },
+    {
+      "theme": "Too chatty / notification pollution",
+      "cluster_size": "medium",
+      "verbatim_example": "I've had to disable the AI reviewer on some projects my team manages because it was so chatty that it caused meaningful notifications from team members to be missed.",
+      "source": "HN comment, 2025-12-21",
+      "implication_for_wr": "Volume discipline: fewer high-confidence findings beats more low-confidence ones. The reviewer that cries wolf gets disabled."
+    },
+    {
+      "theme": "Review happens too late when AI writes code fast",
+      "cluster_size": "medium",
+      "verbatim_example": "I've been using tools like CodeRabbit and Greptile for PR review, they're solid. But recently, with AI writing large chunks of code inside the IDE, I've started feeling like PR review can be 'too late' for certain regressions. By the time I open a PR, multiple AI edits have already landed.",
+      "source": "Reddit r/devops, 2025-11-22",
+      "implication_for_wr": "Shift-left pressure: pre-commit / IDE review is becoming important as AI generates more code. CodeRabbit's CLI and IDE extension address this. Less relevant to wr.mr-review but affects roadmap framing."
+    },
+    {
+      "theme": "AI review misses codebase-specific context",
+      "cluster_size": "medium",
+      "verbatim_example": "The AI dev stack needs TWO AI tools: one to write, one to review. Everyone focuses on the tool that writes code. Nobody talks about what reviews the code after AI generates it.",
+      "source": "Reddit r/devops, 2025-08-08",
+      "implication_for_wr": "Users are explicitly looking for a review tool that understands the existing codebase, not just the diff. This validates our roadmap direction on codebase-aware reviewer families."
+    },
+    {
+      "theme": "CI/CD integration gotchas in production",
+      "cluster_size": "small-medium",
+      "verbatim_example": "Speed is one issue... in practice there's a bunch of gotchas that come up. What's your experience with CI/CD integration for AI code review in production pipelines?",
+      "source": "Reddit r/devops thread with 15 comments, 2025-09-14",
+      "implication_for_wr": "Production reliability matters. Flaky reviews that timeout or crash CI are deal-breakers."
+    }
+  ],
+
+  "top_praises": [
+    {
+      "theme": "Automatically catches things human reviewers miss",
+      "cluster_size": "medium",
+      "context": "Users appreciate AI reviewers for catching bugs in paths humans don't check, especially edge cases and security issues.",
+      "source": "Aggregate from HN/Reddit",
+      "implication_for_wr": "The bar is 'catches what humans miss', not 'catches everything'. Actionable, specific findings on real paths beat broad coverage."
+    },
+    {
+      "theme": "CodeRabbit learnings creates compounding value",
+      "cluster_size": "small",
+      "context": "Reddit post (CodeRabbit Slack agent thread): users highlight that CodeRabbit 'remembers feedback and gets smarter with each PR.' The feedback loop is a key differentiator vs tools with no memory.",
+      "source": "Reddit r/devops, CodeRabbit Slack agent post",
+      "implication_for_wr": "Memory/learning feedback loop is a feature users actively want. Our reviewer family model could incorporate learnings."
+    },
+    {
+      "theme": "PR-Agent is fast and cheap (30 seconds, BYOK)",
+      "cluster_size": "medium",
+      "context": "The explicit positioning of PR-Agent as 'each tool uses a single LLM call (~30 seconds, low cost)' resonates with users who want a low-friction, no-subscription option.",
+      "source": "PR-Agent README, corroborated by HN discussions",
+      "implication_for_wr": "Speed and cost transparency matter to users. wr.mr-review should communicate its token budget."
+    }
+  ],
+
+  "switch_in_narratives": [
+    {
+      "narrative": "Moving from pure CodeRabbit to hybrid (CodeRabbit write suggestions + separate review agent to implement fixes)",
+      "detail": "Reddit: 'My previous flow was using CodeRabbit and setting up an agent with OpenClaw to read the comments from CR would leave and make the changes.' Users are building pipelines on top of AI review tools.",
+      "source": "Reddit r/devops, 2025-08-08",
+      "time_period": "30-180_days"
+    },
+    {
+      "narrative": "Teams moving toward structured review pipelines with multiple AI models as reviewer panel",
+      "detail": "Reddit post (2,304 pts): 'Claude Code is a Beast - Tips from 6 Months of Hardcore Use' and related 'Evaluating GPT-5.3 Codex, GPT-5.2, Claude Opus 4.6 across 133 review cycles' (164 pts). Power users are running structured multi-model review panels, not just auto-review.",
+      "source": "Reddit r/ClaudeAI, Reddit r/devops",
+      "time_period": "last_30_days"
+    }
+  ],
+
+  "switch_out_narratives": [
+    {
+      "narrative": "Disabled AI reviewer due to chattiness",
+      "detail": "HN comment (2025-12-21): 'I've had to disable the AI reviewer on some projects my team manages because it was so chatty that it caused meaningful notifications from team members to be missed.' Explicit churn event tied to volume, not quality.",
+      "source": "HN, 2025-12-21",
+      "time_period": "30-180_days"
+    },
+    {
+      "narrative": "Show HN: Forget CodeRabbit, Meet Open Code Review (open-source multi-agent alternative)",
+      "detail": "HN post (2026-01-29): 'Forget CodeRabbit. Meet Open Code Review, Open Source Multi-Agent Code Review' - 1 pt. Low engagement but signals users looking for open, composable alternatives.",
+      "source": "HN, 2026-01-29",
+      "time_period": "30-180_days"
+    }
+  ],
+
+  "github_issues_signal": {
+    "source": "https://api.github.com/repos/the-pr-agent/pr-agent/issues",
+    "most_requested": [
+      "MCP tool orchestration and server config support (#2348, 20 comments) - users want reviewers that can call external tools",
+      "Review risk assessment and optional repository review rules (#2391, 28 comments) - users want repo-specific rules, not generic ones",
+      "Extended improve mode for more thorough PR reviews (#229, 77 comments) - users want deeper analysis",
+      "Static analysis integration (#1266, 36 comments) - users want tool-based findings not just LLM"
+    ],
+    "implication_for_wr": "The top community requests align exactly with our gaps: codebase-specific rules, tool integration, deeper analysis. These are validated pain points, not speculative features."
+  },
+
+  "industrial_research_signal": {
+    "paper": "Understanding the Limits of Automated Evaluation for Code Review Bots in Practice",
+    "arxiv": "2604.24525",
+    "venue": "EASE 2026",
+    "key_finding": "LLM-as-a-Judge evaluation achieves only 0.44-0.62 agreement with developer labels (Beko industrial dataset, 2,604 bot comments). Developer fix/wontFix actions are confounded by organizational pressure and workflow dynamics - not purely a signal of comment quality.",
+    "implication_for_wr": "We cannot evaluate wr.mr-review quality purely by measuring whether developers acted on findings. Developer behavior is confounded. Need better evaluation strategies (e.g. blind review comparison, inject-known-bug tests)."
+  }
+}

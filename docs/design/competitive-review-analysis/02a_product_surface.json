@@ -1,0 +1,226 @@
+{
+  "subagent": "2a - Technical & Product Surface",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "research_date": "2026-05-15",
+
+  "feature_inventory": [
+
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Self-reflection / two-pass scoring",
+      "status": "shipped_verified",
+      "detail": "After generating suggestions, a second LLM call scores each 0-10 with rationale, re-ranks, and filters out score=0 items. Score threshold configurable. Solves the problem of LLMs being poor at simultaneous generation and ranking.",
+      "source": "https://docs.pr-agent.ai/core-abilities/self_reflection/",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Asymmetric dynamic context (enclosing function expansion)",
+      "status": "shipped_verified",
+      "detail": "Extends hunk context asymmetrically: more lines before change (up to enclosing function/class boundary) than after. Prevents 'needle in haystack' overload while giving enough context to understand the change. Configurable: allow_dynamic_context, max_extra_lines_before_dynamic_context=8.",
+      "source": "https://docs.pr-agent.ai/core-abilities/dynamic_context/",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Adaptive token-aware file patch compression",
+      "status": "shipped_verified",
+      "detail": "For large PRs: prioritizes language (most common in repo first), removes deletion-only hunks, uses tiktoken for budget-aware fitting. Additions prioritized over deletions. Remaining patches listed as 'other modified files'. Enables full-repo-aware review without context overflow.",
+      "source": "https://docs.pr-agent.ai/core-abilities/compression_strategy/",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Ticket context integration (Jira/GitHub/Linear)",
+      "status": "shipped_verified",
+      "detail": "Fetches linked ticket requirements, generates TicketCompliance output: fully_compliant_requirements, not_compliant_requirements, requires_further_human_verification. Requires ticket URL in PR description. branch_issue_regex can extract issue number from branch name.",
+      "source": "https://raw.githubusercontent.com/the-pr-agent/pr-agent/main/pr_agent/settings/configuration.toml",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Incremental review (-i flag)",
+      "status": "shipped_verified",
+      "detail": "Reviews only commits added since last review. Configurable thresholds: minimal_commits_for_incremental_review, minimal_minutes_for_incremental_review. Partial port to GitLab in-progress (open PR #2389).",
+      "source": "https://docs.pr-agent.ai/tools/review/",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Structured output schema with confidence constraints",
+      "status": "shipped_verified",
+      "detail": "Pydantic output contract: KeyIssuesComponentLink (file, issue_header, issue_content, start_line, end_line). Prompt explicitly requires: 'do not flag unless you can identify the specific affected code path from the diff context.' Max 3 findings by default (num_max_findings). Security issues may be included with explicit uncertainty noted.",
+      "source": "https://raw.githubusercontent.com/the-pr-agent/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Repo-level and wiki-level configuration inheritance",
+      "status": "shipped_verified",
+      "detail": "Three config file locations: global, repo-level (.pr_agent.toml), and GitHub wiki page. All merged. extra_instructions field allows per-team customization of review focus. per-file instructions planned in SKILL.md format (open PR #2385).",
+      "source": "https://raw.githubusercontent.com/the-pr-agent/pr-agent/main/pr_agent/settings/configuration.toml",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "MCP tool integration in PRReviewer",
+      "status": "shipped_claimed",
+      "detail": "Open PR #2356 implements MCP tool registry and integration. Open PR #2348 adds MCP orchestration and server config support. Not yet merged as of research date.",
+      "source": "https://api.github.com/repos/the-pr-agent/pr-agent/issues",
+      "time_period": "last_30_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "Review risk assessment + repo review rules",
+      "status": "shipped_claimed",
+      "detail": "Open PR #2391 adds review risk assessment and optional repository review rules. Not yet merged.",
+      "source": "https://api.github.com/repos/the-pr-agent/pr-agent/issues",
+      "time_period": "last_30_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "feature": "AGENTS.md / CLAUDE.md as context files",
+      "status": "shipped_claimed",
+      "detail": "Open PR #2387 adds support for per-repo context files (AGENTS.md, CLAUDE.md etc.) to be included as context. Not yet merged.",
+      "source": "https://api.github.com/repos/the-pr-agent/pr-agent/issues",
+      "time_period": "last_30_days"
+    },
+
+    {
+      "tool": "CodeRabbit",
+      "feature": "Agentic codebase exploration",
+      "status": "shipped_verified",
+      "detail": "Architecture page states: 'Sandboxed cloud execution with full repository cloned for isolated analysis' and 'Agentic exploration that autonomously investigates your codebase for context.' Not just diff-read - review agent can search the full repo.",
+      "source": "https://docs.coderabbit.ai/overview/architecture",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Learnings system (feedback -> stored preference -> applied)",
+      "status": "shipped_verified",
+      "detail": "Team members chat with @coderabbitai to express preferences during reviews. CodeRabbit creates natural-language learning records stored per-org. Applied at every future review comment generation. Scopeable: repo-only or org-wide. Export/import CSV supported. Key insight: preferences tied to file pattern + context of original comment.",
+      "source": "https://docs.coderabbit.ai/knowledge-base/learnings",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Multi-repo analysis (cross-repo impact detection)",
+      "status": "shipped_verified",
+      "detail": "Linked repositories configuration. Research agent checks linked repos when PR touches shared APIs, schemas, or types. Findings appear in 'Additional context used' section. Use cases: API contracts, microservice consumers, shared libraries, database schemas. Plan-gated (Pro/Pro+/Enterprise).",
+      "source": "https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Change Stack (cohort+layer diff reorganization)",
+      "status": "shipped_verified",
+      "detail": "Reorganizes diff from alphabetical file list into cohorts (related files grouped) and layers (ordered by dependency: data shapes before consumers). Per-range AI summaries. Auto-generated diagrams for call flows, state machines, ERDs where warranted. Keyboard navigation. Early access, GitHub only. Will become Pro+ feature.",
+      "source": "https://docs.coderabbit.ai/pr-reviews/change-stack",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "CI/CD pipeline analysis (post inline fix suggestions on CI failure lines)",
+      "status": "shipped_verified",
+      "detail": "Reads CI/CD pipeline failures and posts inline fix suggestions on the relevant PR lines. CircleCI integration available. Changelog entries confirm shipping.",
+      "source": "https://docs.coderabbit.ai/pr-reviews/cicd-pipeline-analysis",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "40+ static analysis / linter / SAST tools integrated",
+      "status": "shipped_verified",
+      "detail": "Tools include: ESLint, Ruff, Semgrep, OpenGrep, Betterleaks (secret scanning), TruffleHog, Checkov, Trivy, RuboCop, SwiftLint, Clippy, Brakeman, PHPStan, golangci-lint, ShellCheck, Clang-Tidy, detekt, PMD, PSScriptAnalyzer, yamllint, markdownlint, and 20+ more. All fire during review pass.",
+      "source": "https://docs.coderabbit.ai/tools/index.md",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "AST-based path instructions (ast-grep structural patterns)",
+      "status": "shipped_verified",
+      "detail": "Can write structural code pattern rules using ast-grep to give precise, syntax-aware review instructions tied to specific code patterns - not just file globs. E.g. 'when a React component uses useEffect without cleanup, flag it.'",
+      "source": "https://docs.coderabbit.ai/configuration/ast-grep-instructions",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Path-based review instructions (file glob routing)",
+      "status": "shipped_verified",
+      "detail": "Apply different review instructions to different paths (controllers, tests, docs, etc.) using glob patterns in .coderabbit.yaml. Foundation for codebase-specific reviewer behavior.",
+      "source": "https://docs.coderabbit.ai/configuration/path-instructions",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Slop detection (AI-generated PR quality signal)",
+      "status": "shipped_verified",
+      "detail": "Analyzes PRs on public GitHub repos for signals of low-quality AI-generated content. Notes in walkthrough comment. Optional labeling. No extra setup needed - runs as part of standard review pipeline.",
+      "source": "https://docs.coderabbit.ai/pr-reviews/slop-detection",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Autofix (one-click apply review finding)",
+      "status": "shipped_verified",
+      "detail": "Let CodeRabbit implement fixes for unresolved review findings with one click. No copy-paste switching.",
+      "source": "https://docs.coderabbit.ai/finishing-touches/autofix",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Incremental reviews (focus on what changed since last review)",
+      "status": "shipped_verified",
+      "detail": "'New commits: Incremental reviews that track what's new since the last review. Every update: Fresh insights without repeating resolved comments.'",
+      "source": "https://docs.coderabbit.ai/overview/pull-request-review",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "MCP server integration as knowledge source",
+      "status": "shipped_verified",
+      "detail": "Connect external tools as MCP servers to give CodeRabbit additional context from documentation systems, design tools, project management platforms during reviews.",
+      "source": "https://docs.coderabbit.ai/knowledge-base/mcp-context",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "feature": "Web search during review",
+      "status": "shipped_verified",
+      "detail": "CodeRabbit can use web search to gather additional context during code reviews and chat responses.",
+      "source": "https://docs.coderabbit.ai/knowledge-base/web-search",
+      "time_period": "30-180_days"
+    },
+
+    {
+      "tool": "Greptile",
+      "feature": "Full codebase semantic search / indexing for PR context",
+      "status": "shipped_claimed",
+      "detail": "Marketing claims: 'Merge 4x Faster, Catch 3x More Bugs.' Approach described as indexing full codebase for semantic search, enabling context beyond the diff. No independent user benchmarks found to corroborate the 4x/3x claims. [unverified-vendor-claim]",
+      "source": "https://www.greptile.com/blog/code-review",
+      "time_period": "180+_days"
+    }
+  ],
+
+  "architecture_inferences": [
+    {
+      "tool": "CodeRabbit",
+      "inference": "Parallel specialized AI agents: Review agent + Verification agent + Chat agent + Pre-Merge Checks agent run simultaneously, each with full repo clone in sandbox. This explains why CodeRabbit can find cross-repo issues while PR-Agent cannot.",
+      "confidence": "high",
+      "source": "https://docs.coderabbit.ai/overview/architecture"
+    },
+    {
+      "tool": "PR-Agent",
+      "inference": "Single-pass with optional two-pass for suggestions. No persistent codebase index - works purely from diff + dynamic context expansion. Faster (30s per review) and cheaper, but fundamentally limited to what's visible in the diff window.",
+      "confidence": "high",
+      "source": "https://docs.pr-agent.ai/core-abilities/compression_strategy/"
+    },
+    {
+      "tool": "PR-Agent",
+      "inference": "repo_settings_file=true and use_wiki_settings_file=true: team preferences encoded as TOML in .pr_agent.toml checked into the repo. This is the open-source equivalent of CodeRabbit's learnings - but static/manual, not learned from conversation.",
+      "confidence": "high",
+      "source": "https://raw.githubusercontent.com/the-pr-agent/pr-agent/main/pr_agent/settings/configuration.toml"
+    }
+  ],
+
+  "key_technical_insight_for_wr": "PR-Agent's two-pass self-reflection (generate -> score 0-10 -> re-rank -> filter) is the single most directly adoptable technique. The confidence constraint in their prompt is also directly adoptable: 'Do not speculate that a change might break other code unless you can identify the specific affected code path from the diff context.' CodeRabbit's agentic exploration solves our single-session gap but requires infrastructure we don't have (full repo clone + search). Their learnings system is the closest thing to codebase-specific reviewer families."
+}

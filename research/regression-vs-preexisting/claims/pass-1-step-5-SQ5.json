@@ -1,0 +1,47 @@
+[
+  {
+    "id": "SQ5-C1",
+    "text": "Technique 1: Explicit intent-vs-outcome framing in prompt. Ask the LLM to reason: 'For each finding, determine whether this issue could have existed before the PR, or whether it was introduced by these specific changes.' This addresses hard cases 1 and 5 (transitive callers, invariant violations) by making the LLM articulate causality explicitly. Requires no engine primitives - pure prompt engineering. Evidence basis: PR-Agent's prompt instructs LLM to 'focus only on issues introduced by this PR' but provides no mechanism to verify this; adding an explicit causal framing step would improve precision.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml",
+    "source_type": "oss_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ5-C2",
+    "text": "Technique 2: Static caller enumeration via git grep / LSP as a pre-processing step. Before LLM review, run a script: for each changed function/method signature, grep the codebase for callers. Inject caller names and file locations into the LLM prompt as 'callers of changed functions: [...]'. This addresses hard case 1 (transitive callers) without requiring a full call-graph. Implementation: workflow step that runs git grep against changed function names. Practical for compiled languages with clear function signatures (TypeScript, Java, Python with type hints). No engine primitives needed - pure workflow pre-processing.",
+    "source_url": "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+    "source_type": "tool_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ5-C3",
+    "text": "Technique 3: Two-pass review with pre-existing baseline tagging. Run a first LLM pass that reads the diff and asks 'which of these issues do you suspect existed before this PR?' This generates a 'suspected pre-existing' set. Run a second pass that asks 'given the following are suspected pre-existing, what issues are definitively introduced by this PR?' This is structurally similar to Semgrep's two-scan approach but done in the LLM domain. Evidence basis: None of the surveyed tools implement this; it is a novel workflow design derived from Semgrep's outcome-diffing approach.",
+    "source_url": "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md",
+    "source_type": "tool_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ5-C4",
+    "text": "Technique 4 (addressing SQ4 gap): Inject expanded file context (not just diff hunks) for small-to-medium PRs. PR-Agent's PATCH_EXTRA_LINES_BEFORE/AFTER caps at 10 lines. For functions with callers, inject the full function body of changed functions plus a list of callers. This gives the LLM enough context to reason about second-order effects. Hard cap: token budget. Not workable for large files but practical for focused PRs. No engine primitives needed.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py",
+    "source_type": "oss_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ5-C5",
+    "text": "What CodeRabbit does that is most relevant to implement: (1) Learnings injection - persist review preferences as context; (2) Multi-repo linked analysis - LLM research agent over linked repos. The multi-repo mechanism is the shipped analog of cross-repo caller discovery. For wr.mr-review, the equivalent would be a workflow step that uses a code search tool to find callers in the same repo before the LLM review step.",
+    "source_url": "https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/",
+    "source_type": "product_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  }
+]

@@ -1,0 +1,49 @@
+{
+  "subQuestions": [
+    {
+      "id": "SQ1",
+      "question": "What are the shipped production patterns for parent-child agent spawning with typed result return across LangGraph, OpenAI Agents SDK, AutoGen, and CrewAI?",
+      "rationale": "Foundation -- must establish ground truth on what frameworks actually ship before deriving engine requirements.",
+      "dependsOn": [],
+      "sourcePriority": ["S1", "S2", "S3", "S5"]
+    },
+    {
+      "id": "SQ2",
+      "question": "How does each pattern handle the blocking vs non-blocking execution model -- does the parent suspend, poll, or hand off control permanently?",
+      "rationale": "Determines the coroutine/continuation model. Answers whether 'wait for child result' is universally synchronous-blocking or whether async patterns exist in production.",
+      "dependsOn": ["SQ1"],
+      "sourcePriority": ["S1", "S2", "S4"]
+    },
+    {
+      "id": "SQ3",
+      "question": "What are the typed result contracts -- how is the output schema of the child communicated to the parent, and how is it injected into the parent's state?",
+      "rationale": "The core technical problem. Depends on SQ1 to know which patterns to examine for typing discipline.",
+      "dependsOn": ["SQ1"],
+      "sourcePriority": ["S1", "S2", "S7"]
+    },
+    {
+      "id": "SQ4",
+      "question": "What are the failure modes -- what happens when a child agent fails, times out, or produces malformed output? How does the parent recover?",
+      "rationale": "Critical for a durable session engine. WorkRail must handle crash recovery. Depends on SQ2 (blocking model) and SQ3 (typed contracts) to assess what 'failure' means in each context.",
+      "dependsOn": ["SQ2", "SQ3"],
+      "sourcePriority": ["S2", "S3", "S6"]
+    },
+    {
+      "id": "SQ5",
+      "question": "What engine primitives are needed to support the most practical pattern in WorkRail's architecture -- specifically: what must change in the DAG model, session events, and HMAC token protocol?",
+      "rationale": "The synthesis question. Depends on all prior sub-questions to produce concrete engine requirements.",
+      "dependsOn": ["SQ1", "SQ2", "SQ3", "SQ4"],
+      "sourcePriority": ["S1", "S2", "S3"]
+    },
+    {
+      "id": "SQ6",
+      "question": "What would the workflow authoring surface look like for a 'mid-review spawn and wait' pattern -- specifically for the MR review use case?",
+      "rationale": "Design output question. Translates engine primitives (SQ5) into concrete authoring syntax for the WorkRail JSON workflow format.",
+      "dependsOn": ["SQ5"],
+      "sourcePriority": ["S1", "S3"]
+    }
+  ],
+  "regime": "depth_serial",
+  "regimeRationale": "SQ2 depends on SQ1; SQ3 depends on SQ1; SQ4 depends on SQ2 and SQ3; SQ5 depends on all prior; SQ6 depends on SQ5. This is a strict dependency chain -- answers must be gathered in topological order.",
+  "topologicalOrder": ["SQ1", "SQ2", "SQ3", "SQ4", "SQ5", "SQ6"]
+}

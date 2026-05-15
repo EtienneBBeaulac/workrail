@@ -1,0 +1,74 @@
+[
+  {
+    "id": "SQ2-C1",
+    "text": "PR-Agent constructs its review prompt by injecting only the diff (via get_pr_diff). The diff is extended with configurable extra context lines before and after each hunk (PATCH_EXTRA_LINES_BEFORE, PATCH_EXTRA_LINES_AFTER, max 10 each). The full file content is NOT injected unless it fits within token budget. The LLM never sees the full codebase - only changed hunks plus limited surrounding context.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C2",
+    "text": "PR-Agent review prompt system instruction explicitly states: 'The review should focus on new code added in the PR code diff (lines starting with +), and only on issues introduced by this PR.' It also warns the LLM: 'Note that you only see changed code segments (diff hunks in a PR), not the entire codebase. Avoid suggestions that might duplicate existing functionality or questioning code elements that may be defined elsewhere in the codebase.' No mechanism for attribution of findings to pre-existing vs new.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C3",
+    "text": "PR-Agent has an incremental review mode (-i flag) via IncrementalPR class. When invoked, it limits review to unreviewed_files_set - files changed since the last review. This is for reviewing only new pushes to an already-reviewed PR, NOT for distinguishing pre-existing bugs from regressions. It still only sees the diff of new changes.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/tools/pr_reviewer.py",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C4",
+    "text": "PR-Agent injected context beyond the diff includes: PR title, branch name, description, commit messages, main programming language, AI-generated file summaries (if enabled via enable_ai_metadata). None of these provide information about whether a flagged issue pre-existed in the codebase. The PR description may hint at intent but there is no pre-existing issue lookup.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/tools/pr_reviewer.py",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C5",
+    "text": "CodeRabbit Learnings: CodeRabbit maintains a per-organization 'learnings' database of natural-language review preferences. These are injected as context on every review. Learnings can capture patterns like 'in auth middleware, prefer early returns' but do NOT represent a pre-existing issue database - they are style/preference instructions, not bug findings.",
+    "source_url": "https://docs.coderabbit.ai/knowledge-base/learnings",
+    "source_type": "product_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C6",
+    "text": "CodeRabbit Multi-Repo Analysis (shipped, documented 2024+): CodeRabbit can be configured with linked_repositories in .coderabbit.yaml. When a PR is submitted, CodeRabbit uses a 'research agent' to check linked repos for cross-repository impact. Findings appear in PR review summary under 'Additional context used'. This is the closest any shipped LLM review tool comes to cross-file/cross-repo impact analysis. Limited by plan (number of linked repos varies by tier).",
+    "source_url": "https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/",
+    "source_type": "product_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C7",
+    "text": "GitHub Copilot code review documented limitation: 'Missed code quality problems - Copilot may not identify all of the problems that are present in code, especially where changes are large or complex.' No mechanism described for distinguishing pre-existing bugs from regressions. Custom instructions can be injected via repository .github/copilot-instructions.md but this is static context, not per-review issue lookup.",
+    "source_url": "https://docs.github.com/en/copilot/responsible-use-of-github-copilot-features/responsible-use-of-github-copilot-code-review",
+    "source_type": "product_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ2-C8",
+    "text": "CodeRabbit web search: CodeRabbit may perform web queries during reviews to fetch current documentation. This can improve accuracy of security findings against known CVEs. However, it is not a mechanism for identifying pre-existing bugs in the codebase itself.",
+    "source_url": "https://docs.coderabbit.ai/knowledge-base/web-search/",
+    "source_type": "product_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "last_updated": "2026-05-15T19:45:00Z",
+  "priors": [],
+  "note": "No priors existed before pass 1. This ledger is initialized from pass 1 merged claims. All claims from pass 1 are promoted as current findings, not as priors for future passes."
+}

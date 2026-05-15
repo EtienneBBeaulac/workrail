@@ -1,0 +1,56 @@
+[
+  {
+    "claimId": "sq6-c1",
+    "text": "Proposed authoring surface for spawn_and_wait: a new step property `spawnAndWait` on WorkflowStepDefinition. This extends the existing step type (no new step type needed at the schema level). Example: `{ id: 'investigate', title: 'Spawn Investigation Agent', spawnAndWait: { workflowId: 'wr.code-investigation', goalTemplate: 'Investigate {{pr_url}} for security issues', workspacePathKey: 'workspace_path', expectedArtifact: { contractRef: 'wr.investigation_findings' }, contextPassThrough: ['pr_url', 'repo_path'] } }`. When a step has `spawnAndWait`, the engine (a) starts the child workflow, (b) parks the parent step, (c) injects child artifacts as context when child completes, (d) validates against expectedArtifact contract.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ6",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq6-c2",
+    "text": "Parent workflow fragment for MR review spawn-and-wait:\n\n```json\n{\n  \"id\": \"spawn-investigation\",\n  \"title\": \"Spawn codebase investigation agent\",\n  \"spawnAndWait\": {\n    \"workflowId\": \"wr.code-investigation\",\n    \"goalTemplate\": \"Investigate security implications of changes in PR {{pr_number}} at {{repo_path}}\",\n    \"workspacePathKey\": \"repo_path\",\n    \"expectedArtifact\": { \"contractRef\": \"wr.investigation_findings\", \"required\": true },\n    \"contextPassThrough\": [\"pr_number\", \"repo_path\", \"changed_files\"]\n  },\n  \"notesOptional\": true\n}\n```\n\nThe step has no `prompt` -- the engine renders a standard 'spawning child session' prompt or skips LLM call entirely (mechanical step). The agent at this step is the engine itself, not an LLM turn.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ6",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq6-c3",
+    "text": "Child workflow (wr.code-investigation) fragment: a standalone workflow with normal steps that ends by submitting a `wr.investigation_findings` typed artifact. The child is a complete, reusable workflow -- it knows nothing about being spawned mid-review. Its last step's outputContract declares `contractRef: 'wr.investigation_findings'`. When this step completes, the engine validates the artifact, stores it in the child's event log, and the parent poller can read it via the session store. This mirrors LangGraph's 'sharing only final results' pattern: child's scratchpad is private; only the final typed artifact crosses the boundary.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/artifacts/",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ6",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq6-c4",
+    "text": "Output contract between child and parent: the `wr.investigation_findings` artifact contract would be a JSON Schema-registered contract (like wr.review_verdict already is) with fields: `{ securityFindings: Finding[], performanceFindings: Finding[], summary: string, confidence: 'high' | 'medium' | 'low' }`. The parent step's `spawnAndWait.expectedArtifact.contractRef` must match the child workflow's final step `outputContract.contractRef`. The engine validates at two points: (1) child final step advance -- artifact matches child's declared outputContract; (2) parent resume -- injected artifact matches parent's declared expectedArtifact.contractRef.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/artifacts/index.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ6",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq6-c5",
+    "text": "Context injection mechanism: when the parent resumes after child completion, the child's final typed artifact is injected as a context_set event in the parent's session with key `child_result` (or a step-scoped key like `spawn-investigation.result`). Subsequent steps in the parent workflow can reference this via `{{spawn-investigation.result}}` in their prompt templates. This maps to LangGraph's state channel update pattern: child output becomes a named key in the parent's shared state that downstream steps can read via context template resolution.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/domain/context-template-resolver.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ6",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq6-c6",
+    "text": "Comparison with LangGraph subgraph pattern: WorkRail's proposed spawnAndWait step maps to LangGraph's 'call subgraph inside a node function with different state schemas' pattern. The key structural difference: in LangGraph the parent node function blocks synchronously and the transformation is ad-hoc Python code. In WorkRail, the binding is declarative (JSON authoring) and the transformation is type-contract-enforced. This is architecturally superior: the contract is explicit, version-controlled, and engine-validated rather than implicit in Python closures.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ6",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  }
+]

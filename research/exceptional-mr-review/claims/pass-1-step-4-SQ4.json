@@ -1,0 +1,80 @@
+{
+  "subQuestion": "SQ4",
+  "question": "What prompt and instruction techniques demonstrably improve LLM review quality? Which are validated vs. speculative?",
+  "fetchedAt": "2026-05-15T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ4-C1",
+      "text": "Sphinx (Zhang et al., 2026, Microsoft): Checklist-based evaluation and Checklist Reward Policy Optimization (CRPO) improves LLM review completeness by up to 40% in checklist coverage vs. baselines including GPT-4. The key insight: 'human reviewers often operate with implicit or explicit checklists -- verifying functional correctness, robustness, security compliance, coding conventions, and architectural alignment.' Making this checklist EXPLICIT in the prompt and using it for reward shaping is the best-validated technique in the literature.",
+      "sourceUrl": "https://arxiv.org/html/2601.04252v1",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "empirically_validated"
+    },
+    {
+      "id": "SQ4-C2",
+      "text": "Sphinx identifies three specific failures of current LLM PR reviewers that prompt techniques must address: (1) treating PRs as isolated code diffs, overlooking rich multi-modal context (PR description, linked issues, motivation); (2) relying on surface-level text similarity metrics; (3) generating 'fluent but shallow comments, frequently missing critical issues or offering vague suggestions.' The remedy: give the LLM the full PR context (description, linked issue, intent), not just the diff.",
+      "sourceUrl": "https://arxiv.org/html/2601.04252v1",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "empirically_validated"
+    },
+    {
+      "id": "SQ4-C3",
+      "text": "SOEN-101 / FlowGen (Lin et al., 2024, ICSE 2025): Role-based multi-agent frameworks where different LLM agents take on specific software engineering roles (requirement engineer, architect, developer, tester, scrum master) 'achieve a 15% average improvement' over baseline LLM in code generation quality. Specifically: 'design and code review adding more exception handling and reducing code smells.' This is evidence that role specialization helps even for adjacent tasks, supporting the hypothesis that specialized reviewer agents (security, correctness, design) would outperform generalist review.",
+      "sourceUrl": "https://arxiv.org/abs/2403.15852",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "partially_validated",
+      "notes": "The SOEN-101 result is for code generation, not directly code review, but is the closest empirical evidence for role specialization"
+    },
+    {
+      "id": "SQ4-C4",
+      "text": "Abstain and Validate (Cambronero et al., Microsoft/Google, ICSE 2025): The key technique for reducing noise in LLM-generated code feedback is a two-stage pipeline: (1) a 'bug abstention' policy that determines whether to comment at all, and (2) a 'patch validation' policy that rejects outputs unlikely to be accepted. The result: 'reducing noise by preventing patches unlikely to be accepted.' Applied to code review: separating the signal-generating and signal-validating steps reduces noise. This is the structural basis for having a synthesis/filtering step after initial findings.",
+      "sourceUrl": "https://arxiv.org/abs/2510.03217",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "partially_validated"
+    },
+    {
+      "id": "SQ4-C5",
+      "text": "AI-Assisted Code Review as Scaffold (Oliveira et al., 2026): Students in a study of LLM-assisted PR review showed 32-33% follow-through rate (subsequent commits after AI review). Key finding: 'structured comments' helped students 'focus reviews and discuss code quality, while guidance reduced over-reliance.' Structured, categorized output (not free-form feedback) correlates with higher actionability. This implies that output contracts (severity, category, recommendation) in reviewer prompts improve actionability.",
+      "sourceUrl": "https://arxiv.org/abs/2604.23251",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "partially_validated"
+    },
+    {
+      "id": "SQ4-C6",
+      "text": "Google Engineering Practices (practitioner evidence): The 'Nit:' prefix convention is a form of output structuring that separates non-blocking style from blocking issues. This maps to prompt engineering: instructing a reviewer to classify findings by severity and type (blocker / suggestion / nit) reduces the reviewer's output noise. This is the practitioner-validated equivalent of a structured output contract.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/standard.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "practitioner_validated"
+    },
+    {
+      "id": "SQ4-C7",
+      "text": "Synthesis from Sphinx, EASE 2026, and SOEN-101 (inferred): The most effective prompt techniques for LLM code review, ranked by validation strength: (1) Explicit structured checklist -- 40% improvement in coverage (Sphinx, empirically validated); (2) Full context injection -- PR description + linked issue + intent (Sphinx, theoretically validated, not separately measured); (3) Role specialization -- 15% improvement in adjacent task (SOEN-101, partially validated); (4) Severity classification in output -- practitioner validated (Google guide); (5) Two-stage review with validation step -- reduces noise (Abstain/Validate, adjacent task). Steelman-before-criticize and false-positive suppression have NO direct empirical validation in the literature fetched.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "synthesis"
+    },
+    {
+      "id": "SQ4-C8",
+      "text": "OWASP Code Review Guide establishes that security-specific code review requires a threat-model-driven approach: reviewers must understand what attacker capabilities exist and work backwards from attack surface to code paths. This is a specialization technique that cannot emerge from a generalist review prompt. Security review requires: (1) identifying trust boundaries in the diff, (2) checking input validation at each boundary, (3) checking output encoding, (4) checking authentication/authorization for each code path introduced. This is the basis for a dedicated security reviewer prompt with its own specialized checklist.",
+      "sourceUrl": "https://owasp.org/www-project-code-review-guide/",
+      "sourceType": "practitioner_guide",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ4",
+      "validationStatus": "practitioner_validated"
+    }
+  ]
+}

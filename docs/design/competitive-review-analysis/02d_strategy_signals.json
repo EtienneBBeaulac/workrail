@@ -1,0 +1,79 @@
+{
+  "subagent": "2d - Commercial Strategy Signals",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "research_date": "2026-05-15",
+  "note": "Job posting databases (LinkedIn, Glassdoor) not accessible without login. Relying on careers pages and GitHub activity.",
+
+  "strategy_signals": [
+    {
+      "signal": "CodeRabbit expanding from PR review into full developer workflow platform",
+      "code": "motion_changing",
+      "evidence": "CodeRabbit now ships: Slack agent (investigate/plan/code from Slack), CLI tool (pre-commit reviews), IDE extension (VS Code, Cursor, Windsurf), CodeRabbit Plan (issue-to-coding-plan), and PR reviews. Five distinct delivery surfaces.",
+      "source": "https://docs.coderabbit.ai/overview/introduction",
+      "time_period": "30-180_days",
+      "implication": "CodeRabbit is not positioning as a 'code review tool' but as a full developer platform. wr.mr-review competes only on the PR review surface."
+    },
+    {
+      "signal": "PR-Agent donated to open-source community by Qodo",
+      "code": "motion_changing",
+      "evidence": "README states: 'Qodo has donated PR-Agent to the open-source community.' Project now in 'the-pr-agent' GitHub org with first external maintainer (Naor @naorpeled). Qodo moving commercial focus to Qodo 2.0.",
+      "source": "https://github.com/the-pr-agent/pr-agent",
+      "time_period": "30-180_days",
+      "implication": "Qodo is ceding the open-source code review space and moving upmarket. PR-Agent will continue to grow as a community tool but won't be Qodo's commercial focus."
+    },
+    {
+      "signal": "Active community development on PR-Agent: MCP integration, AGENTS.md context, risk assessment",
+      "code": "capability_adding",
+      "evidence": "Open PRs #2348 (MCP orchestration), #2356 (MCP tool registry in reviewer), #2387 (AGENTS.md/CLAUDE.md context files), #2391 (review risk assessment + repo rules), #2385 (SKILL.md agent skills format). All opened within last 30 days.",
+      "source": "https://api.github.com/repos/the-pr-agent/pr-agent/issues",
+      "time_period": "last_30_days",
+      "implication": "Community is adding exactly the capabilities that address current gaps: tool calling, codebase context, per-repo rules. These will ship within 60-90 days."
+    },
+    {
+      "signal": "CodeRabbit topped Martian's independent AI code review benchmark",
+      "code": "market_entering",
+      "evidence": "Two HN posts from March 2026 about benchmark results. Low point scores (1 pt) suggest HN community skeptical of benchmark methodology or dismissive of vendor-adjacent benchmarks.",
+      "source": "HN Algolia search, March 2026",
+      "time_period": "30-180_days",
+      "implication": "Benchmark competition is heating up. Community will want to see methodology. [benchmark_claim - needs independent methodology review]"
+    },
+    {
+      "signal": "Power users building structured multi-model review panels",
+      "code": "market_entering",
+      "evidence": "Reddit post (164 pts): 'Evaluating GPT-5.3 Codex, GPT-5.2, Claude Opus 4.6 across 133 review cycles of a real platform refactoring.' Users running structured review workflows with multiple models as a panel. This is an emerging market segment.",
+      "source": "Reddit r/devops, Reddit r/ClaudeAI, May 2026",
+      "time_period": "last_30_days",
+      "implication": "Sophisticated users are already doing what wr.mr-review does (structured multi-reviewer workflow). The market exists. These users are potential early adopters."
+    },
+    {
+      "signal": "CodeRabbit hiring for AI infrastructure roles",
+      "code": "capability_adding",
+      "evidence": "Careers page active with open roles. Benefits include equity, catered lunch (suggests SF-area offices), learning stipend. 'Fast-growing company' self-description.",
+      "source": "https://coderabbit.ai/careers",
+      "time_period": "last_30_days",
+      "implication": "CodeRabbit is investing in infrastructure, not just features. Sandboxed execution at scale requires significant ops investment."
+    },
+    {
+      "signal": "Academic research validating LLM-extracted patch intent (PatchGuru, Feb 2026)",
+      "code": "capability_adding",
+      "evidence": "PatchGuru (arXiv:2602.05270) shows LLMs can extract developer intent from PR NL artifacts, synthesize runtime assertions comparing pre/post-patch behavior, find 24 true positive bugs including 12 unknown. Peer-reviewed, accepted.",
+      "source": "https://arxiv.org/abs/2602.05270",
+      "time_period": "30-180_days",
+      "implication": "Research frontier: automated pre-existing vs regression distinction is achievable via patch oracle inference. This technique could be adopted by tools within 1-2 years."
+    },
+    {
+      "signal": "Security research: agentic workflow injection vulnerabilities in GitHub Actions (arXiv:2605.07135)",
+      "code": "market_entering",
+      "evidence": "Study found 496 confirmed exploitable AWI vulnerabilities in 13,392 real-world agentic workflows. 343 unknown zero-days. Direct relevance: PR content (descriptions, issue bodies) injected into agent prompts is a live attack surface.",
+      "source": "https://arxiv.org/abs/2605.07135",
+      "time_period": "last_30_days",
+      "implication": "Security posture: wr.mr-review daemon reads PR content. If that content feeds into prompts without sanitization, it's an injection surface. This is a real threat, not theoretical."
+    }
+  ],
+
+  "market_dynamics": {
+    "observation": "The code review AI market is consolidating into platforms (CodeRabbit) vs composable open-source tools (PR-Agent). WorkRail's workflow-enforcement approach is a third category: structured review methodology, not just an LLM reviewer.",
+    "differentiation_opportunity": "No competitor enforces review methodology as a workflow. All tools are prompt-based one-shot or two-pass reviewers. wr.mr-review's step enforcement + durable session state is genuinely unique. The risk is that composable tools (PR-Agent + MCP) could approximate this.",
+    "timeline_pressure": "PR-Agent community is adding MCP integration and AGENTS.md context within 30 days. This narrows the gap on codebase-specific review. Moving fast matters."
+  }
+}

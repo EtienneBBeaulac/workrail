@@ -1,0 +1,404 @@
+{
+  "passNumber": 1,
+  "totalClaims": 48,
+  "summary": {
+    "verified": 7,
+    "singleSource": 17,
+    "inferred": 24,
+    "notes": "Verified = 2+ distinct hostnames corroborating; single-source = 1 URL; inferred = derived from multiple fetched sources"
+  },
+  "claims": [
+    {
+      "id": "SQ1-C1",
+      "subQuestion": "SQ1",
+      "confidence": "verified",
+      "text": "Google Engineering Practices defines 9 review dimensions in priority order: Design, Functionality, Complexity, Tests, Naming, Comments, Style, Documentation, Every Line.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/looking-for.html", "https://google.github.io/eng-practices/review/reviewer/standard.html"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C2",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Google's expert review sequence: (1) broad view first -- does this change make sense? (2) examine main parts -- major design problems before rest. (3) logical sequence through the rest. Broad view first is what separates expert from novice reviewers.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/navigate.html"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C3",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Google's review standard: primary goal is code health improvement over time, not perfection. Approve once a CL 'definitely improves the overall code health of the system being worked on, even if the CL isn't perfect.'",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/standard.html"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C4",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Chelsea Troy: core failure of mediocre reviewers is DELEGATION -- noting what they don't like without participating in the solution. Great reviewers pull down and run code, test alternatives, and submit working code suggestions.",
+      "sourceUrls": ["https://chelseatroy.com/2019/12/18/reviewing-pull-requests/"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C5",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Chelsea Troy's 6-criterion review standard: (1) solutions in working code; (2) what works AND what doesn't; (3) links to docs; (4) highlights laudable work; (5) asks questions before judgments; (6) explains reasoning. Test: 'Can my review be supplanted by a personal proofread, a Google search, or nothing?'",
+      "sourceUrls": ["https://chelseatroy.com/2019/12/18/reviewing-pull-requests/"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C6",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Gergely Orosz: good reviews cover the change and fit; better reviews check the change IN THE CONTEXT OF THE LARGER SYSTEM -- abstractions introduced, maintainability, architectural fit, and 'is this the right place for this change?'",
+      "sourceUrls": ["https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C7",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Gergely Orosz: too many nitpicks are a smell of lack of tooling or standards. Great reviewers solve this outside the review process (linting, team standards). Human judgment should not be wasted on mechanical checks.",
+      "sourceUrls": ["https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C8",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Gergely Orosz: when a review has many comments, great reviewers proactively reach out to talk directly rather than back-and-forth in writing. Many comments = likely misunderstanding on either side.",
+      "sourceUrls": ["https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C9",
+      "subQuestion": "SQ1",
+      "confidence": "single-source",
+      "text": "Google guide: if a reviewer cannot understand code, they should ask for clarification BEFORE reviewing. 'If you can't understand the code, it's very likely that other developers won't either.' This is a specific behavior great reviewers exhibit that LLMs never do.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/looking-for.html"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C10",
+      "subQuestion": "SQ1",
+      "confidence": "verified",
+      "text": "Great reviewers use 'Nit:' prefix (Google) or equivalent to distinguish non-blocking style from blocking issues. Severity signaling separates signal from noise.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/standard.html", "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/"],
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ2-C1",
+      "subQuestion": "SQ2",
+      "confidence": "single-source",
+      "text": "Bacchelli & Bird 2013 (ICSE, Microsoft Research) -- confirmed to exist (Microsoft Research publication). Primary goal of review is perceived as finding defects, but reviews deliver more value in knowledge transfer and improvement suggestions.",
+      "sourceUrls": ["https://www.microsoft.com/en-us/research/publication/expectations-outcomes-and-challenges-of-modern-code-review/"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C2",
+      "subQuestion": "SQ2",
+      "confidence": "inferred",
+      "text": "Bacchelli & Bird finding (widely reported): review comment types in descending frequency are code improvement, defect finding, questions, superfluous comments. Finding bugs is LESS frequent than expected. Most review value is in improvements and understanding.",
+      "sourceUrls": ["secondary_sources_citing_Bacchelli_Bird_2013"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C3",
+      "subQuestion": "SQ2",
+      "confidence": "inferred",
+      "text": "Bacchelli & Bird: many comments are about code 'evolvability' and 'understandability' -- not correctness. Design and clarity concerns are where review adds most value relative to automated tools.",
+      "sourceUrls": ["secondary_sources_citing_Bacchelli_Bird_2013"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C4",
+      "subQuestion": "SQ2",
+      "confidence": "single-source",
+      "text": "Pirouzkhah, Wurzel Goncalves & Bacchelli 2026 (arXiv:2602.14611, 80K PRs, 156 projects): PR descriptions that state 'desired feedback type' best predict change acceptance and reviewer engagement. Purpose/code explanations preserve rationale. Without clear intent in PR description, reviewer value drops.",
+      "sourceUrls": ["https://arxiv.org/abs/2602.14611"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C5",
+      "subQuestion": "SQ2",
+      "confidence": "inferred",
+      "text": "Swarmia synthesis of empirical literature: 'code reviews surface software design issues while they are still relatively easy to change' -- this is more important than defect detection. Design-level review catches the highest-value issues.",
+      "sourceUrls": ["https://www.swarmia.com/blog/a-complete-guide-to-code-reviews/"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C6",
+      "subQuestion": "SQ2",
+      "confidence": "inferred",
+      "text": "Code reviews deliver value in 4 areas: knowledge sharing, ownership spreading, practice unification, quality control. Knowledge transfer and ownership cannot be replicated by automated reviewers.",
+      "sourceUrls": ["https://www.swarmia.com/blog/a-complete-guide-to-code-reviews/"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C7",
+      "subQuestion": "SQ2",
+      "confidence": "inferred",
+      "text": "Bosu et al. findings (not directly accessed, widely cited): useful review comments are about defects or design improvements; they are specific and actionable. Least useful: style/formatting, things author already knows, vague comments without explanation.",
+      "sourceUrls": ["inferred_from_Bosu_et_al_secondary_sources"],
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ3-C1",
+      "subQuestion": "SQ3",
+      "confidence": "single-source",
+      "text": "EASE 2026 paper VERIFIED (arXiv:2604.24525, accepted EASE 2026): 0.44-0.62 is the agreement ratio between automated evaluation (LLM-as-Judge) and developer labels on whether bot-generated PR comments were useful. The low figure reflects both comment quality AND contextual constraints that make good comments ignored.",
+      "sourceUrls": ["https://arxiv.org/abs/2604.24525"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C2",
+      "subQuestion": "SQ3",
+      "confidence": "single-source",
+      "text": "EASE 2026: Developer labeling of LLM review comments is 'strongly influenced by workflow pressures and organizational constraints.' The 0.44-0.62 figure likely OVERSTATES helpfulness (good comments get ignored when devs are busy) AND understates unhelpfulness.",
+      "sourceUrls": ["https://arxiv.org/abs/2604.24525"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C3",
+      "subQuestion": "SQ3",
+      "confidence": "single-source",
+      "text": "EASE 2026: 2,604 bot-generated PR comments from Beko analyzed. Developer actions reflect 'not only comment quality, but also contextual constraints, prioritization decisions, and workflow dynamics difficult to capture through static artifacts.'",
+      "sourceUrls": ["https://arxiv.org/abs/2604.24525"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C4",
+      "subQuestion": "SQ3",
+      "confidence": "single-source",
+      "text": "Sphinx paper (arXiv:2601.04252): Three LLM PR review limitations: (1) noisy supervision from human review training data; (2) limited contextual understanding -- LLMs treat PRs as isolated code diffs; (3) inadequate evaluation metrics (BLEU fails to capture review quality).",
+      "sourceUrls": ["https://arxiv.org/abs/2601.04252"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C5",
+      "subQuestion": "SQ3",
+      "confidence": "single-source",
+      "text": "Sphinx: Standard LLMs 'generate fluent but shallow comments, frequently missing critical issues or offering vague suggestions.' Checklist coverage improves 40% with CRPO training. Standard LLMs lack structured coverage -- comment on what they notice first, miss key verification points.",
+      "sourceUrls": ["https://arxiv.org/html/2601.04252v1"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C6",
+      "subQuestion": "SQ3",
+      "confidence": "inferred",
+      "text": "LLM reviewers are better at mechanical issues (code smells, syntactically visible bugs) than semantic issues (design fit, intent alignment, system impact). Claims to predict 'future potential risks' are aspirational in current literature.",
+      "sourceUrls": ["https://arxiv.org/abs/2404.18496"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C7",
+      "subQuestion": "SQ3",
+      "confidence": "inferred",
+      "text": "Abstain/Validate (arXiv:2510.03217, ICSE 2025): Uncurated LLM-generated code feedback has a noise problem that 'erodes trust' in automated code changes. Structural filtering is required -- noise is not a prompt problem but a pipeline design problem.",
+      "sourceUrls": ["https://arxiv.org/abs/2510.03217"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C8",
+      "subQuestion": "SQ3",
+      "confidence": "inferred",
+      "text": "Five LLM code review failure modes (synthesis): (1) surface pattern matching; (2) context blindness (intent alignment); (3) pre-existing issue attribution; (4) verbosity inflation; (5) knowledge gap filling (writing findings about misunderstood code instead of asking questions).",
+      "sourceUrls": ["synthesis_of_SQ3-C1_through_SQ3-C7"],
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ4-C1",
+      "subQuestion": "SQ4",
+      "confidence": "single-source",
+      "text": "Sphinx (Zhang et al., 2026, Microsoft): Checklist-based training (CRPO) improves LLM review completeness by up to 40% in checklist coverage vs. proprietary baselines. Explicit checklist is the best-validated prompt technique in the literature.",
+      "sourceUrls": ["https://arxiv.org/html/2601.04252v1"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "empirically_validated"
+    },
+    {
+      "id": "SQ4-C2",
+      "subQuestion": "SQ4",
+      "confidence": "single-source",
+      "text": "Sphinx: LLMs must receive full PR context (description, linked issue, intent) not just the diff. Treating PRs as isolated diffs is a fundamental failure mode. 'Context-rich, semantically grounded review' requires multi-modal input.",
+      "sourceUrls": ["https://arxiv.org/html/2601.04252v1"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "empirically_validated"
+    },
+    {
+      "id": "SQ4-C3",
+      "subQuestion": "SQ4",
+      "confidence": "inferred",
+      "text": "SOEN-101 (Lin et al., ICSE 2025): Role-based multi-agent frameworks with specialization achieve ~15% improvement over baseline LLM in code quality metrics. Role specialization helps for adjacent tasks, supporting specialized reviewer agents hypothesis.",
+      "sourceUrls": ["https://arxiv.org/abs/2403.15852"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "partially_validated"
+    },
+    {
+      "id": "SQ4-C4",
+      "subQuestion": "SQ4",
+      "confidence": "inferred",
+      "text": "Abstain/Validate (Microsoft/Google, ICSE 2025): Two-stage review pipeline -- signal generation + signal validation -- reduces noise by preventing low-quality outputs from reaching developers. This is the structural basis for a synthesis/filtering step in wr.mr-review.",
+      "sourceUrls": ["https://arxiv.org/abs/2510.03217"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "partially_validated"
+    },
+    {
+      "id": "SQ4-C5",
+      "subQuestion": "SQ4",
+      "confidence": "inferred",
+      "text": "Oliveira et al. 2026 (student study): Structured LLM review comments helped students 'focus reviews and discuss code quality.' Structured output (not free-form) correlates with higher actionability. Output contracts in reviewer prompts improve actionability.",
+      "sourceUrls": ["https://arxiv.org/abs/2604.23251"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "partially_validated"
+    },
+    {
+      "id": "SQ4-C6",
+      "subQuestion": "SQ4",
+      "confidence": "verified",
+      "text": "Severity signaling (Google 'Nit:' convention, Gergely Orosz) -- distinguishing blocking from non-blocking -- separates signal from noise and is the practitioner-validated equivalent of a structured output schema.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/standard.html", "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "practitioner_validated"
+    },
+    {
+      "id": "SQ4-C7",
+      "subQuestion": "SQ4",
+      "confidence": "inferred",
+      "text": "Techniques ranked by validation strength: (1) Explicit checklist -- 40% improvement (Sphinx, empirically validated); (2) Full context injection -- theoretically validated; (3) Role specialization -- 15% improvement in adjacent task; (4) Severity classification -- practitioner validated; (5) Two-stage validation -- reduces noise in adjacent task. Steelman-before-criticize and false-positive suppression have NO direct empirical validation.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "synthesis"
+    },
+    {
+      "id": "SQ4-C8",
+      "subQuestion": "SQ4",
+      "confidence": "inferred",
+      "text": "OWASP: Security code review requires threat-model-driven approach: identify trust boundaries, check input validation at each boundary, output encoding, authentication/authorization per code path. Security review cannot emerge from a generalist review prompt.",
+      "sourceUrls": ["https://owasp.org/www-project-code-review-guide/"],
+      "answersSubquestion": "SQ4",
+      "validationStatus": "practitioner_validated"
+    },
+    {
+      "id": "SQ5-C1",
+      "subQuestion": "SQ5",
+      "confidence": "single-source",
+      "text": "Google: for complex concerns -- privacy, security, concurrency, accessibility, internationalization -- reviewer MUST ensure a qualified specialist is on the review. Not all dimensions can be covered by a generalist.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/looking-for.html"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C2",
+      "subQuestion": "SQ5",
+      "confidence": "single-source",
+      "text": "Gergely Orosz identifies two distinct reviewer modes: (A) DIFF reviewer -- correctness of the change itself; (B) SYSTEM reviewer -- design fit, blast radius, architectural alignment. These should not be conflated.",
+      "sourceUrls": ["https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C3",
+      "subQuestion": "SQ5",
+      "confidence": "single-source",
+      "text": "Sphinx enumerates 5 complete PR review dimensions: functional correctness, robustness/edge cases, security compliance, coding conventions, architectural alignment. An agent covering all 5 in one pass is necessarily shallow on most.",
+      "sourceUrls": ["https://arxiv.org/html/2601.04252v1"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C4",
+      "subQuestion": "SQ5",
+      "confidence": "inferred",
+      "text": "OWASP: Security review is a distinct specialty with its own mental model: 'can an attacker make this code do what they want?' vs. correctness review 'does this code do what it says?' Fundamentally different question frames.",
+      "sourceUrls": ["https://owasp.org/www-project-code-review-guide/"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C5",
+      "subQuestion": "SQ5",
+      "confidence": "inferred",
+      "text": "Chelsea Troy's context transfer principle implies a COMPLETENESS reviewer role: checking PR description explains intent, diff is understandable, tests and docs updated, reviewer could take over development from this PR alone.",
+      "sourceUrls": ["https://chelseatroy.com/2019/12/18/reviewing-pull-requests/"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C6",
+      "subQuestion": "SQ5",
+      "confidence": "inferred",
+      "text": "Optimal 4-role specialization: (1) INTENT & DESIGN -- intent alignment, design fit, blast radius, architectural alignment; (2) CORRECTNESS & COMPLETENESS -- logic, edge cases, tests, error handling; (3) SECURITY -- trust boundaries, input validation, attack surface; (4) MAINTAINABILITY & STYLE -- naming, complexity, code health. Non-blocking findings only for role 4.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C7",
+      "subQuestion": "SQ5",
+      "confidence": "inferred",
+      "text": "Role ordering: INTENT & DESIGN must go first, output consumed by other roles. SECURITY and CORRECTNESS can run in parallel after intent established. MAINTAINABILITY runs last, cannot escalate to blocker without corroboration from one of the first three.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ6-C1",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "LLMs cannot self-enforce: (A) reading intent before correctness; (B) checking only what the PR introduces; (C) calibrating severity with clear enums; (D) asking questions instead of writing findings when they don't understand something.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C2",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "Structural guardrail 1: INTENT GATE. Before any reviewer produces findings, workflow must force: 'Does this PR match the stated ticket?' and 'Is this the right place for this change?' If intent is misaligned, surface as blocker BEFORE running detailed reviewers.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C3",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "Structural guardrail 2: DIFF SCOPE ENFORCEMENT. Reviewer receives only the diff, not the full file, unless context explicitly needed. This prevents pre-existing issue attribution. Cannot be prompt-level advice -- must be structural.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C4",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "Structural guardrail 3: FORCED OUTPUT SCHEMA. Each reviewer must produce: (a) severity enum (blocker|suggestion|nit), (b) category, (c) specific location, (d) reasoning, (e) recommendation. Without (e), LLMs produce vague findings. Without (a), findings lose signal-to-noise ratio.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C5",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "Structural guardrail 4: SYNTHESIS STEP WITH DEDUPLICATION. Must deduplicate findings across reviewers, resolve severity conflicts, enforce maximum finding count, produce summary in fixed format. Without this step, combined output is raw and often contradictory.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C6",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "Structural guardrail 5: KNOWLEDGE GAP PROTOCOL. When reviewer encounters code it doesn't understand, workflow must force a QUESTION output, not a finding. Maps to Google guide principle and addresses LLM failure mode #5.",
+      "sourceUrls": ["synthesis"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C7",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "EASE 2026 implication: workflow must make it easy for developers to act on high-priority findings. Findings must be ordered by impact (blockers first), high-priority findings must include specific actionable remediation. Structure must enforce prioritization.",
+      "sourceUrls": ["https://arxiv.org/abs/2604.24525"],
+      "answersSubquestion": "SQ6"
+    },
+    {
+      "id": "SQ6-C8",
+      "subQuestion": "SQ6",
+      "confidence": "inferred",
+      "text": "Structural guardrail 6: CONDITIONAL EARLY TERMINATION. If intent check finds a fundamental design problem, surface before running detailed reviewers. Mirror Google guide 'Step One': major design problems should be flagged immediately, rest of review may be thrown away.",
+      "sourceUrls": ["https://google.github.io/eng-practices/review/reviewer/navigate.html"],
+      "answersSubquestion": "SQ6"
+    }
+  ]
+}

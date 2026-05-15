@@ -1,0 +1,56 @@
+[
+  {
+    "id": "SQ4-C1",
+    "text": "Facebook Infer reactive mode (--reactive flag): analyzes modified files/procedures AND their callers/dependencies. From Infer docs: 'only a subset of the project needs to be analyzed: the modified files/procedures and their dependencies.' This is the closest shipped tool to automatic call-graph analysis for callers of changed functions. Requires: first-run full capture (infer capture), then reactive re-analysis on each code change.",
+    "source_url": "https://fbinfer.com/docs/infer-workflow/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ4-C2",
+    "text": "Infer's reactive mode propagates analysis to procedure dependencies - it re-analyzes callers of changed procedures. This is interprocedural impact analysis: if function A changes, all callers of A are re-analyzed. This directly addresses the hard case of unchanged callers. However, Infer is a heavyweight static analyzer (C/Java/ObjC focus), not deployed as an LLM review assistant, and requires build system integration.",
+    "source_url": "https://fbinfer.com/docs/infer-workflow/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ4-C3",
+    "text": "Semgrep Pro cross-file (interfile) analysis: uses 'interfile: true' in rule definition. Analyzes across files and functions. Ships as a separate binary (semgrep-pro). Documented capability: reduces false positives and uncovers new vulnerabilities via cross-file taint analysis. CRITICAL LIMITATION: 'cross-file analysis does not currently run on diff-aware (pull request or merge request) scans' - confirmed in official docs. Only runs on full scans.",
+    "source_url": "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ4-C4",
+    "text": "CodeRabbit Multi-Repo Analysis: uses a 'research agent' to check linked repositories for cross-repo impact. This is NOT call-graph analysis - it is LLM-based reasoning over the linked repo's code. It can flag 'API consumers in linked repos may be affected' but cannot enumerate all callers. Ships as a configured feature (linked_repositories in .coderabbit.yaml). Documented as shipped (2024+).",
+    "source_url": "https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/",
+    "source_type": "product_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ4-C5",
+    "text": "No shipped tool performs automatic call-graph analysis to flag unchanged callers in the same repo during a PR review. The only shipped approach is Infer's reactive mode (heavyweight, offline, not a PR review tool). Semgrep's cross-file analysis is explicitly disabled for PR scans. CodeRabbit's multi-repo analysis is LLM-based inference across repos, not intra-repo call-graph traversal. SonarQube's taint analysis runs full-scan only (like Semgrep).",
+    "source_url": "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+    "source_type": "tool_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ4-C6",
+    "text": "Reviewdog 'file' filter mode as a partial workaround: reports ALL findings in modified or added files, regardless of whether the finding is on a changed line. This implicitly surfaces pre-existing issues in touched files - but has no transitive caller discovery. It flags bugs on unchanged lines within the changed file, but not bugs in callers in other unchanged files.",
+    "source_url": "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  }
+]

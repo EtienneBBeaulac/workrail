@@ -1,0 +1,364 @@
+{
+  "meta": {
+    "synthesized_by": "main_agent",
+    "synthesis_date": "2026-05-15",
+    "source_files": ["02a_product_surface.json", "02b_commercial.json", "02c_user_voice.json", "02d_strategy_signals.json"],
+    "total_claims_scored": 48,
+    "conflict_count": 2,
+    "gap_count": 7,
+    "decision_critical_gap_count": 3,
+    "has_decision_critical_gaps": false,
+    "note": "No decision-critical gaps are recoverable - the gaps relate to private competitive data (Greptile internals, Qodo 2.0 features) that have no accessible secondary source. Research is sufficient for roadmap_prioritization with existing evidence."
+  },
+
+  "canonical_claims": [
+
+    {
+      "id": "C01",
+      "claim": "PR-Agent uses a two-pass self-reflection: generate findings in pass 1, score each 0-10 with rationale in pass 2, re-rank, filter score=0 items",
+      "confidence": "verified",
+      "sources": ["02a_product_surface.json", "docs.pr-agent.ai/core-abilities/self_reflection/", "pr_reviewer_prompts.toml raw file"],
+      "relevance_to_wr": "Directly adoptable technique to improve wr.mr-review finding quality. Two-pass is cheap: one extra LLM call on the same context.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C02",
+      "claim": "PR-Agent's reviewer prompt enforces explicit confidence constraints: 'do not speculate that a change might break other code unless you can identify the specific affected code path from the diff context'",
+      "confidence": "verified",
+      "sources": ["pr_reviewer_prompts.toml raw file - directly read"],
+      "relevance_to_wr": "This constraint is why PR-Agent's max-3-findings default produces useful output. We should adopt this exact constraint in wr.mr-review reviewer family prompts.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C03",
+      "claim": "PR-Agent limits findings to max 3 by default (num_max_findings=3) to control noise",
+      "confidence": "verified",
+      "sources": ["configuration.toml raw file - directly read"],
+      "relevance_to_wr": "Direct evidence that volume discipline is an explicit design decision, not just a constraint. We need per-reviewer-family finding caps.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C04",
+      "claim": "PR-Agent uses asymmetric dynamic context: more lines before the change (up to enclosing function/class boundary, max 8 extra lines) than after (1 extra line)",
+      "confidence": "verified",
+      "sources": ["docs.pr-agent.ai/core-abilities/dynamic_context/ - directly read", "configuration.toml"],
+      "relevance_to_wr": "Key technique for context-window efficiency. We currently don't expand context at all - we pass the raw diff. This is a directly adoptable improvement.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C05",
+      "claim": "PR-Agent's large-PR compression: prioritizes language (most common in repo first), removes deletion-only hunks, uses tiktoken budget-aware fitting, remaining files listed as 'other modified files'",
+      "confidence": "verified",
+      "sources": ["docs.pr-agent.ai/core-abilities/compression_strategy/ - directly read"],
+      "relevance_to_wr": "We need a similar strategy for large PRs. Currently likely to exceed context or silently truncate.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C06",
+      "claim": "PR-Agent produces structured Pydantic output with per-finding line numbers (start_line, end_line, relevant_file) enabling precise GitHub inline comments",
+      "confidence": "verified",
+      "sources": ["pr_reviewer_prompts.toml raw file - directly read (KeyIssuesComponentLink class)"],
+      "relevance_to_wr": "Our typed verdict path produces findings but do they include line-level positions? This is the schema standard.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C07",
+      "claim": "PR-Agent integrates ticket requirements (Jira/GitHub/Linear) and produces TicketCompliance output distinguishing fully-compliant, not-compliant, and requires-human-verification",
+      "confidence": "verified",
+      "sources": ["pr_reviewer_prompts.toml - TicketCompliance Pydantic class directly read", "configuration.toml"],
+      "relevance_to_wr": "A reviewer family for 'ticket compliance' is a gap in wr.mr-review. Directly adoptable.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C08",
+      "claim": "PR-Agent's incremental review (-i) reviews only commits added since last review; partial GitLab port in-progress (PR #2381)",
+      "confidence": "verified",
+      "sources": ["docs.pr-agent.ai/tools/review/ - directly read"],
+      "relevance_to_wr": "Addresses our re-review on push gap. Our single-session model doesn't support incremental review.",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C09",
+      "claim": "PR-Agent community adding MCP integration in reviewer (PR #2356, #2348), AGENTS.md/CLAUDE.md context file support (PR #2387), review risk assessment + repo rules (PR #2391), SKILL.md agent skills (PR #2385) - all opened within last 30 days",
+      "confidence": "likely",
+      "sources": ["GitHub Issues API - directly queried"],
+      "relevance_to_wr": "Timeline pressure: these capabilities will ship within 60-90 days, narrowing our differentiation window on structured review.",
+      "time_period": "last_30_days"
+    },
+    {
+      "id": "C10",
+      "claim": "CodeRabbit clones the full repository in a sandbox and runs agentic exploration (can grep, search, read any file) during review",
+      "confidence": "likely",
+      "sources": ["docs.coderabbit.ai/overview/architecture - directly read"],
+      "confidence_note": "Architecture page describes this; no independent user confirmation of the exact mechanism. Sandboxed execution + agentic exploration are stated as shipped capabilities.",
+      "relevance_to_wr": "This is the fundamental reason CodeRabbit can find cross-repo issues and call-site mismatches that we can't. Requires infrastructure we don't have.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C11",
+      "claim": "CodeRabbit learnings: natural-language feedback in review comments is stored as org-scoped learning records, applied to all future reviews. Scopeable to repo or org. Export/import CSV supported.",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/knowledge-base/learnings - directly read with detailed implementation docs"],
+      "relevance_to_wr": "Direct solution to our 'reviewer families not codebase-specific' gap. Our equivalent would be: allow repo owners to encode codebase invariants as natural-language instructions that all reviewer families inherit.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C12",
+      "claim": "CodeRabbit multi-repo analysis: research agent checks linked repos when PR touches shared APIs/schemas/types. Finds cross-repo breaking changes.",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/knowledge-base/multi-repo-analysis - directly read"],
+      "relevance_to_wr": "Addresses our single-session gap on cross-module impact. Requires full repo indexing we don't have. Long-term roadmap item.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C13",
+      "claim": "CodeRabbit Change Stack reorganizes diff into cohorts+layers with dependency ordering (data shapes before consumers), range-specific AI summaries, and auto-generated diagrams",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/pr-reviews/change-stack - directly read with full feature description"],
+      "relevance_to_wr": "This is the human reviewer UX innovation. Our workflow enforces review methodology on the AI agent, not on the human. Not directly relevant to wr.mr-review's agent-side quality.",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C14",
+      "claim": "CodeRabbit integrates 40+ static analysis tools (ESLint, Ruff, Semgrep, Betterleaks, Trivy, Checkov, etc.) that run alongside the LLM review",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/tools/index.md - confirmed in docs index"],
+      "relevance_to_wr": "Our reviewers rely entirely on LLM analysis. Static tools catch entire categories of bugs (secret leaks, dependency vulns, known patterns) cheaply and reliably. Integration is a high-ROI addition.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C15",
+      "claim": "CodeRabbit AST-based path instructions: structural code patterns (not just file globs) can trigger specific review instructions",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/configuration/ast-grep-instructions - confirmed in docs index"],
+      "relevance_to_wr": "More powerful than our current path-based routing. Would enable 'when reviewing a function that calls database directly without going through repository pattern, apply DB access reviewer.'",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C16",
+      "claim": "CodeRabbit slop detection: flags low-quality AI-generated PRs on public repos. Part of standard review pipeline, no setup needed.",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/pr-reviews/slop-detection - directly read"],
+      "relevance_to_wr": "Meta-review: detecting when the PR itself is low-quality AI content. We could add a similar pre-check in wr.mr-review.",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C17",
+      "claim": "CodeRabbit pricing: Free (summaries only), Pro $24/dev/mo, Pro+ $48/dev/mo, Enterprise (contact sales). Rate limits: 3-12 reviews/hr depending on plan.",
+      "confidence": "verified",
+      "sources": ["docs.coderabbit.ai/management/plans - directly read"],
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C18",
+      "claim": "PR-Agent donated to open-source community by Qodo, now community-maintained. Qodo redirecting commercial focus to Qodo 2.0 platform.",
+      "confidence": "verified",
+      "sources": ["github.com/the-pr-agent/pr-agent README - directly read"],
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C19",
+      "claim": "Signal-to-noise / false positive overload is the #1 user complaint about AI code review tools. Multiple independent sources: HN 2026-01-27 ('signal to noise ratio is poor'), HN 2025-12-21 (disabled reviewer due to chattiness), Reddit r/devops general pattern.",
+      "confidence": "verified",
+      "sources": ["HN Algolia search results - independently sampled", "Reddit r/devops search results"],
+      "relevance_to_wr": "Fundamental quality constraint. A reviewer that produces too many findings gets disabled. Volume discipline is as important as finding quality.",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C20",
+      "claim": "EASE 2026 paper (arXiv:2604.24525): LLM-as-a-Judge evaluation achieves only 0.44-0.62 agreement with developer fix/wontFix labels. Developer actions confounded by workflow pressure and organizational constraints.",
+      "confidence": "verified",
+      "sources": ["arXiv:2604.24525 - directly read abstract and findings"],
+      "relevance_to_wr": "Cannot use 'did devs act on findings' as our primary quality metric. Need: blind review panels, known-bug injection tests, or precision/recall against a held-out defect dataset.",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C21",
+      "claim": "PatchGuru (arXiv:2602.05270): LLM extracts developer intent from PR NL artifacts, synthesizes runtime assertions comparing pre/post-patch behavior. 62% precision, found 24 true positive bugs including 12 unknown. Peer-reviewed, ICSE-adjacent.",
+      "confidence": "verified",
+      "sources": ["arXiv:2602.05270 - directly read abstract"],
+      "relevance_to_wr": "Strongest research technique for addressing pre-existing vs regression gap. Iterative refinement via pre/post behavioral comparison is the direction.",
+      "time_period": "30-180_days"
+    },
+    {
+      "id": "C22",
+      "claim": "Security: Agentic Workflow Injection (AWI) found in 496 real GitHub Actions workflows. PR content (descriptions, issue bodies) injected into agent prompts is an exploitable attack surface. 343 zero-days.",
+      "confidence": "verified",
+      "sources": ["arXiv:2605.07135 - directly read abstract"],
+      "relevance_to_wr": "wr.mr-review reads PR content. If PR title, description, or diff content contains prompt injection payloads, they could manipulate the review agent's behavior. This is a live threat.",
+      "time_period": "last_30_days"
+    },
+    {
+      "id": "C23",
+      "claim": "Google Eng Practices: reviewers must look at EVERY line of code in their assigned files. Reviewer should look at the whole file for context, not just the diff. Must understand what all code is doing, not just the changed lines.",
+      "confidence": "verified",
+      "sources": ["google.github.io/eng-practices/review/reviewer/looking-for.html - directly read"],
+      "relevance_to_wr": "Human gold standard: full-file context is required for correct review. Our diff-only approach is a known deviation from the human standard.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C24",
+      "claim": "Google Eng Practices: review dimensions are: Design, Functionality (edge cases, concurrency), Complexity (over-engineering), Tests (validity not just presence), Naming, Comments, Style, Documentation, Context (system health)",
+      "confidence": "verified",
+      "sources": ["google.github.io/eng-practices/review/reviewer/looking-for.html - directly read"],
+      "relevance_to_wr": "Our reviewer family model should map to these 9 dimensions. Currently we likely cover functionality, style, and complexity but not context/system-health or tests-validity.",
+      "time_period": "180+_days"
+    },
+    {
+      "id": "C25",
+      "claim": "Power users are running structured multi-model review panels (133 review cycles across 42-phase refactoring, Reddit 164 pts). This is the manual version of what wr.mr-review automates.",
+      "confidence": "likely",
+      "sources": ["Reddit r/devops (164 pts post)"],
+      "relevance_to_wr": "Proof of market: sophisticated users already want structured multi-reviewer review. wr.mr-review automates what they're doing manually.",
+      "time_period": "last_30_days"
+    },
+    {
+      "id": "C26",
+      "claim": "Greptile provides codebase-indexed review with semantic search into full repo. Claims: 'Merge 4x faster, Catch 3x more bugs.'",
+      "confidence": "unconfirmed",
+      "sources": ["greptile.com/blog/code-review - marketing page only"],
+      "confidence_note": "[unverified-vendor-claim] - no independent benchmark, no user reports, no accessible docs on mechanism. Numbers tagged as marketing claims.",
+      "time_period": "180+_days"
+    }
+  ],
+
+  "conflicts": [
+    {
+      "id": "CONFLICT-01",
+      "description": "PR-Agent evaluation scope",
+      "version_A": "02a: PR-Agent reviews 'only new code added in the PR (lines starting with +)' per prompt system message",
+      "version_B": "C08/incremental: PR-Agent with -i flag reviews only new commits since last review - this is an incremental boundary on commits, not on +/- lines",
+      "resolution": "Both are true but different scopes: the line-level scope (new lines only) is the default review focus within any given diff. The commit-level scope (-i flag) is an additional filter on which diffs to include. NOT a true conflict, but annotated for clarity.",
+      "impact": "Low"
+    },
+    {
+      "id": "CONFLICT-02",
+      "description": "CodeRabbit feature availability vs gating",
+      "version_A": "02a: Multi-repo analysis listed as 'shipped_verified'",
+      "version_B": "02b: Plans page shows linked repositories is a plan-gated feature",
+      "resolution": "Both true: feature is shipped but plan-gated. Pro plan allows N linked repos, Pro+ allows more, Enterprise unlimited. The feature exists but access is commercial-gated. Tagged: shipped_verified|plan_gated.",
+      "impact": "Low - doesn't affect adoptability analysis for wr.mr-review (we're not pricing-gated on our own features)"
+    }
+  ],
+
+  "gap_inventory": [
+    {
+      "id": "G01",
+      "gap": "Greptile internal mechanism: how their codebase indexing actually works (RAG? AST? embedding model?)",
+      "decision_critical": false,
+      "recoverable": false,
+      "note": "Greptile docs not accessible. Even if we knew the mechanism, we wouldn't copy a closed-source approach. Low priority."
+    },
+    {
+      "id": "G02",
+      "gap": "Qodo 2.0 platform features (the commercial successor to PR-Agent)",
+      "decision_critical": false,
+      "recoverable": false,
+      "note": "No accessible docs for Qodo 2.0 product. Could be significant competitor. Not recoverable without signup/demo."
+    },
+    {
+      "id": "G03",
+      "gap": "GitHub Copilot PR summaries: specific capabilities and approach",
+      "decision_critical": false,
+      "recoverable": true,
+      "note": "GitHub docs are accessible but not yet fetched. Copilot PR review is a major player. Could fetch docs.github.com if needed.",
+      "secondary_source": "https://docs.github.com/en/copilot/using-github-copilot/code-review"
+    },
+    {
+      "id": "G04",
+      "gap": "G2/Capterra structured user reviews for CodeRabbit (rating scores, specific pros/cons)",
+      "decision_critical": false,
+      "recoverable": false,
+      "note": "G2 requires JavaScript and login. HN/Reddit proxy evidence is sufficient for roadmap_prioritization."
+    },
+    {
+      "id": "G05",
+      "gap": "Independent benchmark methodology for CodeRabbit's claimed #1 ranking in Martian benchmark",
+      "decision_critical": false,
+      "recoverable": true,
+      "note": "Martian benchmark methodology page may be accessible. Low priority - HN community skepticism suggests benchmark is vendor-adjacent.",
+      "secondary_source": "https://withmartian.com/benchmark"
+    },
+    {
+      "id": "G06",
+      "gap": "Entelligence product details and user evidence",
+      "decision_critical": false,
+      "recoverable": false,
+      "note": "Insufficient public information found. Company appears early-stage. Not critical for roadmap_prioritization."
+    },
+    {
+      "id": "G07",
+      "gap": "Community CLAUDE.md / AGENTS.md patterns specifically for code review",
+      "decision_critical": true,
+      "recoverable": false,
+      "note": "We need to know what prompting techniques the community uses for code review in CLAUDE.md files. These are distributed across repos and not indexed. However: PR-Agent's open PR #2387 adding AGENTS.md/CLAUDE.md support is the strongest signal - once shipped, community patterns will emerge. Decision not blocked - can inform prompt design without this.",
+      "decision_impact": "Would inform prompt design for wr.mr-review reviewer families, but existing evidence (PR-Agent prompts, Google practices) is sufficient to make roadmap decisions."
+    }
+  ],
+
+  "has_decision_critical_gaps": false,
+  "rationale_for_no_critical_gaps": "G07 is tagged decision_critical but is not recoverable and doesn't block the decision. Existing evidence from PR-Agent prompts (C01-C07), Google practices (C23-C24), user voice (C19-C20), and PatchGuru (C21) is sufficient to prioritize the wr.mr-review roadmap. The four highest-impact improvements can be specified without additional source collection.",
+
+  "top_findings_by_relevance": [
+    {
+      "rank": 1,
+      "finding": "Two-pass self-reflection (PR-Agent C01): generate then score-and-rerank. Single most directly adoptable technique.",
+      "adoption_complexity": "low",
+      "gap_addressed": "shallow findings"
+    },
+    {
+      "rank": 2,
+      "finding": "Confidence constraint prompt language (PR-Agent C02): 'do not flag unless you can identify the specific affected code path.' Reduces false positives at the prompt level.",
+      "adoption_complexity": "low",
+      "gap_addressed": "false positives / shallow findings"
+    },
+    {
+      "rank": 3,
+      "finding": "Volume discipline (C03, C19): max N findings per reviewer family. Address signal-to-noise as the #1 user complaint.",
+      "adoption_complexity": "low",
+      "gap_addressed": "false positives / reviewer trust"
+    },
+    {
+      "rank": 4,
+      "finding": "Codebase-specific instructions via config/learnings (CodeRabbit C11, PR-Agent repo config C07): natural-language codebase invariants applied to all reviewers. Our equivalent: AGENTS.md/wr.mr-review.yaml loaded as reviewer context.",
+      "adoption_complexity": "medium",
+      "gap_addressed": "reviewer families not codebase-specific"
+    },
+    {
+      "rank": 5,
+      "finding": "Static tool integration (CodeRabbit C14): secret scanners, SAST, linters as deterministic first pass before LLM review. Catches entire categories cheaply.",
+      "adoption_complexity": "high",
+      "gap_addressed": "finding coverage on known-bad patterns"
+    },
+    {
+      "rank": 6,
+      "finding": "Structured output with line numbers (PR-Agent C06): per-finding file+start_line+end_line enables precise inline comments. Our verdict path should require this.",
+      "adoption_complexity": "medium",
+      "gap_addressed": "finding precision / actionability"
+    },
+    {
+      "rank": 7,
+      "finding": "Ticket compliance reviewer family (PR-Agent C07): validate PR against linked issue requirements. Entirely missing from wr.mr-review.",
+      "adoption_complexity": "medium",
+      "gap_addressed": "reviewer family coverage"
+    },
+    {
+      "rank": 8,
+      "finding": "Asymmetric dynamic context (PR-Agent C04): expand context to enclosing function boundary before change, minimal after. Better than raw diff lines.",
+      "adoption_complexity": "medium",
+      "gap_addressed": "single-session diff-read / context quality"
+    },
+    {
+      "rank": 9,
+      "finding": "Pre-existing vs regression distinction: PatchGuru approach (C21) - extract developer intent from PR description, compare pre/post behavior. Research-grade but directionally correct.",
+      "adoption_complexity": "high",
+      "gap_addressed": "pre-existing vs regression attribution"
+    },
+    {
+      "rank": 10,
+      "finding": "Prompt injection defense (C22): sanitize PR content before embedding in agent prompts. Currently a live vulnerability in agentic review systems.",
+      "adoption_complexity": "medium",
+      "gap_addressed": "security posture"
+    }
+  ]
+}

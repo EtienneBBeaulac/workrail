@@ -1,0 +1,47 @@
+[
+  {
+    "claimId": "sq2-c1",
+    "text": "LangGraph subgraph invocation is synchronous-blocking. The parent node function calls `subgraph.invoke(input_state)` which blocks until the entire subgraph completes. There is no async/non-blocking form for cross-graph delegation in the standard API. The parent graph's execution thread is suspended inside the node function for the full duration of the subgraph run. Non-blocking patterns in LangGraph require explicit async node functions with `ainvoke()` + asyncio -- but even then the parent awaits the result before returning from the node.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq2-c2",
+    "text": "OpenAI Agents SDK `as_tool` execution model: the tool callback `_run_agent_impl` calls `await Runner.run(...)` which is a coroutine. From the parent agent's perspective, this is blocking within the current turn: the parent LLM called the tool, the tool call awaits child completion, then the tool result is injected back into the parent's message list for the next LLM call. The parent cannot 'continue doing other work' during child execution -- the tool call occupies the entire tool-execution slot for that turn.",
+    "source_url": "https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq2-c3",
+    "text": "LangGraph's Send API (map-reduce pattern) is the only production form of true non-blocking parallel sub-agent spawning. `builder.add_conditional_edges(source, lambda state: [Send('worker', item) for item in state['items']])` spawns N worker nodes in parallel. The parent graph does NOT advance until all Send targets complete -- it is still logically blocking but physically concurrent. This is fundamentally different from spawn-and-wait for a single result-returning child.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq2-c4",
+    "text": "AutoGen Swarm (not the OpenAI Swarm) uses `HandoffMessage` which permanently transfers active agent control. The previous agent does NOT receive a result back -- it is deregistered from the active slot. This is the non-blocking extreme: parent terminates, child continues. This is unsuitable for any pattern where the parent needs to synthesize child output.",
+    "source_url": "https://microsoft.github.io/autogen/stable/user-guide/agentchat-user-guide/tutorial/teams.html",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq2-c5",
+    "text": "WorkRail's current spawn_agent tool (src/daemon/tools/spawn-agent.ts) uses the blocking model: `await sc.runWorkflowFn(...)` inside the tool's execute() callback. The parent agent loop is inside _executeTools() for the entire duration of the child run. For parallel spawns, multiple spawnOne() calls run concurrently via Promise.all -- still blocking the parent loop for the full batch duration. Comments in the source explicitly document: 'For parallel spawns: multiple spawnOne() calls run concurrently via Promise.all -- the parent loop is still blocked inside execute() for the full batch duration.'",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ2",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  }
+]

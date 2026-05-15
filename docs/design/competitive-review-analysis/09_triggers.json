@@ -1,0 +1,94 @@
+{
+  "note": "WorkRail cannot register live cron jobs. This file is a configuration document for the operator to configure monitoring alerts and calendar reminders based on the triggers listed here.",
+
+  "analysis_id": "code-review-ecosystem-roadmap_prioritization-2026-05-15",
+  "competitor_scope": "AI code review ecosystem (CodeRabbit, PR-Agent/Qodo, Greptile, human review methodology, academic research)",
+  "decision_target": "roadmap_prioritization",
+  "primary_verdict": "Ship three prompt-level improvements first (two-pass self-reflection, confidence constraint language, per-family finding cap) before any infrastructure investment. Validate 'review methodology enforcement' category frame with user research.",
+  "analysis_date": "2026-05-15",
+  "staleness_date": "2026-08-15",
+
+  "time_based_triggers": [
+    {
+      "type": "full_rerun",
+      "frequency": "quarterly",
+      "next_date": "2026-08-15",
+      "scope": "All steps (01 through 09)",
+      "rationale": "PR-Agent community is shipping fast. CodeRabbit changelogs update frequently. AI code review market is moving at quarterly cadence."
+    },
+    {
+      "type": "lightweight_refresh",
+      "frequency": "monthly",
+      "next_date": "2026-06-15",
+      "scope": "Steps 2b (commercial/pricing), 2c (user voice), 2d (strategy signals) only",
+      "rationale": "Pricing, community sentiment, and strategy signals change faster than product surface. Monthly spot-check on GitHub Issues, HN threads, pricing pages, and job postings."
+    }
+  ],
+
+  "event_based_triggers": [
+    {
+      "event": "PR-Agent ships MCP integration OR AGENTS.md support (PRs #2356, #2348, #2387)",
+      "action": "full_rerun",
+      "priority": "high",
+      "detection": "Watch https://github.com/the-pr-agent/pr-agent/pulls for merge of PRs #2356, #2348, #2387, #2391, #2385",
+      "rationale": "When these ship, the PR-Agent community convergence threat becomes 'verified' instead of 'likely'. The entire threat read and differentiation story must be re-evaluated."
+    },
+    {
+      "event": "CodeRabbit pricing change or new plan tier",
+      "action": "lightweight_refresh",
+      "priority": "medium",
+      "detection": "Watch https://docs.coderabbit.ai/management/plans for changes. Archive current pricing page to Wayback Machine for diff.",
+      "rationale": "CodeRabbit pricing at $48/dev/mo is the current data. A price decrease (or freemium model for full reviews) would materially change competitive dynamics."
+    },
+    {
+      "event": "CodeRabbit or Qodo funding round or acquisition",
+      "action": "full_rerun",
+      "priority": "high",
+      "detection": "Monitor Crunchbase/TechCrunch for announcements",
+      "rationale": "Significant funding would accelerate agentic exploration infrastructure and potentially lower pricing. Acquisition by GitHub/Microsoft/GitLab would change the competitive landscape entirely."
+    },
+    {
+      "event": "CodeRabbit major version release or marketing relaunch",
+      "action": "full_rerun",
+      "priority": "medium",
+      "detection": "Watch https://docs.coderabbit.ai/changelog and coderabbit.ai blog",
+      "rationale": "A major version release may change the product surface enough to invalidate the current architecture inferences."
+    },
+    {
+      "event": "3+ new independent user reviews on HN/Reddit in 30 days with a new complaint theme",
+      "action": "update_02c_user_voice",
+      "priority": "medium",
+      "detection": "Monthly HN Algolia search: coderabbit OR pr-agent OR code-review-ai, filter last_30_days",
+      "rationale": "User complaint themes are the primary signal for what users actually care about. A new theme may invalidate the current 'signal-to-noise is #1 complaint' finding."
+    },
+    {
+      "event": "Greptile publishes independent benchmark or user case study",
+      "action": "update_greptile_findings",
+      "priority": "low",
+      "detection": "Watch greptile.com/blog for new technical posts",
+      "rationale": "Greptile is currently [unverified-vendor-claim]. Independent evidence would upgrade their codebase-indexing claim to 'verified' and change the competitive gap analysis."
+    },
+    {
+      "event": "Team is about to make a roadmap decision this analysis was meant to inform",
+      "action": "human_signoff_refresh",
+      "priority": "critical",
+      "detection": "Any sprint planning or roadmap meeting discussing wr.mr-review quality overhaul",
+      "rationale": "Before acting on urgent ledger items, human reviewer should confirm verdicts. 08_human_signoff.md verdicts are proposed defaults, not confirmed decisions."
+    },
+    {
+      "event": "User research with 3+ high-risk engineering teams completed",
+      "action": "update_category_frame_validation",
+      "priority": "high",
+      "detection": "User research conversations documented",
+      "rationale": "The changes-positioning verdict ('validate methodology enforcement category frame') requires user research to resolve. When that research happens, re-evaluate whether the JTBD frame holds."
+    }
+  ],
+
+  "key_open_questions_for_next_run": [
+    "Did PR-Agent ship MCP integration and AGENTS.md support? If yes, what did early adopters say about quality vs wr.mr-review?",
+    "Do users in high-risk engineering segments (fintech, healthcare, security-critical) recognize 'review methodology enforcement' as a job they need done?",
+    "Does the target segment already use CodeRabbit? If yes, is wr.mr-review an add-on (methodology layer on top of CodeRabbit) or a substitute?",
+    "What is Qodo 2.0's feature set? Is it now a credible competitor that was inaccessible during this research?",
+    "Did wr.mr-review ship the three urgent improvements (two-pass self-reflection, confidence constraints, volume caps)? What was the measured impact on finding quality?"
+  ]
+}

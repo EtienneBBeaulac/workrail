@@ -1,0 +1,37 @@
+{
+  "subQuestions": [
+    {
+      "id": "SQ1",
+      "question": "What diff-anchoring techniques do shipped static analysis tools (Semgrep, SonarQube, Reviewdog) actually implement to limit findings to changed lines, and what are their known failure modes?",
+      "dependencies": [],
+      "rationale": "Foundation -- establishes the baseline techniques that LLM tools can learn from or contrast with. No dependencies; can be answered from tool docs and source alone."
+    },
+    {
+      "id": "SQ2",
+      "question": "How do LLM-based PR review bots (Qodo PR-Agent, CodeRabbit, GitHub Copilot PR review) construct their review context -- specifically, do they inject only the diff, or do they inject additional file/call context, and how do they attribute findings to changed vs unchanged lines?",
+      "dependencies": [],
+      "rationale": "Independent empirical question about current LLM tool behavior. Can be answered from source inspection (PR-Agent) and changelog/docs (CodeRabbit). No dependency on SQ1 -- the techniques may be completely different."
+    },
+    {
+      "id": "SQ3",
+      "question": "What are the concrete hard cases where diff-anchoring fails -- i.e., regressions that are introduced by the PR but do not appear on changed lines (transitive callers, second-order invariant violations, schema/type drift)?",
+      "dependencies": ["SQ1"],
+      "rationale": "Depends on SQ1 to understand where the baseline techniques break. The hard cases are the failure modes of diff-anchoring."
+    },
+    {
+      "id": "SQ4",
+      "question": "Do any shipped tools perform call-graph or cross-file impact analysis to detect regressions in unchanged callers/consumers of changed code, and if so, what is the mechanism?",
+      "dependencies": ["SQ1", "SQ3"],
+      "rationale": "Depends on SQ1 (what the baseline is) and SQ3 (what cases call-graph analysis would address). Looking for evidence of shipped cross-file analysis beyond raw diff filtering."
+    },
+    {
+      "id": "SQ5",
+      "question": "What concrete techniques can be practically implemented in an LLM-based review workflow (prompt engineering, context injection, structured pre-processing) to improve pre-existing vs regression separation, given the constraints of LLM token windows and the absence of a call graph?",
+      "dependencies": ["SQ2", "SQ3", "SQ4"],
+      "rationale": "Synthesis question -- depends on understanding current LLM bot behavior (SQ2), the hard cases (SQ3), and what existing tools do for cross-file analysis (SQ4). This is the final actionable output."
+    }
+  ],
+  "regime": "depth_serial",
+  "regimeRationale": "SQ3 depends on SQ1; SQ4 depends on SQ1 and SQ3; SQ5 depends on SQ2, SQ3, SQ4. The dependency graph is non-empty, requiring topological ordering.",
+  "topologicalOrder": ["SQ1", "SQ2", "SQ3", "SQ4", "SQ5"]
+}

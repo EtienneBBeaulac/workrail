@@ -1,0 +1,65 @@
+[
+  {
+    "claimId": "sq5-c1",
+    "text": "WorkRail's current spawn_agent is a daemon-only tool, not a workflow primitive. It runs in the daemon agent loop as a regular AgentTool, called by the LLM. The parent session is a daemon session (autonomous agent loop) -- it is NOT an MCP server session guided step-by-step. For MCP server sessions (Claude Code using WorkRail), there is no spawn_and_wait primitive at all. This means the MR review use case -- where an MCP-driven review workflow wants to spawn a codebase investigation sub-agent mid-review -- has NO existing engine support.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq5-c2",
+    "text": "The WorkRail DAG currently has 4 node kinds: step, checkpoint, blocked_attempt, gate_checkpoint. There is no 'spawn_and_wait' node kind. To support mid-session child agent spawning with result injection, a new node kind is needed -- OR the existing 'step' can be extended with a spawn_and_wait behavior that (a) emits a child session, (b) durably parks the parent session with a pending reference, (c) resumes when the child completes. The durable parking is the hard part: the parent's HMAC token (continueToken) must remain valid while the child runs.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/session/events.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq5-c3",
+    "text": "HMAC token protocol constraint: continueToken contains (sessionId, runId, nodeId, workflowHashRef). The parent session's continueToken is currently stateless -- it encodes only the current node position. To support durable parking (parent waits for child), no token change is strictly required: the parent simply does not advance (its continueToken stays valid at the current step). The child can run independently. When the child completes, a separate mechanism must trigger the parent to resume (call continue_workflow with the parked token + child result injected as context).",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/tokens/payloads.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq5-c4",
+    "text": "The parent-child session link is already durable: session_created.data.parentSessionId (optional field) records the parent WorkRail session ID in the child's event log. This means the shared session store already has parent-child relationship tracking. What is missing is: (a) a new session event kind `child_session_completed` emitted to the PARENT's event log when a child completes, (b) an optional `pendingChildSessionId` reference in the parent's step state so the engine knows a child is in flight, (c) a resume-from-child-result path in continue_workflow that injects child artifacts into parent context.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/v2/durable-core/schemas/session/events.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq5-c5",
+    "text": "The minimal engine change for MCP-served spawn_and_wait would be: (1) Add a new MCP tool `spawn_and_wait` that starts a daemon child session and returns its sessionId immediately (non-blocking from MCP perspective). (2) Add a new gate_checkpoint variant (or new DAG node) `pending_child` that parks the parent session with `{ pendingChildSessionId }` in its engine state. (3) The PendingChildPoller (analogous to PendingDraftReviewPoller) polls the child session and when complete, auto-advances the parent by injecting child artifacts as context and calling continue_workflow internally. (4) No HMAC token change is needed -- the parent's continueToken remains valid at the parked step.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq5-c6",
+    "text": "Alternative minimal approach (no new DAG node): Treat spawn_and_wait as an MCP tool returned to the calling agent (Claude Code). The agent calls `spawn_and_wait({ workflowId, goal, workspacePath })` as an MCP tool call, the tool starts a daemon child session synchronously (like spawn_agent does today), and blocks until it returns the child's lastStepArtifacts. The parent MCP session is suspended in the tool call. This maps exactly to the OpenAI Agents SDK `as_tool` pattern. The downside: if the MCP connection drops while the child runs, the parent loses state. The advantage: zero engine changes, zero DAG changes -- just a new MCP tool.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/mcp/",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq5-c7",
+    "text": "The typed artifact contract gap (sq3-c3) is the most important engine change needed regardless of which spawning approach is chosen. The parent step should declare `expectedChildArtifact: { contractRef: 'wr.review_verdict' }` and the engine should validate the child result against this contract before injecting it into parent context. Without this, the parent receives `unknown[]` and must LLM-parse the result -- defeating the purpose of typed contracts. Adding this to WorkflowStepDefinition as an optional `childWorkflowContract` field would enable compile-time validation and runtime enforcement.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/types/workflow-definition.ts",
+    "source_type": "primary_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ5",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  }
+]

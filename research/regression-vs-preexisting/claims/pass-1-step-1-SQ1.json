@@ -1,0 +1,74 @@
+[
+  {
+    "id": "SQ1-C1",
+    "text": "Semgrep diff-aware scanning works by running the scanner on both the baseline commit and the HEAD commit, then diffing the findings. A finding is identified by a 4-tuple: (rule ID, file path, syntactic context, index). Only findings present in HEAD but not in baseline are reported. The baseline is set via SEMGREP_BASELINE_REF env var or automatically from PR context in GitHub Actions / GitLab CI.",
+    "source_url": "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C2",
+    "text": "Semgrep diff-aware scanning is purely outcome-based: it scans the full file at both commits, not just changed lines, then compares resulting finding sets. It does NOT filter to changed lines per se; it finds findings in HEAD that weren't in baseline. This means a pre-existing bug on an unchanged line that existed in baseline will not be reported (correct behavior), but a pre-existing bug that appears on a changed line but was not in baseline may appear as 'new'.",
+    "source_url": "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/src/components/reference/_diff-aware-scanning.mdx",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C3",
+    "text": "SonarQube/SonarCloud PR analysis works by scanning HEAD commit of branch B and comparing with the most recent scan of target T. Only issues appearing in B but not in T are reported. Critical failure mode documented: if T's scan is outdated (new issues were added to T since last scan), those issues appear in the PR analysis even though the PR didn't introduce them. Requires up-to-date base branch scan.",
+    "source_url": "https://docs.sonarsource.com/sonarcloud/improving/pull-request-analysis/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C4",
+    "text": "SonarQube 'new code period' concept: issues are attributed as 'new' based on git blame date of the line containing the issue. Options: previous version, number of days (default 30, max 90), specific version, specific date. This is the mechanism for clean-as-you-code: only conditions on new code are applied in quality gates for PRs.",
+    "source_url": "https://docs.sonarsource.com/sonarcloud/improving/new-code-definition/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C5",
+    "text": "Reviewdog filter modes (shipped, documented in README): (1) 'added' (default) - filter results by added/modified lines only; (2) 'diff_context' - filter by diff context +/- N lines; (3) 'file' - report results in any added/modified file regardless of line; (4) 'nofilter' - report everything. Reviewdog works by taking linter output and filtering against the git diff. The mechanism is strictly positional: finding location (file, line) matched against diff hunks.",
+    "source_url": "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C6",
+    "text": "Reviewdog limitation: GitHub PR Review API does not support posting comments outside diff context. If using github-pr-review reporter with file or nofilter mode, findings outside diff are posted as Check annotations (fallback), not as inline review comments. GitLab MR discussion reporter partially supported for file/nofilter - posts outside-diff findings to console only.",
+    "source_url": "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md",
+    "source_type": "oss_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C7",
+    "text": "Semgrep cross-file (interprocedural) analysis explicitly does NOT run on diff-aware (PR/MR) scans. Quoted from official docs: 'Note that cross-file analysis does not currently run on diff-aware (pull request or merge request) scans.' Cross-file analysis only runs on full scans. This is a fundamental limitation: the most powerful analysis is incompatible with PR-scoped scanning.",
+    "source_url": "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ1-C8",
+    "text": "Semgrep finding identity uses syntactic context (the actual code lines), not line numbers, for baseline comparison. This means if code moves between commits (refactoring), findings travel with the code. However, if a finding appears on a changed line that also existed in baseline but was syntactically different, the finding fingerprint changes and it may appear as 'new'.",
+    "source_url": "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  }
+]

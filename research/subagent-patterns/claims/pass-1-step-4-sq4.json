@@ -1,0 +1,47 @@
+[
+  {
+    "claimId": "sq4-c1",
+    "text": "OpenAI Agents SDK failure modes: `MaxTurnsExceeded` (child exceeded max_turns), `ModelBehaviorError` (malformed JSON or tool calls), `ModelRefusalError` (model refused). By default, `failure_error_function` parameter on `as_tool` converts these exceptions into error strings returned to the parent as the tool result -- allowing the parent to continue. When `failure_error_function=None`, exceptions propagate and terminate the parent run. The default `default_tool_error_function` wraps the exception message as a tool result string. This is the bounded child execution model: all failures produce a string result; the parent never sees an unhandled exception from a child tool.",
+    "source_url": "https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/exceptions.py",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq4-c2",
+    "text": "LangGraph subgraph failure: if a subgraph raises an uncaught exception, the parent graph's checkpointer captures state UP TO the failed node. The parent graph itself fails -- there is no automatic retry or parent-continues-with-error-result mechanism. LangGraph relies on the checkpointer for fault tolerance: the graph can be re-run from the last successful checkpoint. There is NO native 'child failed, parent gets typed error result and continues' pattern in LangGraph without explicit try/except wrapping in the parent node function.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq4-c3",
+    "text": "WorkRail's spawn_agent tool (src/daemon/tools/spawn-agent.ts) has the most complete failure handling of all surveyed frameworks. Child outcome is a discriminated union: 'success' | 'error' | 'timeout' | 'stuck'. All paths return a typed `SingleSpawnResult` -- `spawnOne()` never throws. The `gate_parked` case (child blocked at requireConfirmation gate) is surfaced as 'stuck'. The parent agent receives the outcome as a JSON tool result and can decide what to do. This is the 'errors are data' pattern applied to child execution failure.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/daemon/tools/spawn-agent.ts",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq4-c4",
+    "text": "Anthropic orchestrator-workers failure: the engineering blog does not describe failure handling beyond 'stopping conditions (such as a maximum number of iterations)'. No structured error result contract is described. Anthropic's pattern implies the orchestrator LLM handles worker failure via natural language: a worker that fails returns a message and the orchestrator synthesizes around it. This is the least structured failure handling -- it relies on the LLM to interpret error signals rather than typed outcome discriminants.",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq4-c5",
+    "text": "WorkRail spawn_agent: timeout case is `WorkflowRunTimeout { _tag: 'timeout', message: string }` and stuck case is `WorkflowRunStuck { _tag: 'stuck', message: string, issueSummaries?: string[] }`. Both are returned to the parent as `outcome: 'timeout'` or `outcome: 'stuck'` in the SingleSpawnResult. The parent agent (LLM) reads these outcomes as JSON and can report_issue or take alternative action. The issueSummaries field on stuck provides structured context about what the child attempted before getting stuck.",
+    "source_url": "file:///Users/etienneb/git/personal/workrail/src/daemon/types.ts",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ4",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  }
+]

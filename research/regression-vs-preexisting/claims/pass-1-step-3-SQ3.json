@@ -1,0 +1,65 @@
+[
+  {
+    "id": "SQ3-C1",
+    "text": "Hard case 1: Transitive callers in unchanged files. PR changes function signature in file A. Callers in file B (unchanged) are now wrong. Diff-anchoring completely misses this: the bug is in unchanged file B. No SAST tool runs cross-file analysis in PR mode. Semgrep explicitly confirms cross-file analysis does NOT run on diff-aware scans. Reviewdog 'added' filter only reports findings on changed lines. This is the canonical hard case.",
+    "source_url": "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+    "source_type": "tool_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ3-C2",
+    "text": "Hard case 2: Pre-existing code on touched lines. PR edits a function that already had a bug. The bug was there before but is now on a changed line (nearby code was edited). Semgrep's 4-tuple fingerprint uses syntactic context: if the buggy line's code changed (even whitespace or nearby context), the finding is treated as new. SonarQube's blame date: if the bug line was touched by the PR, blame points to the PR commit - it appears as new.",
+    "source_url": "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md",
+    "source_type": "tool_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ3-C3",
+    "text": "Hard case 3: SonarQube stale base scan. SonarCloud docs explicitly warn: 'In cases where T includes new issues added since the most recent scan (the scan is outdated) those additional issues will appear as part of the pull request analysis, even though they were not introduced by the pull request.' A pre-existing bug in main branch that was added to main AFTER the last full scan will show up as a PR regression.",
+    "source_url": "https://docs.sonarsource.com/sonarcloud/improving/pull-request-analysis/",
+    "source_type": "tool_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ3-C4",
+    "text": "Hard case 4: Type/schema drift across unchanged consumers. PR changes a TypeScript interface or database schema in file A. Consumers in unchanged files B, C pass wrong types. TypeScript compiler catches this at compile time, but LLM review only sees file A's diff. No LLM PR review tool injects downstream consumers of changed types. Reviewdog 'file' mode would report B and C only if they were modified.",
+    "source_url": "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md",
+    "source_type": "oss_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ3-C5",
+    "text": "Hard case 5: Second-order invariant violations. PR changes behavior of function f(). An invariant documented in a comment or test assumes f() has property X. The changed f() no longer has property X. The callers in unchanged files depend on X. The LLM reviewing only the diff for f() cannot reason about the invariant unless the invariant is stated in the diff context. PR-Agent explicitly warns LLM: 'Do not speculate that a change might break other code unless you can identify the specific affected code path from the diff context.'",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml",
+    "source_type": "oss_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ3-C6",
+    "text": "Hard case 6: Diff noise from refactoring + functional change combined. A PR that renames variables across many files AND introduces a bug: diff-anchoring finds the bug on a changed line, but because many lines changed the 'regression' signal is drowned in noise. LLM has difficulty distinguishing intentional changes from bugs when diff is large.",
+    "source_url": "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py",
+    "source_type": "oss_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  },
+  {
+    "id": "SQ3-C7",
+    "text": "Hard case 7: Reviewdog 'file' mode - a workaround that over-reports. Setting filter-mode=file reports ALL findings in any modified file, including pre-existing bugs that existed before the PR on unchanged lines. This is the opposite problem: treating pre-existing bugs as regressions, creating review fatigue. Google Engineering Practices docs acknowledge this tension between coverage and noise.",
+    "source_url": "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md",
+    "source_type": "oss_source",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ3",
+    "fetched_at": "2026-05-15T19:32:33Z"
+  }
+]

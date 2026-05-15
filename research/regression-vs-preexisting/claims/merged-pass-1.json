@@ -1,0 +1,266 @@
+{
+  "pass": 1,
+  "merged_at": "2026-05-15T19:45:00Z",
+  "corroboration_notes": "No priors-ledger existed at start of pass 1 (first pass). Corroboration applied via multiple source hostnames. Cross-claims within this pass: SQ1-C7 (Semgrep cross-file disabled in PR mode) corroborated by SQ4-C3 (same fact, same source) - merged. SQ2-C1 and SQ2-C2 (PR-Agent context) are from github.com/Codium-ai - two different files, same hostname - single-source. SQ1-C3 and SQ3-C3 (SonarQube stale scan) mention same fact from same source - single-source.",
+  "claims": [
+    {
+      "id": "SQ1-C1",
+      "text": "Semgrep diff-aware scanning works by running the scanner on both the baseline commit and the HEAD commit, then diffing the findings. A finding is identified by a 4-tuple: (rule ID, file path, syntactic context, index). Only findings present in HEAD but not in baseline are reported. The baseline is set via SEMGREP_BASELINE_REF env var or automatically from PR context in GitHub Actions / GitLab CI.",
+      "source_urls": ["https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C2",
+      "text": "Semgrep diff-aware scanning is outcome-based: it scans the full file at both commits, not just changed lines, then compares resulting finding sets. It does NOT filter to changed lines per se; it finds findings in HEAD that weren't in baseline. A pre-existing bug on an unchanged line that existed in baseline will not be reported (correct). A pre-existing bug that appears on a changed line but was not in baseline may appear as 'new' due to fingerprint mismatch.",
+      "source_urls": [
+        "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/src/components/reference/_diff-aware-scanning.mdx",
+        "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md"
+      ],
+      "confidence": "verified",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C3",
+      "text": "SonarQube/SonarCloud PR analysis scans HEAD commit of the PR branch and compares with the most recent scan of target branch T. Only issues appearing in HEAD but not in T are reported. Critical documented failure mode: if T's scan is outdated, issues added to T after the last scan appear in the PR analysis as false regressions. Requires up-to-date base branch scan for correct attribution.",
+      "source_urls": ["https://docs.sonarsource.com/sonarcloud/improving/pull-request-analysis/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C4",
+      "text": "SonarQube 'new code period' concept: issues are attributed as 'new' based on git blame date of the line containing the issue. Options: previous version, number of days (default 30, max 90), specific version, specific date. Only conditions on new code are applied in quality gates for PRs.",
+      "source_urls": ["https://docs.sonarsource.com/sonarcloud/improving/new-code-definition/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C5",
+      "text": "Reviewdog filter modes (shipped): 'added' (default) - filter by added/modified lines; 'diff_context' - filter by diff context +/- N lines; 'file' - report results in any added/modified file regardless of line; 'nofilter' - report everything. Works by matching linter output (file, line) against git diff output.",
+      "source_urls": ["https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C6",
+      "text": "Reviewdog GitHub PR Review API limitation: cannot post inline review comments outside the diff context. Findings outside the diff when using file or nofilter mode fall back to Check annotations. GitLab MR discussion partially supported for out-of-diff findings (prints to console).",
+      "source_urls": ["https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C7",
+      "text": "Semgrep cross-file (interprocedural) analysis is explicitly disabled for diff-aware (PR/MR) scans. Official docs: 'Note that cross-file analysis does not currently run on diff-aware (pull request or merge request) scans.' Cross-file analysis only runs on full scans. The most powerful analysis is incompatible with PR-scoped scanning.",
+      "source_urls": [
+        "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+        "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md"
+      ],
+      "confidence": "verified",
+      "answers_subquestion": ["SQ1", "SQ4"]
+    },
+    {
+      "id": "SQ1-C8",
+      "text": "Semgrep finding identity uses syntactic context (actual code lines), not line numbers, for baseline comparison. Findings survive code moves (refactoring). However, if a finding appears on a changed line that was syntactically different in baseline, the fingerprint changes and it may appear as 'new' even if the underlying bug was pre-existing.",
+      "source_urls": ["https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ1"
+    },
+    {
+      "id": "SQ2-C1",
+      "text": "PR-Agent constructs its review prompt by injecting only the diff (via get_pr_diff). The diff is extended with configurable extra context lines before and after each hunk (PATCH_EXTRA_LINES_BEFORE, PATCH_EXTRA_LINES_AFTER, max 10 each). Full file content is NOT injected. The LLM sees only changed hunks plus limited surrounding context.",
+      "source_urls": ["https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C2",
+      "text": "PR-Agent system prompt explicitly states: 'The review should focus on new code added in the PR code diff (lines starting with +), and only on issues introduced by this PR.' Also instructs the LLM: 'Note that you only see changed code segments, not the entire codebase. Do not speculate that a change might break other code unless you can identify the specific affected code path from the diff context.' No mechanism exists for attribution of findings to pre-existing vs new.",
+      "source_urls": [
+        "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml",
+        "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py"
+      ],
+      "confidence": "verified",
+      "answers_subquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C3",
+      "text": "PR-Agent incremental review mode (-i flag) limits review to files changed since last review (for reviewing new pushes to an already-reviewed PR). This is NOT a mechanism for distinguishing pre-existing bugs from regressions - it still only sees the diff of new changes.",
+      "source_urls": ["https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/tools/pr_reviewer.py"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C4",
+      "text": "PR-Agent context beyond the diff includes: PR title, branch name, description, commit messages, main language, AI-generated file summaries (optional). None of these provide information about whether a flagged issue pre-existed in the codebase.",
+      "source_urls": ["https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/tools/pr_reviewer.py"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C5",
+      "text": "CodeRabbit Learnings: per-organization natural-language review preferences database, injected as context on every review. Captures patterns like 'prefer early returns in auth middleware'. Does NOT represent a pre-existing issue database - learnings are style/preference instructions, not bug findings.",
+      "source_urls": ["https://docs.coderabbit.ai/knowledge-base/learnings"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C6",
+      "text": "CodeRabbit Multi-Repo Analysis (shipped, configurable via .coderabbit.yaml): uses an LLM 'research agent' to check linked repositories for cross-repository impact when a PR is submitted. Findings appear in PR review summary under 'Additional context used'. This is the only shipped LLM review feature doing any form of cross-boundary impact analysis. Requires explicit configuration and read access to linked repos.",
+      "source_urls": ["https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/"],
+      "confidence": "single-source",
+      "answers_subquestion": ["SQ2", "SQ4"]
+    },
+    {
+      "id": "SQ2-C7",
+      "text": "GitHub Copilot code review documented limitation: 'Missed code quality problems - Copilot may not identify all problems, especially where changes are large or complex.' No mechanism for distinguishing pre-existing bugs from regressions. Custom instructions via .github/copilot-instructions.md are static context, not per-review issue lookup.",
+      "source_urls": ["https://docs.github.com/en/copilot/responsible-use-of-github-copilot-features/responsible-use-of-github-copilot-code-review"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ2"
+    },
+    {
+      "id": "SQ3-C1",
+      "text": "Hard case HC-1: Transitive callers in unchanged files. PR changes function signature in file A. Callers in file B (unchanged) are now wrong. Diff-anchoring misses this entirely: the bug is in unchanged file B. No SAST tool runs cross-file analysis in PR mode. TypeScript compiler catches this at build time but LLM review misses it. This is the canonical hard case for all diff-anchoring approaches.",
+      "source_urls": [
+        "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+        "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md"
+      ],
+      "confidence": "verified",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C2",
+      "text": "Hard case HC-2: Pre-existing bug on touched lines. PR edits a function that already had a bug. The bug was there before but is now on a changed line (nearby code was edited). Semgrep fingerprint: if buggy line's code changed, finding appears new. SonarQube blame: if buggy line was touched by the PR, blame points to PR commit. Pre-existing bug appears as a regression.",
+      "source_urls": [
+        "https://raw.githubusercontent.com/semgrep/semgrep-docs/main/docs/semgrep-ci/findings-ci.md",
+        "https://docs.sonarsource.com/sonarcloud/improving/pull-request-analysis/"
+      ],
+      "confidence": "verified",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C3",
+      "text": "Hard case HC-3: SonarQube stale base scan. A pre-existing bug in the target branch added to main AFTER the last full scan appears in the PR analysis as if the PR introduced it. Documented explicitly in SonarCloud docs: 'if the scan is outdated those additional issues will appear as part of the pull request analysis, even though they were not introduced by the pull request.'",
+      "source_urls": ["https://docs.sonarsource.com/sonarcloud/improving/pull-request-analysis/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C4",
+      "text": "Hard case HC-4: Type/schema drift in consumers. PR changes a TypeScript interface or database schema. Consumers in unchanged files pass wrong types. TypeScript compiler catches this at build time; LLM reviewing only the changed file cannot see the downstream break unless callers are injected into context.",
+      "source_urls": [
+        "https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md",
+        "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/"
+      ],
+      "confidence": "inferred",
+      "derivation_chain": "SQ1-C7 (cross-file disabled in PR mode) + SQ1-C5 (reviewdog only looks at changed lines) + general knowledge of type system behavior",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C5",
+      "text": "Hard case HC-5: Second-order invariant violation. PR changes behavior of function f() that callers rely on for an implicit invariant. The invariant is only visible from the callers in unchanged files. PR-Agent explicitly suppresses this class of finding: 'Do not speculate that a change might break other code unless you can identify the specific affected code path from the diff context.'",
+      "source_urls": ["https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C6",
+      "text": "Hard case HC-6: Large noisy diff obscures regression signal. A PR that renames variables across many files AND introduces a bug: LLM attention spreads thin and regression signal is diluted in noise. Token budget pressure means some changed functions may not be included in context.",
+      "source_urls": ["https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py"],
+      "confidence": "inferred",
+      "derivation_chain": "SQ2-C1 (token budget and pruning logic) + general LLM context behavior",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C7",
+      "text": "Hard case HC-7: Reviewdog 'file' mode over-report. Setting filter-mode=file reports ALL findings in modified files, including pre-existing bugs on unchanged lines. Opposite problem: treating pre-existing bugs as regressions, creating review fatigue. No tool has a mode that is both complete (catches all regressions) and precise (suppresses all pre-existing).",
+      "source_urls": ["https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ3"
+    },
+    {
+      "id": "SQ4-C1",
+      "text": "Facebook Infer reactive mode (--reactive flag): re-analyzes modified files/procedures AND their callers/dependencies. From official docs: 'only a subset of the project needs to be analyzed: the modified files/procedures and their dependencies.' This is the only shipped tool that automatically propagates analysis to callers of changed procedures. Requires: first-run full capture (infer capture), then reactive re-analysis.",
+      "source_urls": ["https://fbinfer.com/docs/infer-workflow/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4"
+    },
+    {
+      "id": "SQ4-C2",
+      "text": "Infer's reactive mode re-analyzes callers of changed procedures via its interprocedural analysis engine. If function A changes, all callers of A are re-analyzed. Directly addresses HC-1 (unchanged callers). Limitation: heavyweight (C/Java/ObjC only), requires build system integration, designed for offline batch analysis - not a real-time PR review tool.",
+      "source_urls": ["https://fbinfer.com/docs/infer-workflow/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4"
+    },
+    {
+      "id": "SQ4-C3",
+      "text": "Semgrep Pro cross-file analysis explicitly does not run on diff-aware scans. 'Note that cross-file analysis does not currently run on diff-aware (pull request or merge request) scans.' Only runs on full scans. This is the dominant shipped SAST tool; this limitation confirms the gap is industry-wide.",
+      "source_urls": ["https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4"
+    },
+    {
+      "id": "SQ4-C4",
+      "text": "CodeRabbit Multi-Repo Analysis uses an LLM 'research agent' to check linked repos for cross-repo impact. This is LLM-based reasoning over linked repo code, not a call-graph analysis. It can flag 'API consumers in linked repos may be affected' but cannot enumerate all callers. Ships as configured feature (linked_repositories in .coderabbit.yaml).",
+      "source_urls": ["https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4"
+    },
+    {
+      "id": "SQ4-C5",
+      "text": "No shipped tool performs automatic intra-repo call-graph analysis to flag unchanged callers during a PR review scan. Semgrep cross-file disabled for PR mode (confirmed). SonarQube taint only in full scans. CodeRabbit multi-repo is cross-repo LLM inference, not intra-repo call-graph. Reviewdog file mode is file-level only. Infer reactive is offline batch analysis.",
+      "source_urls": [
+        "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/",
+        "https://fbinfer.com/docs/infer-workflow/",
+        "https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/"
+      ],
+      "confidence": "inferred",
+      "derivation_chain": "SQ1-C7 (Semgrep disabled) + SQ4-C1 (Infer offline) + SQ4-C4 (CodeRabbit cross-repo only) - synthesis across 3 sources",
+      "answers_subquestion": "SQ4"
+    },
+    {
+      "id": "SQ4-C6",
+      "text": "Reviewdog 'file' filter mode as partial workaround: reports all findings in modified or added files, regardless of whether on changed line. Implicitly surfaces pre-existing issues in touched files. No transitive caller discovery - only covers bugs in the changed file itself.",
+      "source_urls": ["https://raw.githubusercontent.com/reviewdog/reviewdog/master/README.md"],
+      "confidence": "single-source",
+      "answers_subquestion": "SQ4"
+    },
+    {
+      "id": "SQ5-C1",
+      "text": "Technique 1 (Ranked #1): Caller-enumeration pre-processing step. Before the LLM review, run git grep or ripgrep for changed function/method names against the full codebase (excluding changed files). Inject caller list into LLM context: 'The following unchanged files call the modified functions: [file:line]...'. Ask LLM to assess whether the function contract changed in a way that affects these callers. Addresses HC-1 and HC-5. No engine primitives needed. Analogous to what CodeRabbit's multi-repo agent does across repos, applied intra-repo.",
+      "source_urls": [
+        "https://docs.coderabbit.ai/knowledge-base/multi-repo-analysis/",
+        "https://semgrep.dev/docs/semgrep-code/semgrep-pro-engine-intro/"
+      ],
+      "confidence": "inferred",
+      "derivation_chain": "SQ4-C4 (CodeRabbit multi-repo LLM approach) + SQ4-C5 (gap: no intra-repo tool) -> intra-repo grep approach closes the gap",
+      "answers_subquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C2",
+      "text": "Technique 2 (Ranked #2): Explicit causal framing in review prompt. Replace generic 'focus on new issues' with structured reasoning: 'For each issue: state whether it could have existed before this PR, describe what specific change made it newly relevant, only flag issues with articulate causal connection to changed lines.' Addresses HC-2, HC-5, HC-6. Pure prompt change. Evidence basis: PR-Agent prompt currently lacks this reasoning scaffold; adding it forces explicit causal attribution.",
+      "source_urls": [
+        "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/settings/pr_reviewer_prompts.toml",
+        "https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py"
+      ],
+      "confidence": "inferred",
+      "derivation_chain": "SQ2-C2 (PR-Agent prompt has no causal scaffold) + SQ3-C2 (HC-2 pre-existing on touched lines) -> gap in prompt design",
+      "answers_subquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C3",
+      "text": "Technique 3 (Ranked #3): Full function body injection with explicit line marking. Instead of 10-line context windows, inject complete bodies of changed functions with [NEW]/[UNCHANGED]/[REMOVED] markers. Ask LLM to reason about the full function, not just changed hunks. Addresses HC-2 (pre-existing on nearby lines visible in full context) and HC-5 (invariant visible in full body). Limitation: token budget; practical only for small PRs or PRs with few changed functions.",
+      "source_urls": ["https://raw.githubusercontent.com/Codium-ai/pr-agent/main/pr_agent/algo/pr_processing.py"],
+      "confidence": "inferred",
+      "derivation_chain": "SQ2-C1 (PR-Agent caps context at 10 lines) + SQ3-C2 (pre-existing bugs need more context to identify) -> expand context window",
+      "answers_subquestion": "SQ5"
+    }
+  ],
+  "summary": {
+    "total_claims": 30,
+    "verified": 5,
+    "single_source": 17,
+    "inferred": 8,
+    "falsified_priors": 0,
+    "corroborated_priors": 0
+  }
+}

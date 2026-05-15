@@ -1,0 +1,56 @@
+[
+  {
+    "claimId": "sq1-c1",
+    "text": "LangGraph provides two distinct subgraph invocation patterns: (1) shared-state: parent adds compiled subgraph as a node via `builder.add_node('subgraph_node', subgraph)` -- subgraph receives parent state directly when schemas share keys; (2) different-schemas: parent wraps subgraph call in a plain node function `def call_subgraph(state): response = subgraph.invoke({...}); return {...}` -- enables explicit input/output transformation. In both cases the parent graph node blocks synchronously until subgraph.invoke() returns.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/subgraphs.md",
+    "source_type": "primary_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq1-c2",
+    "text": "LangGraph multi-agent supervisor pattern: a central LLM node routes to worker agent nodes via `Command(goto=next_agent, update={...})`. The pattern supports 4 topologies: Network (N:N), Supervisor (hub-and-spoke), Supervisor with tool-calling (workers exposed as tools to a ReAct supervisor), and Hierarchical (tree of supervisors). The tool-calling variant is the closest to typed result return: individual agents become Python functions annotated with `InjectedState`, return a string result, and the supervisor receives it as a tool message.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md",
+    "source_type": "primary_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq1-c3",
+    "text": "OpenAI Agents SDK `as_tool` pattern: `child_agent.as_tool(tool_name, tool_description)` returns a `FunctionTool` that the parent agent can call. When the parent LLM invokes the tool, `Runner.run()` is called on the child agent synchronously (blocking) from within the tool callback `_run_agent_impl`. The child's `final_output` (typed via `output_type` on the Agent definition) is returned as the tool result string. This is explicitly contrasted with handoffs: 'In this tool, the new agent is called as a tool, and the conversation is continued by the original agent.'",
+    "source_url": "https://raw.githubusercontent.com/openai/openai-agents-python/main/src/agents/agent.py",
+    "source_type": "primary_source",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq1-c4",
+    "text": "Anthropic engineering blog (Dec 2024) describes orchestrator-workers as a production pattern: 'a central LLM dynamically breaks down tasks, delegates them to worker LLMs, and synthesizes their results.' The blog names this appropriate for 'complex tasks where you can't predict the subtasks needed' and contrasts it with parallelization. The orchestrator pattern is distinct from handoffs -- the orchestrator synthesizes results rather than transferring control. This is the Anthropic-canonical endorsement of the blocking parent-delegates-to-children pattern.",
+    "source_url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "source_type": "primary_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq1-c5",
+    "text": "OpenAI Swarm (deprecated) used handoffs-only architecture: transfer of control, not result return. The original agent does NOT resume after a handoff -- the new agent takes over the full conversation. Swarm's README explicitly documents this and it was deprecated in favor of the Agents SDK which added `as_tool` to fill the result-return gap. The deprecation itself is evidence that handoffs are insufficient for orchestrator-workers patterns requiring typed result injection.",
+    "source_url": "https://github.com/openai/swarm/blob/main/README.md",
+    "source_type": "primary_docs",
+    "confidence": "inferred",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  },
+  {
+    "claimId": "sq1-c6",
+    "text": "LangGraph multi-agent 'sharing only final results' pattern: each subagent has its own private message list (e.g., `alice_messages`, `bob_messages` in state), runs in isolation, and only posts its final output to the shared state channel. This is the cleanest model for typed result return: the child's private scratch is invisible to the parent; the parent reads only the final typed field. Requires different state schemas per agent.",
+    "source_url": "https://raw.githubusercontent.com/langchain-ai/langgraph/0.4/docs/docs/concepts/multi_agent.md",
+    "source_type": "primary_docs",
+    "confidence": "single-source",
+    "answers_subquestion": "SQ1",
+    "fetched_at": "2026-05-15T00:00:00Z"
+  }
+]

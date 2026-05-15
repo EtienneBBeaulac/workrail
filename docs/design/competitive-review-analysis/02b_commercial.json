@@ -1,0 +1,102 @@
+{
+  "subagent": "2b - Commercial & Pricing",
+  "rules_applied": ["shipped_vs_announced", "marketing_vs_user"],
+  "research_date": "2026-05-15",
+  "note": "Pricing data is from vendor docs only. G2 pricing field not accessible (JS-gated). No Vendr/Tropic data accessible. All pricing tagged as 'official' from vendor docs.",
+
+  "pricing": [
+    {
+      "tool": "CodeRabbit",
+      "plan": "Free",
+      "price": "$0",
+      "tag": "official",
+      "source": "https://docs.coderabbit.ai/management/plans",
+      "details": "PR summarization only (no code reviews in PR). Code reviews available via VS Code extension and CLI. 14-day Pro+ trial included. Rate limits: 3 PR reviews/hr, 1 file/review, 3 chat/hr, 150 IDE/hr.",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "plan": "Pro",
+      "price": "$24/developer/month (annual) or $30 month-to-month",
+      "tag": "official",
+      "source": "https://docs.coderabbit.ai/management/plans",
+      "details": "PR reviews, higher rate limits, Knowledge base (learnings, code guidelines, multi-repo), linter/SAST tools, analytics, docstrings, autofix. 5 reviews/hr, 5 files/review.",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "plan": "Pro+",
+      "price": "$48/developer/month (annual) or $60 month-to-month",
+      "tag": "official",
+      "source": "https://docs.coderabbit.ai/management/plans",
+      "details": "Everything in Pro + CodeRabbit Plan (issue-to-coding-plan), unit test generation, merge conflict resolution, Change Stack, pre/post-merge actions. 10 reviews/hr.",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "CodeRabbit",
+      "plan": "Enterprise",
+      "price": "Contact sales",
+      "tag": "official",
+      "source": "https://docs.coderabbit.ai/management/plans",
+      "details": "Self-hosting, multi-org, SLA + dedicated CSM, AWS/GCP Marketplace, API access, custom RBAC, audit logging. 12 reviews/hr.",
+      "time_period": "30-180_days"
+    },
+    {
+      "tool": "PR-Agent (open-source)",
+      "plan": "Self-hosted OSS",
+      "price": "$0 (BYOK: OpenAI/Claude/etc.)",
+      "tag": "official",
+      "source": "https://github.com/the-pr-agent/pr-agent",
+      "details": "Community-maintained, donated to open-source foundation. Requires own API key. Full feature set available. No rate limits on self-hosted.",
+      "time_period": "180+_days"
+    },
+    {
+      "tool": "Qodo (formerly CodiumAI)",
+      "plan": "Free tier",
+      "price": "$0",
+      "tag": "official",
+      "source": "https://www.qodo.ai/get-started/",
+      "details": "Qodo 2.0 is a full AI code review platform, distinct from open-source PR-Agent. Free tier available.",
+      "time_period": "30-180_days"
+    }
+  ],
+
+  "market_positioning": {
+    "coderabbit": "Platform play: $24-48/dev/month. Competing with GitHub Copilot (included in some plans) on depth and codebase-awareness rather than price. Usage-based add-on for overflow. Enterprise self-hosting available.",
+    "pr_agent": "Free/open-source with BYOK model. Donated to community by Qodo. Qodo captures enterprise users with Qodo 2.0 platform that has more features than OSS PR-Agent.",
+    "greptile": "Pricing unknown - no accessible pricing page found. [unverified]"
+  },
+
+  "rate_limits_signal": "CodeRabbit's rate limits (3-12 reviews/hr depending on plan) reveal per-developer pricing model and that reviews are computationally expensive (full repo clone + multiple parallel agents). PR-Agent's '~30 seconds, low cost' design is explicitly positioned as the cost-conscious alternative.",
+
+  "commercial_strategy_signals": [
+    {
+      "signal": "CodeRabbit careers page active, multiple open roles, unlimited PTO, equity",
+      "code": "capability_adding",
+      "detail": "Hiring across AI and software engineering roles. Fast-growing. In-office catered lunch suggests SF/NY office-centric.",
+      "source": "https://coderabbit.ai/careers",
+      "time_period": "last_30_days"
+    },
+    {
+      "signal": "CodeRabbit topped Martian's independent code review benchmark (Mar 2026)",
+      "code": "market_entering",
+      "detail": "HN thread: 'CodeRabbit tops the first independent AI code review benchmark' (2026-03-06) and 'CodeRabbit tops the F1 score in Martian's code review benchmarks' (2026-03-04). Low HN engagement (1 pt) suggests community skepticism about benchmark methodology.",
+      "source": "https://hn.algolia.com/",
+      "time_period": "30-180_days"
+    },
+    {
+      "signal": "Qodo donated PR-Agent to open-source community, redirecting to Qodo 2.0",
+      "code": "motion_changing",
+      "detail": "PR-Agent README explicitly states Qodo has donated the project to community. Qodo 2.0 is the new commercial product. Signals Qodo is moving up-market from open-source tool to platform.",
+      "source": "https://github.com/the-pr-agent/pr-agent",
+      "time_period": "180+_days"
+    },
+    {
+      "signal": "CodeRabbit Slack agent launched with workspace scopes, knowledge base, automations",
+      "code": "capability_adding",
+      "detail": "Reddit post (13 pts): 'CodeRabbit now works in Slack and can pull context from GitHub, Linear, docs, and more.' Signals expansion beyond PR review into full workflow context.",
+      "source": "Reddit r/devops",
+      "time_period": "30-180_days"
+    }
+  ]
+}

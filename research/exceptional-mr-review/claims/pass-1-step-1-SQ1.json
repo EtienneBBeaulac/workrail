@@ -1,0 +1,87 @@
+{
+  "subQuestion": "SQ1",
+  "question": "What do great human reviewers do that mediocre ones don't? What dimensions do they check, and in what order?",
+  "fetchedAt": "2026-05-15T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ1-C1",
+      "text": "Google Engineering Practices defines 9 dimensions reviewers should check, in approximate priority order: (1) Design -- do the interactions make sense? does this change belong? is it the right time? (2) Functionality -- does it do what the developer intended? is that intent good for users? (3) Complexity -- is it over-engineered? (4) Tests -- correct, sensible, useful? (5) Naming -- good names for everything? (6) Comments -- clear, necessary, explain 'why' not 'what'? (7) Style -- follows guides? (8) Documentation -- updated if behavior changed? (9) Every Line -- reviewer should look at every human-written line, not scan.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/looking-for.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C2",
+      "text": "Google's navigation guide defines the expert review sequence: Step 1 = take a broad view (does this change make sense? if not, reject immediately). Step 2 = examine the main part of the change first (major design problems should be flagged before reviewing the rest). Step 3 = look through the rest in a logical sequence. The 'broad view first' step is structurally different from what mediocre reviewers do -- they start at line 1.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/navigate.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C3",
+      "text": "Google's standard states the primary purpose of code review is to make sure the overall code health of the codebase is IMPROVING over time -- not to achieve perfection. A reviewer should approve a CL once it 'definitely improves the overall code health of the system being worked on, even if the CL isn't perfect.' This implies great reviewers balance improvement vs. perfect and do not block on nits.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/standard.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C4",
+      "text": "Chelsea Troy (Reviewing Pull Requests, 2019) argues the core failure mode of mediocre reviewers is that they DELEGATE -- they note what they don't like without participating in the solution. Great reviewers pull down and run the code, try alternative approaches themselves, and submit working code suggestions rather than vague directions. Her standard: 'a reviewer spending this time is still a better use of resources than having the original developer chase down solutions suggested by lazy, delegating commentary.'",
+      "sourceUrl": "https://chelseatroy.com/2019/12/18/reviewing-pull-requests/",
+      "sourceType": "practitioner_blog",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C5",
+      "text": "Chelsea Troy's criteria for a maximally effective pull request review: (1) Suggests solutions in working code (not pseudocode). (2) Points out what's working AND what isn't. (3) Links to documentation where useful. (4) Highlights laudable work. (5) Asks questions before making assumptions or judgments. (6) Explains the reasoning behind suggestions. (7) Distinguishes conventions from technical facts. (8) Prepares the reviewer to take responsibility for the code if the original author became unavailable. Her judgment test: 'Can my review be supplanted by a personal proofread, a Google search, or nothing?'",
+      "sourceUrl": "https://chelseatroy.com/2019/12/18/reviewing-pull-requests/",
+      "sourceType": "practitioner_blog",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C6",
+      "text": "Gergely Orosz (Pragmatic Engineer) distinguishes 'good' vs 'better' code reviews on a key dimension: Good reviews cover the change and how it fits the codebase; Better reviews check the change in the context of the larger SYSTEM, including abstractions introduced and how they fit into existing software architecture. Better reviews ask 'is this the right place for this change?' and 'does this introduction affect the system outside the diff?'",
+      "sourceUrl": "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C7",
+      "text": "Gergely Orosz notes that great reviewers notice when too many nitpicks are a symptom of a lack of tooling or standards -- and solve this outside the review process (via linting, team standards). This implies great reviewers think structurally about what can be automated vs. what requires human judgment. They don't waste human judgment capacity on mechanical checks.",
+      "sourceUrl": "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C8",
+      "text": "Gergely Orosz describes how great reviewers handle knowledge gaps: when a review has many comments, rather than going back-and-forth in writing, they proactively reach out to talk directly. 'They have learned that they save a lot of time, misunderstandings and hard feelings this way.' A large number of comments is a signal of likely misunderstanding on either side -- best resolved by direct conversation.",
+      "sourceUrl": "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C9",
+      "text": "Google guide: if a reviewer cannot understand the code, they should let the developer know and wait for clarification before reviewing. 'If you can't understand the code, it's very likely that other developers won't either.' This is a specific behavior great reviewers exhibit: they ask clarification questions instead of writing findings about code they don't understand. LLMs by contrast always write findings.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/looking-for.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    },
+    {
+      "id": "SQ1-C10",
+      "text": "Great reviewers distinguish their comments by severity: Google uses 'Nit:' prefix for non-blocking style improvements. Gergely Orosz notes good reviews make it 'clear which questions or comments are non-blocking or unimportant.' This severity signaling is a key practice that separates signal (blockers) from noise (polish).",
+      "sourceUrl": "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ1"
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "subQuestion": "SQ2",
+  "question": "What does empirical research say review comments are actually useful for? What percentage of review value is correctness vs. design vs. style?",
+  "fetchedAt": "2026-05-15T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ2-C1",
+      "text": "Bacchelli & Bird 2013 (ICSE, Microsoft Research) -- 'Expectations, Outcomes, and Challenges of Modern Code Review' -- is the foundational empirical study. The paper is real and exists (DOI: 10.1109/ICSE.2013.6606617, Microsoft Research publication confirmed). The paper studied code review at Microsoft using mixed methods. The full text is not publicly accessible without institutional access, but the paper is widely cited as establishing that developers' PRIMARY expectation of review is finding defects, but reviews also deliver significant value in knowledge transfer, team awareness, and improved solutions.",
+      "sourceUrl": "https://www.microsoft.com/en-us/research/publication/expectations-outcomes-and-challenges-of-modern-code-review/",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ2",
+      "notes": "Paper confirmed to exist at Microsoft Research, direct text not accessible for full quote extraction"
+    },
+    {
+      "id": "SQ2-C2",
+      "text": "Bacchelli & Bird found that the top reasons reviewers leave comments -- in approximate descending order -- are: (1) code improvement suggestions, (2) defect finding, (3) questions/clarifications, (4) superfluous/style comments. Critically: finding defects is LESS frequent than expected. Most review value comes from improvements and understanding, not catching bugs. This challenges the 'code review catches bugs' narrative.",
+      "sourceUrl": "https://www.microsoft.com/en-us/research/publication/expectations-outcomes-and-challenges-of-modern-code-review/",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ2",
+      "notes": "Finding derived from secondary sources describing the paper; the pattern is widely reported in the literature"
+    },
+    {
+      "id": "SQ2-C3",
+      "text": "Bacchelli & Bird found that many review comments are about code 'evolvability' and 'understandability' -- not correctness. Reviewers often care more about making code maintainable for future developers than about finding immediate bugs. This implies design and clarity concerns are where review adds the most value relative to what automated tools can do.",
+      "sourceUrl": "https://www.microsoft.com/en-us/research/publication/expectations-outcomes-and-challenges-of-modern-code-review/",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ2",
+      "notes": "Widely reported finding from the paper, not directly verified against full text due to access"
+    },
+    {
+      "id": "SQ2-C4",
+      "text": "Pirouzkhah, Wurzel Goncalves & Bacchelli (2026, arXiv:2602.14611) studied 80K GitHub PRs across 156 projects. Finding: PR descriptions that state the 'desired feedback type' best predict change acceptance and reviewer engagement. 'Purpose and code explanations are valued by developers for preserving the rationale and history of changes.' This confirms the reviewer-needs-intent insight: without clear intent in the PR description, reviewer value drops.",
+      "sourceUrl": "https://arxiv.org/abs/2602.14611",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C5",
+      "text": "Swarmia synthesis of research (blog, citing academic literature): 'Studies have shown that code reviews can help with catching defects, but even more importantly, they surface software design issues while they are still relatively easy to change.' This confirms the finding that design-level review catches the highest-value issues -- issues that are cheaper to fix in review than in production.",
+      "sourceUrl": "https://www.swarmia.com/blog/a-complete-guide-to-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C6",
+      "text": "Swarmia review of research: code reviews deliver value across four areas: (1) sharing knowledge (depth depends on thoroughness), (2) spreading ownership (mutual code ownership, reduces key-person risk), (3) unifying development practices (architectural and micro-level), (4) quality control (defects AND design issues). The first two are often forgotten when designing review automation -- knowledge transfer and ownership spreading cannot be replicated by an automated reviewer.",
+      "sourceUrl": "https://www.swarmia.com/blog/a-complete-guide-to-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ2"
+    },
+    {
+      "id": "SQ2-C7",
+      "text": "Bosu et al. (existing literature, not directly fetched but widely cited) found that useful code review comments tend to be: (1) about defects or code that doesn't work, (2) about improvements to design or architecture, (3) specific and actionable. Comments rated as LEAST useful are: style/formatting comments, comments about things the author already knows about, and comments that are vague ('this seems wrong') without explanation.",
+      "sourceUrl": "ACM DL -- Bosu et al. code review useful comments studies",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ2",
+      "notes": "Could not directly access Bosu paper; characterization based on secondary sources and EASE 2026 paper context"
+    }
+  ]
+}

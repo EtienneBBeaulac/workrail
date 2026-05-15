@@ -1,0 +1,63 @@
+{
+  "subQuestion": "SQ5",
+  "question": "How should reviewer specialization be structured? What role boundaries maximize finding depth without overlap noise?",
+  "fetchedAt": "2026-05-15T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ5-C1",
+      "text": "Google Engineering Practices specifies that for complex concerns -- especially privacy, security, concurrency, accessibility, and internationalization -- the reviewer MUST ensure there is a qualified specialist on the review, not just the generalist. This is the origin of the specialization principle: not all review dimensions can be covered by a single generalist, especially for cross-cutting concerns.",
+      "sourceUrl": "https://google.github.io/eng-practices/review/reviewer/looking-for.html",
+      "sourceType": "practitioner_guide",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C2",
+      "text": "Gergely Orosz identifies the distinction that separates 'good' from 'better' code review: good covers the change; better covers the change IN THE CONTEXT OF THE LARGER SYSTEM. This maps to two distinct reviewer specializations that should not be conflated: (A) the DIFF reviewer -- checks correctness, logic, completeness of the change itself; (B) the SYSTEM reviewer -- checks design fit, blast radius, architectural alignment, and whether the change belongs in the codebase at all.",
+      "sourceUrl": "https://blog.pragmaticengineer.com/good-code-reviews-better-code-reviews/",
+      "sourceType": "practitioner_blog",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C3",
+      "text": "Sphinx paper (Zhang et al.) enumerates the key dimensions that a complete PR review must cover: (1) functional correctness, (2) robustness/edge cases, (3) security compliance, (4) coding conventions, (5) architectural alignment. This five-domain decomposition is the academic basis for role specialization. An agent that tries to cover all five in a single pass will necessarily be shallow on most of them.",
+      "sourceUrl": "https://arxiv.org/html/2601.04252v1",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C4",
+      "text": "OWASP Code Review Guide establishes that security review is a distinct specialty requiring: threat modeling from the diff perspective, trust boundary analysis, input validation path tracing, and output encoding checks. Security reviewers think in terms of ATTACK PATHS, not code correctness. This is a fundamentally different mental model from a correctness reviewer who asks 'does this code do what it says?' vs. a security reviewer who asks 'can an attacker make this code do what they want?'",
+      "sourceUrl": "https://owasp.org/www-project-code-review-guide/",
+      "sourceType": "practitioner_guide",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C5",
+      "text": "Chelsea Troy's criteria for effective PR review includes asking questions before making assumptions -- and understanding that knowledge transfer is a primary goal. A CONTEXT reviewer role (distinct from correctness and security) can be responsible for: checking that the PR description explains intent, ensuring the diff is understandable, flagging when the diff is missing context (tests, documentation, migration path), and ensuring the reviewer could take over development from this PR alone. This maps to the 'completeness' specialization.",
+      "sourceUrl": "https://chelseatroy.com/2019/12/18/reviewing-pull-requests/",
+      "sourceType": "practitioner_blog",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C6",
+      "text": "Synthesis from SQ1-SQ4: Optimal specialization structure for an LLM reviewer family (4 roles that cover the 5 Sphinx dimensions without overlap): (1) INTENT & DESIGN reviewer -- checks that the PR solves the right problem (intent alignment), design fit (does this belong here?), blast radius (what breaks?), architectural alignment. Depends on: PR description, linked issue, codebase context. (2) CORRECTNESS & COMPLETENESS reviewer -- checks logical correctness, edge cases, tests, error handling, robustness. Depends on: code diff and existing tests. (3) SECURITY reviewer -- checks trust boundaries, input validation, output encoding, authentication/authorization paths, attack surface introduced. Depends on: diff, security context. (4) MAINTAINABILITY & STYLE reviewer -- checks naming, comments, complexity, code health trajectory. Bounded to non-blocking findings only; cannot block merge alone.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ5"
+    },
+    {
+      "id": "SQ5-C7",
+      "text": "Key overlap prevention: The INTENT & DESIGN reviewer must go FIRST and its output (intent assessment, blast radius) must be consumed by the other reviewers. If intent is wrong, the other reviews are wasted. The SECURITY and CORRECTNESS reviewers can run in parallel after intent is established. The MAINTAINABILITY reviewer runs last and CANNOT escalate to blocker status without corroboration from one of the other three. This ordering prevents overlap on findings that cross domains.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ5"
+    }
+  ]
+}

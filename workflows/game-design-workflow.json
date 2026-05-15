@@ -1,0 +1,603 @@
+{
+  "id": "wr.game-design",
+  "name": "Game Design Workflow",
+  "version": "1.0.0",
+  "metricsProfile": "design",
+  "validatedAgainstSpecVersion": 3,
+  "description": "Design a minigame from concept to implementation-ready spec. Supports educational and generic game types. Educational games get additional structural gates: age-concept fit validation, intrinsic integration assessment, LM-GM mapping artifact, productive failure design, debrief spec, and evidence model. The output is a game spec artifact a developer or coding workflow can implement from without re-asking design questions.",
+  "about": "## Game Design Workflow\n\nThis workflow guides you through designing a minigame -- from a rough concept to a concrete spec a developer can build from.\n\n**Two paths:**\n- **Educational** (`gameType = educational`): The workflow enforces that the game's core mechanic is structurally tied to the learning concept -- not just themed around it. Includes age-concept fit validation, LM-GM mapping, intrinsic integration gate, productive failure design, debrief spec, and evidence model.\n- **Generic** (`gameType = generic`): Mechanic ideation, game loop design (win/fail states, feedback, progression), and a complete spec output.\n\n**What it produces:**\nA structured game spec with: core mechanic description, win/fail states, feedback design, progression, platform constraints, and (for educational games) LM-GM mapping, debrief spec, evidence model, and failure state design.\n\n**How to get good results:**\nDescribe the game concept, target audience (age range and context), and platform (web browser, mobile web, etc.). For educational games, name the specific concept you want players to internalize -- the more specific, the better the mechanic fit.",
+  "examples": [
+    "Design a budgeting minigame for 10-year-olds on a financial literacy website",
+    "Design a fast-paced arcade game about needs vs wants for ages 8-10",
+    "Design a web minigame where kids practice comparison shopping",
+    "Design a casual puzzle game (no educational requirement)"
+  ],
+  "recommendedPreferences": {
+    "recommendedAutonomy": "guided",
+    "recommendedRiskPolicy": "conservative"
+  },
+  "features": [
+    "wr.features.capabilities"
+  ],
+  "assessments": [
+    {
+      "id": "intrinsic-integration-gate",
+      "purpose": "The leading mechanic requires the finance concept as structural to play -- removing the concept would break the core game action, not just re-theme it.",
+      "dimensions": [
+        {
+          "id": "concept_structural_to_play",
+          "purpose": "A specific game action exists that is impossible without the finance concept. Generic descriptions like 'player uses money' do not count -- the action must be uniquely enabled or constrained by the concept.",
+          "levels": [
+            "bolt_on",
+            "structural"
+          ]
+        },
+        {
+          "id": "game_action_specificity",
+          "purpose": "The named game action is specific and falsifiable -- a developer could check whether it actually requires the concept to work.",
+          "levels": [
+            "vague",
+            "specific"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "spec-completeness-gate",
+      "purpose": "The game spec has all required fields filled concretely enough for a developer to start implementing without re-asking design questions.",
+      "dimensions": [
+        {
+          "id": "loop_completeness",
+          "purpose": "Win state, fail state, feedback loop, and progression are all specified concretely. A developer reading this could implement the core loop.",
+          "levels": [
+            "incomplete",
+            "complete"
+          ]
+        },
+        {
+          "id": "educational_fields_complete",
+          "purpose": "For educational games: LM-GM mapping has specific player-action rows (not vague engagement descriptions), debrief spec has real transfer prompts, and evidence model names a concrete competency and transfer task. For generic games: always complete.",
+          "levels": [
+            "incomplete",
+            "complete"
+          ]
+        }
+      ]
+    }
+  ],
+  "preconditions": [
+    "I can describe the game concept and the target audience (age range and context).",
+    "I can name the platform or technical environment (e.g. web browser, mobile web).",
+    "For educational games: I can name the specific concept I want players to internalize."
+  ],
+  "metaGuidance": [
+    "Default: use tools and keep moving. Only stop to ask me for things you cannot responsibly infer.",
+    "Durability: keep execution truth in output.notesMarkdown and explicit context keys. The game spec doc is for readability -- it is not required workflow memory.",
+    "Intrinsic integration is not a vibe check. The test is concrete: name one game action that would be impossible if the finance concept were removed. If you cannot name it, the mechanic is bolt-on.",
+    "LM-GM rows must be specific. 'Player engages with budgeting' is not a valid row. 'Player must allocate a fixed token budget across purchase slots before the timer expires' is.",
+    "Age-concept fit is a hard constraint from developmental research. Abstract concepts (compound interest, credit risk) are not appropriate for children under 9. Check before generating mechanics.",
+    "Failure states should teach causality, not punish. A wrong choice should alter a future condition -- move a savings goal further away, close an option, force a rebalance -- not just block progress or reset the puzzle.",
+    "Debrief is part of the game design, not an afterthought. Every game spec must include a transfer prompt: what question or reflection bridges the in-game event to the real-world concept.",
+    "Platform constraints belong in the spec. A developer should not have to ask 'does this need to work on mobile?' after receiving the spec.",
+    "Tech stack belongs in the spec. If the user stated a preferred stack, validate it -- do not override without a real reason. If none stated, match the stack to the complexity tier and platform.",
+    "Cross-platform note: Godot exports to web, desktop, and mobile from one codebase. Phaser 3 covers web and mobile web. Unity covers everything but is heavier. Match the engine to the actual deployment target."
+  ],
+  "steps": [
+    {
+      "id": "phase-0-intake",
+      "title": "Phase 0: Intake and Classification",
+      "promptBlocks": {
+        "goal": "Figure out exactly what game I need and classify everything that will drive the rest of the design. This step determines the path -- get it right.",
+        "constraints": [
+          "Do not begin mechanic ideation here.",
+          "If gameType is ambiguous, ask -- the educational vs generic classification changes the entire workflow path.",
+          "Age range is required for educational games. If I say 'kids', ask for the age band: 6-8, 9-11, or 12-14.",
+          "Platform constraints belong here -- web browser, mobile web, native app, etc. A missing platform constraint is a developer's problem later.",
+          "If a preferred tech stack is mentioned (e.g. Godot, React, Unity, Phaser), capture it -- it shapes the tech stack recommendation."
+        ],
+        "procedure": [
+          "Gather: game concept description, target audience, gameType (educational or generic), targetAgeRange (required for educational), financeConceptName (required for educational), platformConstraints, desiredPlayDuration, and any anti-goals or known constraints.",
+          "For educational games: identify the specific finance concept the game should teach. 'Financial literacy' is too broad -- push for specificity: budgeting, opportunity cost, needs vs wants, comparison shopping, saving toward a goal, simple interest, etc.",
+          "Classify `gameType` as exactly one of: `educational` or `generic`. Record the rationale.",
+          "For educational games: map `targetAgeRange` to one of three developmental bands: `early` (ages 6-8: concrete/immediate/visible only), `middle` (ages 9-11: budgeting, comparison, opportunity cost, saving goals), `advanced` (ages 12-14: time tradeoffs, risk, simple borrowing, delayed consequences). Record as `ageBand`.",
+          "Classify `platformType` as exactly one of: `web_browser` (desktop/laptop browser), `mobile_web` (mobile browser or embedded webview), `desktop_standalone` (installed desktop app), `cross_platform` (must run on multiple platforms). If unclear, ask.",
+          "Capture `preferredStack` if a specific engine or framework is mentioned (e.g. Godot, Unity, React, Phaser). Leave empty string if none stated. Set `hasPreferredStack = true` if captured, false otherwise.",
+          "Set these keys in context: `gameType`, `targetAgeRange`, `ageBand` (educational only), `financeConceptName` (educational only), `platformConstraints`, `platformType`, `preferredStack`, `hasPreferredStack`, `desiredPlayDuration`, `gameConcept`."
+        ],
+        "verify": [
+          "gameType is classified as educational or generic -- not left open.",
+          "For educational games: financeConceptName is specific enough to constrain mechanic design.",
+          "For educational games: ageBand is set to early, middle, or advanced.",
+          "platformType is set to one of: web_browser, mobile_web, desktop_standalone, cross_platform.",
+          "Platform constraints are recorded -- not left implicit."
+        ]
+      },
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-0b-tech-stack",
+      "title": "Phase 0b: Tech Stack Recommendation",
+      "promptBlocks": {
+        "goal": "Recommend the right tech stack for this game. If a preferred stack was stated, validate it against the platform and complexity requirements -- do not override it without a real reason.",
+        "constraints": [
+          "Do not recommend a stack the stated platform cannot support.",
+          "If `hasPreferredStack = true`, use that stack unless it is genuinely incompatible with the platform or mechanic complexity. State why if overriding.",
+          "Prefer the simplest stack that can deliver the required game feel -- do not reach for a full engine when a lighter solution will do.",
+          "Mobile web requires touch-first interaction design -- flag any touch constraints regardless of stack."
+        ],
+        "procedure": [
+          "If `hasPreferredStack = true`: validate that the preferred stack works for `platformType` and the expected mechanic complexity. If compatible, confirm it. If incompatible, explain why and recommend an alternative.",
+          "If `hasPreferredStack = false`: map the game concept to a complexity tier and recommend accordingly. Use the platform-specific guidance injected below.",
+          "Complexity tiers (platform-agnostic): `simple` (turn-based choices, drag-and-drop, card selection, progress bars -- no real-time loop), `moderate` (real-time timer, sprite movement, score tracking, multiple scenes), `full` (physics, particles, complex animation, large asset sets), `simulation` (data-driven, spreadsheet-style, no real-time).",
+          "State the recommended stack, the complexity tier, and a one-sentence rationale.",
+          "Flag any platform-specific constraints relevant to the recommended stack.",
+          "Set `recommendedStack`, `stackComplexityTier`, and `platformNotes` in context."
+        ],
+        "verify": [
+          "If a preferred stack was stated, it was either confirmed or overridden with an explicit reason.",
+          "The recommended stack matches the complexity tier and platform -- not over- or under-engineered.",
+          "`recommendedStack` is set in context."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "stack-web-browser",
+          "when": {
+            "var": "platformType",
+            "equals": "web_browser"
+          },
+          "text": "Platform: web browser. Ladder -- simple: plain HTML/CSS + vanilla JS (no framework needed); moderate: Phaser 3 (Canvas/WebGL, embeds as a <canvas> element, no install); full: Phaser 3 + WebGL or PixiJS; simulation: plain JS. Avoid heavy runtimes (Unity WebGL, large WASM bundles) -- load time matters for kids on school networks."
+        },
+        {
+          "id": "stack-mobile-web",
+          "when": {
+            "var": "platformType",
+            "equals": "mobile_web"
+          },
+          "text": "Platform: mobile web. All touch targets min 44x44px. No audio autoplay. Ladder is the same as web_browser but add: test canvas scaling on small screens, avoid hover-dependent interactions, prefer portrait-friendly layouts. Phaser 3 handles mobile scaling well."
+        },
+        {
+          "id": "stack-desktop-standalone",
+          "when": {
+            "var": "platformType",
+            "equals": "desktop_standalone"
+          },
+          "text": "Platform: desktop standalone (installed app). Godot (GDScript or C#, exports to Windows/Mac/Linux, free, great for 2D minigames) and Unity (C#, larger ecosystem, heavier) are both viable. For simple games, Electron + web stack is also an option. Recommend Godot for new projects without an existing engine preference -- lighter, faster iteration, strong 2D support."
+        },
+        {
+          "id": "stack-cross-platform",
+          "when": {
+            "var": "platformType",
+            "equals": "cross_platform"
+          },
+          "text": "Platform: cross-platform (web + mobile + desktop). Godot exports to web (HTML5), desktop, and mobile from one codebase. Unity does the same but is heavier. If web-primary with mobile secondary, Phaser 3 + a responsive canvas wrapper covers most cases without a full engine. Pick the stack with the lowest export friction for the priority platform."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-1-concept-age-fit",
+      "title": "Phase 1: Concept-Age Fit Validation",
+      "runCondition": {
+        "var": "gameType",
+        "equals": "educational"
+      },
+      "promptBlocks": {
+        "goal": "Check whether the target finance concept is developmentally appropriate for the stated age band before generating any mechanics.",
+        "constraints": [
+          "Do not generate mechanics here.",
+          "Base the fit check on established developmental bands, not on optimistic assumptions about what kids can handle.",
+          "If the concept is inappropriate for the age band, propose an alternative concept or an alternative age band -- do not just flag and proceed."
+        ],
+        "procedure": [
+          "Apply the developmental band rules:",
+          "  - `early` (6-8): appropriate concepts are earning/exchanging, saving toward a visible goal, needs vs wants, simple one-step tradeoffs, basic counting/spending. NOT appropriate: abstract accounts, credit, interest, multi-step planning.",
+          "  - `middle` (9-11): appropriate concepts are budgeting a fixed amount, comparison shopping, opportunity cost, saving strategies, distinguishing wants from needs with tradeoffs. NOT appropriate: credit utilization, compound growth, formal risk-return.",
+          "  - `advanced` (12-14): appropriate concepts are delayed consequences, fees and simple interest, tradeoffs between certainty and reward, basic borrowing mechanics, multi-period planning.",
+          "If `financeConceptName` maps cleanly to the age band: record `ageBandValidated = true` and explain why the concept is appropriate.",
+          "If the concept is borderline: describe what scaffolding or concretization would make it appropriate and record as `conceptAdaptationRequired`.",
+          "If the concept is clearly inappropriate: propose an alternative concept for the same age band OR an alternative age band for the same concept. Do not proceed with an inappropriate pairing.",
+          "Set these keys in context: `ageBandValidated`, `conceptAdaptationRequired`, `finalizedConceptName`."
+        ],
+        "verify": [
+          "The concept-age pairing has been explicitly checked against the developmental band rules.",
+          "If the concept is inappropriate, an alternative has been proposed -- not just flagged.",
+          "`ageBandValidated` is set before advancing."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2-mechanic-ideation",
+      "title": "Phase 2: Mechanic Ideation",
+      "promptBlocks": {
+        "goal": "Generate candidate game mechanics that could carry this concept. Produce genuinely distinct candidates -- not variations on the same idea.",
+        "constraints": [
+          "Generate at least 3 mechanically distinct candidates.",
+          "Each candidate must have a clear core action -- the thing the player does on every turn or interaction.",
+          "Do not polish a single mechanic here -- generate options first, narrow later."
+        ],
+        "procedure": [
+          "For each candidate mechanic, record: mechanic name, core player action (one sentence), how the concept is involved, win condition sketch, and fail condition sketch.",
+          "Check each candidate for distinctness: if two candidates share the same core player action, merge or replace one.",
+          "Select the leading mechanic candidate based on fit with the game concept, age range, and platform constraints.",
+          "Record `selectedMechanic` and the rationale for choosing it over the alternatives.",
+          "Set `selectedMechanic` in context."
+        ],
+        "verify": [
+          "At least 3 mechanically distinct candidates were generated.",
+          "The selected mechanic has a clear core action, not just a theme.",
+          "The rationale for selection names why the alternatives were weaker."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "educational-mechanic-bias",
+          "when": {
+            "var": "gameType",
+            "equals": "educational"
+          },
+          "text": "For educational games: at least one candidate must be one where the finance concept is the action grammar -- the core action cannot be performed without using the concept. If none of your candidates meet this bar, add one before selecting."
+        },
+        {
+          "id": "generic-mechanic-clarity",
+          "when": {
+            "var": "gameType",
+            "equals": "generic"
+          },
+          "text": "For generic games: prioritize mechanics with clear and satisfying win/fail states. The fun of the core loop should be immediately legible to a player."
+        },
+        {
+          "id": "early-band-constraints",
+          "when": {
+            "var": "ageBand",
+            "equals": "early"
+          },
+          "text": "Age band EARLY (6-8): mechanics must be concrete and immediate. No abstract timers, multi-step plans, or hidden variables. Progress must be visible. Time horizons should be within a single play session."
+        },
+        {
+          "id": "middle-band-constraints",
+          "when": {
+            "var": "ageBand",
+            "equals": "middle"
+          },
+          "text": "Age band MIDDLE (9-11): mechanics can introduce simple planning and comparison, but must stay anchored to concrete situations. Opportunity cost and budgeting allocation are strong fits here."
+        },
+        {
+          "id": "advanced-band-constraints",
+          "when": {
+            "var": "ageBand",
+            "equals": "advanced"
+          },
+          "text": "Age band ADVANCED (12-14): mechanics can include delayed consequences, multi-period choices, and simple risk. Represent future consequences explicitly -- do not hide arithmetic."
+        },
+        {
+          "id": "stack-simple-mechanic-scope",
+          "when": {
+            "var": "stackComplexityTier",
+            "equals": "simple"
+          },
+          "text": "Stack complexity tier is SIMPLE -- avoid mechanics that require real-time loops, sprite animation, or physics. Drag-and-drop, card selection, step-by-step allocation, and turn-based choices are well-matched to this tier."
+        },
+        {
+          "id": "stack-simulation-mechanic-scope",
+          "when": {
+            "var": "stackComplexityTier",
+            "equals": "simulation"
+          },
+          "text": "Stack complexity tier is SIMULATION -- mechanics should be data-driven and turn-based. No real-time elements. Rich spreadsheet-style state (budget ledgers, multi-period plans, category allocation) is a strong fit."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-3-lm-gm-mapping",
+      "title": "Phase 3: Learning Mechanic / Game Mechanic Mapping",
+      "runCondition": {
+        "var": "gameType",
+        "equals": "educational"
+      },
+      "promptBlocks": {
+        "goal": "Build the LM-GM mapping for the selected mechanic. This artifact is the proof that the game teaches the concept -- not just claims to.",
+        "constraints": [
+          "Each row must have a specific player action, not a vague engagement description.",
+          "'Player engages with budgeting' is not a valid row. 'Player must allocate a fixed token budget across purchase slots before confirming' is.",
+          "Every learning mechanic row must have at least one observable player action as evidence.",
+          "If a game mechanic row has no learning mechanic, it is decorative -- flag it."
+        ],
+        "procedure": [
+          "For the selected mechanic, build a table with columns: Learning Mechanic | Game Mechanic | Player Evidence (observable action that shows the concept was used).",
+          "Add one row per distinct learning-game pairing in the mechanic.",
+          "Flag any game mechanic rows where the learning mechanic column is empty -- those are decorative and should be justified or removed.",
+          "Flag any learning mechanic rows where the player evidence is vague (cannot be observed by a developer running a test).",
+          "Record the completed mapping in notesMarkdown."
+        ],
+        "verify": [
+          "Every learning mechanic row has a specific observable player evidence action.",
+          "Any decorative game mechanics are flagged and justified.",
+          "The mapping covers all major player actions in the selected mechanic."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-4-integration-gate",
+      "title": "Phase 4: Intrinsic Integration Gate",
+      "runCondition": {
+        "var": "gameType",
+        "equals": "educational"
+      },
+      "assessmentRefs": [
+        "intrinsic-integration-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "bolt_on",
+            "forAssessment": "intrinsic-integration-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "concept_structural_to_play = bolt_on: the mechanic is themed around the concept but does not require it. Name one game action that is impossible without the finance concept. If you cannot name it, revise the mechanic until you can. Replacing the concept with a different subject (coins instead of budgets, gems instead of prices) should break the core action -- if it does not, the integration is bolt-on."
+          }
+        },
+        {
+          "when": {
+            "anyEqualsLevel": "vague",
+            "forAssessment": "intrinsic-integration-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "game_action_specificity = vague: the named game action is too general to verify. Restate it as a specific player interaction: what button does the player press, what choice do they make, what constraint are they operating under? A developer should be able to implement exactly this action from your description."
+          }
+        }
+      ],
+      "promptBlocks": {
+        "goal": "Test whether the selected mechanic genuinely requires the finance concept to work, or whether the concept is just a skin over a generic game loop.",
+        "constraints": [
+          "This is a falsification test, not a confidence check. You are trying to break the mechanic's claim.",
+          "Generic descriptions fail. 'The player uses money' is not structural -- money could be replaced by anything.",
+          "The test: replace the finance concept with a neutral placeholder (tokens, gems, stars). If the core game action still works identically, the concept is bolt-on."
+        ],
+        "procedure": [
+          "Apply the substitution test: mentally replace the finance concept with a neutral placeholder. Does the core game action change? If yes, the concept is structural. If no, it is bolt-on.",
+          "Name one specific game action that is impossible without the finance concept. This is the structural proof.",
+          "Rate `concept_structural_to_play`: structural if the named action genuinely requires the concept; bolt_on if the concept is decorative.",
+          "Rate `game_action_specificity`: specific if a developer could implement the named action from your description alone; vague if it requires further clarification.",
+          "Set `integrationTestPassed = true` in context if both dimensions pass."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "The specific game action that requires the concept, the substitution test result, and both dimension ratings."
+        },
+        "verify": [
+          "The substitution test was applied -- not just described.",
+          "The named game action is specific enough to implement.",
+          "Both assessment dimensions are rated explicitly."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5-game-loop-design",
+      "title": "Phase 5: Game Loop Design",
+      "promptBlocks": {
+        "goal": "Design the full game loop: win state, fail state, feedback, progression, and replayability.",
+        "constraints": [
+          "Win and fail states must be concrete -- a developer should be able to implement them from your description.",
+          "Feedback must be immediate and interpretable -- the player should know why something happened, not just that something changed.",
+          "Progression must respect the platform and play duration constraints from intake."
+        ],
+        "procedure": [
+          "Design and record: winState (what condition ends a round successfully), failState (what condition ends a round unsuccessfully or triggers a consequence), feedbackDesign (what the player sees/hears immediately after each action), progressionDesign (how difficulty or scope changes across sessions or rounds), replayabilityDesign (what changes between plays to keep it fresh).",
+          "For the platform constraints: note any technical constraints on the loop design (no audio autoplay on mobile, touch vs click, screen size considerations).",
+          "Set `gameLoopDesigned = true` in context."
+        ],
+        "verify": [
+          "Win state and fail state are both specified concretely.",
+          "Feedback design says what the player sees/hears, not just 'provide feedback'.",
+          "Progression design accounts for the target age band and play duration."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "educational-fail-states",
+          "when": {
+            "var": "gameType",
+            "equals": "educational"
+          },
+          "text": "For educational games: fail states must alter a future condition to teach causality -- move a savings goal further away, close a purchase option, force a budget rebalance. A fail state that just resets the round teaches nothing. Unlimited harmless retries let the player guess until correct without building the mental model."
+        },
+        {
+          "id": "educational-feedback-depth",
+          "when": {
+            "var": "gameType",
+            "equals": "educational"
+          },
+          "text": "For educational games: feedback should surface the causal structure, not just the outcome. 'You spent too much' is weak. 'You chose the snack -- your savings goal moved from 5 days away to 7 days away' is strong. The player should see the mechanism, not just the score."
+        },
+        {
+          "id": "loop-early-band",
+          "when": {
+            "var": "ageBand",
+            "equals": "early"
+          },
+          "text": "Age band EARLY (6-8): keep the loop short (under 3 minutes), progress must be visible at all times, win/fail states must be immediate and unambiguous. No hidden state. Progression should change surface variety, not complexity."
+        },
+        {
+          "id": "loop-advanced-band",
+          "when": {
+            "var": "ageBand",
+            "equals": "advanced"
+          },
+          "text": "Age band ADVANCED (12-14): the loop can include delayed consequences and multi-period state. Win/fail can depend on outcomes that only become visible after several decisions -- this is age-appropriate and reinforces the concept of long-term thinking."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-6-failure-state-design",
+      "title": "Phase 6: Productive Failure Design",
+      "runCondition": {
+        "var": "gameType",
+        "equals": "educational"
+      },
+      "promptBlocks": {
+        "goal": "Design how mistakes teach -- not how they punish or permit guessing.",
+        "constraints": [
+          "Every mistake must alter a future condition in a way that makes the causal structure visible.",
+          "Unlimited harmless retry (guess until correct) is not productive failure -- it teaches the answer, not the concept.",
+          "Recovery should be possible but require engagement with the concept -- not just waiting or clicking through."
+        ],
+        "procedure": [
+          "For each major mistake type in the selected mechanic, design: what condition changes as a result, what the player sees that makes causality visible, and what action re-engages the concept to recover.",
+          "Check: does the failure state make the player confront the causal structure, or just acknowledge an error?",
+          "Record the failure state designs in notesMarkdown.",
+          "Set `failureStateDesigned = true` in context."
+        ],
+        "verify": [
+          "Each failure state alters a future condition -- not just shows an error message.",
+          "Recovery requires engaging with the concept, not just retrying.",
+          "The causal link between mistake and consequence is visible to the player."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "failure-early-band",
+          "when": {
+            "var": "ageBand",
+            "equals": "early"
+          },
+          "text": "Age band EARLY (6-8): consequences must be immediate and visible -- no delayed effects the child cannot connect to their action. Keep consequence magnitude small and recoverable. Emotional safety matters: the tone should be 'oops, let's fix it' not 'you failed'."
+        },
+        {
+          "id": "failure-advanced-band",
+          "when": {
+            "var": "ageBand",
+            "equals": "advanced"
+          },
+          "text": "Age band ADVANCED (12-14): consequences can be delayed across multiple turns to model real financial cause-and-effect (e.g. missed savings compounds into a larger gap later). Make the chain explicit so the player can trace the consequence back to the decision."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-7-debrief-design",
+      "title": "Phase 7: Debrief Design",
+      "runCondition": {
+        "var": "gameType",
+        "equals": "educational"
+      },
+      "promptBlocks": {
+        "goal": "Design the end-of-round debrief that bridges in-game events to the real-world concept. This is not a score screen -- it is a transfer mechanism.",
+        "constraints": [
+          "The debrief must include at least one transfer prompt: a question or reflection that connects what happened in the game to something outside it.",
+          "'You scored 80/100' is not a debrief. 'You chose the snack instead of saving -- when would that tradeoff show up in real life?' is.",
+          "Keep it short and age-appropriate. Early band: one simple question. Middle band: one question plus a comparison. Advanced band: can include a reflection card."
+        ],
+        "procedure": [
+          "Design the debrief format: what appears at end of round, what transfer prompt(s) are shown, and how the debrief connects the in-game event to the real-world concept.",
+          "Write at least two example transfer prompts appropriate for the age band.",
+          "Consider whether the debrief should support a parent/teacher conversation (optional but valuable for classroom contexts).",
+          "Record the debrief design in notesMarkdown.",
+          "Set `debriefDesigned = true` in context."
+        ],
+        "verify": [
+          "At least one transfer prompt is included and connects the game to real life.",
+          "The debrief is age-appropriate in complexity.",
+          "The debrief is part of the game spec, not a suggestion to add later."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-8-evidence-model",
+      "title": "Phase 8: Evidence Model",
+      "runCondition": {
+        "var": "gameType",
+        "equals": "educational"
+      },
+      "promptBlocks": {
+        "goal": "Define what learning this game should produce and how you would know it worked -- before the game is built.",
+        "constraints": [
+          "Competency must be behaviorally testable, not just named. 'Understands budgeting' is not testable. 'Prioritizes needs over wants under a fixed budget constraint' is.",
+          "Observable evidence must be in-game player actions, not score or level completion.",
+          "The transfer task must use different surface features than the game -- different story, different numbers, same underlying concept."
+        ],
+        "procedure": [
+          "Define the competency: one sentence, behaviorally testable. What would a player who internalized the concept do differently than one who just learned to win the game?",
+          "Define observable in-game evidence: two or three specific player actions that count as evidence for the competency. These are what you would measure if you were running an evaluation.",
+          "Define a near-transfer task: a short scenario outside the game that uses the same concept with different surface features. This is how you check whether learning transferred.",
+          "Record all three in notesMarkdown.",
+          "Set `evidenceModelComplete = true` in context."
+        ],
+        "verify": [
+          "Competency is behaviorally testable -- a reviewer could check whether a player demonstrated it.",
+          "Observable evidence items are specific player actions, not score proxies.",
+          "Transfer task uses different surface features than the game."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-9-spec-output",
+      "title": "Phase 9: Game Spec Output",
+      "assessmentRefs": [
+        "spec-completeness-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "incomplete",
+            "forAssessment": "spec-completeness-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "spec-completeness-gate failed: identify which required fields are missing or trivial (win state, fail state, feedback loop, progression for all games; LM-GM rows, debrief spec, evidence model for educational games) and complete them before producing the final spec. Vague fields ('provide feedback') do not count as complete."
+          }
+        }
+      ],
+      "promptBlocks": {
+        "goal": "Produce the complete game spec artifact. This is what a developer picks up to start building -- make it concrete enough to do that without asking you anything.",
+        "constraints": [
+          "Every field must be specific enough to implement. 'Provide positive feedback' is not implementable. 'Show a coin-collect animation and display the updated balance' is.",
+          "Do not leave educational fields as placeholders if gameType is educational.",
+          "The spec should stand alone -- a developer who was not in this conversation should be able to read it and start."
+        ],
+        "procedure": [
+          "Compile the full game spec with all of the following fields:",
+          "  - `gameType`: educational or generic",
+          "  - `gameConcept`: one paragraph describing what the game is",
+          "  - `targetAudience`: age range and context",
+          "  - `platformConstraints`: technical environment and constraints",
+          "  - `coreMechanic`: the core player action in one sentence",
+          "  - `winState`: what condition ends a round successfully",
+          "  - `failState`: what condition ends a round unsuccessfully or triggers a consequence",
+          "  - `feedbackDesign`: what the player sees/hears immediately after each action",
+          "  - `progressionDesign`: how difficulty or scope changes",
+          "  - `replayabilityDesign`: what changes between plays",
+          "  - `recommendedStack`: the recommended tech stack with complexity tier and rationale",
+          "  - `uiSketch`: a brief description of the key UI elements (not a mockup -- just enough to start implementation)",
+          "  Educational games also require:",
+          "  - `financeConceptName`: the specific concept being taught",
+          "  - `ageBand`: early, middle, or advanced",
+          "  - `lmGmMapping`: the full LM-GM table from phase-3",
+          "  - `integrationEvidence`: the specific game action that is impossible without the concept",
+          "  - `failureStateDesign`: how mistakes alter future conditions",
+          "  - `debriefSpec`: transfer prompt(s) and debrief format",
+          "  - `evidenceModel`: competency, observable evidence, transfer task",
+          "Record the complete spec in notesMarkdown.",
+          "Set `specReady = true` in context."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "The complete game spec with all required fields filled concretely."
+        },
+        "verify": [
+          "All required fields are present and non-trivial.",
+          "A developer reading this could start implementation without asking clarifying questions.",
+          "For educational games: LM-GM mapping has specific player-action rows, debrief has real transfer prompts, evidence model names a behaviorally testable competency."
+        ]
+      },
+      "requireConfirmation": true
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "subQuestion": "SQ3",
+  "question": "What are the documented failure modes of LLM code reviewers? (verbosity, false positives, surface pattern-matching, missing intent, pre-existing issue attribution)",
+  "fetchedAt": "2026-05-15T00:00:00Z",
+  "claims": [
+    {
+      "id": "SQ3-C1",
+      "text": "EASE 2026 paper (Karakaya, Torun, Ucar, Tüzün -- arXiv:2604.24525, accepted EASE 2026): The 0.44-0.62 developer agreement figure is REAL and precisely characterized. The figure refers not to 'developer agreement with LLM findings' in the direct sense, but to 'agreement between automated evaluation (LLM-as-Judge) and developer-provided labels' on whether bot-generated PR comments were useful (fixed/wontFix). Agreement ratios range from approximately 0.44 to 0.62 across models (Gemini-2.5-pro, GPT-4.1-mini, GPT-5.2). The paper's key finding: developer labeling behavior is strongly influenced by workflow pressures, organizational constraints, and context -- not just comment quality.",
+      "sourceUrl": "https://arxiv.org/abs/2604.24525",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C2",
+      "text": "EASE 2026 (Karakaya et al.): The dataset studied was 2,604 bot-generated PR comments from Beko, labeled by software engineers. The paper analyzes an INDUSTRIAL deployment of LLM-powered ACR bots. Key finding: 'Developer actions such as resolving or ignoring comments reflect not only comment quality, but also contextual constraints, prioritization decisions, and workflow dynamics that are difficult to capture through static artifacts.' This means the 0.44-0.62 figure understates true quality problems: even useful comments get ignored for non-quality reasons.",
+      "sourceUrl": "https://arxiv.org/abs/2604.24525",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C3",
+      "text": "EASE 2026 (Karakaya et al.): Interview with a software engineering director found that developer labeling behavior is 'strongly influenced by workflow pressures and organizational constraints.' This means when developers mark a bot comment 'wontFix' it's often because they're under time pressure, not because the comment is wrong. The implication is: LLM code review quality metrics likely OVERSTATE helpfulness (because even good comments get ignored when devs are busy), AND understate unhelpfulness (because good comments also get credited when fixed for unrelated reasons).",
+      "sourceUrl": "https://arxiv.org/abs/2604.24525",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C4",
+      "text": "Sphinx paper (Zhang et al., arXiv:2601.04252): LLM PR review automation faces three key limitations identified in the literature: (1) noisy supervision -- the training data from human reviews contains noise and disagreements, (2) limited contextual understanding -- LLMs review code without the broader system context, (3) inadequate evaluation metrics -- BLEU and similar surface metrics don't capture review quality. The Sphinx framework addresses these by using checklist-based evaluation (structured coverage of actionable verification points).",
+      "sourceUrl": "https://arxiv.org/abs/2601.04252",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C5",
+      "text": "Sphinx paper: LLMs trained with standard approaches 'outperform both proprietary and open-source baselines by up to 40% in checklist coverage' when trained with CRPO (Checklist Reward Policy Optimization). The key insight from the failure mode perspective: standard LLMs LACK structured coverage -- they comment on what they notice first, not on what matters most. This is the verbosity/selectivity failure: they fill space with comments but miss key verification points.",
+      "sourceUrl": "https://arxiv.org/abs/2601.04252",
+      "sourceType": "academic_paper",
+      "confidence": "single-source",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C6",
+      "text": "From empirical evidence (Rasheed et al., arXiv:2404.18496, LLM-based code review early results): LLM reviewers excel at detecting code smells and suggesting improvements at the surface level, but the paper notes that 'unlike traditional static code analysis tools, our LLM-based AI agent has the ability to predict future potential risks in the code' -- however this claim is marked as aspirational future work. Current LLM reviewers are BETTER at identifying mechanical issues (code smells, bugs visible syntactically) than semantic issues (design fit, intent alignment, system impact).",
+      "sourceUrl": "https://arxiv.org/abs/2404.18496",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C7",
+      "text": "Abstain and Validate (Cambronero et al., arXiv:2510.03217, ICSE 2025): In the context of automated program repair (adjacent to code review), the problem of 'noise' from LLMs is well-documented: 'Showing patches unlikely to be accepted can lead to substantial noise, wasting valuable developer time and eroding trust in automated code changes.' The paper shows that LLM-generated outputs WITHOUT validation/filtering have a substantial noise problem that erodes developer trust over time. This is directly applicable to code review: uncurated LLM findings erode trust.",
+      "sourceUrl": "https://arxiv.org/abs/2510.03217",
+      "sourceType": "academic_paper",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ3"
+    },
+    {
+      "id": "SQ3-C8",
+      "text": "Key failure mode synthesis from the literature (inferred from EASE 2026, Sphinx, Abstain/Validate): LLM code reviewers exhibit five characteristic failure modes: (1) SURFACE PATTERN MATCHING -- commenting on code style/form rather than runtime behavior and system impact; (2) CONTEXT BLINDNESS -- missing intent alignment (does this PR solve the right problem?); (3) PRE-EXISTING ISSUE ATTRIBUTION -- flagging issues that existed before the PR; (4) VERBOSITY INFLATION -- producing many comments that dilute high-signal findings; (5) KNOWLEDGE GAP FILLING -- writing findings about things they don't understand rather than asking clarifying questions.",
+      "sourceUrl": "synthesis",
+      "sourceType": "synthesis",
+      "confidence": "inferred",
+      "answersSubquestion": "SQ3"
+    }
+  ]
+}

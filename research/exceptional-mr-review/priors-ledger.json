@@ -1,0 +1,87 @@
+{
+  "version": "pass-1",
+  "priors": [
+    {
+      "id": "P1",
+      "text": "Great human reviewers check: intent alignment, design fit, blast radius, completeness -- not just correctness",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ1-C1", "SQ1-C6", "SQ5-C3"],
+      "notes": "Google guide (9 dimensions including design first), Gergely Orosz (system context), Sphinx (5-domain decomposition) all corroborate this"
+    },
+    {
+      "id": "P2",
+      "text": "Mediocre reviewers focus on style and surface, miss semantic concerns",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ1-C4", "SQ3-C5", "SQ4-C2"],
+      "notes": "Chelsea Troy (delegation without running code), Sphinx (fluent but shallow), EASE 2026 implication"
+    },
+    {
+      "id": "P3",
+      "text": "Expert reviewers ask 'what is the simplest thing that could go wrong with this change in production?' and work backwards from failure",
+      "status": "prior:unverified",
+      "notes": "Not directly confirmed by fetched sources; closest match is OWASP security review mental model (SQ4-C8) but that's security-specific"
+    },
+    {
+      "id": "P4",
+      "text": "LLM reviewers fail by: pattern-matching on surface; attributing pre-existing issues to the PR; verbosity diluting real findings; lacking codebase context; missing intent alignment",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ3-C4", "SQ3-C5", "SQ3-C8", "SQ4-C2"],
+      "notes": "Sphinx (limited contextual understanding, noisy supervision), EASE 2026 (context constraints), synthesis claim SQ3-C8 covers all 5 modes"
+    },
+    {
+      "id": "P5",
+      "text": "Google Engineering Practices is the canonical written reference -- 9 review dimensions",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ1-C1"],
+      "notes": "Directly verified: Design, Functionality, Complexity, Tests, Naming, Comments, Style, Documentation, Every Line"
+    },
+    {
+      "id": "P6",
+      "text": "Chelsea Troy has influential writing on reviewing code you don't fully understand",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ1-C4", "SQ1-C5"],
+      "notes": "Article fetched and read; focus is on participation principle and context transfer, not 'reviewing without understanding'"
+    },
+    {
+      "id": "P7",
+      "text": "The biggest failure mode is reviewing only what changed, not the system impact of what changed",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ1-C6", "SQ3-C4", "SQ5-C2"],
+      "notes": "Gergely Orosz (system context distinction), Sphinx (context blindness), Pragmatic Engineer (diff vs. system review)"
+    },
+    {
+      "id": "P8",
+      "text": "LLMs improve with: concrete checklist, steelman-before-criticize, explicit false-positive suppression",
+      "status": "partially-corroborated",
+      "corroboratedBy": ["SQ4-C1"],
+      "notes": "Checklist is VALIDATED (Sphinx, 40% improvement). Steelman-before-criticize and false-positive suppression have NO empirical validation in fetched literature. Prior is partially falsified for the latter two claims."
+    },
+    {
+      "id": "P9",
+      "text": "Specialization (security reviewer vs. correctness reviewer vs. performance reviewer) produces better findings than generalist",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ4-C3", "SQ5-C1", "SQ5-C3", "SQ5-C4"],
+      "notes": "SOEN-101 role specialization (15% improvement), Google guide (specialist reviewers for complex concerns), Sphinx 5-domain decomposition, OWASP security specialization. Partially empirically supported."
+    },
+    {
+      "id": "P10",
+      "text": "Dual reading technique (once for understanding, once adversarially) is taught in security training",
+      "status": "prior:unverified",
+      "notes": "Not directly confirmed or denied in fetched sources. OWASP guide covers security review methodology but did not fetch the specific dual-reading technique description."
+    },
+    {
+      "id": "P11",
+      "text": "A reviewer who doesn't understand should ask questions, not write findings -- LLMs always write findings instead",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ1-C9", "SQ3-C8", "SQ6-C6"],
+      "notes": "Google guide explicitly states this (SQ1-C9); LLM failure mode #5 (SQ3-C8); structural guardrail 5 (SQ6-C6)"
+    },
+    {
+      "id": "P12",
+      "text": "EASE 2026 paper found only 0.44-0.62 developer agreement on LLM review findings",
+      "status": "corroborated",
+      "corroboratedBy": ["SQ3-C1"],
+      "notes": "Paper VERIFIED (arXiv:2604.24525, Karakaya et al., accepted EASE 2026). Figure is real BUT: it measures LLM-as-Judge vs. developer labels, not direct developer agreement on LLM findings. The prior statement is directionally correct but the numerics need nuance."
+    }
+  ]
+}
