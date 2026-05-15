@@ -365,13 +365,16 @@ export async function runStartupRecovery(
           // WHY discard (not re-evaluate): startup recovery doesn't have the trigger context
           // needed to choose an evaluator workflow. The trigger router handles live gate
           // evaluation because it has the full trigger definition and workspacePath.
-          // On a restart, the trigger will re-fire on the next poll cycle, creating a fresh
-          // session that will reach the gate again and be evaluated normally.
+          // WHY "poll triggers only": polling triggers re-fire on the next cycle and the session
+          // reaches the gate again for fresh evaluation. Webhook triggers are one-shot -- a gate
+          // session lost to daemon restart is permanently lost for webhook-sourced workflows.
+          // TODO: store trigger provider in the sidecar so startup recovery can post to outbox
+          // for webhook sessions and avoid the misleading "trigger will re-fire" message.
           if (session.gateState?.kind === 'gate_checkpoint') {
             console.log(
               `[WorkflowRunner] Startup recovery: session ${session.sessionId} was parked at ` +
-              `gate checkpoint (step '${session.gateState.stepId}'). Discarding -- ` +
-              `the trigger will re-fire on the next poll cycle for fresh evaluation.`,
+              `gate checkpoint (step '${session.gateState.stepId}'). Discarding. ` +
+              `Note: polling triggers will re-fire; webhook-triggered sessions are not automatically retried.`,
             );
             break;
           }
