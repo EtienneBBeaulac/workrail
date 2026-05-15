@@ -361,6 +361,22 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       prUrl: z.string().optional(),
     }),
   }),
+  /**
+   * review_draft_submitted: appended by PendingDraftReviewPoller after detecting
+   * that the operator published the pending draft review.
+   *
+   * WHY a session event: makes review submission visible in the console and
+   * queryable from the session store, consistent with delivery_recorded.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('review_draft_submitted'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      reviewId: z.number().int().positive(),
+      prUrl: z.string(),
+      submittedAt: z.string(),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;

@@ -229,11 +229,32 @@ export async function runStartupRecovery(
   // site valid without positional changes. Production passes the key from startTriggerListener;
   // tests that don't exercise the resume path can omit it.
   apiKey: string = '',
+  /**
+   * Optional trigger index for recovering pending-draft review pollers.
+   * When provided, pending-draft sidecars found in sessionsDir are used to restart
+   * PendingDraftReviewPoller instances for each orphaned review. The trigger index
+   * is needed to look up reviewerIdentity.token (which is NOT stored in the sidecar).
+   * When absent, pending-draft recovery is skipped (sidecars are left on disk).
+   */
+  triggerIndex?: ReadonlyMap<string, import('../trigger/types.js').TriggerDefinition>,
+  /**
+   * Optional ReviewApprovalAdapter for restarting pollers after crash recovery.
+   * Defaults to GitHubReviewApprovalAdapter if absent and a sidecar is found.
+   */
+  reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
 ): Promise<void> {
   // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
   // WHY first: queue-issue cleanup is independent of session state and must
   // always run, even if session recovery fails or ctx is absent.
   await clearQueueIssueSidecars(sessionsDir);
+
+  // Phase B: Restart PendingDraftReviewPoller for any orphaned pending-draft sidecars.
+  // WHY here (after queue-issue cleanup, before session recovery): pending-draft recovery
+  // is independent of session token state and runs regardless of ctx being present.
+  // Requires triggerIndex to look up reviewerIdentity.token (not stored in the sidecar).
+  if (ctx?.v2 && triggerIndex && triggerIndex.size > 0) {
+    await recoverPendingDraftPollers(sessionsDir, ctx, triggerIndex, reviewApprovalAdapterFn);
+  }
 
   // Read all parseable session files.
   const sessions = await readAllDaemonSessions(sessionsDir);
@@ -667,6 +688,71 @@ export async function clearQueueIssueSidecars(sessionsDir: string): Promise<void
  * file is orphaned. It holds no useful state (the rename never completed), so we
  * discard it unconditionally.
  */
+/**
+ * Restart PendingDraftReviewPoller instances for orphaned pending-draft sidecars.
+ *
+ * Called by runStartupRecovery() when triggerIndex is available. For each
+ * pending-draft-*.json sidecar found, looks up the trigger by triggerId to get
+ * the reviewerIdentity.token (which is NOT stored in the sidecar for security),
+ * then restarts polling. If the trigger no longer exists, logs a warning and
+ * deletes the sidecar.
+ *
+ * Non-fatal: any error is caught and logged. Never throws.
+ */
+async function recoverPendingDraftPollers(
+  sessionsDir: string,
+  ctx: import('../mcp/types.js').V2ToolContext,
+  triggerIndex: ReadonlyMap<string, import('../trigger/types.js').TriggerDefinition>,
+  reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
+): Promise<void> {
+  const { readAllPendingDraftSidecars, PendingDraftReviewPoller, GitHubReviewApprovalAdapter } =
+    await import('../trigger/pending-draft-review-poller.js').then(async (m) => ({
+      readAllPendingDraftSidecars: m.readAllPendingDraftSidecars,
+      PendingDraftReviewPoller: m.PendingDraftReviewPoller,
+      GitHubReviewApprovalAdapter: (await import('../trigger/review-approval-adapter.js')).GitHubReviewApprovalAdapter,
+    }));
+
+  const sidecars = await readAllPendingDraftSidecars(sessionsDir);
+  if (sidecars.length === 0) return;
+
+  console.log(`[StartupRecovery] Found ${sidecars.length} orphaned pending-draft review sidecar(s). Restarting pollers.`);
+
+  for (const sidecar of sidecars) {
+    const trigger = triggerIndex.get(sidecar.triggerId);
+    if (!trigger?.reviewerIdentity) {
+      console.warn(
+        `[StartupRecovery] Pending-draft sidecar trigger '${sidecar.triggerId}' not found or has no reviewerIdentity. ` +
+        `Deleting sidecar for daemonSessionId=${sidecar.daemonSessionId}.`,
+      );
+      await fs.unlink(path.join(sessionsDir, `pending-draft-${sidecar.daemonSessionId}.json`)).catch(() => {});
+      continue;
+    }
+
+    const adapter = reviewApprovalAdapterFn ? reviewApprovalAdapterFn() : new GitHubReviewApprovalAdapter();
+    if (!ctx.v2) continue;
+
+    const poller = new PendingDraftReviewPoller(adapter, {
+      prNumber: sidecar.prNumber,
+      prRepo: sidecar.prRepo,
+      reviewId: sidecar.reviewId,
+      token: trigger.reviewerIdentity.token,
+      login: trigger.reviewerIdentity.login,
+      workrailSessionId: sidecar.workrailSessionId,
+      daemonSessionId: sidecar.daemonSessionId,
+      sessionStore: ctx.v2.sessionStore,
+      gate: ctx.v2.gate,
+      mintEventId: ctx.v2.idFactory.mintEventId.bind(ctx.v2.idFactory),
+      sessionsDir,
+    });
+    poller.start();
+
+    console.log(
+      `[StartupRecovery] Restarted PendingDraftReviewPoller: ` +
+      `daemonSessionId=${sidecar.daemonSessionId} prRepo=${sidecar.prRepo} prNumber=${sidecar.prNumber}`,
+    );
+  }
+}
+
 async function clearStrayTmpFiles(sessionsDir: string): Promise<void> {
   let entries: string[];
   try {

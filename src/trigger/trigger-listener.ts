@@ -479,7 +479,7 @@ export async function startTriggerListener(
   // call executeContinueWorkflow with intent: 'rehydrate' for sessions with progress).
   // WHY pass runWorkflowFn: crash-recovered sessions resume via runWorkflow; passing the
   // enricher-wrapped fn ensures recovered root sessions also receive context enrichment.
-  await runStartupRecovery(undefined, undefined, ctx, undefined, undefined, runWorkflowFn, apiKey).catch((err: unknown) => {
+  await runStartupRecovery(undefined, undefined, ctx, undefined, undefined, runWorkflowFn, apiKey, triggerIndex).catch((err: unknown) => {
     console.warn(
       '[TriggerListener] Startup recovery encountered an unexpected error:',
       err instanceof Error ? err.message : String(err),

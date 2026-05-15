@@ -48,6 +48,8 @@ import { resumeFromGate } from '../daemon/gate-resume.js';
 import type { ReviewApprovalAdapter } from './review-approval-adapter.js';
 import { GitHubReviewApprovalAdapter } from './review-approval-adapter.js';
 import { parseReviewVerdictArtifact } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
+import { PendingDraftReviewPoller, writePendingDraftSidecar } from './pending-draft-review-poller.js';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -327,6 +329,8 @@ async function maybeRunPostWorkflowActions(
   originalResult: WorkflowRunResult,
   reviewApprovalAdapter: ReviewApprovalAdapter,
   notificationService?: NotificationService,
+  ctx?: V2ToolContext,
+  triggerId?: string,
 ): Promise<void> {
   if (originalResult._tag !== 'success') return;
   if (!workflowTrigger.reviewerIdentity) return;
@@ -359,9 +363,9 @@ async function maybeRunPostWorkflowActions(
   }
 
   // Extract PR number and repo from context (injected by github_prs_poll polling adapter).
-  const ctx = workflowTrigger.context as Record<string, unknown> | undefined;
-  const prNumber = typeof ctx?.['itemNumber'] === 'number' ? ctx['itemNumber'] : undefined;
-  const prUrl = typeof ctx?.['itemUrl'] === 'string' ? ctx['itemUrl'] : undefined;
+  const triggerCtx = workflowTrigger.context as Record<string, unknown> | undefined;
+  const prNumber = typeof triggerCtx?.['itemNumber'] === 'number' ? triggerCtx['itemNumber'] : undefined;
+  const prUrl = typeof triggerCtx?.['itemUrl'] === 'string' ? triggerCtx['itemUrl'] : undefined;
 
   if (prNumber === undefined || prUrl === undefined) {
     console.warn(
@@ -411,8 +415,62 @@ async function maybeRunPostWorkflowActions(
     `prRepo=${prRepo} prNumber=${prNumber} reviewId=${reviewId}`,
   );
 
+  // Write pending-draft sidecar BEFORE starting the poller (crash recovery invariant).
+  const daemonSessionId = originalResult.sessionId ?? randomUUID();
+  const workrailSessionId = originalResult.sessionWorkspacePath
+    ? '' // session ID not directly available here; use empty string if absent
+    : '';
+  // Prefer the workrail session ID from the result if available.
+  // WorkflowRunSuccess.lastStepArtifacts carries the session context but not the session ID.
+  // The sidecar only needs it for the session event log write-back; we skip the event if absent.
+  const resolvedWorkrailSessionId = (originalResult as { workrailSessionId?: string }).workrailSessionId ?? '';
+
+  if (ctx?.v2 && resolvedWorkrailSessionId) {
+    try {
+      await writePendingDraftSidecar({
+        reviewId,
+        prNumber,
+        prRepo,
+        daemonSessionId,
+        workrailSessionId: resolvedWorkrailSessionId,
+        token: reviewerIdentity.token,
+        login: reviewerIdentity.login,
+        createdAt: new Date().toISOString(),
+        triggerId: triggerId ?? '',
+      });
+    } catch (e: unknown) {
+      console.warn(
+        `[TriggerRouter] Failed to write pending-draft sidecar: ` +
+        `${e instanceof Error ? e.message : String(e)}`,
+      );
+      // Non-fatal: poller still starts; crash recovery won't work but review still posts.
+    }
+
+    // Start PendingDraftReviewPoller as a fire-and-forget background task.
+    // WHY fire-and-forget: poller runs until operator publishes (could be hours).
+    // Awaiting it would hold the queue callback slot. Same pattern as gate evaluation.
+    const poller = new PendingDraftReviewPoller(reviewApprovalAdapter, {
+      prNumber,
+      prRepo,
+      reviewId,
+      token: reviewerIdentity.token,
+      login: reviewerIdentity.login,
+      workrailSessionId: resolvedWorkrailSessionId,
+      daemonSessionId,
+      sessionStore: ctx.v2.sessionStore,
+      gate: ctx.v2.gate,
+      mintEventId: ctx.v2.idFactory.mintEventId.bind(ctx.v2.idFactory),
+      onSubmitted: (submittedAt) => {
+        console.log(
+          `[TriggerRouter] Review published by operator: workflowId=${workflowTrigger.workflowId} ` +
+          `prRepo=${prRepo} prNumber=${prNumber} submittedAt=${submittedAt}`,
+        );
+      },
+    });
+    poller.start();
+  }
+
   // Notify operator that draft is ready.
-  // PR3 will also start PendingDraftReviewPoller here (fire-and-forget).
   notificationService?.notify(originalResult, `WorkTrain review draft ready on PR #${prNumber} -- open in GitHub to review findings`);
 }
 
@@ -1059,7 +1117,7 @@ export class TriggerRouter {
       // Post-workflow review actions: create a PENDING draft review when reviewerIdentity is set.
       // Uses workflowTrigger (which carries reviewerIdentity forwarded from TriggerDefinition).
       // Uses originalResult to avoid callbackUrl delivery_failed suppressing review posting.
-      await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService);
+      await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService, this.ctx, trigger.id);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
@@ -1223,7 +1281,7 @@ export class TriggerRouter {
       // Post-workflow review actions: create a PENDING draft review when reviewerIdentity is set.
       // reviewerIdentity is forwarded from TriggerDefinition onto WorkflowTrigger so this path
       // can access it without a triggerId lookup.
-      await maybeRunPostWorkflowActions(workflowTrigger, result, this._reviewApprovalAdapter, this.notificationService);
+      await maybeRunPostWorkflowActions(workflowTrigger, result, this._reviewApprovalAdapter, this.notificationService, this.ctx);
     });
     return workflowTrigger.workflowId;
   }

@@ -275,6 +275,7 @@ export const EVENT_KIND = {
   DECISION_TRACE_APPENDED: 'decision_trace_appended',
   RUN_COMPLETED: 'run_completed',
   DELIVERY_RECORDED: 'delivery_recorded',
+  REVIEW_DRAFT_SUBMITTED: 'review_draft_submitted',
 } as const;
 
 export type EventKindV1 = typeof EVENT_KIND[keyof typeof EVENT_KIND];

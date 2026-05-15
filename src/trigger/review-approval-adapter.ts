@@ -56,26 +56,77 @@ export type CreateDraftReviewResult =
 // ReviewApprovalAdapter interface
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// CheckSubmissionOpts / CheckSubmissionResult
+// ---------------------------------------------------------------------------
+
+export interface CheckSubmissionOpts {
+  readonly prNumber: number;
+  readonly prRepo: string;
+  readonly token: string;
+  readonly login: string;
+  /** The platform-specific review ID returned by createDraftReview. */
+  readonly reviewId: number;
+}
+
 /**
- * Adapter for creating and monitoring GitHub PENDING draft reviews.
+ * Result of checking whether a pending review has been submitted.
  *
- * WHY interface (not class): allows injectable fakes in tests that avoid
- * real GitHub API calls. Production code uses GitHubReviewApprovalAdapter.
+ * WHY discriminated union (not boolean): callers need to distinguish "still
+ * pending", "submitted", and "error" without string-parsing or null checks.
+ * Each variant carries only the fields relevant to that state.
+ */
+export type CheckSubmissionResult =
+  | { readonly kind: 'pending' }
+  | { readonly kind: 'submitted'; readonly submittedAt: string }
+  | { readonly kind: 'err'; readonly error: ReviewApprovalError };
+
+// ---------------------------------------------------------------------------
+// ReviewApprovalAdapter interface
+// ---------------------------------------------------------------------------
+
+/**
+ * Platform-agnostic adapter for creating draft reviews and polling for submission.
+ *
+ * WHY interface (not class): allows injectable fakes in tests and enables
+ * platform-specific implementations (GitHub, GitLab, future) without coupling
+ * the polling loop to any single platform's API.
+ *
+ * Implementations:
+ * - GitHubReviewApprovalAdapter: uses GitHub REST API (pending draft review)
+ * - Future GitLabReviewApprovalAdapter: different creation + polling mechanism
+ *
+ * The PendingDraftReviewPoller calls checkSubmission() on each tick -- it is
+ * entirely platform-agnostic. All platform-specific logic lives in the adapter.
  */
 export interface ReviewApprovalAdapter {
   /**
-   * Create a PENDING GitHub draft review under the operator's identity.
+   * Create a platform-appropriate draft/pending review under the operator's identity.
    *
-   * Performs a pre-creation GET check for an existing PENDING draft by
-   * reviewerLogin on the same PR. If found, returns the existing reviewId
-   * (reused: true). Otherwise POSTs a new draft review.
+   * The adapter handles the platform-specific creation mechanism:
+   * - GitHub: POST /pulls/:number/reviews with no event field (creates PENDING draft)
+   * - GitLab (future): create a draft note batch, or commit to a review-staging branch
    *
-   * An in-process mutex (keyed by `${prRepo}#${prNumber}`) prevents duplicate
-   * POST calls from concurrent sessions finishing at the same time.
+   * Performs a pre-creation check for an existing pending review by the same login
+   * to avoid duplicates when two sessions finish concurrently for the same PR.
    *
    * Returns err on network failure or non-2xx API response.
    */
   createDraftReview(opts: CreateDraftReviewOpts): Promise<CreateDraftReviewResult>;
+
+  /**
+   * Check whether the pending review has been submitted (published) by the operator.
+   *
+   * Called by PendingDraftReviewPoller on each polling tick. Returns:
+   * - { kind: 'pending' }: review still exists in draft/pending state
+   * - { kind: 'submitted', submittedAt }: operator published it (any non-pending state)
+   * - { kind: 'err', error }: network/API failure (poller should log and retry)
+   *
+   * WHY on the adapter (not the poller): submission detection is platform-specific.
+   * GitHub polls GET /reviews and checks state !== 'PENDING'. GitLab will check
+   * a different signal (note published, branch merged, etc.). The poller is dumb.
+   */
+  checkSubmission(opts: CheckSubmissionOpts): Promise<CheckSubmissionResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +275,47 @@ export class GitHubReviewApprovalAdapter implements ReviewApprovalAdapter {
     }
 
     return { kind: 'ok', reviewId: null };
+  }
+
+  async checkSubmission(opts: CheckSubmissionOpts): Promise<CheckSubmissionResult> {
+    const { prNumber, prRepo, token, reviewId } = opts;
+    const apiUrl = `https://api.github.com/repos/${prRepo}/pulls/${prNumber}/reviews/${reviewId}`;
+    let response: { ok: boolean; status: number; json(): Promise<unknown> };
+    try {
+      response = await this.fetchFn(apiUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      });
+    } catch (e) {
+      return { kind: 'err', error: { kind: 'network_error', message: `GET review failed: ${e instanceof Error ? e.message : String(e)}` } };
+    }
+
+    // 404 means the review was deleted -- treat as submitted/gone.
+    if (response.status === 404) {
+      return { kind: 'submitted', submittedAt: new Date().toISOString() };
+    }
+    if (!response.ok) {
+      return { kind: 'err', error: { kind: 'api_error', message: `GET review returned HTTP ${response.status}`, status: response.status } };
+    }
+
+    let body: unknown;
+    try { body = await response.json(); } catch {
+      return { kind: 'err', error: { kind: 'parse_error', message: 'Failed to parse GET review response' } };
+    }
+
+    const obj = body as Record<string, unknown>;
+    const state = obj['state'];
+    // Any state other than PENDING means the operator acted on the review.
+    if (state !== 'PENDING') {
+      const submittedAt = typeof obj['submitted_at'] === 'string'
+        ? obj['submitted_at']
+        : new Date().toISOString();
+      return { kind: 'submitted', submittedAt };
+    }
+    return { kind: 'pending' };
   }
 }
 
