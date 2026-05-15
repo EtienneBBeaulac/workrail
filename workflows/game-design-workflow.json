@@ -5,7 +5,7 @@
   "metricsProfile": "design",
   "validatedAgainstSpecVersion": 3,
   "description": "Design a minigame from concept to implementation-ready spec. Supports educational and generic game types. Educational games get additional structural gates: age-concept fit validation, intrinsic integration assessment, LM-GM mapping artifact, productive failure design, debrief spec, and evidence model. The output is a game spec artifact a developer or coding workflow can implement from without re-asking design questions.",
-  "about": "## Game Design Workflow\n\nThis workflow guides you through designing a minigame -- from a rough concept to a concrete spec a developer can build from.\n\n**Two paths:**\n- **Educational** (`gameType = educational`): The workflow enforces that the game's core mechanic is structurally tied to the learning concept -- not just themed around it. Includes age-concept fit validation, LM-GM mapping, intrinsic integration gate, productive failure design, debrief spec, and evidence model.\n- **Generic** (`gameType = generic`): Mechanic ideation, game loop design (win/fail states, feedback, progression), and a complete spec output.\n\n**What it produces:**\nA structured game spec with: core mechanic description, win/fail states, feedback design, progression, platform constraints, and (for educational games) LM-GM mapping, debrief spec, evidence model, and failure state design.\n\n**How to get good results:**\nDescribe the game concept, target audience (age range and context), and platform (web browser, mobile web, etc.). For educational games, name the specific concept you want players to internalize -- the more specific, the better the mechanic fit.",
+  "about": "## Game Design Workflow\n\nThis workflow guides you through designing a minigame -- from a rough concept to an implementation-ready spec a developer can build from without re-asking design questions.\n\n**Two paths:**\n- **Educational** (`gameType = educational`): Validates age-concept fit, generates mechanics grounded in real design tensions, enforces intrinsic integration (the concept must be structural to play, not decorative), designs productive failure states, debrief transfer prompts, and an evidence model. Includes a full design review pass before the spec is finalized.\n- **Generic** (`gameType = generic`): Tension-grounded mechanic generation, game loop design, design review, and a complete spec output.\n\n**What it produces:**\nA structured game spec covering core mechanic, win/fail states, feedback design, progression, tech stack recommendation, scene structure, tutorial design, behavior-first state description, asset categories, audio policy, accessibility level, persistence model, and (for educational games) LM-GM mapping, intrinsic integration evidence, failure state design, debrief spec, and evidence model.\n\n**How to get good results:**\nDescribe the game concept, target audience, and platform. Mention a preferred tech stack if you have one -- the workflow will validate it rather than override it. For educational games, name the specific concept you want players to internalize.",
   "examples": [
     "Design a budgeting minigame for 10-year-olds on a financial literacy website",
     "Design a fast-paced arcade game about needs vs wants for ages 8-10",
@@ -18,6 +18,16 @@
   },
   "features": [
     "wr.features.capabilities"
+  ],
+  "functionDefinitions": [
+    {
+      "name": "lmGmMappingTemplate",
+      "definition": "Use this shape for the LM-GM mapping table:\n## LM-GM Mapping\n| Learning Mechanic | Game Mechanic | Player Evidence |\n|---|---|---|\n| <what financial concept operation the player performs> | <what game action implements it> | <specific observable player action that proves the concept was used> |\n\nRules: each Player Evidence cell must be a specific observable action (not 'player engages with the concept'). Flag any Game Mechanic row with an empty Learning Mechanic as decorative."
+    },
+    {
+      "name": "gameSpecTemplate",
+      "definition": "Use this shape for the complete game spec:\n## Game Spec\n### Core Design\n- gameType: educational | generic\n- gameConcept: one paragraph\n- targetAudience: age range and context\n- platformConstraints: technical environment\n- persistenceModel: none | in_session | cross_session\n- accessibilityLevel: none | basic | classroom\n- audioPolicy: required | optional | off_by_default | none\n- recommendedStack: stack name, complexity tier, one-sentence rationale\n- coreMechanic: the core player action in one sentence\n- winState: condition that ends a round successfully\n- failState: condition that ends a round or triggers a consequence\n- feedbackDesign: what the player sees/hears after each action\n- progressionDesign: how difficulty or scope changes\n- replayabilityDesign: what changes between plays\n### Technical Spec\n- sceneInventory: list of screens with behavioral description and navigation (what player action or event moves to the next screen)\n- tutorialDesign: how the concept is introduced before the player uses it independently\n- stateDescription: behavior-first description of what changes, when, and in response to what (no variable names or schema)\n- assetCategories: list of asset types needed, each marked required or optional\n- uiSketch: key UI elements (enough to start implementation)\n\nEducational games also require:\n- financeConceptName: specific concept being taught\n- ageBand: early | middle | advanced\n- lmGmMapping: full LM-GM table (use lmGmMappingTemplate)\n- integrationEvidence: the specific game action impossible without the concept\n- failureStateDesign: how mistakes alter future conditions\n- debriefSpec: transfer prompt(s), debriefStyle (modal | full_screen | inline), debriefSkippable (true | false)\n- evidenceModel: competency (behaviorally testable), observable evidence (2-3 player actions), transfer task (different surface features)"
+    }
   ],
   "assessments": [
     {
@@ -102,13 +112,17 @@
           "For educational games: map `targetAgeRange` to one of three developmental bands: `early` (ages 6-8: concrete/immediate/visible only), `middle` (ages 9-11: budgeting, comparison, opportunity cost, saving goals), `advanced` (ages 12-14: time tradeoffs, risk, simple borrowing, delayed consequences). Record as `ageBand`.",
           "Classify `platformType` as exactly one of: `web_browser` (desktop/laptop browser), `mobile_web` (mobile browser or embedded webview), `desktop_standalone` (installed desktop app), `cross_platform` (must run on multiple platforms). If unclear, ask.",
           "Capture `preferredStack` if a specific engine or framework is mentioned (e.g. Godot, Unity, React, Phaser). Leave empty string if none stated. Set `hasPreferredStack = true` if captured, false otherwise.",
-          "Set these keys in context: `gameType`, `targetAgeRange`, `ageBand` (educational only), `financeConceptName` (educational only), `platformConstraints`, `platformType`, `preferredStack`, `hasPreferredStack`, `desiredPlayDuration`, `gameConcept`."
+          "Classify `persistenceModel` as exactly one of: `none` (no state saved beyond the current session -- game resets on reload), `in_session` (progress saved within a session, reset between sessions), `cross_session` (progress or scores saved across sessions). If unclear, ask -- this affects architecture significantly.",
+          "Classify `accessibilityLevel` as exactly one of: `none` (no special requirements), `basic` (readable fonts, sufficient color contrast, touch-friendly targets), `classroom` (keyboard navigable, no audio dependency, screen-reader compatible). If unclear and targeting children in a school context, default to `basic`.",
+          "Classify `audioPolicy` as exactly one of: `required` (audio is core to the experience), `optional` (audio enhances but game works without it), `off_by_default` (audio available but muted until the player enables it), `none` (no audio at all). Note: mobile browsers and many schools block audio autoplay -- flag this if `platformType` includes mobile or classroom context.",
+          "Set these keys in context: `gameType`, `targetAgeRange`, `ageBand` (educational only), `financeConceptName` (educational only), `platformConstraints`, `platformType`, `preferredStack`, `hasPreferredStack`, `desiredPlayDuration`, `gameConcept`, `persistenceModel`, `accessibilityLevel`, `audioPolicy`."
         ],
         "verify": [
           "gameType is classified as educational or generic -- not left open.",
           "For educational games: financeConceptName is specific enough to constrain mechanic design.",
           "For educational games: ageBand is set to early, middle, or advanced.",
           "platformType is set to one of: web_browser, mobile_web, desktop_standalone, cross_platform.",
+          "persistenceModel, accessibilityLevel, and audioPolicy are all set.",
           "Platform constraints are recorded -- not left implicit."
         ]
       },
@@ -208,26 +222,78 @@
       "requireConfirmation": false
     },
     {
-      "id": "phase-2-mechanic-ideation",
-      "title": "Phase 2: Mechanic Ideation",
+      "id": "phase-2-mechanic-ideation-setup",
+      "title": "Phase 2: Mechanic Ideation Setup",
       "promptBlocks": {
-        "goal": "Generate candidate game mechanics that could carry this concept. Produce genuinely distinct candidates -- not variations on the same idea.",
+        "goal": "Frame the tensions and constraints that should drive mechanic generation before the ideation routine runs.",
         "constraints": [
-          "Generate at least 3 mechanically distinct candidates.",
-          "Each candidate must have a clear core action -- the thing the player does on every turn or interaction.",
-          "Do not polish a single mechanic here -- generate options first, narrow later."
+          "Do not generate mechanics here -- that happens in the next step.",
+          "Tensions must be specific to this game's concept, audience, and platform -- not generic design clichés.",
+          "Use the game-type-specific guidance below to identify the right tensions for this path."
         ],
         "procedure": [
-          "For each candidate mechanic, record: mechanic name, core player action (one sentence), how the concept is involved, win condition sketch, and fail condition sketch.",
-          "Check each candidate for distinctness: if two candidates share the same core player action, merge or replace one.",
-          "Select the leading mechanic candidate based on fit with the game concept, age range, and platform constraints.",
-          "Record `selectedMechanic` and the rationale for choosing it over the alternatives.",
-          "Set `selectedMechanic` in context."
+          "Name 2-4 specific tensions for this game. Record as `identifiedTensions` (array of one-sentence descriptions).",
+          "State what a mechanic that resolves each tension differently would look like at a high level.",
+          "Record the mechanic success criteria: what does a good mechanic for this concept/age/platform need to satisfy?",
+          "Set `identifiedTensions` in context."
         ],
         "verify": [
-          "At least 3 mechanically distinct candidates were generated.",
-          "The selected mechanic has a clear core action, not just a theme.",
-          "The rationale for selection names why the alternatives were weaker."
+          "Tensions are specific to this game -- not generic game design clichés.",
+          "At least one tension is specific to the educational constraint (if educational).",
+          "`identifiedTensions` is set before advancing."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "educational-tensions",
+          "when": {
+            "var": "gameType",
+            "equals": "educational"
+          },
+          "text": "For educational games: the most important tension to name is the intrinsic integration tension -- how do you make the finance concept the action grammar without making the game feel like homework?"
+        },
+        {
+          "id": "generic-tensions",
+          "when": {
+            "var": "gameType",
+            "equals": "generic"
+          },
+          "text": "For generic games: name tensions around player agency, difficulty curve, and replayability. What does this game offer that a player would come back for?"
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2b-mechanic-ideation",
+      "title": "Phase 2b: Mechanic Ideation (Injected Routine)",
+      "templateCall": {
+        "templateId": "wr.templates.routine.tension-driven-design",
+        "args": {
+          "deliverableName": "mechanic-candidates.md"
+        }
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-2c-mechanic-selection",
+      "title": "Phase 2c: Mechanic Selection",
+      "promptBlocks": {
+        "goal": "Read mechanic-candidates.md and select the leading mechanic for this game.",
+        "constraints": [
+          "Select based on fit with the concept, age band, platform constraints, and identified tensions.",
+          "Do not let the most familiar mechanic win by default -- check it against the others.",
+          "For educational games: the selected mechanic must have a credible path to passing the intrinsic integration gate."
+        ],
+        "procedure": [
+          "Read mechanic-candidates.md.",
+          "Select the leading mechanic and name the strongest alternative.",
+          "Record why the selected mechanic wins on the identified tensions.",
+          "Record `selectedMechanic` and `runnerUpMechanic` in context."
+        ],
+        "verify": [
+          "Selection is justified against the identified tensions, not just stated.",
+          "The runner-up is named -- not just the winner.",
+          "For educational games: the selected mechanic has a named path to structural integration."
         ]
       },
       "promptFragments": [
@@ -318,11 +384,15 @@
           "The mapping covers all major player actions in the selected mechanic."
         ]
       },
+      "functionReferences": [
+        "lmGmMappingTemplate()"
+      ],
       "requireConfirmation": false
     },
     {
       "id": "phase-4-integration-gate",
       "title": "Phase 4: Intrinsic Integration Gate",
+      "agentRole": "You are a skeptical game design researcher trying to falsify the claim that this mechanic requires the learning concept. Your job is to break the integration claim, not to validate it.",
       "runCondition": {
         "var": "gameType",
         "equals": "educational"
@@ -497,13 +567,16 @@
         "procedure": [
           "Design the debrief format: what appears at end of round, what transfer prompt(s) are shown, and how the debrief connects the in-game event to the real-world concept.",
           "Write at least two example transfer prompts appropriate for the age band.",
+          "Choose `debriefStyle`: exactly one of `modal` (overlay on the game screen, player must dismiss), `full_screen` (replaces game screen, dedicated debrief view), `inline` (appears below or beside the game without interrupting layout). Consider: modal is fastest to implement; full_screen gives the transfer moment the most weight; inline is least disruptive but risks being skipped.",
+          "Decide `debriefSkippable`: true or false. For early band (6-8): false -- the debrief is part of the learning loop, not optional. For middle and advanced: can be true if the player has already seen it multiple times, but the first occurrence should not be skippable.",
           "Consider whether the debrief should support a parent/teacher conversation (optional but valuable for classroom contexts).",
-          "Record the debrief design in notesMarkdown.",
-          "Set `debriefDesigned = true` in context."
+          "Record the full debrief design in notesMarkdown.",
+          "Set `debriefDesigned = true`, `debriefStyle`, and `debriefSkippable` in context."
         ],
         "verify": [
           "At least one transfer prompt is included and connects the game to real life.",
           "The debrief is age-appropriate in complexity.",
+          "`debriefStyle` and `debriefSkippable` are both set.",
           "The debrief is part of the game spec, not a suggestion to add later."
         ]
       },
@@ -534,6 +607,115 @@
           "Competency is behaviorally testable -- a reviewer could check whether a player demonstrated it.",
           "Observable evidence items are specific player actions, not score proxies.",
           "Transfer task uses different surface features than the game."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-8b-technical-spec",
+      "title": "Phase 8b: Technical Spec",
+      "promptBlocks": {
+        "goal": "Produce the technical spec sections a developer needs that pure game design cannot answer: scene structure, tutorial design, behavior-first state description, and asset categories.",
+        "constraints": [
+          "Scene structure is behavioral -- what the user does on each screen, not how it looks or animates.",
+          "State description must be behavior-first: describe what changes, when, and in response to what player action. Do not write pseudo-code or TypeScript types.",
+          "Asset categories are coarse-grained: types of assets needed (sprite sheets, backgrounds, sound effects, fonts), not filenames or dimensions.",
+          "Tutorial design is part of the educational spec for educational games -- not an implementation detail. A cold game loop is a design failure for children."
+        ],
+        "procedure": [
+          "Design the scene/screen inventory: list every screen the game needs (e.g. title, tutorial, game, debrief, game-over, results) with one sentence describing what the player does on each. Then describe the behavioral navigation: which player action or condition moves from each screen to the next.",
+          "Design the tutorial: how is the concept introduced before the player must use it? Options: character-guided walkthrough, interactive first round with scaffolding, tooltip overlays, skippable intro screen. For early band (6-8): mandatory guided first round is strongly recommended. For middle and advanced: a skippable intro is acceptable. Record as `tutorialDesign`.",
+          "Describe the game state in behavior-first terms: what entities exist in this game, what about them changes during play, and what player action or game event causes each change. Example: 'The budget decreases when the player confirms a purchase. Items move from available to selected when tapped. The round ends when the timer reaches zero or the player taps confirm.' Do not name variables or write schema.",
+          "List asset categories needed: for each category, name the type and give one example of what it represents. Examples: background image (the shop or market scene), item sprites (individual purchasable items), UI icons (confirm button, savings jar), sound effects (coin collect, wrong-choice buzz), font (display font for budget numbers). Distinguish: required assets (game does not work without them) vs. optional assets (enhancements that can be stubbed).",
+          "Note any audio-policy implications for the asset list: if `audioPolicy = none` or `off_by_default`, mark all sound effects as optional stubs.",
+          "Note any accessibility implications for the asset list: if `accessibilityLevel = classroom`, flag any asset that depends on color alone to convey meaning.",
+          "Set `technicalSpecComplete = true` in context."
+        ],
+        "verify": [
+          "Every screen in the scene inventory has a behavioral description, not just a name.",
+          "Navigation between screens is described in terms of player actions or game events -- not UI transitions.",
+          "Tutorial design is specified -- not left as 'add a tutorial later'.",
+          "State description uses behavior-first language -- no variable names, no schema syntax.",
+          "Asset categories are distinguished as required vs. optional."
+        ]
+      },
+      "promptFragments": [
+        {
+          "id": "tutorial-early-band",
+          "when": {
+            "var": "ageBand",
+            "equals": "early"
+          },
+          "text": "Age band EARLY (6-8): a mandatory guided first round is strongly recommended. The tutorial should model the exact mechanic the child will use, not explain it abstractly. Show the action happening, then hand control to the child."
+        },
+        {
+          "id": "tutorial-educational",
+          "when": {
+            "var": "gameType",
+            "equals": "educational"
+          },
+          "text": "For educational games: the tutorial is part of the educational design. How the concept is introduced before the player uses it independently affects whether the mechanic teaches or just tests. A character guide or scaffolded first round is better than a text explanation."
+        },
+        {
+          "id": "persistence-cross-session-state",
+          "when": {
+            "var": "persistenceModel",
+            "equals": "cross_session"
+          },
+          "text": "persistenceModel = cross_session: include a 'saved state' entry in the scene inventory covering what is stored and when. Note in the state description which fields persist across sessions vs. reset on each play."
+        },
+        {
+          "id": "audio-none-assets",
+          "when": {
+            "var": "audioPolicy",
+            "equals": "none"
+          },
+          "text": "audioPolicy = none: omit all sound effects from the asset category list. Ensure all feedback is visual-only -- nothing in the state description or scene flow should depend on audio."
+        },
+        {
+          "id": "accessibility-classroom-assets",
+          "when": {
+            "var": "accessibilityLevel",
+            "equals": "classroom"
+          },
+          "text": "accessibilityLevel = classroom: flag any asset that uses color as the only signal (red = bad, green = good). Every visual signal needs a secondary indicator (icon, text label, or pattern). Include keyboard navigation in the scene inventory's behavioral descriptions."
+        }
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-8c-design-review",
+      "title": "Phase 8b: Design Review (Injected Routine)",
+      "templateCall": {
+        "templateId": "wr.templates.routine.design-review",
+        "args": {
+          "deliverableName": "design-review-findings.md"
+        }
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-8d-design-review-synthesis",
+      "title": "Phase 8d: Design Review Synthesis",
+      "promptBlocks": {
+        "goal": "Read design-review-findings.md and decide what to revise before producing the spec.",
+        "constraints": [
+          "Classify each finding as structural (changes the mechanic or path), tactical (changes implementation within the current design), or surface (wording, labelling). Only structural findings should change the design.",
+          "Do not adopt review findings wholesale -- synthesize them against your own reasoning.",
+          "If a structural finding reveals the mechanic is bolt-on, loop back to phase-2 rather than papering over it in the spec.",
+          "For generic games: the review runs after one substantive design phase (loop design). Do not treat thin findings as a complete audit -- they reflect limited input, not a clean bill of health."
+        ],
+        "procedure": [
+          "Read design-review-findings.md.",
+          "Classify each finding: structural | tactical | surface.",
+          "For structural findings: state whether you accept or reject the finding and why. If accepting, describe the revision.",
+          "For tactical and surface findings: note them for inclusion in the spec or dismiss with a reason.",
+          "Set `designReviewComplete = true` and `designRevised` (true/false) in context."
+        ],
+        "verify": [
+          "Every finding was classified before being acted on.",
+          "No structural finding was accepted without a stated revision.",
+          "Main agent owns the synthesis -- review output was treated as evidence, not as the answer."
         ]
       },
       "requireConfirmation": false
@@ -595,6 +777,58 @@
           "All required fields are present and non-trivial.",
           "A developer reading this could start implementation without asking clarifying questions.",
           "For educational games: LM-GM mapping has specific player-action rows, debrief has real transfer prompts, evidence model names a behaviorally testable competency."
+        ]
+      },
+      "functionReferences": [
+        "gameSpecTemplate()"
+      ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-10-handoff",
+      "title": "Phase 10: Coding Workflow Handoff",
+      "promptBlocks": {
+        "goal": "Produce two artifacts: a structured wr.game_spec block for machine/pipeline use, and a coding-workflow briefing document the user pastes as the goal when starting the coding task workflow. The briefing must answer the questions the coding workflow would otherwise spend phase-0 discovering.",
+        "constraints": [
+          "The briefing document is not a prose summary of the spec -- it is a structured prompt-ready context package.",
+          "The coding task workflow starts from a goal description and does its own codebase analysis. The briefing must give it the invariants, non-goals, verification strategy, and must-not-violate constraints up front -- so phase-0 spends its time on codebase analysis, not re-deriving design decisions.",
+          "The briefing must be self-contained: a developer or coding workflow with no prior context should be able to read it and start without asking questions.",
+          "For educational games: the integration evidence is the most load-bearing field. A vague integration evidence will produce a game that looks correct but does not teach the concept."
+        ],
+        "procedure": [
+          "First, emit the structured wr.game_spec block:",
+          "  kind: wr.game_spec",
+          "  version: 1",
+          "  gameType: educational | generic",
+          "  coreMechanic: <one sentence>",
+          "  recommendedStack: <stack name and one-sentence rationale>",
+          "  platformType: <web_browser | mobile_web | desktop_standalone | cross_platform>",
+          "  accessibilityLevel: <none | basic | classroom>",
+          "  audioPolicy: <required | optional | off_by_default | none>",
+          "  persistenceModel: <none | in_session | cross_session>",
+          "  tutorialDesign: <one sentence summary>",
+          "  implementationConstraints: <must-not-violate statements>",
+          "  outOfScope: <explicitly excluded things>",
+          "  Educational games also include: financeConceptName, ageBand, integrationEvidence, debriefStyle, debriefSkippable",
+          "Second, produce the coding workflow briefing document with these sections:",
+          "  ## Task: one paragraph describing what to build, for whom, and on what platform.",
+          "  ## Tech Stack: recommended stack, complexity tier, and any constraints on stack choice.",
+          "  ## Game Spec: the full spec from phase-9 inline -- coreMechanic, winState, failState, feedbackDesign, progressionDesign, replayabilityDesign, uiSketch, sceneInventory, tutorialDesign, stateDescription, assetCategories.",
+          "  ## Invariants: hard requirements the implementation must preserve. Include accessibility level implications (e.g. 'all interactive elements must have visible focus states'), audio policy implications (e.g. 'game must be fully playable with audio off'), persistence model implications.",
+          "  ## Non-Goals: what is explicitly out of scope. The developer must not implement these even if they seem useful.",
+          "  ## Verification Strategy: how to know the game works. For educational games: include the evidence model competency and transfer task so the developer knows what to test against. For all games: name the platform/browser targets to test on.",
+          "  ## Educational Requirements (educational games only): integrationEvidence (the specific game action impossible without the concept), LM-GM mapping summary, debriefSpec with transfer prompts.",
+          "  ## Known Gaps: anything that was left unresolved or will require a design decision during implementation."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "The wr.game_spec block followed by the full coding workflow briefing document."
+        },
+        "verify": [
+          "The briefing document is self-contained -- no prior context needed to start implementation.",
+          "Invariants are hard requirements, not suggestions.",
+          "Non-goals names at least one thing deliberately excluded.",
+          "Verification strategy says how to know the game works -- not just 'test it'.",
+          "For educational games: integrationEvidence is specific and falsifiable."
         ]
       },
       "requireConfirmation": true
