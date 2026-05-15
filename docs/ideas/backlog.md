@@ -2316,80 +2316,30 @@ The better long-term design: the engine owns the enforcement mechanism (validate
 
 ---
 
-### Two-tier artifact schema: outer strict for routing, inner passthrough for enrichment (May 15, 2026)
+### Artifact schemas should use passthrough, not strict -- engine should not block workflow-level enrichment (May 15, 2026)
 
 **Status: idea** | Priority: high
 
 **Score: 12** | Cor:3 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
 
-All artifact Zod schemas use `.strict()` at every level. This means any enrichment field a workflow agent emits alongside routing fields (file location, line numbers, causal attribution, remediation steps) causes validation failure at `complete_step` and triggers the blocked-response path. The coordinator falls back to keyword scanning on prose notes.
+All artifact Zod schemas in `src/v2/durable-core/schemas/artifacts/` (including `ReviewVerdictArtifactV1Schema`) use `.strict()`. This means any field a workflow author adds to an artifact -- file location, line number, causal attribution, remediation steps -- causes validation failure at `complete_step` and triggers the blocked-response path. The coordinator falls back to keyword scanning.
 
-**The core problem:** The engine conflates two concerns that should be separate: (1) enforcing that coordinator-required routing fields are present and correctly typed, and (2) defining the complete shape of what an artifact may contain. Only the first is the engine's job.
+**Why this is wrong:** The engine's job is to enforce that coordinator-required fields are present and correctly typed. It is not the engine's job to prevent workflows from carrying additional context. `.strict()` inverts the coupling -- infrastructure constrains the application layer. A workflow that wants to emit `{ kind: 'wr.review_verdict', verdict: 'blocking', findings: [...], file: 'src/foo.ts', startLine: 42 }` should be able to do so; the coordinator reads what it needs and ignores the rest.
 
-**The fix (Option F):** Keep `.strict()` on the outer artifact object (so the required routing fields are enforced) but apply `.passthrough()` to the enrichable sub-object inside. For `ReviewVerdictArtifactV1Schema`, the finding sub-object becomes passthrough -- `severity`, `summary`, and `findingCategory` are still required and typed, but any additional fields the agent emits are stored and passed through without rejection.
+**The fix:** Replace `.strict()` with `.passthrough()` on all artifact schemas (or add explicit optional fields where the set is known). For `ReviewVerdictArtifactV1Schema` specifically, add optional fields to the per-finding schema: `file?: string`, `startLine?: number`, `endLine?: number`, `causalLink?: string`, `remediation?: string`. These are surfaced to the coordinator and stored in the session event log, enabling richer downstream tooling without any breaking change.
 
-```ts
-// Outer object stays .strict() -- routing fields enforced
-ReviewVerdictArtifactV1Schema = z.object({
-  kind: z.literal('wr.review_verdict'),
-  verdict: z.enum(['clean', 'minor', 'blocking']),
-  confidence: z.enum(['high', 'medium', 'low']),
-  findings: z.array(FindingSchema),
-  summary: z.string().min(1),
-}).strict();
-
-// Finding sub-object gets .passthrough() -- engine stores, never validates enrichment
-FindingSchema = z.object({
-  severity: z.enum(['critical', 'major', 'minor', 'nit']),
-  summary: z.string().min(1),
-  findingCategory: z.enum([...]).optional(),
-}).passthrough();  // file, startLine, causalLink, remediation etc. pass through freely
-```
-
-**Why this is the right design:** The engine enforces what it needs (routing fields on the outer object). It stores what it doesn't need (enrichment fields on inner sub-objects) without rejecting them. No accumulation problem -- workflow authors never need an engine PR to add enrichment fields. No engine PR per field, ever.
-
-**Consumer tradeoff:** Enrichment fields arrive as `unknown` on the TypeScript type. Consumers that want typed access must validate on read with their own schema. This is correct behavior -- the engine shouldn't be the type authority for data it doesn't use. The longer-term fix is [[extensible-output-contract-registration]] which gives consumers a registered schema for typed access without touching the engine.
+**Discovered during:** wr.mr-review v2.9.0 overhaul -- the updated Phase 6 verdict prompt wanted to include file/line/causalLink/remediation per finding in the typed artifact, but the strict schema forced those fields back into human-readable notes only, losing the machine-readable signal.
 
 **Scope:**
-- `src/v2/durable-core/schemas/artifacts/review-verdict.ts` -- primary target; split FindingSchema into a named sub-schema with `.passthrough()`
-- `src/v2/durable-core/schemas/artifacts/` -- audit all other schemas for enrichable sub-objects; apply consistently in one pass. Pure routing primitives (`LoopControlArtifactV1`, `GateVerdictArtifactV1`) stay fully `.strict()` -- no enrichment concept applies to them.
-- `src/v2/durable-core/domain/artifact-contract-validator.ts` -- verify passthrough behavior doesn't affect the routing validation path
-- `tests/unit/artifact-contract-review-verdict.test.ts` -- update to assert unknown fields pass through on the finding sub-object
-- `workflows/mr-review-workflow.agentic.v2.json` -- update Phase 6 prompt to emit `file`, `startLine`, `endLine`, `causalLink`, `remediation` in the typed artifact (revert the "put enrichment in notes" redirect). This is a paired delivery with the engine PR -- ship together in the same milestone.
-
-**Delivery constraint:** Engine PR must merge before the workflow Phase 6 update. If the workflow update ships first, Phase 6 starts emitting enrichment fields against the old strict schema and every `complete_step` call fails.
+- `src/v2/durable-core/schemas/artifacts/review-verdict.ts` -- primary target; add optional finding fields, change to passthrough
+- `src/v2/durable-core/schemas/artifacts/` -- audit all other artifact schemas for the same issue
+- `src/v2/durable-core/domain/artifact-contract-validator.ts` -- verify passthrough doesn't break validation logic
+- Update `getBlockedMessage()` in `review-verdict.ts` to show the extended schema
 
 **Things to hash out:**
-- Does storing extra fields in the session event log affect `workflowHash` or session validation? Likely no -- the hash covers workflow JSON, not artifact content. Verify before merging.
-- Which sub-objects in other artifact schemas are "enrichable"? The finding sub-object in review-verdict is obvious. Are there equivalent sub-objects in DiscoveryHandoffArtifactV1, ShapingHandoffArtifactV1, CodingHandoffArtifactV1?
-- Related (follow-on): [[extensible-output-contract-registration]] gives consumers typed access to enrichment fields. Option F is a prerequisite and intermediate step.
-
----
-
-### Extensible artifact contract registration: coordinator-owned schemas, engine-enforced (May 15, 2026)
-
-**Status: idea** | Priority: medium
-
-**Score: 9** | Cor:2 Cap:3 Eff:1 Lev:2 Con:2 | Blocked: needs [[two-tier-artifact-schema]] first
-
-The two-tier passthrough design (above) solves the engine-side problem -- enrichment fields are no longer rejected. But consumers still get `unknown` typed fields, not typed enrichment. A coordinator that wants to read `finding.file` as a typed string must either cast (unsafe) or validate with its own Zod schema on read (duplicated effort per consumer).
-
-**The right long-term design:** The engine owns the enforcement mechanism (validate presence and shape at `complete_step`) but not the schema definitions for enrichment. Coordinator-domain contracts register their enrichment schemas from outside the engine. The engine validates required routing fields (via the existing strict outer schema) and optionally validates enrichment fields against whatever sub-schemas are registered for that artifact kind and consumer.
-
-**What this enables:**
-- Workflow authors declare enrichment schemas in workflow JSON or coordinator config -- no engine PR ever
-- Consumers import a registered schema and get fully typed enrichment fields
-- The engine enforces both tiers -- routing fields strictly, enrichment fields against the registered consumer schema
-- WorkTrain's self-improvement loop can emit richer typed artifacts that downstream phases consume with type safety
-
-**Blocked by:** The two-tier passthrough design above. Coordinator-owned schemas can't be registered if the engine rejects any field not in its hardcoded list. Option F is the prerequisite.
-
-**Things to hash out:**
-- Registration API: DI injection at startup (consistent with existing container pattern), module-level call, or config file?
-- Compile-time vs runtime: workflow compilation and `complete_step` validation happen at different points. The registry must be available at both. Does this require eager registration before compilation starts?
-- Does this change `workflowHash`? If registered schemas change, should the session hash change? Probably no -- the hash covers workflow JSON structure, not external schemas.
-- Migration: do the existing 5 hardcoded contracts migrate to the registry, or stay hardcoded? A two-tier system (some hardcoded, some registered) is confusing but full migration has low priority. Probably: new contracts use the registry, existing ones stay until there's a reason to migrate.
-- Related: [[two-tier-artifact-schema]] is the prerequisite. This design is the destination.
+- `.passthrough()` vs explicit optional fields: passthrough is simpler and most permissive; explicit optional fields are self-documenting and keep the type useful. Prefer explicit optional fields for known enrichment patterns (file/line/causal), passthrough for the general case.
+- Does storing extra fields in the session event log affect `workflowHash` or session validation? Likely no -- the hash covers the workflow JSON, not artifact content. Verify.
+- Related: [[extensible-output-contract-registration]] is the longer-term design for coordinator-owned schema registration. This fix is a prerequisite for that -- you can't have coordinator-owned schemas if the engine rejects anything not in its hardcoded list.
 
 ---
 
@@ -3246,100 +3196,6 @@ This is the actual cause of sessions sitting silent for 10+ minutes: the hung Be
 **Things to hash out:**
 - What is the right per-call timeout? Haiku can legitimately take 90s on a complex response. Sonnet can take longer. The timeout should be model-tier-aware, or at minimum configurable via `agentConfig.callTimeoutSeconds`.
 - Should a per-call timeout count as a stall (same abort path) or as a retryable error (try again once before aborting)?
-
----
-
-### Provider-agnostic LLM adapter: decouple AgentLoop from Anthropic SDK types (May 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
-
-`AgentLoop` is deeply coupled to Anthropic SDK types: `Anthropic.Message`, `Anthropic.ContentBlock`, `Anthropic.Tool`, `Anthropic.ToolUseBlock`, `Anthropic.ToolResultBlockParam`, `Anthropic.MessageParam` -- ~10 provider-specific types threaded through the internal conversation history and the main loop. `buildAgentClient()` only knows two concrete SDK clients: `new Anthropic()` and `new AnthropicBedrock()`. Adding OpenAI, Gemini, Ollama, DeepSeek, or any local model requires changing the loop internals, not just swapping a client.
-
-This is the root blocker for all multi-provider work: streaming, local LLMs, model-tier abstraction, and cost routing all require a clean provider boundary first.
-
-**The coupling is in one file and one factory -- it is removable:**
-- `src/daemon/agent-loop.ts` -- all Anthropic types in `AgentClientInterface`, `AgentInternalMessage`, `_runLoop()`, `_executeTools()`, `_buildApiMessages()`
-- `src/daemon/core/agent-client.ts` -- hardcodes `new Anthropic()` and `new AnthropicBedrock()`
-
-Everything else in the daemon (tools, session state, workflow engine, coordinator) is already provider-unaware.
-
-**The right design: a canonical internal message format + a provider adapter interface.**
-
-Define an internal `LlmMessage` type (canonical, provider-neutral) for the conversation history. Define an `LlmAdapter` interface that translates between canonical messages and a specific provider's wire format, makes the call, and returns a canonical response. `AgentLoop` only knows `LlmAdapter`. Each provider (Anthropic, OpenAI-compat, Ollama, Gemini) is an `LlmAdapter` implementation.
-
-```typescript
-// Canonical types -- no SDK imports allowed here
-interface LlmToolCall { id: string; name: string; input: Record<string, unknown> }
-interface LlmMessage {
-  role: 'user' | 'assistant';
-  text?: string;
-  toolCalls?: LlmToolCall[];           // assistant -> requested tool calls
-  toolResults?: { toolCallId: string; content: string; isError: boolean }[]; // user -> results
-}
-interface LlmResponse {
-  message: LlmMessage;
-  stopReason: 'tool_use' | 'end_turn' | 'error';
-  inputTokens: number;
-  outputTokens: number;
-  errorMessage?: string;
-}
-
-interface LlmAdapter {
-  complete(
-    system: string,
-    messages: readonly LlmMessage[],
-    tools: readonly LlmTool[],
-    opts: { maxTokens: number; signal: AbortSignal },
-  ): Promise<LlmResponse>;
-}
-```
-
-An `AnthropicAdapter` wraps `client.messages.create()` and translates to/from `Anthropic.MessageParam[]`. An `OpenAICompatAdapter` wraps `client.chat.completions.create()` (covers OpenAI, Ollama, DeepSeek, LM Studio, any OpenAI-compatible endpoint). A `GeminiAdapter` follows the same pattern with the Gemini SDK.
-
-**Streaming becomes a feature of the adapter, not the loop.** Each adapter implementation decides whether to stream internally -- the loop always receives a `Promise<LlmResponse>`. The `AnthropicStreamingAdapter` uses `messages.stream()` + `finalMessage()` and can surface per-token progress via a callback (e.g. `opts.onToken`). Other adapters that don't support streaming use batch calls. `AgentLoop` never knows the difference.
-
-**What doesn't change:**
-- Tool execution, session state, workflow engine, steer queue, turn-end subscribers
-- `AgentLoopOptions` (replace `client: AgentClientInterface` with `adapter: LlmAdapter`)
-- `AgentLoopCallbacks` (all callbacks stay the same)
-- The stall timer and per-call timer (now implemented in the adapter, not the loop)
-
-**What this unlocks:**
-- Streaming (first-token timeout, per-token progress, no abort needed)
-- Local LLM support (Ollama, LM Studio, any OpenAI-compat server)
-- OpenAI, Gemini, DeepSeek as first-class providers
-- Model-tier abstraction (cheap/medium/expensive is just a routing wrapper around `LlmAdapter`)
-- Provider-level retry (the adapter retries a hung call before surfacing it as a failure)
-- Cost attribution per provider
-
-**Things to hash out:**
-- Canonical tool call format: Anthropic uses `input: Record<string, unknown>`, OpenAI uses `arguments: string` (JSON). The canonical type should be `input: Record<string, unknown>` (parsed) -- the adapter handles JSON parsing.
-- Streaming progress surface: `opts.onToken?: (delta: string) => void` callback on `complete()` is the simplest interface. The loop passes it through; the adapter calls it per token if it streams.
-- Tool result format: Anthropic and OpenAI both support multi-part tool results. Canonical type should be `content: string` for MVP (single text result) -- expand to array later.
-- `max_tokens` vs `max_completion_tokens`: provider-specific, the adapter maps it.
-- Bedrock model IDs contain inference profile suffixes that direct-Anthropic IDs don't. The adapter handles this -- the loop only sees a `modelId` string it doesn't interpret.
-
----
-
-### Replace abort-based stall recovery with explicit LLM call lifecycle control (May 2026)
-
-**Status: idea** | Priority: high
-
-**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: provider-agnostic adapter (above)
-
-The current stall and per-call timeout mechanisms work by firing `abort()` on the session's `AbortController` when a hung call is detected. This is a blunt instrument: it kills the entire agent loop, losing all progress on the current step. We should never need to abort. The goal is to always be in full control of what the LLM is doing -- not to rescue a runaway call after the fact.
-
-**The deeper problem:** `client.messages.create()` is a black box. Once called, we have no visibility into what's happening. The per-call timeout (`llmCallTimeoutMs`, shipped May 2026) adds a circuit breaker, but a circuit breaker is still an abort.
-
-**What full control looks like (requires provider-agnostic adapter above):**
-- **Streaming inside the adapter:** the `AnthropicStreamingAdapter` uses `messages.stream()`. Per-token progress is visible; a hung call means no token within N seconds, not "no new call started".
-- **Retry budget inside the adapter:** a hung call is retried once (with backoff) before surfacing as an error. Today, a single hung call = dead session.
-- **Timeout ladder:** warn at 30s (no first token), retry at 60s, abort at 90s. Each rung is inside the adapter; the loop never sees the retry.
-- **First-token latency as health signal:** time from call start to first token is a direct measure of provider health. Surface it in `LlmResponse.firstTokenMs` for observability.
-
-**Why this is blocked by the adapter:** if we add streaming now against the Anthropic-specific `AgentClientInterface`, we're deepening the coupling instead of removing it. The right order is: adapter first, streaming as a feature of the adapter.
 
 ---
 

@@ -193,7 +193,7 @@ export function buildAgentCallbacks(
         kind: 'agent_stuck',
         sessionId,
         reason: 'stall',
-        detail: `No LLM API call started within the stall timeout window. Last tool calls: ${state.lastNToolCalls.map((c) => c.toolName).join(', ') || 'none'}`,
+        detail: `LLM API call stalled or in-flight call timed out. Last tool calls: ${state.lastNToolCalls.map((c) => c.toolName).join(', ') || 'none'}`,
         ...withWorkrailSession(state.workrailSessionId),
       });
       void writeStuckOutboxEntry({
@@ -320,6 +320,7 @@ export async function buildAgentReadySession(
       ? { maxTokens: trigger.agentConfig.maxOutputTokens }
       : {}),
     stallTimeoutMs: sessionCtx.stallTimeoutMs,
+    llmCallTimeoutMs: sessionCtx.llmCallTimeoutMs,
   });
 
   handle?.setAgent(agent);
