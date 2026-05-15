@@ -195,6 +195,142 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Periodic session reminders via turn-end subscriber: drift correction, time budget, scope boundary (May 15, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:2 Eff:3 Lev:2 Con:2 | Blocked: no
+
+**Context:** Claude Code's harness injects periodic `<system-reminder>` nudges into the conversation when ambient conditions are met (unused tools, long sessions, etc.). WorkTrain daemon sessions have no equivalent -- an agent that drifts off-track, runs low on time budget, or loses sight of the current step's goal has no mechanism to be gently corrected short of hitting a stuck detection abort.
+
+The mechanism already exists: `agent.steer()` injects user-role messages between turns. `buildTurnEndSubscriber()` fires on every `turn_end`. The step-injector (`src/daemon/turn-end/step-injector.ts`) already uses this path for step advancement. This entry is about expanding that subscriber to carry general session health nudges -- injected in user voice (not as raw system content) so the agent processes them with operator-level attention.
+
+**Proposed reminder categories:**
+
+1. **Drift correction**: if N turns have passed since the last step advance and the current step's `verify` criteria don't appear to be satisfied yet, inject a condensed reminder of what the step is asking for and what "done" looks like. Not a warning -- just a grounding re-statement: "Just to keep us on track -- this step needs [X]. How is that going?"
+
+2. **Time budget awareness**: at ~50% and ~80% of `maxSessionMinutes`, inject a brief time-check: "You've used roughly half your session time. You've completed M of N steps. Worth checking whether your current approach is going to get there." Agent decides whether to adjust; WorkTrain just surfaces the signal.
+
+3. **Soul file / step reinforcement for long sessions**: for sessions long enough that the system prompt may be compressed out of effective context, re-inject a condensed version of the step goal and the most relevant soul file rules at a configurable interval (e.g. every 20 turns).
+
+4. **Scope boundary reinforcement**: for `branchStrategy: 'worktree'` sessions, periodically remind the agent of its worktree path and the rule about not reading from the main checkout. Especially useful after a `spawn_agent` call where the agent has been in a different context.
+
+**Design notes:**
+- All reminders are delivered via `agent.steer()` as user-voice messages, not system-prompt injections -- same as step injection. This makes them feel like an engaged operator checking in, not machinery.
+- Reminder frequency is configurable per trigger or session type (research sessions vs coding sessions have different appropriate cadences).
+- Reminders should be suppressed if the session is clearly making good progress (recent step advance, turn count is low). The goal is ambient correction, not noise.
+- Connects directly to the implicit step advancement idea (May 15, 2026): once step injection is fully in user voice, all of these fit naturally in the same turn-end subscriber without any new architectural surface.
+
+**Things to hash out:**
+- What signals indicate "drift" reliably enough to trigger a reminder without false-positiving on legitimate multi-turn exploration? Turn count alone is too coarse; something like "turns since last step advance relative to expected step duration" is closer.
+- Should time-budget nudges be suppressed for sessions where the operator has explicitly set a high `maxSessionMinutes` (implying they expect a long run)?
+- What is the right conciseness for reminder content? Too long and the agent treats it as another instruction to process; too short and it's not grounding. One or two sentences seems right.
+- Is there a risk that frequent reminders reinforce sycophancy ("yes I'm making progress") rather than genuine course correction? The framing matters -- a question ("how is that going?") may be more honest-inducing than a statement ("remember to...").
+
+---
+
+### Provider-agnostic external context tools: category-based tool API with user-configured backends (May 15, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 11** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**Context:** The reviewer-assigned MR review feature introduces native daemon tools for fetching external context: `fetch_jira_issue`, `fetch_mr_description`, `fetch_url`. As currently scoped these are provider-specific -- an agent calling `fetch_jira_issue` assumes the user's team uses Jira. Teams using Linear, GitHub Issues, Notion, or any other system get nothing.
+
+The correct design: tools represent *categories of external context*, not specific providers. The agent calls `fetch_issue(id)`, `fetch_spec_doc(url)`, `fetch_ci_run(id)` -- provider-agnostic names. The user configures which concrete provider fills each category in their workspace config or triggers.yml. WorkTrain routes the tool call to the right client at runtime; the agent and workflows never change.
+
+**Category-to-provider mapping (illustrative):**
+- `fetch_issue` → Jira, Linear, GitHub Issues, GitLab Issues, Notion database
+- `fetch_spec_doc` → Confluence, Notion, Google Docs (via URL), local markdown file
+- `fetch_pr_description` → GitHub, GitLab (already computable from trigger context)
+- `fetch_ci_run` → GitHub Actions, GitLab CI, Jenkins, CircleCI
+- `fetch_monitoring_event` → Datadog, PagerDuty, Grafana
+
+**Configuration model:**
+The workspace config (`~/.workrail/config.json` or workspace-level config) declares provider bindings per category:
+```yaml
+integrations:
+  issueTracker: jira          # or: linear, github_issues, gitlab_issues
+  specDocs: confluence        # or: notion, url
+  codeHost: github            # or: gitlab
+  ci: github_actions          # or: gitlab_ci
+```
+Each provider has a corresponding credential reference (env var) and a thin client adapter registered in the daemon tool layer. The tool schema seen by the agent is always the same (`fetch_issue`, not `fetch_jira_issue`); only the routing changes.
+
+**Why this matters for MR review specifically:** The "was the right thing implemented?" question requires fetching the linked issue + acceptance criteria + spec doc. If the tool names are hardcoded to Jira and Confluence, the feature only works for teams using those tools. Provider-agnostic tools make `wr.mr-review` v3 universally useful.
+
+**Things to hash out:**
+- What is the right granularity of categories? Too coarse (one "fetch_context" tool) loses specificity; too fine (one tool per provider) defeats the purpose. The right level is probably: category = the type of information, not the source.
+- How does the agent know what to pass as the `id` argument if it doesn't know the provider? For issues, the trigger context already injects the issue URL or number -- the tool just needs to resolve it. For spec docs, the agent needs to know where to look (AGENTS.md could declare `specDocUrl: "..."` per workspace).
+- What happens when a category has no configured provider? The tool should return a typed `not_configured` result (not an error) so the agent can degrade gracefully rather than failing the step.
+- Should provider adapters be built-in only, or user-extensible (custom adapter pointing to an arbitrary API)? A custom adapter path would let teams with internal tooling (proprietary ticket systems, internal wikis) participate without waiting for a built-in adapter.
+- How does credential management work? Each provider needs a token. Pattern options: env vars (current pattern for polling tokens), per-workspace secrets file, or a dedicated `~/.workrail/credentials.json`. Env vars are the safest and most consistent with existing patterns.
+- Does this belong in the daemon tool layer, or should it be a separate "context provider" service that both daemon sessions and future MCP sessions can call? The latter is more general but adds infrastructure.
+
+**Relationship to existing entries:** The reviewer-assigned MR review feature (active, May 15, 2026) introduces the first external context tools as provider-specific. This entry is the follow-on generalization. The initial tools (`fetch_jira_issue` etc.) can ship as-is for v1 and be refactored to the category model as this entry is implemented.
+
+---
+
+### Implicit step advancement in daemon sessions: eliminate complete_step (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**Daemon-only. The MCP server's continue_workflow contract is unchanged.**
+
+In daemon sessions today, the agent must call `complete_step` (or `continue_workflow`) to advance to the next workflow step. This is an explicit tool call that the agent has to know about, remember to make, and include structured output in. The result is cognitive overhead per step, occasional workflow stalls when the agent forgets to advance, and an artificial seam in the agent's working model -- it treats "do the work" and "advance the step" as two separate operations.
+
+The proposed model: when a daemon session's agent finishes its turn (AgentLoop fires `turn_end` with an empty steer queue and the agent is about to produce `end_turn`), WorkRail detects the natural stopping point and sends a structured follow-up message -- framed as a user message, not a system notification -- asking the agent to summarize what it did, what it found, and any artifacts it produced. The agent responds naturally. WorkRail reads that response, extracts notes and artifacts, advances the step internally, and injects the next step's prompt as the next user message. The agent never calls a workflow tool. It just works, summarizes when asked, and receives the next instruction.
+
+**Why framing it as a user message matters:** if the "provide your output" request arrives as a system message or tool result, the agent processes it as infrastructure. If it arrives as a user turn, the agent treats it as an operator instruction and responds with higher fidelity and more natural language -- the same compliance difference observed between system-prompt rules and conversational directives.
+
+**The key insight from discovery:** approval questions shouldn't be announced as workflow machinery. "Here's what you need to do for the next step" should feel like a natural continuation of a conversation, not a state machine transition. The agent works better when it doesn't know it's in a state machine.
+
+**Implementation sketch:**
+- `turn_end` subscriber in `buildTurnEndSubscriber()` detects: agent is at end_turn, no steer messages pending, current step is completable
+- Instead of waiting for `complete_step`, WorkRail steers a user-voice message: e.g. "Good. Before moving on -- what did you do in this step, what did you find, and are there any artifacts I should know about?" (configurable per workflow step via a `closingQuestion` field)
+- Agent responds in natural language
+- WorkRail parses the response to extract notes, detects artifact blocks (JSON fenced blocks with `kind:` field), and calls `executeContinueWorkflow` internally
+- Next step prompt arrives as the next steer message, again in user voice
+- Agent never sees `complete_step` in its tool list for daemon sessions; it is not offered the tool
+
+**Things to hash out:**
+- How does WorkRail know the agent is "done" with a step vs. mid-work? `end_turn` is not always a real stopping point -- the agent may call several tools and hit `end_turn` partway through a step. The heuristic needs to be more than "agent stopped": ideally it checks whether the step's `verify` criteria are satisfiable from the current tool call history.
+- What if the agent's natural-language summary doesn't contain usable notes? WorkRail needs a fallback: re-prompt once ("Can you be more specific about what you produced?"), then use what it has.
+- Artifact extraction from natural language is lossy. A structured `complete_step` call is unambiguous; a natural-language summary requires parsing. This is a quality tradeoff: better UX for the agent, more fragile extraction for WorkRail. A hybrid is possible: WorkRail's follow-up asks the agent to emit any artifacts in a specific format if it has them.
+- This must be daemon-only. MCP sessions have a human operator watching and the explicit `continue_workflow` contract is load-bearing for MCP client compatibility. The daemon owns the full loop and can intercept it.
+- Does this interact well with loops and branches? Steps that conditionally advance need the decision signal. The closing question must elicit that signal naturally.
+- Does removing `complete_step` from the tool list affect agents that are mid-session when the feature ships? Migration path: daemon sessions created after the feature ships use implicit advancement; older sessions use explicit tools as before (the session event log records the creation-time config).
+
+---
+
+### Step injection in user voice: workflow instructions feel like operator messages (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+When WorkRail delivers a new step prompt to a daemon agent today, it arrives via `agent.steer()` after `turn_end` -- a user-role message in the conversation, which is correct mechanically. But the content is structured workflow prose that reads like system instructions: "## Goal / Do X. ## Procedure / 1. ... 2. ..." The agent parses this correctly but treats it with the same compliance weight as system-prompt rules rather than as a directive from an engaged operator.
+
+The observation: agents respond with noticeably higher fidelity and more natural execution when instructions arrive in conversational operator voice rather than formal workflow template voice. A message that reads "Alright, next I want you to look at the auth middleware and trace the full call chain for the login flow -- specifically whether the session token is validated before any database call. Tell me what you find." produces better behavior than a step prompt in workflow-spec format covering the same ground.
+
+The proposal is a two-layer change:
+1. **Voice transformation:** the step prompt is rendered through a lightweight LLM pass (cheap model, one-shot) that converts the workflow step's formal prose into conversational operator voice, injecting relevant context from the trigger (goal, prior notes) to make it feel specific to this session. The transformation is cached: same step + same context = same render. The original step definition is unchanged; only the delivery is transformed.
+2. **Persona injection:** the step injection carries the persona defined in the trigger's soul file -- so the "operator" directing the agent has a consistent voice across a session.
+
+**Why this is daemon-only:** MCP sessions have a real human operator. Transforming step prompts in MCP sessions would produce unexpected behavior for the operator watching the session. Daemon sessions are fully autonomous -- the only "user" the agent sees is WorkRail itself, and WorkRail controlling that voice is legitimate.
+
+**Relationship to the implicit advancement entry:** these two ideas compose naturally. If daemon sessions use implicit advancement (no `complete_step` tool), the closing-question and next-step injection are both WorkRail-authored user messages. The quality of those messages directly determines the quality of the agent's response. Voice transformation makes both feel like a real operator is running the session.
+
+**Things to hash out:**
+- What is the right transformation model? A cheap Haiku-class model doing a one-shot persona rewrite is fast and cheap. But any LLM call adds latency to the step injection path. Is the behavioral improvement worth 1-2 seconds of extra latency per step?
+- How do you prevent the transformation from losing information? The formal step prompt contains structured `verify` criteria, output contract references, and conditional logic. The transformation must preserve semantic content even while changing voice. Structured fields that must be preserved verbatim (output contract, required artifacts) should be passed through unchanged, with only the prose rewritten.
+- Is a transformation step a workflow-level opt-in, or a daemon-global setting, or a trigger-level config? Per-trigger seems right: some workflows (gate evaluators, structured analysis steps) may perform better with formal prompts; others (exploration, investigation, coding) may respond better to conversational voice.
+- How do you measure whether this actually helps? The hypothesis is testable: run the same workflow on the same task with and without voice transformation, compare stepAdvanceCount, turn count, and human review of step quality. This should be run before shipping, not after.
+
+---
+
 ### Large-comment smell detection during implementation (May 8, 2026)
 
 **Status: idea** | Priority: medium
@@ -3877,30 +4013,49 @@ Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or co
 
 ### Automated reviewer-assigned MR review with identity-matched comments (May 15, 2026)
 
-**Status: idea** | Priority: high
+**Status: active** | Priority: high
 
 **Score: 14** | Cor:3 Cap:3 Eff:3 Lev:3 Con:2 | Blocked: no
 
-When a user is assigned as reviewer on a GitLab (or GitHub) MR, WorkTrain should automatically trigger a review session, post an acknowledgment comment in the user's voice while the review is in progress, then post the completed review in the user's comment style.
+**Discovery completed May 15, 2026. Design doc: `docs/design/reviewer-identity-discovery.md`.**
 
-**What this looks like end-to-end:**
-1. GitLab webhook or polling detects `reviewer_assigned` event for the configured user on a configured set of repos
-2. WorkTrain immediately posts an acknowledgment comment (configurable template, e.g. "Taking a look at this, will have feedback shortly") so the author knows review is in progress
-3. WorkTrain runs `wr.mr-review` (or the improved successor) to produce findings
-4. WorkTrain posts the review findings as inline + summary comments in the user's voice -- comment style, tone, and framing should match the user's historical review patterns
-5. Optionally, the user can approve/reject the posted draft before it goes live (Slack interaction, similar to what etienne-clone already implements)
+When assigned as reviewer on a GitHub PR, WorkTrain automatically runs a deep review, creates a PENDING draft review under the operator's GitHub identity (invisible to the author until published), notifies the operator, and lets them publish/edit/delete individual findings via GitHub's native "Finish your review" UI. Zero findings post without explicit operator action.
 
-**Relevant prior work:**
-- `~/git/personal/etienne-clone` -- a MR review bot with GitLab posting, identity doc loading, WorkRail integration, Slack approval pipeline, and a review queue. Does NOT yet have reviewer-assignment detection (only manual `/review` endpoint trigger). The identity prompting (`src/identity/`) and GitLab posting (`src/gitlab/posting.ts`) infrastructure is directly applicable.
-- `wr.mr-review-workflow.agentic.v2.json` -- the current review workflow. Needs the quality overhaul (see item below) before this can produce review-quality output worth posting.
+**Selected architecture (from discovery):**
 
-**Things to hash out:**
-- Webhook vs polling: GitLab webhooks require infrastructure. Polling `GET /merge_requests?reviewer_username=etienneb&state=opened` on a 5-minute cycle is simpler and sufficient for non-latency-sensitive reviews.
-- Which repos to watch: needs a `repos` config in triggers.yml or a new trigger type.
-- Acknowledgment comment: should be configurable per-repo. Some teams find bot acknowledgments noisy; others find them useful. Default on with opt-out.
-- Identity matching: etienne-clone loads identity docs from `docs/`. WorkTrain needs a way to reference that same source or an equivalent -- either a path config, or the user's Memory MCP contains their review style.
-- Draft approval gate: optional Slack (or operator outbox) approval step before posting. etienne-clone already has this via `createSlackInteraction`. Could reuse or port the pattern.
-- Handling non-code reviews (design docs, RFCs): the review workflow is code-diff-oriented. A separate path may be needed for non-code MRs.
+*GitHub Draft Review as Approval Channel.* WorkTrain completes `wr.mr-review`, produces a typed `wr.review_verdict` artifact with per-finding `filePath`/`lineNumber`, then at session completion calls `POST /repos/:owner/:repo/pulls/:number/reviews` with `event: 'PENDING'` under the operator's `reviewerIdentity.githubToken`. A `PendingDraftReviewPoller` polls every 30-60s for submission. The draft is anchored to the diff at creation time, avoiding stale-diff misanchoring. The operator's per-finding editing capability (native GitHub UI) solves the voice-matching problem without requiring a separate approval UI.
+
+**Runner-up:** Branch-Merge as Approval Signal -- use this if the GitHub PENDING draft REST API turns out to be session-level (not account-level), or if GitLab is the deployment target.
+
+**Pre-implementation verification required:** Confirm that a PENDING draft review created via `POST .../reviews?event=PENDING` appears in the operator's browser "Finish your review" panel. One test API call. If not, pivot to runner-up.
+
+**Build order:**
+1. Post-workflow action pathway -- new platform concept separate from `DEFAULT_DELIVERY_PIPELINE` (which is commit/PR-only and halts without a `HandoffArtifact`). This is the foundation; nothing else works without it.
+2. `wr.mr-review` v3 prerequisites: model-tier dispatch in `spawn_agent` (`SingleSpawnSpec.model?`), native external context tools (`fetch_jira_issue`, `fetch_mr_description`, `fetch_url`), `wr.review_verdict` findings schema extended with `filePath`/`lineNumber`
+3. Reviewer assignment detection: add `requested_reviewers` field to `GitHubPR` type and `reviewerLogin` filter to `github_prs_poll` adapter
+4. `reviewerIdentity: { githubToken, githubLogin }` field on `TriggerDefinition` (env-resolved, same pattern as `hmacSecret`)
+5. GitHub PENDING draft review creation at post-workflow action time
+6. `PendingDraftReviewPoller` (~300-500 lines)
+7. `branchStrategy: 'read-only'` variant for concurrent review sessions that need to inspect PR branches without dirtying the main checkout
+
+**Key implementation constraints:**
+- MUST NOT route review posting through `DEFAULT_DELIVERY_PIPELINE` (`parseHandoffStage` halts without `HandoffArtifact`)
+- MUST expose `session.artifacts[]` alongside `lastStepNotes` in `WorkflowRunSuccess` for delivery consumption
+- MUST NOT enable confidence-based quality-gating until `wr.mr-review` v3 confidence scoring is empirically calibrated
+- GitLab gap: GitHub PENDING draft has no direct GitLab equivalent; GitLab variant (`ReviewApprovalAdapter` interface, console approval or branch-merge) is out of scope for v1 but must be designed as a follow-on
+
+**Two new platform capabilities this feature requires (benefit all future features):**
+- Post-workflow action pathway: `postWorkflowActions: [...]` on `TriggerDefinition`, fires after session completion, reads `session.artifacts[]` -- generic infrastructure for non-commit sessions (review, analysis, monitoring)
+- `ReviewApprovalAdapter` pluggable interface: approval channel (GitHub draft / Slack / console / branch-merge) as a per-trigger config choice, not a hardcoded code path
+
+**Key codebase locations:**
+- `src/trigger/delivery-pipeline.ts` -- DEFAULT_DELIVERY_PIPELINE; home for post-workflow action pathway redesign
+- `src/trigger/types.ts` -- TriggerDefinition; add `reviewerIdentity`, `postWorkflowActions`; extend `TriggerValidationRule`
+- `src/trigger/adapters/github-poller.ts` -- add `requested_reviewers` to `GitHubPR`; add `reviewerLogin` filter
+- `src/trigger/trigger-router.ts` -- gate routing; extend for post-workflow actions on non-commit sessions
+- `src/daemon/tools/spawn-agent.ts` -- add `model` field to `SingleSpawnSpec` for model-tier dispatch
+- `workflows/mr-review-workflow.agentic.v2.json` -- evolve to v3: coordinator phases, model-tier fan-out, `filePath`/`lineNumber` per finding
+- `src/daemon/tools/` -- add `fetch_jira_issue`, `fetch_mr_description`, `fetch_url` native context tools
 
 ---
 

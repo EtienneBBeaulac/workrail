@@ -1,271 +1,184 @@
-# Implementation Plan: Shared Pipeline Worktree
+# Implementation Plan: Reviewer-Assigned MR Review with GitHub Draft Review Approval
 
-## Problem statement
+**Last revised:** Post-audit pass (blocking gaps addressed)
 
-The coordinator pipeline creates a `branchStrategy: 'worktree'` for the coding session only. Discovery writes design docs and shaping writes `current-pitch.md` to `opts.workspace` (main checkout). The coding session's worktree is forked from `main` AFTER these files were written -- they are never committed, so they are absent from the worktree. Pipeline file handoffs are silently broken.
+## 1. Problem statement
 
-Secondary problem: `opts.workspace` is used as an implicit workspace reference throughout `full-pipeline.ts` and `implement.ts` for path construction (`pitchPath`, `archiveDir`), delivery, and spawnSession calls. After introducing a shared worktree, every such reference must be audited and updated to the correct workspace value.
+When assigned as reviewer on a GitHub PR, an engineer must context-switch to review it manually. WorkTrain should detect the assignment, run a deep review autonomously, create a PENDING GitHub draft review under the operator's identity (invisible to the PR author), notify the operator, and let them publish/edit/delete findings via GitHub's native "Finish your review" UI. Zero findings post without explicit operator action.
 
-## Acceptance criteria
+## 2. Acceptance criteria
 
-1. When `runFullPipeline` runs, all phase sessions (discovery, shaping, coding, review, UX gate) receive the coordinator-created worktree path as their `workspacePath`.
-2. Shaping writes `.workrail/current-pitch.md` to the shared worktree; coding reads it from the same absolute path without any copy step.
-3. The coordinator's `finally` block: (a) archives the pitch from the shared worktree path, then (b) removes the shared worktree. Both happen on success AND on failure.
-4. Crash recovery: if `PipelineRunContext.worktreePath` is present and the path exists on disk, the pipeline resumes using the existing worktree instead of creating a second one.
-5. `runImplementPipeline` applies the same pattern.
-6. No per-session `branchStrategy: 'worktree'` is passed for coordinator-spawned sessions.
-7. All existing tests continue to pass. New tests cover all new invariants.
-8. `runCoordinatorDelivery` is called with `worktreePath` as `workspacePath`, not `opts.workspace`.
+See `spec.md` (canonical). Summary:
+- AC1: reviewer-assignment filter in `github_prs_poll`
+- AC2: draft review created on success + reviewerIdentity + wr.review_verdict
+- AC3: pre-creation dedup check (GET before POST + in-process mutex)
+- AC4: pending-draft sidecar written before poller starts
+- AC5: poller detects submission, appends session event, deletes sidecar
+- AC6: startup recovery restarts polling (requires triggerId in sidecar + trigger index passed to recovery)
+- AC7: macOS notification after draft creation
+- AC8: githubToken env-resolved from $ENV_VAR
+- AC9: branchStrategy:read-only creates isolated worktree --detach
+- AC10: cleanup stages run for branchStrategy:read-only
+- AC11: new TriggerDefinition fields parse correctly
+- AC12: `npx vitest run` passes
 
-## Non-goals
+## 3. Non-goals
 
-- No changes to the daemon's per-session worktree mechanism (`buildPreAgentSession`)
-- No changes to `QUICK_REVIEW` or `REVIEW_ONLY` modes
-- No changes to the WorkRail engine, MCP server, or session store
-- `CodingHandoffArtifactV1.branchName` is NOT made optional in this PR (follow-up ticket)
-- `worktrain run pipeline` CLI command wiring is NOT in scope
-- Startup recovery for pipeline-worktree orphans is NOT in scope (follow-up ticket)
+- GitLab support (separate follow-on)
+- Slack approval channel (separate follow-on)
+- wr.mr-review v3 quality overhaul (separate backlog item)
+- Model-tier dispatch in spawn_agent (separate backlog item)
+- Fork PR support for branchStrategy:read-only (follow-up ticket)
 
-## Philosophy-driven constraints
+## 4. Philosophy-driven constraints
 
-- **DI for boundaries:** `createPipelineWorktree` and `removePipelineWorktree` must be dep methods
-- **Make illegal states unrepresentable:** `createPipelineWorktree` returns `Result<string, string>` -- no code path reaches `spawnSession` with undefined worktree path; `worktreeCreated` boolean flag prevents `removePipelineWorktree` being called when creation never succeeded
-- **Single source of state truth:** `PipelineRunContext.worktreePath` is the durable path; no separate file
-- **Functional core, imperative shell:** finally block has explicit, ordered cleanup steps; pitch archival before worktree removal is an invariant, not a convention
-- **Architectural fix over patch:** introduce `activeWorkspacePath` to replace scattered `opts.workspace` references for within-session path construction
+- **[PHILOSOPHY]** `maybeRunPostWorkflowActions()` is separate from `maybeRunDelivery()` -- different gate conditions, different code path
+- **[PHILOSOPHY]** GitHub draft creation is deterministic infrastructure -- agent never calls GitHub API
+- **[PHILOSOPHY]** `reviewerIdentity` presence is the feature flag -- no separate boolean
+- **[PHILOSOPHY]** `PendingDraftReviewPoller.start()` is called fire-and-forget (not awaited) in the queue callback -- same pattern as gate evaluation in the existing `gate_parked` branch
+- **[CONVENTION]** New `TriggerDefinition` fields: all 4 parser locations (ParsedTriggerRaw, main loop `if (key === ...)` branch with bespoke sub-object scanner, validateAndResolveTrigger assembly, TriggerDefinition interface). NOT in `setTriggerField()` -- sub-objects are handled by `if (key ===)` branches, not the scalar switch.
+- **[CONVENTION]** `branchStrategy: 'read-only'` requires widening in: `TriggerDefinition`, `WorkflowTrigger`, parser allowed-value check (~line 1043), `autocommit-needs-worktree` validation rule, cleanup guards in delivery-pipeline.ts. New `TriggerValidationRule`: `'read-only-with-autocommit'`.
+- **[CONVENTION]** `pending-draft-*.json` sidecars must be explicitly excluded in `readAllDaemonSessions()` filter (same pattern as `queue-issue-` exclusion at line 114).
+- **[CONVENTION]** `review_draft_submitted` event kind requires: new entry in `EVENT_KIND` (constants.ts), new schema in `DomainEventV1Schema` (schemas/session/events.ts), design lock update per lock comment.
+- **[CONVENTION]** `maybeRunPostWorkflowActions()` receives `originalResult` (pre-delivery_failed reassignment), same as `maybeRunDelivery()`. Must be called in BOTH `route()` AND `dispatch()` -- polling triggers use `dispatch()`.
+- **[TEAM_RULE]** `assertNever(result)` in both `route()` and `dispatch()` must be audited.
 
-## Invariants
+## 5. Invariants
 
-1. Worktree created BEFORE first `spawnSession` call
-2. `worktreePath` persisted atomically in `createPipelineContext` call immediately after creation
-3. Pitch archival runs BEFORE worktree removal in the `finally` block (pitch is inside the worktree)
-4. Worktree removal runs in `finally` block ONLY if worktree was successfully created (`worktreeCreated` flag)
-5. `branchStrategy` is NOT passed for any coordinator-spawned session
-6. Crash resume: check `fs.access(worktreePath)` before reusing; escalate with clear message if path missing
-7. All path construction using the within-session workspace (`pitchPath`, `archiveDir`, delivery `workspacePath`) uses `activeWorkspacePath` (the worktree path), not `opts.workspace`
-8. `opts.workspace` is used ONLY for coordinator-owned operations: `readActiveRunId`, `readPipelineContext`, `writePhaseRecord`, `markPipelineRunComplete`, `createPipelineContext` (context file storage), and git commands run by `createPipelineWorktree`/`removePipelineWorktree`
+1. Zero findings post without explicit operator approval
+2. `lastStepArtifacts` already on `WorkflowRunSuccess` -- no schema change
+3. `reviewerIdentity.githubToken` must be a separate PAT from `source.token`
+4. Sidecar written BEFORE poller starts, deleted after submission
+5. Pre-creation check: GET + in-process mutex between GET and POST to close race window
+6. All `ReviewApprovalAdapter` methods return `Result<T,E>` -- no throws
+7. `branchStrategy: 'read-only'` sessions: cleanup runs in `finalizeSession()` via worktree removal (not via delivery pipeline stages), because no delivery pipeline runs for non-autoCommit sessions
 
-## Selected approach
+## 6. Selected approach
 
-### New types and interface changes
+Same as before. Three PRs. GitHub PENDING draft review as approval channel.
 
-**`AdaptiveCoordinatorDeps` (adaptive-pipeline.ts):**
-```typescript
-createPipelineWorktree(
-  workspace: string,
-  runId: string,
-  baseBranch?: string,  // default: 'main'
-): Promise<Result<string, string>>;  // ok(worktreePath) | err(reason)
+**Pre-implementation verification (before PR3):** Verify `POST /reviews` with `event: PENDING` appears in the operator's browser. One API call.
 
-removePipelineWorktree(
-  workspace: string,
-  worktreePath: string,
-): Promise<void>;  // best-effort, never throws
-```
+**Startup recovery approach (revised after audit):**
+Add `triggerId: string` to the pending-draft sidecar. Pass the loaded trigger index to `runStartupRecovery()` as a new optional parameter (pattern: same as other optional injectable parameters). On startup, for each pending-draft sidecar, look up the trigger by `triggerId` to get `reviewerIdentity.githubToken`, then restart the poller. If the trigger no longer exists in the index (trigger was removed), log a warning and delete the sidecar.
 
-**`PipelineRunContext` (pipeline-run-context.ts):**
-```typescript
-// new optional field (optional for backward compat with pre-feature context files)
-readonly worktreePath?: string;
-```
-Zod schema: `worktreePath: z.string().optional()`.
+**`review_draft_submitted` event (revised after audit):**
+This is a v2 domain event. Must add to `EVENT_KIND`, define a schema (`{ sessionId: string; reviewId: string; prUrl: string; submittedAt: string }`), and add to `DomainEventV1Schema` union. This work belongs in PR3 scope.
 
-**`createPipelineContext` (adaptive-pipeline.ts + coordinator-deps.ts):**
-```typescript
-createPipelineContext(
-  workspace: string,
-  runId: string,
-  goal: string,
-  pipelineMode: PipelineRunContext['pipelineMode'],
-  worktreePath: string,  // required for new callers -- NOT optional
-): Promise<Result<void, string>>;
-```
-Note: the 5th param is typed as required in `AdaptiveCoordinatorDeps`. Pre-feature callers in `implement.ts` always pass the value because `createPipelineWorktree` runs first. The Zod schema field remains optional for backward-compat deserialization of old context files.
+**Alternative if the domain event is too heavy:** Store submission state in the pending-draft sidecar only (update `submittedAt` field instead of deleting) and skip the session event log write. Simpler but loses console visibility. Decision: use the domain event (consistency with delivery_recorded pattern).
 
-### Implementation in coordinator-deps.ts
+## 7. Vertical slices
 
-```typescript
-createPipelineWorktree: async (workspace, runId, baseBranch = 'main') => {
-  const worktreePath = path.join(WORKTREES_DIR, runId);
-  const branchName = `worktrain/${runId}`;
-  try {
-    await fs.promises.mkdir(WORKTREES_DIR, { recursive: true });
-    await execFileAsync('git', ['-C', workspace, 'fetch', 'origin', baseBranch]);
-    await execFileAsync('git', ['-C', workspace, 'worktree', 'add',
-      worktreePath, '-b', branchName, `origin/${baseBranch}`]);
-    return ok(worktreePath);
-  } catch (e) {
-    return err(`createPipelineWorktree failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-},
+### Slice 1 (PR1): Post-workflow action pathway + reviewerIdentity infrastructure
 
-removePipelineWorktree: async (workspace, worktreePath) => {
-  try {
-    await execFileAsync('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath]);
-  } catch { /* best-effort */ }
-},
-```
+**Files changed:**
+- NEW `src/trigger/review-approval-adapter.ts`:
+  - `ReviewApprovalAdapter` interface: `createDraftReview(opts): Promise<Result<{reviewId: string}, ReviewApprovalError>>` and `pollForSubmission(opts): Promise<Result<ReviewSubmitted, ReviewApprovalError>>`
+  - `GitHubReviewApprovalAdapter` implementation (injectable `fetchFn`)
+  - `creatingReviewPRs = new Set<string>()` for in-process mutex (keyed by `${repo}#${prNumber}`)
+- `src/trigger/types.ts`: add `reviewerIdentity?: { readonly githubToken: string; readonly githubLogin: string }` to `TriggerDefinition`; add new `TriggerValidationRule` IDs
+- `src/trigger/trigger-store.ts`: add `if (key === 'reviewerIdentity')` branch in main parse loop with bespoke 2-key sub-object scanner; `resolveSecret()` for `githubToken`; all 4 parser locations
+- `src/trigger/trigger-router.ts`: new `maybeRunPostWorkflowActions()` function; call from BOTH `route()` AND `dispatch()` callbacks after result switch; receives `originalResult`; calls `createDraftReview()` (awaited), then fires `PendingDraftReviewPoller.start()` as fire-and-forget (void); explicit `console.warn` when `wr.review_verdict` absent from artifacts
 
-### Changes to full-pipeline.ts and implement.ts
+**Key spec for `maybeRunPostWorkflowActions()`:**
+- Gates: `originalResult._tag === 'success'` AND `trigger.reviewerIdentity !== undefined` AND `parseReviewVerdictArtifact(originalResult.lastStepArtifacts)` returns non-null
+- Explicit `console.warn` when artifacts present but `wr.review_verdict` absent (separate from warn when `lastStepArtifacts` undefined)
+- In `dispatch()`: `TriggerDefinition` is not available (dispatch receives `WorkflowTrigger`), so `WorkflowTrigger` needs a `reviewerIdentity` field mirroring the one on `TriggerDefinition`. Trigger-router passes it through when constructing the `WorkflowTrigger` from the `TriggerDefinition`.
 
-Pattern for `runFullPipeline` / `runImplementPipeline` (the outer wrapper):
+**Done when:** trigger-store unit tests parse `reviewerIdentity` correctly; trigger-router unit tests confirm fires on success+reviewerIdentity+verdict, does NOT fire on error/timeout/stuck/gate_parked; `npx vitest run` passes.
 
-```typescript
-// Before runFullPipelineCore call:
-let worktreeCreated = false;
-let activeWorkspacePath = opts.workspace;  // fallback until worktree is ready
+---
 
-// After worktree creation in core (or in outer function for implement):
-// see runFullPipelineCore below
+### Slice 2 (PR2): Reviewer assignment detection + prBranch threading + branchStrategy:read-only
 
-// In the finally block:
-try {
-  if (pitchPath was from activeWorkspacePath) {
-    await deps.mkdir(archiveDir, { recursive: true });
-    await deps.archiveFile(pitchPath, archivePath);  // FIRST: archive before removal
-  }
-} catch { /* log */ }
-if (worktreeCreated) {
-  await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);  // SECOND
-}
-```
+**Files changed:**
+- `src/trigger/adapters/github-poller.ts`:
+  - Add `readonly head: { readonly ref: string }` to `GitHubPR` type
+  - Update `isGitHubPRShape()` type guard to include `head.ref`
+  - Add `reviewerLogin` filter in `applyPRFilters()`
+- `src/trigger/polling-scheduler.ts`:
+  - Add `prBranch: string` to the context injected by `buildGitHubWorkflowTrigger()` (sourced from `pr.head.ref`)
+- `src/trigger/types.ts`:
+  - Add `reviewerLogin?: string` to `GitHubPollingSource`
+  - Add `'read-only'` to `branchStrategy` union on `TriggerDefinition`
+  - Add `TriggerValidationRule: 'read-only-with-autocommit'`
+- `src/trigger/trigger-store.ts`:
+  - Parse `source.reviewerLogin` scalar
+  - Add `'read-only'` to allowed `branchStrategy` values (line ~1043)
+  - Add `'read-only-with-autocommit'` validation rule in `validateTriggerStrict()`
+- `src/daemon/types.ts`:
+  - Add `'read-only'` to `WorkflowTrigger.branchStrategy` union
+- `src/daemon/runner/pre-agent-session.ts`:
+  - New `'read-only'` branch: `git worktree add <path> --detach origin/<prBranch>` where `prBranch` comes from `trigger.context.prBranch`
+  - Cleanup for `'read-only'`: call `git worktree remove --force` in `finalizeSession()` for both `'worktree'` and `'read-only'` strategies, regardless of result (no delivery pipeline runs for `'read-only'`)
+- `src/trigger/delivery-pipeline.ts`:
+  - Widen `cleanupWorktreeStage` guard to include `'read-only'` (belt-and-suspenders -- actual cleanup for read-only is in finalizeSession, but delivery pipeline cleanup should also fire)
+  - Widen `deleteSidecarStage` guard similarly
+- `src/daemon/startup-recovery.ts`:
+  - Exclude `pending-draft-*.json` from `readAllDaemonSessions()` filter (line 114 pattern)
 
-Pattern for `runFullPipelineCore` / `runImplementCore`:
+**Note on `sidecardLifecycleFor`:** For `'read-only'` strategy with `success`, the sidecar lifecycle should be `delete_now` (not `retain_for_delivery`). Confirm the existing logic `branchStrategy === 'worktree' ? 'retain_for_delivery' : 'delete_now'` correctly produces `delete_now` for the new `'read-only'` value (it should, since the condition is strict equality), but audit this explicitly.
 
-```typescript
-// Step 0: Create worktree
-const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
-if (worktreeResult.isErr()) {
-  return { kind: 'escalated', escalationReason: { phase: 'init', reason: worktreeResult.error } };
-}
-const activeWorkspacePath = worktreeResult.value;
-worktreeCreated = true;  // signal to finally block
+**Done when:** github-poller tests confirm reviewerLogin filter; trigger-store tests parse `source.reviewerLogin`; `branchStrategy: 'read-only'` parses without error; `unknown-value` produces error; worktree cleanup tests for `'read-only'` sessions; `npx vitest run` passes.
 
-// Step 1: Persist worktreePath in context immediately (5th param required)
-await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL', activeWorkspacePath);
+---
 
-// Step N: pitchPath uses activeWorkspacePath (not opts.workspace)
-const pitchPath = activeWorkspacePath + '/.workrail/current-pitch.md';
-const archiveDir = activeWorkspacePath + '/.workrail/used-pitches';
+### Slice 3 (PR3): PendingDraftReviewPoller + domain event + startup recovery
 
-// All spawnSession calls: workspace = activeWorkspacePath (not opts.workspace)
-deps.spawnSession('wr.discovery', opts.goal, activeWorkspacePath, ...);
-deps.spawnSession('wr.shaping', opts.goal, activeWorkspacePath, ...);
-deps.spawnSession('wr.coding-task', opts.goal, activeWorkspacePath, { pitchPath, ... }, ...);  // no branchStrategy
-deps.spawnSession('wr.mr-review', opts.goal, activeWorkspacePath, ...);
-deps.spawnSession('wr.ui-ux-design', opts.goal, activeWorkspacePath, ...);  // UX gate
+**Pre-condition:** GitHub PENDING draft REST API verified as account-level.
 
-// Delivery: uses activeWorkspacePath
-runCoordinatorDelivery(deps, recapMarkdown, branchName, activeWorkspacePath);
+**Files changed:**
+- NEW `src/trigger/pending-draft-review-poller.ts`:
+  - `PendingDraftReviewPoller` class following `PollingScheduler` pattern
+  - `start()`: polls `GET /repos/:owner/:repo/pulls/:number/reviews` every 30-60s for `reviewId` out of PENDING state; on detection appends domain event; deletes sidecar; calls `stop()`
+  - `stop()`: calls `clearInterval()`; safe to call before `start()` (no-op)
+- `src/v2/durable-core/constants.ts`: add `REVIEW_DRAFT_SUBMITTED: 'review_draft_submitted'` to `EVENT_KIND`
+- `src/v2/durable-core/schemas/session/events.ts`: add `ReviewDraftSubmittedEventSchema` to `DomainEventV1Schema` union
+- `src/daemon/startup-recovery.ts`:
+  - Add optional `triggerIndex?: ReadonlyMap<string, TriggerDefinition>` parameter
+  - Add `clearPendingDraftSidecars()` scan function (analogous to `clearQueueIssueSidecars`)
+  - For each `pending-draft-*.json` sidecar: look up `triggerId` in `triggerIndex`; if found, restart poller with token from trigger; if not found, log warning and delete sidecar
+- `src/trigger/trigger-listener.ts`: pass trigger index to `runStartupRecovery()` when calling it at daemon start
+- **Sidecar shape (revised):** `{ reviewId: string; prNumber: number; prRepo: string; sessionId: string; createdAt: string; triggerId: string }`
 
-// opts.workspace references preserved for:
-// - writePhaseRecord(opts.workspace, runId, ...)
-// - readPipelineContext(opts.workspace, runId)
-// - markPipelineRunComplete(opts.workspace, runId)
-```
+**Done when:** `PendingDraftReviewPoller` unit tests cover polling loop, submission detection, sidecar lifecycle, session event write-back; startup recovery test confirms orphaned pending-draft sidecars restart polling; domain event appends and loads correctly from session store; `npx vitest run` passes.
 
-### Crash resume path
+## 8. Test design
 
-```typescript
-if (priorRunId) {
-  const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
-  if (existingCtx.isOk() && existingCtx.value?.worktreePath) {
-    const priorWorktreePath = existingCtx.value.worktreePath;
-    try {
-      await fs.promises.access(priorWorktreePath);
-      // Worktree exists -- reuse it
-      activeWorkspacePath = priorWorktreePath;
-      worktreeCreated = true;  // finally block will clean up
-    } catch {
-      return { kind: 'escalated', escalationReason: {
-        phase: 'init',
-        reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
-                `Delete ${opts.workspace}/.workrail/pipeline-runs/${priorRunId}-context.json to start fresh.`
-      }};
-    }
-  }
-  // If worktreePath absent from context (old-format context): fall through to create fresh worktree
-}
-```
+**New test files:**
+- `tests/unit/review-approval-adapter.test.ts`
+- `tests/unit/pending-draft-review-poller.test.ts`
 
-## Vertical slices
+**Extend:**
+- `tests/unit/trigger-store.test.ts` -- reviewerIdentity parsing; source.reviewerLogin; branchStrategy:read-only; unknown branchStrategy error
+- `tests/unit/github-poller.test.ts` -- reviewerLogin filter; head.ref presence in context
+- `tests/unit/trigger-router.test.ts` -- maybeRunPostWorkflowActions fires/not-fires; originalResult used; present in both route() and dispatch() callbacks
+- `tests/unit/delivery-pipeline*.test.ts` -- cleanup guards for 'read-only'
 
-### Slice 1: Schema and interface layer (no behavior change)
-- Add `worktreePath?: string` to `PipelineRunContext` + Zod schema (optional)
-- Add `createPipelineWorktree` and `removePipelineWorktree` to `AdaptiveCoordinatorDeps`
-- Change `createPipelineContext` 5th param from optional to required (`worktreePath: string`)
-- **AC:** `npm run build` passes; all existing tests pass (no callers yet supply 5th param -- will be compile errors resolved in Slice 3/4)
+## 9. Risk register
 
-### Slice 2: Implement new dep methods in coordinator-deps.ts
-- Implement `createPipelineWorktree` and `removePipelineWorktree`
-- Update `createPipelineContext` implementation to include `worktreePath` in initial object
-- Update fake `AdaptiveCoordinatorDeps` in test files to add stub implementations (return `ok('')` / no-op)
-- **AC:** `npm run build` passes; all existing tests pass
+| Risk | Severity | Mitigation |
+|------|----------|-----------|
+| GitHub PENDING draft API session-level not account-level | CRITICAL | Pre-implementation API verification. Fallback: Candidate 5. |
+| Startup recovery token unavailable if triggerId not in sidecar | HIGH | Add triggerId to sidecar; pass trigger index to runStartupRecovery(). In PR3 scope. |
+| GET-then-POST race for concurrent same-PR sessions | MEDIUM | In-process mutex (`creatingReviewPRs` Set) in GitHubReviewApprovalAdapter. In PR3 scope. |
+| Fork PRs fail at branchStrategy:read-only | MEDIUM | Validation warning at load time; follow-up ticket. |
+| `review_draft_submitted` event breaks session log if schema not updated | HIGH | Add to DomainEventV1Schema. In PR3 scope. |
+| prBranch not available to pre-agent-session.ts | HIGH | Thread via context from polling adapter. In PR2 scope. |
 
-### Slice 3: Wire into full-pipeline.ts
-- Introduce `worktreeCreated: boolean` and `activeWorkspacePath` variables
-- Create worktree before discovery; persist to context (5th param)
-- Replace ALL `opts.workspace` path-construction references with `activeWorkspacePath`:
-  - `pitchPath` (lines 216, 553)
-  - `archiveDir` (line 217)
-  - All `spawnSession` workspace args (lines 274, 373, 458, 558)
-  - `runCoordinatorDelivery` workspace arg (line 645)
-  - UX gate `spawnSession` (line 458)
-- Preserve `opts.workspace` for: `readActiveRunId`, `readPipelineContext`, `writePhaseRecord`, `markPipelineRunComplete`
-- Finally block: pitch archival from `activeWorkspacePath` FIRST, then `removePipelineWorktree` if `worktreeCreated`
-- Crash resume: existence check before reuse
-- **AC:** existing tests pass; new tests added; `npm run build` passes
+## 10. PR packaging strategy
 
-### Slice 4: Wire into implement.ts
-- Same pattern: `worktreeCreated`, `activeWorkspacePath`, replace path-construction references
-- `pitchPath` arg to `runImplementCore` must be `worktreePath`-relative: derive it inside core after worktree creation rather than constructing in the outer `runImplementPipeline`
-- **AC:** existing tests pass; new tests added
+**PR1:** ReviewApprovalAdapter + reviewerIdentity + maybeRunPostWorkflowActions
+**PR2:** Reviewer assignment detection + prBranch threading + branchStrategy:read-only + cleanup
+**PR3 (after API verification):** PendingDraftReviewPoller + domain event + startup recovery
 
-### Slice 5: Test coverage for all new invariants
-Tests to add in `adaptive-full-pipeline.test.ts`:
-1. `createPipelineWorktree` called with `(opts.workspace, runId)` before first `spawnSession`
-2. All `spawnSession` calls receive `worktreePath` as workspace (not `opts.workspace`)
-3. `pitchPath` in coding context points to `worktreePath` (not `opts.workspace`)
-4. `runCoordinatorDelivery` receives `worktreePath` as 4th arg
-5. `removePipelineWorktree` called in finally on success (after `archiveFile`)
-6. `removePipelineWorktree` called in finally on discovery escalation
-7. `createPipelineWorktree` failure → escalated at `init`; `spawnSession` not called; `removePipelineWorktree` not called
-8. Crash resume: prior `worktreePath` in context + existence check passes → `createPipelineWorktree` NOT called; all sessions receive prior `worktreePath`
-9. Crash resume: prior `worktreePath` in context + existence check fails → escalated at `init`
-10. Old-format context (no `worktreePath`): falls through to fresh worktree creation
+## 11. Follow-up tickets
 
-Mirror all tests in `adaptive-implement.test.ts`.
+1. Verify GitHub PENDING draft REST API account-level behavior (pre-PR3 blocker)
+2. Fork PR support for branchStrategy:read-only
+3. Rate limit validation warning if reviewerIdentity token matches source token
+4. GitLab ReviewApprovalAdapter variant
 
-## Test design
+## Plan confidence: Medium
 
-All tests use fully-injected fakes. `createPipelineWorktree` and `removePipelineWorktree` added to `makeFakeDeps`:
-```typescript
-createPipelineWorktree: vi.fn().mockResolvedValue(ok('/fake/worktree')),
-removePipelineWorktree: vi.fn().mockResolvedValue(undefined),
-```
-
-Crash resume tests inject a fake `readPipelineContext` that returns a context with `worktreePath` set. The `fileExists` dep (used by `routeTask`) is separate from the `fs.access` call in crash resume -- the crash resume check uses the `deps.fileExists` method or a new `deps.worktreeExists` dep (design decision: use existing `fileExists` dep to avoid proliferating dep methods).
-
-## Risk register
-
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| Orphaned pipeline worktrees if daemon crashes before context write | Low | Known gap; startup recovery for pipeline worktrees is a follow-up ticket |
-| `opts.workspace` reference missed in a spawnSession or path construction | Medium | Invariant 8 lists all allowed `opts.workspace` uses; Slice 3/4 explicitly enumerate every line number to update |
-| Pitch archival before worktree removal ordering violated by future change | Low | Documented invariant 3; test 5 verifies call ordering via mock call order inspection |
-| Crash resume existence check uses wrong dep method | Low | Use `deps.fileExists` (already in deps) rather than a new method |
-
-## PR packaging strategy
-
-Single PR. All 5 slices are logically coupled. User explicitly requested single PR.
-
-## Follow-up tickets
-
-1. Make `CodingHandoffArtifactV1.branchName` optional (redundant for delivery routing)
-2. Wire `worktrain run pipeline` CLI command with new dep methods
-3. Startup recovery for pipeline worktrees (scan `pipeline-runs/` for in-progress contexts with stale worktrees)
-4. Per-phase commit strategy for richer crash recovery and audit trail
-
-## Plan confidence: High
-
-All blocking audit findings resolved with confirmed primary-evidence verification. No remaining unresolved questions.
+One unresolved unknown remains: GitHub PENDING draft REST API behavior. PR1 and PR2 are unaffected.
