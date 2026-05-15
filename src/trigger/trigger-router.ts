@@ -857,6 +857,18 @@ export class TriggerRouter {
                 DEFAULT_GATE_EVAL_TIMEOUT_MS,
               );
 
+              // Escalate uncertain or rejected verdicts to the operator outbox.
+              // WHY here (not in resumeFromGate): resumeFromGate resumes regardless of verdict --
+              // the agent receives the verdict in its firstStepPrompt and decides how to proceed.
+              // Operator escalation is a coordinator-layer concern, not an engine concern.
+              if (verdict.verdict === 'uncertain') {
+                await deps.postToOutbox(
+                  `Gate evaluation uncertain for step '${stepId}' in session ${sessionId}. ` +
+                  `Reason: ${verdict.rationale}`,
+                  { sessionId, stepId, workflowId: workflowTrigger.workflowId, verdict: verdict.verdict, confidence: verdict.confidence },
+                );
+              }
+
               const resumeResult = await resumeFromGate(
                 sessionId,
                 verdict,
@@ -871,6 +883,10 @@ export class TriggerRouter {
               if (resumeResult.kind === 'err') {
                 console.warn(
                   `[TriggerRouter] Gate resume failed for session ${sessionId}: ${resumeResult.error.message}`,
+                );
+                await deps.postToOutbox(
+                  `Gate session ${sessionId} could not be resumed: ${resumeResult.error.message}`,
+                  { sessionId, stepId, workflowId: workflowTrigger.workflowId, error: resumeResult.error.kind },
                 );
               } else {
                 console.log(
@@ -1037,9 +1053,19 @@ export class TriggerRouter {
                 undefined,
                 DEFAULT_GATE_EVAL_TIMEOUT_MS,
               );
+              if (verdict.verdict === 'uncertain') {
+                await deps.postToOutbox(
+                  `Gate evaluation uncertain for step '${stepId}' in session ${sessionId}. Reason: ${verdict.rationale}`,
+                  { sessionId, stepId, workflowId: workflowTrigger.workflowId, verdict: verdict.verdict, confidence: verdict.confidence },
+                );
+              }
               const resumeResult = await resumeFromGate(sessionId, verdict, ctx, apiKey, this.runWorkflowFn, undefined, emitter, activeSessionSet);
               if (resumeResult.kind === 'err') {
                 console.warn(`[TriggerRouter] Dispatch gate resume failed for session ${sessionId}: ${resumeResult.error.message}`);
+                await deps.postToOutbox(
+                  `Gate session ${sessionId} could not be resumed: ${resumeResult.error.message}`,
+                  { sessionId, stepId, workflowId: workflowTrigger.workflowId, error: resumeResult.error.kind },
+                );
               } else {
                 console.log(`[TriggerRouter] Dispatch gate resumed: sessionId=${sessionId} verdict=${verdict.verdict}`);
               }
