@@ -139,3 +139,13 @@ export function parseDiscoveryHandoffArtifact(
   const result = DiscoveryHandoffArtifactV1Schema.safeParse(artifact);
   return result.success ? result.data : null;
 }
+
+/** Actionable blocked message for wr.discovery_handoff contract. */
+export function getBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${DISCOVERY_HANDOFF_CONTRACT_REF}`,
+    `Provide a wr.discovery_handoff artifact in complete_step's artifacts[] parameter.`,
+    `Required fields: selectedDirection (string), designDocPath (string), confidenceBand ("high"|"medium"|"low"), keyInvariants (string[]), selectionTier ("strong_recommendation"|"provisional_recommendation"|"insufficient_signal").`,
+    `See the step prompt for the full schema.`,
+  ];
+}

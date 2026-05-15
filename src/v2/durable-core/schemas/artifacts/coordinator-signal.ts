@@ -142,3 +142,16 @@ export function parseCoordinatorSignalArtifact(
   const result = CoordinatorSignalArtifactV1Schema.safeParse(artifact);
   return result.success ? result.data : null;
 }
+
+/** Actionable blocked message for wr.coordinator_signal contract. */
+export function getBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${COORDINATOR_SIGNAL_CONTRACT_REF}`,
+    `Provide a wr.coordinator_signal artifact in complete_step's artifacts[] parameter.`,
+    `Required fields: signalKind ("progress"|"finding"|"data_needed"|"approval_needed"|"blocked"), payload (object).`,
+    `Canonical format:`,
+    `\`\`\`json`,
+    `{ "artifacts": [{ "kind": "wr.coordinator_signal", "signalKind": "finding", "payload": { "summary": "..." } }] }`,
+    `\`\`\``,
+  ];
+}

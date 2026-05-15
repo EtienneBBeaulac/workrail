@@ -120,3 +120,26 @@ export function parseReviewVerdictArtifact(
   const result = ReviewVerdictArtifactV1Schema.safeParse(artifact);
   return result.success ? result.data : null;
 }
+
+/**
+ * Actionable blocked message for when a step requires a wr.review_verdict artifact
+ * but the agent did not provide one.
+ *
+ * Injected into the retry prompt so the agent knows exactly what to fix.
+ */
+export function getBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${REVIEW_VERDICT_CONTRACT_REF}`,
+    `Provide a valid wr.review_verdict artifact in complete_step's artifacts[] parameter.`,
+    `Required schema (all fields mandatory):`,
+    `  verdict: "clean" | "minor" | "blocking"`,
+    `  confidence: "high" | "medium" | "low"`,
+    `  findings: array of { severity, summary, findingCategory? } (empty array for clean verdicts)`,
+    `  summary: one-line overall verdict string`,
+    `Canonical format:`,
+    `\`\`\`json`,
+    `{ "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing test for edge case", "findingCategory": "testing" }], "summary": "Minor issues found, no blockers" }] }`,
+    `\`\`\``,
+    `For a clean review with no findings use: "verdict": "clean", "findings": []`,
+  ];
+}

@@ -173,6 +173,26 @@ export function parseCodingHandoffArtifact(
   return result.success ? result.data : null;
 }
 
+/** Actionable blocked message for wr.shaping_handoff contract. */
+export function getShapingHandoffBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${SHAPING_HANDOFF_CONTRACT_REF}`,
+    `Provide a wr.shaping_handoff artifact in complete_step's artifacts[] parameter.`,
+    `Required fields: pitchTitle (string), pitchPath (string), selectedApproach (string).`,
+    `See the step prompt for the full schema.`,
+  ];
+}
+
+/** Actionable blocked message for wr.coding_handoff contract. */
+export function getCodingHandoffBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${CODING_HANDOFF_CONTRACT_REF}`,
+    `Provide a wr.coding_handoff artifact in complete_step's artifacts[] parameter.`,
+    `Required fields: branchName (string), keyDecisions (string[]), knownLimitations (string[]), testsAdded (string[]), filesChanged (string[]).`,
+    `See the step prompt for the full schema.`,
+  ];
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE HANDOFF ARTIFACT -- CLOSED DISCRIMINATED UNION
 // ═══════════════════════════════════════════════════════════════════════════

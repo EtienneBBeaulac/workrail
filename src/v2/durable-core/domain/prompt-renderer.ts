@@ -16,7 +16,21 @@ import { collectAncestryRecap, collectDownstreamRecap, buildChildSummary } from 
 import { expandFunctionDefinitions, formatFunctionDef } from './function-definition-expander.js';
 import { EVENT_KIND, OUTPUT_CHANNEL, PAYLOAD_KIND } from '../constants.js';
 import { extractValidationRequirements } from './validation-requirements-extractor.js';
-import { LOOP_CONTROL_CONTRACT_REF } from '../schemas/artifacts/index.js';
+import {
+  LOOP_CONTROL_CONTRACT_REF,
+  REVIEW_VERDICT_CONTRACT_REF,
+  DISCOVERY_HANDOFF_CONTRACT_REF,
+  GATE_VERDICT_CONTRACT_REF,
+  COORDINATOR_SIGNAL_CONTRACT_REF,
+  SHAPING_HANDOFF_CONTRACT_REF,
+  CODING_HANDOFF_CONTRACT_REF,
+} from '../schemas/artifacts/index.js';
+import { getBlockedMessage as getLoopControlBlockedMessage } from '../schemas/artifacts/loop-control.js';
+import { getBlockedMessage as getReviewVerdictBlockedMessage } from '../schemas/artifacts/review-verdict.js';
+import { getBlockedMessage as getDiscoveryHandoffBlockedMessage } from '../schemas/artifacts/discovery-handoff.js';
+import { getBlockedMessage as getGateVerdictBlockedMessage } from '../schemas/artifacts/gate-verdict.js';
+import { getBlockedMessage as getCoordinatorSignalBlockedMessage } from '../schemas/artifacts/coordinator-signal.js';
+import { getShapingHandoffBlockedMessage, getCodingHandoffBlockedMessage } from '../schemas/artifacts/phase-handoff.js';
 import { projectRunContextV2 } from '../../projections/run-context.js';
 import { asSortedEventLog } from '../sorted-event-log.js';
 import { evaluateCondition } from '../../../utils/condition-evaluator.js';
@@ -283,30 +297,38 @@ function buildLoopContextBanner(args: {
 }
 
 /**
+ * Lookup map: contractRef -> getBlockedMessage function.
+ *
+ * Each contract schema owns its blocked message -- this map just routes to it.
+ * Adding a new contract never requires changing this function; add getBlockedMessage()
+ * to the contract file and register it here.
+ */
+const CONTRACT_BLOCKED_MESSAGES: Readonly<Record<string, () => readonly string[]>> = {
+  [LOOP_CONTROL_CONTRACT_REF]: getLoopControlBlockedMessage,
+  [REVIEW_VERDICT_CONTRACT_REF]: getReviewVerdictBlockedMessage,
+  [DISCOVERY_HANDOFF_CONTRACT_REF]: getDiscoveryHandoffBlockedMessage,
+  [GATE_VERDICT_CONTRACT_REF]: getGateVerdictBlockedMessage,
+  [COORDINATOR_SIGNAL_CONTRACT_REF]: getCoordinatorSignalBlockedMessage,
+  [SHAPING_HANDOFF_CONTRACT_REF]: getShapingHandoffBlockedMessage,
+  [CODING_HANDOFF_CONTRACT_REF]: getCodingHandoffBlockedMessage,
+};
+
+/**
  * Format system-injected requirements for output contracts.
- * These are generated from contract metadata, not authored prompts.
+ * Delegates to each contract's getBlockedMessage() so contracts own their guidance.
  */
 function formatOutputContractRequirements(
   outputContract: { readonly contractRef?: string } | undefined
 ): readonly string[] {
   const contractRef = outputContract?.contractRef;
   if (!contractRef) return [];
-
-  switch (contractRef) {
-    case LOOP_CONTROL_CONTRACT_REF:
-      return [
-        `Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`,
-        `Provide an artifact with kind: "wr.loop_control"`,
-        `Required field: decision ("continue" | "stop")`,
-        `Do NOT include loopId — the engine matches automatically`,
-        `Canonical format:\n\`\`\`json\n{ "artifacts": [{ "kind": "wr.loop_control", "decision": "stop" }] }\n\`\`\``,
-      ];
-    default:
-      return [
-        `Artifact contract: ${contractRef}`,
-        `Provide an artifact matching the contract schema`,
-      ];
-  }
+  const getMsg = CONTRACT_BLOCKED_MESSAGES[contractRef];
+  if (getMsg) return getMsg();
+  // Unknown contract: generic fallback
+  return [
+    `Artifact contract: ${contractRef}`,
+    `Provide an artifact matching the contract schema`,
+  ];
 }
 
 export function formatAssessmentRequirementsForTest(

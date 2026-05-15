@@ -86,3 +86,16 @@ export function parseGateVerdictArtifact(
   const result = GateVerdictArtifactV1Schema.safeParse(artifact);
   return result.success ? result.data : null;
 }
+
+/** Actionable blocked message for wr.gate_verdict contract. */
+export function getBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${GATE_VERDICT_CONTRACT_REF}`,
+    `Provide a wr.gate_verdict artifact in complete_step's artifacts[] parameter.`,
+    `Required fields: verdict ("approved"|"rejected"|"uncertain"), rationale (string), confidence ("high"|"medium"|"low"), stepId (string).`,
+    `Canonical format:`,
+    `\`\`\`json`,
+    `{ "artifacts": [{ "kind": "wr.gate_verdict", "verdict": "approved", "rationale": "Output meets criteria", "confidence": "high", "stepId": "phase-6-final-handoff" }] }`,
+    `\`\`\``,
+  ];
+}
