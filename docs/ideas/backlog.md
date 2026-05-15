@@ -3875,6 +3875,35 @@ Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or co
 
 ---
 
+### Automated reviewer-assigned MR review with identity-matched comments (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:3 Cap:3 Eff:3 Lev:3 Con:2 | Blocked: no
+
+When a user is assigned as reviewer on a GitLab (or GitHub) MR, WorkTrain should automatically trigger a review session, post an acknowledgment comment in the user's voice while the review is in progress, then post the completed review in the user's comment style.
+
+**What this looks like end-to-end:**
+1. GitLab webhook or polling detects `reviewer_assigned` event for the configured user on a configured set of repos
+2. WorkTrain immediately posts an acknowledgment comment (configurable template, e.g. "Taking a look at this, will have feedback shortly") so the author knows review is in progress
+3. WorkTrain runs `wr.mr-review` (or the improved successor) to produce findings
+4. WorkTrain posts the review findings as inline + summary comments in the user's voice -- comment style, tone, and framing should match the user's historical review patterns
+5. Optionally, the user can approve/reject the posted draft before it goes live (Slack interaction, similar to what etienne-clone already implements)
+
+**Relevant prior work:**
+- `~/git/personal/etienne-clone` -- a MR review bot with GitLab posting, identity doc loading, WorkRail integration, Slack approval pipeline, and a review queue. Does NOT yet have reviewer-assignment detection (only manual `/review` endpoint trigger). The identity prompting (`src/identity/`) and GitLab posting (`src/gitlab/posting.ts`) infrastructure is directly applicable.
+- `wr.mr-review-workflow.agentic.v2.json` -- the current review workflow. Needs the quality overhaul (see item below) before this can produce review-quality output worth posting.
+
+**Things to hash out:**
+- Webhook vs polling: GitLab webhooks require infrastructure. Polling `GET /merge_requests?reviewer_username=etienneb&state=opened` on a 5-minute cycle is simpler and sufficient for non-latency-sensitive reviews.
+- Which repos to watch: needs a `repos` config in triggers.yml or a new trigger type.
+- Acknowledgment comment: should be configurable per-repo. Some teams find bot acknowledgments noisy; others find them useful. Default on with opt-out.
+- Identity matching: etienne-clone loads identity docs from `docs/`. WorkTrain needs a way to reference that same source or an equivalent -- either a path config, or the user's Memory MCP contains their review style.
+- Draft approval gate: optional Slack (or operator outbox) approval step before posting. etienne-clone already has this via `createSlackInteraction`. Could reuse or port the pattern.
+- Handling non-code reviews (design docs, RFCs): the review workflow is code-diff-oriented. A separate path may be needed for non-code MRs.
+
+---
+
 ### wr.mr-review quality and architecture overhaul (May 8, 2026)
 
 **Status: idea** | Priority: high
