@@ -2503,6 +2503,20 @@ The problem is not just "add an LLM to make the decision." An LLM making approva
 
 ---
 
+### is_autonomous context key is a magic string check in advance-core (May 14, 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 4** | Cor:1 Cap:1 Eff:1 Lev:1 Con:0 | Blocked: no
+
+`src/mcp/handlers/v2-advance-core/index.ts:313` detects daemon sessions via `v.mergedContext['is_autonomous'] === 'true'` -- a magic string check in an unconstrained `Record<string, unknown>` map. The daemon writes this key at session start (`pre-agent-session.ts:102`).
+
+The check is correct and necessary (using the autonomy preference was previously wrong -- all sessions start with 'guided'), but it violates "validate at boundaries, trust inside" by checking an untyped context key deep in the advance path. The better design is a typed first-class concept that the advance handler can rely on without magic string matching.
+
+**Options:** (a) Add a session-level `daemonMode: boolean` field to the session event schema, written at start time via a dedicated `preferences_changed` event or `session_meta` event; (b) Promote `is_autonomous` to a typed context slot with a registered key constant. Option (a) is cleaner architecturally but is a schema change. Option (b) is lower blast radius. Neither is urgent -- the current behavior is correct.
+
+---
+
 ### Agents must not perform delivery actions -- only the coordinator's delivery layer can (Apr 30, 2026)
 
 **Status: idea** | Priority: high
