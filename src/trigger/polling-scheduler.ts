@@ -729,6 +729,10 @@ function buildGitLabWorkflowTrigger(
     ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
     ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
     ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
+    ...(trigger.branchStrategy !== undefined ? { branchStrategy: trigger.branchStrategy } : {}),
+    ...(trigger.baseBranch !== undefined ? { baseBranch: trigger.baseBranch } : {}),
+    ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
+    ...(trigger.reviewerIdentity !== undefined ? { reviewerIdentity: trigger.reviewerIdentity } : {}),
   };
 }
 
@@ -780,6 +784,10 @@ function buildGitHubWorkflowTrigger(
     ...(trigger.referenceUrls !== undefined ? { referenceUrls: trigger.referenceUrls } : {}),
     ...(trigger.agentConfig !== undefined ? { agentConfig: trigger.agentConfig } : {}),
     ...(trigger.soulFile !== undefined ? { soulFile: trigger.soulFile } : {}),
+    ...(trigger.branchStrategy !== undefined ? { branchStrategy: trigger.branchStrategy } : {}),
+    ...(trigger.baseBranch !== undefined ? { baseBranch: trigger.baseBranch } : {}),
+    ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
+    ...(trigger.reviewerIdentity !== undefined ? { reviewerIdentity: trigger.reviewerIdentity } : {}),
   };
 }
 
