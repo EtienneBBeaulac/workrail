@@ -344,6 +344,18 @@ export interface WorkflowRunSuccess {
     readonly name: string;
     readonly email: string;
   };
+  /**
+   * The WorkRail session ID (sess_* branded ID) of this workflow run.
+   *
+   * WHY this field exists: maybeRunPostWorkflowActions() in TriggerRouter needs the
+   * WorkRail session ID to read artifacts from the session store (for the human_approval
+   * gate path) and to write the review_draft_submitted event via PendingDraftReviewPoller.
+   * Without this field the poller guard `if (ctx?.v2 && resolvedWorkrailSessionId)` is
+   * always false and the poller never starts.
+   *
+   * Absent when the WorkRail session ID was not decoded (rare edge case).
+   */
+  readonly workrailSessionId?: SessionId;
 }
 
 /** Failed workflow run (tool error, agent error, engine error, etc.). */
