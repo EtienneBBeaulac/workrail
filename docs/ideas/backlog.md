@@ -195,6 +195,67 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### worktrain session-log: readable turn-by-turn replay of any session (May 15, 2026)
+
+**Status: idea** | Priority: CRITICAL
+
+**Score: 16** | Cor:3 Cap:3 Eff:3 Lev:3 Con:4 | Blocked: no
+
+Without this, debugging stalled or failed sessions means grepping through raw JSONL files and guessing. Every hour spent trying to understand why a session hung is an hour that could be spent fixing real problems. This is the single highest-leverage observability gap.
+
+`worktrain session-log <sessionId>` -- reads the conversation JSONL and session event log for any session (live or completed) and renders them as a human-readable, time-annotated turn-by-turn log:
+
+```
+[13:21:04] Turn 1   → Bash: cd /worktrees/abc && gh pr diff 1022   [started]
+[13:21:06] Turn 1   ← Bash: 847 lines  [2.1s]
+[13:21:06] Turn 1   → Bash: cat src/trigger/types.ts   [started]
+[13:21:08] Turn 1   ← Bash: (4203 chars)  [1.8s]
+[13:21:12] Turn 2   → complete_step  [started]
+[13:21:13] Turn 2   ADVANCE: phase-0 → phase-0b  [0.9s]
+[13:22:45] Turn 3   → spawn_agent: { agents: [{ workflowId: wr.discovery... }] }  [started]
+[13:24:52] Turn 3   ← spawn_agent: outcome=error  [127s] ← SLOW
+[13:24:52] Turn 3   → Bash: ...  [started]
+[13:26:48] STALL ABORT: no LLM call started in 120s (last call started 13:24:52, tool still in flight)
+```
+
+Key: timestamps per turn, duration per tool call, which call hung (marked SLOW or still-in-flight at abort time), step advances with notes, and the final outcome.
+
+**Why I can read this myself:** when a session stalls and gets killed, I run `worktrain session-log <id>` and immediately see which turn hung, which tool was in flight, and what the agent said just before. No more guessing.
+
+**Also needed: `--follow` flag** for live tailing. Same output, just streams as new lines are appended to the conversation log. Foundation for the console Live tab.
+
+**Implementation:** new CLI command `src/cli/commands/worktrain-session-log.ts`, ~150 lines. Reads `~/.workrail/daemon-sessions/<id>-conversation.jsonl` (turn data) and `~/.workrail/data/sessions/<sessionId>/events/*.jsonl` (step advances, stalls). The daemon session UUID maps to the WorkRail session ID via the sidecar file.
+
+---
+
+### Verify reviewer-assigned MR review feature end-to-end (May 15, 2026)
+
+**Status: active** | Priority: CRITICAL
+
+**Score: 16** | Cor:3 Cap:3 Eff:3 Lev:3 Con:4 | Blocked: no
+
+We have never successfully completed a full end-to-end run of the reviewer-assigned MR review feature. Every attempt so far has stalled mid-session due to hung Bedrock calls before reaching the `human_approval` gate. We don't know if the gate routing works, if the draft review gets created, if the poller starts, or if the macOS notification fires. Until we see this work once, we're shipping untested infrastructure.
+
+**What needs to happen:**
+1. A `wr.mr-review` session runs on a real PR to completion (reaches phase-6 final handoff)
+2. The `human_approval` gate fires (not `coordinator_eval` -- verify this in session events)
+3. `maybeRunPostWorkflowActions()` reads `wr.review_verdict` from session artifacts
+4. `GitHubReviewApprovalAdapter.createDraftReview()` posts a PENDING draft to GitHub
+5. The operator sees "Finish your review" in GitHub with real findings
+6. Operator publishes the draft
+7. `PendingDraftReviewPoller` detects submission within 60s
+8. `review_draft_submitted` event appears in the session event log
+9. macOS notification fires at draft creation
+
+**Blockers to clear first:**
+- `worktrain session-log` command (adjacent entry above) -- needed to diagnose any future stalls
+- Per-call timeout in AgentLoop -- prevents hung Bedrock calls from blocking indefinitely
+- Consider using Sonnet instead of Haiku for this verification run -- fewer stalls, confirms the pipeline works before optimizing cost
+
+**Success signal:** a real pending draft review visible under your GitHub account on PR #1022, with findings that reflect the actual code in the PR.
+
+---
+
 ### Large-comment smell detection during implementation (May 8, 2026)
 
 **Status: idea** | Priority: medium
@@ -2969,6 +3030,80 @@ Simplify third-party and team workflow hookup by requiring explicit `workspacePa
 ---
 
 ## Console
+
+### Actionable blocked responses: tell the agent exactly what to fix, not just that it failed (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:2 Con:3 | Blocked: no
+
+When the engine blocks an advance (output contract not satisfied, validation criteria failed, required field missing), the agent receives a generic error message. It knows something is wrong but not what specifically needs to change. The result is wasted turns where the agent retries with variations that still fail, or gives up and produces a different kind of wrong output.
+
+Every blocked response should be actionable: tell the agent the exact schema expected, what was provided, and the precise call needed to fix it.
+
+**Examples of current vs. better:**
+
+Output contract failure:
+- Current: `"output contract not satisfied: wr.review_verdict required"`
+- Better: `"Phase 6 requires a wr.review_verdict artifact in complete_step's artifacts[] parameter. Your last call provided 0 artifacts. Required schema: { kind: 'wr.review_verdict', verdict: 'clean'|'minor'|'blocking', confidence: 'high'|'medium'|'low', findings: [...], summary: '...' }. Call complete_step again with this artifact."`
+
+Validation criteria failure:
+- Current: `"validation criterion not met"`
+- Better: `"Criterion: 'build must pass'. Evidence required: Bash output showing 0 TypeScript errors. Provide this evidence in your notes before advancing."`
+
+Required field missing:
+- Current: `"missing required field"`
+- Better: `"The wr.review_verdict artifact is missing required field 'findings'. Include an empty array if there are no findings: findings: []"`
+
+**Implementation:** the blocked response is built in `src/mcp/handlers/v2-advance-core/outcome-blocked.ts`. It currently surfaces validation results as-is. Enriching it with schema context (from the outputContract's contractRef, resolved against the artifact schemas) and diff context (what was provided vs. what was required) is the targeted change.
+
+**Things to hash out:**
+- How much schema detail is useful vs. noisy? A full JSON schema dump of `wr.review_verdict` is too long. The agent needs the minimum to fix the call -- field names, types, and a concrete example.
+- Should the blocked message include the agent's previous call so it can see the diff? "You called complete_step with artifacts: [] -- add the wr.review_verdict object."
+
+---
+
+### Full session lifecycle management: real status, cleanup, and operator control (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+WorkTrain has all the data needed to know exactly what every session is doing at any moment -- it just doesn't surface it. The session event log has precise state: which step is active, how many LLM turns have been taken, whether a Bedrock call is in flight, whether the agent is waiting on a spawn_agent child, whether a gate is parked. Instead of inferring "probably stuck" from "no step advance in 60 minutes", the operator should be able to see exactly what's happening and act on it.
+
+**What this covers:**
+
+**Precise session status** (not guesses):
+- `running:turn_N` -- agent loop active, turn N of current step, last LLM call started X seconds ago
+- `running:awaiting_child` -- spawn_agent in flight, waiting on N child sessions
+- `running:bedrock_call` -- Bedrock API call in progress, started X seconds ago (visible when call is hung)
+- `gate_parked:human_approval` -- parked at human_approval gate, draft review created, waiting for publish
+- `gate_parked:coordinator_eval` -- parked at coordinator gate, evaluator session running
+- `completed:success` / `completed:error` / `completed:stuck` / `completed:timeout` -- terminal states with full detail
+- `orphaned` -- process died, token still valid, eligible for resume
+
+**Session management actions** (from console or CLI):
+- `worktrain session kill <id>` -- abort the agent loop cleanly, write a terminal event, clean up sidecar and worktree
+- `worktrain session archive <id>` -- mark completed sessions as archived so they don't clutter the console
+- `worktrain session resume <id>` -- manually trigger recovery for an orphaned session
+- `worktrain session retry <id>` -- re-fire the workflow from the beginning with the same goal and trigger context (useful when a session died on a transient error)
+- Bulk cleanup: archive all sessions older than N days, kill all stuck sessions, etc.
+
+**Console improvements:**
+- Status badges on every session in the list: not just "active/complete" but the precise state above
+- Real-time status updates for active sessions without requiring a page refresh
+- Filter by status: show only running, only stuck, only gate-parked, only errored
+- Session detail shows the current LLM turn count, wall-clock time per step, which child sessions are running
+- "Kill" and "Archive" buttons on each session card
+
+**The data exists.** `DaemonEventEmitter` fires `tool_called`, `step_advanced`, `session_completed` on every event. The `ActivityRegistry` (or equivalent) tracks which sessions are in the active set. The session sidecar has `workflowId`, `goal`, `worktreePath`. The gap is plumbing this into the console's session list projection and adding the management endpoints.
+
+**Things to hash out:**
+- What is the right source for real-time "is this session currently making a Bedrock call" -- the `onLlmTurnStarted` callback in `AgentLoop` fires before each call, but the console reads from the session store. Bridging the two requires either a separate in-process state map or a new "heartbeat" event kind written to the session log on each LLM call start.
+- Session cleanup for worktrees: killing a session that used `branchStrategy: 'worktree'` or `read-only` needs to clean up the worktree on disk -- the kill action should trigger `git worktree remove`.
+- Archive vs delete: archived sessions should be queryable (for audit, for learning from edits) but not shown by default. Delete should require explicit confirmation.
+
+---
 
 ### Perfect, no-nonsense session resumption after crash or hang (May 15, 2026)
 
