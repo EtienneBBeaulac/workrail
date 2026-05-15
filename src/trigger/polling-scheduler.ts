@@ -754,6 +754,12 @@ function buildGitHubWorkflowTrigger(
     itemUrl: item.html_url,
     itemUpdatedAt: item.updated_at,
     ...(item.user?.login ? { itemAuthorLogin: item.user.login } : {}),
+    // prBranch: the head branch name of the PR. Only present for GitHubPR items.
+    // GitHubIssue has no head field; optional chaining ensures no crash for issues.
+    // Used by branchStrategy:'read-only' to checkout the PR branch in an isolated worktree.
+    ...((item as import('./adapters/github-poller.js').GitHubPR).head?.ref
+      ? { prBranch: (item as import('./adapters/github-poller.js').GitHubPR).head!.ref }
+      : {}),
   };
 
   const goal = interpolateGoalFromPayload(trigger, {

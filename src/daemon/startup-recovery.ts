@@ -111,7 +111,7 @@ export async function readAllDaemonSessions(
     // (i.e. they end with .tmp, not .json) -- the endsWith('.json') check already
     // excludes them. The belt-and-suspenders check keeps this robust to naming changes.
     // queue-issue-*.json sidecars live in the same directory; skip them here.
-    if (!entry.endsWith('.json') || entry.startsWith('queue-issue-')) continue;
+    if (!entry.endsWith('.json') || entry.startsWith('queue-issue-') || entry.startsWith('pending-draft-')) continue;
 
     const sessionId = asRunId(entry.slice(0, -5)); // strip .json
     const filePath = path.join(sessionsDir, entry);

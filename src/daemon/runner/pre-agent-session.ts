@@ -213,6 +213,69 @@ export async function buildPreAgentSession(
         handle: undefined,
       };
     }
+  } else if (trigger.branchStrategy === 'read-only') {
+    // 'read-only': checkout the PR's existing branch in an isolated worktree (--detach).
+    // No new branch is created; no push occurs after the session.
+    // The PR branch name must be in trigger.context.prBranch (injected by buildGitHubWorkflowTrigger).
+    const prBranch = (trigger.context as Record<string, unknown> | undefined)?.['prBranch'];
+    if (typeof prBranch !== 'string' || !prBranch) {
+      const msg = 'branchStrategy:read-only requires context.prBranch (the PR head branch). ' +
+        'Ensure the trigger uses github_prs_poll with a reviewerLogin so prBranch is injected.';
+      console.error(`[WorkflowRunner] Read-only worktree creation failed: sessionId=${sessionId} -- ${msg}`);
+      return {
+        kind: 'complete',
+        result: { _tag: 'error', workflowId: trigger.workflowId, message: msg, stopReason: 'error' },
+        workrailSessionId: state.workrailSessionId,
+        handle: undefined,
+      };
+    }
+
+    sessionWorkspacePath = path.join(WORKTREES_DIR, sessionId);
+    sessionWorktreePath = sessionWorkspacePath;
+
+    try {
+      await fs.mkdir(WORKTREES_DIR, { recursive: true });
+      // Fetch the PR branch so it's available locally before creating the worktree.
+      await execFileAsync('git', ['-C', trigger.workspacePath, 'fetch', 'origin', prBranch]);
+      await execFileAsync('git', [
+        '-C', trigger.workspacePath,
+        'worktree', 'add',
+        sessionWorkspacePath,
+        '--detach',
+        `origin/${prBranch}`,
+      ]);
+
+      const worktreePersistResult = await persistTokens(
+        sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
+        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, branchStrategy: 'read-only' },
+      );
+      if (worktreePersistResult.kind === 'err') {
+        console.error(`[WorkflowRunner] Read-only worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
+        try { await execFileAsync('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', sessionWorkspacePath]); } catch { /* best effort */ }
+        return {
+          kind: 'complete',
+          result: {
+            _tag: 'error',
+            workflowId: trigger.workflowId,
+            message: `Read-only worktree sidecar persist failed: ${worktreePersistResult.error.code}`,
+            stopReason: 'error',
+          },
+          workrailSessionId: state.workrailSessionId,
+          handle: undefined,
+        };
+      }
+
+      console.log(`[WorkflowRunner] Read-only worktree created: sessionId=${sessionId} prBranch=${prBranch} path=${sessionWorkspacePath}`);
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      console.error(`[WorkflowRunner] Read-only worktree creation failed: sessionId=${sessionId} prBranch=${prBranch} error=${errMsg}`);
+      return {
+        kind: 'complete',
+        result: { _tag: 'error', workflowId: trigger.workflowId, message: `Read-only worktree creation failed: ${errMsg}`, stopReason: 'error' },
+        workrailSessionId: state.workrailSessionId,
+        handle: undefined,
+      };
+    }
   }
 
   // ---- Registry setup (AFTER all potentially-failing I/O -- FM1 invariant) ----

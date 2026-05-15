@@ -370,7 +370,7 @@ const recordCommitShasStage: DeliveryStage = {
 const cleanupWorktreeStage: DeliveryStage = {
   name: 'cleanupWorktree',
   async run(result, trigger, execFn, _ctx) {
-    if (trigger.branchStrategy !== 'worktree' || !result.sessionWorkspacePath) {
+    if ((trigger.branchStrategy !== 'worktree' && trigger.branchStrategy !== 'read-only') || !result.sessionWorkspacePath) {
       return { kind: 'continue' };
     }
 
@@ -423,7 +423,7 @@ const cleanupWorktreeStage: DeliveryStage = {
 const deleteSidecarStage: DeliveryStage = {
   name: 'deleteSidecar',
   async run(result, trigger, _execFn, _ctx) {
-    if (trigger.branchStrategy !== 'worktree' || result.sessionId === undefined) {
+    if ((trigger.branchStrategy !== 'worktree' && trigger.branchStrategy !== 'read-only') || result.sessionId === undefined) {
       return { kind: 'continue' };
     }
 

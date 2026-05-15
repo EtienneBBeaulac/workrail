@@ -95,6 +95,17 @@ export interface GitHubPR {
   readonly draft?: boolean;
   /** Labels on the PR. Used for notLabels filtering. */
   readonly labels?: readonly GitHubLabel[];
+  /**
+   * Head branch info. `ref` is the branch name (e.g. 'feature/my-pr').
+   * Used by branchStrategy:'read-only' to checkout the PR branch in an isolated worktree.
+   * The GitHub API returns this field on all PR list responses.
+   */
+  readonly head?: { readonly ref: string };
+  /**
+   * Requested reviewers for this PR.
+   * Used to filter PRs assigned to a specific reviewer (reviewerLogin filter).
+   */
+  readonly requested_reviewers?: readonly { readonly login: string }[];
 }
 
 export type GitHubPollError =
@@ -368,6 +379,12 @@ function applyPRFilters(prs: GitHubPR[], source: GitHubPollingSource): GitHubPR[
     if (source.notLabels.length > 0 && pr.labels) {
       const labelNames = pr.labels.map(l => l.name);
       if (source.notLabels.some(nl => labelNames.includes(nl))) return false;
+    }
+    // reviewerLogin filter: when set, only dispatch PRs where this login is in requested_reviewers.
+    // Absent field means no reviewers fetched yet or none assigned -- drop the PR.
+    if (source.reviewerLogin) {
+      const reviewers = pr.requested_reviewers ?? [];
+      if (!reviewers.some(r => r.login === source.reviewerLogin)) return false;
     }
     return true;
   });
