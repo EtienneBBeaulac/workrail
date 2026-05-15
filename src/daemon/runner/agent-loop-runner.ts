@@ -283,6 +283,9 @@ export async function buildAgentReadySession(
     emitter,
     sessionId,
     workflowId: trigger.workflowId,
+    triggerWorkspacePath: trigger.workspacePath,
+    triggerGoal: trigger.goal ?? '',
+    triggerBranchStrategy: trigger.branchStrategy,
     activeSessionSet,
   };
   const tools = constructTools(ctx, apiKey, schemas, scope, runWorkflowFn);

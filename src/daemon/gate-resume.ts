@@ -90,6 +90,7 @@ export async function resumeFromGate(
     workflowId?: string;
     goal?: string;
     workspacePath?: string;
+    branchStrategy?: 'worktree' | 'none';
     worktreePath?: string;
     continueToken?: string;
   };
@@ -185,7 +186,7 @@ export async function resumeFromGate(
     workflowId,
     goal,
     workspacePath,
-    branchStrategy: 'none' as const,
+    branchStrategy: sidecar.branchStrategy ?? 'none',
   };
 
   const source: SessionSource = {

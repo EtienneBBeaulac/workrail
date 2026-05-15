@@ -125,13 +125,19 @@ export function detectBlockingReasonsV1(args: {
     reasons.push({ kind: 'missing_notes', stepId: args.missingNotes.stepId });
   }
 
-  for (const followup of args.assessmentFollowupsRequired ?? []) {
+  // WHY validate all followups before pushing any: an early return on the first invalid
+  // dimensionId would silently drop valid consequences already accumulated in `reasons`.
+  // Validate the full set first so callers get a consistent error report.
+  const followups = args.assessmentFollowupsRequired ?? [];
+  for (const followup of followups) {
     if (!DELIMITER_SAFE_ID_PATTERN.test(followup.dimensionId)) {
       return err({
         code: 'INVALID_DELIMITER_SAFE_ID',
         message: `assessment dimension ID must be delimiter-safe: [a-z0-9_-]+ (got: ${followup.dimensionId})`,
       });
     }
+  }
+  for (const followup of followups) {
     reasons.push({
       kind: 'assessment_followup_required',
       assessmentId: followup.assessmentId,

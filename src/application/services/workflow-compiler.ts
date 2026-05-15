@@ -345,6 +345,22 @@ export class WorkflowCompiler {
           ));
         }
       }
+
+      // WHY duplicate trigger check: two consequences with the same (anyEqualsLevel, forAssessment)
+      // produce identical dedupeKeys in buildAssessmentConsequenceAppliedEvent, crashing the
+      // session store with SESSION_STORE_INVARIANT_VIOLATION at runtime.
+      const seenTriggerKeys = new Set<string>();
+      for (const consequence of assessmentConsequences) {
+        const key = `${consequence.when.anyEqualsLevel}:${consequence.when.forAssessment ?? ''}`;
+        if (seenTriggerKeys.has(key)) {
+          return err(Err.invalidState(
+            `Step '${step.id}' declares duplicate assessment consequence trigger: anyEqualsLevel '${consequence.when.anyEqualsLevel}' ` +
+            (consequence.when.forAssessment ? `forAssessment '${consequence.when.forAssessment}'` : '(no forAssessment scoping)') +
+            ` appears more than once. Duplicate triggers produce identical event dedupeKeys.`
+          ));
+        }
+        seenTriggerKeys.add(key);
+      }
     }
 
     const compiledLoops = new Map<string, CompiledLoop>();

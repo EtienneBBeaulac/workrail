@@ -78,6 +78,9 @@ export interface GateEvaluatorDeps {
 /** Default gate evaluation timeout: 30 minutes. */
 export const DEFAULT_GATE_EVAL_TIMEOUT_MS = 30 * 60 * 1000;
 
+/** Default evaluator workflow ID used when no override is configured. */
+export const DEFAULT_GATE_EVALUATOR_WORKFLOW_ID = 'wr.gate-eval-generic';
+
 // ---------------------------------------------------------------------------
 // evaluateGate
 // ---------------------------------------------------------------------------
