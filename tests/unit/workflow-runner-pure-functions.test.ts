@@ -51,6 +51,7 @@ describe('tagToStatsOutcome', () => {
     { tag: 'error', expected: 'error' },
     { tag: 'timeout', expected: 'timeout' },
     { tag: 'stuck', expected: 'stuck' },
+    { tag: 'gate_parked', expected: 'gate_parked' },
     // delivery_failed: workflow succeeded; only the POST failed -- record as success.
     // See WorkflowDeliveryFailed and invariants doc section 1.3.
     { tag: 'delivery_failed', expected: 'success' },
@@ -817,6 +818,43 @@ describe('buildSessionResult', () => {
       expect(result.botIdentity).toEqual({ name: 'bot', email: 'bot@example.com' });
     }
   });
+
+  it('returns _tag: gate_parked when gate_parked terminalSignal is set', () => {
+    const state = createSessionState('ct_test');
+    setTerminalSignal(state, { kind: 'gate_parked', gateToken: 'ct_fake_gate_token', stepId: 'design-gate' });
+    const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('gate_parked');
+    if (result._tag === 'gate_parked') {
+      expect(result.gateToken).toBe('ct_fake_gate_token');
+      expect(result.stepId).toBe('design-gate');
+      expect(result.sessionId).toBe(SESSION_ID);
+      expect(result.stopReason).toBe('gate_parked');
+    }
+  });
+
+  it('gate_parked result includes workrailSessionId when state has one', () => {
+    const state = createSessionState('ct_test');
+    setTerminalSignal(state, { kind: 'gate_parked', gateToken: 'ct_gate', stepId: 'some-gate' });
+    // Simulate setSessionId having been called -- directly assign since the typed
+    // transition is tested in state/session-state tests.
+    (state as { workrailSessionId: unknown }).workrailSessionId = 'sess_workrail123' as unknown;
+    const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('gate_parked');
+    if (result._tag === 'gate_parked') {
+      expect(result.workrailSessionId).toBe('sess_workrail123');
+    }
+  });
+
+  it('gate_parked result omits workrailSessionId when state has null', () => {
+    const state = createSessionState('ct_test');
+    setTerminalSignal(state, { kind: 'gate_parked', gateToken: 'ct_gate', stepId: 'some-gate' });
+    // workrailSessionId starts null in fresh state
+    const result = buildSessionResult(state, 'stop', undefined, makeTrigger(), SESSION_ID, undefined);
+    expect(result._tag).toBe('gate_parked');
+    if (result._tag === 'gate_parked') {
+      expect(result.workrailSessionId).toBeUndefined();
+    }
+  });
 });
 
 // ── sidecardLifecycleFor ──────────────────────────────────────────────────────
@@ -868,6 +906,18 @@ describe('sidecardLifecycleFor', () => {
 
   it('stuck + none -> delete_now', () => {
     expect(sidecardLifecycleFor('stuck', 'none')).toEqual({ kind: 'delete_now' });
+  });
+
+  it('gate_parked + worktree -> retain_for_gate', () => {
+    expect(sidecardLifecycleFor('gate_parked', 'worktree')).toEqual({ kind: 'retain_for_gate' });
+  });
+
+  it('gate_parked + none -> retain_for_gate', () => {
+    expect(sidecardLifecycleFor('gate_parked', 'none')).toEqual({ kind: 'retain_for_gate' });
+  });
+
+  it('gate_parked + undefined -> retain_for_gate', () => {
+    expect(sidecardLifecycleFor('gate_parked', undefined)).toEqual({ kind: 'retain_for_gate' });
   });
 
   it('delivery_failed -> throws via assertNever (impossible from runWorkflow())', () => {
