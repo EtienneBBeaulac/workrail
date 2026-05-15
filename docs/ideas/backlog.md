@@ -4011,6 +4011,7 @@ Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or co
 
 ---
 
+<<<<<<< HEAD
 ### Automated reviewer-assigned MR review with identity-matched comments (May 15, 2026)
 
 **Status: active** | Priority: high
@@ -4060,6 +4061,39 @@ When assigned as reviewer on a GitHub PR, WorkTrain automatically runs a deep re
 ---
 
 ### Slice 3: PendingDraftReviewPoller, domain event, and startup recovery (May 15, 2026)
+=======
+### worktrain review <pr-number>: one-off PR review CLI command (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:3 Lev:3 Con:2 | Blocked: no
+
+There is no simple way to trigger a review of a specific PR without either setting up polling triggers or hand-crafting a JSON webhook payload with the branch name, PR number, and URL manually. This is too much friction for ad-hoc reviews.
+
+**The fix:** `worktrain review <pr-number>` -- a CLI command that:
+1. Calls `gh pr view <pr-number> --json number,title,headRefName,url,baseRefName` to fetch PR metadata
+2. Constructs the correct `WorkflowTrigger` with all required context fields (`itemNumber`, `itemUrl`, `prBranch`) already populated
+3. Dispatches `wr.mr-review` (or the workflow selected by `routeReviewWorkflow()`) via `TriggerRouter.dispatch()` with `branchStrategy: 'read-only'`
+4. If `reviewerIdentity` is configured in `~/.workrail/config.json`, creates the draft review and starts the poller automatically
+5. Prints a link to the WorkTrain Console session so the operator can watch progress
+
+**Optional flags:**
+- `--workflow wr.production-readiness-audit` -- override workflow selection
+- `--no-draft` -- run the review but don't create a GitHub draft (just log findings to the console)
+- `--repo owner/repo` -- specify repo explicitly (default: current directory's git remote)
+
+**Why this matters:** the polling triggers handle the automated case (assigned PRs fire automatically), but operators need a simple way to say "review this PR right now" for ad-hoc cases -- PRs not assigned to them, PRs they want a second pass on, or just testing the review pipeline. A single command with no config required (besides having the daemon running) is the right UX.
+
+**Implementation:** new `src/cli/commands/worktrain-review.ts` following the same pattern as `worktrain-spawn.ts`. Uses `gh pr view` via `execFile` for PR metadata, then calls into the daemon dispatch path.
+
+**Things to hash out:**
+- Should this require the daemon to be running, or should it spin up a one-shot session directly? Running through the daemon is cleaner (uses the full pipeline including sidecar write and poller) but requires the daemon. A direct `runWorkflow()` call without the daemon is simpler for scripts. Proposal: daemon-required for the full feature (draft review, poller); add a `--standalone` flag for environments without a running daemon.
+- When `reviewerIdentity` is not configured, should `--no-draft` be the implicit default, or should the command error out asking you to configure it?
+
+---
+
+### Self-review before merge: WorkTrain runs review families on its own PRs and fixes blocking findings (May 15, 2026)
+>>>>>>> d5d61a7e (docs(backlog): add worktrain review CLI command entry)
 
 **Status: idea** | Priority: high
 
