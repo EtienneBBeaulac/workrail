@@ -513,17 +513,23 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - **Level**: required
 - **Status**: active
 - **Scope**: step.assessment-refs, step.assessment-consequences
-- **Rule**: A step may declare one or more assessmentRefs and at most one assessmentConsequences entry. When assessmentConsequences is present, at least one ref is required. Use anyEqualsLevel as the trigger -- the engine checks all submitted dimensions across all referenced assessments and fires if any equals that level.
-- **Why**: Multiple refs allow composing separate orthogonal assessment definitions (e.g. quality-gate + coverage-gate) behind a single blocking consequence, without forcing unrelated dimensions into one monolithic definition.
-- **Enforced by**: validator
+- **Rule**: A step may declare one or more assessmentRefs and up to 10 assessmentConsequences entries. When assessmentConsequences is present, at least one ref is required. Each consequence uses anyEqualsLevel as the trigger. When a step references multiple assessments, use forAssessment on each consequence to scope it to a specific assessment -- this prevents cross-gate false-fires when multiple assessments share the same level name (e.g. all use 'low'/'high'). Without forAssessment scoping, a consequence fires if any dimension across any referenced assessment equals the trigger level.
+- **Why**: Multiple independent consequences let each gate provide targeted remediation guidance. Without scoping, all consequences fire from the same matched assessment, which merges unrelated remediation into a single undifferentiated block. forAssessment makes the consequence-to-gate relationship explicit and each consequence can carry guidance specific to the gate that failed.
+- **Enforced by**: validator, compiler
 
 **Checks**
 - At least one assessmentRefs entry when assessmentConsequences is present.
-- No more than one assessmentConsequences entry per step.
+- Up to 10 assessmentConsequences entries per step (maxItems: 10).
 - The consequence uses anyEqualsLevel to declare which level blocks -- not a named dimension.
+- When forAssessment is set, it must be one of the assessmentRefs declared on the same step.
+- When forAssessment is set, anyEqualsLevel must be a level declared in that specific assessment's dimensions.
+- No two consequences on the same step may share the same (anyEqualsLevel, forAssessment) combination -- duplicate pairs produce identical event dedupeKeys and crash the session store.
+- assessmentId values used in consequences must be delimiter-safe: [a-z0-9_-]+ only.
 
 **Anti-patterns**
-- Trying to encode multiple consequences via workarounds
+- Declaring multiple consequences without forAssessment scoping when assessments share level names -- all will fire from the first matching assessment.
+- Merging guidance from multiple distinct gates into one consequence string -- use separate forAssessment-scoped consequences instead.
+- Duplicate (anyEqualsLevel, forAssessment) pairs on the same step.
 
 
 ## Delegation and subagents

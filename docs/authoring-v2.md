@@ -156,7 +156,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
 - **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables project-overridable delegation seams without forking workflow JSON.
 - **References**: workflow-declared pointers to external documents (schemas, specs, guides). Resolved at start time, delivered as a separate MCP content item. The agent reads the files itself if needed. See "Workflow references" section below.
-- **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with one or more `assessmentRefs` and, in v1, use for one exact-match `require_followup` consequence via `assessmentConsequences` (fires if any dimension across any referenced assessment equals the trigger level).
+- **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with one or more `assessmentRefs` and use for one or more `require_followup` consequences via `assessmentConsequences` (up to 10 per step). Each consequence fires independently when its trigger level matches. Use the optional `forAssessment` field to scope a consequence to a specific named assessment -- essential when multiple assessments on the same step share the same level names.
 
 For detailed JSON syntax and examples, see: `docs/design/workflow-authoring-v2.md`.
 
@@ -305,15 +305,35 @@ The v1 shape is:
 
 - declare one or more workflow-level assessments in `assessments`
 - reference them from a step with one or more `assessmentRefs` entries
-- optionally declare one step-level `assessmentConsequences` rule
-- if any dimension across any referenced assessment matches that rule, the engine returns a retryable same-step follow-up block
+- optionally declare one or more step-level `assessmentConsequences` entries (up to 10)
+- each consequence fires independently: if any dimension across any referenced assessment matches the trigger level, the engine returns a retryable same-step follow-up block with that consequence's guidance
 
-Important limits in v1:
+**`forAssessment` scoping (required when multiple assessments share level names):**
+
+When a step references multiple assessments that all use the same level names (e.g. all use `'low'`/`'high'`), an unscoped consequence fires from the first matching assessment -- not from its intended gate. Use `forAssessment` to scope each consequence to its specific assessment:
+
+```json
+"assessmentConsequences": [
+  {
+    "when": { "anyEqualsLevel": "low", "forAssessment": "constraint-derivation-gate" },
+    "effect": { "kind": "require_followup", "guidance": "..." }
+  },
+  {
+    "when": { "anyEqualsLevel": "low", "forAssessment": "type-design-gate" },
+    "effect": { "kind": "require_followup", "guidance": "..." }
+  }
+]
+```
+
+`forAssessment` must be one of the `assessmentRefs` declared on the same step. The compiler enforces this and rejects duplicate `(anyEqualsLevel, forAssessment)` pairs on the same step.
+
+Limits in v1:
 
 - at least one `assessmentRefs` entry when `assessmentConsequences` is present; multiple refs are supported
-- at most one `assessmentConsequences` entry per step
-- one supported effect only: `require_followup`
-- exact-match trigger only: one declared dimension equals one declared canonical level
+- up to 10 `assessmentConsequences` entries per step; each fires independently
+- one supported effect kind: `require_followup`
+- exact-match trigger only: `anyEqualsLevel` must be a canonical level declared in the referenced assessment's dimensions
+- no two consequences on the same step may share the same `(anyEqualsLevel, forAssessment)` pair -- duplicate pairs crash the session store at runtime
 
 Keep the responsibility split clean:
 
