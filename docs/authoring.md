@@ -513,9 +513,9 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - **Level**: required
 - **Status**: active
 - **Scope**: step.assessment-refs, step.assessment-consequences
-- **Rule**: A step may declare one or more assessmentRefs and up to 10 assessmentConsequences entries. When assessmentConsequences is present, at least one ref is required. Each consequence uses anyEqualsLevel as the trigger. When a step references multiple assessments, use forAssessment on each consequence to scope it to a specific assessment -- this prevents cross-gate false-fires when multiple assessments share the same level name (e.g. all use 'low'/'high'). Without forAssessment scoping, a consequence fires if any dimension across any referenced assessment equals the trigger level.
-- **Why**: Multiple independent consequences let each gate provide targeted remediation guidance. Without scoping, all consequences fire from the same matched assessment, which merges unrelated remediation into a single undifferentiated block. forAssessment makes the consequence-to-gate relationship explicit and each consequence can carry guidance specific to the gate that failed.
-- **Enforced by**: validator, compiler
+- **Rule**: A step may declare one or more assessmentRefs and up to 10 assessmentConsequences entries (maxItems: 10). Each consequence fires independently when its trigger level matches. Use forAssessment to scope a consequence to one specific assessmentRef when multiple assessments share the same level names -- without scoping, consequences fire from the first matching assessment.
+- **Why**: Multiple scoped consequences let each gate carry targeted remediation guidance instead of merging all gates into one consequence string. forAssessment makes the gate-to-consequence mapping explicit and prevents cross-gate false-fires.
+- **Enforced by**: validator
 
 **Checks**
 - At least one assessmentRefs entry when assessmentConsequences is present.
