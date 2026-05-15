@@ -4059,6 +4059,142 @@ When assigned as reviewer on a GitHub PR, WorkTrain automatically runs a deep re
 
 ---
 
+### Slice 3: PendingDraftReviewPoller, domain event, and startup recovery (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+**Depends on:** PR #1022 and PR #1023 merged. GitHub API behavior verified ✅ (draft reviews are account-level and visible in browser "Finish your review" panel; created by omitting `event` field, not passing `"PENDING"`).
+
+This is the missing piece that completes the reviewer-assigned MR review feature end-to-end. Without it, WorkTrain creates the draft review but never knows when it was published -- there is no operator approval detection, no session event record, and no crash recovery for in-flight reviews.
+
+**What needs to be built:**
+
+1. **`PendingDraftReviewPoller`** (`src/trigger/pending-draft-review-poller.ts`): polls `GET /repos/:owner/:repo/pulls/:number/reviews` every 30-60s for the specific `reviewId` transitioning out of PENDING state (any submitted state: APPROVED, COMMENTED, CHANGES_REQUESTED, or DISMISSED). On detection: appends `review_draft_submitted` event to session event log; deletes pending-draft sidecar; stops polling.
+
+2. **`review_draft_submitted` domain event**: add `REVIEW_DRAFT_SUBMITTED: 'review_draft_submitted'` to `EVENT_KIND` in `src/v2/durable-core/constants.ts`; add schema `{ sessionId, reviewId, prUrl, submittedAt }` to `DomainEventV1Schema` in `src/v2/durable-core/schemas/session/events.ts`. Required before appending the event -- unknown event kinds corrupt the session log on load.
+
+3. **Pending-draft sidecar**: write `pending-draft-<sessionId>.json` to `~/.workrail/daemon-sessions/` BEFORE starting background polling. Shape: `{ reviewId, prNumber, prRepo, sessionId, createdAt, triggerId }`. The `triggerId` is required for crash recovery (needed to look up `reviewerIdentity.token` from the trigger index on daemon restart -- tokens cannot be stored in the sidecar).
+
+4. **Startup recovery hook** in `runStartupRecovery()` (`src/daemon/startup-recovery.ts`): scan for `pending-draft-*.json` sidecars on daemon start; for each, look up `triggerId` in the trigger index to get the token; restart polling. If the trigger no longer exists, log a warning and delete the sidecar. Pass the trigger index as a new optional parameter to `runStartupRecovery()` (same pattern as other optional injectable parameters). Wire up in `trigger-listener.ts`.
+
+5. **Unit tests**: `tests/unit/review-approval-adapter.test.ts` (createDraftReview happy path, dedup path, API error path) and `tests/unit/pending-draft-review-poller.test.ts` (polling loop, submission detection, sidecar lifecycle, session event write-back, startup recovery scan).
+
+**Key implementation notes (from verified behavior):**
+- Draft review is created by omitting the `event` field entirely (not by passing `"PENDING"` -- that returns a 422)
+- The `reviewId` returned from `POST .../reviews` is a number, not a string
+- On daemon restart: poller state is in-memory only; sidecar is the crash-recovery bridge
+
+**Things to hash out:**
+- What should happen when the operator dismisses the draft instead of submitting? The GET response will show state !== 'PENDING' but also !== 'APPROVED'. Should WorkTrain treat any non-PENDING state as "done" and clean up, or only APPROVED/COMMENTED/CHANGES_REQUESTED?
+- Should the macOS notification include a direct link to the PR's review UI, or just the PR URL? The review URL format is `https://github.com/{owner}/{repo}/pull/{number}#pullrequestreview-{reviewId}`.
+
+---
+
+### GitLab ReviewApprovalAdapter: approval path for GitLab deployments (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**Context:** The current `ReviewApprovalAdapter` interface has one implementation: `GitHubReviewApprovalAdapter` which uses GitHub's pending draft review API. GitLab is a separate platform with no equivalent "pending review invisible to author" concept. GitLab draft notes (`isDraft: true`) are visible to everyone immediately -- they're just marked as drafts, not hidden. This means the GitHub draft review architecture does not translate directly to GitLab.
+
+**The GitLab problem:** WorkTrain cannot safely create a draft review on GitLab and wait for the operator to publish it, because any note is immediately visible to the MR author. The approval must happen before anything is posted. Two viable paths:
+
+**Option A -- Console approval panel (inline with WorkRail Console):** When a GitLab review session completes, WorkTrain writes the `wr.review_verdict` to a `review-inbox.jsonl` sidecar. The WorkRail Console gains a minimal approval panel at a new route showing pending reviews with per-finding approve/drop toggles. Operator submits; WorkTrain posts via GitLab API. This breaks the console's read-only invariant but narrowly (one POST endpoint, localhost only). Already analyzed in discovery as Candidate 1.
+
+**Option B -- Branch-merge as approval signal:** WorkTrain commits `wr.review_verdict` as `review-output.json` to a `review-staging/<sessionId>` branch. Operator edits (drop findings by deleting them) and merges a small review-staging PR. WorkTrain detects the merge (second polling trigger on `review-inbox` branch) and posts the approved findings via GitLab API. Auditable, git-native, no UI changes. Already analyzed in discovery as Candidate 5.
+
+Both options require: `GitLabReviewApprovalAdapter` implementation using GitLab's Discussions API (`POST /projects/:id/merge_requests/:iid/discussions`); reviewer-assignment detection in `gitlab_poll` adapter (add `reviewer_id` query filter + `reviewers[]` field on `GitLabMR`); `reviewerLogin` field on `GitLabPollingSource`.
+
+**Things to hash out:**
+- Option A vs B: Option A has better UX (browser panel, per-finding granularity) but requires console write capability. Option B is git-native and auditable but the "review the review" UX is less intuitive. Which fits the operator's workflow better?
+- For Option B: does the operator need to edit findings directly (drop noisy ones) or is whole-review approve/reject sufficient for GitLab?
+- GitLab MR reviewer assignment: the `GET /merge_requests?reviewer_username=X` filter exists but is it available on all GitLab editions (Community vs Enterprise)?
+
+---
+
+### Inline review comments: extend wr.review_verdict findings with file/line position (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**Context:** The current `GitHubReviewApprovalAdapter` posts all findings as a single review body (summary comment with bulleted findings list). GitHub's review API supports placing individual comments on specific diff lines -- "this finding is on line 42 of auth.ts" shows up inline in the PR diff next to the relevant code. This is significantly better UX for the PR author: they see findings next to the code they need to fix, not as a detached list.
+
+**What's needed:**
+- Extend `ReviewVerdictArtifactV1` schema in `src/v2/durable-core/schemas/artifacts/review-verdict.ts` to add `filePath?: string` and `line?: number` as optional fields on each finding
+- Update `wr.mr-review` workflow to populate these fields when the agent identifies a specific file/line (the agent already reads the diff -- it just doesn't record position in the artifact)
+- Update `GitHubReviewApprovalAdapter.createDraftReview()` to use the `comments[]` array in the review creation body: `{ path: finding.filePath, line: finding.line, side: 'RIGHT', body: finding.summary }` for findings with position, and the review body for findings without
+- Note: GitHub's inline comment API uses `line` (actual file line number) + `side: 'RIGHT'` -- not `position` (diff hunk offset). This is the cleaner path that avoids patch parsing.
+
+**Ordering constraint:** `wr.mr-review` v3 overhaul is a prerequisite -- the workflow needs to actually fetch the diff and identify file/line positions for this to produce useful output. A workflow that pattern-matches on diff text without precise position data will produce low-quality inline annotations.
+
+**Things to hash out:**
+- What percentage of `wr.mr-review` findings are position-specific (can be anchored to a line) vs cross-cutting (belong in the review body)? Architecture findings often don't have a single line; a missing test doesn't have a line. The adapter should gracefully handle both in the same review.
+- Should unpositioned findings be a single summary comment or individual top-level comments? Single summary is less noisy.
+- When the operator edits a positioned finding in the "Finish your review" UI, do they edit the inline comment or can they promote it to the body? GitHub's UI allows full editing of each comment -- this is handled naturally.
+
+---
+
+### Acknowledgment comment: immediately post "review in progress" on PR assignment (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:3 Cap:2 Eff:3 Lev:2 Con:2 | Blocked: no
+
+**Context:** When WorkTrain is assigned as reviewer and detects the assignment via polling, the PR author currently sees nothing until the review draft is published (which could be 30-60 minutes later if wr.mr-review takes that long). This creates uncertainty for the author: did anyone see this PR? Is anyone working on it?
+
+The fix is a `postAckStage` that fires immediately when the trigger dispatches the review session -- before `wr.mr-review` even starts -- posting a brief comment like "I've been assigned as reviewer. I'll have feedback shortly." This decouples the acknowledgment from the review quality and gives the author immediate signal.
+
+**Implementation:** New pre-session delivery action in `TriggerRouter.route()` queue callback, fires when `trigger.reviewerIdentity` is set and the workflow is a review workflow. Uses `GitHubReviewApprovalAdapter` or a simpler `POST /repos/:owner/:repo/issues/:number/comments` call (regular issue comment, not a review comment). Should be configurable (`ackComment: false` to opt out for teams that find it noisy).
+
+**Things to hash out:**
+- Should the acknowledgment be a regular comment or a review comment? Regular comment is simpler and doesn't require a review ID. Review comment might be cleaner for teams that route notifications differently.
+- What is the right default text? Should it be configurable per-trigger via a `ackCommentTemplate` field?
+- Should the acknowledgment be suppressed if a review draft already exists on this PR (second dispatch for same PR should not double-ack)?
+
+---
+
+### Learning from operator edits: capture review style from diff between generated and published (May 15, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
+
+**Context:** When the operator edits a finding in GitHub's "Finish your review" panel before publishing -- rewording it, deleting it, or adding nuance -- WorkTrain currently discards that information. The `PendingDraftReviewPoller` detects that the draft was published but doesn't compare what was published to what was generated.
+
+This diff is the highest-quality feedback signal available: it captures the exact delta between what WorkTrain wrote and what the operator actually wanted. Accumulated over dozens of reviews, it builds a precise model of the operator's review style that wr.mr-review can use for future sessions.
+
+**Implementation sketch:** When the `PendingDraftReviewPoller` detects submission, call `GET /repos/:owner/:repo/pulls/:number/reviews/:reviewId` to get the final published review and its comments. Compare against the original `wr.review_verdict` artifact. For each finding: was it published verbatim, edited, or dropped? Append a `review_style_feedback` record to a `~/.workrail/review-style/<repo>.jsonl` file. A future `wr.mr-review` session start can load the most recent N records and inject them as style context.
+
+**Things to hash out:**
+- What is the right representation for style feedback? Raw before/after pairs are the ground truth but expensive to store and hard to summarize. A structured diff (severity changes, tone markers, common edit patterns) would be more actionable.
+- How do you separate "operator rephrased for clarity" from "operator fundamentally disagreed with the finding"? The former is style signal; the latter is accuracy signal and should feed back into the review quality loop.
+- How many examples are needed before the style signal is useful? Probably 10-20 reviews minimum before patterns emerge.
+
+---
+
+### Fork PR support for branchStrategy:read-only (May 15, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+**Context:** The current `branchStrategy: 'read-only'` implementation in `pre-agent-session.ts` runs `git fetch origin <prBranch>` before creating the worktree. This fails for PRs from forks because the fork's branch is not in `origin`'s reflist -- `git fetch origin feature/my-feature` returns "couldn't find remote ref" when the branch lives in a fork repository.
+
+Fork PRs are common in open-source repositories and any org where contributors don't have push access. Without this fix, WorkTrain silently fails to review fork PRs.
+
+**Fix:** Before running `git worktree add --detach`, detect whether the PR is from a fork by checking if `pr.head.repo.full_name !== pr.base.repo.full_name` (needs the `head.repo` field added to `GitHubPR` type). If it's a fork, fetch from the fork's clone URL directly: `git fetch <forkCloneUrl> <prBranch>:refs/remotes/fork/<sessionId>/<prBranch>`, then create the worktree from that ref. Clean up the temporary remote ref after the session.
+
+**Things to hash out:**
+- The fork clone URL (`pr.head.repo.clone_url`) needs to be in the PR response -- add to `GitHubPR` type
+- Does fetching from an arbitrary fork URL require authentication? For public repos no; for private org forks with fork PRs, the same token that can read the base repo can usually read the fork
+- Should fork PRs have a configurable opt-out (`allowForkReviews: false`) for operators who don't want to fetch from arbitrary external repos?
+
+---
+
 ### wr.mr-review quality and architecture overhaul (May 8, 2026)
 
 **Status: idea** | Priority: high
