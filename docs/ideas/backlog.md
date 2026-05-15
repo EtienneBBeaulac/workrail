@@ -3875,6 +3875,37 @@ Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or co
 
 ---
 
+### Multi-workflow reviewer: route PRs to prod audit, arch audit, or mr-review based on context (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:3 Cap:3 Eff:3 Lev:3 Con:2 | Blocked: no
+
+The reviewer-assigned MR review feature currently hardcodes `wr.mr-review` as the review workflow. But `wr.production-readiness-audit` and `wr.architecture-scalability-audit` exist and are suited to different kinds of PRs. A dependency bump needs a different lens than a core engine change. A PR touching the daemon's session lock needs different scrutiny than a documentation update.
+
+**The opportunity:** when a PR is assigned to you, WorkTrain should choose the right workflow (or combination) based on what the PR actually changes -- not always run the same generalist review. Deeper, more targeted findings with less noise.
+
+**Routing signals (static, zero LLM turns -- same principle as `routeTask()` in the adaptive pipeline):**
+- `wr.production-readiness-audit`: PRs touching runtime paths -- daemon, trigger system, agent loop, session store, delivery pipeline. High blast radius if broken.
+- `wr.architecture-scalability-audit`: PRs changing interfaces, type contracts, module boundaries, or core domain types.
+- `wr.mr-review`: general correctness, completeness vs. requirements, test coverage. The default fallback and the only one that checks "was the right thing implemented?"
+- Multiple workflows: large PRs touching multiple concerns -- run in parallel, merge findings into one `wr.review_verdict`, organize the draft review body by workflow.
+- Skip / lightweight: dependency bumps, docs-only, chore commits -- no draft review created, or a one-line summary comment only.
+
+**Implementation shape:**
+- New optional `reviewWorkflowId` field on `TriggerDefinition` -- explicit per-trigger override. When absent, the router auto-selects.
+- New `routeReviewWorkflow(pr, trigger): string[]` pure function (in `src/coordinators/routing/`) that maps PR metadata to one or more workflow IDs via file path patterns and diff shape. No LLM.
+- When multiple workflows are selected, each runs as a parallel `spawn_agent` child under a thin coordinator session that merges findings into a single `wr.review_verdict`.
+- Draft review body is organized by workflow: "**Production readiness** (3 findings) ... **Architecture** (1 finding)..."
+
+**Things to hash out:**
+- What file path patterns cleanly identify runtime vs. interface vs. general? `src/daemon/`, `src/v2/durable-core/` for runtime; `src/*/types.ts`, `src/v2/ports/` for interfaces. Worth auditing the codebase to validate coverage before shipping.
+- When multiple workflows run in parallel and produce conflicting severity assessments, how are they merged? Proposal: highest severity wins at the `wr.review_verdict` level; all individual findings are surfaced in the draft body.
+- For the skip/lightweight case, should WorkTrain post "no findings" as a draft review (so the author sees acknowledgment) or skip posting entirely? Skipping is less noisy.
+- Should the routing decision be visible to the operator? Yes -- log it as a `review_workflow_routed` signal so the operator can see why `wr.production-readiness-audit` was chosen.
+
+---
+
 ### Automated reviewer-assigned MR review with identity-matched comments (May 15, 2026)
 
 **Status: idea** | Priority: high
