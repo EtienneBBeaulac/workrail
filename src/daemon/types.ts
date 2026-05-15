@@ -446,6 +446,12 @@ export interface WorkflowRunGateParked {
   readonly stepId: string;
   readonly stopReason: string;
   /**
+   * The kind of gate that fired. Determines how TriggerRouter routes the parked session.
+   * 'coordinator_eval': autonomous LLM evaluator (wr.gate-eval-generic).
+   * 'human_approval': human operator approval (e.g. reviewer-assigned draft review).
+   */
+  readonly gateKind: import('../v2/durable-core/constants.js').GateKind;
+  /**
    * The daemon-local session UUID -- keys the sidecar file that resumeFromGate reads.
    * WHY on the result: the trigger router calls resumeFromGate(sessionId, verdict) after
    * gate evaluation; it needs this ID to find the right sidecar.

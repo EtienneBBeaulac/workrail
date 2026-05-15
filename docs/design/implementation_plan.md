@@ -1,271 +1,125 @@
-# Implementation Plan: Shared Pipeline Worktree
+# Implementation Plan: GateKind Discriminated Union
 
-## Problem statement
+## 1. Problem statement
 
-The coordinator pipeline creates a `branchStrategy: 'worktree'` for the coding session only. Discovery writes design docs and shaping writes `current-pitch.md` to `opts.workspace` (main checkout). The coding session's worktree is forked from `main` AFTER these files were written -- they are never committed, so they are absent from the worktree. Pipeline file handoffs are silently broken.
+The `requireConfirmation` gate system has a single hardcoded kind (`confirmation_required`) that always routes to `wr.gate-eval-generic` (autonomous LLM evaluator). When a workflow step's gate should be evaluated by a human (reviewer-assigned MR review), the autonomous evaluator fires unnecessarily, receives empty inputs, returns `uncertain`, and stalls the session. The workflow has no way to declare that it needs a human evaluator rather than a coordinator evaluator.
 
-Secondary problem: `opts.workspace` is used as an implicit workspace reference throughout `full-pipeline.ts` and `implement.ts` for path construction (`pitchPath`, `archiveDir`), delivery, and spawnSession calls. After introducing a shared worktree, every such reference must be audited and updated to the correct workspace value.
+## 2. Acceptance criteria
 
-## Acceptance criteria
+- [ ] `requireConfirmation` in workflow JSON accepts `{ "kind": "coordinator_eval" }` and `{ "kind": "human_approval" }` object forms alongside the existing boolean/condition forms
+- [ ] `gateKind` flows as a typed field through: RenderedStep → AdvanceContext → execution snapshot → WorkflowRunGateParked
+- [ ] TriggerRouter routes `gate_parked` results by `gateKind` with `assertNever` exhaustiveness: `coordinator_eval` → existing `wr.gate-eval-generic` path; `human_approval` → `maybeRunPostWorkflowActions()` directly
+- [ ] `wr.mr-review` phase-6 `requireConfirmation` changed from `true` to `{ "kind": "human_approval" }`
+- [ ] Existing sessions with `gateKind: 'confirmation_required'` in their snapshots route to `coordinator_eval` (backward compat)
+- [ ] `npx vitest run` passes
+- [ ] `npm run build` clean
+- [ ] `npm run validate:authoring-spec` passes
+- [ ] `npm run validate:feature-coverage` passes
 
-1. When `runFullPipeline` runs, all phase sessions (discovery, shaping, coding, review, UX gate) receive the coordinator-created worktree path as their `workspacePath`.
-2. Shaping writes `.workrail/current-pitch.md` to the shared worktree; coding reads it from the same absolute path without any copy step.
-3. The coordinator's `finally` block: (a) archives the pitch from the shared worktree path, then (b) removes the shared worktree. Both happen on success AND on failure.
-4. Crash recovery: if `PipelineRunContext.worktreePath` is present and the path exists on disk, the pipeline resumes using the existing worktree instead of creating a second one.
-5. `runImplementPipeline` applies the same pattern.
-6. No per-session `branchStrategy: 'worktree'` is passed for coordinator-spawned sessions.
-7. All existing tests continue to pass. New tests cover all new invariants.
-8. `runCoordinatorDelivery` is called with `worktreePath` as `workspacePath`, not `opts.workspace`.
+## 3. Non-goals
 
-## Non-goals
+- No new gate evaluator workflow
+- No changes to MCP session behavior (gate never fires for MCP sessions -- `is_autonomous` guard unchanged)
+- No changes to `wr.gate-eval-generic` workflow
+- No crash recovery for gate-parked sessions (separate follow-up)
+- No gate kind beyond `coordinator_eval` and `human_approval` in this PR
 
-- No changes to the daemon's per-session worktree mechanism (`buildPreAgentSession`)
-- No changes to `QUICK_REVIEW` or `REVIEW_ONLY` modes
-- No changes to the WorkRail engine, MCP server, or session store
-- `CodingHandoffArtifactV1.branchName` is NOT made optional in this PR (follow-up ticket)
-- `worktrain run pipeline` CLI command wiring is NOT in scope
-- Startup recovery for pipeline-worktree orphans is NOT in scope (follow-up ticket)
+## 4. Philosophy-driven constraints
 
-## Philosophy-driven constraints
+- **[PHILOSOPHY]** `GateKind` is a discriminated union (`'coordinator_eval' | 'human_approval'`) -- no string widening, no optional routing, no instanceof checks. New kinds must extend the union and update TriggerRouter.
+- **[PHILOSOPHY]** TriggerRouter uses `assertNever(result.gateKind)` -- any future gate kind that isn't handled is a compile error, not a runtime fallthrough.
+- **[PHILOSOPHY]** `gateKind` travels as typed data on `WorkflowRunGateParked` -- TriggerRouter never reads the session snapshot to determine routing.
+- **[CONVENTION]** `execution-snapshot.v1.ts` widens `gateKind: z.literal('confirmation_required')` to `z.enum(['coordinator_eval', 'human_approval', 'confirmation_required'])` -- `confirmation_required` is a legacy alias for `coordinator_eval`.
+- **[TEAM_RULE]** `spec/authoring-spec.json` must document the new `requireConfirmation` object form; `validate:authoring-spec` and `validate:feature-coverage` must pass.
 
-- **DI for boundaries:** `createPipelineWorktree` and `removePipelineWorktree` must be dep methods
-- **Make illegal states unrepresentable:** `createPipelineWorktree` returns `Result<string, string>` -- no code path reaches `spawnSession` with undefined worktree path; `worktreeCreated` boolean flag prevents `removePipelineWorktree` being called when creation never succeeded
-- **Single source of state truth:** `PipelineRunContext.worktreePath` is the durable path; no separate file
-- **Functional core, imperative shell:** finally block has explicit, ordered cleanup steps; pitch archival before worktree removal is an invariant, not a convention
-- **Architectural fix over patch:** introduce `activeWorkspacePath` to replace scattered `opts.workspace` references for within-session path construction
+## 5. Invariants
 
-## Invariants
+1. `gateKind: 'coordinator_eval'` is the default when `requireConfirmation: true` (boolean form) -- no behavior change for existing workflows
+2. `gateKind` on `WorkflowRunGateParked` is non-optional -- every gate_parked result carries a kind
+3. Gate only fires in daemon sessions (`is_autonomous: 'true'` context key guard at v2-advance-core/index.ts:313 is unchanged)
+4. Gate only fires on `mode.kind === 'fresh'` (retry guard unchanged)
+5. `assertNever` in TriggerRouter is the exhaustiveness contract -- every gate kind must have an explicit routing branch
 
-1. Worktree created BEFORE first `spawnSession` call
-2. `worktreePath` persisted atomically in `createPipelineContext` call immediately after creation
-3. Pitch archival runs BEFORE worktree removal in the `finally` block (pitch is inside the worktree)
-4. Worktree removal runs in `finally` block ONLY if worktree was successfully created (`worktreeCreated` flag)
-5. `branchStrategy` is NOT passed for any coordinator-spawned session
-6. Crash resume: check `fs.access(worktreePath)` before reusing; escalate with clear message if path missing
-7. All path construction using the within-session workspace (`pitchPath`, `archiveDir`, delivery `workspacePath`) uses `activeWorkspacePath` (the worktree path), not `opts.workspace`
-8. `opts.workspace` is used ONLY for coordinator-owned operations: `readActiveRunId`, `readPipelineContext`, `writePhaseRecord`, `markPipelineRunComplete`, `createPipelineContext` (context file storage), and git commands run by `createPipelineWorktree`/`removePipelineWorktree`
+## 6. Selected approach
 
-## Selected approach
+Thread `GateKind = 'coordinator_eval' | 'human_approval'` through 9 locations as typed data. `TerminalSignal.gate_parked` gains `gateKind`, closing the gap where `out.gateKind` was discarded in `continue-workflow.ts`.
 
-### New types and interface changes
+**Rationale:** workflow declares intent via step definition; routing is deterministic TypeScript; no coupling of infrastructure concerns into workflow content.
 
-**`AdaptiveCoordinatorDeps` (adaptive-pipeline.ts):**
-```typescript
-createPipelineWorktree(
-  workspace: string,
-  runId: string,
-  baseBranch?: string,  // default: 'main'
-): Promise<Result<string, string>>;  // ok(worktreePath) | err(reason)
+**Runner-up:** None. Context-variable approach rejected by user (couples infra into workflow).
 
-removePipelineWorktree(
-  workspace: string,
-  worktreePath: string,
-): Promise<void>;  // best-effort, never throws
-```
+## 7. Vertical slices
 
-**`PipelineRunContext` (pipeline-run-context.ts):**
-```typescript
-// new optional field (optional for backward compat with pre-feature context files)
-readonly worktreePath?: string;
-```
-Zod schema: `worktreePath: z.string().optional()`.
+### Slice 1: Type layer (no behavior change)
+**Files:**
+- `src/v2/durable-core/constants.ts` -- add `export type GateKind = 'coordinator_eval' | 'human_approval'`; keep `'confirmation_required'` as legacy value in snapshot schema only
+- `src/v2/durable-core/schemas/execution-snapshot/execution-snapshot.v1.ts` -- widen `gateKind: z.literal('confirmation_required')` to `z.enum(['coordinator_eval', 'human_approval', 'confirmation_required'])`
+- `src/v2/durable-core/domain/gate-checkpoint-builder.ts` -- accept `gateKind: GateKind` parameter (default `'coordinator_eval'`); store it in snapshot
+- `src/v2/durable-core/domain/prompt-renderer.ts` -- add `gateKind?: GateKind` to `RenderedStep`; extract `gateKind` from the object form BEFORE calling `evaluateCondition()`; normalize object form to `true` for the boolean `requireConfirmation` evaluation (so `evaluateCondition()` is never called with the object form); default `'coordinator_eval'` for boolean true. Specifically: `if (rc is object with .kind) { gateKind = rc.kind; rc = true; }` before line 550.
+- `src/daemon/state/terminal-signal.ts` -- add `gateKind: GateKind` to `gate_parked` variant
+- `src/daemon/types.ts` -- add `gateKind: GateKind` to `WorkflowRunGateParked`
 
-**`createPipelineContext` (adaptive-pipeline.ts + coordinator-deps.ts):**
-```typescript
-createPipelineContext(
-  workspace: string,
-  runId: string,
-  goal: string,
-  pipelineMode: PipelineRunContext['pipelineMode'],
-  worktreePath: string,  // required for new callers -- NOT optional
-): Promise<Result<void, string>>;
-```
-Note: the 5th param is typed as required in `AdaptiveCoordinatorDeps`. Pre-feature callers in `implement.ts` always pass the value because `createPipelineWorktree` runs first. The Zod schema field remains optional for backward-compat deserialization of old context files.
+**Done when:** `npm run build` clean with no type errors across all changed files.
 
-### Implementation in coordinator-deps.ts
+### Slice 2: Wire gateKind through the call chain
+**Files:**
+- `src/mcp/handlers/v2-advance-core/index.ts` -- pass `gateKind` from `v.gateKind` (RenderedStep) to `buildGateCheckpointOutcome()`
+- `src/mcp/handlers/v2-advance-core/outcome-gate-checkpoint.ts` -- accept and pass `gateKind` to `buildGateCheckpointSnapshot()`
+- `src/daemon/tools/continue-workflow.ts` -- update both `onGateParked()` calls (lines ~91, ~322) to include `out.gateKind`; update callback signature to `(gateToken: string, stepId: string, gateKind: GateKind) => void`
+- `src/daemon/core/session-result.ts` -- read `signal.gateKind` when constructing `WorkflowRunGateParked`
+- `src/daemon/runner/construct-tools.ts` and `src/daemon/runner/agent-loop-runner.ts` -- update `onGateParked` callback to match new signature
 
-```typescript
-createPipelineWorktree: async (workspace, runId, baseBranch = 'main') => {
-  const worktreePath = path.join(WORKTREES_DIR, runId);
-  const branchName = `worktrain/${runId}`;
-  try {
-    await fs.promises.mkdir(WORKTREES_DIR, { recursive: true });
-    await execFileAsync('git', ['-C', workspace, 'fetch', 'origin', baseBranch]);
-    await execFileAsync('git', ['-C', workspace, 'worktree', 'add',
-      worktreePath, '-b', branchName, `origin/${baseBranch}`]);
-    return ok(worktreePath);
-  } catch (e) {
-    return err(`createPipelineWorktree failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-},
+**Done when:** `npx vitest run` passes. The `gateKind` field is populated on all `WorkflowRunGateParked` results.
 
-removePipelineWorktree: async (workspace, worktreePath) => {
-  try {
-    await execFileAsync('git', ['-C', workspace, 'worktree', 'remove', '--force', worktreePath]);
-  } catch { /* best-effort */ }
-},
-```
+### Slice 3: TriggerRouter routing + workflow update
+**Files:**
+- `src/trigger/trigger-router.ts` -- update `gate_parked` branch in both `route()` and `dispatch()`: switch on `result.gateKind`, `coordinator_eval` → existing evaluator path, `human_approval` → `maybeRunPostWorkflowActions()` directly, `assertNever` on the union
+- `workflows/mr-review-workflow.agentic.v2.json` -- change phase-6 `requireConfirmation: true` to `{ "kind": "human_approval" }`
+- `spec/authoring-spec.json` -- add rule documenting `requireConfirmation` object form and valid `kind` values
+- `spec/workflow.schema.json` -- extend `confirmationRule` to accept `{ "kind": "coordinator_eval" | "human_approval" }` object form
 
-### Changes to full-pipeline.ts and implement.ts
+**Done when:** `npx vitest run` passes; `npm run validate:authoring-spec` passes; `npm run validate:feature-coverage` passes.
 
-Pattern for `runFullPipeline` / `runImplementPipeline` (the outer wrapper):
+## 8. Test design
 
-```typescript
-// Before runFullPipelineCore call:
-let worktreeCreated = false;
-let activeWorkspacePath = opts.workspace;  // fallback until worktree is ready
+**Existing tests to verify pass unchanged:** lifecycle tests for `wr.mr-review`, gate-related unit tests in `tests/unit/`.
 
-// After worktree creation in core (or in outer function for implement):
-// see runFullPipelineCore below
+**New test coverage needed:**
+- Unit test: `WorkflowRunGateParked.gateKind === 'human_approval'` when workflow step has `{ kind: 'human_approval' }`
+- Unit test: `WorkflowRunGateParked.gateKind === 'coordinator_eval'` when workflow step has `requireConfirmation: true` (backward compat)
+- Unit test: TriggerRouter routes `human_approval` to `maybeRunPostWorkflowActions()`, not `evaluateGate()`
+- Unit test: TriggerRouter routes `coordinator_eval` to `evaluateGate()` (existing path unchanged)
 
-// In the finally block:
-try {
-  if (pitchPath was from activeWorkspacePath) {
-    await deps.mkdir(archiveDir, { recursive: true });
-    await deps.archiveFile(pitchPath, archivePath);  // FIRST: archive before removal
-  }
-} catch { /* log */ }
-if (worktreeCreated) {
-  await deps.removePipelineWorktree(opts.workspace, activeWorkspacePath);  // SECOND
-}
-```
+## 9. Risk register
 
-Pattern for `runFullPipelineCore` / `runImplementCore`:
+| Risk | Mitigation |
+|------|-----------|
+| `npm run validate:feature-coverage` fails -- new gate kind requires feature-registry entry | Add `wr.features.human_approval_gate` to feature-registry if validate:feature-coverage requires it |
+| Golden token test fixtures encode snapshot with `gateKind:'confirmation_required'` | Confirmed no fixtures encode this value (grep verified). No risk. |
+| `complete_step` tool has same `onGateParked` gap as `continue_workflow` | Slice 2 explicitly covers both tools via construct-tools.ts callback signature update |
 
-```typescript
-// Step 0: Create worktree
-const worktreeResult = await deps.createPipelineWorktree(opts.workspace, runId);
-if (worktreeResult.isErr()) {
-  return { kind: 'escalated', escalationReason: { phase: 'init', reason: worktreeResult.error } };
-}
-const activeWorkspacePath = worktreeResult.value;
-worktreeCreated = true;  // signal to finally block
+## 10. PR packaging
 
-// Step 1: Persist worktreePath in context immediately (5th param required)
-await deps.createPipelineContext(opts.workspace, runId, opts.goal, 'FULL', activeWorkspacePath);
+Single PR. All three slices are coupled -- Slice 3 requires Slice 2 which requires Slice 1.
 
-// Step N: pitchPath uses activeWorkspacePath (not opts.workspace)
-const pitchPath = activeWorkspacePath + '/.workrail/current-pitch.md';
-const archiveDir = activeWorkspacePath + '/.workrail/used-pitches';
+## 11. Follow-up tickets
 
-// All spawnSession calls: workspace = activeWorkspacePath (not opts.workspace)
-deps.spawnSession('wr.discovery', opts.goal, activeWorkspacePath, ...);
-deps.spawnSession('wr.shaping', opts.goal, activeWorkspacePath, ...);
-deps.spawnSession('wr.coding-task', opts.goal, activeWorkspacePath, { pitchPath, ... }, ...);  // no branchStrategy
-deps.spawnSession('wr.mr-review', opts.goal, activeWorkspacePath, ...);
-deps.spawnSession('wr.ui-ux-design', opts.goal, activeWorkspacePath, ...);  // UX gate
+1. Add `gateKind` to gate crash recovery sidecar (for future gate-parked session resume)
 
-// Delivery: uses activeWorkspacePath
-runCoordinatorDelivery(deps, recapMarkdown, branchName, activeWorkspacePath);
+## 12. Philosophy alignment per slice
 
-// opts.workspace references preserved for:
-// - writePhaseRecord(opts.workspace, runId, ...)
-// - readPipelineContext(opts.workspace, runId)
-// - markPipelineRunComplete(opts.workspace, runId)
-```
+### Slice 1
+- Make illegal states unrepresentable → satisfied -- GateKind union literal
+- Typed contracts at phase boundaries → satisfied -- RenderedStep and WorkflowRunGateParked carry typed gateKind
 
-### Crash resume path
+### Slice 2
+- Validate at boundaries, trust inside → satisfied -- gateKind validated at schema compile, trusted downstream
+- Functional core / imperative shell → satisfied -- workflow declares intent; daemon carries it through
 
-```typescript
-if (priorRunId) {
-  const existingCtx = await deps.readPipelineContext(opts.workspace, priorRunId);
-  if (existingCtx.isOk() && existingCtx.value?.worktreePath) {
-    const priorWorktreePath = existingCtx.value.worktreePath;
-    try {
-      await fs.promises.access(priorWorktreePath);
-      // Worktree exists -- reuse it
-      activeWorkspacePath = priorWorktreePath;
-      worktreeCreated = true;  // finally block will clean up
-    } catch {
-      return { kind: 'escalated', escalationReason: {
-        phase: 'init',
-        reason: `Crash recovery: prior pipeline worktree not found at ${priorWorktreePath}. ` +
-                `Delete ${opts.workspace}/.workrail/pipeline-runs/${priorRunId}-context.json to start fresh.`
-      }};
-    }
-  }
-  // If worktreePath absent from context (old-format context): fall through to create fresh worktree
-}
-```
-
-## Vertical slices
-
-### Slice 1: Schema and interface layer (no behavior change)
-- Add `worktreePath?: string` to `PipelineRunContext` + Zod schema (optional)
-- Add `createPipelineWorktree` and `removePipelineWorktree` to `AdaptiveCoordinatorDeps`
-- Change `createPipelineContext` 5th param from optional to required (`worktreePath: string`)
-- **AC:** `npm run build` passes; all existing tests pass (no callers yet supply 5th param -- will be compile errors resolved in Slice 3/4)
-
-### Slice 2: Implement new dep methods in coordinator-deps.ts
-- Implement `createPipelineWorktree` and `removePipelineWorktree`
-- Update `createPipelineContext` implementation to include `worktreePath` in initial object
-- Update fake `AdaptiveCoordinatorDeps` in test files to add stub implementations (return `ok('')` / no-op)
-- **AC:** `npm run build` passes; all existing tests pass
-
-### Slice 3: Wire into full-pipeline.ts
-- Introduce `worktreeCreated: boolean` and `activeWorkspacePath` variables
-- Create worktree before discovery; persist to context (5th param)
-- Replace ALL `opts.workspace` path-construction references with `activeWorkspacePath`:
-  - `pitchPath` (lines 216, 553)
-  - `archiveDir` (line 217)
-  - All `spawnSession` workspace args (lines 274, 373, 458, 558)
-  - `runCoordinatorDelivery` workspace arg (line 645)
-  - UX gate `spawnSession` (line 458)
-- Preserve `opts.workspace` for: `readActiveRunId`, `readPipelineContext`, `writePhaseRecord`, `markPipelineRunComplete`
-- Finally block: pitch archival from `activeWorkspacePath` FIRST, then `removePipelineWorktree` if `worktreeCreated`
-- Crash resume: existence check before reuse
-- **AC:** existing tests pass; new tests added; `npm run build` passes
-
-### Slice 4: Wire into implement.ts
-- Same pattern: `worktreeCreated`, `activeWorkspacePath`, replace path-construction references
-- `pitchPath` arg to `runImplementCore` must be `worktreePath`-relative: derive it inside core after worktree creation rather than constructing in the outer `runImplementPipeline`
-- **AC:** existing tests pass; new tests added
-
-### Slice 5: Test coverage for all new invariants
-Tests to add in `adaptive-full-pipeline.test.ts`:
-1. `createPipelineWorktree` called with `(opts.workspace, runId)` before first `spawnSession`
-2. All `spawnSession` calls receive `worktreePath` as workspace (not `opts.workspace`)
-3. `pitchPath` in coding context points to `worktreePath` (not `opts.workspace`)
-4. `runCoordinatorDelivery` receives `worktreePath` as 4th arg
-5. `removePipelineWorktree` called in finally on success (after `archiveFile`)
-6. `removePipelineWorktree` called in finally on discovery escalation
-7. `createPipelineWorktree` failure → escalated at `init`; `spawnSession` not called; `removePipelineWorktree` not called
-8. Crash resume: prior `worktreePath` in context + existence check passes → `createPipelineWorktree` NOT called; all sessions receive prior `worktreePath`
-9. Crash resume: prior `worktreePath` in context + existence check fails → escalated at `init`
-10. Old-format context (no `worktreePath`): falls through to fresh worktree creation
-
-Mirror all tests in `adaptive-implement.test.ts`.
-
-## Test design
-
-All tests use fully-injected fakes. `createPipelineWorktree` and `removePipelineWorktree` added to `makeFakeDeps`:
-```typescript
-createPipelineWorktree: vi.fn().mockResolvedValue(ok('/fake/worktree')),
-removePipelineWorktree: vi.fn().mockResolvedValue(undefined),
-```
-
-Crash resume tests inject a fake `readPipelineContext` that returns a context with `worktreePath` set. The `fileExists` dep (used by `routeTask`) is separate from the `fs.access` call in crash resume -- the crash resume check uses the `deps.fileExists` method or a new `deps.worktreeExists` dep (design decision: use existing `fileExists` dep to avoid proliferating dep methods).
-
-## Risk register
-
-| Risk | Likelihood | Mitigation |
-|---|---|---|
-| Orphaned pipeline worktrees if daemon crashes before context write | Low | Known gap; startup recovery for pipeline worktrees is a follow-up ticket |
-| `opts.workspace` reference missed in a spawnSession or path construction | Medium | Invariant 8 lists all allowed `opts.workspace` uses; Slice 3/4 explicitly enumerate every line number to update |
-| Pitch archival before worktree removal ordering violated by future change | Low | Documented invariant 3; test 5 verifies call ordering via mock call order inspection |
-| Crash resume existence check uses wrong dep method | Low | Use `deps.fileExists` (already in deps) rather than a new method |
-
-## PR packaging strategy
-
-Single PR. All 5 slices are logically coupled. User explicitly requested single PR.
-
-## Follow-up tickets
-
-1. Make `CodingHandoffArtifactV1.branchName` optional (redundant for delivery routing)
-2. Wire `worktrain run pipeline` CLI command with new dep methods
-3. Startup recovery for pipeline worktrees (scan `pipeline-runs/` for in-progress contexts with stale worktrees)
-4. Per-phase commit strategy for richer crash recovery and audit trail
+### Slice 3
+- Zero LLM turns for routing → satisfied -- TriggerRouter switch is pure TypeScript
+- Exhaustiveness everywhere → satisfied -- assertNever on GateKind union
 
 ## Plan confidence: High
 
-All blocking audit findings resolved with confirmed primary-evidence verification. No remaining unresolved questions.
+No unresolved unknowns. All call sites identified by grep. No test fixtures at risk. The 9-location chain is fully mapped.

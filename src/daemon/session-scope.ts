@@ -288,6 +288,6 @@ export interface SessionScope {
    * SessionState and TerminalSignal while still allowing the orchestration layer
    * to observe the gate event.
    */
-  readonly onGateParked: (gateToken: string, stepId: string) => void;
+  readonly onGateParked: (gateToken: string, stepId: string, gateKind: import('../v2/durable-core/constants.js').GateKind) => void;
 
 }

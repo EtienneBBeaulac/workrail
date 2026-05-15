@@ -37,7 +37,8 @@ export type GateCheckpointPayload = NonNullable<EnginePayloadV1['gateCheckpoint'
 export function buildGateCheckpointSnapshot(args: {
   readonly priorSnapshot: ExecutionSnapshotFileV1;
   readonly stepId: string;
-  readonly gateKind: 'confirmation_required';
+  /** The kind of gate -- 'coordinator_eval' or 'human_approval'. Stored in snapshot for coordinator routing. */
+  readonly gateKind: import('../constants.js').GateKind;
 }): Result<ExecutionSnapshotFileV1, GateCheckpointBuildError> {
   const state = args.priorSnapshot.enginePayload.engineState as EngineStateV1;
 

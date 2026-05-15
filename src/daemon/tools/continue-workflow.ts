@@ -23,7 +23,7 @@ export function makeContinueWorkflowTool(
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: SessionId | null,
-  onGateParked: (gateToken: string, stepId: string) => void = () => { /* no-op for callers that predate gate support */ },
+  onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
   gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy },
 ): AgentTool {
   return {
@@ -88,7 +88,7 @@ export function makeContinueWorkflowTool(
         }
         // Signal the terminal state -- buildSessionResult() produces _tag: 'gate_parked',
         // sidecardLifecycleFor() retains the sidecar. First-writer-wins, same as stuck/timeout.
-        onGateParked(out.gateToken, out.stepId);
+        onGateParked(out.gateToken, out.stepId, (out.gateKind === 'human_approval' ? 'human_approval' : 'coordinator_eval'));
         return {
           content: [{ type: 'text', text: `Gate checkpoint reached at step '${out.stepId}'. Session paused awaiting coordinator evaluation. Do not call continue_workflow or complete_step again -- the coordinator will resume this session.` }],
           details: out,
@@ -239,7 +239,7 @@ export function makeCompleteStepTool(
   _executeContinueWorkflowFn: typeof executeContinueWorkflow = executeContinueWorkflow,
   emitter?: DaemonEventEmitter,
   workrailSessionId?: SessionId | null,
-  onGateParked: (gateToken: string, stepId: string) => void = () => { /* no-op for callers that predate gate support */ },
+  onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
   gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy },
 ): AgentTool {
   return {
@@ -319,7 +319,7 @@ export function makeCompleteStepTool(
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (complete_step gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }
-        onGateParked(out.gateToken, out.stepId);
+        onGateParked(out.gateToken, out.stepId, (out.gateKind === 'human_approval' ? 'human_approval' : 'coordinator_eval'));
         return {
           content: [{ type: 'text', text: JSON.stringify({ status: 'gate_checkpoint', stepId: out.stepId, gateKind: out.gateKind }) + '\n\nGate checkpoint reached. Session paused awaiting coordinator evaluation. Do not call complete_step again -- the coordinator will resume this session.' }],
           details: out,

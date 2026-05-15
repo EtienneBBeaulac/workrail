@@ -311,7 +311,7 @@ export function executeAdvanceCore(args: {
     // way to detect daemon vs MCP sessions at advance time.
 
     if (mode.kind === 'fresh' && v.mergedContext['is_autonomous'] === 'true' && isGateRequired(v.requireConfirmation, v.mergedContext as ConditionContext)) {
-      return buildGateCheckpointOutcome({ snap, ctx, stepId: v.pendingStep.stepId, lock, ports, lockedIndex: args.lockedIndex });
+      return buildGateCheckpointOutcome({ snap, ctx, stepId: v.pendingStep.stepId, lock, ports, lockedIndex: args.lockedIndex, gateKind: v.gateKind ?? 'coordinator_eval' });
     }
 
     // ── 6. Success path ─────────────────────────────────────────────────

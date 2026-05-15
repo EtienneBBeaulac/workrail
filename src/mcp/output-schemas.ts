@@ -492,15 +492,17 @@ const V2ContinueWorkflowBlockedSchema = z.object({
  * evaluate the gate before the session can advance to the next step.
  *
  * gateToken: the continueToken for the gate_checkpoint node -- the coordinator
- * passes this to resume_from_gate (PR 2) once the gate evaluation completes.
+ * passes this to resume_from_gate once the gate evaluation completes.
  * stepId: the ID of the step whose gate fired.
- * gateKind: 'confirmation_required' -- the only gate kind in PR 1.
+ * gateKind: the kind of gate -- 'coordinator_eval' (autonomous LLM evaluator) or
+ *   'human_approval' (human operator approval). 'confirmation_required' is a legacy
+ *   value from before GateKind was a discriminated union; treat as 'coordinator_eval'.
  */
 const V2ContinueWorkflowGateCheckpointSchema = z.object({
   kind: z.literal('gate_checkpoint'),
   gateToken: z.string().min(1),
   stepId: z.string().min(1),
-  gateKind: z.literal('confirmation_required'),
+  gateKind: z.enum(['coordinator_eval', 'human_approval', 'confirmation_required']),
 });
 
 export type V2ContinueWorkflowGateCheckpointOutput = z.infer<typeof V2ContinueWorkflowGateCheckpointSchema>;

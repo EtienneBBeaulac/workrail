@@ -125,7 +125,8 @@ export interface StepResponseGateCheckpoint {
   readonly kind: 'gate_checkpoint';
   readonly gateToken: string;
   readonly stepId: string;
-  readonly gateKind: 'confirmation_required';
+  /** 'confirmation_required' is a legacy value; treated as 'coordinator_eval'. */
+  readonly gateKind: 'coordinator_eval' | 'human_approval' | 'confirmation_required';
 }
 
 export type StepResponse = StepResponseOk | StepResponseBlocked | StepResponseGateCheckpoint;

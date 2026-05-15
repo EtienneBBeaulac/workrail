@@ -33,7 +33,7 @@ export type TerminalSignal =
    * before the next step is injected. The coordinator (PR 2) reads gateToken to
    * resume the session after gate evaluation completes.
    */
-  | { readonly kind: 'gate_parked'; readonly gateToken: string; readonly stepId: string };
+  | { readonly kind: 'gate_parked'; readonly gateToken: string; readonly stepId: string; readonly gateKind: import('../../v2/durable-core/constants.js').GateKind };
 
 /**
  * Set the terminal signal for a session (first-writer-wins).

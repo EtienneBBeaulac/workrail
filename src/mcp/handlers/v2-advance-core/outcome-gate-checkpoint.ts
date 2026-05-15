@@ -24,6 +24,8 @@ export function buildGateCheckpointOutcome(args: {
   readonly lock: WithHealthySessionLock;
   readonly ports: AdvanceCorePorts;
   readonly lockedIndex: SessionIndex;
+  /** The kind of gate -- determines how TriggerRouter routes the parked session. */
+  readonly gateKind: import('../../../v2/durable-core/constants.js').GateKind;
 }): RA<void, InternalError | SessionEventLogStoreError | SnapshotStoreError> {
   const { snap, lock, ports } = args;
   const { truth, sessionId, runId, currentNodeId, attemptId, workflowHash } = args.ctx;
@@ -32,7 +34,7 @@ export function buildGateCheckpointOutcome(args: {
   const gateSnapshotRes = buildGateCheckpointSnapshot({
     priorSnapshot: snap,
     stepId: args.stepId,
-    gateKind: 'confirmation_required',
+    gateKind: args.gateKind ?? 'coordinator_eval',
   });
   if (gateSnapshotRes.isErr()) {
     return neErrorAsync({ kind: 'invariant_violation' as const, message: gateSnapshotRes.error.message });

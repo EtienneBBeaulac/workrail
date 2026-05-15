@@ -59,6 +59,13 @@ export interface ValidatedAdvanceInputs {
    * Used by executeAdvanceCore to detect whether a gate checkpoint should fire.
    */
   readonly requireConfirmation: boolean | Condition | undefined;
+  /**
+   * The gate kind extracted from the requireConfirmation object form.
+   * Only present when requireConfirmation is { kind: 'coordinator_eval' | 'human_approval' }.
+   * Undefined when requireConfirmation is boolean or condition.
+   * Defaults to 'coordinator_eval' in executeAdvanceCore when requireConfirmation is true.
+   */
+  readonly gateKind: import('../../../v2/durable-core/constants.js').GateKind | undefined;
 }
 
 export function validateAdvanceInputs(args: {
@@ -179,5 +186,17 @@ export function validateAdvanceInputs(args: {
     effectivePrefs,
     notesOptional,
     requireConfirmation: typedStep?.requireConfirmation,
+    // Extract gateKind from the object form of requireConfirmation. Must happen here
+    // (boundary) so executeAdvanceCore receives a typed GateKind, not a raw object.
+    gateKind: (() => {
+      const rc = typedStep?.requireConfirmation;
+      if (typeof rc === 'object' && rc !== null && !Array.isArray(rc) && 'kind' in rc) {
+        const k = (rc as { kind: unknown }).kind;
+        if (k === 'coordinator_eval' || k === 'human_approval') {
+          return k as import('../../../v2/durable-core/constants.js').GateKind;
+        }
+      }
+      return undefined;
+    })(),
   });
 }

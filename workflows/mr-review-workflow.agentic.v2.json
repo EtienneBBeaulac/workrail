@@ -323,7 +323,7 @@
       "outputContract": {
         "contractRef": "wr.contracts.review_verdict"
       },
-      "requireConfirmation": true
+      "requireConfirmation": { "kind": "human_approval" }
     }
   ]
 }

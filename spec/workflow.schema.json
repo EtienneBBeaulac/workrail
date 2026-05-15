@@ -838,6 +838,19 @@
           "description": "Whether to require user confirmation before proceeding"
         },
         {
+          "type": "object",
+          "description": "Object form declaring the gate kind: coordinator_eval (autonomous LLM evaluator) or human_approval (human operator approval)",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["coordinator_eval", "human_approval"],
+              "description": "coordinator_eval: spawn wr.gate-eval-generic; human_approval: route to human approval mechanism (e.g. GitHub draft review)"
+            }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
           "$ref": "#/$defs/condition",
           "description": "Conditional logic that determines if confirmation is required based on context variables"
         }

@@ -428,6 +428,12 @@ export interface StepMetadata {
   readonly prompt: string;
   readonly agentRole?: string;
   readonly requireConfirmation: boolean;
+  /**
+   * The kind of gate this step requires. Only present when requireConfirmation is true.
+   * Derived from the requireConfirmation object form: { kind: 'coordinator_eval' | 'human_approval' }.
+   * Defaults to 'coordinator_eval' when requireConfirmation is boolean true.
+   */
+  readonly gateKind?: import('../constants.js').GateKind;
 }
 
 /**
@@ -546,10 +552,26 @@ export function renderPendingPrompt(args: {
   // Evaluate requireConfirmation after renderContext is built so that condition-form values
   // (e.g. { var: 'taskComplexity', equals: 'Large' }) are evaluated against live session context.
   // Boolean(conditionObject) would always be true -- we need evaluateCondition() here.
-  const rc = step.requireConfirmation;
+  //
+  // Object form { kind: 'coordinator_eval' | 'human_approval' }: extract gateKind FIRST,
+  // then treat the value as boolean true. Must happen before evaluateCondition() since
+  // { kind: '...' } is not a valid condition expression.
+  let rc = step.requireConfirmation;
+  let gateKind: import('../constants.js').GateKind | undefined;
+  if (typeof rc === 'object' && rc !== null && !Array.isArray(rc) && 'kind' in rc) {
+    const kindObj = rc as { kind: string };
+    if (kindObj.kind === 'coordinator_eval' || kindObj.kind === 'human_approval') {
+      gateKind = kindObj.kind as import('../constants.js').GateKind;
+      rc = true; // normalize to boolean for the requireConfirmation evaluation below
+    }
+  }
   const requireConfirmation = rc === true || rc === false || rc === undefined
     ? Boolean(rc)
-    : evaluateCondition(rc, renderContext);
+    : evaluateCondition(rc as Exclude<typeof rc, { kind: string }>, renderContext);
+  // Default gateKind to 'coordinator_eval' when requireConfirmation is true but no kind was specified.
+  if (requireConfirmation && gateKind === undefined) {
+    gateKind = 'coordinator_eval';
+  }
 
   // Resolve both prompt and title — titles are agent-visible (inspect output, UI headers).
   // prompt is optional (steps may use promptBlocks instead); default to '' so the resolver
@@ -699,7 +721,7 @@ export function renderPendingPrompt(args: {
 
   // If not rehydrate-only, return enhanced prompt (no recovery needed for advance/start)
   if (!args.rehydrateOnly) {
-    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation });
+    return ok({ stepId: args.stepId, title: baseTitle, prompt: enhancedPrompt, agentRole, requireConfirmation, ...(gateKind !== undefined ? { gateKind } : {}) });
   }
 
   // Rehydrate-only: load recovery projections (extracted helper)
@@ -711,6 +733,7 @@ export function renderPendingPrompt(args: {
       prompt: enhancedPrompt + '\n\n' + projectionsRes.error,
       agentRole,
       requireConfirmation,
+      ...(gateKind !== undefined ? { gateKind } : {}),
     });
   }
 
@@ -740,5 +763,5 @@ export function renderPendingPrompt(args: {
   }).text;
   const finalPrompt = `${enhancedPrompt}\n\n${recoveryText}`;
 
-  return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, agentRole, requireConfirmation });
+  return ok({ stepId: args.stepId, title: baseTitle, prompt: finalPrompt, agentRole, requireConfirmation, ...(gateKind !== undefined ? { gateKind } : {}) });
 }

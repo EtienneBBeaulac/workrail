@@ -281,6 +281,24 @@ export const EVENT_KIND = {
 export type EventKindV1 = typeof EVENT_KIND[keyof typeof EVENT_KIND];
 
 // =============================================================================
+// GateKind: discriminated union for requireConfirmation gate types
+// =============================================================================
+
+/**
+ * Discriminates the kind of gate a workflow step requires.
+ *
+ * - 'coordinator_eval': autonomous LLM evaluator (wr.gate-eval-generic). Default.
+ *   Corresponds to requireConfirmation: true in workflow JSON.
+ * - 'human_approval': human operator approval (e.g. reviewer-assigned draft review).
+ *   Corresponds to requireConfirmation: { "kind": "human_approval" } in workflow JSON.
+ *
+ * WHY a named type (not inline union): every switch on GateKind must use assertNever
+ * so future kinds produce compile errors at all routing sites. A named export makes
+ * that exhaustiveness contract discoverable and enforced.
+ */
+export type GateKind = 'coordinator_eval' | 'human_approval';
+
+// =============================================================================
 // Output Channels (Section 1.2: node_output_appended)
 // =============================================================================
 

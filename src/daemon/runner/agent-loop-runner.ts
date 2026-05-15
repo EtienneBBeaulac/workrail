@@ -272,8 +272,8 @@ export async function buildAgentReadySession(
       }
     },
     onSteer: (text: string) => { state.pendingSteerParts.push(text); },
-    onGateParked: (gateToken: string, stepId: string) => {
-      setTerminalSignal(state, { kind: 'gate_parked', gateToken, stepId });
+    onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => {
+      setTerminalSignal(state, { kind: 'gate_parked', gateToken, stepId, gateKind });
     },
     getCurrentToken: () => state.currentContinueToken,
     sessionWorkspacePath,

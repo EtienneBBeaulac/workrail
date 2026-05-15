@@ -166,7 +166,9 @@ export type EnginePayloadV1 = z.infer<typeof EnginePayloadV1Schema>;
  */
 const GateCheckpointPayloadV1Schema = z.object({
   stepId: z.string().min(1),
-  gateKind: z.literal('confirmation_required'),
+  // 'confirmation_required' is a legacy value from before GateKind was a discriminated union.
+  // It maps to 'coordinator_eval' at read time. New sessions write 'coordinator_eval' or 'human_approval'.
+  gateKind: z.enum(['coordinator_eval', 'human_approval', 'confirmation_required']),
 }).strict();
 
 export const EnginePayloadV1Schema = z.object({

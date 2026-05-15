@@ -144,6 +144,7 @@ export function buildSessionResult(
         workflowId: trigger.workflowId,
         gateToken: signal.gateToken,
         stepId: signal.stepId,
+        gateKind: signal.gateKind,
         stopReason: 'gate_parked',
         sessionId: String(sessionId),
         ...(state.workrailSessionId !== null ? { workrailSessionId: state.workrailSessionId } : {}),
