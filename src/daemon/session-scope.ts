@@ -248,10 +248,28 @@ export interface SessionScope {
 
   /**
    * The workflow ID being executed (e.g. "wr.coding-task").
-   * Not destructured inside constructTools() in this PR -- will be consumed by
-   * individual tool factories in A4 when they move to their own files.
    */
   readonly workflowId: string;
+
+  /**
+   * The trigger's workspace path. Used by the gate sidecar recovery context so
+   * that resumeFromGate() can reconstruct the WorkflowTrigger without a second
+   * source of truth.
+   */
+  readonly triggerWorkspacePath: string;
+
+  /**
+   * The trigger's goal string. Stored in the gate sidecar so the evaluator
+   * and any resumed session have the original intent available.
+   */
+  readonly triggerGoal: string;
+
+  /**
+   * The trigger's branch strategy. Stored in the gate sidecar so resumeFromGate()
+   * can reconstruct the WorkflowTrigger with the original strategy rather than
+   * hardcoding 'none'.
+   */
+  readonly triggerBranchStrategy: 'worktree' | 'none' | undefined;
 
   /**
    * Registry mapping workrailSessionId -> abort callback.

@@ -43,7 +43,7 @@ import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
 import { runAdaptivePipeline } from '../coordinators/adaptive-pipeline.js';
 import { DispatchDeduplicator } from './dispatch-deduplicator.js';
-import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS } from '../coordinators/gate-evaluator-dispatcher.js';
+import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS, DEFAULT_GATE_EVALUATOR_WORKFLOW_ID } from '../coordinators/gate-evaluator-dispatcher.js';
 import { resumeFromGate } from '../daemon/gate-resume.js';
 
 /**
@@ -849,7 +849,7 @@ export class TriggerRouter {
                   readStepOutput: (wrSessionId) => deps.getAgentResult(wrSessionId),
                 },
                 artifactContext,
-                'wr.gate-eval-generic',
+                DEFAULT_GATE_EVALUATOR_WORKFLOW_ID,
                 workflowTrigger.workspacePath,
                 stepId,
                 gateWorkrailSessionId,
@@ -1004,10 +1004,50 @@ export class TriggerRouter {
           // TODO(follow-up): add onStuck: trigger hook support here
         );
       } else if (result._tag === 'gate_parked') {
+        const sessionId = result.sessionId;
+        const stepId = result.stepId;
         console.log(
           `[TriggerRouter] Dispatch parked at gate: workflowId=${workflowTrigger.workflowId} ` +
-          `stepId=${result.stepId}`,
+          `stepId=${stepId} sessionId=${sessionId}`,
         );
+        if (sessionId && this._coordinatorDeps) {
+          const deps = this._coordinatorDeps;
+          const ctx = this.ctx;
+          const apiKey = this.apiKey;
+          const activeSessionSet = this._activeSessionSet;
+          const emitter = this.emitter;
+          void (async () => {
+            try {
+              const gateWorkrailSessionId = result.workrailSessionId;
+              const artifactContext = { stepId, workflowId: workflowTrigger.workflowId, goal: workflowTrigger.goal };
+              const verdict = await evaluateGate(
+                {
+                  spawnSession: (wfId, goal, workspace, context, agentConfig) =>
+                    deps.spawnSession(wfId, goal, workspace, context, agentConfig),
+                  awaitSessions: (handles, timeoutMs) => deps.awaitSessions(handles, timeoutMs),
+                  getAgentResult: (handle) => deps.getAgentResult(handle),
+                  stderr: (line) => process.stderr.write(line + '\n'),
+                  readStepOutput: (wrSessionId) => deps.getAgentResult(wrSessionId),
+                },
+                artifactContext,
+                DEFAULT_GATE_EVALUATOR_WORKFLOW_ID,
+                workflowTrigger.workspacePath,
+                stepId,
+                gateWorkrailSessionId,
+                undefined,
+                DEFAULT_GATE_EVAL_TIMEOUT_MS,
+              );
+              const resumeResult = await resumeFromGate(sessionId, verdict, ctx, apiKey, this.runWorkflowFn, undefined, emitter, activeSessionSet);
+              if (resumeResult.kind === 'err') {
+                console.warn(`[TriggerRouter] Dispatch gate resume failed for session ${sessionId}: ${resumeResult.error.message}`);
+              } else {
+                console.log(`[TriggerRouter] Dispatch gate resumed: sessionId=${sessionId} verdict=${verdict.verdict}`);
+              }
+            } catch (e) {
+              console.error(`[TriggerRouter] Dispatch gate evaluation threw: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          })();
+        }
       } else {
         // Compile-time exhaustiveness guard. If WorkflowRunResult gains a new variant
         // this will fail to compile, forcing the developer to handle the new case.

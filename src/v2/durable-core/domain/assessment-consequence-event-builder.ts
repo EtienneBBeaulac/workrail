@@ -1,6 +1,6 @@
 import { err, ok, type Result } from 'neverthrow';
 import type { DomainEventV1 } from '../schemas/session/index.js';
-import { EVENT_KIND } from '../constants.js';
+import { EVENT_KIND, DELIMITER_SAFE_ID_PATTERN } from '../constants.js';
 
 type EventToAppendV1 = Omit<DomainEventV1, 'eventIndex' | 'sessionId' | 'timestampMs'>;
 
@@ -24,6 +24,12 @@ export function buildAssessmentConsequenceAppliedEvent(args: {
   }
   if (!args.assessmentId || !args.dimensionId || !args.level || !args.guidance) {
     return err({ code: 'ASSESSMENT_CONSEQUENCE_EVENT_INVARIANT_VIOLATION', message: 'assessment consequence fields are required' });
+  }
+  if (!DELIMITER_SAFE_ID_PATTERN.test(args.assessmentId)) {
+    return err({ code: 'ASSESSMENT_CONSEQUENCE_EVENT_INVARIANT_VIOLATION', message: `assessmentId must be delimiter-safe: [a-z0-9_-]+ (got: ${args.assessmentId})` });
+  }
+  if (!DELIMITER_SAFE_ID_PATTERN.test(args.dimensionId)) {
+    return err({ code: 'ASSESSMENT_CONSEQUENCE_EVENT_INVARIANT_VIOLATION', message: `dimensionId must be delimiter-safe: [a-z0-9_-]+ (got: ${args.dimensionId})` });
   }
 
   // WHY include assessmentId+dimensionId in the dedupeKey: multiple consequences can fire

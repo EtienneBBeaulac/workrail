@@ -24,6 +24,7 @@ export function makeContinueWorkflowTool(
   emitter?: DaemonEventEmitter,
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string) => void = () => { /* no-op for callers that predate gate support */ },
+  gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: 'worktree' | 'none' },
 ): AgentTool {
   return {
     name: 'continue_workflow',
@@ -81,7 +82,7 @@ export function makeContinueWorkflowTool(
         // if the daemon crashes between now and agent loop exit, startup recovery
         // can detect the gate from the sidecar rather than relying on in-memory state.
         const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
-        const persistResult = await persistTokens(sessionId, '', null, undefined, undefined, gateState, workrailSessionId);
+        const persistResult = await persistTokens(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (continue_workflow gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }
@@ -239,6 +240,7 @@ export function makeCompleteStepTool(
   emitter?: DaemonEventEmitter,
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string) => void = () => { /* no-op for callers that predate gate support */ },
+  gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: 'worktree' | 'none' },
 ): AgentTool {
   return {
     name: 'complete_step',
@@ -313,7 +315,7 @@ export function makeCompleteStepTool(
       // WHY NOT call onAdvance: the step did NOT advance to the next workflow step.
       if (out.kind === 'gate_checkpoint') {
         const gateState = { kind: 'gate_checkpoint' as const, gateToken: out.gateToken, stepId: out.stepId };
-        const persistResult = await persistTokens(sessionId, '', null, undefined, undefined, gateState, workrailSessionId);
+        const persistResult = await persistTokens(sessionId, '', null, undefined, gateRecoveryContext, gateState, workrailSessionId);
         if (persistResult.kind === 'err') {
           console.warn(`[WorkflowRunner] persistTokens failed (complete_step gate_checkpoint): ${persistResult.error.code} -- ${persistResult.error.message}`);
         }

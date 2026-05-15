@@ -88,6 +88,7 @@ export async function persistTokens(
     readonly workflowId: string;
     readonly goal: string;
     readonly workspacePath: string;
+    readonly branchStrategy?: 'worktree' | 'none';
   },
   gateState?: {
     readonly kind: 'gate_checkpoint';
@@ -110,6 +111,7 @@ export async function persistTokens(
           workflowId: recoveryContext.workflowId,
           goal: recoveryContext.goal,
           workspacePath: recoveryContext.workspacePath,
+          ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
         } : {}),
         ...(gateState !== undefined ? { gateState } : {}),
         ...(workrailSessionId != null ? { workrailSessionId } : {}),
