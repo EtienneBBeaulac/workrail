@@ -125,6 +125,10 @@ interface ParsedTriggerRaw {
   // Both payloadPath and equals must be present strings when the block is set.
   // Validated at assembly time; missing either field is a TriggerStoreError.
   dispatchCondition?: { payloadPath?: string; equals?: string };
+  // Reviewer identity for posting review comments after review sessions.
+  // token may be a $SECRET_REF, resolved at assembly time.
+  // platform discriminates which ReviewApprovalAdapter is used ('github' | 'gitlab').
+  reviewerIdentity?: { platform?: string; token?: string; login?: string };
   // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   // Fields from all providers are unioned here -- the assembler validates which
@@ -138,6 +142,7 @@ interface ParsedTriggerRaw {
     excludeAuthors?: string;  // space-separated logins; split at assemble time
     notLabels?: string;       // space-separated label names; split at assemble time
     labelFilter?: string;     // space-separated label names; passed to GitHub API
+    reviewerLogin?: string;   // single GitHub login for reviewer-assignment filtering
     // Shared fields
     token?: string;           // may be a $SECRET_REF, resolved at assembly time
     events?: string;          // space-separated scalar in YAML; split at assemble time
@@ -444,6 +449,40 @@ function parseTriggersYaml(
           lineIndex++;
         }
         trigger.dispatchCondition = dispatchCondition;
+        continue;
+      }
+
+      if (key === 'reviewerIdentity') {
+        // reviewerIdentity: is a 2-key sub-object: githubToken + githubLogin.
+        // githubToken may be a $SECRET_REF; resolved at assembly time.
+        lineIndex++;
+        const reviewerIdentity: { platform?: string; token?: string; login?: string } = {};
+        while (lineIndex < lines.length) {
+          const riLine = lines[lineIndex];
+          if (riLine === undefined) break;
+          const riTrimmed = riLine.trim();
+          if (riTrimmed === '' || riTrimmed.startsWith('#')) { lineIndex++; continue; }
+          const riIndent = riLine.search(/\S/);
+          if (riIndent <= lineIndent) break;
+          const riColonIdx = riTrimmed.indexOf(':');
+          if (riColonIdx === -1) {
+            return err({ kind: 'parse_error', message: `Missing colon in reviewerIdentity entry at line ${lineIndex + 1}: "${riTrimmed}"`, lineNumber: lineIndex + 1 });
+          }
+          const riKey = riTrimmed.slice(0, riColonIdx).trim();
+          const riRawValue = riTrimmed.slice(riColonIdx + 1).trim();
+          if (riRawValue !== '') {
+            const riValueResult = parseScalar(riRawValue, lineIndex + 1);
+            if (riValueResult.kind === 'err') return riValueResult;
+            switch (riKey) {
+              case 'platform': reviewerIdentity.platform = riValueResult.value; break;
+              case 'token': reviewerIdentity.token = riValueResult.value; break;
+              case 'login': reviewerIdentity.login = riValueResult.value; break;
+              default: break; // unknown sub-keys silently ignored
+            }
+          }
+          lineIndex++;
+        }
+        trigger.reviewerIdentity = reviewerIdentity;
         continue;
       }
 
@@ -1040,10 +1079,10 @@ function validateAndResolveTrigger(
   // field validation in this function.
   // ---------------------------------------------------------------------------
   const rawBranchStrategy = raw.branchStrategy?.trim();
-  if (rawBranchStrategy !== undefined && rawBranchStrategy !== 'worktree' && rawBranchStrategy !== 'none') {
+  if (rawBranchStrategy !== undefined && rawBranchStrategy !== 'worktree' && rawBranchStrategy !== 'none' && rawBranchStrategy !== 'read-only') {
     return err({
       kind: 'invalid_field_value',
-      field: `branchStrategy (must be "worktree" or "none", got: "${rawBranchStrategy}")`,
+      field: `branchStrategy (must be "worktree", "none", or "read-only", got: "${rawBranchStrategy}")`,
       triggerId: rawId,
     });
   }
@@ -1059,8 +1098,11 @@ function validateAndResolveTrigger(
       triggerId: rawId,
     });
   }
-  const branchStrategy: 'worktree' | 'none' | undefined =
-    rawBranchStrategy === 'worktree' ? 'worktree' : rawBranchStrategy === 'none' ? 'none' : undefined;
+  const branchStrategy: import('./types.js').TriggerDefinition['branchStrategy'] =
+    rawBranchStrategy === 'worktree' ? 'worktree'
+    : rawBranchStrategy === 'none' ? 'none'
+    : rawBranchStrategy === 'read-only' ? 'read-only'
+    : undefined;
 
   const baseBranch = raw.baseBranch?.trim() || undefined;
   const branchPrefix = raw.branchPrefix?.trim() || undefined;
@@ -1243,6 +1285,7 @@ function validateAndResolveTrigger(
         );
       }
 
+      const reviewerLogin = src.reviewerLogin?.trim() || undefined;
       pollingSource = {
         provider: provider as 'github_issues_poll' | 'github_prs_poll',
         repo: src.repo.trim(),
@@ -1252,6 +1295,7 @@ function validateAndResolveTrigger(
         excludeAuthors,
         notLabels,
         labelFilter,
+        ...(reviewerLogin ? { reviewerLogin } : {}),
       };
     }
   } else if (provider === 'github_queue_poll') {
@@ -1318,6 +1362,31 @@ function validateAndResolveTrigger(
   // (only goal, workspacePath, and context are passed to dispatchAdaptivePipeline).
   const resolvedWorkflowId = raw.workflowId?.trim() ?? '';
 
+  // Assemble and resolve reviewerIdentity if present.
+  // token is resolved from env using the same $SECRET_REF pattern as hmacSecret.
+  // platform discriminates the ReviewApprovalAdapter implementation.
+  let reviewerIdentity: TriggerDefinition['reviewerIdentity'] | undefined;
+  if (raw.reviewerIdentity) {
+    const rawPlatform = raw.reviewerIdentity.platform?.trim();
+    const rawToken = raw.reviewerIdentity.token?.trim();
+    const rawLogin = raw.reviewerIdentity.login?.trim();
+    if (!rawPlatform) {
+      return err({ kind: 'missing_field', field: 'reviewerIdentity.platform', triggerId: rawId });
+    }
+    if (rawPlatform !== 'github' && rawPlatform !== 'gitlab') {
+      return err({ kind: 'invalid_field_value', field: `reviewerIdentity.platform (must be "github" or "gitlab", got: "${rawPlatform}")`, triggerId: rawId });
+    }
+    if (!rawToken) {
+      return err({ kind: 'missing_field', field: 'reviewerIdentity.token', triggerId: rawId });
+    }
+    if (!rawLogin) {
+      return err({ kind: 'missing_field', field: 'reviewerIdentity.login', triggerId: rawId });
+    }
+    const tokenResult = resolveSecret(rawToken, rawId, env);
+    if (tokenResult.kind === 'err') return tokenResult;
+    reviewerIdentity = { platform: rawPlatform, token: tokenResult.value, login: rawLogin };
+  }
+
   // Assemble and validate dispatchCondition if present.
   // Both payloadPath and equals must be non-empty strings.
   let dispatchCondition: TriggerDefinition['dispatchCondition'] | undefined;
@@ -1366,6 +1435,8 @@ function validateAndResolveTrigger(
     ...(dispatchCondition !== undefined ? { dispatchCondition } : {}),
     // maxQueueDepth: only spread when explicitly set in YAML (undefined = apply default 10 in route()).
     ...(maxQueueDepth !== undefined ? { maxQueueDepth } : {}),
+    // Reviewer identity for GitHub PENDING draft review creation after review sessions.
+    ...(reviewerIdentity !== undefined ? { reviewerIdentity } : {}),
   };
 
   return ok(trigger);
@@ -1672,6 +1743,21 @@ export function validateTriggerStrict(
         'set maxQueueDepth explicitly to control the per-trigger queue depth limit ' +
         '(at 30-minute sessions, depth 10 implies a worst-case wait of ~5 hours)',
       suggestedFix: 'maxQueueDepth: 10',
+    });
+  }
+
+  // Rule: reviewer-identity-without-read-only (warning)
+  // reviewer-assigned PR review sessions need branchStrategy: 'read-only' to checkout the PR
+  // branch in an isolated worktree so concurrent reviews don't clobber the main checkout.
+  if (trigger.reviewerIdentity && trigger.branchStrategy !== 'read-only') {
+    issues.push({
+      rule: 'reviewer-identity-without-read-only',
+      severity: 'warning',
+      triggerId: id,
+      message:
+        'reviewerIdentity is set but branchStrategy is not "read-only" -- reviewer sessions ' +
+        'should use branchStrategy: read-only to checkout the PR branch in an isolated worktree',
+      suggestedFix: 'branchStrategy: read-only',
     });
   }
 

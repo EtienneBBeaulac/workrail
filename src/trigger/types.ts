@@ -25,6 +25,34 @@
 // TriggerId: branded string to prevent accidental string substitution
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ReviewerIdentity: platform-discriminated identity for posting review comments
+//
+// Using a discriminated union makes illegal states unrepresentable:
+// a GitHub identity cannot have a gitlab project ID, and new platforms
+// (GitLab, future) add a new union member without touching existing code.
+//
+// WHY `token` + `login` as the common field names (not `githubToken`):
+// Platform-agnostic names let the adapter interface stay generic.
+// The `platform` discriminant is what routes to the right implementation.
+// ---------------------------------------------------------------------------
+
+export type ReviewerIdentity =
+  | {
+      readonly platform: 'github';
+      /** Resolved from env (never a raw $SECRET_NAME at runtime). */
+      readonly token: string;
+      /** GitHub login (e.g. 'etienneb'). Used for reviewer-assignment filtering and dedup. */
+      readonly login: string;
+    }
+  | {
+      readonly platform: 'gitlab';
+      /** Resolved from env (never a raw $SECRET_NAME at runtime). */
+      readonly token: string;
+      /** GitLab username (e.g. 'etienneb'). */
+      readonly login: string;
+    };
+
 export type TriggerId = string & { readonly _brand: 'TriggerId' };
 
 export function asTriggerId(value: string): TriggerId {
@@ -219,6 +247,14 @@ export interface GitHubPollingSource {
    * Space-separated in triggers.yml: "labelFilter: bug high-priority"
    */
   readonly labelFilter: readonly string[];
+  /**
+   * When set, only dispatch PRs where this GitHub login appears in `requested_reviewers`.
+   * Used with `reviewerIdentity` to scope review sessions to PRs assigned to the operator.
+   *
+   * Only meaningful for `github_prs_poll` triggers -- ignored for `github_issues_poll`.
+   * In YAML:   reviewerLogin: etienneb
+   */
+  readonly reviewerLogin?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -659,7 +695,40 @@ export interface TriggerDefinition {
    * Explicit 'branchStrategy: none' is the opt-out when autoCommit/autoOpenPR is set.
    * In YAML: branchStrategy: worktree
    */
-  readonly branchStrategy?: 'worktree' | 'none';
+  readonly branchStrategy?: 'worktree' | 'none' | 'read-only';
+
+  /**
+   * Optional reviewer identity for creating GitHub PENDING draft reviews after a
+   * successful review session. When present, `maybeRunPostWorkflowActions()` in
+   * TriggerRouter calls the GitHub REST API to create a draft review under this
+   * identity after the session emits a valid `wr.review_verdict` artifact.
+   *
+   * WHY a sub-object (not two flat fields): keeps the two related fields together
+   * and makes `reviewerIdentity` presence the single feature flag -- no separate
+   * `autoPostDraftReview` boolean that could be set inconsistently.
+   *
+   * Both fields are already resolved from environment at parse time (same pattern
+   * as `hmacSecret`). Never contains raw `$SECRET_NAME` refs at runtime.
+   *
+   * In YAML:
+   *   reviewerIdentity:
+   *     githubToken: $GITHUB_REVIEWER_TOKEN
+   *     githubLogin: etienneb
+   */
+  /**
+   * Platform-agnostic reviewer identity. The `platform` field discriminates
+   * which ReviewApprovalAdapter implementation is used at dispatch time.
+   * New platforms (e.g. 'jira', 'linear') are added as new union members
+   * without changing existing callers.
+   *
+   * In YAML:
+   *   reviewerIdentity:
+   *     platform: github          # or: gitlab
+   *     token: $GITHUB_REVIEWER_TOKEN
+   *     login: etienneb
+   */
+  readonly reviewerIdentity?: ReviewerIdentity;
+
 
   /**
    * Base branch for the worktree. Only used when branchStrategy === 'worktree'.
@@ -757,7 +826,9 @@ export type TriggerValidationRule =
   /** serial trigger has no maxQueueDepth -- using default of 10 */
   | 'missing-max-queue-depth'
   /** agentConfig.model present but not in 'provider/model-id' format */
-  | 'invalid-model-format';
+  | 'invalid-model-format'
+  /** reviewerIdentity present AND branchStrategy is not 'read-only' -- reviewer sessions should use read-only worktree */
+  | 'reviewer-identity-without-read-only';
 
 // ---------------------------------------------------------------------------
 // TriggerValidationIssue: a single named validation issue for a trigger.

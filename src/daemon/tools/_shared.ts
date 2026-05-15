@@ -88,7 +88,7 @@ export async function persistTokens(
     readonly workflowId: string;
     readonly goal: string;
     readonly workspacePath: string;
-    readonly branchStrategy?: 'worktree' | 'none';
+    readonly branchStrategy?: import('../types.js').BranchStrategy;
   },
   gateState?: {
     readonly kind: 'gate_checkpoint';

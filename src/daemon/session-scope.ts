@@ -269,7 +269,7 @@ export interface SessionScope {
    * can reconstruct the WorkflowTrigger with the original strategy rather than
    * hardcoding 'none'.
    */
-  readonly triggerBranchStrategy: 'worktree' | 'none' | undefined;
+  readonly triggerBranchStrategy: import('./types.js').BranchStrategy | undefined;
 
   /**
    * Registry mapping workrailSessionId -> abort callback.

@@ -153,7 +153,7 @@ export interface FinalizationContext {
   readonly workrailSessionId: SessionId | null;
   readonly startMs: number;
   readonly stepAdvanceCount: number;
-  readonly branchStrategy: 'worktree' | 'none' | undefined;
+  readonly branchStrategy: import('../types.js').BranchStrategy | undefined;
   readonly statsDir: string;
   readonly sessionsDir: string;
   readonly conversationPath: string;

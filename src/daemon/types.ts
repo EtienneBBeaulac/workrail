@@ -35,6 +35,24 @@ export type { RunId } from './daemon-events.js';
 export type ReadFileState = { content: string; timestamp: number; isPartialView: boolean };
 
 // ---------------------------------------------------------------------------
+// BranchStrategy
+// ---------------------------------------------------------------------------
+
+/**
+ * Branch isolation strategy for a daemon workflow session.
+ *
+ * - 'worktree': create an isolated git worktree on a new branch; push + PR after delivery.
+ * - 'none': no worktree; session writes directly to workspacePath.
+ * - 'read-only': create an isolated git worktree by checking out an existing branch (--detach);
+ *   no new branch created, no push. Used for review sessions that inspect a PR branch.
+ *
+ * WHY a named type (not an inline union): the union was repeated in 8+ files.
+ * Adding a new value required a multi-file grep-and-fix. A single named export makes
+ * exhaustiveness checks work across the codebase from one change.
+ */
+export type BranchStrategy = 'worktree' | 'none' | 'read-only';
+
+// ---------------------------------------------------------------------------
 // WorkflowTrigger
 // ---------------------------------------------------------------------------
 
@@ -185,7 +203,14 @@ export interface WorkflowTrigger {
    * When absent, defaults to 'none' behavior.
    * Kept here so workflow-runner.ts remains decoupled from trigger system types.
    */
-  readonly branchStrategy?: 'worktree' | 'none';
+  readonly branchStrategy?: BranchStrategy;
+  /**
+   * Reviewer identity for creating draft reviews after review sessions.
+   * Sourced from TriggerDefinition.reviewerIdentity.
+   * Carried here so maybeRunPostWorkflowActions() in TriggerRouter can access it
+   * from the dispatch() path, which only receives WorkflowTrigger (not TriggerDefinition).
+   */
+  readonly reviewerIdentity?: import('../trigger/types.js').ReviewerIdentity;
   /**
    * Base branch for the worktree. Only used when branchStrategy === 'worktree'.
    * Sourced from TriggerDefinition.baseBranch.

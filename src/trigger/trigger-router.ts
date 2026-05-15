@@ -45,6 +45,9 @@ import { runAdaptivePipeline } from '../coordinators/adaptive-pipeline.js';
 import { DispatchDeduplicator } from './dispatch-deduplicator.js';
 import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS, DEFAULT_GATE_EVALUATOR_WORKFLOW_ID } from '../coordinators/gate-evaluator-dispatcher.js';
 import { resumeFromGate } from '../daemon/gate-resume.js';
+import type { ReviewApprovalAdapter } from './review-approval-adapter.js';
+import { GitHubReviewApprovalAdapter } from './review-approval-adapter.js';
+import { parseReviewVerdictArtifact } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -301,6 +304,118 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
  * @param result - WorkflowRunResult; only called when _tag === 'success'
  * @param execFn - Injectable exec function (production: execFileAsync; tests: fake)
  */
+/**
+ * Run post-workflow review actions when reviewerIdentity is configured.
+ *
+ * Fires only on success with a valid wr.review_verdict artifact.
+ * Creates a PENDING GitHub/GitLab draft review under the operator's identity.
+ * The PendingDraftReviewPoller (PR3) is wired in here once implemented.
+ *
+ * WHY separate from maybeRunDelivery: different gate conditions (no autoCommit
+ * required, different artifact source), different side effects (GitHub API call,
+ * not git commit). These are independent post-workflow action pathways.
+ *
+ * WHY receives originalResult: same as maybeRunDelivery -- prevents callbackUrl
+ * delivery_failed reassignment from suppressing review posting on a succeeded session.
+ *
+ * WHY fire-and-forget for the poller (future PR3): the poller is long-running
+ * (polls until operator publishes, could take hours). Awaiting it would hold the
+ * queue slot. Same pattern as gate evaluation: void (async () => { ... })().
+ */
+async function maybeRunPostWorkflowActions(
+  workflowTrigger: WorkflowTrigger,
+  originalResult: WorkflowRunResult,
+  reviewApprovalAdapter: ReviewApprovalAdapter,
+  notificationService?: NotificationService,
+): Promise<void> {
+  if (originalResult._tag !== 'success') return;
+  if (!workflowTrigger.reviewerIdentity) return;
+
+  const { reviewerIdentity } = workflowTrigger;
+
+  // Find wr.review_verdict artifact.
+  const artifacts = originalResult.lastStepArtifacts;
+  if (!artifacts || artifacts.length === 0) {
+    console.warn(
+      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
+      `lastStepArtifacts is absent or empty. Ensure wr.mr-review emits wr.review_verdict on the final step.`,
+    );
+    return;
+  }
+
+  let reviewVerdict: ReturnType<typeof parseReviewVerdictArtifact> = null;
+  for (const artifact of artifacts) {
+    reviewVerdict = parseReviewVerdictArtifact(artifact);
+    if (reviewVerdict !== null) break;
+  }
+
+  if (reviewVerdict === null) {
+    console.warn(
+      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
+      `lastStepArtifacts present but no valid wr.review_verdict found. ` +
+      `Artifacts: ${artifacts.map((a) => (typeof a === 'object' && a !== null ? (a as Record<string, unknown>)['kind'] : 'unknown')).join(', ')}`,
+    );
+    return;
+  }
+
+  // Extract PR number and repo from context (injected by github_prs_poll polling adapter).
+  const ctx = workflowTrigger.context as Record<string, unknown> | undefined;
+  const prNumber = typeof ctx?.['itemNumber'] === 'number' ? ctx['itemNumber'] : undefined;
+  const prUrl = typeof ctx?.['itemUrl'] === 'string' ? ctx['itemUrl'] : undefined;
+
+  if (prNumber === undefined || prUrl === undefined) {
+    console.warn(
+      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
+      `context missing itemNumber or itemUrl (required for draft review creation). ` +
+      `Ensure the trigger uses github_prs_poll with reviewer context injection.`,
+    );
+    return;
+  }
+
+  // Derive prRepo from the URL: "https://github.com/owner/repo/pull/N" -> "owner/repo"
+  let prRepo: string | undefined;
+  try {
+    const url = new URL(prUrl);
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2) prRepo = `${parts[0]}/${parts[1]}`;
+  } catch { /* invalid URL */ }
+
+  if (!prRepo) {
+    console.warn(
+      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
+      `could not derive prRepo from prUrl="${prUrl}"`,
+    );
+    return;
+  }
+
+  const createResult = await reviewApprovalAdapter.createDraftReview({
+    prNumber,
+    prRepo,
+    token: reviewerIdentity.token,
+    login: reviewerIdentity.login,
+    findings: reviewVerdict.findings,
+    prUrl,
+  });
+
+  if (createResult.kind === 'err') {
+    console.error(
+      `[TriggerRouter] Draft review creation failed: workflowId=${workflowTrigger.workflowId} ` +
+      `prRepo=${prRepo} prNumber=${prNumber} error=${createResult.error.message}`,
+    );
+    return;
+  }
+
+  const { reviewId, reused } = createResult.value;
+  console.log(
+    `[TriggerRouter] Draft review ${reused ? 'reused' : 'created'}: workflowId=${workflowTrigger.workflowId} ` +
+    `prRepo=${prRepo} prNumber=${prNumber} reviewId=${reviewId}`,
+  );
+
+  // Notify operator that draft is ready.
+  // PR3 will also start PendingDraftReviewPoller here (fire-and-forget).
+  notificationService?.notify(originalResult, `WorkTrain review draft ready on PR #${prNumber} -- open in GitHub to review findings`);
+}
+
 async function maybeRunDelivery(
   triggerId: string,
   trigger: TriggerDefinition,
@@ -405,6 +520,7 @@ export class TriggerRouter {
   private readonly _activeSessionSet: ActiveSessionSet | undefined;
   private _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
+  private readonly _reviewApprovalAdapter: ReviewApprovalAdapter;
 
   /**
    * Recent adaptive dispatch timestamps keyed by a path-specific dedup key.
@@ -507,6 +623,12 @@ export class TriggerRouter {
      * Inject in tests to control TTL or observe dedup behavior.
      */
     deduplicator?: DispatchDeduplicator,
+    /**
+     * Optional ReviewApprovalAdapter for creating draft reviews after review sessions.
+     * Defaults to GitHubReviewApprovalAdapter in production.
+     * Inject a fake in tests to avoid real GitHub API calls.
+     */
+    reviewApprovalAdapter?: ReviewApprovalAdapter,
   ) {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
@@ -515,6 +637,7 @@ export class TriggerRouter {
     this._coordinatorDeps = coordinatorDeps;
     this._modeExecutors = modeExecutors;
     this._deduplicator = deduplicator ?? new DispatchDeduplicator(TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS);
+    this._reviewApprovalAdapter = reviewApprovalAdapter ?? new GitHubReviewApprovalAdapter();
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -684,6 +807,9 @@ export class TriggerRouter {
       ...(trigger.branchStrategy !== undefined ? { branchStrategy: trigger.branchStrategy } : {}),
       ...(trigger.baseBranch !== undefined ? { baseBranch: trigger.baseBranch } : {}),
       ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
+      // Reviewer identity forwarded to WorkflowTrigger so maybeRunPostWorkflowActions()
+      // can access it from the dispatch() path (which receives WorkflowTrigger, not TriggerDefinition).
+      ...(trigger.reviewerIdentity !== undefined ? { reviewerIdentity: trigger.reviewerIdentity } : {}),
     };
 
     // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
@@ -929,6 +1055,11 @@ export class TriggerRouter {
         ? { gate: this.ctx.v2.gate, sessionStore: this.ctx.v2.sessionStore, idFactory: this.ctx.v2.idFactory }
         : undefined;
       await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn, deliveryDeps);
+
+      // Post-workflow review actions: create a PENDING draft review when reviewerIdentity is set.
+      // Uses workflowTrigger (which carries reviewerIdentity forwarded from TriggerDefinition).
+      // Uses originalResult to avoid callbackUrl delivery_failed suppressing review posting.
+      await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService);
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
@@ -1088,6 +1219,11 @@ export class TriggerRouter {
       // does not carry autoCommit/autoOpenPR flags (those live on TriggerDefinition, keyed
       // by triggerId). The dispatch() path does not have a triggerId to look up the definition.
       // TODO(follow-up): accept an optional triggerId in dispatch() to enable delivery here.
+
+      // Post-workflow review actions: create a PENDING draft review when reviewerIdentity is set.
+      // reviewerIdentity is forwarded from TriggerDefinition onto WorkflowTrigger so this path
+      // can access it without a triggerId lookup.
+      await maybeRunPostWorkflowActions(workflowTrigger, result, this._reviewApprovalAdapter, this.notificationService);
     });
     return workflowTrigger.workflowId;
   }
