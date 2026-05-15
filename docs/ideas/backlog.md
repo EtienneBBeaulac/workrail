@@ -2970,6 +2970,39 @@ Simplify third-party and team workflow hookup by requiring explicit `workspacePa
 
 ## Console
 
+### Live turn-level log stream for active sessions (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+The console shows step-level progress (which workflow phase the session is on) but nothing at the turn level: which tool the agent called, what it returned, how long it took, what the agent said between tool calls. Diagnosing a slow or stuck session currently requires grepping through raw conversation JSONL files -- not practical while a session is live.
+
+**What's needed:** a `worktrain logs --follow <sessionId>` CLI command (and/or a "Live" tab in the console) that streams tool-call-level activity as it happens:
+
+```
+[09:52:14] Turn 12  Bash       → cd /worktrees/abc && npx vitest run
+[09:52:31] Turn 12  Bash       ← exit 0, 396 tests pass  [17s]
+[09:52:31] Turn 13  complete_step → phase-2-scope-and-completeness
+[09:52:31] ADVANCE  phase-2 → phase-3-state-hypothesis
+[09:53:02] Turn 14  Bash       → gh pr diff 1022
+[09:53:04] Turn 14  Bash       ← 847 lines  [2s]
+```
+
+**The data already exists.** `DaemonEventEmitter` fires `tool_called`, `tool_error`, `step_advanced`, and `session_completed` events on every turn. The conversation JSONL captures every message. The gap is purely presentation -- nothing consumes these events into a human-readable live feed.
+
+**Two surfaces:**
+1. `worktrain logs --follow <sessionId>` -- CLI command, streams to stdout, pipe-friendly. Reads from the daemon event stream (JSONL file in `~/.workrail/data/`) and tails it in real time.
+2. Console "Live" tab -- same data in the browser, auto-updating without refresh. Especially useful for long-running sessions where you want to keep an eye without a terminal.
+
+**Things to hash out:**
+- How much of the tool output to show inline vs. truncate? A `gh pr diff` result is 800 lines; showing all of it destroys the log readability. Proposal: first 3 lines + byte count for long outputs; full output available via `--verbose`.
+- Should `worktrain logs` work for completed sessions too (replay)? Yes -- same format, just not tailing. `worktrain logs <sessionId>` (no `--follow`) replays the full conversation history in readable form.
+- LLM text output between tool calls: show it? Yes, but dim/indented. The agent's reasoning is valuable for debugging wrong decisions.
+- Should the console Live tab replace the existing session detail view or augment it? Augment -- step-level detail stays, Live tab adds the turn-level stream as a separate tab.
+
+---
+
 ### Workflows tab: incorrect source attribution for bundled workflows (Apr 21, 2026)
 
 **Status: bug** | Priority: low
