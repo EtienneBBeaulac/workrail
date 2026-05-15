@@ -33,6 +33,34 @@ triggers:
       # Dev/test: Haiku for fast, cheap iteration.
       model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
 
+  # Review with draft posting: same as mr-review but creates a GitHub PENDING draft
+  # review under the operator's identity. Operator publishes via GitHub "Finish your review".
+  # Test with:
+  #   curl -s -X POST http://localhost:3200/webhook/mr-review-draft \
+  #     -H "Content-Type: application/json" \
+  #     -d '{"pull_request":{"number":1022,"title":"feat(engine): reviewer identity, draft review adapter, BranchStrategy type","head":{"ref":"feat/etienneb/reviewer-identity-draft-review-pr1"}},"html_url":"https://github.com/EtienneBBeaulac/workrail/pull/1022"}'
+  - id: mr-review-draft
+    provider: generic
+    workflowId: wr.mr-review
+    workspacePath: /Users/etienneb/git/personal/workrail
+    goalTemplate: "Review PR {{$.pull_request.number}}: {{$.pull_request.title}}"
+    concurrencyMode: parallel
+    branchStrategy: read-only
+    autoCommit: false
+    reviewerIdentity:
+      platform: github
+      token: $GITHUB_REVIEWER_TOKEN
+      login: EtienneBBeaulac
+    contextMapping:
+      itemNumber: "$.pull_request.number"
+      itemUrl: "$.html_url"
+      prBranch: "$.pull_request.head.ref"
+    agentConfig:
+      maxSessionMinutes: 45
+      stallTimeoutSeconds: 120
+      stuckAbortPolicy: abort
+      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+
   # Self-improvement queue: assign issues to worktrain-etienneb to queue them.
   # WorkTrain acts as EtienneBBeaulac. PRs get [WT] prefix and worktrain/ branch.
   # DISABLED: uncomment to re-enable queue polling.

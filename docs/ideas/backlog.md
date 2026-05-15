@@ -2970,6 +2970,92 @@ Simplify third-party and team workflow hookup by requiring explicit `workspacePa
 
 ## Console
 
+### Perfect, no-nonsense session resumption after crash or hang (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+When the daemon crashes or a session is killed (network hang, OOM, SIGTERM, machine sleep), sessions with meaningful progress should resume automatically and transparently on the next daemon start. No data loss, no need for the operator to intervene, no re-firing webhooks.
+
+The current state: crash recovery exists and works for some failure modes (clean process crash with a valid sidecar). It fails for hung-call kills because the sidecar's `continueToken` may not reflect the latest state if the process died mid-Bedrock-call before the token was updated. The operator currently has to notice the session died, figure out why, and re-fire manually.
+
+**What "perfect" looks like:**
+- Daemon starts → silently scans for orphaned sessions → resumes each one with 0 operator input
+- Operator sees the session in the console continuing from where it left off, not restarted from scratch
+- No ceremony: the session store is the source of truth, the sidecar is just the handshake token. As long as the token is valid, the agent loop restarts directly from the current step.
+- Failed resume (expired token, corrupted sidecar) surfaces a clear notification: "Session X could not be resumed -- re-fire required" rather than silently discarding
+- Metrics: track resume success rate; a high discard rate means the sidecar write is not durable enough
+
+**Key gaps to close:**
+1. **Sidecar durability during hung calls**: the `continueToken` sidecar should be written atomically on every step advance AND on every token update (already done), but the "last written before the hang" case needs to be validated at recovery time -- the token must still be valid in the store, not just present on disk
+2. **Per-call timeout** (see adjacent backlog entry): prevents the hung-call case entirely by aborting stalled Bedrock requests before they require a process kill
+3. **Resume notification**: when a session is resumed at startup, emit a macOS notification and log entry so the operator knows it happened
+4. **Clear failure message**: when a session cannot be resumed (token expired, store inconsistency), write to outbox with session ID, workflow, goal, and the reason -- enough for the operator to re-fire with context
+
+---
+
+### Stall timer must apply to in-flight Bedrock calls, not just inter-call gaps (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:3 Cap:2 Eff:3 Lev:3 Con:3 | Blocked: no
+
+The current stall detection in `AgentLoop` (`stallTimeoutMs`) fires when no new LLM API call has *started* within the configured window. It resets each time `client.messages.create()` is about to be called. But if a Bedrock call *starts* and then hangs indefinitely (the HTTP request is in flight but never returns -- network issue, Bedrock internal error, throttle without a response), the stall timer never fires because the next call never starts. The session holds its queue slot until `maxSessionMinutes` expires.
+
+This is the actual cause of sessions sitting silent for 10+ minutes: the hung Bedrock call is not covered by the stall timer's guard.
+
+**The fix:** the stall timer should also fire if a single Bedrock API call exceeds a configured per-call timeout. Concretely: start a per-call timer just before `client.messages.create()` and cancel it when the call returns (success or error). If the timer fires, cancel the AbortController and treat it as a stall. The per-call timeout can be shorter than `stallTimeoutSeconds` (e.g. 90s per call vs 120s between calls) or configured separately.
+
+**Implementation:** `AgentLoop._runLoop()` already has the stall timer mechanism (`stallTimeoutMs`). Adding a per-call `AbortSignal` with a timeout, or wrapping `client.messages.create()` in a `Promise.race` with a timeout promise, would close the gap. The `AbortController` approach is cleaner since the SDK accepts an AbortSignal in request options.
+
+**Things to hash out:**
+- What is the right per-call timeout? Haiku can legitimately take 90s on a complex response. Sonnet can take longer. The timeout should be model-tier-aware, or at minimum configurable via `agentConfig.callTimeoutSeconds`.
+- Should a per-call timeout count as a stall (same abort path) or as a retryable error (try again once before aborting)?
+
+---
+
+### Bedrock credential expiry detection and re-auth notification (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:3 Cap:3 Eff:3 Lev:2 Con:3 | Blocked: no
+
+AWS SSO credentials expire every ~8 hours. When they expire mid-session, `AnthropicBedrock()` throws `Could not load credentials from any providers` and the session dies silently. The operator only discovers this by noticing sessions stopped completing or by checking the terminal.
+
+**What's needed:**
+- Detect Bedrock credential errors specifically at the agent-client or agent-loop level (they manifest as SDK errors before any API call returns, distinct from model errors or API 400s)
+- On detection: fire a macOS notification "WorkTrain needs AWS re-auth -- run: aws sso login --profile <profile>" and write to the outbox so `worktrain inbox` surfaces it
+- Optionally: retry the session automatically after a configurable delay (to allow the operator to re-authenticate without losing the session)
+
+**Refresh behavior:** `AnthropicBedrock()` reads from `~/.aws/sso/cache/` on each call -- so refreshing SSO while the daemon is running (`aws sso login`) is picked up automatically without a daemon restart. The notification just needs to tell the operator to do that.
+
+**Implementation:** detect in `buildAgentClient()` or in the agent loop error handler in `agent-loop.ts` -- the credential error surfaces as a non-200 response from the SDK before any model call succeeds. Tag it as a distinct `WorkflowRunError` reason code (`credential_expired`) so the operator outbox message is specific.
+
+---
+
+### Parent-child session tree in console: link spawned sessions to their parent (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+When `spawn_agent` creates child sessions, `session_created.data.parentSessionId` is written to the session store. The data is already there. The console currently shows all sessions as a flat list, so a `wr.mr-review` run producing 8-10 parallel reviewer family sessions looks like unrelated noise.
+
+**What's needed:** read `parentSessionId` from `session_created` events in the session list projection and render child sessions nested under their parent in the console UI. At minimum, each child session should show "child of `<parentId>`" and be visually grouped or indented under the parent. A tree view would be ideal.
+
+**Two display modes worth supporting:**
+1. **Grouped/nested**: child sessions indented under parent in the session list, collapsed by default, expanding on click. Shows the full spawn tree for complex pipelines.
+2. **Parent indicator on child**: simpler fallback -- each child session shows a "↳ spawned by `<parentId>`" badge and a link to jump to the parent session.
+
+**Implementation notes:** `parentSessionId` is written on the `session_created` event's `data` field. The console session list endpoint (`GET /api/v2/sessions`) reads the session store -- adding a `parentSessionId` field to `ConsoleSessionSummary` is the entry point. The UI change is additive on top of that.
+
+**Things to hash out:**
+- Should orphaned children (parent session already deleted/archived) show a greyed-out parent indicator or no indicator at all?
+- The tree can be arbitrarily deep (spawn_agent allows up to depth 3 by default). Does the UI need to handle 3-level nesting, or is 1-level (parent → direct children) sufficient for now?
+
+---
+
 ### Live turn-level log stream for active sessions (May 15, 2026)
 
 **Status: idea** | Priority: high
