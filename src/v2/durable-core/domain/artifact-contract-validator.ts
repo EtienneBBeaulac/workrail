@@ -16,6 +16,9 @@ import {
   DISCOVERY_HANDOFF_CONTRACT_REF,
   DiscoveryHandoffArtifactV1Schema,
   isDiscoveryHandoffArtifact,
+  GATE_VERDICT_CONTRACT_REF,
+  GateVerdictArtifactV1Schema,
+  isGateVerdictArtifact,
   SHAPING_HANDOFF_CONTRACT_REF,
   ShapingHandoffArtifactV1Schema,
   isShapingHandoffArtifact,
@@ -85,6 +88,9 @@ export function validateArtifactContract(
 
     case DISCOVERY_HANDOFF_CONTRACT_REF:
       return validateDiscoveryHandoffContract(artifacts, contractRef, required);
+
+    case GATE_VERDICT_CONTRACT_REF:
+      return validateGateVerdictContract(artifacts, contractRef, required);
 
     case SHAPING_HANDOFF_CONTRACT_REF:
       return validateShapingHandoffContract(artifacts, contractRef, required);
@@ -275,6 +281,55 @@ function validateDiscoveryHandoffContract(
 
   const artifact = handoffArtifacts[0]!;
   const parseResult = DiscoveryHandoffArtifactV1Schema.safeParse(artifact);
+
+  if (!parseResult.success) {
+    const issues = parseResult.error.issues.map(
+      (issue) => `${issue.path.join('.')}: ${issue.message}`
+    );
+    return {
+      valid: false,
+      error: {
+        code: 'INVALID_ARTIFACT_SCHEMA',
+        contractRef,
+        message: `Artifact schema validation failed for ${contractRef}`,
+        issues,
+      },
+    };
+  }
+
+  return { valid: true, artifact: parseResult.data };
+}
+
+/**
+ * Validate gate verdict artifact contract.
+ *
+ * WHY: Gate verdict artifacts are produced by independent evaluator sessions and consumed
+ * by GateEvaluatorDispatcher to decide whether to resume or escalate a parked session.
+ * The contract is required by the wr.gate-eval-generic workflow's emit step.
+ */
+function validateGateVerdictContract(
+  artifacts: readonly unknown[],
+  contractRef: string,
+  required: boolean
+): ArtifactContractValidationResult {
+  const verdictArtifacts = artifacts.filter(isGateVerdictArtifact);
+
+  if (verdictArtifacts.length === 0) {
+    if (required) {
+      return {
+        valid: false,
+        error: {
+          code: 'MISSING_REQUIRED_ARTIFACT',
+          contractRef,
+          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.gate_verdict'.`,
+        },
+      };
+    }
+    return { valid: true, artifact: null };
+  }
+
+  const artifact = verdictArtifacts[0]!;
+  const parseResult = GateVerdictArtifactV1Schema.safeParse(artifact);
 
   if (!parseResult.success) {
     const issues = parseResult.error.issues.map(
