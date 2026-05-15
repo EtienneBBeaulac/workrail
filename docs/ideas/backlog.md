@@ -195,6 +195,27 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Local LLM support: use Gemma, Llama, or any Ollama-compatible model as the agent backend (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+WorkTrain currently supports two backends: Anthropic direct (`ANTHROPIC_API_KEY`) and Amazon Bedrock (`AWS_PROFILE`). Both are cloud APIs with per-token costs, rate limits, and latency. A local LLM backend would enable: offline operation, zero API cost for iteration and testing, privacy for sensitive codebases, and much faster iteration cycles on workflow development.
+
+**What this looks like:** `agentConfig.model: "ollama/llama3.2"` or `agentConfig.model: "ollama/gemma3:4b"` in triggers.yml. The daemon detects the `ollama/` prefix, constructs an Ollama-compatible HTTP client, and uses it as the `AgentClientInterface` instead of `AnthropicBedrock` or `Anthropic`.
+
+**Implementation path:** `AgentClientInterface` in `agent-loop.ts` is already duck-typed -- it only requires `messages.create(params, options)` returning `Promise<Anthropic.Message>`. Ollama's `/api/chat` endpoint with `stream: false` can be wrapped in a thin adapter that maps to this interface. The key translation: Ollama uses OpenAI-style tool calling format, not Anthropic's `tool_use` content blocks -- the adapter needs to normalize this.
+
+**Where it fits:** `buildAgentClient()` in `src/daemon/core/agent-client.ts` parses `agentConfig.model` and constructs the right client. Adding an `ollama/` prefix case there is the natural extension point. No changes needed to AgentLoop, runWorkflow, or any workflow definitions.
+
+**Things to hash out:**
+- Ollama tool calling quality varies significantly by model -- Llama 3.2 and Gemma 3 support tool use but reliability is lower than Claude. How does WorkTrain handle an agent that frequently hallucinates tool names or ignores tool results?
+- Context window size: local models typically have 4K-8K context vs. Claude's 200K. Long `wr.mr-review` sessions that read many files may hit the limit mid-session. Need a warning or graceful degradation when context is near capacity.
+- The `stallTimeoutSeconds` default (120s) is calibrated for Claude response times. Local models on consumer hardware can be much slower or much faster -- the default should be overridable and local models may need a higher default.
+
+---
+
 ### worktrain session-log: readable turn-by-turn replay of any session (May 15, 2026)
 
 **Status: idea** | Priority: CRITICAL
