@@ -3875,6 +3875,63 @@ Open questions: does `wr.dispatch` replace `workflowId` in trigger config, or co
 
 ---
 
+### Self-review before merge: WorkTrain runs review families on its own PRs and fixes blocking findings (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+When WorkTrain opens a PR through the autonomous pipeline, it currently hands off immediately after `gh pr create`. A human reviewer is then expected to catch issues. This breaks the self-improvement loop: WorkTrain's coding quality is only as good as the review bar it applies to others, and right now it doesn't apply that bar to itself before shipping.
+
+**The fix:** after creating a PR, the coordinator runs the same review workflows (via `spawn_agent`) on WorkTrain's own output before considering the task done. If findings are `clean` or `minor` with no blockers, the PR is considered shippable. If findings are `blocking`, WorkTrain spawns a fix session, applies the changes to the same worktree branch, pushes the amendment, and re-reviews. This loop continues until findings are clean or a configured retry limit is hit, at which case it escalates to the operator outbox.
+
+**Why this is different from the reviewer-assigned feature:** the reviewer feature posts findings as draft comments under the operator's identity for human PRs. This feature fixes findings autonomously on WorkTrain's own PRs -- no posting, no approval gate, just code changes. The output is a clean PR, not a review comment.
+
+**Already partially implemented:** the adaptive pipeline coordinator already has a review phase and a fix-iteration loop in `full-pipeline.ts`. What's missing is (a) routing the review findings back into the worktree rather than creating a new branch, and (b) running the full review family (prod audit, arch audit, mr-review) not just `wr.mr-review`.
+
+**Things to hash out:**
+- What is the right retry cap before escalating? Two fix iterations seems right -- if the coding agent can't fix blocking findings in two attempts, a human needs to look.
+- Should the fix sessions run in the same worktree as the coding session, or a fresh worktree branched from the PR branch? Same worktree is simpler; fresh worktree is cleaner if the fix touches many files.
+- How does WorkTrain distinguish a pre-existing issue on main from a regression it introduced? The diff is the boundary: only findings anchored to changed lines are WorkTrain's responsibility to fix. Pre-existing issues in unchanged code get filed as backlog items, not fixed in this PR.
+- What happens to the fix commits in the PR history? They should be squashable -- the PR should tell the story of the feature, not the internal review-fix iterations.
+
+---
+
+### PR lifecycle management: babysit any PR from open to merged (May 15, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:3 Cap:3 Eff:3 Lev:3 Con:2 | Blocked: no
+
+Everything between "PR opened" and "PR merged" is currently invisible to WorkTrain. CI fails silently. Reviewers request changes and nobody responds. The PR goes stale. A rebase conflict appears and blocks merge. Even for PRs WorkTrain opens autonomously, a human has to watch and intervene.
+
+This entry covers the full lifecycle management capability -- for both WorkTrain-created PRs and any PR the operator explicitly asks WorkTrain to babysit.
+
+**Scope:**
+
+1. **CI failure handling**: poll CI status on open PRs. On failure, read the failing job logs, determine root cause, spawn a fix session, push to the PR branch, re-trigger CI. If the failure is flaky (same test fails intermittently with no code change), flag it as infrastructure noise rather than a code problem.
+
+2. **Reviewer comment resolution**: poll for new review comments on the PR. Classify each comment: (a) actionable change requested → spawn fix session, apply, push, reply "Done"; (b) question or discussion → draft a response for operator approval before posting; (c) nitpick / style → apply automatically if it's a clear single-line fix, otherwise defer to operator. Never post responses autonomously without operator approval for non-trivial content.
+
+3. **Rebase on conflict**: when the PR branch falls behind main and has merge conflicts, fetch main, rebase, resolve conflicts deterministically where possible (ours vs. theirs based on context), push force-with-lease. If conflicts are non-trivial, flag for operator.
+
+4. **Re-review requests**: after pushing fixes, re-request review from the original reviewers so they know the PR is ready for another look.
+
+5. **Stale PR detection**: if a PR has been open for N days with no activity from reviewers, ping the reviewer(s) or escalate to the operator outbox.
+
+6. **Non-WorkTrain PRs**: the operator can assign WorkTrain to any PR (via reviewer assignment, a comment trigger like `/worktrain babysit`, or explicit dispatch) and WorkTrain takes over lifecycle management from that point.
+
+**Trigger mechanism:** a `github_prs_poll` trigger with `authorLogin` filter (the operator or WorkTrain's bot account) scoped to the operator's repos. WorkTrain polls for PRs in states that need action (CI failing, changes requested, behind main, review overdue) and dispatches a lifecycle management session for each.
+
+**Things to hash out:**
+- What is the right polling interval for lifecycle management vs. review? CI failure is time-sensitive (minutes); stale PR detection is not (hours). Different intervals per event type.
+- Responding to reviewer comments requires posting as the operator -- same `reviewerIdentity` mechanism as the draft review feature. No posting without approval for substantive responses.
+- For flaky CI: how many consecutive failures on the same test across different commits before WorkTrain declares it infrastructure noise vs. a real regression?
+- Force-push for rebases requires `--force-with-lease` and a CI re-trigger. Should WorkTrain do this autonomously or always request operator approval first? Proposal: autonomous for clean rebases (no conflicts); operator approval required for conflict resolution.
+- What is the right retry limit for the CI fix loop before escalating? Three attempts seems right -- if WorkTrain can't fix a CI failure in three tries, a human needs to look.
+
+---
+
 ### Multi-workflow reviewer: route PRs to prod audit, arch audit, or mr-review based on context (May 15, 2026)
 
 **Status: idea** | Priority: high
