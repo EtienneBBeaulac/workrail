@@ -108,9 +108,42 @@ describe('parseReviewVerdictArtifact', () => {
     expect(result!.findings[1]!.findingCategory).toBe('architecture');
   });
 
-  it('returns null for extra fields (strict schema)', () => {
+  it('returns null for extra fields on the outer verdict object (outer schema stays strict)', () => {
     const withExtra = { ...VALID_CLEAN as object, unexpectedField: 'value' };
     expect(parseReviewVerdictArtifact(withExtra)).toBeNull();
+  });
+
+  it('preserves enrichment fields on findings (finding sub-schema is passthrough)', () => {
+    const withEnrichment = {
+      kind: 'wr.review_verdict',
+      verdict: 'blocking',
+      confidence: 'high',
+      findings: [
+        {
+          severity: 'critical',
+          summary: 'Missing null check',
+          findingCategory: 'correctness',
+          file: 'src/daemon/session-handler.ts',
+          startLine: 42,
+          endLine: 47,
+          causalLink: 'PR removed the null guard on line 42',
+          remediation: 'Restore the null check before dereferencing',
+        },
+      ],
+      summary: 'Critical finding blocks merge',
+    };
+    const result = parseReviewVerdictArtifact(withEnrichment);
+    expect(result).not.toBeNull();
+    expect(result!.verdict).toBe('blocking');
+    // Routing fields still validated
+    expect(result!.findings[0]!.severity).toBe('critical');
+    expect(result!.findings[0]!.summary).toBe('Missing null check');
+    // Enrichment fields passed through
+    const finding = result!.findings[0] as Record<string, unknown>;
+    expect(finding['file']).toBe('src/daemon/session-handler.ts');
+    expect(finding['startLine']).toBe(42);
+    expect(finding['causalLink']).toBe('PR removed the null guard on line 42');
+    expect(finding['remediation']).toBe('Restore the null check before dereferencing');
   });
 
   it('returns null for invalid verdict value', () => {
