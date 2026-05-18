@@ -5,7 +5,7 @@
  * of any session (live or completed) in the last N days.
  *
  * Design invariants:
- * - parseSessionLog() is a pure function: no direct I/O, readFile is injected
+ * - parseSessionEvents() is a pure function: no direct I/O, readFile is injected
  * - SessionLogResult is a discriminated union -- exhaustiveness enforced at compile time
  * - tool_called events are skipped; only tool_call_started/completed/failed produce lines
  * - argsSummary is tracked via a FIFO queue per toolName (tools run sequentially)
@@ -100,7 +100,7 @@ function matchesQuery(eventSessionId: string, query: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// parseSessionLog -- pure, injected I/O
+// parseSessionEvents -- pure, injected I/O
 // ---------------------------------------------------------------------------
 
 /**
@@ -111,7 +111,7 @@ function matchesQuery(eventSessionId: string, query: string): boolean {
  * @param daysBack - How many days back to scan (default 7)
  * @param readFile - Injected file reader: returns file contents or null if not found
  */
-export function parseSessionLog(
+export function parseSessionEvents(
   sessionIdQuery: string,
   eventsDir: string,
   daysBack: number,
@@ -295,7 +295,7 @@ export function parseSessionLog(
 }
 
 // ---------------------------------------------------------------------------
-// formatSessionLog -- pure renderer
+// formatSessionEvents -- pure renderer
 // ---------------------------------------------------------------------------
 
 const SLOW_THRESHOLD_MS = 10_000;
@@ -313,7 +313,7 @@ function fmtDuration(ms: number): string {
  * Format a SessionLogResult as a human-readable string.
  * Pure: no I/O, chalk for color.
  */
-export function formatSessionLog(result: SessionLogResult): string {
+export function formatSessionEvents(result: SessionLogResult): string {
   if (result.kind === 'not_found') {
     return chalk.red(`Session not found: ${result.sessionIdQuery}`) +
       `\nSearched the last ${result.daysBack} days of daemon event logs.`;

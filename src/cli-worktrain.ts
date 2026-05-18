@@ -52,7 +52,7 @@ import {
   formatDiagnosticJson,
   formatFleetSummary,
 } from './cli/commands/worktrain-diagnose.js';
-import { parseSessionLog, formatSessionLog } from './cli/commands/worktrain-session-log.js';
+import { parseSessionEvents, formatSessionEvents } from './cli/commands/worktrain-session-log.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1109,8 +1109,8 @@ program
     const readFile = (filePath: string): string | null => {
       try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
     };
-    const result = parseSessionLog(sessionId, eventsDir, 7, readFile);
-    process.stdout.write(formatSessionLog(result) + '\n');
+    const result = parseSessionEvents(sessionId, eventsDir, 7, readFile);
+    process.stdout.write(formatSessionEvents(result) + '\n');
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
