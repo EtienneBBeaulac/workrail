@@ -52,6 +52,7 @@ import {
   formatDiagnosticJson,
   formatFleetSummary,
 } from './cli/commands/worktrain-diagnose.js';
+import { parseSessionLog, formatSessionLog } from './cli/commands/worktrain-session-log.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1033,6 +1034,26 @@ program
       const analysis = analyzeFleet(readDir, readFile, eventsDir, options.workflow);
       process.stdout.write(formatFleetSummary(analysis, { ascii: options.ascii ?? false }) + '\n');
     }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION-LOG COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('session-log <sessionId>')
+  .description(
+    'Print a time-annotated turn-by-turn replay of a daemon session. ' +
+    'Shows LLM calls, tool executions with durations, step advances, and the final outcome. ' +
+    'Accepts a full session ID or a prefix. Searches the last 7 days of daemon event logs.',
+  )
+  .action((sessionId: string) => {
+    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+    const readFile = (filePath: string): string | null => {
+      try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
+    };
+    const result = parseSessionLog(sessionId, eventsDir, 7, readFile);
+    process.stdout.write(formatSessionLog(result) + '\n');
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
