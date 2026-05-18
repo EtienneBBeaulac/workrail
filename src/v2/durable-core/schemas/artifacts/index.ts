@@ -46,9 +46,11 @@ export {
 export {
   // Review Verdict
   REVIEW_VERDICT_CONTRACT_REF,
+  ReviewVerdictFindingSchema,
   ReviewVerdictArtifactV1Schema,
   isReviewVerdictArtifact,
   parseReviewVerdictArtifact,
+  type ReviewVerdictFinding,
   type ReviewVerdictArtifactV1,
 } from './review-verdict.js';
 
