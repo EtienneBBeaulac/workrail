@@ -44,8 +44,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const EVENTS_DIR = '/fake/events/daemon';
-const TODAY = '2026-05-09';
-const YESTERDAY = '2026-05-08';
+const TODAY = new Date().toISOString().slice(0, 10);
+const YESTERDAY = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
 function makeReadFile(files: Record<string, string>): (path: string) => string | null {
   return (path: string) => files[path] ?? null;
@@ -550,7 +550,7 @@ describe('resultCategory', () => {
 
 describe('analyzeFleet', () => {
   const FLEET_EVENTS_DIR = '/fleet/events';
-  const TODAY_FILE = `${FLEET_EVENTS_DIR}/2026-05-09.jsonl`;
+  const TODAY_FILE = `${FLEET_EVENTS_DIR}/${new Date().toISOString().slice(0, 10)}.jsonl`;
 
   function makeReadDir(files: Record<string, string>): (dir: string) => readonly string[] | null {
     return (dir: string) => {
