@@ -6,9 +6,9 @@
  *
  * Invocation modes:
  *   worktrain daemon             Start the trigger listener (launchd entry point)
- *   worktrain daemon --install   Create plist + load service + verify running
- *   worktrain daemon --uninstall Unload service + remove plist
- *   worktrain daemon --status    Check whether the launchd service is running
+ *   worktrain daemon install   Create plist + load service + verify running
+ *   worktrain daemon uninstall Unload service + remove plist
+ *   worktrain daemon status    Check whether the launchd service is running
  *
  * WHY launchd: When the daemon runs as a child of the MCP server process, any
  * Claude Code reconnect spawns a new MCP server and displaces the running daemon.
@@ -165,20 +165,28 @@ export interface WorktrainDaemonCommandDeps {
   readonly startDaemon?: () => Promise<void>;
 }
 
+/**
+ * Discriminated union for the daemon subcommand.
+ *
+ * WHY a union (not optional booleans): five optional booleans allow illegal
+ * combinations like `{install: true, uninstall: true}`. A discriminated union
+ * makes exactly one operation representable at a time, eliminating the
+ * runtime mutual-exclusivity guard that was previously needed.
+ *
+ * The `run` kind is the launchd entry point: `worktrain daemon` with no
+ * subcommand. launchd calls `worktrain daemon` directly, so this case must
+ * be the actual daemon startup, not a usage error.
+ */
+export type DaemonSubcommand =
+  | { readonly kind: 'run' }
+  | { readonly kind: 'install' }
+  | { readonly kind: 'uninstall' }
+  | { readonly kind: 'start' }
+  | { readonly kind: 'stop' }
+  | { readonly kind: 'status'; readonly json?: boolean };
+
 export interface WorktrainDaemonCommandOpts {
-  /** Create and load the launchd service. Mutually exclusive with other flags. */
-  readonly install?: boolean;
-  /** Unload and remove the launchd service. Mutually exclusive with other flags. */
-  readonly uninstall?: boolean;
-  /** Report the current service status. Mutually exclusive with other flags. */
-  readonly status?: boolean;
-  /**
-   * Start the daemon via launchctl (service must be installed first).
-   * Does NOT auto-start on login -- operator must explicitly call this.
-   */
-  readonly start?: boolean;
-  /** Stop the running daemon via launchctl. Does not uninstall the service. */
-  readonly stop?: boolean;
+  readonly subcommand: DaemonSubcommand;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -189,14 +197,14 @@ export interface WorktrainDaemonCommandOpts {
  * Build the launchd plist XML for the WorkTrain daemon.
  *
  * WHY no RunAtLoad or KeepAlive: the daemon must be started explicitly by the
- * operator (`worktrain daemon --start`). Auto-starting at login and auto-restarting
+ * operator (`worktrain daemon start`). Auto-starting at login and auto-restarting
  * on crash means WorkTrain autonomously works in your repos without any deliberate
  * operator action -- which is unsafe, especially when the daemon has bugs or the
  * operator hasn't reviewed what triggers are configured. The operator decides when
  * WorkTrain runs; launchd just provides the process management scaffolding.
  *
- * To start the daemon: `worktrain daemon --start`
- * To stop the daemon:  `worktrain daemon --stop`
+ * To start the daemon: `worktrain daemon start`
+ * To stop the daemon:  `worktrain daemon stop`
  *
  * WHY WorkingDirectory is set to homedir: without it launchd sets cwd to '/'.
  * The daemon falls back to process.cwd() when WORKRAIL_DEFAULT_WORKSPACE is
@@ -252,13 +260,13 @@ ${envEntries}
 
   <!--
     No RunAtLoad or KeepAlive: the daemon must be started explicitly with
-    'worktrain daemon --start'. Auto-starting at login and auto-restarting
+    'worktrain daemon start'. Auto-starting at login and auto-restarting
     on crash is unsafe -- WorkTrain acts autonomously in your repos and the
     operator must decide when it runs.
 
-    To start:  worktrain daemon --start
-    To stop:   worktrain daemon --stop
-    To status: worktrain daemon --status
+    To start:  worktrain daemon start
+    To stop:   worktrain daemon stop
+    To status: worktrain daemon status
   -->
 </dict>
 </plist>
@@ -311,7 +319,7 @@ function captureEnvVars(
     // The user explicitly set this to something other than 'true'. Override
     // it so the plist-launched daemon can start, but warn so they notice.
     warn(
-      `[worktrain daemon --install] WORKRAIL_TRIGGERS_ENABLED is set to '${existing}' in your environment. ` +
+      `[worktrain daemon install] WORKRAIL_TRIGGERS_ENABLED is set to '${existing}' in your environment. ` +
       `The plist will override this with 'true' so the daemon can start. ` +
       `Remove WORKRAIL_TRIGGERS_ENABLED from your shell environment if you do not want this warning.`,
     );
@@ -459,19 +467,19 @@ async function runInstall(
   deps.print('');
   deps.print('Then start the daemon:');
   deps.print('');
-  deps.print('  worktrain daemon --start     Start the daemon now');
-  deps.print('  worktrain daemon --stop      Stop the daemon');
-  deps.print('  worktrain daemon --status    Check if running');
-  deps.print('  worktrain daemon --uninstall Remove the registration');
+  deps.print('  worktrain daemon start     Start the daemon now');
+  deps.print('  worktrain daemon stop      Stop the daemon');
+  deps.print('  worktrain daemon status    Check if running');
+  deps.print('  worktrain daemon uninstall Remove the registration');
   deps.print('');
   deps.print(`Logs: ${logDir}/daemon.stdout.log`);
   deps.print(`      ${logDir}/daemon.stderr.log`);
 
   return success({
-    message: 'WorkTrain daemon registered. Run: worktrain daemon --start',
+    message: 'WorkTrain daemon registered. Run: worktrain daemon start',
     details: [
       `Plist: ${plistPath}`,
-      `Start: worktrain daemon --start`,
+      `Start: worktrain daemon start`,
       `Logs:  ${logDir}/daemon.stdout.log`,
       `       ${logDir}/daemon.stderr.log`,
     ],
@@ -520,6 +528,7 @@ async function runUninstall(
 
 async function runStatus(
   deps: WorktrainDaemonCommandDeps,
+  json?: boolean,
 ): Promise<CliResult> {
   const home = deps.homedir();
   const plistPath = deps.joinPath(home, 'Library', 'LaunchAgents', PLIST_FILENAME);
@@ -528,6 +537,16 @@ async function runStatus(
   const plistExists = await deps.exists(plistPath);
   const listResult = await deps.exec('launchctl', ['list', LAUNCHD_LABEL]);
   const status = parseLaunchctlList(listResult.stdout, listResult.exitCode);
+
+  if (json) {
+    // WHY stdout via print: runStatus is called from executeWorktrainDaemonCommand which
+    // is invoked from the CLI action; deps.print writes to stdout in production.
+    // The JSON contract: {"running": bool, "installed": bool}
+    deps.print(JSON.stringify({ running: status.running, installed: plistExists }));
+    return success({
+      message: status.running ? 'running' : plistExists ? 'installed' : 'not_installed',
+    });
+  }
 
   deps.print('');
   deps.print('WorkTrain daemon status:');
@@ -542,7 +561,7 @@ async function runStatus(
 
   if (!plistExists && !status.loaded) {
     deps.print('');
-    deps.print('Daemon is not installed. Run: worktrain daemon --install');
+    deps.print('Daemon is not installed. Run: worktrain daemon install');
   } else if (plistExists && !status.running) {
     deps.print('');
     deps.print(`Daemon installed but not running. Check logs: tail -f ${logDir}/daemon.stderr.log`);
@@ -636,8 +655,8 @@ async function runStart(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
 
   if (!(await deps.exists(plistPath))) {
     return failure(
-      'WorkTrain daemon is not installed. Run: worktrain daemon --install',
-      { suggestions: ['worktrain daemon --install'] },
+      'WorkTrain daemon is not installed. Run: worktrain daemon install',
+      { suggestions: ['worktrain daemon install'] },
     );
   }
 
@@ -678,7 +697,7 @@ async function runStart(deps: WorktrainDaemonCommandDeps): Promise<CliResult> {
     {
       suggestions: [
         `View logs: tail -f ${logDir}/daemon.stderr.log`,
-        `Check daemon status: worktrain daemon --status`,
+        `Check daemon status: worktrain daemon status`,
       ],
     },
   );
@@ -721,10 +740,11 @@ export async function executeWorktrainDaemonCommand(
   deps: WorktrainDaemonCommandDeps,
   opts: WorktrainDaemonCommandOpts,
 ): Promise<CliResult> {
-  const flagCount = [opts.install, opts.uninstall, opts.status, opts.start, opts.stop].filter(Boolean).length;
+  const { subcommand } = opts;
 
-  // No flags: this is the launchd entry point. Start the daemon process.
-  if (flagCount === 0) {
+  // 'run' kind: this is the launchd entry point (`worktrain daemon` with no subcommand).
+  // launchd calls `worktrain daemon` directly -- this must be the actual daemon startup.
+  if (subcommand.kind === 'run') {
     if (deps.startDaemon) {
       await deps.startDaemon();
       // startDaemon() keeps the process alive (event loop stays open).
@@ -732,25 +752,21 @@ export async function executeWorktrainDaemonCommand(
       return success({ message: 'WorkTrain daemon stopped.' });
     }
     return misuse(
-      'Specify one of: --install, --uninstall, --start, --stop, or --status',
+      'Specify a subcommand: install, uninstall, start, stop, or status',
       [
-        'worktrain daemon --install    Register as a launchd service (does not auto-start)',
-        'worktrain daemon --start      Start the daemon',
-        'worktrain daemon --stop       Stop the daemon',
-        'worktrain daemon --status     Show service status',
-        'worktrain daemon --uninstall  Remove the launchd service registration',
+        'worktrain daemon install    Register as a launchd service (does not auto-start)',
+        'worktrain daemon start      Start the daemon',
+        'worktrain daemon stop       Stop the daemon',
+        'worktrain daemon status     Show service status',
+        'worktrain daemon uninstall  Remove the launchd service registration',
       ],
     );
   }
 
-  if (flagCount > 1) {
-    return misuse('--install, --uninstall, --start, --stop, and --status are mutually exclusive. Specify only one.');
-  }
-
-  // All management flags (install/uninstall/start/stop/status) require macOS (launchd).
+  // All management subcommands (install/uninstall/start/stop/status) require macOS (launchd).
   if (deps.platform !== 'darwin') {
     return failure(
-      `worktrain daemon management flags require macOS (launchd). ` +
+      `worktrain daemon management requires macOS (launchd). ` +
       `Current platform: ${deps.platform}.`,
       {
         suggestions: [
@@ -761,10 +777,11 @@ export async function executeWorktrainDaemonCommand(
     );
   }
 
-  if (opts.install) return runInstall(deps);
-  if (opts.uninstall) return runUninstall(deps);
-  if (opts.start) return runStart(deps);
-  if (opts.stop) return runStop(deps);
-  // opts.status must be true at this point.
-  return runStatus(deps);
+  switch (subcommand.kind) {
+    case 'install':   return runInstall(deps);
+    case 'uninstall': return runUninstall(deps);
+    case 'start':     return runStart(deps);
+    case 'stop':      return runStop(deps);
+    case 'status':    return runStatus(deps, subcommand.json);
+  }
 }
