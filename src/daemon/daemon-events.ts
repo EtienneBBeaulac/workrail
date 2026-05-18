@@ -232,10 +232,6 @@ export interface LlmTurnCompletedEvent {
  * file path) that AgentLoop cannot see. The fine-grained stream adds timing
  * and lifecycle without replacing the coarse stream.
  *
- * IMPORTANT for log readers: both streams fire for every tool call. Any
- * consumer that reads the event log must skip `tool_called` when using
- * `tool_call_started/completed/failed`, or it will double-render every tool.
- *
  * WHY argsSummary: raw params may be large (e.g. file contents in Write tool).
  * Truncating to 200 chars gives observability without bloating the event log.
  */
