@@ -2318,7 +2318,7 @@ The better long-term design: the engine owns the enforcement mechanism (validate
 
 ### Two-tier artifact schema: outer strict for routing, inner passthrough for enrichment (May 15, 2026)
 
-**Status: idea** | Priority: high
+**Status: done** | Shipped PR #1032 (May 18, 2026)
 
 **Score: 12** | Cor:3 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
 
@@ -4471,7 +4471,7 @@ When a user is assigned as reviewer on a GitLab (or GitHub) MR, WorkTrain should
 
 ### wr.mr-review quality and architecture overhaul (May 8, 2026)
 
-**Status: idea** | Priority: high
+**Status: done** | Shipped as v2.9.0 in PR #1033 (May 18, 2026)
 
 **Score: 13** | Cor:3 Cap:3 Eff:2 Lev:3 Con:2 | Blocked: no
 
