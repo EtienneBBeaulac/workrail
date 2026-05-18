@@ -26,6 +26,53 @@ import { z } from 'zod';
 export const REVIEW_VERDICT_CONTRACT_REF = 'wr.contracts.review_verdict' as const;
 
 /**
+ * Per-finding schema for review verdict artifacts.
+ *
+ * Uses .passthrough() so workflow agents can include enrichment fields
+ * (file location, line numbers, causal attribution, remediation steps)
+ * alongside the required routing fields without engine rejection.
+ *
+ * Routing fields (severity, summary, findingCategory) are still strictly
+ * typed and validated. The engine enforces what it needs; extra fields are
+ * stored in the session event log and available to future consumers.
+ *
+ * WHY .passthrough() here but .strict() on the outer schema:
+ * The outer schema enforces routing fields the coordinator reads for
+ * merge/escalate decisions. The finding sub-object carries coordinator-
+ * required fields (severity, summary) plus optional workflow-level context
+ * that enriches the finding for human readers and future tooling.
+ */
+export const ReviewVerdictFindingSchema = z
+  .object({
+    /** Finding severity classification */
+    severity: z.enum(['critical', 'major', 'minor', 'nit']),
+    /** One-line finding description (for fix-agent goal string) */
+    summary: z.string().min(1),
+    /**
+     * Category of the finding. Used by coordinators to route audit chains.
+     * Optional for backward compatibility with sessions that do not emit this field.
+     * architecture -> wr.architecture-scalability-audit; all others -> wr.production-readiness-audit.
+     */
+    findingCategory: z
+      .enum([
+        'correctness',
+        'security',
+        'architecture',
+        'ux',
+        'performance',
+        'testing',
+        'style',
+      ])
+      .optional()
+      .describe(
+        'Category of the finding. Used by coordinators to route audit chains.',
+      ),
+  })
+  .passthrough();
+
+export type ReviewVerdictFinding = z.infer<typeof ReviewVerdictFindingSchema>;
+
+/**
  * Review Verdict Artifact V1 Schema
  *
  * Machine-checkable artifact for pr-review coordinator consumption.
@@ -54,35 +101,7 @@ export const ReviewVerdictArtifactV1Schema = z
      * Structured list of findings.
      * Empty array for clean verdicts.
      */
-    findings: z.array(
-      z
-        .object({
-          /** Finding severity classification */
-          severity: z.enum(['critical', 'major', 'minor', 'nit']),
-          /** One-line finding description (for fix-agent goal string) */
-          summary: z.string().min(1),
-          /**
-           * Category of the finding. Used by coordinators to route audit chains.
-           * Optional for backward compatibility with sessions that do not emit this field.
-           * architecture -> wr.architecture-scalability-audit; all others -> wr.production-readiness-audit.
-           */
-          findingCategory: z
-            .enum([
-              'correctness',
-              'security',
-              'architecture',
-              'ux',
-              'performance',
-              'testing',
-              'style',
-            ])
-            .optional()
-            .describe(
-              'Category of the finding. Used by coordinators to route audit chains.',
-            ),
-        })
-        .strict(),
-    ),
+    findings: z.array(ReviewVerdictFindingSchema),
 
     /** One-line summary for logging and display */
     summary: z.string().min(1),
@@ -131,14 +150,15 @@ export function getBlockedMessage(): readonly string[] {
   return [
     `Artifact contract: ${REVIEW_VERDICT_CONTRACT_REF}`,
     `Provide a valid wr.review_verdict artifact in complete_step's artifacts[] parameter.`,
-    `Required schema (all fields mandatory):`,
+    `Required schema (verdict, confidence, findings, summary are mandatory):`,
     `  verdict: "clean" | "minor" | "blocking"`,
     `  confidence: "high" | "medium" | "low"`,
-    `  findings: array of { severity, summary, findingCategory? } (empty array for clean verdicts)`,
+    `  findings: array of { severity, summary, findingCategory? } plus any enrichment fields (empty array for clean verdicts)`,
     `  summary: one-line overall verdict string`,
+    `Enrichment fields allowed on each finding (optional): file, startLine, endLine, causalLink, remediation`,
     `Canonical format:`,
     `\`\`\`json`,
-    `{ "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing test for edge case", "findingCategory": "testing" }], "summary": "Minor issues found, no blockers" }] }`,
+    `{ "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing null check", "findingCategory": "correctness", "file": "src/foo.ts", "startLine": 42, "causalLink": "PR removed the guard", "remediation": "Restore null check" }], "summary": "Minor issues found" }] }`,
     `\`\`\``,
     `For a clean review with no findings use: "verdict": "clean", "findings": []`,
   ];
