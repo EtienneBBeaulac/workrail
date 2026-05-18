@@ -587,8 +587,7 @@ async function buildDaemonDeps(): Promise<import('./cli/commands/worktrain-daemo
   // when an operator still uses the old syntax.
   // WHY addCommand with hidden: Commander v12+ supports { hidden: true } on addCommand.
   const makeFlagShim = (oldFlag: string, newSubcmd: string) => {
-    const { Command: Cmd } = require('commander');
-    const cmd = new Cmd(oldFlag)
+    return new Command(oldFlag)
       .description('(removed flag)')
       .action(() => {
         process.stderr.write(
@@ -596,7 +595,6 @@ async function buildDaemonDeps(): Promise<import('./cli/commands/worktrain-daemo
         );
         process.exit(1);
       });
-    return cmd;
   };
   daemonCmd.addCommand(makeFlagShim('--install', 'install'), { hidden: true });
   daemonCmd.addCommand(makeFlagShim('--uninstall', 'uninstall'), { hidden: true });
