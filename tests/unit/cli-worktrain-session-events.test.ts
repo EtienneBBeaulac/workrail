@@ -1,14 +1,14 @@
 /**
- * Unit tests for worktrain session-log -- parseSessionLog() and formatSessionLog().
+ * Unit tests for worktrain session-log -- parseSessionEvents() and formatSessionEvents().
  *
- * parseSessionLog() is exported and tested with an injected readFile fake.
+ * parseSessionEvents() is exported and tested with an injected readFile fake.
  * No filesystem access. Pattern follows cli-worktrain-diagnose.test.ts.
  */
 
 import { describe, it, expect } from 'vitest';
 import {
-  parseSessionLog,
-  formatSessionLog,
+  parseSessionEvents,
+  formatSessionEvents,
   type SessionLogResult,
 } from '../../src/cli/commands/worktrain-session-log.js';
 
@@ -60,12 +60,12 @@ const SID = 'aaaa1111-bbbb-cccc-dddd-eeeeeeeeeeee';
 const EVENTS_FILE = `${EVENTS_DIR}/${TODAY}.jsonl`;
 
 // ---------------------------------------------------------------------------
-// parseSessionLog
+// parseSessionEvents
 // ---------------------------------------------------------------------------
 
-describe('parseSessionLog', () => {
+describe('parseSessionEvents', () => {
   it('returns not_found when no events match', () => {
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({}));
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({}));
     expect(result.kind).toBe('not_found');
     if (result.kind === 'not_found') {
       expect(result.sessionIdQuery).toBe(SID);
@@ -83,7 +83,7 @@ describe('parseSessionLog', () => {
       sessionCompleted(SID, 'success', 'stop', 2000),
     ].join('\n');
 
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
     expect(result.kind).toBe('found');
     if (result.kind !== 'found') return;
 
@@ -109,7 +109,7 @@ describe('parseSessionLog', () => {
       sessionStarted(SID),
       sessionStarted(sid2),
     ].join('\n');
-    const result = parseSessionLog('aaaa1111', EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+    const result = parseSessionEvents('aaaa1111', EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
     expect(result.kind).toBe('ambiguous');
     if (result.kind === 'ambiguous') {
       expect(result.candidates).toContain(SID);
@@ -127,7 +127,7 @@ describe('parseSessionLog', () => {
       sessionCompleted(SID, 'success'),
     ].join('\n');
 
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
     expect(result.kind).toBe('found');
     if (result.kind !== 'found') return;
 
@@ -144,7 +144,7 @@ describe('parseSessionLog', () => {
       // No tool_call_completed -- daemon crashed
     ].join('\n');
 
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
     expect(result.kind).toBe('found');
     if (result.kind !== 'found') return;
 
@@ -172,7 +172,7 @@ describe('parseSessionLog', () => {
       sessionCompleted(SID, 'success', '', 3000),
     ].join('\n');
 
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({
       [yesterdayFile]: yesterdayEvents,
       [todayFile]: todayEvents,
     }));
@@ -191,7 +191,7 @@ describe('parseSessionLog', () => {
     ].join('\n');
 
     expect(() => {
-      const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+      const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
       expect(result.kind).toBe('found');
     }).not.toThrow();
   });
@@ -204,7 +204,7 @@ describe('parseSessionLog', () => {
       sessionCompleted(SID, 'stuck', 'stall', 2000),
     ].join('\n');
 
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
     expect(result.kind).toBe('found');
     if (result.kind !== 'found') return;
 
@@ -224,7 +224,7 @@ describe('parseSessionLog', () => {
       sessionCompleted(SID, 'error'),
     ].join('\n');
 
-    const result = parseSessionLog(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
+    const result = parseSessionEvents(SID, EVENTS_DIR, 7, makeReadFile({ [EVENTS_FILE]: lines }));
     expect(result.kind).toBe('found');
     if (result.kind !== 'found') return;
 
@@ -241,10 +241,10 @@ describe('parseSessionLog', () => {
 // formatSessionLog
 // ---------------------------------------------------------------------------
 
-describe('formatSessionLog', () => {
+describe('formatSessionEvents', () => {
   it('not_found output contains the session ID query', () => {
     const result: SessionLogResult = { kind: 'not_found', sessionIdQuery: 'abc123', daysBack: 7 };
-    const output = formatSessionLog(result);
+    const output = formatSessionEvents(result);
     expect(output).toContain('abc123');
     expect(output).toContain('7');
   });
@@ -255,7 +255,7 @@ describe('formatSessionLog', () => {
       sessionIdQuery: 'aaaa',
       candidates: ['aaaa-1111', 'aaaa-2222'],
     };
-    const output = formatSessionLog(result);
+    const output = formatSessionEvents(result);
     expect(output).toContain('aaaa-1111');
     expect(output).toContain('aaaa-2222');
   });
@@ -271,7 +271,7 @@ describe('formatSessionLog', () => {
         { kind: 'session_end', ts: 2000, outcome: 'success' },
       ],
     };
-    const output = formatSessionLog(result);
+    const output = formatSessionEvents(result);
     expect(output).toContain(SID);
     expect(output).toContain('Bash');
     expect(output).toContain('500ms');
@@ -288,7 +288,7 @@ describe('formatSessionLog', () => {
         { kind: 'tool', ts: 1200, toolName: 'Bash', argsSummary: '', durationMs: 15000, isError: false, summary: '' },
       ],
     };
-    const output = formatSessionLog(result);
+    const output = formatSessionEvents(result);
     expect(output).toContain('SLOW');
     expect(output).toContain('15.0s');
   });
@@ -303,7 +303,7 @@ describe('formatSessionLog', () => {
         { kind: 'tool', ts: 1200, toolName: 'Bash', argsSummary: '', durationMs: null, isError: false, summary: '' },
       ],
     };
-    const output = formatSessionLog(result);
+    const output = formatSessionEvents(result);
     expect(output).toContain('crashed');
   });
 });
