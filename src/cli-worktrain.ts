@@ -1094,24 +1094,89 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SESSION-LOG COMMAND
+// SESSION NAMESPACE: events, kill, resume, retry
 // ═══════════════════════════════════════════════════════════════════════════
 
 program
-  .command('session-log <sessionId>')
-  .description(
-    'Print a time-annotated turn-by-turn replay of a daemon session. ' +
-    'Shows LLM calls, tool executions with durations, step advances, and the final outcome. ' +
-    'Accepts a full session ID or a prefix. Searches the last 7 days of daemon event logs.',
-  )
-  .action((sessionId: string) => {
-    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
-    const readFile = (filePath: string): string | null => {
-      try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
-    };
-    const result = parseSessionEvents(sessionId, eventsDir, 7, readFile);
-    process.stdout.write(formatSessionEvents(result) + '\n');
-  });
+  .command('session')
+  .description('Inspect and control individual daemon sessions.\nSubcommands: events, kill, resume, retry');
+
+{
+  const sessionCmd = program.commands.find((c) => c.name() === 'session')!;
+
+  sessionCmd
+    .command('events <sessionId>')
+    .description(
+      'Print a time-annotated turn-by-turn replay of a daemon session. ' +
+      'Shows LLM calls, tool executions with durations, step advances, and the final outcome. ' +
+      'Accepts a full session ID or a prefix. Searches the last 7 days of daemon event logs.',
+    )
+    .action((sessionId: string) => {
+      const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+      const readFile = (filePath: string): string | null => {
+        try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
+      };
+      const result = parseSessionEvents(sessionId, eventsDir, 7, readFile);
+      process.stdout.write(formatSessionEvents(result) + '\n');
+    });
+
+  sessionCmd
+    .command('kill <sessionId>')
+    .description('Abort a running session. Requires --force or confirmation prompt.')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (sessionId: string, options: { force?: boolean }) => {
+      const { executeWorktrainSessionKillCommand } = await import('./cli/commands/worktrain-session-kill.js');
+      const result = await executeWorktrainSessionKillCommand({ sessionId, force: options.force });
+      interpretCliResultWithoutDI(result);
+    });
+
+  sessionCmd
+    .command('resume <sessionId>')
+    .description('Re-fire an orphaned session that crash recovery did not restart.')
+    .action(async (sessionId: string) => {
+      const { executeWorktrainSessionResumeCommand } = await import('./cli/commands/worktrain-session-resume.js');
+      const result = await executeWorktrainSessionResumeCommand({ sessionId });
+      interpretCliResultWithoutDI(result);
+    });
+
+  sessionCmd
+    .command('retry <sessionId>')
+    .description('Re-run a session from scratch with the same goal and context. Requires --force or confirmation prompt.')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (sessionId: string, options: { force?: boolean }) => {
+      const { executeWorktrainSessionRetryCommand } = await import('./cli/commands/worktrain-session-retry.js');
+      const result = await executeWorktrainSessionRetryCommand({ sessionId, force: options.force });
+      interpretCliResultWithoutDI(result);
+    });
+
+  // Hidden migration shim for old `session-log` command.
+  sessionCmd.addCommand(
+    new Command('log')
+      .description('(removed)')
+      .argument('<sessionId>', 'session ID')
+      .action(() => {
+        process.stderr.write(
+          '\'worktrain session-log\' was renamed. Use: worktrain session events <sessionId>\n',
+        );
+        process.exit(1);
+      }),
+    { hidden: true },
+  );
+}
+
+// Hidden migration shim for the old top-level `session-log` command.
+program.addCommand(
+  new Command('session-log')
+    .description('(removed)')
+    .argument('<sessionId>', 'session ID')
+    .action(() => {
+      process.stderr.write(
+        '\'worktrain session-log\' was renamed. Use: worktrain session events <sessionId>\n',
+      );
+      process.exit(1);
+    }),
+  { hidden: true },
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HEALTH COMMAND (renamed from `status <sessionId>`)
