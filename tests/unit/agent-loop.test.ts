@@ -1077,3 +1077,167 @@ describe('AgentLoop 400 error enrichment', () => {
     expect(errorMessage).toBe('aborted');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-call LLM timeout (llmCallTimeoutMs)
+// ---------------------------------------------------------------------------
+
+describe('AgentLoop per-call LLM timeout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('per-call timer fires and aborts the loop when client.messages.create() never returns', async () => {
+    // HangingAnthropicClient with zero immediate responses: the first call hangs forever.
+    // This simulates a hung Bedrock/Anthropic call that starts but never resolves.
+    const client = new HangingAnthropicClient([]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      llmCallTimeoutMs: 5000, // 5 seconds per-call timeout
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance past the per-call timeout. The timer fires, calls abort(),
+    // which resolves the hanging create() promise via AbortSignal.
+    await vi.advanceTimersByTimeAsync(6000);
+    await promptPromise;
+
+    expect(stallDetectedSpy).toHaveBeenCalledOnce();
+    expect(client.callCount).toBe(1); // One call that hung
+
+    // Loop should exit via the abort path.
+    const messages = agent.state.messages;
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant') as
+      | { role: 'assistant'; stopReason: string; errorMessage?: string }
+      | undefined;
+    expect(lastAssistant?.stopReason).toBe('error');
+  });
+
+  it('per-call timer does not fire when client.messages.create() returns before the timeout', async () => {
+    // Normal client: first call returns end_turn immediately.
+    const client = new FakeAnthropicClient([makeEndTurnMessage('Done.')]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      llmCallTimeoutMs: 5000,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    await agent.prompt(USER_MSG);
+
+    // Advance past the timeout AFTER the loop has already completed.
+    // The timer should have been cleared by the finally block.
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+    expect(client.callCount).toBe(1);
+  });
+
+  it('per-call timeout is disabled when llmCallTimeoutMs is undefined', async () => {
+    // HangingAnthropicClient with no immediate responses. Without llmCallTimeoutMs,
+    // the per-call timer is never set -- the loop hangs until externally aborted.
+    const client = new HangingAnthropicClient([]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      // No llmCallTimeoutMs -- per-call timeout disabled
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance far past what would be the per-call timeout if it were enabled.
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    // Per-call timer did not fire -- still hanging.
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+
+    // Force abort to unblock.
+    agent.abort();
+    await promptPromise;
+
+    // onStallDetected must still not have been called (abort() bypasses the stall path).
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+  });
+
+  it('per-call timer and stall timer do not produce double-abort when both active and per-call fires first', async () => {
+    // Per-call timer fires before the stall timer. The stall timer should be a no-op
+    // because _aborted is already true when it eventually fires.
+    const client = new HangingAnthropicClient([]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      llmCallTimeoutMs: 3000, // per-call fires at 3s
+      stallTimeoutMs: 10000,  // stall timer fires at 10s (after per-call, but loop is already done)
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance past per-call timeout (3s) but not stall timeout (10s).
+    await vi.advanceTimersByTimeAsync(4000);
+    await promptPromise;
+
+    // Per-call timer fired and called abort() + onStallDetected().
+    expect(stallDetectedSpy).toHaveBeenCalledOnce();
+
+    // Now advance past the stall timeout. Stall timer fires but _aborted is true.
+    // onStallDetected must NOT be called a second time.
+    await vi.advanceTimersByTimeAsync(7000);
+    expect(stallDetectedSpy).toHaveBeenCalledOnce(); // still only once
+  });
+
+  it('external abort() while per-call timer is armed does not double-abort', async () => {
+    // External abort fires (e.g. SIGTERM) while a call is in-flight and the per-call
+    // timer is armed. The per-call timer should fire as a no-op because _aborted is
+    // already true.
+    const client = new HangingAnthropicClient([]);
+    const stallDetectedSpy = vi.fn();
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [],
+      client,
+      modelId: 'claude-test',
+      llmCallTimeoutMs: 5000,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // External abort fires at 1s (well before the per-call timeout at 5s).
+    await vi.advanceTimersByTimeAsync(1000);
+    agent.abort();
+    await promptPromise;
+
+    // External abort did not call onStallDetected (it goes through the abort path, not stall).
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+
+    // Now advance past the per-call timeout. Timer fires but _aborted is true -- no-op.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+  });
+});

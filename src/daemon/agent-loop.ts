@@ -249,6 +249,31 @@ export interface AgentLoopOptions {
    * correct timeout from trigger configuration.
    */
   readonly stallTimeoutMs?: number;
+  /**
+   * Maximum milliseconds a single client.messages.create() call may take before
+   * the loop is aborted as a stall.
+   *
+   * The stall timer (stallTimeoutMs) fires when no new LLM call *starts* within
+   * the configured window. This timer fires when an in-flight call does not
+   * *return* within the configured window -- covering hung Bedrock/Anthropic calls
+   * that start successfully but never resolve (network freeze, provider stall).
+   *
+   * When it fires, abort() + callbacks.onStallDetected() are called, same as the
+   * stall timer. The result is WorkflowRunStuck { reason: 'stall' }.
+   *
+   * When undefined (the default), per-call timeout is disabled.
+   * Must be > 0 to enable -- values <= 0 are silently ignored.
+   *
+   * WHY a separate field (not reusing stallTimeoutMs): the two timers have different
+   * lifecycle ownership. stallTimeoutMs is a class-field timer cleared in prompt()'s
+   * finally block. llmCallTimeoutMs is a local per-call timer cleared in the
+   * try/finally wrapping each create() call. They must be named separately so the
+   * AgentLoop can manage them independently.
+   *
+   * In practice, both are sourced from the same stallTimeoutSeconds config value
+   * (see buildSessionContext()). One knob, two enforcement points.
+   */
+  readonly llmCallTimeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -395,7 +420,7 @@ export class AgentLoop {
   // ---------------------------------------------------------------------------
 
   private async _runLoop(): Promise<void> {
-    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs } = this._options;
+    const { client, modelId, systemPrompt, tools, maxTokens = 8192, callbacks, stallTimeoutMs, llmCallTimeoutMs } = this._options;
 
     while (true) {
       // Check abort before each LLM call.
@@ -449,6 +474,24 @@ export class AgentLoop {
       // must never crash the agent loop.
       try { callbacks?.onLlmTurnStarted?.({ messageCount: apiMessages.length, modelId }); } catch { /* swallow */ }
 
+      // Per-call timeout: fire abort() if a single client.messages.create() call
+      // does not return within llmCallTimeoutMs. Covers hung in-flight Bedrock/Anthropic
+      // calls that the stall timer cannot detect (stall timer fires between calls, not
+      // during a call). Fires the same abort() + onStallDetected() path as the stall timer.
+      // WHY local variable (not class field): this timer is scoped to a single create()
+      // call and cleared in the try/finally below. Class-field lifetime would be wrong.
+      let perCallTimerHandle: ReturnType<typeof setTimeout> | undefined;
+      if (llmCallTimeoutMs !== undefined && llmCallTimeoutMs > 0) {
+        perCallTimerHandle = setTimeout(() => {
+          // WHY _aborted guard: if the session was already aborted (SIGTERM, wall-clock,
+          // stall timer) before this timer fires, do not overwrite the abort reason.
+          if (!this._aborted) {
+            this.abort();
+            try { callbacks?.onStallDetected?.(); } catch { /* swallow */ }
+          }
+        }, llmCallTimeoutMs);
+      }
+
       let response: Anthropic.Message;
       try {
         response = await client.messages.create(
@@ -479,6 +522,16 @@ export class AgentLoop {
         this._appendErrorMessage(isAbort ? 'aborted' : message);
         await this._emitEvent({ type: 'agent_end' });
         return;
+      } finally {
+        // Clear the per-call timer whether the call succeeded, was aborted, or errored.
+        // WHY clearTimeout here (not after the try/catch): clearTimeout must run on every
+        // exit path -- success, abort, and API error. A finally block is the only safe place.
+        // WHY this is safe even if the timer already fired: clearTimeout on an already-fired
+        // timer is a no-op. The _aborted guard in the timer callback prevents double-abort.
+        if (perCallTimerHandle !== undefined) {
+          clearTimeout(perCallTimerHandle);
+          perCallTimerHandle = undefined;
+        }
       }
 
       // Emit llm_turn_completed after the API response.

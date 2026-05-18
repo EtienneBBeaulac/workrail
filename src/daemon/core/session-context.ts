@@ -72,6 +72,13 @@ export interface SessionContext {
    * Passed directly to AgentLoopOptions.stallTimeoutMs.
    */
   readonly stallTimeoutMs: number;
+  /**
+   * Per-call LLM API timeout in milliseconds.
+   * Passed directly to AgentLoopOptions.llmCallTimeoutMs.
+   * Sourced from the same stallTimeoutSeconds value as stallTimeoutMs -- one config
+   * knob governs both the between-call window and the per-call duration.
+   */
+  readonly llmCallTimeoutMs: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +137,10 @@ export function buildSessionContext(
   const maxTurns = trigger.agentConfig?.maxTurns ?? DEFAULT_MAX_TURNS;
   const stallTimeoutMs =
     (trigger.agentConfig?.stallTimeoutSeconds ?? DEFAULT_STALL_TIMEOUT_SECONDS) * 1000;
+  // Per-call LLM timeout: same source value as stallTimeoutMs. One config knob, two
+  // enforcement points (between-call window via stallTimeoutMs, per-call duration via
+  // llmCallTimeoutMs). Operators who need longer call windows can raise stallTimeoutSeconds.
+  const llmCallTimeoutMs = stallTimeoutMs;
 
-  return { systemPrompt, initialPrompt, sessionTimeoutMs, maxTurns, stallTimeoutMs };
+  return { systemPrompt, initialPrompt, sessionTimeoutMs, maxTurns, stallTimeoutMs, llmCallTimeoutMs };
 }
