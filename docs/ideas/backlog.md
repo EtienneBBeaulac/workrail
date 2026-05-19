@@ -216,36 +216,19 @@ WorkTrain currently supports two backends: Anthropic direct (`ANTHROPIC_API_KEY`
 
 ---
 
-### worktrain session-log: readable turn-by-turn replay of any session (May 15, 2026)
+### worktrain session events: readable turn-by-turn replay of any session (May 15, 2026)
 
-**Status: idea** | Priority: CRITICAL
+**Status: done** | Shipped PRs #1039 (original) and #1043 (CLI redesign, renamed to `session events`)
 
 **Score: 16** | Cor:3 Cap:3 Eff:3 Lev:3 Con:4 | Blocked: no
 
-Without this, debugging stalled or failed sessions means grepping through raw JSONL files and guessing. Every hour spent trying to understand why a session hung is an hour that could be spent fixing real problems. This is the single highest-leverage observability gap.
+Shipped as `worktrain session events <id>`. Reads the daemon event log (not conversation JSONL -- the event log has all timing, durations, tool names already computed). Renders time-annotated LLM turns, tool calls with durations, SLOW annotation (>10s), step advances, stuck events, and final outcome.
 
-`worktrain session-log <sessionId>` -- reads the conversation JSONL and session event log for any session (live or completed) and renders them as a human-readable, time-annotated turn-by-turn log:
+**What shipped:** `src/cli/commands/worktrain-session-log.ts` (exports renamed to `parseSessionEvents`/`formatSessionEvents`). Registered as `worktrain session events <id>`. Migration shim: `worktrain session-log <id>` prints redirect message.
 
-```
-[13:21:04] Turn 1   → Bash: cd /worktrees/abc && gh pr diff 1022   [started]
-[13:21:06] Turn 1   ← Bash: 847 lines  [2.1s]
-[13:21:06] Turn 1   → Bash: cat src/trigger/types.ts   [started]
-[13:21:08] Turn 1   ← Bash: (4203 chars)  [1.8s]
-[13:21:12] Turn 2   → complete_step  [started]
-[13:21:13] Turn 2   ADVANCE: phase-0 → phase-0b  [0.9s]
-[13:22:45] Turn 3   → spawn_agent: { agents: [{ workflowId: wr.discovery... }] }  [started]
-[13:24:52] Turn 3   ← spawn_agent: outcome=error  [127s] ← SLOW
-[13:24:52] Turn 3   → Bash: ...  [started]
-[13:26:48] STALL ABORT: no LLM call started in 120s (last call started 13:24:52, tool still in flight)
-```
+**What did NOT ship:** `--follow` flag for live tailing. Still needed -- see follow-up item below.
 
-Key: timestamps per turn, duration per tool call, which call hung (marked SLOW or still-in-flight at abort time), step advances with notes, and the final outcome.
-
-**Why I can read this myself:** when a session stalls and gets killed, I run `worktrain session-log <id>` and immediately see which turn hung, which tool was in flight, and what the agent said just before. No more guessing.
-
-**Also needed: `--follow` flag** for live tailing. Same output, just streams as new lines are appended to the conversation log. Foundation for the console Live tab.
-
-**Implementation:** new CLI command `src/cli/commands/worktrain-session-log.ts`, ~150 lines. Reads `~/.workrail/daemon-sessions/<id>-conversation.jsonl` (turn data) and `~/.workrail/data/sessions/<sessionId>/events/*.jsonl` (step advances, stalls). The daemon session UUID maps to the WorkRail session ID via the sidecar file.
+**Key design decision:** uses daemon event log as primary source (not conversation JSONL). The event log already has `durationMs` on every tool call completion and `argsSummary`/`resultSummary` pre-computed. Conversation JSONL adds nothing for MVP.
 
 ---
 
@@ -268,9 +251,9 @@ We have never successfully completed a full end-to-end run of the reviewer-assig
 8. `review_draft_submitted` event appears in the session event log
 9. macOS notification fires at draft creation
 
-**Blockers to clear first:**
-- `worktrain session-log` command (adjacent entry above) -- needed to diagnose any future stalls
-- ~~Per-call timeout in AgentLoop~~ -- **shipped** (fix/etienneb/per-call-llm-timeout, May 2026)
+**Blockers cleared:**
+- ~~`worktrain session-log` command~~ -- **shipped** as `worktrain session events <id>` (PRs #1039, #1043)
+- ~~Per-call timeout in AgentLoop~~ -- **shipped** (PR #1030, May 2026)
 
 **Requirement:** Haiku MUST be able to complete a full review session and produce excellent findings. Switching to Sonnet is not an acceptable workaround -- if the pipeline cannot run on cheap models, that is a bug to fix, not a model to upgrade.
 
@@ -6176,3 +6159,74 @@ There is no mechanism to distinguish "this genuinely needs a separate session wi
 - How do you distinguish legitimate scope decisions from avoidance? A session on a performance bug that surfaces an unrelated security issue is right to defer the security issue. A session that addresses only 2 of 3 acceptance criteria is not. What is the principled distinction?
 - TODO comments in code are not always deferred work -- some are architectural notes, some are pre-existing. How do you identify TODOs that represent deferred task-scope work versus incidental notes?
 - How does this interact with the existing stuck detection system? A stuck agent and a "done-claiming but not actually done" agent are different failure modes. How does the system tell them apart?
+
+---
+
+### worktrain CLI surface redesign: 18 commands → 14 (May 2026)
+
+**Status: done** | Shipped PRs #1040, #1043, #1044
+
+Previous surface had 18 commands with overlapping responsibilities, dead code, flags-as-verbs on `daemon`, no `session` namespace, no `dispatch`, and no machine-readable output. Redesign based on operator journeys and a full UX review (wr.ui-ux-design workflow with 5 reviewer families).
+
+**What shipped:**
+- `daemon start|stop|status|install|uninstall` as proper subcommands (was `daemon --start` etc). `DaemonSubcommand` discriminated union eliminates 5-boolean illegal state. `daemon status --json`.
+- `session events|kill|resume|retry` namespace. `session events <id>` replaces `session-log`.
+- `dispatch <task>` replaces `spawn`, `run pipeline`, `run pr-review`. Routes via daemon HTTP. `--wait` polls for terminal state (exit 0/1/2). `--json`, `--pr <n>`, `--workflow <id>`.
+- 7 dead commands removed with migration messages: `spawn`, `await`, `run`, `health`, `status`, `run pipeline`, `run pr-review`.
+- `--json` on `inbox` and `logs`. `tell --session <id>` routes to steer endpoint. `init --yes` non-TTY guard.
+
+**What did NOT ship (follow-up items):**
+- `session kill/resume/retry` are stubs -- daemon HTTP endpoints (`POST /api/v2/sessions/:id/abort|resume|retry`) not yet built
+- `--follow` flag on `session events` for live tailing
+- `inbox` response/acknowledge capability (gate decisions require operator response)
+- Unit tests for `tell --session`, `inbox --json`, `logs --json`, `init` non-TTY path
+- `dispatch --wait` uses `__exit2__` sentinel in CliResult message to signal exit code 2 -- tech debt until CliResult carries an exit-code field
+
+---
+
+### Daemon HTTP endpoints for session kill/resume/retry (May 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:3 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+The `worktrain session kill|resume|retry` CLI commands were shipped as stubs (exit 1, "not yet implemented"). The CLI surface is correct and stable -- the daemon-side HTTP routes are the missing piece.
+
+**What's needed:**
+- `POST /api/v2/sessions/:id/abort` on the trigger listener (port 3200): calls `agent.abort()` on the matching `ActiveSessionSet` handle, writes a `session_aborted` event, cleans up the sidecar file
+- `POST /api/v2/sessions/:id/resume` on the trigger listener: reads the orphaned session sidecar, re-fires via `runWorkflow()` with a `pre_allocated` source
+- `POST /api/v2/sessions/:id/retry` on the trigger listener: reads the sidecar for goal/workspace/workflowId, fires a fresh `runWorkflow()` from scratch
+
+**Guards needed at the HTTP layer:**
+- `kill`: session must be in `ActiveSessionSet` (not already complete/orphaned)
+- `resume`: session must be orphaned (not in active set, has sidecar with `continueToken`)
+- `retry`: check that session is not currently running before re-firing (prevent duplicate active sessions)
+- `kill`/`retry`: honor `--force` flag from CLI (skip confirmation for scripts)
+
+---
+
+### `session events --follow` for live session tailing (May 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:3 Lev:2 Con:2 | Blocked: no
+
+`worktrain session events <id>` currently does a one-shot read. `--follow` would poll the event log file for new lines and stream them as they arrive -- like `tail -f` but with the same structured rendering (timestamps, tool durations, SLOW markers).
+
+Implementation is straightforward: after the initial render, enter a poll loop (1s interval) reading the file from the last offset, formatting and printing new lines as they arrive. Exit on SIGINT.
+
+This is the foundation for the console Live tab and replaces the need to run `worktrain logs --session <id> --follow` for live debugging.
+
+---
+
+### Extend CliResult to carry exit-code field (May 2026)
+
+**Status: idea** | Priority: low
+
+**Score: 7** | Cor:2 Cap:1 Eff:1 Lev:2 Con:2 | Blocked: no
+
+`dispatch --wait` currently uses a `__exit2__` sentinel prefix in the failure message to signal exit code 2 (timed out waiting for terminal event). This is a smell -- CliResult has no exit-code field and the sentinel is detected in the action handler before `interpretCliResultWithoutDI`.
+
+The clean fix: add an optional `exitCode?: number` field to `CliResult.failure` (or add a new `CliResult.timeout` variant). Then `interpretCliResultWithoutDI` reads it and calls `process.exit(exitCode ?? 1)`. All existing callers are unaffected (no `exitCode` = default 1).
+
+Low priority because the sentinel works correctly today and `dispatch --wait` is the only caller that needs exit code 2.
