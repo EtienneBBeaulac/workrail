@@ -41,6 +41,12 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
           timeout: BASH_TIMEOUT_MS,
           shell: '/bin/bash',
           signal,
+          // WHY 'ignore' for stdin: tools like rg, grep, awk, sed, sort, etc. read from
+          // stdin when no file argument is given AND stdin is not a TTY. Node's exec()
+          // passes a pipe as stdin (not a terminal), causing these tools to block indefinitely
+          // waiting for input that never arrives. Closing stdin ('ignore') is the correct
+          // semantic: the bash tool is not an interactive session and never provides input.
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
         const output = [stdout, stderr].filter(Boolean).join('\n');
         return {
