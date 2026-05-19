@@ -236,6 +236,22 @@ export async function buildAgentReadySession(
   activeSessionSet: ActiveSessionSet | undefined,
   runWorkflowFn: typeof runWorkflow,
   enricherResult?: EnricherResult,
+  /**
+   * Optional callback to notify a parent AgentLoop when this session advances a step.
+   *
+   * WHY here (not on WorkflowTrigger): WorkflowTrigger is an immutable data DTO with
+   * readonly serialization-safe fields. A live function reference does not belong there.
+   * This parameter threads the callback directly to the session builder where it is wired
+   * into the onAdvance closure.
+   *
+   * WHY via mutable ref: the AgentLoop is constructed AFTER constructTools(), which builds
+   * the scope that holds onChildStepAdvance. A `{ fn: undefined }` ref is populated after
+   * agent construction so the closure always calls the correct notifyActivity() target.
+   *
+   * Set by spawnOne() when a child session is spawned, pointing to the parent's
+   * AgentLoop.notifyActivity(). Absent for root-level sessions.
+   */
+  onChildStepAdvance?: () => void,
 ): Promise<AgentReadySession> {
   const { state, firstStepPrompt, sessionWorkspacePath, sessionWorktreePath, agentClient, modelId } = preAgentSession;
   const startContinueToken = preAgentSession.continueToken;
@@ -243,6 +259,12 @@ export async function buildAgentReadySession(
 
   const MAX_ISSUE_SUMMARIES = 10;
   const STUCK_REPEAT_THRESHOLD = 3;
+
+  // C2: the parent's notifyActivity() callback, passed in from spawnOne() via the
+  // onChildStepAdvance parameter. Absent for root-level sessions (undefined = no-op).
+  // Called from onAdvance below whenever this session advances a workflow step, which
+  // resets the parent AgentLoop's stall timer to prevent false-positive stall aborts.
+  const notifyParentActivity: (() => void) | undefined = onChildStepAdvance;
 
   const onAdvance = (stepText: string, continueToken: string, stepId?: string): void => {
     advanceStep(state, stepText, continueToken, stepId);
@@ -253,6 +275,10 @@ export async function buildAgentReadySession(
       ...withWorkrailSession(state.workrailSessionId),
       ...(state.pendingStepIdAfterAdvance !== null ? { stepId: state.pendingStepIdAfterAdvance } : {}),
     });
+    // C2: Notify parent AgentLoop that a step advanced in this (child) session.
+    // This resets the parent's stall timer, preventing false-positive stall aborts
+    // when spawn_agent blocks waiting for long-running child sessions.
+    notifyParentActivity?.();
   };
 
   const onComplete = (notes: string | undefined, artifacts?: readonly unknown[]): void => {
@@ -287,6 +313,10 @@ export async function buildAgentReadySession(
     triggerGoal: trigger.goal ?? '',
     triggerBranchStrategy: trigger.branchStrategy,
     activeSessionSet,
+    // C2: pass the parent activity notifier through scope so constructTools can
+    // forward it to makeSpawnAgentTool. When a grandchild spawns further children,
+    // the callback propagates recursively through the spawn chain.
+    onChildStepAdvance: notifyParentActivity,
   };
   const tools = constructTools(ctx, apiKey, schemas, scope, runWorkflowFn);
 

@@ -137,6 +137,12 @@ interface SpawnContext {
   readonly runWorkflowFn: typeof runWorkflow;
   readonly emitter: DaemonEventEmitter | undefined;
   readonly activeSessionSet: ActiveSessionSet | undefined;
+  /**
+   * Optional callback to notify the parent AgentLoop when a child session advances a step.
+   * Passed through to buildAgentReadySession so the child's onAdvance closure can call it.
+   * When present, resets the parent's stall detection timer (C2 path).
+   */
+  readonly onChildStepAdvance?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +263,8 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     undefined, // _statsDir: use default
     undefined, // _sessionsDir: use default
     childSource,
+    undefined, // enricherDeps: not injected for child sessions (only root sessions)
+    sc.onChildStepAdvance, // C2: notify parent's AgentLoop when this child advances a step
   ) as ChildWorkflowRunResult;
   // WHY cast to ChildWorkflowRunResult: runWorkflow() returns WorkflowRunResult (includes
   // delivery_failed), but structurally only produces success/error/timeout/stuck here.
@@ -339,6 +347,8 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
  * @param schemas - Plain JSON Schema map from getSchemas().
  * @param emitter - Optional event emitter for structured lifecycle events.
  * @param activeSessionSet - Session registry for abort callbacks (graceful shutdown).
+ * @param onChildStepAdvance - Optional C2 callback: notify the parent AgentLoop when
+ *   a child session advances a step, resetting the parent's stall detection timer.
  */
 export function makeSpawnAgentTool(
   sessionId: RunId,
@@ -352,6 +362,7 @@ export function makeSpawnAgentTool(
   schemas: Record<string, any>,
   emitter?: DaemonEventEmitter,
   activeSessionSet?: ActiveSessionSet,
+  onChildStepAdvance?: () => void,
 ): AgentTool {
   return {
     name: 'spawn_agent',
@@ -375,7 +386,7 @@ export function makeSpawnAgentTool(
       // typed values only -- no typeof checks, no String() coercions, no as-casts.
       const parsed = parseParams(params);
 
-      const sc: SpawnContext = { ctx, apiKey, sessionId, thisWorkrailSessionId, currentDepth, maxDepth, runWorkflowFn, emitter, activeSessionSet };
+      const sc: SpawnContext = { ctx, apiKey, sessionId, thisWorkrailSessionId, currentDepth, maxDepth, runWorkflowFn, emitter, activeSessionSet, onChildStepAdvance };
 
       if (parsed.kind === 'single') {
         console.log(`[WorkflowRunner] Tool: spawn_agent sessionId=${sessionId} workflowId=${parsed.spec.workflowId} depth=${currentDepth}/${maxDepth}`);

@@ -356,6 +356,50 @@ export class AgentLoop {
   }
 
   /**
+   * Notify the loop that forward progress is being made from outside the LLM call cycle.
+   *
+   * Resets the stall detection timer so long-running tool executions (e.g. spawn_agent
+   * waiting on child sessions) do not trigger a false-positive stall abort. Should be
+   * called whenever a delegated sub-task makes verifiable progress -- e.g. when a child
+   * session advances a workflow step.
+   *
+   * WHY public (not just _resetStallTimer): this is a named capability -- "there is
+   * activity happening in a delegated context" -- not an implementation detail. Callers
+   * (tool factories) signal liveness; the internal mechanism is encapsulated.
+   *
+   * WHY for tools only: this is intended for delegation tools (spawn_agent) that run
+   * sub-sessions. Direct tool calls that hang should be caught by the stall timer -- do
+   * not call notifyActivity() as a general-purpose keepalive.
+   */
+  notifyActivity(): void {
+    this._resetStallTimer();
+  }
+
+  /**
+   * Reset the stall detection timer to its full window from now.
+   *
+   * Called in two places:
+   * 1. At the top of _runLoop() before each LLM call (original behavior).
+   * 2. In _executeTools() before each tool.execute() (C1: safety net for long tools).
+   * 3. Via notifyActivity() when child session step advances are reported (C2: C2 progress).
+   *
+   * WHY a shared private method: avoids copy-pasting the setTimeout setup across 3 sites.
+   */
+  private _resetStallTimer(): void {
+    const { callbacks, stallTimeoutMs } = this._options;
+    if (stallTimeoutMs === undefined || stallTimeoutMs <= 0) return;
+    if (this._stallTimerHandle !== undefined) {
+      clearTimeout(this._stallTimerHandle);
+    }
+    this._stallTimerHandle = setTimeout(() => {
+      if (!this._aborted) {
+        this.abort();
+        try { callbacks?.onStallDetected?.(); } catch { /* swallow */ }
+      }
+    }, stallTimeoutMs);
+  }
+
+  /**
    * Current agent state.
    *
    * state.messages is readable after prompt() resolves. workflow-runner.ts
@@ -445,29 +489,11 @@ export class AgentLoop {
 
       // Reset the stall detection timer before each LLM call.
       // WHY here (before onLlmTurnStarted): this is the per-turn heartbeat point.
-      // Clearing the previous handle and setting a new one ensures the window is
-      // measured from the START of each LLM call attempt. If no new LLM call starts
-      // within stallTimeoutMs, the loop is stuck inside _executeTools() (a tool hung)
-      // and should be aborted.
-      // WHY stallTimeoutMs > 0 guard: prevents misconfigured zero values from
-      // causing immediate abort on the next tick.
-      if (stallTimeoutMs !== undefined && stallTimeoutMs > 0) {
-        if (this._stallTimerHandle !== undefined) {
-          clearTimeout(this._stallTimerHandle);
-        }
-        this._stallTimerHandle = setTimeout(() => {
-          // Guard against firing when a prior abort was already registered.
-          // WHY: if the loop was aborted by shutdown or max-turns before the stall
-          // timer fires, we must not overwrite the abort reason with 'stall'.
-          // Single-threaded JS ensures no race between this check and the callback.
-          if (!this._aborted) {
-            this.abort();
-            // WHY try/catch: fire-and-forget invariant -- a throwing callback must
-            // never crash the timer callback.
-            try { callbacks?.onStallDetected?.(); } catch { /* swallow */ }
-          }
-        }, stallTimeoutMs);
-      }
+      // If no new LLM call starts within stallTimeoutMs, the loop is stuck inside
+      // _executeTools() and should be aborted. _resetStallTimer() is also called
+      // in _executeTools() before each tool.execute() (C1 safety net) and via
+      // notifyActivity() when delegated sub-sessions report progress (C2).
+      this._resetStallTimer();
 
       // Emit llm_turn_started before the API call.
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
@@ -680,6 +706,18 @@ export class AgentLoop {
       // must never crash the agent loop.
       const argsSummary = JSON.stringify(params).slice(0, 200);
       try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
+
+      // C1: Reset stall timer before each tool execution.
+      // WHY here: the stall timer fires when no new LLM call starts within stallTimeoutMs.
+      // Without this reset, a legitimately long tool (e.g. spawn_agent running 18-min child
+      // sessions) triggers a false-positive stall abort. Resetting here ensures the timer
+      // measures 'time since last tool started' rather than 'time since last LLM call',
+      // which correctly identifies genuine hangs (nothing started at all) vs. long but
+      // productive tool executions.
+      // WHY this is safe: a tool that starts then hangs forever still fires the stall at
+      // stallTimeoutMs from its start -- the C2 path (notifyActivity on child step advances)
+      // extends the window further for legitimately long delegated work.
+      this._resetStallTimer();
 
       const toolStartMs = Date.now();
       let result: AgentToolResult<unknown>;

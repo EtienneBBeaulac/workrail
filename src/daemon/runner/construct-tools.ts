@@ -56,6 +56,7 @@ export function constructTools(
     getCurrentToken, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth,
     emitter, activeSessionSet, workflowId: scopeWorkflowId,
     triggerWorkspacePath, triggerGoal, triggerBranchStrategy,
+    onChildStepAdvance,
   } = scope;
   const sid = scope.sessionId;
   const workrailSid = scope.workrailSessionId;
@@ -101,6 +102,7 @@ export function constructTools(
       schemas,
       emitter,
       activeSessionSet,
+      onChildStepAdvance, // C2: propagate parent activity notifier to spawn_agent
     ),
     makeSignalCoordinatorTool(sid, emitter, workrailSid),
   ];
