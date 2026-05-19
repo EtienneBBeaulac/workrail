@@ -582,25 +582,10 @@ async function buildDaemonDeps(): Promise<import('./cli/commands/worktrain-daemo
       interpretCliResultWithoutDI(result);
     });
 
-  // Hidden migration shims for old flag forms (--install, --start, etc.).
-  // WHY { hidden: true }: stays out of --help while giving a helpful error
-  // when an operator still uses the old syntax.
-  // WHY addCommand with hidden: Commander v12+ supports { hidden: true } on addCommand.
-  const makeFlagShim = (oldFlag: string, newSubcmd: string) => {
-    return new Command(oldFlag)
-      .description('(removed flag)')
-      .action(() => {
-        process.stderr.write(
-          `'worktrain daemon ${oldFlag}' is no longer valid. Use: worktrain daemon ${newSubcmd}\n`,
-        );
-        process.exit(1);
-      });
-  };
-  daemonCmd.addCommand(makeFlagShim('--install', 'install'), { hidden: true });
-  daemonCmd.addCommand(makeFlagShim('--uninstall', 'uninstall'), { hidden: true });
-  daemonCmd.addCommand(makeFlagShim('--start', 'start'), { hidden: true });
-  daemonCmd.addCommand(makeFlagShim('--stop', 'stop'), { hidden: true });
-  daemonCmd.addCommand(makeFlagShim('--status', 'status'), { hidden: true });
+  // WHY no flag-form shims: Commander does not route `--`-prefixed tokens as
+  // subcommand names -- they are parsed as unknown options and produce Commander's
+  // own "unknown option" error before any action() can fire. The shims would be
+  // dead code. Commander's built-in error is acceptable migration UX here.
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
