@@ -52,6 +52,7 @@ import {
   formatDiagnosticJson,
   formatFleetSummary,
 } from './cli/commands/worktrain-diagnose.js';
+import { parseSessionLog, formatSessionLog } from './cli/commands/worktrain-session-log.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -318,232 +319,274 @@ program
 
 program
   .command('daemon')
-  .description('Start the WorkTrain daemon, or manage it as a macOS launchd service')
-  .option('--install', 'Register the daemon as a launchd service (does not auto-start)')
-  .option('--uninstall', 'Unregister the daemon from launchd and remove the plist')
-  .option('--start', 'Start the daemon via launchctl (must be installed first)')
-  .option('--stop', 'Stop the running daemon via launchctl')
-  .option('--status', 'Show the current status of the daemon service')
-  .action(async (options: { install?: boolean; uninstall?: boolean; start?: boolean; stop?: boolean; status?: boolean }) => {
-    // Load ~/.workrail/.env before anything else so secrets are available both
-    // for daemon startup (startDaemon path) and for plist construction (--install path).
+  .description('Start the WorkTrain daemon, or manage it as a macOS launchd service.\nSubcommands: start, stop, status, install, uninstall');
+
+// ---------------------------------------------------------------------------
+// Shared daemon deps factory
+// WHY a module-level async function: all daemon subcommands need identical
+// deps. Extracting avoids duplicating 60+ lines across 5 action handlers.
+// ---------------------------------------------------------------------------
+
+async function buildDaemonDeps(): Promise<import('./cli/commands/worktrain-daemon.js').WorktrainDaemonCommandDeps> {
+  const { execFile: execFileRaw } = await import('child_process');
+  const execFilePromise = promisify(execFileRaw);
+
+  const startDaemon = async (): Promise<void> => {
+    // Load .env again as defense-in-depth.
     await loadDaemonEnv();
 
-    const { execFile: execFileRaw } = await import('child_process');
-    const execFilePromise = promisify(execFileRaw);
+    // This is the launchd entry point: `worktrain daemon` with no subcommand.
+    const { startTriggerListener } = await import('./trigger/trigger-listener.js');
+    const { DaemonEventEmitter } = await import('./daemon/daemon-events.js');
+    const { initializeContainer } = await import('./di/container.js');
 
-    const result = await executeWorktrainDaemonCommand(
-      {
-        env,
-        platform: process.platform,
-        // Use the resolved path of the current worktrain binary so the plist
-        // always points to the installed binary, not a symlink or npx wrapper.
-        worktrainBinPath: process.argv[1],
-        nodeBinPath: process.execPath,
-        homedir: os.homedir,
-        joinPath: path.join,
-        mkdir: (p: string, opts: { recursive: boolean }) => fs.promises.mkdir(p, opts),
-        writeFile: (p: string, content: string) => fs.promises.writeFile(p, content, 'utf-8'),
-        chmod: (p: string, mode: number) => fs.promises.chmod(p, mode),
-        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-        removeFile: (p: string) => fs.promises.unlink(p),
-        exists: async (p: string) => {
-          try {
-            await fs.promises.access(p);
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        exec: async (command: string, args: string[]) => {
-          try {
-            const { stdout, stderr } = await execFilePromise(command, args, { encoding: 'utf-8' });
-            return { stdout: stdout ?? '', stderr: stderr ?? '', exitCode: 0 };
-          } catch (err: unknown) {
-            const e = err as { stdout?: string; stderr?: string; code?: number };
-            return {
-              stdout: e.stdout ?? '',
-              stderr: e.stderr ?? '',
-              exitCode: typeof e.code === 'number' ? e.code : 1,
-            };
-          }
-        },
-        print: (line: string) => console.log(line),
-        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-        httpGet: async (url: string): Promise<number | null> => {
-          // WHY: the health check in runStart() needs to make an HTTP GET to the
-          // daemon's /health endpoint. We use Node's built-in http module here
-          // so there is no extra dependency. Errors (ECONNREFUSED, timeout, etc.)
-          // return null -- the caller handles null as "not yet up".
-          const { get } = await import('http');
-          return new Promise((resolve) => {
-            const req = get(url, { timeout: 1000 }, (res) => {
-              // Consume response body to free the socket.
-              res.resume();
-              resolve(res.statusCode ?? null);
-            });
-            req.on('error', () => resolve(null));
-            req.on('timeout', () => { req.destroy(); resolve(null); });
+    await initializeContainer({ runtimeMode: { kind: 'cli' } });
+    const { createToolContext } = await import('./mcp/server.js');
+    const { requireV2Context } = await import('./mcp/types.js');
+    const rawCtx = await createToolContext();
+    const v2Guard = requireV2Context(rawCtx);
+    if (!v2Guard.ok) {
+      console.error('v2 engine not available -- ensure WorkRail is fully initialized');
+      process.exit(1);
+    }
+    const ctx = v2Guard.ctx;
+
+    const { loadWorkrailConfigFile } = await import('./config/config-file.js');
+
+    // Resolve workspace: WORKRAIL_DEFAULT_WORKSPACE in config > cwd (home
+    // dir when launched by launchd, since WorkingDirectory is set to homedir).
+    const configResult = loadWorkrailConfigFile();
+    const configWorkspace =
+      configResult.kind === 'ok' ? configResult.value['WORKRAIL_DEFAULT_WORKSPACE'] : undefined;
+    const workspacePath = configWorkspace?.trim() || process.cwd();
+
+    const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
+    const apiKey = process.env['ANTHROPIC_API_KEY'];
+    if (!usesBedrock && !apiKey) {
+      console.error('No LLM credentials found. Set AWS_PROFILE (Bedrock) or ANTHROPIC_API_KEY.');
+      process.exit(1);
+    }
+
+    const emitter = new DaemonEventEmitter();
+
+    const handle = await startTriggerListener(ctx, {
+      workspacePath,
+      apiKey: apiKey,
+      env: process.env,
+      emitter,
+    });
+
+    if (handle === null) {
+      console.error('Daemon is disabled. Set WORKRAIL_TRIGGERS_ENABLED=true to enable.');
+      process.exit(1);
+    }
+    if ('_kind' in handle) {
+      console.error('Failed to start daemon:', handle.error);
+      process.exit(1);
+    }
+
+    console.log(`WorkRail daemon running on port ${handle.port}`);
+    console.log(`Workspace: ${workspacePath}`);
+    console.log('Waiting for webhook triggers...');
+    console.log("[Daemon] Run 'worktrain console' to start the dashboard");
+
+    // Keep alive until SIGINT/SIGTERM.
+    await new Promise<void>((resolve) => {
+      // Start periodic heartbeat. Emits daemon_heartbeat every 30s so
+      // `worktrain status` can determine whether the daemon is alive.
+      // WHY 30s: frequent enough to detect a crash within 90s (3x interval),
+      // cheap enough to not impact I/O (fire-and-forget JSONL append).
+      const heartbeatInterval = setInterval(() => {
+        const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
+        const statsDir = path.join(os.homedir(), '.workrail', 'data');
+        // Count active sessions from the daemon-sessions dir. Best-effort:
+        // if the dir is unavailable, activeSessions defaults to 0.
+        fs.promises.readdir(sessionsDir)
+          .then((files) => files.filter((f) => f.endsWith('.json')).length)
+          .catch(() => 0)
+          .then((activeSessions) => {
+            emitter.emit({ kind: 'daemon_heartbeat', activeSessions, ts: Date.now() });
           });
-        },
-        startDaemon: async () => {
-          // Load .env again as defense-in-depth: this callback may be invoked
-          // from paths other than the daemon action handler in the future.
-          await loadDaemonEnv();
+        // Update stats-summary.json as a safety net. Covers sessions whose post-session
+        // write failed (e.g. daemon restart mid-write). Fire-and-forget.
+        writeStatsSummary(statsDir).catch(() => {});
+      }, 30_000);
 
-          // This is the launchd entry point: `worktrain daemon` with no flags.
-          // Run the same startup logic as `workrail daemon`.
-          const { startTriggerListener } = await import('./trigger/trigger-listener.js');
-          const { DaemonEventEmitter } = await import('./daemon/daemon-events.js');
-          const { initializeContainer } = await import('./di/container.js');
+      // Best-effort crash event. Emitted when an uncaught exception reaches
+      // the process boundary. fire-and-forget -- the async write may not
+      // complete before process.exit(1), but this is explicitly acceptable:
+      // observability must never delay crash recovery.
+      // WHY process.on (not process.once): want to catch any uncaught exception,
+      // not only the first one. process.exit(1) after the emit prevents loops.
+      // WHY not re-throw: re-throwing after this handler fires will crash without
+      // the emit having a chance to initiate. Direct exit is more predictable.
+      process.on('uncaughtException', (err) => {
+        console.error('[WorkTrain] Uncaught exception -- daemon shutting down:', err);
+        emitter.emit({ kind: 'daemon_stopped', reason: 'crash', ts: Date.now() });
+        process.exit(1);
+      });
 
-          await initializeContainer({ runtimeMode: { kind: 'cli' } });
-          const { createToolContext } = await import('./mcp/server.js');
-          const { requireV2Context } = await import('./mcp/types.js');
-          const rawCtx = await createToolContext();
-          const v2Guard = requireV2Context(rawCtx);
-          if (!v2Guard.ok) {
-            console.error('v2 engine not available -- ensure WorkRail is fully initialized');
-            process.exit(1);
-          }
-          const ctx = v2Guard.ctx;
+      const shutdown = async () => {
+        console.log('\nShutting down daemon...');
+        // Clear heartbeat before stopping -- prevents timer from firing after
+        // the process is in teardown state.
+        clearInterval(heartbeatInterval);
 
-          const { loadWorkrailConfigFile } = await import('./config/config-file.js');
-
-          // Resolve workspace: WORKRAIL_DEFAULT_WORKSPACE in config > cwd (home
-          // dir when launched by launchd, since WorkingDirectory is set to homedir).
-          const configResult = loadWorkrailConfigFile();
-          const configWorkspace =
-            configResult.kind === 'ok' ? configResult.value['WORKRAIL_DEFAULT_WORKSPACE'] : undefined;
-          const workspacePath = configWorkspace?.trim() || process.cwd();
-
-          const usesBedrock = !!process.env['AWS_PROFILE'] || !!process.env['AWS_ACCESS_KEY_ID'];
-          const apiKey = process.env['ANTHROPIC_API_KEY'];
-          if (!usesBedrock && !apiKey) {
-            console.error('No LLM credentials found. Set AWS_PROFILE (Bedrock) or ANTHROPIC_API_KEY.');
-            process.exit(1);
-          }
-
-          const emitter = new DaemonEventEmitter();
-
-          const handle = await startTriggerListener(ctx, {
-            workspacePath,
-            apiKey: apiKey,
-            env: process.env,
-            emitter,
+        // 1. Emit session_aborted for all in-flight sessions before aborting,
+        // so the event log shows terminal state (not RUNNING forever after restart).
+        for (const sh of handle.activeSessionSet.handles()) {
+          emitter.emit({
+            kind: 'session_aborted',
+            sessionId: sh.sessionId,
+            ...(sh.workrailSessionId !== null ? { workrailSessionId: sh.workrailSessionId } : {}),
+            reason: 'daemon_shutdown',
+            ts: Date.now(),
           });
+        }
+        emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
 
-          if (handle === null) {
-            console.error('Daemon is disabled. Set WORKRAIL_TRIGGERS_ENABLED=true to enable.');
-            process.exit(1);
-          }
-          if ('_kind' in handle) {
-            console.error('Failed to start daemon:', handle.error);
-            process.exit(1);
-          }
+        // 2. Abort all in-flight AgentLoop instances simultaneously.
+        handle.activeSessionSet.abortAll();
 
-          console.log(`WorkRail daemon running on port ${handle.port}`);
-          console.log(`Workspace: ${workspacePath}`);
-          console.log('Waiting for webhook triggers...');
-          console.log("[Daemon] Run 'worktrain console' to start the dashboard");
+        // 3. Drain window: give sessions up to 5s to finish cleanup after abort.
+        // Sessions call handle.dispose() in their finally blocks which decrements size.
+        if (handle.activeSessionSet.size > 0) {
+          await Promise.race([
+            new Promise<void>(r => setTimeout(r, 5000)),
+            new Promise<void>(r => {
+              const check = setInterval(() => {
+                if (handle.activeSessionSet.size === 0) { clearInterval(check); r(); }
+              }, 100);
+            }),
+          ]);
+        }
 
-          // Keep alive until SIGINT/SIGTERM.
-          await new Promise<void>((resolve) => {
-            // Start periodic heartbeat. Emits daemon_heartbeat every 30s so
-            // `worktrain status` can determine whether the daemon is alive.
-            // WHY 30s: frequent enough to detect a crash within 90s (3x interval),
-            // cheap enough to not impact I/O (fire-and-forget JSONL append).
-            const heartbeatInterval = setInterval(() => {
-              const sessionsDir = path.join(os.homedir(), '.workrail', 'daemon-sessions');
-              const statsDir = path.join(os.homedir(), '.workrail', 'data');
-              // Count active sessions from the daemon-sessions dir. Best-effort:
-              // if the dir is unavailable, activeSessions defaults to 0.
-              fs.promises.readdir(sessionsDir)
-                .then((files) => files.filter((f) => f.endsWith('.json')).length)
-                .catch(() => 0)
-                .then((activeSessions) => {
-                  emitter.emit({ kind: 'daemon_heartbeat', activeSessions, ts: Date.now() });
-                });
-              // Update stats-summary.json as a safety net. Covers sessions whose post-session
-              // write failed (e.g. daemon restart mid-write). Fire-and-forget.
-              writeStatsSummary(statsDir).catch(() => {});
-            }, 30_000);
+        // 4. Stop HTTP server and polling loop.
+        // WHY after abort+drain: ensures abort() is called before the HTTP server
+        // closes. If handle.stop() were called first, active sessions would have
+        // no way to complete their final continue_workflow calls.
+        await handle.stop();
+        resolve();
+      };
+      process.once('SIGINT', () => void shutdown());
+      process.once('SIGTERM', () => void shutdown());
+    });
+  };
 
-            // Best-effort crash event. Emitted when an uncaught exception reaches
-            // the process boundary. fire-and-forget -- the async write may not
-            // complete before process.exit(1), but this is explicitly acceptable:
-            // observability must never delay crash recovery.
-            // WHY process.on (not process.once): want to catch any uncaught exception,
-            // not only the first one. process.exit(1) after the emit prevents loops.
-            // WHY not re-throw: re-throwing after this handler fires will crash without
-            // the emit having a chance to initiate. Direct exit is more predictable.
-            process.on('uncaughtException', (err) => {
-              console.error('[WorkTrain] Uncaught exception -- daemon shutting down:', err);
-              emitter.emit({ kind: 'daemon_stopped', reason: 'crash', ts: Date.now() });
-              process.exit(1);
-            });
+  return {
+    env,
+    platform: process.platform,
+    // Use the resolved path of the current worktrain binary so the plist
+    // always points to the installed binary, not a symlink or npx wrapper.
+    worktrainBinPath: process.argv[1] ?? 'worktrain',
+    nodeBinPath: process.execPath,
+    homedir: os.homedir,
+    joinPath: path.join,
+    mkdir: (p: string, opts: { recursive: boolean }) => fs.promises.mkdir(p, opts),
+    writeFile: (p: string, content: string) => fs.promises.writeFile(p, content, 'utf-8'),
+    chmod: (p: string, mode: number) => fs.promises.chmod(p, mode),
+    readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
+    removeFile: (p: string) => fs.promises.unlink(p),
+    exists: async (p: string) => {
+      try { await fs.promises.access(p); return true; } catch { return false; }
+    },
+    exec: async (command: string, args: string[]) => {
+      try {
+        const { stdout, stderr } = await execFilePromise(command, args, { encoding: 'utf-8' });
+        return { stdout: stdout ?? '', stderr: stderr ?? '', exitCode: 0 };
+      } catch (err: unknown) {
+        const e = err as { stdout?: string; stderr?: string; code?: number };
+        return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: typeof e.code === 'number' ? e.code : 1 };
+      }
+    },
+    print: (line: string) => console.log(line),
+    sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+    httpGet: async (url: string): Promise<number | null> => {
+      const { get } = await import('http');
+      return new Promise((resolve) => {
+        const req = get(url, { timeout: 1000 }, (res) => { res.resume(); resolve(res.statusCode ?? null); });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
+      });
+    },
+    startDaemon,
+  };
+}
 
-            const shutdown = async () => {
-              console.log('\nShutting down daemon...');
-              // Clear heartbeat before stopping -- prevents timer from firing after
-              // the process is in teardown state.
-              clearInterval(heartbeatInterval);
+// ---------------------------------------------------------------------------
+// daemon subcommands: start, stop, status, install, uninstall
+// Parent action (no subcommand) = launchd entry point, starts daemon process.
+// WHY parent action preserved: launchd plist calls `worktrain daemon` with no
+// args. Commander fires the parent action when no subcommand is given.
+// ---------------------------------------------------------------------------
 
-              // 1. Emit session_aborted for all in-flight sessions before aborting,
-              // so the event log shows terminal state (not RUNNING forever after restart).
-              for (const sh of handle.activeSessionSet.handles()) {
-                emitter.emit({
-                  kind: 'session_aborted',
-                  sessionId: sh.sessionId,
-                  ...(sh.workrailSessionId !== null ? { workrailSessionId: sh.workrailSessionId } : {}),
-                  reason: 'daemon_shutdown',
-                  ts: Date.now(),
-                });
-              }
-              emitter.emit({ kind: 'daemon_stopped', reason: 'graceful', ts: Date.now() });
+{
+  const daemonCmd = program.commands.find((c) => c.name() === 'daemon')!;
 
-              // 2. Abort all in-flight AgentLoop instances simultaneously.
-              handle.activeSessionSet.abortAll();
-
-              // 3. Drain window: give sessions up to 5s to finish cleanup after abort.
-              // Sessions call handle.dispose() in their finally blocks which decrements size.
-              if (handle.activeSessionSet.size > 0) {
-                await Promise.race([
-                  new Promise<void>(resolve => setTimeout(resolve, 5000)),
-                  new Promise<void>(resolve => {
-                    const check = setInterval(() => {
-                      if (handle.activeSessionSet.size === 0) {
-                        clearInterval(check);
-                        resolve();
-                      }
-                    }, 100);
-                  }),
-                ]);
-              }
-
-              // 4. Stop HTTP server and polling loop.
-              // WHY after abort+drain: ensures abort() is called before the HTTP server
-              // closes. If handle.stop() were called first, active sessions would have
-              // no way to complete their final continue_workflow calls.
-              await handle.stop();
-              resolve();
-            };
-            process.once('SIGINT', () => void shutdown());
-            process.once('SIGTERM', () => void shutdown());
-          });
-        },
-      },
-      {
-        install: options.install,
-        uninstall: options.uninstall,
-        start: options.start,
-        stop: options.stop,
-        status: options.status,
-      },
-    );
-
+  // Bare invocation: launchd entry point. Must start the daemon process.
+  daemonCmd.action(async () => {
+    await loadDaemonEnv();
+    const deps = await buildDaemonDeps();
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'run' } });
     interpretCliResultWithoutDI(result);
   });
+
+  daemonCmd
+    .command('start')
+    .description('Start the daemon via launchctl (must be installed first)')
+    .action(async () => {
+      await loadDaemonEnv();
+      const deps = await buildDaemonDeps();
+      const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
+      interpretCliResultWithoutDI(result);
+    });
+
+  daemonCmd
+    .command('stop')
+    .description('Stop the running daemon via launchctl')
+    .action(async () => {
+      await loadDaemonEnv();
+      const deps = await buildDaemonDeps();
+      const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'stop' } });
+      interpretCliResultWithoutDI(result);
+    });
+
+  daemonCmd
+    .command('status')
+    .description('Show the current status of the daemon service')
+    .option('--json', 'Machine-readable output: {"running": bool, "installed": bool}')
+    .action(async (options: { json?: boolean }) => {
+      await loadDaemonEnv();
+      const deps = await buildDaemonDeps();
+      const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'status', json: options.json } });
+      interpretCliResultWithoutDI(result);
+    });
+
+  daemonCmd
+    .command('install')
+    .description('Register the daemon as a launchd service (does not auto-start)')
+    .action(async () => {
+      await loadDaemonEnv();
+      const deps = await buildDaemonDeps();
+      const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
+      interpretCliResultWithoutDI(result);
+    });
+
+  daemonCmd
+    .command('uninstall')
+    .description('Unregister the daemon from launchd and remove the plist')
+    .action(async () => {
+      await loadDaemonEnv();
+      const deps = await buildDaemonDeps();
+      const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'uninstall' } });
+      interpretCliResultWithoutDI(result);
+    });
+
+  // WHY no flag-form shims: Commander does not route `--`-prefixed tokens as
+  // subcommand names -- they are parsed as unknown options and produce Commander's
+  // own "unknown option" error before any action() can fire. The shims would be
+  // dead code. Commander's built-in error is acceptable migration UX here.
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LOGS COMMAND
@@ -1033,6 +1076,26 @@ program
       const analysis = analyzeFleet(readDir, readFile, eventsDir, options.workflow);
       process.stdout.write(formatFleetSummary(analysis, { ascii: options.ascii ?? false }) + '\n');
     }
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SESSION-LOG COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('session-log <sessionId>')
+  .description(
+    'Print a time-annotated turn-by-turn replay of a daemon session. ' +
+    'Shows LLM calls, tool executions with durations, step advances, and the final outcome. ' +
+    'Accepts a full session ID or a prefix. Searches the last 7 days of daemon event logs.',
+  )
+  .action((sessionId: string) => {
+    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
+    const readFile = (filePath: string): string | null => {
+      try { return fs.readFileSync(filePath, 'utf8'); } catch { return null; }
+    };
+    const result = parseSessionLog(sessionId, eventsDir, 7, readFile);
+    process.stdout.write(formatSessionLog(result) + '\n');
   });
 
 // ═══════════════════════════════════════════════════════════════════════════

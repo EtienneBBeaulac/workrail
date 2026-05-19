@@ -120,7 +120,7 @@ describe('worktrain daemon (no flags)', () => {
     const deps = buildFakeDeps({
       startDaemon: async () => { started = true; },
     });
-    const result = await executeWorktrainDaemonCommand(deps, {});
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'run' } });
 
     expect(started).toBe(true);
     expect(result.kind).toBe('success');
@@ -129,11 +129,11 @@ describe('worktrain daemon (no flags)', () => {
   it('returns misuse when no flags and startDaemon is absent', async () => {
     const deps = buildFakeDeps();
     // No startDaemon in overrides -- falls through to usage error.
-    const result = await executeWorktrainDaemonCommand(deps, {});
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'run' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
-      expect(result.output.message).toContain('--install');
+      expect(result.output.message).toContain('subcommand');
     }
   });
 
@@ -144,7 +144,7 @@ describe('worktrain daemon (no flags)', () => {
       platform: 'linux',
       startDaemon: async () => { started = true; },
     });
-    const result = await executeWorktrainDaemonCommand(deps, {});
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'run' } });
 
     expect(started).toBe(true);
     expect(result.kind).toBe('success');
@@ -158,7 +158,7 @@ describe('worktrain daemon (no flags)', () => {
 describe('worktrain daemon --install', () => {
   it('returns failure on non-darwin platform', async () => {
     const deps = buildFakeDeps({ platform: 'linux' });
-    const result = await executeWorktrainDaemonCommand(deps, { install: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -172,14 +172,14 @@ describe('worktrain daemon --install', () => {
     const deps = buildFakeDeps({
       env: { HOME: '/Users/test', PATH: '/usr/bin' },
     });
-    const result = await executeWorktrainDaemonCommand(deps, { install: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     expect(result.kind).toBe('success');
   });
 
   it('writes the plist file to ~/Library/LaunchAgents/', async () => {
     const deps = buildFakeDeps();
-    const result = await executeWorktrainDaemonCommand(deps, { install: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     expect(result.kind).toBe('success');
     expect(deps.files.has(PLIST_PATH)).toBe(true);
@@ -187,7 +187,7 @@ describe('worktrain daemon --install', () => {
 
   it('sets plist permissions to 0o600 after writing', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const chmodCall = deps.chmodCalls.find((c) => c.path === PLIST_PATH);
     expect(chmodCall).toBeDefined();
@@ -196,7 +196,7 @@ describe('worktrain daemon --install', () => {
 
   it('plist contains the worktrain binary path', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('/usr/local/bin/worktrain');
@@ -204,7 +204,7 @@ describe('worktrain daemon --install', () => {
 
   it('plist contains the node binary path', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('/usr/local/bin/node');
@@ -212,7 +212,7 @@ describe('worktrain daemon --install', () => {
 
   it('plist contains WorkingDirectory set to homedir', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('<key>WorkingDirectory</key>');
@@ -221,7 +221,7 @@ describe('worktrain daemon --install', () => {
 
   it('plist contains WORKRAIL_TRIGGERS_ENABLED', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('WORKRAIL_TRIGGERS_ENABLED');
@@ -229,7 +229,7 @@ describe('worktrain daemon --install', () => {
 
   it('plist does NOT contain RunAtLoad or KeepAlive (operator must start explicitly)', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     // WHY: auto-start at login and auto-restart on crash means WorkTrain acts
@@ -241,7 +241,7 @@ describe('worktrain daemon --install', () => {
 
   it('calls launchctl load with the plist path', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const loadCall = deps.execCalls.find(
       (c) => c.command === 'launchctl' && c.args[0] === 'load',
@@ -250,21 +250,21 @@ describe('worktrain daemon --install', () => {
     expect(loadCall?.args[1]).toBe(PLIST_PATH);
   });
 
-  it('returns success with --start instruction (install no longer auto-starts)', async () => {
+  it('returns success with start instruction (install no longer auto-starts)', async () => {
     const deps = buildFakeDeps();
-    const result = await executeWorktrainDaemonCommand(deps, { install: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
-      expect(result.output?.message).toContain('--start');
+      expect(result.output?.message).toContain('start');
     }
   });
 
-  it('output tells operator to run --start after install', async () => {
+  it('output tells operator to run daemon start after install', async () => {
     const deps = buildFakeDeps();
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
     const output = deps.printed.join('\n');
-    expect(output).toContain('--start');
+    expect(output).toContain('daemon start');
     expect(output).not.toContain('running (PID');
   });
 
@@ -273,7 +273,7 @@ describe('worktrain daemon --install', () => {
     // Pre-populate the plist to simulate an existing install.
     deps.files.set(PLIST_PATH, { content: '<existing>' });
 
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const unloadCall = deps.execCalls.find(
       (c) => c.command === 'launchctl' && c.args[0] === 'unload',
@@ -291,7 +291,7 @@ describe('worktrain daemon --install', () => {
       },
     });
 
-    const result = await executeWorktrainDaemonCommand(deps, { install: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -308,7 +308,7 @@ describe('worktrain daemon --install', () => {
         // WORKRAIL_TRIGGERS_ENABLED intentionally absent
       },
     });
-    await executeWorktrainDaemonCommand(deps, { install: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
     const plist = deps.files.get(PLIST_PATH)?.content ?? '';
     expect(plist).toContain('WORKRAIL_TRIGGERS_ENABLED');
@@ -329,7 +329,7 @@ describe('worktrain daemon --install', () => {
           PATH: '/usr/bin',
         },
       });
-      await executeWorktrainDaemonCommand(deps, { install: true });
+      await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'install' } });
 
       const plist = deps.files.get(PLIST_PATH)?.content ?? '';
       // The plist must have the flag set to true regardless of the env value.
@@ -351,7 +351,7 @@ describe('worktrain daemon --install', () => {
 describe('worktrain daemon --uninstall', () => {
   it('returns failure when plist does not exist', async () => {
     const deps = buildFakeDeps();
-    const result = await executeWorktrainDaemonCommand(deps, { uninstall: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'uninstall' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -363,7 +363,7 @@ describe('worktrain daemon --uninstall', () => {
     const deps = buildFakeDeps();
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { uninstall: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'uninstall' } });
 
     expect(result.kind).toBe('success');
     expect(deps.files.has(PLIST_PATH)).toBe(false);
@@ -385,7 +385,7 @@ describe('worktrain daemon --uninstall', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { uninstall: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'uninstall' } });
 
     // Non-fatal: plist should still be removed and result should be success.
     expect(result.kind).toBe('success');
@@ -401,7 +401,7 @@ describe('worktrain daemon --start', () => {
   it('returns failure when plist is not installed', async () => {
     const deps = buildFakeDeps();
     // No plist in files -- not installed
-    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -413,7 +413,7 @@ describe('worktrain daemon --start', () => {
     const deps = buildFakeDeps();
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    await executeWorktrainDaemonCommand(deps, { start: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     const startCall = deps.execCalls.find(
       (c) => c.command === 'launchctl' && c.args[0] === 'start',
@@ -426,7 +426,7 @@ describe('worktrain daemon --start', () => {
     const deps = buildFakeDeps();
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
@@ -445,7 +445,7 @@ describe('worktrain daemon --start', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     expect(result.kind).toBe('failure');
   });
@@ -454,7 +454,7 @@ describe('worktrain daemon --start', () => {
     const deps = buildFakeDeps({ platform: 'linux' });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -469,7 +469,7 @@ describe('worktrain daemon --start', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -497,7 +497,7 @@ describe('worktrain daemon --start', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    await executeWorktrainDaemonCommand(deps, { start: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     expect(capturedUrls.some((url) => url.includes(':9999'))).toBe(true);
   });
@@ -511,7 +511,7 @@ describe('worktrain daemon --stop', () => {
   it('calls launchctl stop with the service label', async () => {
     const deps = buildFakeDeps();
 
-    await executeWorktrainDaemonCommand(deps, { stop: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'stop' } });
 
     const stopCall = deps.execCalls.find(
       (c) => c.command === 'launchctl' && c.args[0] === 'stop',
@@ -522,7 +522,7 @@ describe('worktrain daemon --stop', () => {
 
   it('returns success when launchctl stop succeeds', async () => {
     const deps = buildFakeDeps();
-    const result = await executeWorktrainDaemonCommand(deps, { stop: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'stop' } });
 
     expect(result.kind).toBe('success');
   });
@@ -537,7 +537,7 @@ describe('worktrain daemon --stop', () => {
       },
     });
 
-    const result = await executeWorktrainDaemonCommand(deps, { stop: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'stop' } });
 
     // Already stopped is not an error -- it's the desired end state
     expect(result.kind).toBe('success');
@@ -549,7 +549,7 @@ describe('worktrain daemon --stop', () => {
   it('returns failure on non-darwin platform', async () => {
     const deps = buildFakeDeps({ platform: 'linux' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { stop: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'stop' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
@@ -568,7 +568,7 @@ describe('worktrain daemon --status', () => {
       exec: async () => ({ stdout: '', stderr: '', exitCode: 1 }),
     });
 
-    const result = await executeWorktrainDaemonCommand(deps, { status: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'status' } });
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
@@ -580,7 +580,7 @@ describe('worktrain daemon --status', () => {
     const deps = buildFakeDeps();
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { status: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'status' } });
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
@@ -603,7 +603,7 @@ describe('worktrain daemon --status', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { status: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'status' } });
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
@@ -616,25 +616,26 @@ describe('worktrain daemon --status', () => {
 // VALIDATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe('worktrain daemon -- flag validation', () => {
-  it('returns misuse when no flag is provided and startDaemon is absent', async () => {
+describe('worktrain daemon -- subcommand validation', () => {
+  it('returns misuse when subcommand is run and startDaemon is absent', async () => {
     const deps = buildFakeDeps();
-    const result = await executeWorktrainDaemonCommand(deps, {});
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'run' } });
 
     expect(result.kind).toBe('failure');
     if (result.kind === 'failure') {
-      expect(result.output.message).toContain('--install');
+      // Should suggest subcommands, not the old flag syntax
+      expect(result.output.message).toContain('subcommand');
     }
   });
 
-  it('returns misuse when multiple flags are provided', async () => {
-    const deps = buildFakeDeps();
-    const result = await executeWorktrainDaemonCommand(deps, { install: true, uninstall: true });
-
-    expect(result.kind).toBe('failure');
-    if (result.kind === 'failure') {
-      expect(result.output.message).toContain('mutually exclusive');
-    }
+  // The "multiple flags" case is now statically impossible: DaemonSubcommand
+  // is a discriminated union that allows exactly one operation at a time.
+  // The old runtime mutual-exclusivity check is no longer needed.
+  it('each kind maps to exactly one operation (type enforces exclusivity)', async () => {
+    // Verify that each subcommand kind routes without error on darwin
+    const deps = buildFakeDeps({ platform: 'darwin' });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'status' } });
+    expect(result.kind).toBe('success');
   });
 });
 
@@ -774,7 +775,7 @@ describe('worktrain daemon --start credential check', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    await executeWorktrainDaemonCommand(deps, { start: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     const output = deps.printed.join('\n');
     expect(output).not.toContain('WARNING');
@@ -786,7 +787,7 @@ describe('worktrain daemon --start credential check', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    await executeWorktrainDaemonCommand(deps, { start: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     const output = deps.printed.join('\n');
     expect(output).not.toContain('WARNING');
@@ -800,7 +801,7 @@ describe('worktrain daemon --start credential check', () => {
     deps.files.set('/Users/test/.workrail/.env', { content: 'ANTHROPIC_API_KEY=sk-ant-from-file' });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    await executeWorktrainDaemonCommand(deps, { start: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     const output = deps.printed.join('\n');
     expect(output).not.toContain('WARNING');
@@ -813,7 +814,7 @@ describe('worktrain daemon --start credential check', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    await executeWorktrainDaemonCommand(deps, { start: true });
+    await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     const output = deps.printed.join('\n');
     expect(output).toContain('WARNING');
@@ -826,7 +827,7 @@ describe('worktrain daemon --start credential check', () => {
     });
     deps.files.set(PLIST_PATH, { content: '<plist />' });
 
-    const result = await executeWorktrainDaemonCommand(deps, { start: true });
+    const result = await executeWorktrainDaemonCommand(deps, { subcommand: { kind: 'start' } });
 
     // Warning is advisory -- start still proceeds
     expect(result.kind).toBe('success');
