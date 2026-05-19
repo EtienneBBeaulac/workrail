@@ -141,12 +141,12 @@ async function pollForOutcome(
 }
 
 async function checkOutcome(
-  deps: Pick<WorktrainDispatchCommandDeps, 'readFile' | 'joinPath'>,
+  deps: Pick<WorktrainDispatchCommandDeps, 'readFile' | 'joinPath' | 'now'>,
   eventsDir: string,
   sessionId: string,
 ): Promise<'success' | 'failure' | null> {
   // Scan last 2 days (session spanning midnight is unlikely for --wait use case).
-  const now = Date.now();
+  const now = (deps.now ?? Date.now)();
   for (let i = 0; i < 2; i++) {
     const date = new Date(now - i * 86400000).toISOString().slice(0, 10);
     const filePath = deps.joinPath(eventsDir, `${date}.jsonl`);
@@ -243,12 +243,6 @@ export async function executeWorktrainDispatchCommand(
       const errMsg = isErrorResponse(responseBody)
         ? responseBody.error
         : `HTTP ${response.status}`;
-      if (response.status === 503 || response.status === 0) {
-        return failure(
-          `Daemon is not running. Start it with: worktrain daemon start\n` +
-          `(tried port ${port})`,
-        );
-      }
       if (response.status === 503) {
         return failure(`WorkTrain daemon is not ready: ${errMsg}`);
       }

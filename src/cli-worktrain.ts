@@ -138,7 +138,7 @@ program
   .description('Queue an async message for the WorkTrain daemon, or steer a specific running session.')
   .option('-w, --workspace <name>', 'Workspace hint for the daemon (optional)')
   .option('--session <id>', 'Send directly to a specific running session via the steer endpoint')
-  .option('-p, --port <n>', 'Override daemon HTTP port for --session (default: 3200)', parseInt)
+  .option('--port <n>', 'Override daemon HTTP port for --session (default: 3200)', parseInt)
   .addOption(
     new Option('--priority <level>', 'Message priority: high, normal, or low')
       .choices(['high', 'normal', 'low'])
@@ -252,6 +252,37 @@ program.addCommand(
     }),
   { hidden: true },
 );
+
+// Hidden `run` parent + subcommand shims for removed `run pipeline` / `run pr-review`.
+// WHY keep `run` as a hidden registered command: Commander resolves commands left-to-right.
+// Without a registered `run`, `worktrain run pipeline` fails at `run` with a generic
+// "unknown command" error before the subcommand name is even seen.
+{
+  const runShim = new Command('run').description('(removed)').allowUnknownOption(true);
+  runShim.addCommand(
+    new Command('pipeline').description('(removed)').allowUnknownOption(true).action(() => {
+      process.stderr.write(
+        "'worktrain run pipeline' was removed. Use 'worktrain dispatch \"<task>\" -w <workspace>' instead.\n",
+      );
+      process.exit(1);
+    }),
+    { hidden: true },
+  );
+  runShim.addCommand(
+    new Command('pr-review').description('(removed)').allowUnknownOption(true).action(() => {
+      process.stderr.write(
+        "'worktrain run pr-review' was removed. Use 'worktrain dispatch --pr <n> -w <workspace>' instead.\n",
+      );
+      process.exit(1);
+    }),
+    { hidden: true },
+  );
+  runShim.action(() => {
+    process.stderr.write("'worktrain run' was removed. Use 'worktrain dispatch' instead.\n");
+    process.exit(1);
+  });
+  program.addCommand(runShim, { hidden: true });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSOLE COMMAND
