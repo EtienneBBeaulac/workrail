@@ -598,6 +598,21 @@ async function buildDaemonDeps(): Promise<import('./cli/commands/worktrain-daemo
  * WHY inline: the logs command is the only consumer of this formatting.
  * Keeping it here avoids creating a module for a single 30-line function.
  */
+/**
+ * Parse a timeout duration string like "30m", "1h", "90s" into milliseconds.
+ * Returns DEFAULT_DISPATCH_TIMEOUT_MS on unrecognized input.
+ */
+function parseTimeoutDuration(input: string): number {
+  const DEFAULT_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
+  const trimmed = input.trim().toLowerCase();
+  const num = parseFloat(trimmed);
+  if (isNaN(num) || num <= 0) return DEFAULT_DISPATCH_TIMEOUT_MS;
+  if (trimmed.endsWith('h')) return num * 60 * 60 * 1000;
+  if (trimmed.endsWith('m')) return num * 60 * 1000;
+  if (trimmed.endsWith('s')) return num * 1000;
+  return DEFAULT_DISPATCH_TIMEOUT_MS;
+}
+
 function formatDaemonEventLine(raw: string): string | null {
   let obj: Record<string, unknown>;
   try {
@@ -1162,6 +1177,68 @@ program.addCommand(
     }),
   { hidden: true },
 );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DISPATCH COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('dispatch [task]')
+  .description(
+    'Dispatch a workflow session via the running daemon.\n' +
+    'Routes adaptively unless --workflow or --pr is specified.\n' +
+    'Requires the daemon to be running (worktrain daemon start).',
+  )
+  .option('-w, --workspace <path>', 'Absolute path to the workspace directory')
+  .option('--workflow <id>', 'Workflow ID to run (overrides adaptive routing)')
+  .option('--pr <n>', 'PR number to review (dispatches wr.mr-review)', (v) => parseInt(v, 10))
+  .option('--wait', 'Block until session completes. Exit 0=success, 1=failure, 2=timeout')
+  .option('--json', 'Machine-readable JSON output (session ID, outcome when --wait)')
+  .option('--timeout <duration>', 'Wait timeout, e.g. "30m", "1h". Default: 30m', '30m')
+  .option('-p, --port <n>', 'Override daemon HTTP port', parseInt)
+  .action(async (task: string | undefined, options: { workspace?: string; workflow?: string; pr?: number; wait?: boolean; json?: boolean; timeout?: string; port?: number }) => {
+    const { executeWorktrainDispatchCommand } = await import('./cli/commands/worktrain-dispatch.js');
+
+    if (!options.workspace) {
+      process.stderr.write('Error: -w/--workspace is required\n');
+      process.exit(1);
+    }
+
+    const timeoutMs = parseTimeoutDuration(options.timeout ?? '30m');
+
+    const result = await executeWorktrainDispatchCommand(
+      {
+        fetch: (url, opts) => globalThis.fetch(url, opts) as Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>,
+        readFile: async (p: string) => { try { return await fs.promises.readFile(p, 'utf8'); } catch { return null; } },
+        stdout: (line: string) => process.stdout.write(line + '\n'),
+        stderr: (line: string) => process.stderr.write(line + '\n'),
+        homedir: os.homedir,
+        joinPath: path.join,
+        pathIsAbsolute: path.isAbsolute,
+        statPath: (p: string) => fs.promises.stat(p),
+        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
+      },
+      {
+        task,
+        workflow: options.workflow,
+        pr: options.pr,
+        workspace: options.workspace,
+        wait: options.wait,
+        json: options.json,
+        port: options.port,
+        timeoutMs,
+      },
+    );
+
+    // Handle exit 2 for --wait timeout (session timed out waiting for terminal event).
+    // WHY special-case: CliResult has no exit-code field; the __exit2__ sentinel is the
+    // minimal way to distinguish "session failed" (exit 1) from "gave up waiting" (exit 2).
+    if (result.kind === 'failure' && typeof result.output?.message === 'string' && result.output.message.startsWith('__exit2__')) {
+      process.stderr.write(result.output.message.replace('__exit2__ ', '') + '\n');
+      process.exit(2);
+    }
+    interpretCliResultWithoutDI(result);
+  });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HEALTH COMMAND (renamed from `status <sessionId>`)
