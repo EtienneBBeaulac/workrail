@@ -238,7 +238,7 @@ describe('parseSessionEvents', () => {
 });
 
 // ---------------------------------------------------------------------------
-// formatSessionLog
+// formatSessionEvents
 // ---------------------------------------------------------------------------
 
 describe('formatSessionEvents', () => {
