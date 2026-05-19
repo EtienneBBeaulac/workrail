@@ -70,6 +70,59 @@ export interface DeliveryAdapter<K extends AdapterConfig['kind'] = AdapterConfig
 }
 
 // ---------------------------------------------------------------------------
+// Migration shim: synthesize DeliveryConfig from legacy TriggerDefinition fields
+// ---------------------------------------------------------------------------
+
+/**
+ * Parameters are the already-validated legacy delivery fields from TriggerDefinition.
+ * Called once per trigger at parse time in validateAndResolveTrigger().
+ *
+ * WHY git_commit before github_draft_review: the branch must exist (commit pushed)
+ * before a review can reference it. Ordering is positional in the adapters array.
+ */
+export interface SynthesizeDeliveryFields {
+  readonly autoCommit?: boolean;
+  readonly autoOpenPR?: boolean;
+  readonly secretScan?: boolean;
+  readonly callbackUrl?: string;
+  readonly reviewerIdentity?: { readonly platform: string; readonly token: string; readonly login: string };
+}
+
+export function synthesizeDeliveryConfig(fields: SynthesizeDeliveryFields): DeliveryConfig {
+  const adapters: AdapterConfig[] = [];
+
+  // git_commit first -- branch must exist before review can reference it
+  if (fields.autoCommit) {
+    adapters.push({
+      kind: 'git_commit',
+      autoOpenPR: fields.autoOpenPR ?? false,
+      secretScan: fields.secretScan ?? true,
+    });
+  }
+
+  // github_draft_review after commit
+  if (fields.reviewerIdentity) {
+    adapters.push({
+      kind: 'github_draft_review',
+      token: fields.reviewerIdentity.token,
+      login: fields.reviewerIdentity.login,
+    });
+  }
+
+  // callback_url: fire-and-forget HTTP notification
+  if (fields.callbackUrl) {
+    adapters.push({ kind: 'callback_url', url: fields.callbackUrl });
+  }
+
+  // cli_inbox fallback when no delivery fields are configured
+  if (adapters.length === 0) {
+    adapters.push({ kind: 'cli_inbox' });
+  }
+
+  return { adapters };
+}
+
+// ---------------------------------------------------------------------------
 // Config resolver (pure)
 // ---------------------------------------------------------------------------
 

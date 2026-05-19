@@ -868,6 +868,9 @@ export class TriggerRouter {
       // Reviewer identity forwarded to WorkflowTrigger so maybeRunPostWorkflowActions()
       // can access it from the dispatch() path (which receives WorkflowTrigger, not TriggerDefinition).
       ...(trigger.reviewerIdentity !== undefined ? { reviewerIdentity: trigger.reviewerIdentity } : {}),
+      // Synthesized delivery config forwarded so dispatch() callers have delivery config
+      // without needing to look up TriggerDefinition by triggerId.
+      ...(trigger.deliveryConfig !== undefined ? { deliveryConfig: trigger.deliveryConfig } : {}),
     };
 
     // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.

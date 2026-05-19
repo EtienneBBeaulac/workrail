@@ -4,10 +4,63 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   resolveDeliveryConfig,
+  synthesizeDeliveryConfig,
   CliInboxAdapter,
   type DeliveryConfig,
   type DeliveryPayload,
 } from '../../src/trigger/delivery-adapter.js';
+
+// ---------------------------------------------------------------------------
+// synthesizeDeliveryConfig
+// ---------------------------------------------------------------------------
+
+describe('synthesizeDeliveryConfig', () => {
+  const reviewer = { platform: 'github', token: 'tok', login: 'user' };
+
+  it('returns cli_inbox when no fields are set', () => {
+    expect(synthesizeDeliveryConfig({})).toEqual({ adapters: [{ kind: 'cli_inbox' }] });
+  });
+
+  it('returns git_commit when autoCommit is true', () => {
+    const result = synthesizeDeliveryConfig({ autoCommit: true });
+    expect(result.adapters).toHaveLength(1);
+    expect(result.adapters[0]).toEqual({ kind: 'git_commit', autoOpenPR: false, secretScan: true });
+  });
+
+  it('reflects autoOpenPR and secretScan on git_commit adapter', () => {
+    const result = synthesizeDeliveryConfig({ autoCommit: true, autoOpenPR: true, secretScan: false });
+    expect(result.adapters[0]).toEqual({ kind: 'git_commit', autoOpenPR: true, secretScan: false });
+  });
+
+  it('returns github_draft_review when reviewerIdentity is set', () => {
+    const result = synthesizeDeliveryConfig({ reviewerIdentity: reviewer });
+    expect(result.adapters).toHaveLength(1);
+    expect(result.adapters[0]).toEqual({ kind: 'github_draft_review', token: 'tok', login: 'user' });
+  });
+
+  it('returns callback_url when callbackUrl is set', () => {
+    const result = synthesizeDeliveryConfig({ callbackUrl: 'https://example.com/hook' });
+    expect(result.adapters).toHaveLength(1);
+    expect(result.adapters[0]).toEqual({ kind: 'callback_url', url: 'https://example.com/hook' });
+  });
+
+  it('puts git_commit before github_draft_review when both are set', () => {
+    const result = synthesizeDeliveryConfig({ autoCommit: true, reviewerIdentity: reviewer });
+    expect(result.adapters).toHaveLength(2);
+    // WHY order matters: branch must exist before review can reference it
+    expect(result.adapters[0]!.kind).toBe('git_commit');
+    expect(result.adapters[1]!.kind).toBe('github_draft_review');
+  });
+
+  it('includes all three adapters in correct order with all fields set', () => {
+    const result = synthesizeDeliveryConfig({
+      autoCommit: true,
+      reviewerIdentity: reviewer,
+      callbackUrl: 'https://example.com/hook',
+    });
+    expect(result.adapters.map(a => a.kind)).toEqual(['git_commit', 'github_draft_review', 'callback_url']);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // resolveDeliveryConfig

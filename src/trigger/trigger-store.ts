@@ -45,6 +45,7 @@ import {
   asTriggerId,
   asWorkspaceName,
 } from './types.js';
+import { synthesizeDeliveryConfig } from './delivery-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -1439,6 +1440,15 @@ function validateAndResolveTrigger(
     ...(maxQueueDepth !== undefined ? { maxQueueDepth } : {}),
     // Reviewer identity for GitHub PENDING draft review creation after review sessions.
     ...(reviewerIdentity !== undefined ? { reviewerIdentity } : {}),
+    // Synthesized delivery config derived from legacy delivery fields.
+    // Enables Phase 3+ to call adapter.deliver() without reading individual legacy flags.
+    deliveryConfig: synthesizeDeliveryConfig({
+      autoCommit: autoCommit || undefined,
+      autoOpenPR: autoOpenPR || undefined,
+      secretScan,
+      callbackUrl,
+      reviewerIdentity,
+    }),
   };
 
   return ok(trigger);
