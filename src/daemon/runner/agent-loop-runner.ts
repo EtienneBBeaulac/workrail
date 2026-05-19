@@ -167,10 +167,23 @@ export function buildAgentCallbacks(
   emitter: DaemonEventEmitter | undefined,
   stuckRepeatThreshold: number,
   workflowId?: string,
+  /**
+   * Optional callback to notify a parent AgentLoop that this (child) session is
+   * making forward progress. Called on every LLM turn start and tool call start.
+   *
+   * WHY any activity (not just step advances): step advances happen at the end of
+   * a full discovery/research phase, which can take 10-20 minutes. Waiting for a
+   * step advance before notifying the parent means the parent stall timer fires
+   * long before the child produces its first advance. Any tool call or LLM turn
+   * is evidence the child is alive and working -- that is the correct heartbeat.
+   */
+  notifyParentActivity?: () => void,
 ): AgentLoopCallbacks {
   return {
     onLlmTurnStarted: ({ messageCount }) => {
       emitter?.emit({ kind: 'llm_turn_started', sessionId, messageCount, modelId, ...withWorkrailSession(state.workrailSessionId) });
+      // C2: any LLM activity in this child session resets the parent's stall timer.
+      notifyParentActivity?.();
     },
     onLlmTurnCompleted: ({ stopReason, outputTokens, inputTokens, toolNamesRequested }) => {
       emitter?.emit({ kind: 'llm_turn_completed', sessionId, stopReason, outputTokens, inputTokens, toolNamesRequested, ...withWorkrailSession(state.workrailSessionId) });
@@ -180,6 +193,8 @@ export function buildAgentCallbacks(
       // WHY here: fires synchronously before tool.execute() so the ring buffer reflects
       // the most recent tool calls at turn_end check time. Bounded at stuckRepeatThreshold.
       recordToolCall(state, toolName, argsSummary, stuckRepeatThreshold);
+      // C2: any tool activity in this child session resets the parent's stall timer.
+      notifyParentActivity?.();
     },
     onToolCallCompleted: ({ toolName, durationMs, resultSummary }) => {
       emitter?.emit({ kind: 'tool_call_completed', sessionId, toolName, durationMs, resultSummary, ...withWorkrailSession(state.workrailSessionId) });
@@ -336,7 +351,7 @@ export async function buildAgentReadySession(
   );
 
   // ---- Observability callbacks for AgentLoop ----
-  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD, trigger.workflowId);
+  const agentCallbacks = buildAgentCallbacks(sessionId, state, modelId, emitter, STUCK_REPEAT_THRESHOLD, trigger.workflowId, notifyParentActivity);
 
   // ---- AgentLoop construction ----
   const agent = new AgentLoopClass({
