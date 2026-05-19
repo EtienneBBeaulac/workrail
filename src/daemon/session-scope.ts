@@ -290,4 +290,21 @@ export interface SessionScope {
    */
   readonly onGateParked: (gateToken: string, stepId: string, gateKind: import('../v2/durable-core/constants.js').GateKind) => void;
 
+  /**
+   * Optional callback to notify the parent AgentLoop that a delegated child session
+   * made forward progress (i.e. a child session advanced a workflow step).
+   *
+   * WHY here (not on AgentLoopCallbacks): the callback needs to reach spawn_agent's
+   * tool factory via constructTools, which receives the SessionScope bundle. This is
+   * the established mechanism for threading per-session callbacks to tool factories.
+   *
+   * WHY optional: root-level sessions (not called via spawn_agent) have no parent to
+   * notify. The field is absent for those sessions.
+   *
+   * Calling this resets the parent AgentLoop's stall detection timer, preventing a
+   * false-positive stall abort when spawn_agent blocks for the duration of long-running
+   * child sessions. See AgentLoop.notifyActivity().
+   */
+  readonly onChildStepAdvance?: () => void;
+
 }

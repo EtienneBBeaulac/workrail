@@ -333,6 +333,15 @@ export async function runWorkflow(
    * notes and git diff stat in their system prompt.
    */
   enricherDeps?: WorkflowEnricherDeps,
+  /**
+   * Optional callback fired whenever this session advances a workflow step.
+   * Used by spawn_agent to reset the parent session's stall detection timer (C2),
+   * preventing false-positive stall aborts when child sessions run for >stallTimeoutMs.
+   *
+   * WHY here (not on WorkflowTrigger): WorkflowTrigger is an immutable data DTO with
+   * readonly serialization-safe fields. A live function reference does not belong there.
+   */
+  onChildStepAdvance?: () => void,
 ): Promise<WorkflowRunResult> {
   // ---- Resolved dirs (injectable for tests) ----
   const statsDir = _statsDir ?? DAEMON_STATS_DIR;
@@ -417,6 +426,7 @@ export async function runWorkflow(
     preResult.session, trigger, ctx, apiKey, sessionId,
     emitter, daemonRegistry, activeSessionSet, runWorkflow,
     enricherResult,
+    onChildStepAdvance,
   );
 
   // ---- Agent loop phase: run prompt loop to completion ----

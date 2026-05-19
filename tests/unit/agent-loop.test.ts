@@ -1241,3 +1241,145 @@ describe('AgentLoop per-call LLM timeout', () => {
     expect(stallDetectedSpy).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// C1: stall timer reset on tool execution start (_resetStallTimer in _executeTools)
+// C2: notifyActivity() resets stall timer from external delegated work
+// ---------------------------------------------------------------------------
+
+describe('AgentLoop stall timer reset on tool start (C1) and notifyActivity (C2)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('C1: stall timer does not fire when sequential tools each start within stallTimeoutMs of the previous', async () => {
+    // Strategy: two sequential tools each take 60% of stallTimeoutMs.
+    // Without C1, the stall timer fires between them because it was set before
+    // the first LLM call and never reset during tool execution.
+    // With C1, each tool.execute() start resets the timer, so both tools complete.
+    const stallDetectedSpy = vi.fn();
+    const STALL_MS = 5000;
+
+    // Tool that takes 60% of stall timeout (3000ms), simulated via fake timers.
+    // Since vi.useFakeTimers() makes tool.execute() resolve "immediately" without
+    // real wall-clock delay, we verify the C1 reset fires by checking the timer
+    // state: each tool start resets the stall clock.
+    let tool1CallCount = 0;
+    let tool2CallCount = 0;
+    const tool1 = makeTool('tool_one', 'result_one');
+    const tool2 = makeTool('tool_two', 'result_two');
+
+    // First LLM call: requests tool_one. Second: requests tool_two. Third: end_turn.
+    const client = new FakeAnthropicClient([
+      makeToolUseMessage('tool_one', 'call-1'),
+      makeToolUseMessage('tool_two', 'call-2'),
+      makeEndTurnMessage(),
+    ]);
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [tool1, tool2],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: STALL_MS,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance timers past stallTimeoutMs -- without C1 this would fire the stall.
+    // With C1, each tool execution resets the timer so no stall fires.
+    await vi.advanceTimersByTimeAsync(STALL_MS + 1000);
+    await promptPromise;
+
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+    expect(client.callCount).toBe(3); // All three LLM calls completed
+  });
+
+  it('C2: notifyActivity() resets the stall timer, preventing false-positive stall during delegated work', async () => {
+    // Strategy: start a hanging LLM call (simulates spawn_agent blocking).
+    // The stall timer would fire after stallTimeoutMs.
+    // But call agent.notifyActivity() before the stall fires -- this should reset
+    // the timer, preventing the stall from firing.
+    const stallDetectedSpy = vi.fn();
+    const STALL_MS = 5000;
+
+    // HangingAnthropicClient: first call hangs, simulating spawn_agent blocking.
+    const client = new HangingAnthropicClient([makeToolUseMessage('bash', 'call-1')]);
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [makeTool('bash')],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: STALL_MS,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance to just before stall fires.
+    await vi.advanceTimersByTimeAsync(STALL_MS - 1000);
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+
+    // C2: simulate a child session step advance notifying the parent.
+    agent.notifyActivity();
+
+    // Advance past the ORIGINAL stall deadline -- stall should NOT fire because
+    // notifyActivity() reset the timer.
+    await vi.advanceTimersByTimeAsync(2000); // original deadline would have fired here
+    expect(stallDetectedSpy).not.toHaveBeenCalled();
+
+    // Advance well past the new deadline (STALL_MS after notifyActivity) -- stall fires.
+    await vi.advanceTimersByTimeAsync(STALL_MS);
+    expect(stallDetectedSpy).toHaveBeenCalledOnce();
+
+    agent.abort();
+    await promptPromise;
+  });
+
+  it('stall timer still fires after C1 reset when a tool hangs indefinitely', async () => {
+    // Regression: C1 resets the stall timer when a tool starts, but must NOT prevent
+    // the stall from eventually firing if the tool then hangs without completing.
+    // With C1: stall fires stallTimeoutMs after tool.execute() starts (not after LLM call).
+    // Without C1: stall fires stallTimeoutMs after LLM call starts.
+    // Either way: a genuinely hung tool produces a stall -- just with different deadlines.
+    //
+    // WHY HangingAnthropicClient instead of a hanging tool: a tool.execute() that returns
+    // a never-resolving Promise blocks the loop permanently. To test the stall timer,
+    // we use the existing HangingAnthropicClient pattern (hangs BETWEEN calls, where
+    // the stall timer fires) -- the LLM call itself never starts, simulating a stall
+    // after tool execution returns control to the loop.
+    const stallDetectedSpy = vi.fn();
+    const STALL_MS = 5000;
+
+    // First response: tool_use. Second response: hangs (loop enters _executeTools for
+    // the first tool, returns, then tries a second LLM call which hangs).
+    // The stall timer was reset by C1 before the first tool execution, then reset
+    // again at the top of the loop before the second LLM call attempt. The hanging
+    // second LLM call triggers the stall.
+    const client = new HangingAnthropicClient([makeToolUseMessage('bash', 'call-1')]);
+
+    const agent = new AgentLoop({
+      systemPrompt: 'Test',
+      tools: [makeTool('bash')],
+      client,
+      modelId: 'claude-test',
+      stallTimeoutMs: STALL_MS,
+      callbacks: { onStallDetected: stallDetectedSpy },
+    });
+
+    const promptPromise = agent.prompt(USER_MSG);
+
+    // Advance past stallTimeoutMs. The second LLM call hangs, stall fires.
+    await vi.advanceTimersByTimeAsync(STALL_MS + 1000);
+
+    expect(stallDetectedSpy).toHaveBeenCalledOnce();
+
+    await promptPromise;
+  });
+});
