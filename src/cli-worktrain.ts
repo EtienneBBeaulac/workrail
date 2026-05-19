@@ -25,26 +25,18 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 
-import { ok as neOk, err as neErr } from 'neverthrow';
 import { interpretCliResultWithoutDI } from './cli/interpret-result.js';
 import { loadDaemonEnv } from './daemon/daemon-env.js';
-import { createContextAssembler } from './context-assembly/index.js';
-import { createListRecentSessions } from './context-assembly/infra.js';
 import {
   executeWorktrainInitCommand,
   executeWorktrainTellCommand,
   executeWorktrainInboxCommand,
-  executeWorktrainSpawnCommand,
-  executeWorktrainAwaitCommand,
   executeWorktrainDaemonCommand,
-  executeWorktrainOverviewCommand,
   executeWorktrainTriggerTestCommand,
   executeWorktrainTriggerValidateCommand,
-  buildConsoleServiceFromDataDir,
   type Priority,
 } from './cli/commands/index.js';
 import { writeStatsSummary } from './daemon/stats-summary.js';
-import type { ChildSessionResult, CoordinatorSpawnContext } from './coordinators/types.js';
 import {
   parseDaemonEvents,
   analyzeFleet,
@@ -76,12 +68,13 @@ program
   .description('Guided setup for WorkTrain daemon: credentials, workspace, triggers.yml, daemon-soul.md, smoke test')
   .option('-y, --yes', 'Skip interactive prompts and use safe defaults (for CI / non-TTY use)')
   .action(async (options: { yes?: boolean }) => {
-    // Warn when running non-interactively without --yes
+    // Non-TTY without --yes: fail fast rather than hanging on prompts.
     if (!options.yes && !input.isTTY) {
-      console.warn(
-        'Warning: stdin is not a TTY. Interactive prompts may not work as expected.\n' +
-        'Run with --yes to use safe defaults without prompting.',
+      process.stderr.write(
+        'Error: stdin is not a TTY. Run with --yes for non-interactive mode.\n' +
+        'Example: worktrain init --yes\n',
       );
+      process.exit(1);
     }
 
     const rl = createInterface({ input, output, terminal: true });
@@ -142,14 +135,50 @@ program
 
 program
   .command('tell <message>')
-  .description('Queue an async message for the WorkTrain daemon (~/.workrail/message-queue.jsonl)')
+  .description('Queue an async message for the WorkTrain daemon, or steer a specific running session.')
   .option('-w, --workspace <name>', 'Workspace hint for the daemon (optional)')
+  .option('--session <id>', 'Send directly to a specific running session via the steer endpoint')
+  .option('--port <n>', 'Override daemon HTTP port for --session (default: 3200)', parseInt)
   .addOption(
-    new Option('-p, --priority <level>', 'Message priority: high, normal, or low')
+    new Option('--priority <level>', 'Message priority: high, normal, or low')
       .choices(['high', 'normal', 'low'])
       .default('normal'),
   )
-  .action(async (message: string, options: { workspace?: string; priority?: string }) => {
+  .action(async (message: string, options: { workspace?: string; session?: string; port?: number; priority?: string }) => {
+    // --session: route directly to running session via steer endpoint
+    if (options.session) {
+      const port = options.port ?? 3200;
+      const url = `http://127.0.0.1:${port}/sessions/${options.session}/steer`;
+      try {
+        const response = await globalThis.fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: message }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+          const err = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
+          if (response.status === 404) {
+            process.stderr.write(`Session not found: ${options.session}\n`);
+          } else {
+            process.stderr.write(`Steer failed: ${err}\n`);
+          }
+          process.exit(1);
+        }
+        console.log(`Message sent to session ${options.session}.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+          process.stderr.write(`Daemon is not running on port ${port}. Start it with: worktrain daemon start\n`);
+        } else {
+          process.stderr.write(`Steer request failed: ${msg}\n`);
+        }
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Default: queue to message-queue.jsonl
     const result = await executeWorktrainTellCommand(
       message,
       {
@@ -178,7 +207,8 @@ program
   .command('inbox')
   .description('Read unread messages from the WorkTrain daemon (~/.workrail/outbox.jsonl)')
   .option('-w, --watch', 'Watch for new messages in real time (not yet implemented)')
-  .action(async (options: { watch?: boolean }) => {
+  .option('--json', 'Output unread messages as a JSON array')
+  .action(async (options: { watch?: boolean; json?: boolean }) => {
     const result = await executeWorktrainInboxCommand(
       {
         readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
@@ -188,80 +218,71 @@ program
         joinPath: path.join,
         print: (line: string) => console.log(line),
       },
-      { watch: options.watch },
+      { watch: options.watch, json: options.json },
     );
     interpretCliResultWithoutDI(result);
   });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SPAWN COMMAND
-// ═══════════════════════════════════════════════════════════════════════════
+// Migration shims for removed commands: spawn, await.
+// WHY hidden: these print a helpful error pointing to the replacement;
+// they must not appear in --help.
+program.addCommand(
+  new Command('spawn')
+    .description('(removed)')
+    .allowUnknownOption(true)
+    .action(() => {
+      process.stderr.write(
+        '\'worktrain spawn\' was removed. Use \'worktrain dispatch\' to start a session.\n' +
+        'Example: worktrain dispatch "task description" -w /path/to/workspace\n',
+      );
+      process.exit(1);
+    }),
+  { hidden: true },
+);
 
-program
-  .command('spawn')
-  .description('Start a workflow session non-interactively. Prints session handle to stdout.')
-  .requiredOption('-w, --workflow <id>', 'Workflow ID to run')
-  .requiredOption('-g, --goal <text>', 'One-sentence goal for the workflow session')
-  .requiredOption('-W, --workspace <path>', 'Absolute path to the workspace directory')
-  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
-  .action(async (options: { workflow: string; goal: string; workspace: string; port?: number }) => {
-    const result = await executeWorktrainSpawnCommand(
-      {
-        fetch: (url, opts) => globalThis.fetch(url, opts),
-        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-        stdout: (line: string) => process.stdout.write(line + '\n'),
-        stderr: (line: string) => process.stderr.write(line + '\n'),
-        homedir: os.homedir,
-        joinPath: path.join,
-        pathIsAbsolute: path.isAbsolute,
-        statPath: (p: string) => fs.promises.stat(p),
-      },
-      {
-        workflow: options.workflow,
-        goal: options.goal,
-        workspace: options.workspace,
-        port: options.port,
-      },
-    );
+program.addCommand(
+  new Command('await')
+    .description('(removed)')
+    .allowUnknownOption(true)
+    .action(() => {
+      process.stderr.write(
+        '\'worktrain await\' was removed. Use \'worktrain dispatch --wait\' to block until completion.\n',
+      );
+      process.exit(1);
+    }),
+  { hidden: true },
+);
 
-    interpretCliResultWithoutDI(result);
+// Hidden `run` parent + subcommand shims for removed `run pipeline` / `run pr-review`.
+// WHY keep `run` as a hidden registered command: Commander resolves commands left-to-right.
+// Without a registered `run`, `worktrain run pipeline` fails at `run` with a generic
+// "unknown command" error before the subcommand name is even seen.
+{
+  const runShim = new Command('run').description('(removed)').allowUnknownOption(true);
+  runShim.addCommand(
+    new Command('pipeline').description('(removed)').allowUnknownOption(true).action(() => {
+      process.stderr.write(
+        "'worktrain run pipeline' was removed. Use 'worktrain dispatch \"<task>\" -w <workspace>' instead.\n",
+      );
+      process.exit(1);
+    }),
+    { hidden: true },
+  );
+  runShim.addCommand(
+    new Command('pr-review').description('(removed)').allowUnknownOption(true).action(() => {
+      process.stderr.write(
+        "'worktrain run pr-review' was removed. Use 'worktrain dispatch --pr <n> -w <workspace>' instead.\n",
+      );
+      process.exit(1);
+    }),
+    { hidden: true },
+  );
+  runShim.action(() => {
+    process.stderr.write("'worktrain run' was removed. Use 'worktrain dispatch' instead.\n");
+    process.exit(1);
   });
-
-// ═══════════════════════════════════════════════════════════════════════════
-// AWAIT COMMAND
-// ═══════════════════════════════════════════════════════════════════════════
-
-program
-  .command('await')
-  .description('Block until workflow sessions complete. Prints JSON results to stdout.')
-  .requiredOption('-s, --sessions <handles>', 'Comma-separated list of session handles to wait for')
-  .option('-m, --mode <mode>', "Wait mode: 'all' (default) or 'any'", 'all')
-  .option('-t, --timeout <duration>', 'Timeout (e.g. "30m", "1h", "90s"). Default: 30m', '30m')
-  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
-  .action(async (options: { sessions: string; mode?: string; timeout?: string; port?: number }) => {
-    const mode = options.mode === 'any' ? 'any' : 'all';
-
-    const result = await executeWorktrainAwaitCommand(
-      {
-        fetch: (url: string) => globalThis.fetch(url),
-        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-        stdout: (line: string) => process.stdout.write(line + '\n'),
-        stderr: (line: string) => process.stderr.write(line + '\n'),
-        homedir: os.homedir,
-        joinPath: path.join,
-        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-        now: () => Date.now(),
-      },
-      {
-        sessions: options.sessions,
-        mode,
-        timeout: options.timeout,
-        port: options.port,
-      },
-    );
-
-    interpretCliResultWithoutDI(result);
-  });
+  program.addCommand(runShim, { hidden: true });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSOLE COMMAND
@@ -598,6 +619,21 @@ async function buildDaemonDeps(): Promise<import('./cli/commands/worktrain-daemo
  * WHY inline: the logs command is the only consumer of this formatting.
  * Keeping it here avoids creating a module for a single 30-line function.
  */
+/**
+ * Parse a timeout duration string like "30m", "1h", "90s" into milliseconds.
+ * Returns DEFAULT_DISPATCH_TIMEOUT_MS on unrecognized input.
+ */
+function parseTimeoutDuration(input: string): number {
+  const DEFAULT_DISPATCH_TIMEOUT_MS = 30 * 60 * 1000;
+  const trimmed = input.trim().toLowerCase();
+  const num = parseFloat(trimmed);
+  if (isNaN(num) || num <= 0) return DEFAULT_DISPATCH_TIMEOUT_MS;
+  if (trimmed.endsWith('h')) return num * 60 * 60 * 1000;
+  if (trimmed.endsWith('m')) return num * 60 * 1000;
+  if (trimmed.endsWith('s')) return num * 1000;
+  return DEFAULT_DISPATCH_TIMEOUT_MS;
+}
+
 function formatDaemonEventLine(raw: string): string | null {
   let obj: Record<string, unknown>;
   try {
@@ -777,7 +813,8 @@ program
   .description('Read and display the WorkRail daemon event log. Use --follow to stream new events in real time.')
   .option('--follow', 'Continuously poll the log file for new events (like tail -f)')
   .option('--session <id>', 'Filter events by sessionId (UUID prefix) or workrailSessionId (sess_xxx prefix)')
-  .action(async (options: { follow?: boolean; session?: string }) => {
+  .option('--json', 'Output raw newline-delimited JSON events instead of formatted text')
+  .action(async (options: { follow?: boolean; session?: string; json?: boolean }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
     // WHY constants: queue-poll uses size-based rotation (not date-based); stderr does not rotate.
@@ -843,9 +880,14 @@ program
           }
         }
 
-        const formatted = formatDaemonEventLine(line);
-        if (formatted !== null) {
-          process.stdout.write(formatted + '\n');
+        if (options.json) {
+          // Raw JSONL passthrough for machine-readable output.
+          process.stdout.write(line + '\n');
+        } else {
+          const formatted = formatDaemonEventLine(line);
+          if (formatted !== null) {
+            process.stdout.write(formatted + '\n');
+          }
         }
       }
     }
@@ -939,8 +981,12 @@ program
               continue;
             }
           }
-          const formatted = formatDaemonEventLine(line);
-          if (formatted !== null) process.stdout.write(formatted + '\n');
+          if (options.json) {
+            process.stdout.write(line + '\n');
+          } else {
+            const formatted = formatDaemonEventLine(line);
+            if (formatted !== null) process.stdout.write(formatted + '\n');
+          }
         } else if (source === 'queue_poll') {
           const formatted = formatQueuePollLine(line);
           if (formatted !== null) process.stdout.write(formatted + '\n');
@@ -1164,1268 +1210,96 @@ program.addCommand(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HEALTH COMMAND (renamed from `status <sessionId>`)
+// DISPATCH COMMAND
 // ═══════════════════════════════════════════════════════════════════════════
 
 program
-  .command('health <sessionId>')
-  .description('Print a health summary for a daemon session. Accepts sessionId (UUID prefix) or workrailSessionId (sess_xxx).')
-  .action((sessionId: string) => {
-    // WHY warn on short IDs: the startsWith() filter in runHealthSummary aggregates
-    // events from ALL sessions sharing the same prefix, silently producing a wrong summary.
-    // Full sess_ IDs are ~31 chars; 20 chars is a safe threshold that warns on
-    // short prefixes without triggering on any valid full session ID.
-    if (sessionId.length < 20) {
-      process.stderr.write(
-        `Warning: session ID "${sessionId}" is shorter than 20 characters -- ` +
-        `provide more characters to avoid matching multiple sessions.\n`,
-      );
-    }
-
-    const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
-    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const filePath = path.join(eventsDir, `${date}.jsonl`);
-
-    let raw: string;
-    try {
-      raw = fs.readFileSync(filePath, 'utf8');
-    } catch {
-      // Today's log doesn't exist -- fall through to cross-day diagnose path below.
-      raw = '';
-    }
-
-    // Check whether this session appears in today's log.
-    // WHY check before running health summary: if the session is not in today's log,
-    // runHealthSummary() would produce an empty/misleading result. For completed/prior-day
-    // sessions, parseDaemonEvents() provides a richer failure card across the last 7 days.
-    // Today's live sessions (actively running) continue to use runHealthSummary().
-    const sessionInTodayLog = raw.split('\n').some((line) => {
-      if (!line.trim()) return false;
-      try {
-        const obj = JSON.parse(line) as Record<string, unknown>;
-        const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
-        const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
-        return sid.startsWith(sessionId) || sid === sessionId ||
-          wrid.startsWith(sessionId) || wrid === sessionId;
-      } catch {
-        return false;
-      }
-    });
-
-    if (!sessionInTodayLog) {
-      // Cross-day delegation: session not in today's log, use diagnose failure card.
-      const readFile = (fp: string): string | null => {
-        try { return fs.readFileSync(fp, 'utf8'); } catch { return null; }
-      };
-      const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
-      const card = formatDiagnosticCard(result);
-      process.stdout.write(card + '\n');
-      return;
-    }
-
-    runHealthSummary(sessionId, raw);
-  });
-
-// ═══════════════════════════════════════════════════════════════════════════
-// STATUS COMMAND (overview, no args)
-// ═══════════════════════════════════════════════════════════════════════════
-
-program
-  .command('status [sessionId]')
+  .command('dispatch [task]')
   .description(
-    'Print an overview of active and recently completed sessions (no args), ' +
-    'or a session health summary when a sessionId is provided (deprecated: use `worktrain health <id>`).',
+    'Dispatch a workflow session via the running daemon.\n' +
+    'Routes adaptively unless --workflow or --pr is specified.\n' +
+    'Requires the daemon to be running (worktrain daemon start).',
   )
-  .option('--json', 'Output machine-readable JSON packet')
-  .option('-w, --workspace <path>', 'Filter sessions by workspace (reserved for future use)')
-  .action(async (sessionId: string | undefined, options: { json?: boolean; workspace?: string }) => {
-    // Backward-compat shim: if a sessionId argument is provided, route to the
-    // health command logic with a deprecation notice.
-    if (sessionId !== undefined) {
-      process.stderr.write(
-        `Deprecation notice: \`worktrain status <sessionId>\` has been renamed to \`worktrain health <sessionId>\`.\n` +
-        `Please update your scripts to use \`worktrain health ${sessionId}\`.\n\n`,
-      );
+  .option('-w, --workspace <path>', 'Absolute path to the workspace directory')
+  .option('--workflow <id>', 'Workflow ID to run (overrides adaptive routing)')
+  .option('--pr <n>', 'PR number to review (dispatches wr.mr-review)', (v) => parseInt(v, 10))
+  .option('--wait', 'Block until session completes. Exit 0=success, 1=failure, 2=timeout')
+  .option('--json', 'Machine-readable JSON output (session ID, outcome when --wait)')
+  .option('--timeout <duration>', 'Wait timeout, e.g. "30m", "1h". Default: 30m', '30m')
+  .option('-p, --port <n>', 'Override daemon HTTP port', parseInt)
+  .action(async (task: string | undefined, options: { workspace?: string; workflow?: string; pr?: number; wait?: boolean; json?: boolean; timeout?: string; port?: number }) => {
+    const { executeWorktrainDispatchCommand } = await import('./cli/commands/worktrain-dispatch.js');
 
-      // WHY warn on short IDs: same rationale as the health command below.
-      if (sessionId.length < 20) {
-        process.stderr.write(
-          `Warning: session ID "${sessionId}" is shorter than 20 characters -- ` +
-          `provide more characters to avoid matching multiple sessions.\n`,
-        );
-      }
-
-      const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
-      const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      const filePath = path.join(eventsDir, `${date}.jsonl`);
-
-      let raw = '';
-      try {
-        raw = fs.readFileSync(filePath, 'utf8');
-      } catch {
-        // Today's log absent -- fall through to cross-day path below.
-      }
-
-      // WHY this shim block is inline: it is a temporary backward-compat bridge
-      // that routes legacy `worktrain status <id>` calls to runHealthSummary.
-      // It is kept inline because it is expected to be removed once all callers
-      // migrate to `worktrain health <id>` -- extracting it would be premature.
-      process.stderr.write(`\nNote: This is the old \`worktrain status <id>\` output. Use \`worktrain health <id>\` instead.\n\n`);
-
-      const sessionInTodayLog = raw.split('\n').some((line) => {
-        if (!line.trim()) return false;
-        try {
-          const obj = JSON.parse(line) as Record<string, unknown>;
-          const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
-          const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
-          return sid.startsWith(sessionId) || sid === sessionId ||
-            wrid.startsWith(sessionId) || wrid === sessionId;
-        } catch { return false; }
-      });
-
-      if (!sessionInTodayLog) {
-        const readFile = (fp: string): string | null => {
-          try { return fs.readFileSync(fp, 'utf8'); } catch { return null; }
-        };
-        const result = parseDaemonEvents(sessionId, eventsDir, 7, readFile);
-        process.stdout.write(formatDiagnosticCard(result) + '\n');
-        return;
-      }
-
-      runHealthSummary(sessionId, raw);
-      return;
+    if (!options.workspace) {
+      process.stderr.write('Error: -w/--workspace is required\n');
+      process.exit(1);
     }
 
-    // No sessionId: new overview mode.
-    await executeWorktrainOverviewCommand(
+    const timeoutMs = parseTimeoutDuration(options.timeout ?? '30m');
+
+    const result = await executeWorktrainDispatchCommand(
       {
-        now: () => Date.now(),
-        buildConsoleService: buildConsoleServiceFromDataDir,
+        fetch: (url, opts) => globalThis.fetch(url, opts) as Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>,
+        readFile: async (p: string) => { try { return await fs.promises.readFile(p, 'utf8'); } catch { return null; } },
+        stdout: (line: string) => process.stdout.write(line + '\n'),
+        stderr: (line: string) => process.stderr.write(line + '\n'),
         homedir: os.homedir,
         joinPath: path.join,
-        print: (line: string) => process.stdout.write(line + '\n'),
-        getDataDirEnv: () => process.env['WORKRAIL_DATA_DIR'],
-        readEventLog: (p: string) => fs.promises.readFile(p, 'utf-8').catch(() => ''),
+        pathIsAbsolute: path.isAbsolute,
+        statPath: (p: string) => fs.promises.stat(p),
+        sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
       },
       {
-        json: options.json,
+        task,
+        workflow: options.workflow,
+        pr: options.pr,
         workspace: options.workspace,
+        wait: options.wait,
+        json: options.json,
+        port: options.port,
+        timeoutMs,
       },
     );
-  });
 
-/**
- * Print a health summary for a single session from its raw JSONL event log.
- *
- * WHY extracted as a function: shared between the `health` command and the
- * backward-compat shim in `status [sessionId]`. Keeps the logic in one place.
- */
-function runHealthSummary(sessionId: string, raw: string): void {
-  let workflowId: string | null = null;
-  let firstTs: number | null = null;
-  let lastTs: number | null = null;
-  let llmTurns = 0;
-  let stepAdvances = 0;
-  let totalToolCalls = 0;
-  let failedToolCalls = 0;
-  let fatalIssues = 0;
-  let errorIssues = 0;
-  let warnIssues = 0;
-  let sessionOutcome: string | null = null;
-  let lastToolName: string | null = null;
-  let lastToolArgs: string | null = null;
-  let stuckCount = 0;
-  let isLive = true;
-
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    let obj: Record<string, unknown>;
-    try {
-      obj = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
+    // Handle exit 2 for --wait timeout (session timed out waiting for terminal event).
+    // WHY special-case: CliResult has no exit-code field; the __exit2__ sentinel is the
+    // minimal way to distinguish "session failed" (exit 1) from "gave up waiting" (exit 2).
+    if (result.kind === 'failure' && typeof result.output?.message === 'string' && result.output.message.startsWith('__exit2__')) {
+      process.stderr.write(result.output.message.replace('__exit2__ ', '') + '\n');
+      process.exit(2);
     }
-
-    const sid = typeof obj['sessionId'] === 'string' ? obj['sessionId'] : '';
-    const wrid = typeof obj['workrailSessionId'] === 'string' ? obj['workrailSessionId'] : '';
-    const matches = sid.startsWith(sessionId) || sid === sessionId ||
-      wrid.startsWith(sessionId) || wrid === sessionId;
-    if (!matches) continue;
-
-    const ts = typeof obj['ts'] === 'number' ? obj['ts'] : null;
-    if (ts !== null) {
-      if (firstTs === null || ts < firstTs) firstTs = ts;
-      if (lastTs === null || ts > lastTs) lastTs = ts;
-    }
-
-    const kind = typeof obj['kind'] === 'string' ? obj['kind'] : '';
-    switch (kind) {
-      case 'session_started':
-        workflowId = typeof obj['workflowId'] === 'string' ? obj['workflowId'] : null;
-        break;
-      case 'llm_turn_completed':
-        llmTurns++;
-        break;
-      case 'step_advanced':
-        stepAdvances++;
-        break;
-      case 'tool_call_started':
-        totalToolCalls++;
-        lastToolName = typeof obj['toolName'] === 'string' ? obj['toolName'] : null;
-        lastToolArgs = typeof obj['argsSummary'] === 'string' ? String(obj['argsSummary']).slice(0, 60) : null;
-        break;
-      case 'tool_call_failed':
-        failedToolCalls++;
-        break;
-      case 'issue_reported': {
-        const severity = obj['severity'];
-        if (severity === 'fatal') fatalIssues++;
-        else if (severity === 'error') errorIssues++;
-        else if (severity === 'warn') warnIssues++;
-        break;
-      }
-      case 'agent_stuck':
-        stuckCount++;
-        break;
-      case 'session_completed':
-        sessionOutcome = typeof obj['outcome'] === 'string' ? obj['outcome'] : null;
-        isLive = false;
-        break;
-      case 'session_aborted':
-        // WHY treat session_aborted as a terminal state: the daemon was stopped before
-        // the session completed. This is not a failure, but the session is definitively
-        // no longer running. Show ABORTED in the status line rather than RUNNING.
-        sessionOutcome = 'aborted';
-        isLive = false;
-        break;
-    }
-  }
-
-  if (firstTs === null) {
-    process.stdout.write(`No events found for session: ${sessionId}\n`);
-    return;
-  }
-
-  const durationMs = (lastTs ?? firstTs) - firstTs;
-  const durationSec = Math.floor(durationMs / 1000);
-  const durationMin = Math.floor(durationSec / 60);
-  const durationRemSec = durationSec % 60;
-  const durationStr = durationMin > 0
-    ? `${durationMin}m ${durationRemSec}s`
-    : `${durationSec}s`;
-
-  const avgTurnSec = llmTurns > 0 ? (durationMs / llmTurns / 1000).toFixed(1) : '?';
-  const failRate = totalToolCalls > 0 ? ((failedToolCalls / totalToolCalls) * 100).toFixed(1) : '0';
-  const sessionStatus = sessionOutcome !== null
-    ? sessionOutcome.toUpperCase()
-    : (isLive ? 'RUNNING' : 'UNKNOWN');
-
-  const issueStr = (fatalIssues + errorIssues + warnIssues) > 0
-    ? `${fatalIssues + errorIssues + warnIssues} (${fatalIssues} fatal, ${errorIssues} error, ${warnIssues} warn)`
-    : '0';
-
-  const lastActivityStr = lastTs !== null
-    ? `${lastToolName ?? 'unknown'} ${lastToolArgs ? `"${lastToolArgs}"` : ''} ${Math.round((Date.now() - lastTs) / 1000)}s ago`
-    : 'unknown';
-
-  process.stdout.write(`\nSession: ${sessionId}    [${sessionStatus}]\n`);
-  if (workflowId) process.stdout.write(`Workflow: ${workflowId}\n`);
-  process.stdout.write(`Duration: ${durationStr}\n`);
-  process.stdout.write(`LLM turns: ${llmTurns}${llmTurns > 0 ? ` (avg ${avgTurnSec}s each)` : ''}\n`);
-  process.stdout.write(`Step advances: ${stepAdvances}\n`);
-  process.stdout.write(`Tool calls: ${totalToolCalls} (${failedToolCalls} failed, ${failRate}% failure rate)\n`);
-  process.stdout.write(`Issues reported: ${issueStr}\n`);
-  process.stdout.write(`Last activity: ${lastActivityStr}\n`);
-
-  if (stuckCount > 0) {
-    process.stdout.write(`*** WARNING: ${stuckCount} stuck signal(s) detected\n`);
-  }
-  if (fatalIssues > 0) {
-    process.stdout.write(`*** WARNING: ${fatalIssues} FATAL issue(s) reported\n`);
-  }
-  if (llmTurns >= 10 && stepAdvances === 0) {
-    process.stdout.write(`*** WARNING: ${llmTurns} turns with 0 step advances (possible stuck)\n`);
-  }
-
-  process.stdout.write('\n');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// RUN COMMAND
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * worktrain run pr-review
- *
- * Autonomous PR review coordinator. Dispatches wr.mr-review sessions
- * for open PRs, waits for results, and routes by severity: clean -> merge,
- * minor -> fix-agent loop, blocking/unknown -> escalate.
- *
- * Requires the WorkTrain daemon to be running: worktrain daemon
- */
-const runCommand = program
-  .command('run')
-  .description('Run a coordinator script');
-
-runCommand
-  .command('pr-review')
-  .description('Review open PRs autonomously: dispatch review sessions, route by findings, merge or escalate')
-  .requiredOption('-W, --workspace <path>', 'Absolute path to the git workspace')
-  .option('-r, --pr <number>', 'Review a specific PR number (repeatable)', (val, prev: number[]) => [...prev, parseInt(val, 10)], [] as number[])
-  .option('--dry-run', 'Print actions without dispatching sessions or merging')
-  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
-  .action(async (options: { workspace: string; pr: number[]; dryRun?: boolean; port?: number }) => {
-    const {
-      runPrReviewCoordinator,
-      discoverConsolePort,
-    } = await import('./coordinators/pr-review.js');
-    const { execFile: execFileRaw } = await import('child_process');
-    const execFilePromise = promisify(execFileRaw);
-
-    // Validate workspace at the CLI boundary
-    if (!path.isAbsolute(options.workspace)) {
-      process.stderr.write(`Error: --workspace must be an absolute path, got: ${options.workspace}\n`);
-      process.exit(1);
-    }
-    try {
-      const stat = await fs.promises.stat(options.workspace);
-      if (!stat.isDirectory()) {
-        process.stderr.write(`Error: --workspace must be an existing directory: ${options.workspace}\n`);
-        process.exit(1);
-      }
-    } catch {
-      process.stderr.write(`Error: --workspace does not exist: ${options.workspace}\n`);
-      process.exit(1);
-    }
-
-    // Discover console port
-    const port = await discoverConsolePort(
-      {
-        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-        homedir: os.homedir,
-        joinPath: path.join,
-      },
-      options.port,
-    );
-
-    // Build real CoordinatorDeps
-    const deps = {
-      spawnSession: async (
-        workflowId: string,
-        goal: string,
-        workspace: string,
-        context?: CoordinatorSpawnContext,
-        _agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
-        parentSessionId?: string,
-      ) => {
-        const url = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
-        try {
-          const response = await globalThis.fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workflowId,
-              goal,
-              workspacePath: workspace,
-              ...(context !== undefined ? { context } : {}),
-              ...(parentSessionId !== undefined ? { parentSessionId } : {}),
-            }),
-            signal: AbortSignal.timeout(30_000),
-          });
-          const body = await response.json() as Record<string, unknown>;
-          if (!response.ok) {
-            const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
-            if (response.status === 503) {
-              return { kind: 'err' as const, error: `WorkTrain daemon is not ready: ${errMsg}` };
-            }
-            return { kind: 'err' as const, error: `Dispatch failed: ${errMsg}` };
-          }
-          if (body['success'] !== true || typeof body['data'] !== 'object') {
-            return { kind: 'err' as const, error: 'Unexpected response from dispatch endpoint' };
-          }
-          const data = body['data'] as Record<string, unknown>;
-          const handle = typeof data['sessionHandle'] === 'string' ? data['sessionHandle'] : '';
-          if (!handle) {
-            return { kind: 'err' as const, error: 'Dispatch succeeded but no session handle returned' };
-          }
-          return { kind: 'ok' as const, value: handle };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          const isConnRefused = msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
-          if (isConnRefused) {
-            return { kind: 'err' as const, error: `Could not connect to WorkTrain daemon on port ${port}. Ensure the daemon is running with: worktrain daemon` };
-          }
-          if (e instanceof Error && e.name === 'TimeoutError') {
-            return { kind: 'err' as const, error: `Daemon request timed out after 30s` };
-          }
-          return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
-        }
-      },
-
-      contextAssembler: createContextAssembler({
-        execGit: async (args: readonly string[], cwd: string) => {
-          try {
-            const { stdout } = await execFileAsync('git', [...args], { cwd });
-            return { kind: 'ok' as const, value: stdout };
-          } catch (e) {
-            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
-          }
-        },
-        execGh: async (args: readonly string[], cwd: string) => {
-          try {
-            const { stdout } = await execFileAsync('gh', [...args], { cwd });
-            return { kind: 'ok' as const, value: stdout };
-          } catch (e) {
-            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
-          }
-        },
-        listRecentSessions: createListRecentSessions(),
-        nowIso: () => new Date().toISOString(),
-      }),
-
-      awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
-        const { executeWorktrainAwaitCommand } = await import('./cli/commands/worktrain-await.js');
-        let resolvedResult: import('./cli/commands/worktrain-await.js').AwaitResult | null = null;
-
-        await executeWorktrainAwaitCommand(
-          {
-            fetch: (url: string) => globalThis.fetch(url),
-            readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-            stdout: (line: string) => {
-              try { resolvedResult = JSON.parse(line) as import('./cli/commands/worktrain-await.js').AwaitResult; } catch { /* ignore */ }
-            },
-            stderr: (line: string) => process.stderr.write(line + '\n'),
-            homedir: os.homedir,
-            joinPath: path.join,
-            sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-            now: () => Date.now(),
-          },
-          {
-            sessions: [...handles].join(','),
-            mode: 'all',
-            timeout: `${Math.round(timeoutMs / 1000)}s`,
-            port,
-          },
-        );
-
-        if (resolvedResult === null) {
-          process.stderr.write(
-            `[WARN coord:reason=await_failed] awaitSessions: could not get session results -- daemon may be unreachable or timed out. Returning all ${handles.length} session(s) as failed.\n`,
-          );
-        }
-        return resolvedResult ?? { results: [...handles].map((h) => ({
-          handle: h,
-          outcome: 'failed' as const,
-          status: null,
-          durationMs: 0,
-        })), allSucceeded: false };
-      },
-
-      getAgentResult: async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
-        // WHY this function returns both recapMarkdown and artifacts:
-        // The coordinator uses recapMarkdown for keyword-scan fallback and artifacts for
-        // typed verdict reading (readVerdictArtifact). Artifacts are aggregated from ALL
-        // session nodes (not just the tip node) so a verdict emitted on any step is captured.
-        // See docs/discovery/artifacts-coordinator-channel.md.
-        const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
-        try {
-          // Step 1: get session detail to find preferredTipNodeId and all node IDs
-          const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
-          const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!sessionRes.ok) {
-            process.stderr.write(
-              `[WARN coord:reason=http_error status=${sessionRes.status} handle=${sessionHandle.slice(0, 16)}] getAgentResult: session fetch returned HTTP ${sessionRes.status}\n`,
-            );
-            return emptyResult;
-          }
-          const sessionBody = await sessionRes.json() as Record<string, unknown>;
-          if (sessionBody['success'] !== true) {
-            process.stderr.write(
-              `[WARN coord:reason=api_error handle=${sessionHandle.slice(0, 16)}] getAgentResult: session API returned success=false\n`,
-            );
-            return emptyResult;
-          }
-
-          const data = sessionBody['data'] as Record<string, unknown> | undefined;
-          if (!data) {
-            process.stderr.write(
-              `[WARN coord:reason=no_data handle=${sessionHandle.slice(0, 16)}] getAgentResult: session response missing data field\n`,
-            );
-            return emptyResult;
-          }
-          const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
-          if (!Array.isArray(runs) || runs.length === 0) {
-            process.stderr.write(
-              `[WARN coord:reason=no_runs handle=${sessionHandle.slice(0, 16)}] getAgentResult: session has no runs\n`,
-            );
-            return emptyResult;
-          }
-
-          const firstRun = runs[0] as Record<string, unknown>;
-          const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string'
-            ? firstRun['preferredTipNodeId']
-            : null;
-          if (!tipNodeId) {
-            process.stderr.write(
-              `[WARN coord:reason=no_tip_node handle=${sessionHandle.slice(0, 16)}] getAgentResult: session run has no preferredTipNodeId\n`,
-            );
-            return emptyResult;
-          }
-
-          // Step 2: collect all node IDs from the session's first run.
-          // WHY all nodes (not just tip): a verdict artifact may be emitted on a non-final step.
-          // The tip node provides recapMarkdown; all nodes contribute to the artifacts aggregate.
-          const allNodes = Array.isArray(firstRun['nodes'])
-            ? (firstRun['nodes'] as Array<Record<string, unknown>>)
-            : [];
-          const allNodeIds = allNodes
-            .map((n) => (typeof n['nodeId'] === 'string' ? n['nodeId'] : null))
-            .filter((id): id is string => id !== null);
-
-          // Ensure the tip node is included even if not in allNodeIds (defensive)
-          const nodeIdsToFetch = allNodeIds.length > 0
-            ? allNodeIds
-            : [tipNodeId];
-
-          // Step 3: fetch each node and aggregate artifacts + recapMarkdown.
-          // WHY per-node try/catch: individual fetch failures must not abort the
-          // entire aggregation. A single failed node's artifacts are skipped (WARN logged),
-          // while other nodes' artifacts and the tip node's recapMarkdown are preserved.
-          const baseNodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/`;
-          let recap: string | null = null;
-          const collectedArtifacts: unknown[] = [];
-
-          for (const nodeId of nodeIdsToFetch) {
-            try {
-              const nodeRes = await globalThis.fetch(
-                baseNodeUrl + encodeURIComponent(nodeId),
-                { signal: AbortSignal.timeout(30_000) },
-              );
-              if (!nodeRes.ok) {
-                process.stderr.write(
-                  `[WARN coord:reason=node_http_error status=${nodeRes.status} handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: node fetch returned HTTP ${nodeRes.status}\n`,
-                );
-                continue;
-              }
-              const nodeBody = await nodeRes.json() as Record<string, unknown>;
-              if (nodeBody['success'] !== true) {
-                process.stderr.write(
-                  `[WARN coord:reason=node_api_error handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: node API returned success=false\n`,
-                );
-                continue;
-              }
-              const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
-              if (!nodeData) continue;
-
-              // Collect recapMarkdown from tip node only
-              if (nodeId === tipNodeId) {
-                recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
-                if (recap === null) {
-                  process.stderr.write(
-                    `[WARN coord:reason=no_recap handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: tip node has no recapMarkdown\n`,
-                  );
-                }
-              }
-
-              // Collect artifacts from all nodes (aggregate across the session)
-              const nodeArtifacts = nodeData['artifacts'];
-              if (Array.isArray(nodeArtifacts) && nodeArtifacts.length > 0) {
-                collectedArtifacts.push(...nodeArtifacts);
-              }
-            } catch (nodeErr) {
-              const msg = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
-              process.stderr.write(
-                `[WARN coord:reason=node_exception handle=${sessionHandle.slice(0, 16)} node=${nodeId.slice(0, 16)}] getAgentResult: ${msg}\n`,
-              );
-              // Continue to next node -- one failed node does not abort the aggregation
-            }
-          }
-
-          return { recapMarkdown: recap, artifacts: collectedArtifacts };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          process.stderr.write(
-            `[WARN coord:reason=exception handle=${sessionHandle.slice(0, 16)}] getAgentResult: ${msg}\n`,
-          );
-          return emptyResult;
-        }
-      },
-
-      getChildSessionResult: async (handle: string, _coordinatorSessionId?: string): Promise<ChildSessionResult> => {
-        // HTTP-based implementation for the CLI review command.
-        // Queries the console server once to read the terminal session status,
-        // then calls getAgentResult for notes and artifacts on success.
-        const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
-        try {
-          const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-          if (!sessionRes.ok) {
-            return { kind: 'failed', reason: 'error', message: `Session fetch HTTP ${sessionRes.status}` };
-          }
-          const sessionBody = await sessionRes.json() as Record<string, unknown>;
-          const data = sessionBody['data'] as Record<string, unknown> | null | undefined;
-          const runs = (data?.['runs'] ?? sessionBody['runs']) as Array<Record<string, unknown>> | null | undefined;
-          const runStatus = runs?.[0]?.['status'] as string | null | undefined;
-
-          if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
-            // Reuse the getAgentResult implementation defined above in this closure.
-            // WHY: the deps object literal is being constructed; we cannot call sibling
-            // methods directly. Re-fetching the session detail is cheap and correct here.
-            const agentResult = await (async () => {
-              const empty = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
-              try {
-                const tipNodeId = (runs?.[0]?.['preferredTipNodeId'] as string | null | undefined) ?? null;
-                if (!tipNodeId) return empty;
-                const allNodes = (runs?.[0]?.['nodes'] as Array<Record<string, unknown>> | null | undefined) ?? [];
-                const allNodeIds = allNodes
-                  .map((n) => n['nodeId'] as string | undefined)
-                  .filter((id): id is string => typeof id === 'string' && id !== '');
-                const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
-                let recap: string | null = null;
-                const collectedArtifacts: unknown[] = [];
-                for (const nodeId of nodeIdsToFetch) {
-                  try {
-                    const nodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}/nodes/${encodeURIComponent(nodeId)}`;
-                    const nodeRes = await globalThis.fetch(nodeUrl, { signal: AbortSignal.timeout(30_000) });
-                    if (!nodeRes.ok) continue;
-                    const nodeBody = await nodeRes.json() as Record<string, unknown>;
-                    const nodeData = nodeBody['data'] as Record<string, unknown> | null | undefined;
-                    if (nodeId === tipNodeId) recap = (nodeData?.['recapMarkdown'] as string | null) ?? null;
-                    const artifacts = (nodeData?.['artifacts'] as unknown[]) ?? [];
-                    if (artifacts.length > 0) collectedArtifacts.push(...artifacts);
-                  } catch { continue; }
-                }
-                return { recapMarkdown: recap, artifacts: collectedArtifacts as readonly unknown[] };
-              } catch { return empty; }
-            })();
-            return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
-          }
-
-          if (runStatus === 'blocked') {
-            return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
-          }
-
-          if (runStatus === null || runStatus === undefined) {
-            return { kind: 'timed_out', message: `Child session ${handle.slice(0, 16)} has no terminal run status` };
-          }
-
-          return { kind: 'timed_out', message: `Child session ${handle.slice(0, 16)} is in state '${runStatus}'` };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return { kind: 'failed', reason: 'error', message: `Exception in getChildSessionResult: ${msg}` };
-        }
-      },
-
-      // CLI-based spawnAndAwait: dispatches via HTTP /api/v2/auto/dispatch.
-      // Sequential single-child only. For batch, use spawnSession + awaitSessions + getChildSessionResult.
-      spawnAndAwait: async (
-        workflowId: string,
-        goal: string,
-        workspace: string,
-        opts?: {
-          readonly coordinatorSessionId?: string;
-          readonly timeoutMs?: number;
-          // agentConfig not supported via CLI HTTP path -- daemon uses its own trigger defaults.
-          readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>;
-        },
-      ): Promise<ChildSessionResult> => {
-        // Step 1: Spawn via HTTP dispatch.
-        const spawnUrl = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
-        let handle: string;
-        try {
-          const response = await globalThis.fetch(spawnUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              workflowId,
-              goal,
-              workspacePath: workspace,
-              ...(opts?.coordinatorSessionId !== undefined ? { parentSessionId: opts.coordinatorSessionId } : {}),
-            }),
-            signal: AbortSignal.timeout(30_000),
-          });
-          const body = await response.json() as Record<string, unknown>;
-          if (!response.ok) {
-            const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
-            return { kind: 'failed', reason: 'error', message: `Spawn HTTP error: ${errMsg}` };
-          }
-          const sessionId = (body['data'] as Record<string, unknown> | null)?.['sessionId'] as string | null | undefined
-            ?? body['sessionId'] as string | null | undefined;
-          if (!sessionId) {
-            return { kind: 'failed', reason: 'error', message: 'Spawn response missing sessionId' };
-          }
-          handle = sessionId;
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return { kind: 'failed', reason: 'error', message: `Exception spawning session: ${msg}` };
-        }
-
-        // Step 2: Poll until terminal or timeout.
-        const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-        const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-        const POLL_INTERVAL_MS = 5_000;
-        const deadline = Date.now() + timeoutMs;
-        let timedOut = false;
-
-        while (Date.now() < deadline) {
-          try {
-            const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
-            const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(10_000) });
-            if (sessionRes.ok) {
-              const body = await sessionRes.json() as Record<string, unknown>;
-              const data = body['data'] as Record<string, unknown> | null | undefined;
-              const runs = (data?.['runs'] ?? body['runs']) as Array<Record<string, unknown>> | null | undefined;
-              const status = runs?.[0]?.['status'] as string | null | undefined;
-              if (status === 'complete' || status === 'complete_with_gaps' || status === 'blocked') {
-                break;
-              }
-            }
-          } catch { /* continue polling */ }
-          await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-        }
-
-        if (Date.now() >= deadline) timedOut = true;
-        if (timedOut) {
-          return { kind: 'timed_out', message: `Session ${handle.slice(0, 16)} timed out after ${timeoutMs}ms` };
-        }
-
-        // Step 3: Read terminal result including notes and artifacts via getChildSessionResult.
-        return deps.getChildSessionResult(handle, opts?.coordinatorSessionId);
-      },
-
-      listOpenPRs: async (workspace: string) => {
-        try {
-          const { stdout } = await execFilePromise('gh', ['pr', 'list', '--json', 'number,title,headRefName'], {
-            cwd: workspace,
-            timeout: 30_000,
-          });
-          const parsed = JSON.parse(stdout) as Array<{ number: number; title: string; headRefName: string }>;
-          return parsed.map((p) => ({ number: p.number, title: p.title, headRef: p.headRefName }));
-        } catch {
-          return [];
-        }
-      },
-
-      mergePR: async (prNumber: number, workspace: string) => {
-        try {
-          await execFilePromise('gh', ['pr', 'merge', String(prNumber), '--squash', '--auto'], {
-            cwd: workspace,
-            timeout: 60_000,
-          });
-          return { kind: 'ok' as const, value: undefined };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return { kind: 'err' as const, error: msg };
-        }
-      },
-
-      writeFile: async (filePath: string, content: string) => {
-        await fs.promises.writeFile(filePath, content, 'utf-8');
-      },
-
-      readFile: (filePath: string) => fs.promises.readFile(filePath, 'utf-8'),
-
-      appendFile: (filePath: string, content: string) =>
-        fs.promises.appendFile(filePath, content, 'utf-8'),
-
-      mkdir: (dirPath: string, opts: { recursive: boolean }) =>
-        fs.promises.mkdir(dirPath, opts),
-
-      homedir: os.homedir,
-      joinPath: path.join,
-      nowIso: () => new Date().toISOString(),
-      generateId: () => randomUUID(),
-
-      stderr: (line: string) => process.stderr.write(line + '\n'),
-      now: () => Date.now(),
-      port,
-    };
-
-    const result = await runPrReviewCoordinator(deps, {
-      workspace: options.workspace,
-      prs: options.pr.length > 0 ? options.pr : undefined,
-      dryRun: options.dryRun ?? false,
-      port: options.port,
-    });
-
-    process.exit(result.hasErrors ? 1 : 0);
-  });
-
-/**
- * worktrain run pipeline
- *
- * Adaptive pipeline coordinator. Routes tasks to QUICK_REVIEW, REVIEW_ONLY,
- * IMPLEMENT, or FULL mode based on static signals in the goal and workspace state,
- * then executes the appropriate pipeline phases end-to-end.
- *
- * Requires the WorkTrain daemon to be running: worktrain daemon
- * (session dispatch uses HTTP to the daemon's /api/v2/auto/dispatch endpoint)
- */
-runCommand
-  .command('pipeline')
-  .description('Run the adaptive pipeline coordinator for a task goal')
-  .requiredOption('-W, --workspace <path>', 'Absolute path to the git workspace')
-  .requiredOption('-g, --goal <text>', 'One-sentence goal for the pipeline')
-  .option('-m, --mode <mode>', 'Pipeline mode override: QUICK_REVIEW, REVIEW_ONLY, IMPLEMENT, FULL')
-  .option('--dry-run', 'Print planned actions without dispatching sessions')
-  .option('-p, --port <n>', 'Console HTTP server port (default: auto-discover from lock file, then 3456)', parseInt)
-  .action(async (options: { workspace: string; goal: string; mode?: string; dryRun?: boolean; port?: number }) => {
-    const {
-      executeWorktrainPipelineCommand,
-    } = await import('./cli/commands/worktrain-pipeline.js');
-    const {
-      discoverConsolePort,
-    } = await import('./coordinators/pr-review.js');
-    const { execFile: execFileRaw } = await import('child_process');
-    const execFilePromise = promisify(execFileRaw);
-
-    // Discover console port (daemon HTTP server)
-    const port = await discoverConsolePort(
-      {
-        readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-        homedir: os.homedir,
-        joinPath: path.join,
-      },
-      options.port,
-    );
-
-    // ── HTTP-based session dispatch (requires running daemon) ────────────────
-    const httpSpawnSession = async (
-      workflowId: string,
-      goal: string,
-      workspace: string,
-      context?: CoordinatorSpawnContext,
-      _agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }>,
-      parentSessionId?: string,
-    ) => {
-      const url = `http://127.0.0.1:${port}/api/v2/auto/dispatch`;
-      try {
-        const response = await globalThis.fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workflowId, goal,
-            workspacePath: workspace,
-            ...(context !== undefined ? { context } : {}),
-            ...(parentSessionId !== undefined ? { parentSessionId } : {}),
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
-        const body = await response.json() as Record<string, unknown>;
-        if (!response.ok) {
-          const errMsg = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
-          if (response.status === 503) {
-            return { kind: 'err' as const, error: `WorkTrain daemon is not ready: ${errMsg}` };
-          }
-          return { kind: 'err' as const, error: `Dispatch failed: ${errMsg}` };
-        }
-        if (body['success'] !== true || typeof body['data'] !== 'object') {
-          return { kind: 'err' as const, error: 'Unexpected response from dispatch endpoint' };
-        }
-        const data = body['data'] as Record<string, unknown>;
-        const handle = typeof data['sessionHandle'] === 'string' ? data['sessionHandle'] : '';
-        if (!handle) {
-          return { kind: 'err' as const, error: 'Dispatch succeeded but no session handle returned' };
-        }
-        return { kind: 'ok' as const, value: handle };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        const isConnRefused = msg.includes('ECONNREFUSED') || msg.includes('fetch failed');
-        if (isConnRefused) {
-          return { kind: 'err' as const, error: `Could not connect to WorkTrain daemon on port ${port}. Ensure the daemon is running with: worktrain daemon` };
-        }
-        return { kind: 'err' as const, error: `Dispatch request failed: ${msg}` };
-      }
-    };
-
-    const httpGetAgentResult = async (sessionHandle: string): Promise<{ recapMarkdown: string | null; artifacts: readonly unknown[] }> => {
-      const emptyResult = { recapMarkdown: null, artifacts: [] as readonly unknown[] };
-      try {
-        const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}`;
-        const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-        if (!sessionRes.ok) return emptyResult;
-        const sessionBody = await sessionRes.json() as Record<string, unknown>;
-        if (sessionBody['success'] !== true) return emptyResult;
-        const data = sessionBody['data'] as Record<string, unknown> | undefined;
-        if (!data) return emptyResult;
-        const runs = data['runs'] as Array<Record<string, unknown>> | undefined;
-        if (!Array.isArray(runs) || runs.length === 0) return emptyResult;
-        const firstRun = runs[0] as Record<string, unknown>;
-        const tipNodeId = typeof firstRun['preferredTipNodeId'] === 'string' ? firstRun['preferredTipNodeId'] : null;
-        if (!tipNodeId) return emptyResult;
-        const allNodes = Array.isArray(firstRun['nodes']) ? (firstRun['nodes'] as Array<Record<string, unknown>>) : [];
-        const allNodeIds = allNodes
-          .map((n) => (typeof n['nodeId'] === 'string' ? n['nodeId'] : null))
-          .filter((id): id is string => id !== null);
-        const nodeIdsToFetch = allNodeIds.length > 0 ? allNodeIds : [tipNodeId];
-        const baseNodeUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(sessionHandle)}/nodes/`;
-        let recap: string | null = null;
-        const collectedArtifacts: unknown[] = [];
-        for (const nodeId of nodeIdsToFetch) {
-          try {
-            const nodeRes = await globalThis.fetch(baseNodeUrl + encodeURIComponent(nodeId), { signal: AbortSignal.timeout(30_000) });
-            if (!nodeRes.ok) continue;
-            const nodeBody = await nodeRes.json() as Record<string, unknown>;
-            if (nodeBody['success'] !== true) continue;
-            const nodeData = nodeBody['data'] as Record<string, unknown> | undefined;
-            if (!nodeData) continue;
-            if (nodeId === tipNodeId) {
-              recap = typeof nodeData['recapMarkdown'] === 'string' ? nodeData['recapMarkdown'] : null;
-            }
-            const nodeArtifacts = nodeData['artifacts'];
-            if (Array.isArray(nodeArtifacts) && nodeArtifacts.length > 0) {
-              collectedArtifacts.push(...nodeArtifacts);
-            }
-          } catch { continue; }
-        }
-        return { recapMarkdown: recap, artifacts: collectedArtifacts };
-      } catch {
-        return emptyResult;
-      }
-    };
-
-    const httpGetChildSessionResult = async (handle: string, _coordinatorSessionId?: string): Promise<ChildSessionResult> => {
-      const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
-      try {
-        const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(30_000) });
-        if (!sessionRes.ok) return { kind: 'failed', reason: 'error', message: `Session fetch HTTP ${sessionRes.status}` };
-        const sessionBody = await sessionRes.json() as Record<string, unknown>;
-        const data = sessionBody['data'] as Record<string, unknown> | null | undefined;
-        const runs = (data?.['runs'] ?? sessionBody['runs']) as Array<Record<string, unknown>> | null | undefined;
-        const runStatus = runs?.[0]?.['status'] as string | null | undefined;
-        if (runStatus === 'complete' || runStatus === 'complete_with_gaps') {
-          const agentResult = await httpGetAgentResult(handle);
-          return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
-        }
-        if (runStatus === 'blocked') {
-          return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
-        }
-        return { kind: 'timed_out', message: `Child session ${handle.slice(0, 16)} has no terminal run status` };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { kind: 'failed', reason: 'error', message: `Exception in getChildSessionResult: ${msg}` };
-      }
-    };
-
-    const deps = {
-      spawnSession: httpSpawnSession,
-
-      contextAssembler: createContextAssembler({
-        execGit: async (args: readonly string[], cwd: string) => {
-          try {
-            const { stdout } = await execFileAsync('git', [...args], { cwd });
-            return { kind: 'ok' as const, value: stdout };
-          } catch (e) {
-            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
-          }
-        },
-        execGh: async (args: readonly string[], cwd: string) => {
-          try {
-            const { stdout } = await execFileAsync('gh', [...args], { cwd });
-            return { kind: 'ok' as const, value: stdout };
-          } catch (e) {
-            return { kind: 'err' as const, error: e instanceof Error ? e.message : String(e) };
-          }
-        },
-        listRecentSessions: createListRecentSessions(),
-        nowIso: () => new Date().toISOString(),
-      }),
-
-      awaitSessions: async (handles: readonly string[], timeoutMs: number) => {
-        const { executeWorktrainAwaitCommand } = await import('./cli/commands/worktrain-await.js');
-        let resolvedResult: import('./cli/commands/worktrain-await.js').AwaitResult | null = null;
-        await executeWorktrainAwaitCommand(
-          {
-            fetch: (url: string) => globalThis.fetch(url),
-            readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
-            stdout: (line: string) => {
-              try { resolvedResult = JSON.parse(line) as import('./cli/commands/worktrain-await.js').AwaitResult; } catch { /* ignore */ }
-            },
-            stderr: (line: string) => process.stderr.write(line + '\n'),
-            homedir: os.homedir,
-            joinPath: path.join,
-            sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
-            now: () => Date.now(),
-          },
-          { sessions: [...handles].join(','), mode: 'all', timeout: `${Math.round(timeoutMs / 1000)}s`, port },
-        );
-        return resolvedResult ?? {
-          results: [...handles].map((h) => ({ handle: h, outcome: 'failed' as const, status: null, durationMs: 0 })),
-          allSucceeded: false,
-        };
-      },
-
-      getAgentResult: httpGetAgentResult,
-      getChildSessionResult: httpGetChildSessionResult,
-
-      spawnAndAwait: async (
-        workflowId: string,
-        goal: string,
-        workspace: string,
-        opts?: { readonly coordinatorSessionId?: string; readonly timeoutMs?: number; readonly agentConfig?: Readonly<{ readonly maxSessionMinutes?: number; readonly maxTurns?: number }> },
-      ): Promise<ChildSessionResult> => {
-        const spawnResult = await httpSpawnSession(workflowId, goal, workspace, undefined, undefined, opts?.coordinatorSessionId);
-        if (spawnResult.kind === 'err') {
-          return { kind: 'failed', reason: 'error', message: spawnResult.error };
-        }
-        const handle = spawnResult.value;
-        const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-        const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-        const POLL_INTERVAL_MS = 5_000;
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-          try {
-            const sessionUrl = `http://127.0.0.1:${port}/api/v2/sessions/${encodeURIComponent(handle)}`;
-            const sessionRes = await globalThis.fetch(sessionUrl, { signal: AbortSignal.timeout(10_000) });
-            if (sessionRes.ok) {
-              const body = await sessionRes.json() as Record<string, unknown>;
-              const data = body['data'] as Record<string, unknown> | null | undefined;
-              const runs = (data?.['runs'] ?? body['runs']) as Array<Record<string, unknown>> | null | undefined;
-              const status = runs?.[0]?.['status'] as string | null | undefined;
-              if (status === 'complete' || status === 'complete_with_gaps' || status === 'blocked') break;
-            }
-          } catch { /* continue polling */ }
-          await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-        }
-        if (Date.now() >= deadline) {
-          return { kind: 'timed_out', message: `Session ${handle.slice(0, 16)} timed out after ${timeoutMs}ms` };
-        }
-        return httpGetChildSessionResult(handle, opts?.coordinatorSessionId);
-      },
-
-      listOpenPRs: async (workspace: string) => {
-        try {
-          const { stdout } = await execFilePromise('gh', ['pr', 'list', '--json', 'number,title,headRefName'], { cwd: workspace, timeout: 30_000 });
-          const parsed = JSON.parse(stdout) as Array<{ number: number; title: string; headRefName: string }>;
-          return parsed.map((p) => ({ number: p.number, title: p.title, headRef: p.headRefName }));
-        } catch {
-          return [];
-        }
-      },
-
-      mergePR: async (prNumber: number, workspace: string) => {
-        try {
-          await execFilePromise('gh', ['pr', 'merge', String(prNumber), '--squash', '--auto'], { cwd: workspace, timeout: 60_000 });
-          return { kind: 'ok' as const, value: undefined };
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          return { kind: 'err' as const, error: msg };
-        }
-      },
-
-      writeFile: async (filePath: string, content: string) => {
-        await fs.promises.writeFile(filePath, content, 'utf-8');
-      },
-      readFile: (filePath: string) => fs.promises.readFile(filePath, 'utf-8'),
-      appendFile: (filePath: string, content: string) => fs.promises.appendFile(filePath, content, 'utf-8'),
-      mkdir: (dirPath: string, opts: { recursive: boolean }) => fs.promises.mkdir(dirPath, opts),
-      homedir: os.homedir,
-      joinPath: path.join,
-      nowIso: () => new Date().toISOString(),
-      generateId: () => randomUUID(),
-      stderr: (line: string) => process.stderr.write(line + '\n'),
-      now: () => Date.now(),
-      stdout: (line: string) => process.stdout.write(line + '\n'),
-      pathIsAbsolute: path.isAbsolute,
-      statPath: (p: string) => fs.promises.stat(p),
-      port,
-
-      // ── AdaptiveCoordinatorDeps extensions ────────────────────────────────
-
-      fileExists: (p: string): boolean => fs.existsSync(p),
-
-      archiveFile: (src: string, dest: string): Promise<void> => fs.promises.rename(src, dest),
-
-      pollForPR: async (branchPattern: string, timeoutMs: number): Promise<string | null> => {
-        const pollIntervalMs = 30_000;
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-          try {
-            const { stdout } = await execFilePromise(
-              'gh',
-              ['pr', 'list', '--head', branchPattern, '--json', 'url', '--limit', '1'],
-              { timeout: 30_000 },
-            );
-            const parsed = JSON.parse(stdout) as Array<{ url: string }>;
-            if (parsed.length > 0 && parsed[0]?.url) return parsed[0].url;
-          } catch { /* continue polling */ }
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) break;
-          await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
-        }
-        return null;
-      },
-
-      postToOutbox: async (message: string, metadata: Readonly<Record<string, unknown>>): Promise<void> => {
-        const workrailDir = path.join(os.homedir(), '.workrail');
-        const outboxPath = path.join(workrailDir, 'outbox.jsonl');
-        await fs.promises.mkdir(workrailDir, { recursive: true });
-        const entry = JSON.stringify({ id: randomUUID(), message, metadata, timestamp: new Date().toISOString() });
-        await fs.promises.appendFile(outboxPath, entry + '\n', 'utf-8');
-      },
-
-      pollOutboxAck: async (requestId: string, timeoutMs: number): Promise<'acked' | 'timeout'> => {
-        const pollIntervalMs = 5 * 60 * 1000;
-        const workrailDir = path.join(os.homedir(), '.workrail');
-        const outboxPath = path.join(workrailDir, 'outbox.jsonl');
-        const cursorPath = path.join(workrailDir, 'inbox-cursor.json');
-        let snapshotCount = 0;
-        try {
-          const outboxContent = await fs.promises.readFile(outboxPath, 'utf-8');
-          snapshotCount = outboxContent.split('\n').filter((l) => l.trim() !== '').length;
-        } catch { /* outbox doesn't exist yet */ }
-        void requestId;
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-          const remaining = deadline - Date.now();
-          if (remaining <= 0) break;
-          await new Promise<void>((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)));
-          try {
-            const cursorContent = await fs.promises.readFile(cursorPath, 'utf-8');
-            const cursor = JSON.parse(cursorContent) as { lastReadCount?: number };
-            if (typeof cursor.lastReadCount === 'number' && cursor.lastReadCount > snapshotCount) return 'acked';
-          } catch { /* not yet acked */ }
-        }
-        return 'timeout';
-      },
-
-      generateRunId: () => randomUUID(),
-
-      readActiveRunId: async (workspace: string) => {
-        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
-        try {
-          const entries = await fs.promises.readdir(runsDir);
-          const candidates: Array<{ runId: string; startedAt: string }> = [];
-          for (const entry of entries) {
-            if (!entry.endsWith('-context.json')) continue;
-            try {
-              const raw = await fs.promises.readFile(path.join(runsDir, entry), 'utf-8');
-              const ctx = JSON.parse(raw) as unknown;
-              if (typeof ctx !== 'object' || ctx === null) continue;
-              const c = ctx as Record<string, unknown>;
-              if (typeof c['runId'] !== 'string') continue;
-              if (c['status'] === 'completed') continue;
-              candidates.push({ runId: c['runId'] as string, startedAt: String(c['startedAt'] ?? '') });
-            } catch { continue; }
-          }
-          if (candidates.length === 0) return neOk(null);
-          candidates.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
-          return neOk(candidates[0]!.runId);
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return neOk(null);
-          const msg = e instanceof Error ? e.message : String(e);
-          return neErr(`readActiveRunId failed: ${msg}`);
-        }
-      },
-
-      readPipelineContext: async (workspace: string, runId: string) => {
-        const { parsePipelineRunContext } = await import('./coordinators/pipeline-run-context.js');
-        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
-        const filePath = path.join(runsDir, `${runId}-context.json`);
-        try {
-          const raw = await fs.promises.readFile(filePath, 'utf-8');
-          const parsed = JSON.parse(raw) as unknown;
-          return parsePipelineRunContext(parsed);
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code === 'ENOENT') return neOk(null);
-          const msg = e instanceof Error ? e.message : String(e);
-          return neErr(`readPipelineContext failed: ${msg}`);
-        }
-      },
-
-      markPipelineRunComplete: async (workspace: string, runId: string) => {
-        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
-        const filePath = path.join(runsDir, `${runId}-context.json`);
-        const tmpPath = filePath + '.tmp';
-        try {
-          const raw = await fs.promises.readFile(filePath, 'utf-8');
-          const existing = JSON.parse(raw) as Record<string, unknown>;
-          const updated = { ...existing, status: 'completed' };
-          await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
-          await fs.promises.rename(tmpPath, filePath);
-          return neOk(undefined);
-        } catch (e) {
-          try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
-          return neErr(`markPipelineRunComplete failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      },
-
-      createPipelineContext: async (
-        workspace: string, runId: string, goal: string,
-        pipelineMode: import('./coordinators/pipeline-run-context.js').PipelineRunContext['pipelineMode'],
-        worktreePath: string,
-      ) => {
-        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
-        const filePath = path.join(runsDir, `${runId}-context.json`);
-        const tmpPath = filePath + '.tmp';
-        try {
-          await fs.promises.mkdir(runsDir, { recursive: true });
-          const initial = { runId, goal, workspace, startedAt: new Date().toISOString(), pipelineMode, worktreePath, phases: {} };
-          await fs.promises.writeFile(tmpPath, JSON.stringify(initial, null, 2) + '\n', 'utf-8');
-          await fs.promises.rename(tmpPath, filePath);
-          return neOk(undefined);
-        } catch (e) {
-          try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
-          return neErr(`createPipelineContext failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      },
-
-      writePhaseRecord: async (workspace: string, runId: string, entry: import('./coordinators/pipeline-run-context.js').PhaseRecord) => {
-        const { parsePipelineRunContext } = await import('./coordinators/pipeline-run-context.js');
-        const runsDir = path.join(workspace, '.workrail', 'pipeline-runs');
-        const filePath = path.join(runsDir, `${runId}-context.json`);
-        const tmpPath = filePath + '.tmp';
-        try {
-          await fs.promises.mkdir(runsDir, { recursive: true });
-          const raw = await fs.promises.readFile(filePath, 'utf-8');
-          const parsed = JSON.parse(raw) as unknown;
-          const existing = parsePipelineRunContext(parsed);
-          if (existing.isErr() || existing.value === null) {
-            return neErr(`writePhaseRecord: context file missing or invalid for runId=${runId}`);
-          }
-          const updated = { ...existing.value, phases: { ...existing.value.phases, [entry.phase]: entry.record } };
-          await fs.promises.writeFile(tmpPath, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
-          await fs.promises.rename(tmpPath, filePath);
-          return neOk(undefined);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          try { await fs.promises.unlink(tmpPath); } catch { /* ignore */ }
-          return neErr(`writePhaseRecord failed: ${msg}`);
-        }
-      },
-
-      execDelivery: async (file: string, args: string[], options: { cwd: string; timeout: number }) => {
-        const result = await execFilePromise(file, args, options);
-        return { stdout: result.stdout, stderr: '' };
-      },
-
-      // WHY returns ok(workspace) instead of creating a real git worktree:
-      // The CLI pipeline dispatches sessions via HTTP to the daemon (/api/v2/auto/dispatch).
-      // The HTTP endpoint cannot forward effectiveWorkspacePath to the daemon's runWorkflow(),
-      // so sessions always work in the trigger.workspacePath (the `workspace` arg passed to
-      // spawnSession, which is opts.workspace -- the main checkout). Creating a real isolated
-      // worktree would be unused: sessions never see it, and delivery would run git operations
-      // against an empty worktree while changes are in the main checkout. Returning opts.workspace
-      // here makes activeWorkspacePath = opts.workspace throughout, so all paths are consistent.
-      createPipelineWorktree: async (workspace: string, _runId: string, _baseBranch = 'main') => {
-        return neOk(workspace);
-      },
-
-      // WHY no-op: no real worktree was created (see createPipelineWorktree above).
-      removePipelineWorktree: async (_workspace: string, _worktreePath: string) => {
-        // no-op: CLI pipeline uses main checkout as activeWorkspacePath, no worktree to remove
-      },
-    };
-
-    const result = await executeWorktrainPipelineCommand(deps, {
-      workspace: options.workspace,
-      goal: options.goal,
-      mode: options.mode,
-      dryRun: options.dryRun ?? false,
-      port: options.port,
-    });
-
     interpretCliResultWithoutDI(result);
   });
+
+// Migration shims for removed health and status commands.
+// Both now point to `worktrain diagnose` which absorbs their functionality.
+program.addCommand(
+  new Command('health')
+    .description('(removed)')
+    .argument('<sessionId>', 'session ID')
+    .allowUnknownOption(true)
+    .action(() => {
+      process.stderr.write(
+        "'worktrain health' was removed. Use 'worktrain diagnose <sessionId>' instead.\n" +
+        'Example: worktrain diagnose abc123\n',
+      );
+      process.exit(1);
+    }),
+  { hidden: true },
+);
+
+program.addCommand(
+  new Command('status')
+    .description('(removed)')
+    .allowUnknownOption(true)
+    .action(() => {
+      process.stderr.write(
+        "'worktrain status' was removed. Use 'worktrain diagnose' for fleet summary or 'worktrain diagnose <id>' for a specific session.\n",
+      );
+      process.exit(1);
+    }),
+  { hidden: true },
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TRIGGER COMMAND GROUP
