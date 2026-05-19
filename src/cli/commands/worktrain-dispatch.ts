@@ -141,12 +141,12 @@ async function pollForOutcome(
 }
 
 async function checkOutcome(
-  deps: Pick<WorktrainDispatchCommandDeps, 'readFile' | 'joinPath' | 'now'>,
+  deps: Pick<WorktrainDispatchCommandDeps, 'readFile' | 'joinPath'>,
   eventsDir: string,
   sessionId: string,
 ): Promise<'success' | 'failure' | null> {
   // Scan last 2 days (session spanning midnight is unlikely for --wait use case).
-  const now = (deps.now ?? Date.now)();
+  const now = Date.now(); // WHY not deps.now: we need the real date for file paths, not the injected test clock
   for (let i = 0; i < 2; i++) {
     const date = new Date(now - i * 86400000).toISOString().slice(0, 10);
     const filePath = deps.joinPath(eventsDir, `${date}.jsonl`);
