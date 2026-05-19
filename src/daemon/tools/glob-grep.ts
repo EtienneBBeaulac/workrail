@@ -36,7 +36,7 @@ export function makeGlobTool(workspacePath: string, schemas: Record<string, any>
       if (typeof params.pattern !== 'string' || !params.pattern) throw new Error('Glob: pattern must be a non-empty string');
       const pattern: string = params.pattern;
       const searchRoot: string = params.path ?? workspacePath;
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Glob', summary: pattern.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Glob', summary: pattern.slice(0, 500), ...withWorkrailSession(workrailSessionId) });
 
       const GLOB_LIMIT = 100;
 
@@ -104,7 +104,7 @@ export function makeGrepTool(workspacePath: string, schemas: Record<string, any>
       const searchPath: string = params.path ?? workspacePath;
       const outputMode: string = params.output_mode ?? 'files_with_matches';
       const headLimit: number = params.head_limit ?? 250;
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Grep', summary: pattern.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Grep', summary: pattern.slice(0, 500), ...withWorkrailSession(workrailSessionId) });
 
       const args: string[] = [
         '--hidden',

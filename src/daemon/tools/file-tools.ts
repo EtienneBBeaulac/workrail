@@ -55,7 +55,7 @@ export function makeReadTool(workspacePath: string, readFileState: Map<string, R
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Read: filePath must be a non-empty string');
       const filePath: string = resolveWithinWorkspace(params.filePath, workspacePath, 'Read');
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Read', summary: filePath.slice(0, 500), ...withWorkrailSession(workrailSessionId) });
 
       // Block device paths to prevent reads from infinite streams
       const devPaths = ['/dev/stdin', '/dev/tty', '/dev/zero', '/dev/random', '/dev/full', '/dev/urandom'];
@@ -113,7 +113,7 @@ export function makeWriteTool(workspacePath: string, readFileState: Map<string, 
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Write: filePath must be a non-empty string');
       if (typeof params.content !== 'string') throw new Error('Write: content must be a string');
       const filePath: string = resolveWithinWorkspace(params.filePath, workspacePath, 'Write');
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 500), ...withWorkrailSession(workrailSessionId) });
 
       // Staleness guard: only for existing files. New files bypass the check entirely.
       // WHY: a new file has never been read, so there is nothing stale to guard against.
@@ -181,7 +181,7 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
       const newString: string = params.new_string;
       const replaceAll: boolean = params.replace_all ?? false;
 
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Edit', summary: filePath.slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Edit', summary: filePath.slice(0, 500), ...withWorkrailSession(workrailSessionId) });
 
       // Validate that old_string and new_string differ
       if (oldString === newString) {

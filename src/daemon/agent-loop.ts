@@ -704,7 +704,7 @@ export class AgentLoop {
       // Emit tool_call_started before execute().
       // WHY try/catch: preserves fire-and-forget invariant -- a throwing callback
       // must never crash the agent loop.
-      const argsSummary = JSON.stringify(params).slice(0, 200);
+      const argsSummary = JSON.stringify(params).slice(0, 2000);
       try { callbacks?.onToolCallStarted?.({ toolName: block.name, argsSummary }); } catch { /* swallow */ }
 
       // C1: Reset stall timer before each tool execution.
@@ -727,7 +727,7 @@ export class AgentLoop {
         const durationMs = Date.now() - toolStartMs;
         const message = err instanceof Error ? err.message : String(err);
         // Emit tool_call_failed for the throwing path.
-        try { callbacks?.onToolCallFailed?.({ toolName: block.name, durationMs, errorMessage: message.slice(0, 200) }); } catch { /* swallow */ }
+        try { callbacks?.onToolCallFailed?.({ toolName: block.name, durationMs, errorMessage: message.slice(0, 500) }); } catch { /* swallow */ }
         results.push({
           toolCallId: block.id,
           toolName: block.name,
@@ -740,7 +740,7 @@ export class AgentLoop {
       // Emit tool_call_completed for the success path.
       {
         const durationMs = Date.now() - toolStartMs;
-        const resultSummary = (result.content[0]?.text ?? '(no output)').slice(0, 200);
+        const resultSummary = (result.content[0]?.text ?? '(no output)').slice(0, 500);
         try { callbacks?.onToolCallCompleted?.({ toolName: block.name, durationMs, resultSummary }); } catch { /* swallow */ }
       }
 

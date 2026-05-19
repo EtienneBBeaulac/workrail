@@ -32,8 +32,8 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.command !== 'string' || !params.command) throw new Error('Bash: command must be a non-empty string');
-      console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 500)}"`);
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 500), ...withWorkrailSession(workrailSessionId) });
       const cwd = params.cwd ?? workspacePath;
       try {
         const { stdout, stderr } = await execAsync(params.command, {
