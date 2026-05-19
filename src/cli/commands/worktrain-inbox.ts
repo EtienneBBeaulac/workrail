@@ -81,6 +81,11 @@ export interface WorktrainInboxCommandOpts {
    * Requires the daemon coordinator loop (not yet built).
    */
   readonly watch?: boolean;
+  /**
+   * When true, output unread messages as a JSON array to stdout instead of
+   * formatted text. Cursor is still advanced (messages marked as read).
+   */
+  readonly json?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -126,7 +131,7 @@ export async function executeWorktrainInboxCommand(
     return success({ message: 'Watch stopped.' });
   }
 
-  const result = await readAndPrint(deps, outboxPath, cursorPath, workrailDir);
+  const result = await readAndPrint(deps, outboxPath, cursorPath, workrailDir, false, opts.json);
   return result;
 }
 
@@ -143,6 +148,7 @@ async function readAndPrint(
   cursorPath: string,
   workrailDir: string,
   silentOnEmpty = false,
+  json = false,
 ): Promise<CliResult> {
   // ── Read outbox ──────────────────────────────────────────────────────────
 
@@ -207,7 +213,10 @@ async function readAndPrint(
     deps.print(`Warning: skipped ${malformedCount} malformed line(s) in outbox.jsonl.`);
   }
 
-  if (newCount > 0) {
+  if (json) {
+    // JSON output: emit the unread entries as a JSON array.
+    deps.print(JSON.stringify(unread));
+  } else if (newCount > 0) {
     for (const msg of unread) {
       deps.print(`[${msg.timestamp}] ${msg.message}`);
     }

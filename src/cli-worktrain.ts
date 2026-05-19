@@ -68,12 +68,13 @@ program
   .description('Guided setup for WorkTrain daemon: credentials, workspace, triggers.yml, daemon-soul.md, smoke test')
   .option('-y, --yes', 'Skip interactive prompts and use safe defaults (for CI / non-TTY use)')
   .action(async (options: { yes?: boolean }) => {
-    // Warn when running non-interactively without --yes
+    // Non-TTY without --yes: fail fast rather than hanging on prompts.
     if (!options.yes && !input.isTTY) {
-      console.warn(
-        'Warning: stdin is not a TTY. Interactive prompts may not work as expected.\n' +
-        'Run with --yes to use safe defaults without prompting.',
+      process.stderr.write(
+        'Error: stdin is not a TTY. Run with --yes for non-interactive mode.\n' +
+        'Example: worktrain init --yes\n',
       );
+      process.exit(1);
     }
 
     const rl = createInterface({ input, output, terminal: true });
@@ -134,14 +135,50 @@ program
 
 program
   .command('tell <message>')
-  .description('Queue an async message for the WorkTrain daemon (~/.workrail/message-queue.jsonl)')
+  .description('Queue an async message for the WorkTrain daemon, or steer a specific running session.')
   .option('-w, --workspace <name>', 'Workspace hint for the daemon (optional)')
+  .option('--session <id>', 'Send directly to a specific running session via the steer endpoint')
+  .option('-p, --port <n>', 'Override daemon HTTP port for --session (default: 3200)', parseInt)
   .addOption(
-    new Option('-p, --priority <level>', 'Message priority: high, normal, or low')
+    new Option('--priority <level>', 'Message priority: high, normal, or low')
       .choices(['high', 'normal', 'low'])
       .default('normal'),
   )
-  .action(async (message: string, options: { workspace?: string; priority?: string }) => {
+  .action(async (message: string, options: { workspace?: string; session?: string; port?: number; priority?: string }) => {
+    // --session: route directly to running session via steer endpoint
+    if (options.session) {
+      const port = options.port ?? 3200;
+      const url = `http://127.0.0.1:${port}/sessions/${options.session}/steer`;
+      try {
+        const response = await globalThis.fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: message }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+          const err = typeof body['error'] === 'string' ? body['error'] : `HTTP ${response.status}`;
+          if (response.status === 404) {
+            process.stderr.write(`Session not found: ${options.session}\n`);
+          } else {
+            process.stderr.write(`Steer failed: ${err}\n`);
+          }
+          process.exit(1);
+        }
+        console.log(`Message sent to session ${options.session}.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+          process.stderr.write(`Daemon is not running on port ${port}. Start it with: worktrain daemon start\n`);
+        } else {
+          process.stderr.write(`Steer request failed: ${msg}\n`);
+        }
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Default: queue to message-queue.jsonl
     const result = await executeWorktrainTellCommand(
       message,
       {
@@ -170,7 +207,8 @@ program
   .command('inbox')
   .description('Read unread messages from the WorkTrain daemon (~/.workrail/outbox.jsonl)')
   .option('-w, --watch', 'Watch for new messages in real time (not yet implemented)')
-  .action(async (options: { watch?: boolean }) => {
+  .option('--json', 'Output unread messages as a JSON array')
+  .action(async (options: { watch?: boolean; json?: boolean }) => {
     const result = await executeWorktrainInboxCommand(
       {
         readFile: (p: string) => fs.promises.readFile(p, 'utf-8'),
@@ -180,7 +218,7 @@ program
         joinPath: path.join,
         print: (line: string) => console.log(line),
       },
-      { watch: options.watch },
+      { watch: options.watch, json: options.json },
     );
     interpretCliResultWithoutDI(result);
   });
@@ -759,7 +797,8 @@ program
   .description('Read and display the WorkRail daemon event log. Use --follow to stream new events in real time.')
   .option('--follow', 'Continuously poll the log file for new events (like tail -f)')
   .option('--session <id>', 'Filter events by sessionId (UUID prefix) or workrailSessionId (sess_xxx prefix)')
-  .action(async (options: { follow?: boolean; session?: string }) => {
+  .option('--json', 'Output raw newline-delimited JSON events instead of formatted text')
+  .action(async (options: { follow?: boolean; session?: string; json?: boolean }) => {
     const eventsDir = path.join(os.homedir(), '.workrail', 'events', 'daemon');
 
     // WHY constants: queue-poll uses size-based rotation (not date-based); stderr does not rotate.
@@ -825,9 +864,14 @@ program
           }
         }
 
-        const formatted = formatDaemonEventLine(line);
-        if (formatted !== null) {
-          process.stdout.write(formatted + '\n');
+        if (options.json) {
+          // Raw JSONL passthrough for machine-readable output.
+          process.stdout.write(line + '\n');
+        } else {
+          const formatted = formatDaemonEventLine(line);
+          if (formatted !== null) {
+            process.stdout.write(formatted + '\n');
+          }
         }
       }
     }
@@ -921,8 +965,12 @@ program
               continue;
             }
           }
-          const formatted = formatDaemonEventLine(line);
-          if (formatted !== null) process.stdout.write(formatted + '\n');
+          if (options.json) {
+            process.stdout.write(line + '\n');
+          } else {
+            const formatted = formatDaemonEventLine(line);
+            if (formatted !== null) process.stdout.write(formatted + '\n');
+          }
         } else if (source === 'queue_poll') {
           const formatted = formatQueuePollLine(line);
           if (formatted !== null) process.stdout.write(formatted + '\n');
