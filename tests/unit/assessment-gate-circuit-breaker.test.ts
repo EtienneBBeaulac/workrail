@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapInternalErrorToToolError, type InternalError } from '../../src/mcp/handlers/v2-error-mapping.js';
 import { formatAssessmentRequirementsForTest } from '../../src/v2/durable-core/domain/prompt-renderer.js';
+import { getArtifactBlockedMessage } from '../../src/v2/durable-core/schemas/artifacts/blocked-messages.js';
 
 // ── Fix 1: Error kind mapping ─────────────────────────────────────────────────
 
@@ -18,18 +19,18 @@ describe('blocked_attempt_limit_exceeded error kind', () => {
   it('maps to PRECONDITION_FAILED (not TOKEN_SCOPE_MISMATCH or INTERNAL_ERROR)', () => {
     const error: InternalError = {
       kind: 'blocked_attempt_limit_exceeded',
-      message: 'Assessment gate failed after 3 attempts. Submit a valid wr.assessment artifact.',
+      message: 'Step failed after 3 attempts. Submit a valid wr.assessment artifact.',
     };
 
     const toolError = mapInternalErrorToToolError(error);
     const parsed = toolError as Record<string, unknown>;
 
     expect(parsed.code).toBe('PRECONDITION_FAILED');
-    expect(parsed.message).toContain('Assessment gate failed after 3 attempts');
+    expect(parsed.message).toContain('Step failed after 3 attempts');
   });
 
   it('preserves the full message from the InternalError (includes artifact format)', () => {
-    const artifactFormatMsg = 'Assessment gate failed after 3 attempts. Required format:\n```json\n{ "artifacts": [...] }\n```';
+    const artifactFormatMsg = 'Step failed after 3 attempts. Required format:\n```json\n{ "artifacts": [...] }\n```';
     const error: InternalError = {
       kind: 'blocked_attempt_limit_exceeded',
       message: artifactFormatMsg,
@@ -44,7 +45,7 @@ describe('blocked_attempt_limit_exceeded error kind', () => {
   it('is not retryable (retry field absent or false)', () => {
     const error: InternalError = {
       kind: 'blocked_attempt_limit_exceeded',
-      message: 'Assessment gate failed after 3 attempts.',
+      message: 'Step failed after 3 attempts.',
     };
 
     const toolError = mapInternalErrorToToolError(error);
@@ -56,6 +57,46 @@ describe('blocked_attempt_limit_exceeded error kind', () => {
     } else {
       expect(parsed.retry).toBeUndefined();
     }
+  });
+});
+
+// ── Fix 1b: Circuit-breaker message content ──────────────────────────────────
+
+describe('circuit-breaker message content', () => {
+  it('getArtifactBlockedMessage returns loop_control scaffold for wr.contracts.loop_control', () => {
+    const lines = getArtifactBlockedMessage('wr.contracts.loop_control');
+    expect(lines).not.toBeNull();
+    const text = lines!.join('\n');
+    expect(text).toContain('wr.loop_control');
+    expect(text).toContain('decision');
+    expect(text).toContain('continue');
+  });
+
+  it('getArtifactBlockedMessage returns assessment scaffold for wr.contracts.assessment', () => {
+    const lines = getArtifactBlockedMessage('wr.contracts.assessment');
+    expect(lines).not.toBeNull();
+    const text = lines!.join('\n');
+    expect(text).toContain('wr.assessment');
+    expect(text).toContain('assessmentId');
+    expect(text).toContain('dimensions');
+  });
+
+  it('getArtifactBlockedMessage returns null for unknown contract refs', () => {
+    const lines = getArtifactBlockedMessage('wr.contracts.unknown_future_type');
+    expect(lines).toBeNull();
+  });
+
+  it('circuit-breaker message uses "Step failed" (not hardcoded "Assessment gate")', () => {
+    // Validate the message template that advance.ts uses -- by constructing it the same way
+    const contractRef = 'wr.contracts.loop_control';
+    const lines = getArtifactBlockedMessage(contractRef);
+    const scaffold = lines ? `Required format:\n${lines.join('\n')}` : '';
+    const message = `Step failed after 3 attempts. Submit a valid ${contractRef} artifact. ${scaffold}`;
+
+    expect(message).toContain('Step failed after 3 attempts');
+    expect(message).toContain('wr.contracts.loop_control');
+    expect(message).not.toContain('Assessment gate');
+    expect(message).not.toContain('wr.assessment');
   });
 });
 

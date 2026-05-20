@@ -11,7 +11,7 @@ export type BlockingDecisionError = {
 export type OutputRequirementStatus =
   | { readonly kind: 'not_required' }
   | { readonly kind: 'satisfied' }
-  | { readonly kind: 'missing'; readonly contractRef: string }
+  | { readonly kind: 'missing'; readonly contractRef: string; readonly submittedKinds?: readonly string[] }
   | { readonly kind: 'invalid'; readonly contractRef: string; readonly validation: ValidationResult };
 
 export type CapabilityRequirementStatus =
@@ -84,7 +84,7 @@ export function detectBlockingReasonsV1(args: {
       case 'satisfied':
         break;
       case 'missing':
-        reasons.push({ kind: 'missing_required_output', contractRef: outReq.contractRef });
+        reasons.push({ kind: 'missing_required_output', contractRef: outReq.contractRef, submittedKinds: outReq.submittedKinds });
         break;
       case 'invalid':
         // We do not embed the full validator output in the durable reason; we only persist the closed-set code.

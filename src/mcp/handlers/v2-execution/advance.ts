@@ -1,4 +1,5 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
+import { getArtifactBlockedMessage } from '../../../v2/durable-core/schemas/artifacts/blocked-messages.js';
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { Workflow } from '../../../types/workflow.js';
 import type { DomainEventV1 } from '../../../v2/durable-core/schemas/session/index.js';
@@ -132,13 +133,19 @@ export function advanceAndRecord(args: {
       // from looping forever on a step they cannot pass.
       const chainDepth = countBlockedAttemptChainDepth(nodeId, args.lockedIndex);
       if (chainDepth >= MAX_BLOCKED_ATTEMPT_RETRIES) {
+        // Extract contractRef from the blocked snapshot's primary output_contract blocker.
+        // `blocked` is already narrowed above (blocked.kind === 'retryable_block').
+        const primaryPointer = blocked.blockers.blockers.find(b => b.pointer.kind === 'output_contract')?.pointer;
+        const primaryContractRef = primaryPointer?.kind === 'output_contract' ? primaryPointer.contractRef : undefined;
+        const lines = primaryContractRef ? getArtifactBlockedMessage(primaryContractRef) : null;
+        const contractLabel = primaryContractRef ?? 'the required artifact';
+        const scaffold = lines
+          ? `Required format:\n${lines.join('\n')}`
+          : `Check the step's outputContract for the required artifact format and pass it in \`output.artifacts\`.`;
         return neErrorAsync({
           kind: 'blocked_attempt_limit_exceeded' as const,
-          message: `Assessment gate failed after ${MAX_BLOCKED_ATTEMPT_RETRIES} attempts. ` +
-            `Submit a valid wr.assessment artifact. Required format:\n` +
-            `\`\`\`json\n` +
-            `{ "artifacts": [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }] }\n` +
-            `\`\`\``,
+          message: `Step failed after ${MAX_BLOCKED_ATTEMPT_RETRIES} attempts. ` +
+            `Submit a valid ${contractLabel} artifact in \`output.artifacts\`. ${scaffold}`,
         } as InternalError);
       }
 

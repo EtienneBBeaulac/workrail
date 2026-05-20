@@ -65,13 +65,15 @@ describe('validateArtifactContract', () => {
       if (!result.valid) {
         expect(result.error.code).toBe('MISSING_REQUIRED_ARTIFACT');
         expect(result.error.contractRef).toBe(LOOP_CONTROL_CONTRACT_REF);
-        expect(result.error.message).toContain('Required artifact missing');
+        // Empty artifacts: message says output.artifacts was empty
+        expect(result.error.message).toContain('output.artifacts was empty');
+        expect(result.error.message).toContain('wr.loop_control');
       }
     });
 
-    it('returns MISSING_REQUIRED_ARTIFACT when only non-loop-control artifacts', () => {
+    it('returns MISSING_REQUIRED_ARTIFACT when only non-loop-control artifacts (wrong-kind)', () => {
       const artifacts = [
-        { kind: 'other_artifact', data: 'value' },
+        { kind: 'wr.assessment', assessmentId: 'my-gate', dimensions: { confidence: 'high' } },
       ];
 
       const result = validateArtifactContract(artifacts, {
@@ -81,6 +83,12 @@ describe('validateArtifactContract', () => {
       expect(result.valid).toBe(false);
       if (!result.valid) {
         expect(result.error.code).toBe('MISSING_REQUIRED_ARTIFACT');
+        // Wrong-kind: message names submitted kind and required kind
+        expect(result.error.message).toContain("'wr.assessment'");
+        expect(result.error.message).toContain("'wr.loop_control'");
+        if ('submittedKinds' in result.error) {
+          expect(result.error.submittedKinds).toEqual(['wr.assessment']);
+        }
       }
     });
 
@@ -201,7 +209,8 @@ describe('formatArtifactValidationError', () => {
 
     const formatted = formatArtifactValidationError(error);
     expect(formatted.code).toBe('MISSING_REQUIRED_OUTPUT');
-    expect(formatted.suggestedFix).toContain('Provide an artifact');
+    // suggestedFix is no longer set -- the message itself carries the actionable content
+    expect(formatted.suggestedFix).toBeUndefined();
   });
 
   it('formats INVALID_ARTIFACT_SCHEMA error', () => {

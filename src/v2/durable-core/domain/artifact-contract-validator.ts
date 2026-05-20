@@ -28,11 +28,34 @@ import {
 } from '../schemas/artifacts/index.js';
 
 /**
+ * Extract artifact kind strings from the submitted artifacts array.
+ * Used for wrong-kind detection: captures what the agent actually submitted
+ * before kind-specific filtering discards non-matching artifacts.
+ */
+function extractSubmittedKinds(artifacts: readonly unknown[]): readonly string[] | undefined {
+  const kinds = artifacts
+    .map(a => (typeof a === 'object' && a !== null ? (a as Record<string, unknown>)['kind'] : undefined))
+    .filter((k): k is string => typeof k === 'string');
+  return kinds.length > 0 ? kinds : undefined;
+}
+
+/**
+ * Build a wrong-kind or empty-artifacts message for MISSING_REQUIRED_ARTIFACT.
+ */
+function buildMissingArtifactMessage(contractRef: string, requiredKind: string, submittedKinds: readonly string[] | undefined): string {
+  if (submittedKinds && submittedKinds.length > 0) {
+    const submitted = submittedKinds.map(k => `'${k}'`).join(', ');
+    return `You submitted kind ${submitted}, but this step requires kind '${requiredKind}' (contractRef=${contractRef}).`;
+  }
+  return `Required artifact missing: ${contractRef}. Your output.artifacts was empty -- pass an artifact with kind='${requiredKind}'.`;
+}
+
+/**
  * Artifact contract validation errors.
  * Forms a closed set for deterministic error handling.
  */
 export type ArtifactContractValidationError =
-  | { readonly code: 'MISSING_REQUIRED_ARTIFACT'; readonly contractRef: string; readonly message: string }
+  | { readonly code: 'MISSING_REQUIRED_ARTIFACT'; readonly contractRef: string; readonly message: string; readonly submittedKinds?: readonly string[] }
   | { readonly code: 'INVALID_ARTIFACT_SCHEMA'; readonly contractRef: string; readonly message: string; readonly issues: readonly string[] }
   | { readonly code: 'UNKNOWN_CONTRACT_REF'; readonly contractRef: string; readonly message: string };
 
@@ -119,7 +142,7 @@ function validateLoopControlContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
-  // Find loop control artifacts
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const loopControlArtifacts = artifacts.filter(isLoopControlArtifact);
 
   if (loopControlArtifacts.length === 0) {
@@ -129,7 +152,8 @@ function validateLoopControlContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.loop_control'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.loop_control', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -167,7 +191,7 @@ function validateCoordinatorSignalContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
-  // Find coordinator signal artifacts by kind discriminant
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const signalArtifacts = artifacts.filter(isCoordinatorSignalArtifact);
 
   if (signalArtifacts.length === 0) {
@@ -177,7 +201,8 @@ function validateCoordinatorSignalContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.coordinator_signal'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.coordinator_signal', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -215,7 +240,7 @@ function validateReviewVerdictContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
-  // Find review verdict artifacts by kind discriminant
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const verdictArtifacts = artifacts.filter(isReviewVerdictArtifact);
 
   if (verdictArtifacts.length === 0) {
@@ -225,7 +250,8 @@ function validateReviewVerdictContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.review_verdict'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.review_verdict', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -263,6 +289,7 @@ function validateDiscoveryHandoffContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const handoffArtifacts = artifacts.filter(isDiscoveryHandoffArtifact);
 
   if (handoffArtifacts.length === 0) {
@@ -272,7 +299,8 @@ function validateDiscoveryHandoffContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.discovery_handoff'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.discovery_handoff', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -312,6 +340,7 @@ function validateGateVerdictContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const verdictArtifacts = artifacts.filter(isGateVerdictArtifact);
 
   if (verdictArtifacts.length === 0) {
@@ -321,7 +350,8 @@ function validateGateVerdictContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.gate_verdict'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.gate_verdict', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -357,6 +387,7 @@ function validateShapingHandoffContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const handoffArtifacts = artifacts.filter(isShapingHandoffArtifact);
 
   if (handoffArtifacts.length === 0) {
@@ -366,7 +397,8 @@ function validateShapingHandoffContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.shaping_handoff'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.shaping_handoff', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -402,6 +434,7 @@ function validateCodingHandoffContract(
   contractRef: string,
   required: boolean
 ): ArtifactContractValidationResult {
+  const submittedKinds = extractSubmittedKinds(artifacts);
   const handoffArtifacts = artifacts.filter(isCodingHandoffArtifact);
 
   if (handoffArtifacts.length === 0) {
@@ -411,7 +444,8 @@ function validateCodingHandoffContract(
         error: {
           code: 'MISSING_REQUIRED_ARTIFACT',
           contractRef,
-          message: `Required artifact missing: ${contractRef}. Agent must provide an artifact with kind='wr.coding_handoff'.`,
+          message: buildMissingArtifactMessage(contractRef, 'wr.coding_handoff', submittedKinds),
+          submittedKinds,
         },
       };
     }
@@ -466,7 +500,6 @@ export function formatArtifactValidationError(error: ArtifactContractValidationE
       return {
         code: 'MISSING_REQUIRED_OUTPUT',
         message: error.message,
-        suggestedFix: `Provide an artifact with kind matching the contract: ${error.contractRef}`,
       };
     
     case 'INVALID_ARTIFACT_SCHEMA':
