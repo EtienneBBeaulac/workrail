@@ -2181,7 +2181,7 @@ describe('TriggerRouter: cli_inbox explicit delivery', () => {
       const trigger = makeTrigger({
         deliveryConfig: {
           adapters: [{ kind: 'cli_inbox' }],
-          explicit: true,
+          source: 'explicit' as const,
         },
       });
       const router = new TriggerRouter(
@@ -2225,11 +2225,11 @@ describe('TriggerRouter: cli_inbox explicit delivery', () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'router-delivery-synth-test-'));
     try {
       const { fn } = makeFakeRunWorkflow('some notes');
-      // synthesized config: no explicit flag
+      // synthesized config: source === 'synthesized', so deliver() must NOT fire
       const trigger = makeTrigger({
         deliveryConfig: {
+          source: 'synthesized' as const,
           adapters: [{ kind: 'cli_inbox' }],
-          // explicit is absent
         },
       });
       const router = new TriggerRouter(

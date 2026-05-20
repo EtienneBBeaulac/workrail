@@ -580,7 +580,7 @@ export class TriggerRouter {
   private _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
   private readonly _reviewApprovalAdapter: ReviewApprovalAdapter;
-  private readonly _workrailDir: string | undefined;
+  private readonly _cliInboxAdapter: CliInboxAdapter | undefined;
 
   /**
    * Recent adaptive dispatch timestamps keyed by a path-specific dedup key.
@@ -704,7 +704,7 @@ export class TriggerRouter {
     this._modeExecutors = modeExecutors;
     this._deduplicator = deduplicator ?? new DispatchDeduplicator(TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS);
     this._reviewApprovalAdapter = reviewApprovalAdapter ?? new GitHubReviewApprovalAdapter();
-    this._workrailDir = workrailDir;
+    this._cliInboxAdapter = workrailDir !== undefined ? new CliInboxAdapter(workrailDir) : undefined;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -1182,8 +1182,8 @@ export class TriggerRouter {
       // flooding outbox.jsonl for all triggers regardless of configuration.
       if (
         originalResult._tag === 'success' &&
-        workflowTrigger.deliveryConfig?.explicit === true &&
-        this._workrailDir !== undefined
+        workflowTrigger.deliveryConfig?.source === 'explicit' &&
+        this._cliInboxAdapter !== undefined
       ) {
         for (const adapterConfig of workflowTrigger.deliveryConfig.adapters) {
           if (adapterConfig.kind === 'cli_inbox') {
@@ -1195,7 +1195,7 @@ export class TriggerRouter {
               artifacts: originalResult.lastStepArtifacts ?? [],
             };
             try {
-              await new CliInboxAdapter(this._workrailDir).deliver(payload, adapterConfig);
+              await this._cliInboxAdapter.deliver(payload, adapterConfig);
             } catch (e) {
               console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`);
             }

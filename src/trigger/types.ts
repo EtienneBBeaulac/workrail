@@ -712,12 +712,10 @@ export interface TriggerDefinition {
   readonly reviewerIdentity?: ReviewerIdentity;
 
   /**
-   * Synthesized delivery configuration for this trigger.
-   * Computed from legacy delivery fields (autoCommit, reviewerIdentity, callbackUrl)
-   * by synthesizeDeliveryConfig() in validateAndResolveTrigger().
-   * When absent: resolveDeliveryConfig() falls back to CLI inbox.
+   * Delivery configuration for this trigger.
+   * Always set by validateAndResolveTrigger(): explicit YAML block or synthesized from legacy fields.
    */
-  readonly deliveryConfig?: import('./delivery-adapter.js').DeliveryConfig;
+  readonly deliveryConfig: import('./delivery-adapter.js').DeliveryConfig;
 
   /**
    * Base branch for the worktree. Only used when branchStrategy === 'worktree'.

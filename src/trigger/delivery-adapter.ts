@@ -26,13 +26,16 @@ export type AdapterConfig =
   | { readonly kind: 'callback_url'; readonly url: string }
   | { readonly kind: 'git_commit'; readonly autoOpenPR: boolean; readonly secretScan: boolean };
 
-export interface DeliveryConfig {
-  readonly adapters: readonly AdapterConfig[];
-  // WHY explicit: distinguishes operator-configured delivery (explicit: true) from
-  // synthesized fallback (absent). route() only fires adapter.deliver() for explicit
-  // configs -- prevents flooding outbox.jsonl for every session on every trigger.
-  readonly explicit?: true;
-}
+/**
+ * WHY source discriminant: distinguishes operator-configured delivery ('explicit') from
+ * the synthesized fallback ('synthesized'). route() only fires adapter.deliver() for
+ * explicit configs -- prevents flooding outbox.jsonl for every session on every trigger.
+ * A boolean would allow { explicit: false } to compile but behave as synthesized; a
+ * discriminated union makes the two states exhaustive and unambiguous.
+ */
+export type DeliveryConfig =
+  | { readonly source: 'explicit'; readonly adapters: readonly AdapterConfig[] }
+  | { readonly source: 'synthesized'; readonly adapters: readonly AdapterConfig[] };
 
 export interface DeliveryPayload {
   readonly workflowId: string;
@@ -123,7 +126,7 @@ export function synthesizeDeliveryConfig(fields: SynthesizeDeliveryFields): Deli
     adapters.push({ kind: 'cli_inbox' });
   }
 
-  return { adapters };
+  return { source: 'synthesized', adapters };
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +138,7 @@ export function resolveDeliveryConfig(
   _workflowId: string,
   _globalConfig: Readonly<Record<string, unknown>>,
 ): DeliveryConfig {
-  return triggerDeliveryConfig ?? { adapters: [{ kind: 'cli_inbox' }] };
+  return triggerDeliveryConfig ?? { source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] };
 }
 
 // ---------------------------------------------------------------------------

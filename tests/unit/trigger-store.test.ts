@@ -267,7 +267,7 @@ describe('loadTriggerConfig', () => {
       expect(result.kind).toBe('ok');
       if (result.kind !== 'ok') return;
       const trigger = result.value.triggers[0];
-      expect(trigger?.deliveryConfig?.explicit).toBe(true);
+      expect(trigger?.deliveryConfig?.source).toBe('explicit');
       expect(trigger?.deliveryConfig?.adapters).toHaveLength(1);
       expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('cli_inbox');
     });
@@ -277,7 +277,7 @@ describe('loadTriggerConfig', () => {
       expect(result.kind).toBe('ok');
       if (result.kind !== 'ok') return;
       const trigger = result.value.triggers[0];
-      expect(trigger?.deliveryConfig?.explicit).toBeUndefined();
+      expect(trigger?.deliveryConfig?.source).toBe('synthesized');
       expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('cli_inbox'); // fallback
     });
 
@@ -288,7 +288,7 @@ describe('loadTriggerConfig', () => {
       const trigger = result.value.triggers[0];
       // Regression guard: synthesizeDeliveryConfig must produce git_commit for autoCommit triggers
       expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('git_commit');
-      expect(trigger?.deliveryConfig?.explicit).toBeUndefined(); // synthesized, not explicit
+      expect(trigger?.deliveryConfig?.source).toBe('synthesized'); // synthesized, not explicit
     });
   });
 

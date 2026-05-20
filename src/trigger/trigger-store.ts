@@ -1453,8 +1453,8 @@ function validateAndResolveTrigger(
       return err({ kind: 'invalid_field_value', field: `delivery.kind (unknown adapter kind: "${rawKind}")`, triggerId: rawId });
     }
     explicitDeliveryConfig = {
+      source: 'explicit' as const,
       adapters: [{ kind: rawKind as AdapterConfig['kind'] } as AdapterConfig],
-      explicit: true,
     };
   }
 

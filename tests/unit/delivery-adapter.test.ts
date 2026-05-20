@@ -18,7 +18,7 @@ describe('synthesizeDeliveryConfig', () => {
   const reviewer = { platform: 'github', token: 'tok', login: 'user' };
 
   it('returns cli_inbox when no fields are set', () => {
-    expect(synthesizeDeliveryConfig({})).toEqual({ adapters: [{ kind: 'cli_inbox' }] });
+    expect(synthesizeDeliveryConfig({})).toEqual({ source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] });
   });
 
   it('returns git_commit when autoCommit is true', () => {
@@ -72,11 +72,12 @@ describe('resolveDeliveryConfig', () => {
 
   it('returns cli_inbox fallback when no trigger config is provided', () => {
     const result = resolveDeliveryConfig(undefined, 'wr.test', {});
-    expect(result).toEqual({ adapters: [{ kind: 'cli_inbox' }] });
+    expect(result).toEqual({ source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] });
   });
 
   it('returns the provided trigger config unchanged', () => {
     const config: DeliveryConfig = {
+      source: 'explicit',
       adapters: [{ kind: 'github_draft_review', token: 'tok', login: 'user' }],
     };
     const result = resolveDeliveryConfig(config, 'wr.test', {});
@@ -85,7 +86,7 @@ describe('resolveDeliveryConfig', () => {
 
   it('returns cli_inbox fallback regardless of workflowId or globalConfig', () => {
     const result = resolveDeliveryConfig(undefined, 'wr.some-other-workflow', { someKey: 'val' });
-    expect(result).toEqual({ adapters: [{ kind: 'cli_inbox' }] });
+    expect(result).toEqual({ source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] });
   });
 });
 
