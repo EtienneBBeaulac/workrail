@@ -64,6 +64,56 @@ No proposed solutions here -- just the problem.]
 
 ## P0 / Critical (blocks WorkTrain from working correctly)
 
+### Engine hint content fixes: correct misleading guidance on artifact validation failures (May 20, 2026)
+
+**Status: idea** | Priority: critical
+
+**Score: 14** | Cor:3 Cap:2 Eff:3 Lev:3 Con:3 | Blocked: no
+
+When an agent fails to submit a required artifact, the engine's blocked response actively misdirects it: (1) the `suggestedFix` says "fix `notesMarkdown`" for all non-assessment artifact contracts -- wrong, the agent should fix `output.artifacts`; (2) the circuit-breaker after 3 retries hardcodes "submit a valid `wr.assessment` artifact" regardless of what the step actually requires; (3) wrong-kind artifacts (e.g. agent submits `wr.assessment` when `wr.loop_control` is needed) are silently dropped with no feedback; (4) the empty-artifacts case produces the same unhelpful message as the wrong-kind case. The result: the agent receives contradictory signals from the step prompt and the blocked message, spirals, and terminates. This is the confirmed root cause of the 0/13 `wr.mr-review` success rate. Every artifact schema file already has a `getBlockedMessage()` function with a canonical example -- the fix is to wire the engine to use it.
+
+**Discovery complete (May 20, 2026):** Design doc at `docs/plans/cortex-hint-content-design.md`. 4 targeted changes: extract `blocked-messages` registry to `src/v2/durable-core/schemas/artifacts/blocked-messages.ts`, wire `reason-model.ts` `reasonToBlocker()` to dispatch through it, fix `advance.ts:137` to use actual `contractRef`, add wrong-kind + empty-artifacts detection in `artifact-contract-validator.ts`. Ships independently, benefits all entry points (MCP + daemon). Must ship before SessionCortex Phase 1+2 -- the cortex hint content draws from the same registry.
+
+**Implementation prerequisites:**
+- Verify `pointer.contractRef` is populated on all `MISSING_REQUIRED_OUTPUT` blocking paths before wiring registry dispatch
+- Add `wr.contracts.assessment` to the registry (currently handled inline in `reason-model.ts` only)
+- Handle empty `output.artifacts` case explicitly -- this is the most common failure mode
+
+**GitHub issue:** https://github.com/EtienneBBeaulac/workrail/issues/1074
+
+---
+
+### Daemon session harness: intelligent layer between agent loop and engine (May 20, 2026)
+
+**Status: idea** | Priority: critical
+
+**Score: 15** | Cor:3 Cap:3 Eff:1 Lev:3 Con:3 | Blocked: no
+
+The daemon's agent loop is currently a thin wrapper: start the LLM, execute its tool calls, check for stuck/stall, repeat. There is no layer that understands what the session is trying to accomplish, can intervene when things go wrong, or can do anything other than watch the agent loop until an external heuristic fires. This means sessions get stuck, spiral, hallucinate recovery paths, and terminate unexpectedly -- all of which are unacceptable outcomes when WorkTrain is supposed to be running autonomously overnight. The worst possible outcome (a stuck session with no recovery path) happens regularly today and has no principled fix.
+
+The daemon owns the agent loop completely. Unlike the MCP server -- which is a stateless tool interface that cannot reach into the agent -- the daemon controls the LLM calls, intercepts tool calls, owns the message history, and can inject content at any point. This is the fundamental capability that makes a harness possible and that the current architecture does not exploit.
+
+A session harness is a layer that sits between the agent loop and the engine and owns session lifecycle intelligence: pre-turn state injection (nudge the agent when a pending outputContract hasn't been satisfied), tool interception (enrich raw engine errors with step-specific recovery guidance before the agent sees them), failure pattern escalation (detect spirals and switch recovery strategy rather than letting stuck detectors be the only backstop), session suspension (true pause at any point -- waiting for MR review, operator input, a dependent session, a timer), daemon-side tool execution (read files, call APIs, check PR status and inject results as synthetic messages without going through the agent), and active steering (inject corrections when the agent goes off-track before things go further wrong). With a proper harness, "stuck" is never a terminal state -- there is always another recovery level before operator escalation, and operator escalation itself is a handled path, not an abnormal exit.
+
+**Constraint: no AI in the harness.** All harness logic must be deterministic scripts -- state checks, counters, lookups, pattern matching. AI-based steering or recovery is explicitly out of scope.
+
+**Discovery complete (May 20, 2026):** Design doc at `docs/plans/session-harness-design.md`. Selected direction: `SessionCortex` -- a stateful class subscribing to the existing `turn_end` event, maintaining per-step failure counts in a typed append-only crash-safe event log, driving a typed escalation state machine: `NoFailures -> HintInjected -> ScaffoldInjected -> StepRewound -> OperatorEscalated`. Individual behaviors are pure functions. Rejected two-chain interceptor approach (hot-path mutation, no shared memory, open/closed fails). Key insight: `SessionState` is not persisted to disk -- cortex event log is the minimum persistence surface for suspension/resumption.
+
+**Implementation phases:**
+- **Phase 0 (ready to implement -- engine fixes):** Fix the engine's wrong guidance content before building the cortex. Design doc at `docs/plans/cortex-hint-content-design.md`. 4 targeted changes: extract blocked-messages registry, wire `reason-model.ts` to use it, fix `advance.ts:137` circuit-breaker, add wrong-kind + empty-artifacts detection. Ships independently, benefits all entry points. See backlog item "Engine hint content fixes" below.
+- **Phase 1+2 (shaped, ready for coding-task):** Cortex wiring + failure counting + hint injection + scaffold injection. Pitch at `docs/plans/session-cortex-phase1-2-pitch.md`. The cortex hint content draws from the same `getBlockedMessage()` registry as Phase 0 -- no hand-authored static strings needed.
+- **Phase 3 (needs design):** Step rewind -- HMAC token protocol rewind mechanism not yet designed.
+- **Phase 4 (needs design):** Operator escalation -- notification mechanism and timeout not specified.
+- **Phase 5+ (future):** Daemon-side synthetic tool calls, context degradation checkpointing, session segmentation. Dynamic tool description per step (C3 from hint content discovery) belongs here if Phase 0+1+2 don't fully resolve daemon session failures.
+
+**Open prerequisites before Phase 3/4:**
+- Step rewind mechanism for HMAC token / append-only log protocol
+- Operator escalation timeout and notification/response interface
+
+**GitHub issues:** Phase 0 (engine fixes): #1074 | Phase 1+2 (cortex): #1075
+
+---
+
 ### wr.coding-task forEach loop exposes broken agent-facing state (Apr 30, 2026)
 
 **Status: done** | Shipped May 1, 2026 (PR #926)
@@ -195,24 +245,39 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Git rebase workflow for agents (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Agents asked to rebase a branch routinely make the same mistakes: they skip conflict markers, accept one side wholesale without reading both, fail to verify the result builds and tests pass, and don't check whether changes from both sides are still semantically correct together after the merge. A rebase done wrong can silently lose logic from either side or create code that compiles but no longer works as intended. Without a structured workflow enforcing a deliberate step-by-step process, agents treat rebase as a mechanical operation rather than a reasoning task.
+
+**Things to hash out:**
+- What are the required checkpoint steps? At minimum: read both sides of each conflict before resolving, verify the intended behavior from each side is preserved in the resolution, run build+tests after each file resolved, final diff review before push.
+- Should the workflow handle interactive rebase (reordering/squashing commits) or only conflict resolution, or both?
+- How does the workflow detect when a "conflict-free" rebase silently loses semantic correctness (e.g. a function is moved on one branch and modified on the other, no textual conflict but wrong behavior)?
+
+---
+
 ### Pluggable output delivery: workflows produce structured artifacts, delivery is configured externally (May 19, 2026)
 
-**Status: partial** | Phases 1-7 shipped (PRs #1054, #1055, #1062-#1063, #1065, #1067, May 20 2026), needs verification + Phase 8 gaps remain
+**Status: partial** | Phases 1-7 shipped (PRs #1054, #1055, #1062-#1063, #1065, #1067, May 20 2026); delivery adapter architecture refactored (PR #1072 open); needs verification + Phase 8 gaps remain
 
 **Score: 12** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
 
-**What shipped (all phases complete):**
-- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit'|'synthesized'), `CliInboxAdapter`, `GitCommitDeliveryContext` interface
-- `synthesizeDeliveryConfig()` migration shim; `_runDeliveryByKind()` unified delivery dispatch
+**What shipped (Phases 1-7 + architecture refactor):**
+- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit'|'synthesized'), `CliInboxAdapter`
+- `synthesizeDeliveryConfig()` migration shim; `_runDeliveryByKind()` unified delivery dispatch (exhaustive switch, `assertNever`)
 - `delivery: { kind: github_draft_review, token: $TOKEN, login: user }` YAML block replacing legacy `reviewerIdentity`
 - Inline review comments posted to PR diff for findings with `file`+`startLine` fields
-- Gate resume: `PendingDraftReviewPoller` calls `resumeFromGate()` fire-and-forget when operator submits review -- `human_approval` gate loop completes automatically
-- `PendingDeliverySidecar` self-contained format (token in state, no trigger index lookup on restart)
-- `TriggerRouterOptions` object replaces 14 positional constructor params
-- `reviewerIdentity` fully removed from `WorkflowTrigger`, `TriggerDefinition`, and YAML parser
-- `callbackUrl` delivery unified through `runCallbackUrlDelivery()` named action
-- `triggers.yml` migrated to `delivery:` block format
-- Full design doc at `docs/plans/output-delivery-design.md`
+- Gate resume: `PendingDraftReviewPoller` calls `resumeFromGate()` fire-and-forget when operator submits review
+- `PendingDeliverySidecar` discriminated union per `adapterId` (typed state, no unsafe casts in recovery)
+- `PendingDeliverySidecar` types extracted to `pending-delivery-sidecar.ts`
+- `GitHubDraftReviewAdapter` and `GitCommitAdapter` as proper `implements DeliveryAdapter<K>` classes (PR #1072 open)
+- `GateResumeCallback` named type, injected at construction, threaded into `recoverPendingDeliveryPollers` so gate sessions resume after daemon restart
+- `reviewerIdentity` fully removed; `callbackUrl` unified; `triggers.yml` migrated
+- Full design doc at `docs/plans/output-delivery-design.md`; architecture refactor design at `docs/plans/output-delivery-design.md`
 
 **Needs verification before declaring fully production-ready:**
 - End-to-end test: fire a real `wr.mr-review` session with `delivery: { kind: github_draft_review }` in triggers.yml (no reviewerIdentity) and confirm draft review posts, inline comments appear, and gate resumes when operator submits
@@ -3405,6 +3470,21 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 ---
 
 ## Workflow Library
+
+### Remove human_approval gate from wr.mr-review final handoff step (May 20, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+The `wr.mr-review` workflow's final handoff step (`phase-6-final-handoff`) uses `requireConfirmation: { kind: "human_approval" }` before posting the draft review to GitHub. This gate is redundant with GitHub's own draft review mechanism -- a draft review is not published until the operator explicitly submits it on GitHub. The gate currently parks the session at a local `gate_parked` state, requiring the operator to respond via `worktrain inbox respond` before anything reaches GitHub. This doubles the number of required human interactions and makes the workflow less useful for overnight autonomous operation. Since the agent posts a *draft* (not a published) review, the operator retains full control via GitHub's native submit button -- the local gate adds friction without adding safety.
+
+**Things to hash out:**
+- Should the gate be removed entirely, or replaced with a post-delivery check (confirm the draft posted successfully before completing)?
+- Does removing the gate affect how `coordinator_eval` gates upstream (phase-0, phase-5) are evaluated -- are they still correct without the final human gate?
+- What happens on a `blocking` verdict -- should the workflow still park for operator input in that case even without the standard gate?
+
+---
 
 ### Pre-specialized expert agents: on-demand consultants for main agents (May 7, 2026)
 

@@ -13,6 +13,9 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { PollHandle } from './pending-delivery-sidecar.js';
+
+export type { PollHandle };
 
 // ---------------------------------------------------------------------------
 // Config + payload types
@@ -43,20 +46,31 @@ export interface DeliveryPayload {
   readonly goal: string;
   readonly notes: string | null;
   readonly artifacts: readonly unknown[];
+  /** Session context map (e.g. itemNumber, itemUrl from contextMapping). */
+  readonly context?: Readonly<Record<string, unknown>>;
+  /** WorkRail session ID (sess_...) needed for event log write-back after async delivery. */
+  readonly workrailSessionId?: string;
+  /** Trigger ID this session was started from, if any. */
+  readonly triggerId?: string;
+  /** Workspace path for git-commit delivery. */
+  readonly workspacePath?: string;
+  /** Branch strategy for git-commit delivery. */
+  readonly branchStrategy?: string;
+  /** Branch name prefix for git-commit delivery. */
+  readonly branchPrefix?: string;
+  /** Base branch for git-commit delivery. */
+  readonly baseBranch?: string;
 }
+
+/** Called fire-and-forget when an async delivery receives operator approval (e.g. review submission). */
+export type GateResumeCallback = (daemonSessionId: string) => void;
 
 // ---------------------------------------------------------------------------
 // Poll handle + receipt
 // ---------------------------------------------------------------------------
 
-export interface PollHandle {
-  // WHY AdapterConfig['kind'] (not string): constrained to the closed set so
-  // startup recovery can exhaustively switch without casting.
-  readonly adapterId: AdapterConfig['kind'];
-  // WHY Record<string,unknown>: each adapter stores its own polling state without
-  // leaking internal types at the interface level.
-  readonly state: Readonly<Record<string, unknown>>;
-}
+// PollHandle is re-exported from pending-delivery-sidecar.ts as a discriminated
+// union so startup recovery can read per-adapter typed state without casting.
 
 /** Errors are data -- deliver() must never throw. */
 export type DeliveryReceipt =
