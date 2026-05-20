@@ -1105,6 +1105,11 @@ export class TriggerRouter {
                     lastStepArtifacts,
                     sessionId: result.sessionId as import('../daemon/daemon-events.js').RunId,
                   };
+                  // NOTE (Phase 5): this still uses the legacy maybeRunPostWorkflowActions() path
+                  // which only fires for reviewerIdentity. Triggers migrated to explicit
+                  // delivery: { kind: github_draft_review } (without reviewerIdentity) will
+                  // NOT get a draft review posted from this gate path until Phase 5 migrates
+                  // this call site to the explicit deliveryConfig dispatch loop.
                   await maybeRunPostWorkflowActions(
                     workflowTrigger,
                     syntheticSuccess,
@@ -1156,13 +1161,20 @@ export class TriggerRouter {
         : undefined;
       await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn, deliveryDeps);
 
-      // Deprecation: warn once per session when both legacy reviewerIdentity and explicit
-      // deliveryConfig are set -- explicit delivery: block takes precedence.
-      if (workflowTrigger.reviewerIdentity !== undefined && workflowTrigger.deliveryConfig?.source === 'explicit') {
+      // Deprecation: warn once per session when reviewerIdentity is set AND the explicit
+      // delivery: block already includes github_draft_review (the two are redundant and
+      // the explicit block takes precedence for review posting).
+      // WHY narrow condition: having delivery: { kind: cli_inbox } + reviewerIdentity is
+      // a valid migration pattern -- cli_inbox for notifications, reviewerIdentity for reviews.
+      if (
+        workflowTrigger.reviewerIdentity !== undefined &&
+        workflowTrigger.deliveryConfig?.source === 'explicit' &&
+        workflowTrigger.deliveryConfig.adapters.some(a => a.kind === 'github_draft_review')
+      ) {
         console.warn(
-          `[TriggerRouter] reviewerIdentity is deprecated when an explicit delivery: block is configured ` +
-          `(workflowId=${workflowTrigger.workflowId}). Remove reviewerIdentity from triggers.yml and use ` +
-          `delivery: { kind: github_draft_review, token: $TOKEN, login: ... } instead.`,
+          `[TriggerRouter] reviewerIdentity is redundant when delivery: { kind: github_draft_review } is configured ` +
+          `(workflowId=${workflowTrigger.workflowId}). Remove reviewerIdentity from triggers.yml -- ` +
+          `the delivery: block already handles review posting.`,
         );
       }
 
@@ -1206,6 +1218,14 @@ export class TriggerRouter {
               trigger.id,
             );
             explicitGithubReviewFired = true;
+          } else if (adapterConfig.kind !== 'cli_inbox') {
+            // Adapter kind is configured but not yet implemented in Phase 4.
+            // Phase 5 will add git_commit; Phase 6+ will add slack_webhook, gitlab_mr_note, callback_url.
+            console.warn(
+              `[TriggerRouter] Delivery adapter kind '${adapterConfig.kind}' is not yet activated ` +
+              `(workflowId=${workflowTrigger.workflowId}). Delivery skipped for this adapter. ` +
+              `This will be implemented in a future phase.`,
+            );
           }
         }
       }

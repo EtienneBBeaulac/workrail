@@ -1834,13 +1834,17 @@ export function validateTriggerStrict(
   // Rule: reviewer-identity-without-read-only (warning)
   // reviewer-assigned PR review sessions need branchStrategy: 'read-only' to checkout the PR
   // branch in an isolated worktree so concurrent reviews don't clobber the main checkout.
-  if (trigger.reviewerIdentity && trigger.branchStrategy !== 'read-only') {
+  // Applies to both legacy reviewerIdentity and explicit delivery: { kind: github_draft_review }.
+  const hasReviewDelivery =
+    trigger.reviewerIdentity !== undefined ||
+    trigger.deliveryConfig?.adapters.some(a => a.kind === 'github_draft_review') === true;
+  if (hasReviewDelivery && trigger.branchStrategy !== 'read-only') {
     issues.push({
       rule: 'reviewer-identity-without-read-only',
       severity: 'warning',
       triggerId: id,
       message:
-        'reviewerIdentity is set but branchStrategy is not "read-only" -- reviewer sessions ' +
+        'Review delivery is configured but branchStrategy is not "read-only" -- reviewer sessions ' +
         'should use branchStrategy: read-only to checkout the PR branch in an isolated worktree',
       suggestedFix: 'branchStrategy: read-only',
     });
