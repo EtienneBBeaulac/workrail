@@ -338,6 +338,7 @@ async function runPostWorkflowReview(
   notificationService?: NotificationService,
   ctx?: V2ToolContext,
   triggerId?: string,
+  onGateResume?: (daemonSessionId: string) => void,
 ): Promise<void> {
   if (originalResult._tag !== 'success') return;
 
@@ -466,6 +467,7 @@ async function runPostWorkflowReview(
           `prRepo=${prRepo} prNumber=${prNumber} submittedAt=${submittedAt}`,
         );
       },
+      onGateResume: onGateResume,
     });
     poller.start();
   }
@@ -474,6 +476,37 @@ async function runPostWorkflowReview(
   notificationService?.notify(originalResult, `WorkTrain review draft ready on PR #${prNumber} -- open in GitHub to review findings`);
 }
 
+
+/**
+/**
+ * POST the completed workflow result to a callbackUrl.
+ * Returns the original result on success, or a WorkflowDeliveryFailed result on HTTP error.
+ * The delivery_failed result suppresses autoCommit for the same session (callers use originalResult
+ * to bypass this for other delivery actions).
+ */
+async function runCallbackUrlDelivery(
+  triggerId: string,
+  workflowId: string,
+  callbackUrl: string,
+  result: WorkflowRunResult,
+  emitter?: DaemonEventEmitter,
+): Promise<WorkflowRunResult> {
+  const deliveryResult = await deliveryPost(callbackUrl, result, emitter);
+  if (deliveryResult.kind === 'err') {
+    const deliveryError =
+      deliveryResult.error.kind === 'http_error'
+        ? `HTTP ${deliveryResult.error.status}: ${deliveryResult.error.body}`
+        : deliveryResult.error.message;
+    console.error(`[TriggerRouter] Delivery failed: triggerId=${triggerId} callbackUrl=${callbackUrl} error=${deliveryError}`);
+    return {
+      _tag: 'delivery_failed',
+      workflowId,
+      stopReason: result._tag === 'success' ? result.stopReason : 'error',
+      deliveryError,
+    } satisfies WorkflowDeliveryFailed;
+  }
+  return result;
+}
 
 /**
  * Run git commit + optional PR open after a successful workflow session.
@@ -739,7 +772,29 @@ export class TriggerRouter {
         await runGitCommitDelivery(triggerId as import('./types.js').TriggerId, workflowTrigger, adapterConfig, result, this.execFn, deps);
       } else if (adapterConfig.kind === 'github_draft_review') {
         const identity: import('./types.js').ReviewerIdentity = { platform: 'github', token: adapterConfig.token, login: adapterConfig.login };
-        await runPostWorkflowReview(identity, workflowTrigger, result, this._reviewApprovalAdapter, this.notificationService, this.ctx, triggerId);
+        // Build a fire-and-forget gate resume closure. When the operator submits the draft
+        // review on GitHub, the poller calls this to resume the parked gate session.
+        const ctx = this.ctx;
+        const apiKey = this.apiKey;
+        const runWorkflowFn = this.runWorkflowFn;
+        const emitter = this.emitter;
+        const activeSessionSet = this._activeSessionSet;
+        const gateResumeClosure = (daemonSessionId: string): void => {
+          void resumeFromGate(
+            daemonSessionId,
+            { verdict: 'approved', confidence: 'high', rationale: 'Operator submitted review on GitHub', stepId: '' },
+            ctx, apiKey, runWorkflowFn, undefined, emitter, activeSessionSet,
+          ).then((r) => {
+            if (r.kind === 'err') {
+              console.warn(`[TriggerRouter] Gate resume after review submission failed: ${r.error.message}`);
+            } else {
+              console.log(`[TriggerRouter] Gate resumed after review submission: daemonSessionId=${daemonSessionId}`);
+            }
+          }).catch((e: unknown) => {
+            console.warn(`[TriggerRouter] Gate resume threw: ${e instanceof Error ? e.message : String(e)}`);
+          });
+        };
+        await runPostWorkflowReview(identity, workflowTrigger, result, this._reviewApprovalAdapter, this.notificationService, this.ctx, triggerId, gateResumeClosure);
       } else if (adapterConfig.kind === 'cli_inbox' && this._cliInboxAdapter !== undefined && workflowTrigger.deliveryConfig.source === 'explicit') {
         const payload: DeliveryPayload = {
           workflowId: workflowTrigger.workflowId,
@@ -750,10 +805,10 @@ export class TriggerRouter {
         };
         try { await this._cliInboxAdapter.deliver(payload, adapterConfig); }
         catch (e) { console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`); }
-      } else {
-        // Unimplemented adapter kind -- Phase 6+ will add slack_webhook, gitlab_mr_note, callback_url.
-        // git_commit is handled above but only when triggerId is available.
-        console.warn(`[TriggerRouter] Delivery adapter '${adapterConfig.kind}' not yet activated or triggerId absent (workflowId=${workflowTrigger.workflowId}).`);
+      } else if (adapterConfig.kind !== 'callback_url') {
+        // callback_url fires through runCallbackUrlDelivery() in route() before _runDeliveryByKind.
+        // All other unimplemented kinds warn so operators know delivery is skipped.
+        console.warn(`[TriggerRouter] Delivery adapter '${adapterConfig.kind}' not yet activated (workflowId=${workflowTrigger.workflowId}).`);
       }
     }
   }
@@ -966,24 +1021,7 @@ export class TriggerRouter {
       const originalTag = result._tag;
       const originalResult = result;
       if (trigger.callbackUrl) {
-        const deliveryResult = await deliveryPost(trigger.callbackUrl, result, this.emitter);
-        if (deliveryResult.kind === 'err') {
-          const deliveryError =
-            deliveryResult.error.kind === 'http_error'
-              ? `HTTP ${deliveryResult.error.status}: ${deliveryResult.error.body}`
-              : deliveryResult.error.message;
-          console.error(
-            `[TriggerRouter] Delivery failed: triggerId=${trigger.id} ` +
-              `callbackUrl=${trigger.callbackUrl} error=${deliveryError}`,
-          );
-          const deliveryFailed: WorkflowDeliveryFailed = {
-            _tag: 'delivery_failed',
-            workflowId: trigger.workflowId,
-            stopReason: result.stopReason,
-            deliveryError,
-          };
-          result = deliveryFailed;
-        }
+        result = await runCallbackUrlDelivery(trigger.id, trigger.workflowId, trigger.callbackUrl, result, this.emitter);
       }
 
       if (result._tag === 'success') {

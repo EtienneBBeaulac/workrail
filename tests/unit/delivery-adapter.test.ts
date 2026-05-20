@@ -37,13 +37,10 @@ describe('synthesizeDeliveryConfig', () => {
     expect(result.adapters[0]).toEqual({ kind: 'github_draft_review', token: 'tok', login: 'user' });
   });
 
-  it('does NOT include callback_url in synthesized adapters (callbackUrl has its own delivery path)', () => {
-    // callbackUrl fires via deliveryPost() in trigger-router.ts, not through the adapter loop.
-    // Adding it to synthesized adapters would create a dead entry that warns "not yet activated".
+  it('includes callback_url in synthesized adapters when callbackUrl is set', () => {
     const result = synthesizeDeliveryConfig({ callbackUrl: 'https://example.com/hook' });
-    expect(result.adapters.every(a => a.kind !== 'callback_url')).toBe(true);
-    // No other delivery configured -- falls back to cli_inbox
-    expect(result.adapters[0]!.kind).toBe('cli_inbox');
+    expect(result.adapters).toHaveLength(1);
+    expect(result.adapters[0]).toEqual({ kind: 'callback_url', url: 'https://example.com/hook' });
   });
 
   it('puts git_commit before github_draft_review when both are set', () => {
@@ -54,13 +51,13 @@ describe('synthesizeDeliveryConfig', () => {
     expect(result.adapters[1]!.kind).toBe('github_draft_review');
   });
 
-  it('returns only git_commit and github_draft_review (not callback_url) when all three legacy fields set', () => {
+  it('includes all three adapters in order when all legacy fields set', () => {
     const result = synthesizeDeliveryConfig({
       autoCommit: true,
       reviewerIdentity: reviewer,
       callbackUrl: 'https://example.com/hook',
     });
-    expect(result.adapters.map(a => a.kind)).toEqual(['git_commit', 'github_draft_review']);
+    expect(result.adapters.map(a => a.kind)).toEqual(['git_commit', 'github_draft_review', 'callback_url']);
   });
 });
 
