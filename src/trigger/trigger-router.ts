@@ -506,16 +506,19 @@ async function runGitCommitDelivery(
   }
 
   // Construct a synthetic trigger-like object from WorkflowTrigger fields.
-  // runDeliveryPipeline() only reads: autoCommit, autoOpenPR, secretScan,
-  // workspacePath, branchPrefix, baseBranch, and id from TriggerDefinition.
+  // runDeliveryPipeline() reads: autoCommit, autoOpenPR, secretScan, workspacePath,
+  // branchPrefix, baseBranch, branchStrategy (for worktree cleanup stages), workflowId
+  // (for PR body attribution), and id from TriggerDefinition.
   const syntheticTrigger = {
     id: triggerId as import('./types.js').TriggerId,
+    workflowId: workflowTrigger.workflowId,
     autoCommit: true as const,
     autoOpenPR: adapterConfig.autoOpenPR,
     secretScan: adapterConfig.secretScan,
     workspacePath: workflowTrigger.workspacePath,
     branchPrefix: workflowTrigger.branchPrefix,
     baseBranch: workflowTrigger.baseBranch,
+    branchStrategy: workflowTrigger.branchStrategy,
   } as unknown as import('./types.js').TriggerDefinition;
 
   await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, syntheticTrigger, execFn, triggerId, deps);
@@ -752,6 +755,10 @@ export class TriggerRouter {
         };
         try { await this._cliInboxAdapter.deliver(payload, adapterConfig); }
         catch (e) { console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`); }
+      } else {
+        // Unimplemented adapter kind -- Phase 6+ will add slack_webhook, gitlab_mr_note, callback_url.
+        // git_commit is handled above but only when triggerId is available.
+        console.warn(`[TriggerRouter] Delivery adapter '${adapterConfig.kind}' not yet activated or triggerId absent (workflowId=${workflowTrigger.workflowId}).`);
       }
     }
   }
@@ -1179,10 +1186,19 @@ export class TriggerRouter {
         : undefined;
       await this._runDeliveryByKind(workflowTrigger, originalResult, trigger.id, deliveryDeps);
 
-
-      // githubReviewFired is true when the kind-based loop above handled github_draft_review.
-      // If deliveryConfig is absent or has no github_draft_review adapter, no review was posted.
-      // This is the expected state for non-review workflows.
+      // Deprecation: warn when legacy reviewerIdentity on TriggerDefinition is redundant with
+      // explicit delivery: { kind: github_draft_review } block. Uses trigger.reviewerIdentity
+      // (from TriggerDefinition) since WorkflowTrigger.reviewerIdentity was removed in Phase 5.
+      if (
+        trigger.reviewerIdentity !== undefined &&
+        workflowTrigger.deliveryConfig?.source === 'explicit' &&
+        workflowTrigger.deliveryConfig.adapters.some(a => a.kind === 'github_draft_review')
+      ) {
+        console.warn(
+          `[TriggerRouter] reviewerIdentity in triggers.yml is redundant when delivery: { kind: github_draft_review } is configured ` +
+          `(triggerId=${trigger.id}). Remove reviewerIdentity from triggers.yml.`,
+        );
+      }
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
