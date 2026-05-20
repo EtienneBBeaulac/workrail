@@ -2,7 +2,7 @@ import type { AutonomyV2 } from '../schemas/session/preferences.js';
 import { AUTONOMY_MODE, DELIMITER_SAFE_ID_PATTERN, MAX_BLOCKERS, MAX_BLOCKER_MESSAGE_BYTES, MAX_BLOCKER_SUGGESTED_FIX_BYTES } from '../constants.js';
 import { err, ok, type Result } from 'neverthrow';
 import { utf8ByteLength } from '../schemas/lib/utf8-byte-length.js';
-import { ASSESSMENT_CONTRACT_REF } from '../schemas/artifacts/index.js';
+import { getArtifactBlockedMessage } from '../schemas/artifacts/blocked-messages.js';
 
 export type CapabilityV2 = 'delegation' | 'web_browsing';
 export type GapSeverityV1 = 'info' | 'warning' | 'critical';
@@ -241,31 +241,39 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
         suggestedFix: 'Remove large blobs from context and pass only small external inputs (IDs, paths, parameters).',
       });
 
-    case 'missing_required_output':
+    case 'missing_required_output': {
       return ensureContractRef(reason.contractRef)
-        .map((contractRef) => ({
-          code: 'MISSING_REQUIRED_OUTPUT' as const,
-          pointer: { kind: 'output_contract' as const, contractRef },
-          message: `Missing required output (contractRef=${contractRef}).`,
-          suggestedFix:
-            contractRef === ASSESSMENT_CONTRACT_REF
-              ? 'Call continue_workflow without output to rehydrate the current step, then retry with an assessment artifact under output.artifacts using kind "wr.assessment" and the required canonical dimension levels.'
-              : 'Call continue_workflow without output to rehydrate the current step, then retry with output.notesMarkdown that satisfies the step output requirements.',
-        }))
+        .map((contractRef) => {
+          const lines = getArtifactBlockedMessage(contractRef);
+          const suggestedFix = lines
+            ? `Pass this artifact in \`output.artifacts\` of your \`complete_step\` call:\n${lines.join('\n')}`
+            : `Check the step's outputContract for the required artifact format and pass it in \`output.artifacts\` of your \`complete_step\` call.`;
+          return {
+            code: 'MISSING_REQUIRED_OUTPUT' as const,
+            pointer: { kind: 'output_contract' as const, contractRef },
+            message: `Missing required output (contractRef=${contractRef}).`,
+            suggestedFix,
+          };
+        })
         .andThen(ensureBlockerTextBudgets);
+    }
 
-    case 'invalid_required_output':
+    case 'invalid_required_output': {
       return ensureContractRef(reason.contractRef)
-        .map((contractRef) => ({
-          code: 'INVALID_REQUIRED_OUTPUT' as const,
-          pointer: { kind: 'output_contract' as const, contractRef },
-          message: `Invalid output for contractRef=${contractRef}.`,
-          suggestedFix:
-            contractRef === ASSESSMENT_CONTRACT_REF
-              ? 'Update the assessment artifact in output.artifacts so it uses the expected assessment ID and canonical dimension levels. Then call continue_workflow without output to rehydrate the current step and retry with the corrected artifact.'
-              : 'Update output.notesMarkdown to satisfy validation. Then call continue_workflow without output to rehydrate the current step and retry advance with the corrected output. Replaying the same invalid advance will keep returning this blocked result.',
-        }))
+        .map((contractRef) => {
+          const lines = getArtifactBlockedMessage(contractRef);
+          const suggestedFix = lines
+            ? `Fix the artifact and pass it in \`output.artifacts\` of your \`complete_step\` call:\n${lines.join('\n')}`
+            : `Fix the artifact to match the required contract and pass it in \`output.artifacts\` of your \`complete_step\` call. Replaying the same invalid advance will keep returning this blocked result.`;
+          return {
+            code: 'INVALID_REQUIRED_OUTPUT' as const,
+            pointer: { kind: 'output_contract' as const, contractRef },
+            message: `Invalid output for contractRef=${contractRef}.`,
+            suggestedFix,
+          };
+        })
         .andThen(ensureBlockerTextBudgets);
+    }
 
     case 'assessment_followup_required':
       return ensureBlockerTextBudgets({

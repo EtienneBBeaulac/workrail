@@ -41,3 +41,18 @@ export function parseAssessmentArtifact(artifact: unknown): AssessmentArtifactV1
   const result = AssessmentArtifactV1Schema.safeParse(artifact);
   return result.success ? result.data : null;
 }
+
+/**
+ * Actionable blocked message for when a step requires a wr.assessment artifact.
+ */
+export function getBlockedMessage(): readonly string[] {
+  return [
+    `Artifact contract: ${ASSESSMENT_CONTRACT_REF}`,
+    `Provide a wr.assessment artifact in complete_step's artifacts[] parameter.`,
+    `Required fields: assessmentId (string), dimensions (object mapping dimensionId to level string).`,
+    `Canonical format:`,
+    `\`\`\`json`,
+    `{ "artifacts": [{ "kind": "wr.assessment", "assessmentId": "<id>", "dimensions": { "<dimensionId>": "high" } }] }`,
+    `\`\`\``,
+  ];
+}

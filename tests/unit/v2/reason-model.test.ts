@@ -87,6 +87,38 @@ describe('reason-model (table-driven mapping)', () => {
     });
   }
 
+  it('reasonToBlocker for missing_required_output (loop_control) says output.artifacts, not notesMarkdown', () => {
+    const result = reasonToBlocker({ kind: 'missing_required_output', contractRef: 'wr.contracts.loop_control' });
+    expect(result.isOk()).toBe(true);
+    const blocker = result._unsafeUnwrap();
+    expect(blocker.suggestedFix).toContain('output.artifacts');
+    expect(blocker.suggestedFix).not.toContain('notesMarkdown');
+    expect(blocker.suggestedFix).toContain('wr.loop_control');
+  });
+
+  it('reasonToBlocker for missing_required_output (assessment) says output.artifacts with assessment scaffold', () => {
+    const result = reasonToBlocker({ kind: 'missing_required_output', contractRef: 'wr.contracts.assessment' });
+    expect(result.isOk()).toBe(true);
+    const blocker = result._unsafeUnwrap();
+    expect(blocker.suggestedFix).toContain('output.artifacts');
+    expect(blocker.suggestedFix).toContain('wr.assessment');
+  });
+
+  it('reasonToBlocker for missing_required_output (unknown contractRef) falls back to generic output.artifacts guidance', () => {
+    const result = reasonToBlocker({ kind: 'missing_required_output', contractRef: 'wr.contracts.some_future_type' });
+    expect(result.isOk()).toBe(true);
+    const blocker = result._unsafeUnwrap();
+    expect(blocker.suggestedFix).toContain('output.artifacts');
+  });
+
+  it('reasonToBlocker for invalid_required_output (loop_control) says output.artifacts, not notesMarkdown', () => {
+    const result = reasonToBlocker({ kind: 'invalid_required_output', contractRef: 'wr.contracts.loop_control' });
+    expect(result.isOk()).toBe(true);
+    const blocker = result._unsafeUnwrap();
+    expect(blocker.suggestedFix).toContain('output.artifacts');
+    expect(blocker.suggestedFix).not.toContain('notesMarkdown');
+  });
+
   it('buildBlockerReport sorts deterministically by (code, pointer.kind, pointer.*)', () => {
     const reasons: ReasonV1[] = [
       { kind: 'missing_required_output', contractRef: 'wr.validationCriteria' },
