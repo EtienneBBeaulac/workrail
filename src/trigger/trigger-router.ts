@@ -569,6 +569,27 @@ class Semaphore {
 /** Default maximum concurrent runWorkflow() calls across all triggers. */
 const DEFAULT_MAX_CONCURRENT_SESSIONS = 3;
 
+/**
+ * Optional dependencies and configuration for TriggerRouter.
+ * All fields default to production values when absent.
+ */
+export interface TriggerRouterOptions {
+  /** Injectable exec function for post-workflow delivery. Defaults to promisify(execFile). */
+  execFn?: ExecFn;
+  maxConcurrentSessions?: number;
+  emitter?: DaemonEventEmitter;
+  notificationService?: NotificationService;
+  activeSessionSet?: ActiveSessionSet;
+  coordinatorDeps?: AdaptiveCoordinatorDeps;
+  modeExecutors?: ModeExecutors;
+  /** Inject in tests to control TTL or observe dedup behavior. */
+  deduplicator?: DispatchDeduplicator;
+  /** Defaults to GitHubReviewApprovalAdapter. Inject a fake in tests. */
+  reviewApprovalAdapter?: ReviewApprovalAdapter;
+  /** Path to ~/.workrail. When absent, cli_inbox delivery is silently skipped. */
+  workrailDir?: string;
+}
+
 export class TriggerRouter {
   private readonly queue = new KeyedAsyncQueue();
   private readonly execFn: ExecFn;
@@ -626,76 +647,20 @@ export class TriggerRouter {
     private readonly ctx: V2ToolContext,
     private readonly apiKey: string,
     private readonly runWorkflowFn: RunWorkflowFn,
-    /**
-     * Injectable exec function for post-workflow delivery.
-     * Defaults to promisify(execFile) in production.
-     * Override in tests to use a fake without calling child_process.
-     */
-    execFn?: ExecFn,
-    maxConcurrentSessions?: number,
-    /**
-     * Optional event emitter for structured daemon lifecycle events.
-     * When provided, emits trigger_fired and session_queued events.
-     * When absent, no events are emitted (zero overhead).
-     */
-    emitter?: DaemonEventEmitter,
-    /**
-     * Optional notification service for user-facing notifications.
-     * When provided, fires macOS/webhook notifications after each session completes.
-     * When absent, no notifications are fired (zero overhead).
-     *
-     * WHY optional injection (not a direct config): follows the DaemonEventEmitter
-     * pattern -- the caller constructs the service and injects it. This keeps
-     * TriggerRouter free of notification config knowledge and makes both sides
-     * independently testable.
-     */
-    notificationService?: NotificationService,
-    /**
-     * Optional active session set for steer injection and graceful shutdown.
-     * Replaces the former SteerRegistry + AbortRegistry pair.
-     * When absent, steer endpoint returns 404 and SIGTERM does not abort sessions.
-     */
-    activeSessionSet?: ActiveSessionSet,
-    /**
-     * Optional adaptive coordinator dependencies for in-process pipeline dispatch.
-     * When provided, dispatchAdaptivePipeline() uses these as default deps.
-     * When absent, dispatchAdaptivePipeline() logs a warning and returns an escalated outcome.
-     *
-     * WHY optional injection: follows the same DI pattern as execFn, emitter, etc.
-     * Production wiring is done in trigger-listener.ts (bootstrap level).
-     * Tests that do not need adaptive dispatch omit this parameter.
-     *
-     * @see dispatchAdaptivePipeline
-     */
-    coordinatorDeps?: AdaptiveCoordinatorDeps,
-    /**
-     * Optional mode executors for the adaptive pipeline coordinator.
-     * Must be provided alongside coordinatorDeps for adaptive dispatch to activate.
-     * When absent (or when coordinatorDeps is absent), dispatchAdaptivePipeline falls back
-     * to logging a warning and returning an escalated outcome.
-     *
-     * @see dispatchAdaptivePipeline
-     */
-    modeExecutors?: ModeExecutors,
-    /**
-     * Optional deduplicator for dispatch dedup guard.
-     * When absent, defaults to a new DispatchDeduplicator with ADAPTIVE_DEDUPE_TTL_MS.
-     * Inject in tests to control TTL or observe dedup behavior.
-     */
-    deduplicator?: DispatchDeduplicator,
-    /**
-     * Optional ReviewApprovalAdapter for creating draft reviews after review sessions.
-     * Defaults to GitHubReviewApprovalAdapter in production.
-     * Inject a fake in tests to avoid real GitHub API calls.
-     */
-    reviewApprovalAdapter?: ReviewApprovalAdapter,
-    /**
-     * Path to the workrail data directory (~/.workrail).
-     * Used by CliInboxAdapter to locate outbox.jsonl.
-     * When absent, cli_inbox delivery is silently skipped.
-     */
-    workrailDir?: string,
+    opts: TriggerRouterOptions = {},
   ) {
+    const {
+      execFn,
+      maxConcurrentSessions,
+      emitter,
+      notificationService,
+      activeSessionSet,
+      coordinatorDeps,
+      modeExecutors,
+      deduplicator,
+      reviewApprovalAdapter,
+      workrailDir,
+    } = opts;
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
     this.notificationService = notificationService;

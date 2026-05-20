@@ -447,8 +447,14 @@ export async function startTriggerListener(
   const baseRunWorkflow = options.runWorkflowFn ?? runWorkflow;
   const runWorkflowFn: RunWorkflowFn = (trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet, _statsDir, _sessionsDir, source) =>
     baseRunWorkflow(trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet, _statsDir, _sessionsDir, source, enricherDeps);
-  const workrailDir = path.join(os.homedir(), '.workrail');
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, activeSessionSet, undefined, modeExecutors, undefined, undefined, workrailDir);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, {
+    maxConcurrentSessions,
+    emitter: options.emitter,
+    notificationService,
+    activeSessionSet,
+    modeExecutors,
+    workrailDir: path.join(os.homedir(), '.workrail'),
+  });
   const coordinatorDeps = createCoordinatorDeps({ ctx, execFileAsync, dispatch: router.dispatch.bind(router) });
   router.setCoordinatorDeps(coordinatorDeps);
   const app = createTriggerApp(router, activeSessionSet);

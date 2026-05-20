@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
+import type { TriggerRouterOptions } from '../../src/trigger/trigger-router.js';
 import type { AdaptiveCoordinatorDeps, ModeExecutors, PipelineOutcome } from '../../src/coordinators/adaptive-pipeline.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
 import type { RunWorkflowFn } from '../../src/trigger/trigger-router.js';
@@ -447,7 +448,7 @@ describe('TriggerRouter.route', () => {
 
       const trigger = makeTrigger({ autoCommit: true });
       const { fn } = makeFakeRunWorkflow(VALID_HANDOFF_NOTES);
-      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, fakeExec);
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { execFn: fakeExec });
 
       router.route(makeEvent());
 
@@ -469,7 +470,7 @@ describe('TriggerRouter.route', () => {
 
       const trigger = makeTrigger({ autoCommit: false });
       const { fn } = makeFakeRunWorkflow(VALID_HANDOFF_NOTES);
-      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, fakeExec);
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { execFn: fakeExec });
 
       router.route(makeEvent());
       await new Promise<void>((r) => setTimeout(r, 50));
@@ -517,7 +518,7 @@ describe('TriggerRouter.route', () => {
         sessionId: SESSION_ID,
       });
 
-      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, fakeExec);
+      const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { execFn: fakeExec });
 
       router.route(makeEvent());
 
@@ -1179,7 +1180,7 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     // gets a unique title-based goal so the dedup does not interfere.
     const trigger = makeTrigger({ concurrencyMode: 'parallel', goalTemplate: '{{$.pull_request.title}}' });
     const { fn, inFlight, releaseAll } = makeLatchedRunWorkflow();
-    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 2);
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { maxConcurrentSessions: 2 });
 
     const [e1, e2, e3] = makeUniqueEvents(3);
     router.route(e1!);
@@ -1210,7 +1211,7 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     // calls. These tests verify semaphore behavior for distinct tasks.
     const trigger = makeTrigger({ concurrencyMode: 'parallel', goalTemplate: '{{$.pull_request.title}}' });
     const { fn, inFlight, releaseNext, releaseAll } = makeLatchedRunWorkflow();
-    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 2);
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { maxConcurrentSessions: 2 });
 
     const [e1, e2, e3] = makeUniqueEvents(3);
     router.route(e1!);
@@ -1259,7 +1260,7 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
     };
 
     // cap=1 so second dispatch can only run after first releases the semaphore slot
-    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 1);
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { maxConcurrentSessions: 1 });
 
     const [e1, e2] = makeUniqueEvents(2);
     router.route(e1!);
@@ -1315,7 +1316,7 @@ describe('TriggerRouter maxConcurrentSessions semaphore', () => {
 
     const trigger = makeTrigger({ concurrencyMode: 'serial' });
     const { fn } = makeFakeRunWorkflow();
-    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, undefined, 0);
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { maxConcurrentSessions: 0 });
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('clamping to 1'));
     expect(router.maxConcurrentSessions).toBe(1);
@@ -1348,10 +1349,7 @@ describe('TriggerRouter notify() wiring', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       fn,
-      undefined,  // execFn
-      undefined,  // maxConcurrentSessions
-      undefined,  // emitter
-      fakeNotify as unknown as NotificationService,
+      { notificationService: fakeNotify as unknown as NotificationService },
     );
 
     router.route(makeEvent());
@@ -1382,10 +1380,7 @@ describe('TriggerRouter notify() wiring', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       errorFn,
-      undefined,  // execFn
-      undefined,  // maxConcurrentSessions
-      undefined,  // emitter
-      fakeNotify as unknown as NotificationService,
+      { notificationService: fakeNotify as unknown as NotificationService },
     );
 
     const workflowTrigger = {
@@ -1420,10 +1415,7 @@ describe('TriggerRouter notify() wiring', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       fn,
-      undefined,  // execFn
-      undefined,  // maxConcurrentSessions
-      undefined,  // emitter
-      fakeNotify as unknown as NotificationService,
+      { notificationService: fakeNotify as unknown as NotificationService },
     );
 
     router.route(makeEvent());
@@ -1837,13 +1829,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       fn,
-      undefined, // execFn
-      undefined, // maxConcurrentSessions
-      undefined, // emitter
-      undefined, // notificationService
-      undefined, // activeSessionSet
-      FAKE_DEPS,
-      executors,
+      { coordinatorDeps: FAKE_DEPS, modeExecutors: executors },
     );
 
     const goal = 'review PR #42';
@@ -1889,13 +1875,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       fn,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // activeSessionSet
-      FAKE_DEPS,
-      executors,
+      { coordinatorDeps: FAKE_DEPS, modeExecutors: executors },
     );
 
     const goal = 'review PR #42';
@@ -1938,13 +1918,7 @@ describe('TriggerRouter.dispatchAdaptivePipeline deduplication', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       fn,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // activeSessionSet
-      FAKE_DEPS,
-      executors,
+      { coordinatorDeps: FAKE_DEPS, modeExecutors: executors },
     );
 
     const workspace = '/workspace';
@@ -2080,13 +2054,7 @@ describe('TriggerRouter.dispatch pre_allocated SessionSource bypass', () => {
       FAKE_CTX,
       FAKE_API_KEY,
       fn,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // activeSessionSet
-      FAKE_DEPS_FOR_BYPASS,
-      executors,
+      { coordinatorDeps: FAKE_DEPS_FOR_BYPASS, modeExecutors: executors },
     );
 
     const goal = trigger.goal;
@@ -2189,16 +2157,7 @@ describe('TriggerRouter: cli_inbox explicit delivery', () => {
         FAKE_CTX,
         FAKE_API_KEY,
         fn,
-        undefined, // execFn
-        undefined, // maxConcurrentSessions
-        undefined, // emitter
-        undefined, // notificationService
-        undefined, // activeSessionSet
-        undefined, // coordinatorDeps
-        undefined, // modeExecutors
-        undefined, // deduplicator
-        undefined, // reviewApprovalAdapter
-        tmpDir,    // workrailDir
+        { workrailDir: tmpDir },
       );
 
       await router.route(makeEvent({ action: 'push' }), makeTrigger());
@@ -2237,9 +2196,7 @@ describe('TriggerRouter: cli_inbox explicit delivery', () => {
         FAKE_CTX,
         FAKE_API_KEY,
         fn,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined,
-        tmpDir,
+        { workrailDir: tmpDir },
       );
 
       await router.route(makeEvent({ action: 'push' }), makeTrigger());
