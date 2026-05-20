@@ -116,12 +116,14 @@ export function synthesizeDeliveryConfig(fields: SynthesizeDeliveryFields): Deli
     });
   }
 
-  // WHY no callback_url here: callbackUrl has its own delivery path via deliveryPost()
-  // in trigger-router.ts route(). Adding it to the synthesized adapters array would
-  // create a dead entry -- _runDeliveryByKind() would warn "not yet activated" and
-  // the real callbackUrl delivery would still fire through the separate path.
-  // callbackUrl adapter will be added to synthesizeDeliveryConfig() in Phase 8 when
-  // the deliveryPost() path is replaced by _runDeliveryByKind().
+  // callback_url: fire-and-forget HTTP notification.
+  // Delivery still goes through runCallbackUrlDelivery() in route() (not _runDeliveryByKind())
+  // to preserve the delivery_failed result that suppresses autoCommit.
+  // The synthesized entry here is for observability (delivery_planned event) and
+  // future Phase 8 unification through _runDeliveryByKind().
+  if (fields.callbackUrl) {
+    adapters.push({ kind: 'callback_url', url: fields.callbackUrl });
+  }
 
   // cli_inbox fallback when no delivery fields are configured
   if (adapters.length === 0) {
