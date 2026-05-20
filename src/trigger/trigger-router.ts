@@ -37,7 +37,7 @@ import type {
   ContextMappingEntry,
 } from './types.js';
 import type { ExecFn } from './delivery-action.js';
-import { runDeliveryPipeline, DEFAULT_DELIVERY_PIPELINE } from './delivery-pipeline.js';
+import { runDeliveryPipeline, DEFAULT_DELIVERY_PIPELINE, type GitCommitDeliveryContext } from './delivery-pipeline.js';
 import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
@@ -501,23 +501,22 @@ async function runGitCommitDelivery(
     return;
   }
 
-  // Construct a synthetic trigger-like object from WorkflowTrigger fields.
-  // runDeliveryPipeline() reads: autoCommit, autoOpenPR, secretScan, workspacePath,
-  // branchPrefix, baseBranch, branchStrategy (for worktree cleanup stages), workflowId
-  // (for PR body attribution), and id from TriggerDefinition.
-  const syntheticTrigger = {
+  // Build a typed GitCommitDeliveryContext from WorkflowTrigger -- no cast needed.
+  // The interface constrains exactly which fields runDeliveryPipeline() reads,
+  // so the compiler will catch any new field access that isn't provided here.
+  const deliveryCtx: GitCommitDeliveryContext = {
     id: triggerId as import('./types.js').TriggerId,
     workflowId: workflowTrigger.workflowId,
-    autoCommit: true as const,
+    workspacePath: workflowTrigger.workspacePath,
+    autoCommit: true,
     autoOpenPR: adapterConfig.autoOpenPR,
     secretScan: adapterConfig.secretScan,
-    workspacePath: workflowTrigger.workspacePath,
     branchPrefix: workflowTrigger.branchPrefix,
     baseBranch: workflowTrigger.baseBranch,
     branchStrategy: workflowTrigger.branchStrategy,
-  } as unknown as import('./types.js').TriggerDefinition;
+  };
 
-  await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, syntheticTrigger, execFn, triggerId, deps);
+  await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, deliveryCtx, execFn, triggerId, deps);
 }
 
 
