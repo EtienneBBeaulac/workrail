@@ -2250,11 +2250,12 @@ describe('TriggerRouter: explicit github_draft_review delivery', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { fn } = makeFakeRunWorkflow();
 
-    // Trigger in index has both reviewerIdentity AND explicit deliveryConfig
+    // Trigger in index has both reviewerIdentity AND explicit github_draft_review
+    // (the warning only fires when explicit config includes github_draft_review)
     const trigger = makeTrigger({
       deliveryConfig: {
         source: 'explicit' as const,
-        adapters: [{ kind: 'cli_inbox' as const }],
+        adapters: [{ kind: 'github_draft_review' as const, token: 'tok', login: 'user' }],
       },
       reviewerIdentity: { platform: 'github', token: 'tok', login: 'user' },
     });
@@ -2264,7 +2265,7 @@ describe('TriggerRouter: explicit github_draft_review delivery', () => {
     await new Promise(r => setTimeout(r, 50));
 
     const warned = warnSpy.mock.calls.some(args =>
-      String(args[0]).includes('reviewerIdentity is deprecated'),
+      String(args[0]).includes('reviewerIdentity is redundant'),
     );
     warnSpy.mockRestore();
     expect(warned).toBe(true);
