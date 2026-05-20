@@ -325,7 +325,13 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
  * (polls until operator publishes, could take hours). Awaiting it would hold the
  * queue slot. Same pattern as gate evaluation: void (async () => { ... })().
  */
-async function maybeRunPostWorkflowActions(
+/**
+ * Core review posting logic: create draft review, write sidecar, start poller.
+ * Extracted from maybeRunPostWorkflowActions() so the explicit deliveryConfig path
+ * can call it with credentials from AdapterConfig rather than reviewerIdentity.
+ */
+async function runPostWorkflowReview(
+  reviewerIdentity: import('./types.js').ReviewerIdentity,
   workflowTrigger: WorkflowTrigger,
   originalResult: WorkflowRunResult,
   reviewApprovalAdapter: ReviewApprovalAdapter,
@@ -334,9 +340,6 @@ async function maybeRunPostWorkflowActions(
   triggerId?: string,
 ): Promise<void> {
   if (originalResult._tag !== 'success') return;
-  if (!workflowTrigger.reviewerIdentity) return;
-
-  const { reviewerIdentity } = workflowTrigger;
 
   // Find wr.review_verdict artifact.
   const artifacts = originalResult.lastStepArtifacts;
@@ -473,6 +476,27 @@ async function maybeRunPostWorkflowActions(
 
   // Notify operator that draft is ready.
   notificationService?.notify(originalResult, `WorkTrain review draft ready on PR #${prNumber} -- open in GitHub to review findings`);
+}
+
+async function maybeRunPostWorkflowActions(
+  workflowTrigger: WorkflowTrigger,
+  originalResult: WorkflowRunResult,
+  reviewApprovalAdapter: ReviewApprovalAdapter,
+  notificationService?: NotificationService,
+  ctx?: V2ToolContext,
+  triggerId?: string,
+): Promise<void> {
+  if (originalResult._tag !== 'success') return;
+  if (!workflowTrigger.reviewerIdentity) return;
+  await runPostWorkflowReview(
+    workflowTrigger.reviewerIdentity,
+    workflowTrigger,
+    originalResult,
+    reviewApprovalAdapter,
+    notificationService,
+    ctx,
+    triggerId,
+  );
 }
 
 async function maybeRunDelivery(
@@ -1132,26 +1156,27 @@ export class TriggerRouter {
         : undefined;
       await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn, deliveryDeps);
 
-      // Post-workflow review actions: create a PENDING draft review when reviewerIdentity is set.
-      // Uses workflowTrigger (which carries reviewerIdentity forwarded from TriggerDefinition).
-      // Uses originalResult to avoid callbackUrl delivery_failed suppressing review posting.
-      await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService, this.ctx, trigger.id);
+      // Deprecation: warn once per session when both legacy reviewerIdentity and explicit
+      // deliveryConfig are set -- explicit delivery: block takes precedence.
+      if (workflowTrigger.reviewerIdentity !== undefined && workflowTrigger.deliveryConfig?.source === 'explicit') {
+        console.warn(
+          `[TriggerRouter] reviewerIdentity is deprecated when an explicit delivery: block is configured ` +
+          `(workflowId=${workflowTrigger.workflowId}). Remove reviewerIdentity from triggers.yml and use ` +
+          `delivery: { kind: github_draft_review, token: $TOKEN, login: ... } instead.`,
+        );
+      }
 
-      // Explicit delivery notification: fire adapter.deliver() for cli_inbox adapters
-      // when the operator has explicitly configured a delivery: block in triggers.yml.
-      // WHY only cli_inbox: git_commit and github_draft_review are still handled by
-      // maybeRunDelivery() and maybeRunPostWorkflowActions() above. Phase 4 will replace
-      // those paths with adapter.deliver() calls for all adapter kinds.
+      // Explicit delivery dispatch: fire configured delivery actions when operator
+      // has set delivery: block in triggers.yml (source === 'explicit').
       // WHY explicit check: every trigger has a synthesized cli_inbox fallback in
-      // deliveryConfig. Without this guard, deliver() would fire for every session,
-      // flooding outbox.jsonl for all triggers regardless of configuration.
+      // deliveryConfig. Without this guard, actions fire for every session.
+      let explicitGithubReviewFired = false;
       if (
         originalResult._tag === 'success' &&
-        workflowTrigger.deliveryConfig?.source === 'explicit' &&
-        this._cliInboxAdapter !== undefined
+        workflowTrigger.deliveryConfig?.source === 'explicit'
       ) {
         for (const adapterConfig of workflowTrigger.deliveryConfig.adapters) {
-          if (adapterConfig.kind === 'cli_inbox') {
+          if (adapterConfig.kind === 'cli_inbox' && this._cliInboxAdapter !== undefined) {
             const payload: DeliveryPayload = {
               workflowId: workflowTrigger.workflowId,
               sessionId: originalResult.sessionId ?? 'unknown',
@@ -1164,8 +1189,33 @@ export class TriggerRouter {
             } catch (e) {
               console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`);
             }
+          } else if (adapterConfig.kind === 'github_draft_review') {
+            // Use explicit credentials from deliveryConfig instead of reviewerIdentity.
+            const identity: import('./types.js').ReviewerIdentity = {
+              platform: 'github',
+              token: adapterConfig.token,
+              login: adapterConfig.login,
+            };
+            await runPostWorkflowReview(
+              identity,
+              workflowTrigger,
+              originalResult,
+              this._reviewApprovalAdapter,
+              this.notificationService,
+              this.ctx,
+              trigger.id,
+            );
+            explicitGithubReviewFired = true;
           }
         }
+      }
+
+      // Legacy review posting: runs when reviewerIdentity is configured and explicit
+      // delivery did NOT already handle it (to avoid double-posting).
+      // WHY separate: explicit delivery: block and legacy reviewerIdentity are mutually
+      // exclusive for review posting. Explicit takes priority.
+      if (!explicitGithubReviewFired) {
+        await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService, this.ctx, trigger.id);
       }
     });
 

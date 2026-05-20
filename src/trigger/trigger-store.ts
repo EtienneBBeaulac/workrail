@@ -132,7 +132,7 @@ interface ParsedTriggerRaw {
   reviewerIdentity?: { platform?: string; token?: string; login?: string };
   // Explicit delivery configuration. When present, overrides the synthesized default
   // from synthesizeDeliveryConfig(). Assembled and validated in validateAndResolveTrigger().
-  delivery?: { kind?: string };
+  delivery?: { kind?: string; token?: string; login?: string };
   // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   // Fields from all providers are unioned here -- the assembler validates which
@@ -512,7 +512,9 @@ function parseTriggersYaml(
             const dlValueResult = parseScalar(dlRawValue, lineIndex + 1);
             if (dlValueResult.kind === 'err') return dlValueResult;
             switch (dlKey) {
-              case 'kind': delivery.kind = dlValueResult.value; break;
+              case 'kind':  delivery.kind = dlValueResult.value; break;
+              case 'token': delivery.token = dlValueResult.value; break;
+              case 'login': delivery.login = dlValueResult.value; break;
               default: break; // unknown sub-keys silently ignored
             }
           }
@@ -1452,9 +1454,28 @@ function validateAndResolveTrigger(
     if (!KNOWN_ADAPTER_KINDS.has(rawKind as AdapterConfig['kind'])) {
       return err({ kind: 'invalid_field_value', field: `delivery.kind (unknown adapter kind: "${rawKind}")`, triggerId: rawId });
     }
+
+    // For github_draft_review: require token and login; resolve $SECRET_NAME for token.
+    let adapterConfig: AdapterConfig;
+    if (rawKind === 'github_draft_review') {
+      const rawToken = raw.delivery.token?.trim();
+      const rawLogin = raw.delivery.login?.trim();
+      if (!rawToken) {
+        return err({ kind: 'missing_field', field: 'delivery.token (required for github_draft_review)', triggerId: rawId });
+      }
+      if (!rawLogin) {
+        return err({ kind: 'missing_field', field: 'delivery.login (required for github_draft_review)', triggerId: rawId });
+      }
+      const tokenResult = resolveSecret(rawToken, rawId, env);
+      if (tokenResult.kind === 'err') return tokenResult;
+      adapterConfig = { kind: 'github_draft_review', token: tokenResult.value, login: rawLogin };
+    } else {
+      adapterConfig = { kind: rawKind as AdapterConfig['kind'] } as AdapterConfig;
+    }
+
     explicitDeliveryConfig = {
       source: 'explicit' as const,
-      adapters: [{ kind: rawKind as AdapterConfig['kind'] } as AdapterConfig],
+      adapters: [adapterConfig],
     };
   }
 

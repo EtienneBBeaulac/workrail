@@ -197,22 +197,29 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ### Pluggable output delivery: workflows produce structured artifacts, delivery is configured externally (May 19, 2026)
 
-**Status: idea** | Priority: high
+**Status: partial** | Shipped PRs #1054, #1055 (Phases 1-3)
 
 **Score: 12** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
 
-Workflows currently hardcode their delivery mechanism. `wr.mr-review` parks at a `requireConfirmation` gate before posting a GitHub draft review -- which means the review sits in a local worktree file, invisible to anyone, until a human approves it via `worktrain inbox`. This conflates two orthogonal concerns: **delivery** (how the result reaches the human) and **gating** (whether execution should pause for human approval before proceeding). The current design forces every workflow to treat delivery as a control flow decision, and there is no way to route output to Slack, a webhook, a GitLab MR note, or any other channel without editing the workflow definition.
+**What shipped (Phases 1-3, May 20 2026):**
+- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit' | 'synthesized'), `resolveDeliveryConfig()` pure function, `CliInboxAdapter` -- in `src/trigger/delivery-adapter.ts`
+- `synthesizeDeliveryConfig()` migration shim wires legacy `autoCommit`/`reviewerIdentity`/`callbackUrl` fields into typed `DeliveryConfig` on every `TriggerDefinition`
+- `delivery: { kind: cli_inbox }` YAML block in triggers.yml activates explicit delivery; `adapter.deliver()` fires for `cli_inbox` adapters on session completion
+- `DeliveryPlannedEvent` added to daemon event log at session start
+- `TriggerRouterOptions` object replaces 14 positional constructor params
+- Full design doc at `docs/plans/output-delivery-design.md`
 
-The underlying issue is broader than mr-review: any workflow that produces a meaningful artifact (a PR link, a deploy summary, a coding task report) has no principled way to notify the operator or deliver the result to the right place. Operators using GitLab instead of GitHub, or teams that want Slack notifications, are blocked entirely.
+**What remains (Phase 4):**
+- Replace `maybeRunDelivery()` (git_commit) and `maybeRunPostWorkflowActions()` (github_draft_review) with `adapter.deliver()` calls for all adapter kinds -- this is when operators can switch review posting from GitHub to GitLab/Slack by changing config
+- Extend `delivery: { kind: ... }` YAML block to support adapter-specific fields (token/login for github_draft_review, webhookUrl for slack_webhook)
+- Deprecate and remove `reviewerIdentity` from `WorkflowTrigger` (currently duplicates `deliveryConfig`)
+- `worktrain trigger validate` should print the resolved delivery adapter per trigger
+- Shared `OutboxMessage` type extraction (currently duplicated between `CliInboxAdapter` and `worktrain-inbox.ts`)
+- Long-term: event-sourced delivery bus (C3 from design doc) for full auditability
 
-A clean model: workflows declare what they produce via typed output contracts (`kind: "draft_review"`, `kind: "summary"`, `kind: "pr_link"`). Delivery is configured on the trigger or as a user/org preference via pluggable output adapters. The `requireConfirmation` gate remains a separate, explicit concept for cases where execution genuinely needs to pause -- but it is not the delivery mechanism; it uses the configured delivery channel to send the "awaiting approval" notification.
-
-**Things to hash out:**
-- What does the output contract declaration look like in the workflow JSON schema? Does it live on the final step, on the workflow root, or as a separate `outputs` block?
-- Where is the adapter configured -- per trigger in `triggers.yml`, globally in `.workrailrc`, or both? What happens when neither is set (sensible default: CLI inbox)?
-- Does the gate's "awaiting approval" message go through the same delivery channel, or does it always go to CLI inbox regardless?
-- GitLab MR notes are not the same as GitHub draft reviews -- some adapters are lossless (Slack, webhook) but others require semantic translation. How much of that translation lives in the adapter vs. the workflow's output contract?
-- First phase scope: is it sufficient to wire up GitHub draft review posting as the first real adapter and define the interface, leaving Slack/GitLab/webhook for follow-on phases?
+**Things still to hash out for Phase 4:**
+- YAML delivery block currently only supports `kind:` (flat scalar). Adapter-specific fields (token, login) need a sub-object parser extension.
+- dispatch() path still has no deliver() call -- sessions started programmatically don't get delivery notifications yet.
 
 ---
 
