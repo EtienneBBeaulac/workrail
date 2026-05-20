@@ -2032,3 +2032,46 @@ triggers:
     expect(result.value.triggers).toHaveLength(0);
   });
 });
+
+describe('reviewerIdentity YAML removal', () => {
+  it('silently ignores reviewerIdentity: block in triggers.yml', () => {
+    const yaml = `
+triggers:
+  - id: review-trigger
+    provider: generic
+    workflowId: wr.mr-review
+    workspacePath: /workspace
+    goal: Review PR
+    reviewerIdentity:
+      platform: github
+      token: mytoken
+      login: myuser
+`;
+    // reviewerIdentity: block is no longer parsed -- trigger loads successfully
+    // and reviewerIdentity fields are silently dropped
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(1);
+  });
+
+  it('rejects delivery: { kind: git_commit } with a parse error', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const yaml = `
+triggers:
+  - id: commit-trigger
+    provider: generic
+    workflowId: wr.coding-task
+    workspacePath: /workspace
+    goal: Commit
+    delivery:
+      kind: git_commit
+`;
+    const result = loadTriggerConfig(yaml, {});
+    warnSpy.mockRestore();
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // git_commit via delivery: block is rejected -- trigger is skipped
+    expect(result.value.triggers).toHaveLength(0);
+  });
+});

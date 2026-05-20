@@ -421,12 +421,8 @@ async function runPostWorkflowReview(
 
   // Write pending-draft sidecar BEFORE starting the poller (crash recovery invariant).
   const daemonSessionId = originalResult.sessionId ?? randomUUID();
-  const workrailSessionId = originalResult.sessionWorkspacePath
-    ? '' // session ID not directly available here; use empty string if absent
-    : '';
-  // Prefer the workrail session ID from the result if available.
-  // WorkflowRunSuccess.lastStepArtifacts carries the session context but not the session ID.
-  // The sidecar only needs it for the session event log write-back; we skip the event if absent.
+  // workrailSessionId (sess_...) needed for session event log write-back after submission.
+  // Available on WorkflowRunSuccess via the workrailSessionId field decoded from the continueToken.
   const resolvedWorkrailSessionId = (originalResult as { workrailSessionId?: string }).workrailSessionId ?? '';
 
   if (ctx?.v2 && resolvedWorkrailSessionId) {
