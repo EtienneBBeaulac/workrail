@@ -280,6 +280,16 @@ describe('loadTriggerConfig', () => {
       expect(trigger?.deliveryConfig?.explicit).toBeUndefined();
       expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('cli_inbox'); // fallback
     });
+
+    it('synthesizes git_commit adapter for autoCommit: true trigger', () => {
+      const result = loadTriggerConfig(WITH_AUTO_COMMIT_TRUE_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      const trigger = result.value.triggers[0];
+      // Regression guard: synthesizeDeliveryConfig must produce git_commit for autoCommit triggers
+      expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('git_commit');
+      expect(trigger?.deliveryConfig?.explicit).toBeUndefined(); // synthesized, not explicit
+    });
   });
 
   describe('quoted string values', () => {

@@ -89,7 +89,7 @@ export interface SynthesizeDeliveryFields {
   readonly autoOpenPR?: boolean;
   readonly secretScan?: boolean;
   readonly callbackUrl?: string;
-  readonly reviewerIdentity?: { readonly platform: string; readonly token: string; readonly login: string };
+  readonly reviewerIdentity?: { readonly platform: 'github' | 'gitlab'; readonly token: string; readonly login: string };
 }
 
 export function synthesizeDeliveryConfig(fields: SynthesizeDeliveryFields): DeliveryConfig {
