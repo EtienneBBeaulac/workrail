@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TriggerRouter, interpolateGoalTemplate } from '../../src/trigger/trigger-router.js';
+import { synthesizeDeliveryConfig } from '../../src/trigger/delivery-adapter.js';
 import type { TriggerRouterOptions } from '../../src/trigger/trigger-router.js';
 import type { AdaptiveCoordinatorDeps, ModeExecutors, PipelineOutcome } from '../../src/coordinators/adaptive-pipeline.js';
 import { createTriggerApp, startTriggerListener } from '../../src/trigger/trigger-listener.js';
@@ -446,7 +447,10 @@ describe('TriggerRouter.route', () => {
       // Without lastStepNotes, maybeRunDelivery returns early (trigger-router.ts ~line 259).
       const fakeExec: ExecFn = vi.fn().mockResolvedValue({ stdout: '[main abc1234] feat(mcp): auto-commit\n', stderr: '' });
 
-      const trigger = makeTrigger({ autoCommit: true });
+      const trigger = makeTrigger({
+        autoCommit: true,
+        deliveryConfig: synthesizeDeliveryConfig({ autoCommit: true }),
+      });
       const { fn } = makeFakeRunWorkflow(VALID_HANDOFF_NOTES);
       const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn, { execFn: fakeExec });
 
@@ -507,6 +511,7 @@ describe('TriggerRouter.route', () => {
         branchStrategy: 'worktree',
         workspacePath: '/workspace',
         branchPrefix: BRANCH_PREFIX,
+        deliveryConfig: synthesizeDeliveryConfig({ autoCommit: true }),
       });
 
       const fn: RunWorkflowFn = async (t) => ({
@@ -2246,29 +2251,23 @@ describe('TriggerRouter: explicit github_draft_review delivery', () => {
     expect(deprecationWarned).toBe(false);
   });
 
-  it('emits deprecation warning when both reviewerIdentity and explicit deliveryConfig are set', async () => {
+  it('does not emit reviewerIdentity redundancy warning (field removed from WorkflowTrigger in Phase 5)', async () => {
+    // reviewerIdentity was removed from WorkflowTrigger in Phase 5 -- the warning is gone.
+    // Verify no spurious warnings fire.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { fn } = makeFakeRunWorkflow();
-
-    // Trigger in index has both reviewerIdentity AND explicit github_draft_review
-    // (the warning only fires when explicit config includes github_draft_review)
     const trigger = makeTrigger({
       deliveryConfig: {
         source: 'explicit' as const,
         adapters: [{ kind: 'github_draft_review' as const, token: 'tok', login: 'user' }],
       },
-      reviewerIdentity: { platform: 'github', token: 'tok', login: 'user' },
     });
-
     const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
     await router.route(makeEvent({ action: 'push' }));
     await new Promise(r => setTimeout(r, 50));
-
-    const warned = warnSpy.mock.calls.some(args =>
-      String(args[0]).includes('reviewerIdentity is redundant'),
-    );
+    const redundancyWarned = warnSpy.mock.calls.some(args => String(args[0]).includes('reviewerIdentity is redundant'));
     warnSpy.mockRestore();
-    expect(warned).toBe(true);
+    expect(redundancyWarned).toBe(false);
   });
 
   it('does NOT emit deprecation warning when only reviewerIdentity is set (no explicit deliveryConfig)', async () => {

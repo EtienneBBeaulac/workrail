@@ -205,13 +205,6 @@ export interface WorkflowTrigger {
    */
   readonly branchStrategy?: BranchStrategy;
   /**
-   * Reviewer identity for creating draft reviews after review sessions.
-   * Sourced from TriggerDefinition.reviewerIdentity.
-   * Carried here so maybeRunPostWorkflowActions() in TriggerRouter can access it
-   * from the dispatch() path, which only receives WorkflowTrigger (not TriggerDefinition).
-   */
-  readonly reviewerIdentity?: import('../trigger/types.js').ReviewerIdentity;
-  /**
    * Base branch for the worktree. Only used when branchStrategy === 'worktree'.
    * Sourced from TriggerDefinition.baseBranch.
    * Default: 'main' (applied at parse time in trigger-store.ts or at use time in runWorkflow()).
