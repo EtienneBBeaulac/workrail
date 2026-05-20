@@ -66,7 +66,7 @@ No proposed solutions here -- just the problem.]
 
 ### Engine hint content fixes: correct misleading guidance on artifact validation failures (May 20, 2026)
 
-**Status: idea** | Priority: critical
+**Status: active** | Priority: critical
 
 **Score: 14** | Cor:3 Cap:2 Eff:3 Lev:3 Con:3 | Blocked: no
 
