@@ -126,10 +126,6 @@ interface ParsedTriggerRaw {
   // Both payloadPath and equals must be present strings when the block is set.
   // Validated at assembly time; missing either field is a TriggerStoreError.
   dispatchCondition?: { payloadPath?: string; equals?: string };
-  // Reviewer identity for posting review comments after review sessions.
-  // token may be a $SECRET_REF, resolved at assembly time.
-  // platform discriminates which ReviewApprovalAdapter is used ('github' | 'gitlab').
-  reviewerIdentity?: { platform?: string; token?: string; login?: string };
   // Explicit delivery configuration. When present, overrides the synthesized default
   // from synthesizeDeliveryConfig(). Assembled and validated in validateAndResolveTrigger().
   delivery?: { kind?: string; token?: string; login?: string };
@@ -453,40 +449,6 @@ function parseTriggersYaml(
           lineIndex++;
         }
         trigger.dispatchCondition = dispatchCondition;
-        continue;
-      }
-
-      if (key === 'reviewerIdentity') {
-        // reviewerIdentity: is a 2-key sub-object: githubToken + githubLogin.
-        // githubToken may be a $SECRET_REF; resolved at assembly time.
-        lineIndex++;
-        const reviewerIdentity: { platform?: string; token?: string; login?: string } = {};
-        while (lineIndex < lines.length) {
-          const riLine = lines[lineIndex];
-          if (riLine === undefined) break;
-          const riTrimmed = riLine.trim();
-          if (riTrimmed === '' || riTrimmed.startsWith('#')) { lineIndex++; continue; }
-          const riIndent = riLine.search(/\S/);
-          if (riIndent <= lineIndent) break;
-          const riColonIdx = riTrimmed.indexOf(':');
-          if (riColonIdx === -1) {
-            return err({ kind: 'parse_error', message: `Missing colon in reviewerIdentity entry at line ${lineIndex + 1}: "${riTrimmed}"`, lineNumber: lineIndex + 1 });
-          }
-          const riKey = riTrimmed.slice(0, riColonIdx).trim();
-          const riRawValue = riTrimmed.slice(riColonIdx + 1).trim();
-          if (riRawValue !== '') {
-            const riValueResult = parseScalar(riRawValue, lineIndex + 1);
-            if (riValueResult.kind === 'err') return riValueResult;
-            switch (riKey) {
-              case 'platform': reviewerIdentity.platform = riValueResult.value; break;
-              case 'token': reviewerIdentity.token = riValueResult.value; break;
-              case 'login': reviewerIdentity.login = riValueResult.value; break;
-              default: break; // unknown sub-keys silently ignored
-            }
-          }
-          lineIndex++;
-        }
-        trigger.reviewerIdentity = reviewerIdentity;
         continue;
       }
 
@@ -1403,30 +1365,6 @@ function validateAndResolveTrigger(
   // Assemble and resolve reviewerIdentity if present.
   // token is resolved from env using the same $SECRET_REF pattern as hmacSecret.
   // platform discriminates the ReviewApprovalAdapter implementation.
-  let reviewerIdentity: TriggerDefinition['reviewerIdentity'] | undefined;
-  if (raw.reviewerIdentity) {
-    const rawPlatform = raw.reviewerIdentity.platform?.trim();
-    const rawToken = raw.reviewerIdentity.token?.trim();
-    const rawLogin = raw.reviewerIdentity.login?.trim();
-    if (!rawPlatform) {
-      return err({ kind: 'missing_field', field: 'reviewerIdentity.platform', triggerId: rawId });
-    }
-    if (rawPlatform !== 'github') {
-      // Only 'github' has a ReviewApprovalAdapter implementation. 'gitlab' is in the type
-      // union for future use -- using it now would silently call GitHub API endpoints.
-      return err({ kind: 'invalid_field_value', field: `reviewerIdentity.platform (only "github" is supported; "gitlab" is planned but not yet implemented, got: "${rawPlatform}")`, triggerId: rawId });
-    }
-    if (!rawToken) {
-      return err({ kind: 'missing_field', field: 'reviewerIdentity.token', triggerId: rawId });
-    }
-    if (!rawLogin) {
-      return err({ kind: 'missing_field', field: 'reviewerIdentity.login', triggerId: rawId });
-    }
-    const tokenResult = resolveSecret(rawToken, rawId, env);
-    if (tokenResult.kind === 'err') return tokenResult;
-    reviewerIdentity = { platform: rawPlatform, token: tokenResult.value, login: rawLogin };
-  }
-
   // Assemble and validate dispatchCondition if present.
   // Both payloadPath and equals must be non-empty strings.
   let dispatchCondition: TriggerDefinition['dispatchCondition'] | undefined;
@@ -1512,15 +1450,12 @@ function validateAndResolveTrigger(
     ...(dispatchCondition !== undefined ? { dispatchCondition } : {}),
     // maxQueueDepth: only spread when explicitly set in YAML (undefined = apply default 10 in route()).
     ...(maxQueueDepth !== undefined ? { maxQueueDepth } : {}),
-    // Reviewer identity for GitHub PENDING draft review creation after review sessions.
-    ...(reviewerIdentity !== undefined ? { reviewerIdentity } : {}),
     // Delivery config: explicit YAML block beats synthesized legacy-field default.
     deliveryConfig: explicitDeliveryConfig ?? synthesizeDeliveryConfig({
       autoCommit: autoCommit || undefined,
       autoOpenPR: autoOpenPR || undefined,
       secretScan,
       callbackUrl,
-      reviewerIdentity,
     }),
   };
 
