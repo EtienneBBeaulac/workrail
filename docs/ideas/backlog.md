@@ -197,29 +197,36 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ### Pluggable output delivery: workflows produce structured artifacts, delivery is configured externally (May 19, 2026)
 
-**Status: partial** | Shipped PRs #1054, #1055 (Phases 1-3)
+**Status: partial** | Phases 1-7 shipped (PRs #1054, #1055, #1062-#1063, #1065, #1067, May 20 2026), needs verification + Phase 8 gaps remain
 
 **Score: 12** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
 
-**What shipped (Phases 1-3, May 20 2026):**
-- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit' | 'synthesized'), `resolveDeliveryConfig()` pure function, `CliInboxAdapter` -- in `src/trigger/delivery-adapter.ts`
-- `synthesizeDeliveryConfig()` migration shim wires legacy `autoCommit`/`reviewerIdentity`/`callbackUrl` fields into typed `DeliveryConfig` on every `TriggerDefinition`
-- `delivery: { kind: cli_inbox }` YAML block in triggers.yml activates explicit delivery; `adapter.deliver()` fires for `cli_inbox` adapters on session completion
-- `DeliveryPlannedEvent` added to daemon event log at session start
+**What shipped (all phases complete):**
+- `DeliveryAdapter<K>` generic interface, `AdapterConfig` discriminated union, `DeliveryConfig` (source: 'explicit'|'synthesized'), `CliInboxAdapter`, `GitCommitDeliveryContext` interface
+- `synthesizeDeliveryConfig()` migration shim; `_runDeliveryByKind()` unified delivery dispatch
+- `delivery: { kind: github_draft_review, token: $TOKEN, login: user }` YAML block replacing legacy `reviewerIdentity`
+- Inline review comments posted to PR diff for findings with `file`+`startLine` fields
+- Gate resume: `PendingDraftReviewPoller` calls `resumeFromGate()` fire-and-forget when operator submits review -- `human_approval` gate loop completes automatically
+- `PendingDeliverySidecar` self-contained format (token in state, no trigger index lookup on restart)
 - `TriggerRouterOptions` object replaces 14 positional constructor params
+- `reviewerIdentity` fully removed from `WorkflowTrigger`, `TriggerDefinition`, and YAML parser
+- `callbackUrl` delivery unified through `runCallbackUrlDelivery()` named action
+- `triggers.yml` migrated to `delivery:` block format
 - Full design doc at `docs/plans/output-delivery-design.md`
 
-**What remains (Phase 4):**
-- Replace `maybeRunDelivery()` (git_commit) and `maybeRunPostWorkflowActions()` (github_draft_review) with `adapter.deliver()` calls for all adapter kinds -- this is when operators can switch review posting from GitHub to GitLab/Slack by changing config
-- Extend `delivery: { kind: ... }` YAML block to support adapter-specific fields (token/login for github_draft_review, webhookUrl for slack_webhook)
-- Deprecate and remove `reviewerIdentity` from `WorkflowTrigger` (currently duplicates `deliveryConfig`)
-- `worktrain trigger validate` should print the resolved delivery adapter per trigger
-- Shared `OutboxMessage` type extraction (currently duplicated between `CliInboxAdapter` and `worktrain-inbox.ts`)
-- Long-term: event-sourced delivery bus (C3 from design doc) for full auditability
+**Needs verification before declaring fully production-ready:**
+- End-to-end test: fire a real `wr.mr-review` session with `delivery: { kind: github_draft_review }` in triggers.yml (no reviewerIdentity) and confirm draft review posts, inline comments appear, and gate resumes when operator submits
+- Manual verification that `recoverPendingDeliveryPollers()` correctly restarts pollers after daemon crash
+- Philosophical alignment audit: ensure the `DeliveryAdapter` layer boundary (trigger/ not daemon/) holds for all new code; verify `source: 'explicit'|'synthesized'` discriminant is used only where intended and not leaking as a gate for unrelated decisions
+- Code verification: confirm `writePendingDeliverySidecar()` is called at every review posting site (not just one)
 
-**Things still to hash out for Phase 4:**
-- YAML delivery block currently only supports `kind:` (flat scalar). Adapter-specific fields (token, login) need a sub-object parser extension.
-- dispatch() path still has no deliver() call -- sessions started programmatically don't get delivery notifications yet.
+**Known remaining gaps (Phase 8+):**
+- `dispatch()` path delivery (programmatic sessions don't get delivery notifications)
+- Slack/GitLab adapters
+- Event-sourced delivery bus (C3 from design doc) for full auditability
+- `callbackUrl` still fires through separate `runCallbackUrlDelivery()` path rather than `_runDeliveryByKind()`
+- `worktrain trigger validate` doesn't yet show resolved delivery adapter per trigger
+- Shared `OutboxMessage` type extraction (duplicated between `CliInboxAdapter` and `worktrain-inbox.ts`)
 
 ---
 

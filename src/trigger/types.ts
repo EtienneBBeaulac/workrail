@@ -698,20 +698,6 @@ export interface TriggerDefinition {
   readonly branchStrategy?: 'worktree' | 'none' | 'read-only';
 
   /**
-   * Platform-agnostic reviewer identity. The `platform` field discriminates
-   * which ReviewApprovalAdapter implementation is used at dispatch time.
-   * New platforms (e.g. 'jira', 'linear') are added as new union members
-   * without changing existing callers.
-   *
-   * In YAML:
-   *   reviewerIdentity:
-   *     platform: github          # or: gitlab
-   *     token: $GITHUB_REVIEWER_TOKEN
-   *     login: etienneb
-   */
-  readonly reviewerIdentity?: ReviewerIdentity;
-
-  /**
    * Delivery configuration for this trigger.
    * Always set by validateAndResolveTrigger(): explicit YAML block or synthesized from legacy fields.
    */

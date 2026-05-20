@@ -47,8 +47,8 @@ triggers:
     concurrencyMode: parallel
     branchStrategy: read-only
     autoCommit: false
-    reviewerIdentity:
-      platform: github
+    delivery:
+      kind: github_draft_review
       token: $GITHUB_REVIEWER_TOKEN
       login: EtienneBBeaulac
     contextMapping:

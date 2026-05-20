@@ -1237,18 +1237,6 @@ export class TriggerRouter {
       await this._runDeliveryByKind(workflowTrigger, originalResult, trigger.id, deliveryDeps);
 
       // Deprecation: warn when legacy reviewerIdentity on TriggerDefinition is redundant with
-      // explicit delivery: { kind: github_draft_review } block. Uses trigger.reviewerIdentity
-      // (from TriggerDefinition) since WorkflowTrigger.reviewerIdentity was removed in Phase 5.
-      if (
-        trigger.reviewerIdentity !== undefined &&
-        workflowTrigger.deliveryConfig?.source === 'explicit' &&
-        workflowTrigger.deliveryConfig.adapters.some(a => a.kind === 'github_draft_review')
-      ) {
-        console.warn(
-          `[TriggerRouter] reviewerIdentity in triggers.yml is redundant when delivery: { kind: github_draft_review } is configured ` +
-          `(triggerId=${trigger.id}). Remove reviewerIdentity from triggers.yml.`,
-        );
-      }
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };
