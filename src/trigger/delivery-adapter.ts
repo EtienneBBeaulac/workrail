@@ -28,6 +28,10 @@ export type AdapterConfig =
 
 export interface DeliveryConfig {
   readonly adapters: readonly AdapterConfig[];
+  // WHY explicit: distinguishes operator-configured delivery (explicit: true) from
+  // synthesized fallback (absent). route() only fires adapter.deliver() for explicit
+  // configs -- prevents flooding outbox.jsonl for every session on every trigger.
+  readonly explicit?: true;
 }
 
 export interface DeliveryPayload {

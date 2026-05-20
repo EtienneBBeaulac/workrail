@@ -372,6 +372,16 @@ export async function runWorkflow(
     workspacePath: trigger.workspacePath,
   });
 
+  // delivery_planned: record which adapters are configured for this session.
+  // Informational only -- emitted regardless of explicit flag so all sessions are observable.
+  if (trigger.deliveryConfig !== undefined) {
+    emitter?.emit({
+      kind: 'delivery_planned',
+      sessionId,
+      deliveryAdapterKinds: trigger.deliveryConfig.adapters.map(a => a.kind),
+    });
+  }
+
   // ---- Context enrichment (root sessions only) ----
   // WHY before buildPreAgentSession: enrichment is I/O-bound (session scan +
   // git), not session-bound. Running it here ensures all entry points that

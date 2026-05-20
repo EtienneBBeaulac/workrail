@@ -50,6 +50,7 @@ import { GitHubReviewApprovalAdapter } from './review-approval-adapter.js';
 import { parseReviewVerdictArtifact } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
 import { PendingDraftReviewPoller, writePendingDraftSidecar } from './pending-draft-review-poller.js';
 import { randomUUID } from 'node:crypto';
+import { CliInboxAdapter, type DeliveryPayload } from './delivery-adapter.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -579,6 +580,7 @@ export class TriggerRouter {
   private _coordinatorDeps: AdaptiveCoordinatorDeps | undefined;
   private readonly _modeExecutors: ModeExecutors | undefined;
   private readonly _reviewApprovalAdapter: ReviewApprovalAdapter;
+  private readonly _workrailDir: string | undefined;
 
   /**
    * Recent adaptive dispatch timestamps keyed by a path-specific dedup key.
@@ -687,6 +689,12 @@ export class TriggerRouter {
      * Inject a fake in tests to avoid real GitHub API calls.
      */
     reviewApprovalAdapter?: ReviewApprovalAdapter,
+    /**
+     * Path to the workrail data directory (~/.workrail).
+     * Used by CliInboxAdapter to locate outbox.jsonl.
+     * When absent, cli_inbox delivery is silently skipped.
+     */
+    workrailDir?: string,
   ) {
     this.execFn = execFn ?? execFileAsync;
     this.emitter = emitter;
@@ -696,6 +704,7 @@ export class TriggerRouter {
     this._modeExecutors = modeExecutors;
     this._deduplicator = deduplicator ?? new DispatchDeduplicator(TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS);
     this._reviewApprovalAdapter = reviewApprovalAdapter ?? new GitHubReviewApprovalAdapter();
+    this._workrailDir = workrailDir;
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -1162,6 +1171,37 @@ export class TriggerRouter {
       // Uses workflowTrigger (which carries reviewerIdentity forwarded from TriggerDefinition).
       // Uses originalResult to avoid callbackUrl delivery_failed suppressing review posting.
       await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService, this.ctx, trigger.id);
+
+      // Explicit delivery notification: fire adapter.deliver() for cli_inbox adapters
+      // when the operator has explicitly configured a delivery: block in triggers.yml.
+      // WHY only cli_inbox: git_commit and github_draft_review are still handled by
+      // maybeRunDelivery() and maybeRunPostWorkflowActions() above. Phase 4 will replace
+      // those paths with adapter.deliver() calls for all adapter kinds.
+      // WHY explicit check: every trigger has a synthesized cli_inbox fallback in
+      // deliveryConfig. Without this guard, deliver() would fire for every session,
+      // flooding outbox.jsonl for all triggers regardless of configuration.
+      if (
+        originalResult._tag === 'success' &&
+        workflowTrigger.deliveryConfig?.explicit === true &&
+        this._workrailDir !== undefined
+      ) {
+        for (const adapterConfig of workflowTrigger.deliveryConfig.adapters) {
+          if (adapterConfig.kind === 'cli_inbox') {
+            const payload: DeliveryPayload = {
+              workflowId: workflowTrigger.workflowId,
+              sessionId: originalResult.sessionId ?? 'unknown',
+              goal: workflowTrigger.goal,
+              notes: originalResult.lastStepNotes ?? null,
+              artifacts: originalResult.lastStepArtifacts ?? [],
+            };
+            try {
+              await new CliInboxAdapter(this._workrailDir).deliver(payload, adapterConfig);
+            } catch (e) {
+              console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`);
+            }
+          }
+        }
+      }
     });
 
     return { _tag: 'enqueued', triggerId: trigger.id };

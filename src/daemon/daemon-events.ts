@@ -416,6 +416,15 @@ export interface AgentStuckEvent {
  * Each member has a `kind` discriminant so switch exhaustiveness is enforced
  * by the TypeScript compiler.
  */
+/** Delivery planned at session start -- records which adapters will be used. */
+export interface DeliveryPlannedEvent {
+  readonly kind: 'delivery_planned';
+  readonly sessionId: RunId;
+  /** Adapter kinds resolved for this session. Absent when deliveryConfig is not set. */
+  readonly deliveryAdapterKinds?: readonly string[];
+  readonly workrailSessionId?: string;
+}
+
 export type DaemonEvent =
   | DaemonStartedEvent
   | DaemonStoppedEvent
@@ -437,7 +446,8 @@ export type DaemonEvent =
   | ToolCallCompletedEvent
   | ToolCallFailedEvent
   | AgentStuckEvent
-  | SignalEmittedEvent;
+  | SignalEmittedEvent
+  | DeliveryPlannedEvent;
 
 // ---------------------------------------------------------------------------
 // DaemonEventEmitter
