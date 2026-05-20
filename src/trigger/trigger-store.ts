@@ -1455,6 +1455,14 @@ function validateAndResolveTrigger(
       return err({ kind: 'invalid_field_value', field: `delivery.kind (unknown adapter kind: "${rawKind}")`, triggerId: rawId });
     }
 
+    // git_commit is only valid as a synthesized adapter (from autoCommit: true).
+    // Configuring it explicitly in the delivery: block is not supported -- the adapter
+    // needs branchStrategy, branchPrefix, baseBranch, and secretScan from WorkflowTrigger
+    // which cannot be expressed in the delivery: block syntax.
+    if (rawKind === 'git_commit') {
+      return err({ kind: 'invalid_field_value', field: `delivery.kind (git_commit is not configurable via delivery: block; use autoCommit: true instead)`, triggerId: rawId });
+    }
+
     // For github_draft_review: require token and login; resolve $SECRET_NAME for token.
     let adapterConfig: AdapterConfig;
     if (rawKind === 'github_draft_review') {
