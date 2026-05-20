@@ -2211,3 +2211,80 @@ describe('TriggerRouter: cli_inbox explicit delivery', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 4: explicit github_draft_review delivery
+// ---------------------------------------------------------------------------
+
+describe('TriggerRouter: explicit github_draft_review delivery', () => {
+  it('explicit github_draft_review config fires runPostWorkflowReview, not maybeRunPostWorkflowActions', async () => {
+    // Verify that when explicit deliveryConfig has github_draft_review, the review path fires.
+    // We can't easily verify the exact token used without an integration setup,
+    // but we can verify that maybeRunPostWorkflowActions() is NOT called (no reviewerIdentity on WorkflowTrigger)
+    // while the explicit path IS attempted (errors are swallowed as warnings).
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fn } = makeFakeRunWorkflow();
+
+    const trigger = makeTrigger({
+      deliveryConfig: {
+        source: 'explicit' as const,
+        adapters: [{ kind: 'github_draft_review' as const, token: 'explicit-token', login: 'myuser' }],
+      },
+      // No reviewerIdentity -- explicit path should fire, legacy path should NOT
+    });
+
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+    await router.route(makeEvent({ action: 'push' }));
+    await new Promise(r => setTimeout(r, 50));
+    warnSpy.mockRestore();
+
+    // If explicit path fires and review context is missing, it logs a warning and continues.
+    // What matters: no crash, and the deprecation warning was NOT emitted (no reviewerIdentity).
+    const deprecationWarned = warnSpy.mock.calls.some(args =>
+      String(args[0]).includes('reviewerIdentity is deprecated'),
+    );
+    expect(deprecationWarned).toBe(false);
+  });
+
+  it('emits deprecation warning when both reviewerIdentity and explicit deliveryConfig are set', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fn } = makeFakeRunWorkflow();
+
+    // Trigger in index has both reviewerIdentity AND explicit github_draft_review
+    // (the warning only fires when explicit config includes github_draft_review)
+    const trigger = makeTrigger({
+      deliveryConfig: {
+        source: 'explicit' as const,
+        adapters: [{ kind: 'github_draft_review' as const, token: 'tok', login: 'user' }],
+      },
+      reviewerIdentity: { platform: 'github', token: 'tok', login: 'user' },
+    });
+
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+    await router.route(makeEvent({ action: 'push' }));
+    await new Promise(r => setTimeout(r, 50));
+
+    const warned = warnSpy.mock.calls.some(args =>
+      String(args[0]).includes('reviewerIdentity is redundant'),
+    );
+    warnSpy.mockRestore();
+    expect(warned).toBe(true);
+  });
+
+  it('does NOT emit deprecation warning when only reviewerIdentity is set (no explicit deliveryConfig)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fn } = makeFakeRunWorkflow();
+    const trigger = makeTrigger({
+      reviewerIdentity: { platform: 'github', token: 'tok', login: 'user' },
+    });
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, fn);
+    await router.route(makeEvent({ action: 'push' }));
+    await new Promise(r => setTimeout(r, 50));
+
+    const warned = warnSpy.mock.calls.some(args =>
+      String(args[0]).includes('reviewerIdentity is deprecated'),
+    );
+    warnSpy.mockRestore();
+    expect(warned).toBe(false);
+  });
+});

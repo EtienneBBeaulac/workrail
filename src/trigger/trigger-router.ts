@@ -325,7 +325,13 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
  * (polls until operator publishes, could take hours). Awaiting it would hold the
  * queue slot. Same pattern as gate evaluation: void (async () => { ... })().
  */
-async function maybeRunPostWorkflowActions(
+/**
+ * Core review posting logic: create draft review, write sidecar, start poller.
+ * Extracted from maybeRunPostWorkflowActions() so the explicit deliveryConfig path
+ * can call it with credentials from AdapterConfig rather than reviewerIdentity.
+ */
+async function runPostWorkflowReview(
+  reviewerIdentity: import('./types.js').ReviewerIdentity,
   workflowTrigger: WorkflowTrigger,
   originalResult: WorkflowRunResult,
   reviewApprovalAdapter: ReviewApprovalAdapter,
@@ -334,9 +340,6 @@ async function maybeRunPostWorkflowActions(
   triggerId?: string,
 ): Promise<void> {
   if (originalResult._tag !== 'success') return;
-  if (!workflowTrigger.reviewerIdentity) return;
-
-  const { reviewerIdentity } = workflowTrigger;
 
   // Find wr.review_verdict artifact.
   const artifacts = originalResult.lastStepArtifacts;
@@ -473,6 +476,27 @@ async function maybeRunPostWorkflowActions(
 
   // Notify operator that draft is ready.
   notificationService?.notify(originalResult, `WorkTrain review draft ready on PR #${prNumber} -- open in GitHub to review findings`);
+}
+
+async function maybeRunPostWorkflowActions(
+  workflowTrigger: WorkflowTrigger,
+  originalResult: WorkflowRunResult,
+  reviewApprovalAdapter: ReviewApprovalAdapter,
+  notificationService?: NotificationService,
+  ctx?: V2ToolContext,
+  triggerId?: string,
+): Promise<void> {
+  if (originalResult._tag !== 'success') return;
+  if (!workflowTrigger.reviewerIdentity) return;
+  await runPostWorkflowReview(
+    workflowTrigger.reviewerIdentity,
+    workflowTrigger,
+    originalResult,
+    reviewApprovalAdapter,
+    notificationService,
+    ctx,
+    triggerId,
+  );
 }
 
 async function maybeRunDelivery(
@@ -1081,6 +1105,11 @@ export class TriggerRouter {
                     lastStepArtifacts,
                     sessionId: result.sessionId as import('../daemon/daemon-events.js').RunId,
                   };
+                  // NOTE (Phase 5): this still uses the legacy maybeRunPostWorkflowActions() path
+                  // which only fires for reviewerIdentity. Triggers migrated to explicit
+                  // delivery: { kind: github_draft_review } (without reviewerIdentity) will
+                  // NOT get a draft review posted from this gate path until Phase 5 migrates
+                  // this call site to the explicit deliveryConfig dispatch loop.
                   await maybeRunPostWorkflowActions(
                     workflowTrigger,
                     syntheticSuccess,
@@ -1132,26 +1161,34 @@ export class TriggerRouter {
         : undefined;
       await maybeRunDelivery(trigger.id, trigger, originalResult, this.execFn, deliveryDeps);
 
-      // Post-workflow review actions: create a PENDING draft review when reviewerIdentity is set.
-      // Uses workflowTrigger (which carries reviewerIdentity forwarded from TriggerDefinition).
-      // Uses originalResult to avoid callbackUrl delivery_failed suppressing review posting.
-      await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService, this.ctx, trigger.id);
+      // Deprecation: warn once per session when reviewerIdentity is set AND the explicit
+      // delivery: block already includes github_draft_review (the two are redundant and
+      // the explicit block takes precedence for review posting).
+      // WHY narrow condition: having delivery: { kind: cli_inbox } + reviewerIdentity is
+      // a valid migration pattern -- cli_inbox for notifications, reviewerIdentity for reviews.
+      if (
+        workflowTrigger.reviewerIdentity !== undefined &&
+        workflowTrigger.deliveryConfig?.source === 'explicit' &&
+        workflowTrigger.deliveryConfig.adapters.some(a => a.kind === 'github_draft_review')
+      ) {
+        console.warn(
+          `[TriggerRouter] reviewerIdentity is redundant when delivery: { kind: github_draft_review } is configured ` +
+          `(workflowId=${workflowTrigger.workflowId}). Remove reviewerIdentity from triggers.yml -- ` +
+          `the delivery: block already handles review posting.`,
+        );
+      }
 
-      // Explicit delivery notification: fire adapter.deliver() for cli_inbox adapters
-      // when the operator has explicitly configured a delivery: block in triggers.yml.
-      // WHY only cli_inbox: git_commit and github_draft_review are still handled by
-      // maybeRunDelivery() and maybeRunPostWorkflowActions() above. Phase 4 will replace
-      // those paths with adapter.deliver() calls for all adapter kinds.
+      // Explicit delivery dispatch: fire configured delivery actions when operator
+      // has set delivery: block in triggers.yml (source === 'explicit').
       // WHY explicit check: every trigger has a synthesized cli_inbox fallback in
-      // deliveryConfig. Without this guard, deliver() would fire for every session,
-      // flooding outbox.jsonl for all triggers regardless of configuration.
+      // deliveryConfig. Without this guard, actions fire for every session.
+      let explicitGithubReviewFired = false;
       if (
         originalResult._tag === 'success' &&
-        workflowTrigger.deliveryConfig?.source === 'explicit' &&
-        this._cliInboxAdapter !== undefined
+        workflowTrigger.deliveryConfig?.source === 'explicit'
       ) {
         for (const adapterConfig of workflowTrigger.deliveryConfig.adapters) {
-          if (adapterConfig.kind === 'cli_inbox') {
+          if (adapterConfig.kind === 'cli_inbox' && this._cliInboxAdapter !== undefined) {
             const payload: DeliveryPayload = {
               workflowId: workflowTrigger.workflowId,
               sessionId: originalResult.sessionId ?? 'unknown',
@@ -1164,8 +1201,41 @@ export class TriggerRouter {
             } catch (e) {
               console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`);
             }
+          } else if (adapterConfig.kind === 'github_draft_review') {
+            // Use explicit credentials from deliveryConfig instead of reviewerIdentity.
+            const identity: import('./types.js').ReviewerIdentity = {
+              platform: 'github',
+              token: adapterConfig.token,
+              login: adapterConfig.login,
+            };
+            await runPostWorkflowReview(
+              identity,
+              workflowTrigger,
+              originalResult,
+              this._reviewApprovalAdapter,
+              this.notificationService,
+              this.ctx,
+              trigger.id,
+            );
+            explicitGithubReviewFired = true;
+          } else if (adapterConfig.kind !== 'cli_inbox') {
+            // Adapter kind is configured but not yet implemented in Phase 4.
+            // Phase 5 will add git_commit; Phase 6+ will add slack_webhook, gitlab_mr_note, callback_url.
+            console.warn(
+              `[TriggerRouter] Delivery adapter kind '${adapterConfig.kind}' is not yet activated ` +
+              `(workflowId=${workflowTrigger.workflowId}). Delivery skipped for this adapter. ` +
+              `This will be implemented in a future phase.`,
+            );
           }
         }
+      }
+
+      // Legacy review posting: runs when reviewerIdentity is configured and explicit
+      // delivery did NOT already handle it (to avoid double-posting).
+      // WHY separate: explicit delivery: block and legacy reviewerIdentity are mutually
+      // exclusive for review posting. Explicit takes priority.
+      if (!explicitGithubReviewFired) {
+        await maybeRunPostWorkflowActions(workflowTrigger, originalResult, this._reviewApprovalAdapter, this.notificationService, this.ctx, trigger.id);
       }
     });
 
