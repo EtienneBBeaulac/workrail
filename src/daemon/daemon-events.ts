@@ -421,7 +421,7 @@ export interface DeliveryPlannedEvent {
   readonly kind: 'delivery_planned';
   readonly sessionId: RunId;
   /** Adapter kinds resolved for this session. Absent when deliveryConfig is not set. */
-  readonly deliveryAdapterKinds?: readonly string[];
+  readonly deliveryAdapterKinds?: readonly import('../trigger/delivery-adapter.js').AdapterConfig['kind'][];
   readonly workrailSessionId?: string;
 }
 
