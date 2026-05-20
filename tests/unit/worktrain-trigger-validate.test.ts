@@ -343,9 +343,9 @@ describe('sync coverage: validateTriggerStrict mirrors validateAndResolveTrigger
   });
 
   describe('rule: reviewer-identity-without-read-only (warning)', () => {
-    it('fires when reviewerIdentity is set but branchStrategy is not read-only', () => {
+    it('fires when explicit github_draft_review delivery is set but branchStrategy is not read-only', () => {
       const trigger = makeTrigger({
-        reviewerIdentity: { platform: 'github', token: 'ghp_test', login: 'etienneb' },
+        deliveryConfig: { source: 'explicit' as const, adapters: [{ kind: 'github_draft_review' as const, token: 'ghp_test', login: 'etienneb' }] },
         branchStrategy: 'none',
       });
       const issues = validateTriggerStrict(trigger);
@@ -354,9 +354,9 @@ describe('sync coverage: validateTriggerStrict mirrors validateAndResolveTrigger
       expect(rule!.severity).toBe('warning');
     });
 
-    it('does not fire when reviewerIdentity is set and branchStrategy is read-only', () => {
+    it('does not fire when explicit github_draft_review delivery is set and branchStrategy is read-only', () => {
       const trigger = makeTrigger({
-        reviewerIdentity: { platform: 'github', token: 'ghp_test', login: 'etienneb' },
+        deliveryConfig: { source: 'explicit' as const, adapters: [{ kind: 'github_draft_review' as const, token: 'ghp_test', login: 'etienneb' }] },
         branchStrategy: 'read-only',
       });
       const issues = validateTriggerStrict(trigger);

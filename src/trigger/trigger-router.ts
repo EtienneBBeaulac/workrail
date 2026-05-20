@@ -48,7 +48,7 @@ import { resumeFromGate } from '../daemon/gate-resume.js';
 import type { ReviewApprovalAdapter } from './review-approval-adapter.js';
 import { GitHubReviewApprovalAdapter } from './review-approval-adapter.js';
 import { parseReviewVerdictArtifact } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
-import { PendingDraftReviewPoller, writePendingDraftSidecar } from './pending-draft-review-poller.js';
+import { PendingDraftReviewPoller, writePendingDraftSidecar, writePendingDeliverySidecar } from './pending-draft-review-poller.js';
 import { randomUUID } from 'node:crypto';
 import { CliInboxAdapter, type DeliveryPayload } from './delivery-adapter.js';
 
@@ -428,6 +428,9 @@ async function runPostWorkflowReview(
 
   if (ctx?.v2 && resolvedWorkrailSessionId) {
     try {
+      // Write both sidecar formats: old (for recoverPendingDraftPollers during transition)
+      // and new generalized (self-contained; used by recoverPendingDeliveryPollers).
+      // WHY both: recoverPendingDraftPollers() reads pending-draft-*.json until it is removed.
       await writePendingDraftSidecar({
         reviewId,
         prNumber,
@@ -439,9 +442,23 @@ async function runPostWorkflowReview(
         createdAt: new Date().toISOString(),
         triggerId: triggerId ?? '',
       });
+      await writePendingDeliverySidecar({
+        adapterId: 'github_draft_review',
+        daemonSessionId,
+        state: {
+          reviewId,
+          prNumber,
+          prRepo,
+          token: reviewerIdentity.token,
+          login: reviewerIdentity.login,
+          workrailSessionId: resolvedWorkrailSessionId,
+          triggerId: triggerId ?? '',
+        },
+        createdAt: new Date().toISOString(),
+      });
     } catch (e: unknown) {
       console.warn(
-        `[TriggerRouter] Failed to write pending-draft sidecar: ` +
+        `[TriggerRouter] Failed to write pending sidecar: ` +
         `${e instanceof Error ? e.message : String(e)}`,
       );
       // Non-fatal: poller still starts; crash recovery won't work but review still posts.

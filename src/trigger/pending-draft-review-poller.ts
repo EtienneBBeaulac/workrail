@@ -280,3 +280,45 @@ export async function readAllPendingDraftSidecars(
   }
   return sidecars;
 }
+
+// ---------------------------------------------------------------------------
+// Generalized pending-delivery sidecar (self-contained, no trigger lookup)
+// ---------------------------------------------------------------------------
+
+import type { AdapterConfig } from './delivery-adapter.js';
+
+export interface PendingDeliverySidecar {
+  readonly adapterId: AdapterConfig['kind'];
+  readonly daemonSessionId: string;
+  readonly state: Readonly<Record<string, unknown>>;
+  readonly createdAt: string;
+}
+
+export async function writePendingDeliverySidecar(
+  sidecar: PendingDeliverySidecar,
+  sessionsDir: string = DAEMON_SESSIONS_DIR,
+): Promise<void> {
+  const sidecarPath = path.join(sessionsDir, `pending-delivery-${sidecar.daemonSessionId}.json`);
+  const tmpPath = `${sidecarPath}.tmp`;
+  await fs.writeFile(tmpPath, JSON.stringify(sidecar, null, 2), 'utf8');
+  await fs.rename(tmpPath, sidecarPath);
+}
+
+export async function readAllPendingDeliverySidecars(
+  sessionsDir: string = DAEMON_SESSIONS_DIR,
+): Promise<PendingDeliverySidecar[]> {
+  const sidecars: PendingDeliverySidecar[] = [];
+  let entries: string[];
+  try { entries = await fs.readdir(sessionsDir); } catch { return sidecars; }
+  for (const entry of entries) {
+    if (!entry.startsWith('pending-delivery-') || !entry.endsWith('.json')) continue;
+    try {
+      const raw = await fs.readFile(path.join(sessionsDir, entry), 'utf8');
+      const parsed = JSON.parse(raw) as Partial<PendingDeliverySidecar>;
+      if (parsed.adapterId && parsed.daemonSessionId && parsed.state) {
+        sidecars.push(parsed as PendingDeliverySidecar);
+      }
+    } catch { /* skip corrupt sidecars */ }
+  }
+  return sidecars;
+}
