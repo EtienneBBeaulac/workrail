@@ -32,8 +32,8 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
       signal: AbortSignal,
     ): Promise<AgentToolResult<unknown>> => {
       if (typeof params.command !== 'string' || !params.command) throw new Error('Bash: command must be a non-empty string');
-      console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 80)}"`);
-      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 80), ...withWorkrailSession(workrailSessionId) });
+      console.log(`[WorkflowRunner] Tool: bash "${String(params.command).slice(0, 500)}"`);
+      if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Bash', summary: String(params.command).slice(0, 500), ...withWorkrailSession(workrailSessionId) });
       const cwd = params.cwd ?? workspacePath;
       try {
         const { stdout, stderr } = await execAsync(params.command, {
@@ -41,7 +41,17 @@ export function makeBashTool(workspacePath: string, schemas: Record<string, any>
           timeout: BASH_TIMEOUT_MS,
           shell: '/bin/bash',
           signal,
-        });
+          // WHY stdio cast: exec() types don't include stdio, but Node passes the option
+          // through to the underlying spawn() call. We cast to bypass the type gap rather
+          // than switching to spawn() with manual buffering.
+          // WHY 'ignore' for stdin: tools like rg, grep, awk, sed, sort, etc. read from
+          // stdin when no file argument is given AND stdin is not a TTY. Node's exec()
+          // passes a pipe as stdin (not a terminal), causing these tools to block indefinitely
+          // waiting for input that never arrives. Closing stdin ('ignore') is the correct
+          // semantic: the bash tool is not an interactive session and never provides input.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          stdio: ['ignore', 'pipe', 'pipe'] as any,
+        } as any);
         const output = [stdout, stderr].filter(Boolean).join('\n');
         return {
           content: [{ type: 'text', text: output || '(no output)' }],

@@ -348,7 +348,7 @@ export function formatSessionEvents(result: SessionLogResult): string {
     if (line.kind === 'tool') {
       const arrow = chalk.dim('→');
       const name = chalk.yellow(line.toolName.padEnd(12));
-      const args = chalk.dim(line.argsSummary.slice(0, 60));
+      const args = chalk.dim(line.argsSummary);
       const startLine = `${ts} ${arrow} ${name} ${args}`;
 
       let endLine: string;
