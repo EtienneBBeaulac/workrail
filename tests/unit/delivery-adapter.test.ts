@@ -3,7 +3,6 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  resolveDeliveryConfig,
   synthesizeDeliveryConfig,
   CliInboxAdapter,
   type DeliveryConfig,
@@ -38,10 +37,13 @@ describe('synthesizeDeliveryConfig', () => {
     expect(result.adapters[0]).toEqual({ kind: 'github_draft_review', token: 'tok', login: 'user' });
   });
 
-  it('returns callback_url when callbackUrl is set', () => {
+  it('does NOT include callback_url in synthesized adapters (callbackUrl has its own delivery path)', () => {
+    // callbackUrl fires via deliveryPost() in trigger-router.ts, not through the adapter loop.
+    // Adding it to synthesized adapters would create a dead entry that warns "not yet activated".
     const result = synthesizeDeliveryConfig({ callbackUrl: 'https://example.com/hook' });
-    expect(result.adapters).toHaveLength(1);
-    expect(result.adapters[0]).toEqual({ kind: 'callback_url', url: 'https://example.com/hook' });
+    expect(result.adapters.every(a => a.kind !== 'callback_url')).toBe(true);
+    // No other delivery configured -- falls back to cli_inbox
+    expect(result.adapters[0]!.kind).toBe('cli_inbox');
   });
 
   it('puts git_commit before github_draft_review when both are set', () => {
@@ -52,41 +54,13 @@ describe('synthesizeDeliveryConfig', () => {
     expect(result.adapters[1]!.kind).toBe('github_draft_review');
   });
 
-  it('includes all three adapters in correct order with all fields set', () => {
+  it('returns only git_commit and github_draft_review (not callback_url) when all three legacy fields set', () => {
     const result = synthesizeDeliveryConfig({
       autoCommit: true,
       reviewerIdentity: reviewer,
       callbackUrl: 'https://example.com/hook',
     });
-    expect(result.adapters.map(a => a.kind)).toEqual(['git_commit', 'github_draft_review', 'callback_url']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveDeliveryConfig
-// ---------------------------------------------------------------------------
-
-describe('resolveDeliveryConfig', () => {
-  const payload = { workflowId: 'wr.test', sessionId: 'sess_1', goal: 'test', notes: null, artifacts: [] };
-  void payload; // used below
-
-  it('returns cli_inbox fallback when no trigger config is provided', () => {
-    const result = resolveDeliveryConfig(undefined, 'wr.test', {});
-    expect(result).toEqual({ source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] });
-  });
-
-  it('returns the provided trigger config unchanged', () => {
-    const config: DeliveryConfig = {
-      source: 'explicit',
-      adapters: [{ kind: 'github_draft_review', token: 'tok', login: 'user' }],
-    };
-    const result = resolveDeliveryConfig(config, 'wr.test', {});
-    expect(result).toBe(config);
-  });
-
-  it('returns cli_inbox fallback regardless of workflowId or globalConfig', () => {
-    const result = resolveDeliveryConfig(undefined, 'wr.some-other-workflow', { someKey: 'val' });
-    expect(result).toEqual({ source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] });
+    expect(result.adapters.map(a => a.kind)).toEqual(['git_commit', 'github_draft_review']);
   });
 });
 
