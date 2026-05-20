@@ -1362,9 +1362,6 @@ function validateAndResolveTrigger(
   // (only goal, workspacePath, and context are passed to dispatchAdaptivePipeline).
   const resolvedWorkflowId = raw.workflowId?.trim() ?? '';
 
-  // Assemble and resolve reviewerIdentity if present.
-  // token is resolved from env using the same $SECRET_REF pattern as hmacSecret.
-  // platform discriminates the ReviewApprovalAdapter implementation.
   // Assemble and validate dispatchCondition if present.
   // Both payloadPath and equals must be non-empty strings.
   let dispatchCondition: TriggerDefinition['dispatchCondition'] | undefined;
@@ -1769,9 +1766,7 @@ export function validateTriggerStrict(
   // Rule: reviewer-identity-without-read-only (warning)
   // reviewer-assigned PR review sessions need branchStrategy: 'read-only' to checkout the PR
   // branch in an isolated worktree so concurrent reviews don't clobber the main checkout.
-  // Applies to both legacy reviewerIdentity and explicit delivery: { kind: github_draft_review }.
   const hasReviewDelivery =
-    trigger.reviewerIdentity !== undefined ||
     trigger.deliveryConfig?.adapters.some(a => a.kind === 'github_draft_review') === true;
   if (hasReviewDelivery && trigger.branchStrategy !== 'read-only') {
     issues.push({

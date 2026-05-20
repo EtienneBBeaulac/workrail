@@ -691,37 +691,47 @@ export async function clearQueueIssueSidecars(sessionsDir: string): Promise<void
 /**
  * Restart PendingDraftReviewPoller instances for orphaned pending-draft sidecars.
  *
- * Called by runStartupRecovery() when triggerIndex is available. For each
- * pending-draft-*.json sidecar found, looks up the trigger by triggerId to get
- * the reviewerIdentity.token (which is NOT stored in the sidecar for security),
- * then restarts polling. If the trigger no longer exists, logs a warning and
- * deletes the sidecar.
+ * Token resolution order:
+ * 1. Check for a corresponding pending-delivery-*.json sidecar (written by Phase 6+).
+ *    If found, read token from its self-contained state -- no trigger index needed.
+ * 2. Fall back to trigger.reviewerIdentity.token for pre-Phase-6 sidecars that were
+ *    created before the generalized sidecar format existed.
+ * 3. If neither source has a token, warn and delete the sidecar.
  *
  * Non-fatal: any error is caught and logged. Never throws.
  */
 async function recoverPendingDraftPollers(
   sessionsDir: string,
   ctx: import('../mcp/types.js').V2ToolContext,
-  triggerIndex: ReadonlyMap<string, import('../trigger/types.js').TriggerDefinition>,
+  _triggerIndex: ReadonlyMap<string, import('../trigger/types.js').TriggerDefinition>,
   reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
 ): Promise<void> {
-  const { readAllPendingDraftSidecars, PendingDraftReviewPoller, GitHubReviewApprovalAdapter } =
-    await import('../trigger/pending-draft-review-poller.js').then(async (m) => ({
-      readAllPendingDraftSidecars: m.readAllPendingDraftSidecars,
-      PendingDraftReviewPoller: m.PendingDraftReviewPoller,
-      GitHubReviewApprovalAdapter: (await import('../trigger/review-approval-adapter.js')).GitHubReviewApprovalAdapter,
-    }));
+  const m = await import('../trigger/pending-draft-review-poller.js');
+  const { readAllPendingDraftSidecars, readAllPendingDeliverySidecars, PendingDraftReviewPoller } = m;
+  const { GitHubReviewApprovalAdapter } = await import('../trigger/review-approval-adapter.js');
 
   const sidecars = await readAllPendingDraftSidecars(sessionsDir);
   if (sidecars.length === 0) return;
 
   console.log(`[StartupRecovery] Found ${sidecars.length} orphaned pending-draft review sidecar(s). Restarting pollers.`);
 
+  // Build a lookup of generalized delivery sidecars by daemonSessionId for token resolution.
+  const deliverySidecars = await readAllPendingDeliverySidecars(sessionsDir);
+  const deliverySidecarMap = new Map(deliverySidecars.map(s => [s.daemonSessionId, s]));
+
   for (const sidecar of sidecars) {
-    const trigger = triggerIndex.get(sidecar.triggerId);
-    if (!trigger?.reviewerIdentity) {
+    // Prefer token from generalized sidecar state (Phase 6+ sessions, self-contained).
+    const deliverySidecar = deliverySidecarMap.get(sidecar.daemonSessionId);
+    const deliveryState = deliverySidecar?.state as { token?: string; login?: string } | undefined;
+
+    // Token comes from the generalized delivery sidecar state (Phase 6+).
+    // Pre-Phase-6 sidecars without a delivery sidecar cannot be recovered.
+    const token = deliveryState?.token;
+    const login = deliveryState?.login;
+
+    if (!token || !login) {
       console.warn(
-        `[StartupRecovery] Pending-draft sidecar trigger '${sidecar.triggerId}' not found or has no reviewerIdentity. ` +
+        `[StartupRecovery] Pending-draft sidecar trigger '${sidecar.triggerId}' has no recoverable token. ` +
         `Deleting sidecar for daemonSessionId=${sidecar.daemonSessionId}.`,
       );
       await fs.unlink(path.join(sessionsDir, `pending-draft-${sidecar.daemonSessionId}.json`)).catch(() => {});
@@ -735,8 +745,8 @@ async function recoverPendingDraftPollers(
       prNumber: sidecar.prNumber,
       prRepo: sidecar.prRepo,
       reviewId: sidecar.reviewId,
-      token: trigger.reviewerIdentity.token,
-      login: trigger.reviewerIdentity.login,
+      token,
+      login,
       workrailSessionId: sidecar.workrailSessionId,
       daemonSessionId: sidecar.daemonSessionId,
       sessionStore: ctx.v2.sessionStore,
