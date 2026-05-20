@@ -56,7 +56,7 @@ export type BlockerReportV1 = {
 export type ReasonV1 =
   | { readonly kind: 'missing_context_key'; readonly key: string }
   | { readonly kind: 'context_budget_exceeded' }
-  | { readonly kind: 'missing_required_output'; readonly contractRef: string }
+  | { readonly kind: 'missing_required_output'; readonly contractRef: string; readonly submittedKinds?: readonly string[] }
   | { readonly kind: 'invalid_required_output'; readonly contractRef: string }
   | { readonly kind: 'assessment_followup_required'; readonly assessmentId: string; readonly dimensionId: string; readonly level: string; readonly guidance: string }
   | { readonly kind: 'missing_notes'; readonly stepId: string }
@@ -245,13 +245,23 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
       return ensureContractRef(reason.contractRef)
         .map((contractRef) => {
           const lines = getArtifactBlockedMessage(contractRef);
+          const submittedKinds = reason.submittedKinds;
+          let message: string;
+          if (submittedKinds && submittedKinds.length > 0) {
+            const submitted = submittedKinds.map(k => `'${k}'`).join(', ');
+            message = `You submitted kind ${submitted}, but this step requires contractRef=${contractRef}.`;
+          } else if (submittedKinds !== undefined) {
+            message = `Your output.artifacts was empty. This step requires contractRef=${contractRef}.`;
+          } else {
+            message = `Missing required output (contractRef=${contractRef}).`;
+          }
           const suggestedFix = lines
             ? `Pass this artifact in \`output.artifacts\` of your \`complete_step\` call:\n${lines.join('\n')}`
             : `Check the step's outputContract for the required artifact format and pass it in \`output.artifacts\` of your \`complete_step\` call.`;
           return {
             code: 'MISSING_REQUIRED_OUTPUT' as const,
             pointer: { kind: 'output_contract' as const, contractRef },
-            message: `Missing required output (contractRef=${contractRef}).`,
+            message,
             suggestedFix,
           };
         })

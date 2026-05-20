@@ -85,7 +85,7 @@ export function getOutputRequirementStatusWithArtifactsV1(args: {
       const error = result.error;
       
       if (error.code === 'MISSING_REQUIRED_ARTIFACT') {
-        return { kind: 'missing', contractRef: error.contractRef };
+        return { kind: 'missing', contractRef: error.contractRef, submittedKinds: error.submittedKinds };
       }
       
       if (error.code === 'INVALID_ARTIFACT_SCHEMA') {

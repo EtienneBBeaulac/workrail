@@ -87,6 +87,23 @@ describe('reason-model (table-driven mapping)', () => {
     });
   }
 
+  it('reasonToBlocker for missing_required_output with wrong-kind puts diagnostic in blocker message', () => {
+    const result = reasonToBlocker({ kind: 'missing_required_output', contractRef: 'wr.contracts.loop_control', submittedKinds: ['wr.assessment'] });
+    expect(result.isOk()).toBe(true);
+    const blocker = result._unsafeUnwrap();
+    expect(blocker.message).toContain("'wr.assessment'");
+    expect(blocker.message).toContain('wr.contracts.loop_control');
+    expect(blocker.suggestedFix).toContain('output.artifacts');
+  });
+
+  it('reasonToBlocker for missing_required_output with empty artifacts puts diagnostic in blocker message', () => {
+    const result = reasonToBlocker({ kind: 'missing_required_output', contractRef: 'wr.contracts.loop_control', submittedKinds: [] });
+    expect(result.isOk()).toBe(true);
+    const blocker = result._unsafeUnwrap();
+    expect(blocker.message).toContain('output.artifacts was empty');
+    expect(blocker.suggestedFix).toContain('output.artifacts');
+  });
+
   it('reasonToBlocker for missing_required_output (loop_control) says output.artifacts, not notesMarkdown', () => {
     const result = reasonToBlocker({ kind: 'missing_required_output', contractRef: 'wr.contracts.loop_control' });
     expect(result.isOk()).toBe(true);

@@ -133,15 +133,10 @@ export function advanceAndRecord(args: {
       // from looping forever on a step they cannot pass.
       const chainDepth = countBlockedAttemptChainDepth(nodeId, args.lockedIndex);
       if (chainDepth >= MAX_BLOCKED_ATTEMPT_RETRIES) {
-        // Extract the actual contractRef from the blocked snapshot's primary output_contract blocker.
-        // snap is in scope (loaded above); engineState.blocked.blockers carries the stored blockers.
-        const blockedState = snap.enginePayload.engineState;
-        const primaryContractRef = blockedState.kind === 'blocked'
-          ? (() => {
-              const p = blockedState.blocked.blockers.blockers.find(b => b.pointer.kind === 'output_contract')?.pointer;
-              return p?.kind === 'output_contract' ? p.contractRef : undefined;
-            })()
-          : undefined;
+        // Extract contractRef from the blocked snapshot's primary output_contract blocker.
+        // `blocked` is already narrowed above (blocked.kind === 'retryable_block').
+        const primaryPointer = blocked.blockers.blockers.find(b => b.pointer.kind === 'output_contract')?.pointer;
+        const primaryContractRef = primaryPointer?.kind === 'output_contract' ? primaryPointer.contractRef : undefined;
         const lines = primaryContractRef ? getArtifactBlockedMessage(primaryContractRef) : null;
         const contractLabel = primaryContractRef ?? 'the required artifact';
         const scaffold = lines
