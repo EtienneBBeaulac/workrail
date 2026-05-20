@@ -37,7 +37,7 @@ import type {
   ContextMappingEntry,
 } from './types.js';
 import type { ExecFn } from './delivery-action.js';
-import { runDeliveryPipeline, DEFAULT_DELIVERY_PIPELINE, type GitCommitDeliveryContext } from './delivery-pipeline.js';
+import type { DeliveryPipelineDeps } from './delivery-pipeline.js';
 import type { DaemonEventEmitter } from '../daemon/daemon-events.js';
 import type { NotificationService } from './notification-service.js';
 import type { AdaptiveCoordinatorDeps, AdaptivePipelineOpts, ModeExecutors } from '../coordinators/adaptive-pipeline.js';
@@ -47,10 +47,9 @@ import { evaluateGate, DEFAULT_GATE_EVAL_TIMEOUT_MS, DEFAULT_GATE_EVALUATOR_WORK
 import { resumeFromGate } from '../daemon/gate-resume.js';
 import type { ReviewApprovalAdapter } from './review-approval-adapter.js';
 import { GitHubReviewApprovalAdapter } from './review-approval-adapter.js';
-import { parseReviewVerdictArtifact } from '../v2/durable-core/schemas/artifacts/review-verdict.js';
-import { PendingDraftReviewPoller, writePendingDraftSidecar, writePendingDeliverySidecar } from './pending-draft-review-poller.js';
-import { randomUUID } from 'node:crypto';
-import { CliInboxAdapter, type DeliveryPayload } from './delivery-adapter.js';
+import { CliInboxAdapter, type DeliveryPayload, type GateResumeCallback } from './delivery-adapter.js';
+import { GitHubDraftReviewAdapter } from './adapters/github-draft-review-adapter.js';
+import { GitCommitAdapter } from './adapters/git-commit-adapter.js';
 
 /**
  * Default production exec function: promisify(execFile).
@@ -286,214 +285,19 @@ function validateHmac(rawBody: Buffer, secret: string, headerValue: string): boo
 }
 
 // ---------------------------------------------------------------------------
-// Delivery helper
+// Callback URL delivery helper (Phase 8: unify into _runDeliveryByKind)
 // ---------------------------------------------------------------------------
 
 /**
- * Run post-workflow delivery if autoCommit is enabled for this trigger.
+ * POST the completed workflow result to a callbackUrl.
+ * Returns the original result on success, or a WorkflowDeliveryFailed result on HTTP error.
+ * The delivery_failed result suppresses autoCommit for the same session (callers use originalResult
+ * to bypass this for other delivery actions).
  *
- * Delegates to runDeliveryPipeline() with DEFAULT_DELIVERY_PIPELINE after validating
- * the three preconditions that must hold for delivery to proceed.
- *
- * All errors are logged and discarded -- delivery is best-effort and must never affect
- * the workflow's success/failure state.
- *
- * WHY module-level function (not class method): pure helper shared by route() and
- * dispatch() without coupling to TriggerRouter's private state. Delivery logic
- * belongs in delivery-pipeline.ts; this is just the wiring.
- *
- * @param triggerId - Used in log messages for traceability
- * @param trigger - Source of workspacePath, autoCommit, autoOpenPR flags
- * @param result - WorkflowRunResult; only called when _tag === 'success'
- * @param execFn - Injectable exec function (production: execFileAsync; tests: fake)
+ * WHY not in _runDeliveryByKind: this is the only delivery path that can mutate the result
+ * to delivery_failed, which must happen before other delivery actions run. Phase 8 will
+ * unify this by giving _runDeliveryByKind a way to signal a failed delivery.
  */
-/**
- * Run post-workflow review actions when reviewerIdentity is configured.
- *
- * Fires only on success with a valid wr.review_verdict artifact.
- * Creates a PENDING GitHub/GitLab draft review under the operator's identity.
- * The PendingDraftReviewPoller (PR3) is wired in here once implemented.
- *
- * WHY separate from maybeRunDelivery: different gate conditions (no autoCommit
- * required, different artifact source), different side effects (GitHub API call,
- * not git commit). These are independent post-workflow action pathways.
- *
- * WHY receives originalResult: same as maybeRunDelivery -- prevents callbackUrl
- * delivery_failed reassignment from suppressing review posting on a succeeded session.
- *
- * WHY fire-and-forget for the poller (future PR3): the poller is long-running
- * (polls until operator publishes, could take hours). Awaiting it would hold the
- * queue slot. Same pattern as gate evaluation: void (async () => { ... })().
- */
-/**
- * Core review posting logic: create draft review, write sidecar, start poller.
- * Extracted from maybeRunPostWorkflowActions() so the explicit deliveryConfig path
- * can call it with credentials from AdapterConfig rather than reviewerIdentity.
- */
-async function runPostWorkflowReview(
-  reviewerIdentity: import('./types.js').ReviewerIdentity,
-  workflowTrigger: WorkflowTrigger,
-  originalResult: WorkflowRunResult,
-  reviewApprovalAdapter: ReviewApprovalAdapter,
-  notificationService?: NotificationService,
-  ctx?: V2ToolContext,
-  triggerId?: string,
-  onGateResume?: (daemonSessionId: string) => void,
-): Promise<void> {
-  if (originalResult._tag !== 'success') return;
-
-  // Find wr.review_verdict artifact.
-  const artifacts = originalResult.lastStepArtifacts;
-  if (!artifacts || artifacts.length === 0) {
-    console.warn(
-      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
-      `lastStepArtifacts is absent or empty. Ensure wr.mr-review emits wr.review_verdict on the final step.`,
-    );
-    return;
-  }
-
-  let reviewVerdict: ReturnType<typeof parseReviewVerdictArtifact> = null;
-  for (const artifact of artifacts) {
-    reviewVerdict = parseReviewVerdictArtifact(artifact);
-    if (reviewVerdict !== null) break;
-  }
-
-  if (reviewVerdict === null) {
-    console.warn(
-      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
-      `lastStepArtifacts present but no valid wr.review_verdict found. ` +
-      `Artifacts: ${artifacts.map((a) => (typeof a === 'object' && a !== null ? (a as Record<string, unknown>)['kind'] : 'unknown')).join(', ')}`,
-    );
-    return;
-  }
-
-  // Extract PR number and repo from context (injected by github_prs_poll polling adapter).
-  const triggerCtx = workflowTrigger.context as Record<string, unknown> | undefined;
-  const prNumber = typeof triggerCtx?.['itemNumber'] === 'number' ? triggerCtx['itemNumber'] : undefined;
-  const prUrl = typeof triggerCtx?.['itemUrl'] === 'string' ? triggerCtx['itemUrl'] : undefined;
-
-  if (prNumber === undefined || prUrl === undefined) {
-    console.warn(
-      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
-      `context missing itemNumber or itemUrl (required for draft review creation). ` +
-      `Ensure the trigger uses github_prs_poll with reviewer context injection.`,
-    );
-    return;
-  }
-
-  // Derive prRepo from the URL: "https://github.com/owner/repo/pull/N" -> "owner/repo"
-  let prRepo: string | undefined;
-  try {
-    const url = new URL(prUrl);
-    const parts = url.pathname.split('/').filter(Boolean);
-    if (parts.length >= 2) prRepo = `${parts[0]}/${parts[1]}`;
-  } catch { /* invalid URL */ }
-
-  if (!prRepo) {
-    console.warn(
-      `[TriggerRouter] Post-workflow review action skipped: workflowId=${workflowTrigger.workflowId} -- ` +
-      `could not derive prRepo from prUrl="${prUrl}"`,
-    );
-    return;
-  }
-
-  const createResult = await reviewApprovalAdapter.createDraftReview({
-    prNumber,
-    prRepo,
-    token: reviewerIdentity.token,
-    login: reviewerIdentity.login,
-    findings: reviewVerdict.findings,
-    prUrl,
-  });
-
-  if (createResult.kind === 'err') {
-    console.error(
-      `[TriggerRouter] Draft review creation failed: workflowId=${workflowTrigger.workflowId} ` +
-      `prRepo=${prRepo} prNumber=${prNumber} error=${createResult.error.message}`,
-    );
-    return;
-  }
-
-  const { reviewId, reused } = createResult.value;
-  console.log(
-    `[TriggerRouter] Draft review ${reused ? 'reused' : 'created'}: workflowId=${workflowTrigger.workflowId} ` +
-    `prRepo=${prRepo} prNumber=${prNumber} reviewId=${reviewId}`,
-  );
-
-  // Write pending-draft sidecar BEFORE starting the poller (crash recovery invariant).
-  const daemonSessionId = originalResult.sessionId ?? randomUUID();
-  // workrailSessionId (sess_...) needed for session event log write-back after submission.
-  // Available on WorkflowRunSuccess via the workrailSessionId field decoded from the continueToken.
-  const resolvedWorkrailSessionId = (originalResult as { workrailSessionId?: string }).workrailSessionId ?? '';
-
-  if (ctx?.v2 && resolvedWorkrailSessionId) {
-    try {
-      // Write both sidecar formats: old (for recoverPendingDraftPollers during transition)
-      // and new generalized (self-contained; used by recoverPendingDeliveryPollers).
-      // WHY both: recoverPendingDraftPollers() reads pending-draft-*.json until it is removed.
-      await writePendingDraftSidecar({
-        reviewId,
-        prNumber,
-        prRepo,
-        daemonSessionId,
-        workrailSessionId: resolvedWorkrailSessionId,
-        token: reviewerIdentity.token,
-        login: reviewerIdentity.login,
-        createdAt: new Date().toISOString(),
-        triggerId: triggerId ?? '',
-      });
-      await writePendingDeliverySidecar({
-        adapterId: 'github_draft_review',
-        daemonSessionId,
-        state: {
-          reviewId,
-          prNumber,
-          prRepo,
-          token: reviewerIdentity.token,
-          login: reviewerIdentity.login,
-          workrailSessionId: resolvedWorkrailSessionId,
-          triggerId: triggerId ?? '',
-        },
-        createdAt: new Date().toISOString(),
-      });
-    } catch (e: unknown) {
-      console.warn(
-        `[TriggerRouter] Failed to write pending sidecar: ` +
-        `${e instanceof Error ? e.message : String(e)}`,
-      );
-      // Non-fatal: poller still starts; crash recovery won't work but review still posts.
-    }
-
-    // Start PendingDraftReviewPoller as a fire-and-forget background task.
-    // WHY fire-and-forget: poller runs until operator publishes (could be hours).
-    // Awaiting it would hold the queue callback slot. Same pattern as gate evaluation.
-    const poller = new PendingDraftReviewPoller(reviewApprovalAdapter, {
-      prNumber,
-      prRepo,
-      reviewId,
-      token: reviewerIdentity.token,
-      login: reviewerIdentity.login,
-      workrailSessionId: resolvedWorkrailSessionId,
-      daemonSessionId,
-      sessionStore: ctx.v2.sessionStore,
-      gate: ctx.v2.gate,
-      mintEventId: ctx.v2.idFactory.mintEventId.bind(ctx.v2.idFactory),
-      onSubmitted: (submittedAt) => {
-        console.log(
-          `[TriggerRouter] Review published by operator: workflowId=${workflowTrigger.workflowId} ` +
-          `prRepo=${prRepo} prNumber=${prNumber} submittedAt=${submittedAt}`,
-        );
-      },
-      onGateResume: onGateResume,
-    });
-    poller.start();
-  }
-
-  // Notify operator that draft is ready.
-  notificationService?.notify(originalResult, `WorkTrain review draft ready on PR #${prNumber} -- open in GitHub to review findings`);
-}
-
-
 /**
 /**
  * POST the completed workflow result to a callbackUrl.
@@ -526,51 +330,6 @@ async function runCallbackUrlDelivery(
 }
 
 /**
- * Run git commit + optional PR open after a successful workflow session.
- *
- * Constructs the minimal trigger-like fields from WorkflowTrigger (which carries
- * autoCommit, autoOpenPR, secretScan, branchPrefix, baseBranch, workspacePath) and
- * delegates to runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE). This is a first-class
- * router action, not a DeliveryAdapter<K>, because it needs WorkflowTrigger fields
- * not available via the deliver(payload, config) interface.
- */
-async function runGitCommitDelivery(
-  triggerId: string,
-  workflowTrigger: WorkflowTrigger,
-  adapterConfig: Extract<import('./delivery-adapter.js').AdapterConfig, { kind: 'git_commit' }>,
-  result: WorkflowRunResult,
-  execFn: ExecFn,
-  deps?: import('./delivery-pipeline.js').DeliveryPipelineDeps,
-): Promise<void> {
-  if (result._tag !== 'success') return;
-  if (result.lastStepNotes === undefined) {
-    console.warn(
-      `[TriggerRouter] Git commit delivery skipped: triggerId=${triggerId} -- ` +
-      `lastStepNotes is absent (agent did not provide notes on the final step).`,
-    );
-    return;
-  }
-
-  // Build a typed GitCommitDeliveryContext from WorkflowTrigger -- no cast needed.
-  // The interface constrains exactly which fields runDeliveryPipeline() reads,
-  // so the compiler will catch any new field access that isn't provided here.
-  const deliveryCtx: GitCommitDeliveryContext = {
-    id: triggerId as import('./types.js').TriggerId,
-    workflowId: workflowTrigger.workflowId,
-    workspacePath: workflowTrigger.workspacePath,
-    autoCommit: true,
-    autoOpenPR: adapterConfig.autoOpenPR,
-    secretScan: adapterConfig.secretScan,
-    branchPrefix: workflowTrigger.branchPrefix,
-    baseBranch: workflowTrigger.baseBranch,
-    branchStrategy: workflowTrigger.branchStrategy,
-  };
-
-  await runDeliveryPipeline(DEFAULT_DELIVERY_PIPELINE, result, deliveryCtx, execFn, triggerId, deps);
-}
-
-
-
 // ---------------------------------------------------------------------------
 // Semaphore: global concurrency cap for runWorkflow() calls
 // ---------------------------------------------------------------------------
@@ -673,6 +432,9 @@ export class TriggerRouter {
   private readonly _modeExecutors: ModeExecutors | undefined;
   private readonly _reviewApprovalAdapter: ReviewApprovalAdapter;
   private readonly _cliInboxAdapter: CliInboxAdapter | undefined;
+  private readonly _gitHubDraftReviewAdapter: GitHubDraftReviewAdapter;
+  private readonly _gitCommitAdapter: GitCommitAdapter;
+  private readonly _gateResumeCallback: GateResumeCallback;
 
   /**
    * Recent adaptive dispatch timestamps keyed by a path-specific dedup key.
@@ -741,6 +503,32 @@ export class TriggerRouter {
     this._deduplicator = deduplicator ?? new DispatchDeduplicator(TriggerRouter.ADAPTIVE_DEDUPE_TTL_MS);
     this._reviewApprovalAdapter = reviewApprovalAdapter ?? new GitHubReviewApprovalAdapter();
     this._cliInboxAdapter = workrailDir !== undefined ? new CliInboxAdapter(workrailDir) : undefined;
+
+    // Build GateResumeCallback: called fire-and-forget by the poller when the operator submits
+    // the review on GitHub. Captures the 5 router deps that resumeFromGate() requires.
+    const gateResumeCallback: GateResumeCallback = (daemonSessionId: string): void => {
+      void resumeFromGate(
+        daemonSessionId,
+        { verdict: 'approved', confidence: 'high', rationale: 'Operator submitted review on GitHub', stepId: '' },
+        this.ctx, this.apiKey, this.runWorkflowFn, undefined, this.emitter, this._activeSessionSet,
+      ).then((r) => {
+        if (r.kind === 'err') {
+          console.warn(`[TriggerRouter] Gate resume after review submission failed: ${r.error.message}`);
+        } else {
+          console.log(`[TriggerRouter] Gate resumed after review submission: daemonSessionId=${daemonSessionId}`);
+        }
+      }).catch((e: unknown) => {
+        console.warn(`[TriggerRouter] Gate resume threw: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    };
+
+    this._gateResumeCallback = gateResumeCallback;
+    this._gitHubDraftReviewAdapter = new GitHubDraftReviewAdapter({
+      reviewApprovalAdapter: this._reviewApprovalAdapter,
+      gateResumeCallback,
+      ctx: this.ctx,
+    });
+    this._gitCommitAdapter = new GitCommitAdapter({ execFn: this.execFn });
     // Validate and clamp: maxConcurrentSessions must be >= 1.
     // A value of 0 or negative would deadlock all dispatches -- make it impossible.
     const requested = maxConcurrentSessions ?? DEFAULT_MAX_CONCURRENT_SESSIONS;
@@ -758,6 +546,9 @@ export class TriggerRouter {
     this.semaphore = new Semaphore(this._maxConcurrentSessions);
     console.log(`[TriggerRouter] maxConcurrentSessions=${this._maxConcurrentSessions}`);
   }
+
+  /** The gate resume callback wired into async delivery adapters. Used by startup recovery. */
+  get gateResumeCallback(): GateResumeCallback { return this._gateResumeCallback; }
 
   /**
    * Bind coordinator deps after construction.
@@ -781,51 +572,59 @@ export class TriggerRouter {
     workflowTrigger: WorkflowTrigger,
     result: WorkflowRunResult,
     triggerId: string | undefined,
-    deps?: import('./delivery-pipeline.js').DeliveryPipelineDeps,
+    deps?: DeliveryPipelineDeps,
   ): Promise<void> {
     if (result._tag !== 'success' || workflowTrigger.deliveryConfig === undefined) return;
+
+    const payload: DeliveryPayload = {
+      workflowId: workflowTrigger.workflowId,
+      sessionId: result.sessionId ?? 'unknown',
+      goal: workflowTrigger.goal,
+      notes: result.lastStepNotes ?? null,
+      artifacts: result.lastStepArtifacts ?? [],
+      context: workflowTrigger.context as Readonly<Record<string, unknown>> | undefined,
+      workrailSessionId: (result as { workrailSessionId?: string }).workrailSessionId,
+      triggerId: triggerId,
+      // Use sessionWorkspacePath (worktree) when present -- delivery must run in the worktree
+      // where the agent's changes live, not in the trigger's base workspace.
+      workspacePath: result.sessionWorkspacePath ?? workflowTrigger.workspacePath,
+      branchStrategy: workflowTrigger.branchStrategy,
+      branchPrefix: workflowTrigger.branchPrefix,
+      baseBranch: workflowTrigger.baseBranch,
+    };
+
     for (const adapterConfig of workflowTrigger.deliveryConfig.adapters) {
-      if (adapterConfig.kind === 'git_commit' && triggerId !== undefined) {
-        await runGitCommitDelivery(triggerId as import('./types.js').TriggerId, workflowTrigger, adapterConfig, result, this.execFn, deps);
-      } else if (adapterConfig.kind === 'github_draft_review') {
-        const identity: import('./types.js').ReviewerIdentity = { platform: 'github', token: adapterConfig.token, login: adapterConfig.login };
-        // Build a fire-and-forget gate resume closure. When the operator submits the draft
-        // review on GitHub, the poller calls this to resume the parked gate session.
-        const ctx = this.ctx;
-        const apiKey = this.apiKey;
-        const runWorkflowFn = this.runWorkflowFn;
-        const emitter = this.emitter;
-        const activeSessionSet = this._activeSessionSet;
-        const gateResumeClosure = (daemonSessionId: string): void => {
-          void resumeFromGate(
-            daemonSessionId,
-            { verdict: 'approved', confidence: 'high', rationale: 'Operator submitted review on GitHub', stepId: '' },
-            ctx, apiKey, runWorkflowFn, undefined, emitter, activeSessionSet,
-          ).then((r) => {
-            if (r.kind === 'err') {
-              console.warn(`[TriggerRouter] Gate resume after review submission failed: ${r.error.message}`);
-            } else {
-              console.log(`[TriggerRouter] Gate resumed after review submission: daemonSessionId=${daemonSessionId}`);
+      switch (adapterConfig.kind) {
+        case 'git_commit':
+          await this._gitCommitAdapter.deliver(payload, adapterConfig);
+          break;
+        case 'github_draft_review':
+          await this._gitHubDraftReviewAdapter.deliver(payload, adapterConfig);
+          break;
+        case 'cli_inbox':
+          // Only fire for explicit configs -- synthesized cli_inbox would flood the outbox
+          // for every session on every trigger.
+          if (this._cliInboxAdapter !== undefined && workflowTrigger.deliveryConfig.source === 'explicit') {
+            const receipt = await this._cliInboxAdapter.deliver(payload, adapterConfig).catch((e: unknown) => {
+              console.error(`[TriggerRouter] cli_inbox delivery threw: ${String(e)}`);
+              return null;
+            });
+            if (receipt?.kind === 'error') {
+              console.error(`[TriggerRouter] cli_inbox delivery failed: ${receipt.message}`);
             }
-          }).catch((e: unknown) => {
-            console.warn(`[TriggerRouter] Gate resume threw: ${e instanceof Error ? e.message : String(e)}`);
-          });
-        };
-        await runPostWorkflowReview(identity, workflowTrigger, result, this._reviewApprovalAdapter, this.notificationService, this.ctx, triggerId, gateResumeClosure);
-      } else if (adapterConfig.kind === 'cli_inbox' && this._cliInboxAdapter !== undefined && workflowTrigger.deliveryConfig.source === 'explicit') {
-        const payload: DeliveryPayload = {
-          workflowId: workflowTrigger.workflowId,
-          sessionId: result.sessionId ?? 'unknown',
-          goal: workflowTrigger.goal,
-          notes: result.lastStepNotes ?? null,
-          artifacts: result.lastStepArtifacts ?? [],
-        };
-        try { await this._cliInboxAdapter.deliver(payload, adapterConfig); }
-        catch (e) { console.error(`[TriggerRouter] cli_inbox delivery failed: ${String(e)}`); }
-      } else if (adapterConfig.kind !== 'callback_url') {
-        // callback_url fires through runCallbackUrlDelivery() in route() before _runDeliveryByKind.
-        // All other unimplemented kinds warn so operators know delivery is skipped.
-        console.warn(`[TriggerRouter] Delivery adapter '${adapterConfig.kind}' not yet activated (workflowId=${workflowTrigger.workflowId}).`);
+          }
+          break;
+        case 'callback_url':
+          // callback_url fires through runCallbackUrlDelivery() in route() before _runDeliveryByKind.
+          // Phase 8: unify into this loop.
+          break;
+        case 'gitlab_mr_note':
+        case 'slack_webhook':
+          // Not yet implemented. Warn so operators know delivery is skipped.
+          console.warn(`[TriggerRouter] Delivery adapter '${adapterConfig.kind}' not yet implemented (workflowId=${workflowTrigger.workflowId}).`);
+          break;
+        default:
+          assertNever(adapterConfig);
       }
     }
   }

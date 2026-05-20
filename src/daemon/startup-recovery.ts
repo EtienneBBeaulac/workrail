@@ -33,6 +33,7 @@ import type { OrphanedSession, SessionSource, AllocatedSession, WorkflowTrigger 
 import { WORKTREES_DIR } from './runner/runner-types.js';
 import { runWorkflow } from './workflow-runner.js';
 import { asRunId } from './daemon-events.js';
+import type { GateResumeCallback } from '../trigger/delivery-adapter.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -242,6 +243,12 @@ export async function runStartupRecovery(
    * Defaults to GitHubReviewApprovalAdapter if absent and a sidecar is found.
    */
   reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
+  /**
+   * Callback fired when the operator submits a pending draft review after a daemon restart.
+   * Required for gate-parked sessions to resume correctly after crash recovery.
+   * Pass router.gateResumeCallback from the live TriggerRouter instance.
+   */
+  gateResumeCallback?: GateResumeCallback,
 ): Promise<void> {
   // Phase A: Delete all queue-issue-*.json sidecars unconditionally.
   // WHY first: queue-issue cleanup is independent of session state and must
@@ -254,7 +261,7 @@ export async function runStartupRecovery(
     await recoverPendingDraftPollers(sessionsDir, ctx, triggerIndex, reviewApprovalAdapterFn);
   }
   if (ctx?.v2) {
-    await recoverPendingDeliveryPollers(sessionsDir, ctx, reviewApprovalAdapterFn);
+    await recoverPendingDeliveryPollers(sessionsDir, ctx, reviewApprovalAdapterFn, gateResumeCallback);
   }
 
   // Read all parseable session files.
@@ -763,9 +770,12 @@ async function recoverPendingDeliveryPollers(
   sessionsDir: string,
   ctx: import('../mcp/types.js').V2ToolContext,
   reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
+  gateResumeCallback?: GateResumeCallback,
 ): Promise<void> {
-  const { readAllPendingDeliverySidecars, PendingDraftReviewPoller } =
+  const { PendingDraftReviewPoller } =
     await import('../trigger/pending-draft-review-poller.js');
+  const { readAllPendingDeliverySidecars } =
+    await import('../trigger/pending-delivery-sidecar.js');
   const { GitHubReviewApprovalAdapter } =
     await import('../trigger/review-approval-adapter.js');
 
@@ -780,11 +790,8 @@ async function recoverPendingDeliveryPollers(
       continue;
     }
 
-    const s = sidecar.state as { reviewId?: number; prNumber?: number; prRepo?: string; token?: string; login?: string; workrailSessionId?: string };
-    if (!s.reviewId || !s.prNumber || !s.prRepo || !s.token || !s.login) {
-      console.warn(`[StartupRecovery] Incomplete pending-delivery sidecar state for ${sidecar.daemonSessionId} -- skipping.`);
-      continue;
-    }
+    // Typed state -- no cast needed; discriminated union guarantees the shape.
+    const s = sidecar.state;
 
     if (!ctx.v2) continue;
     const adapter = reviewApprovalAdapterFn ? reviewApprovalAdapterFn() : new GitHubReviewApprovalAdapter();
@@ -794,15 +801,16 @@ async function recoverPendingDeliveryPollers(
       reviewId: s.reviewId,
       token: s.token,
       login: s.login,
-      workrailSessionId: s.workrailSessionId ?? '',
+      workrailSessionId: s.workrailSessionId,
       daemonSessionId: sidecar.daemonSessionId,
       sessionStore: ctx.v2.sessionStore,
       gate: ctx.v2.gate,
       mintEventId: ctx.v2.idFactory.mintEventId.bind(ctx.v2.idFactory),
       sessionsDir,
+      onGateResume: gateResumeCallback,
     });
     poller.start();
-    console.log(`[StartupRecovery] Restarted pending-delivery poller: daemonSessionId=${sidecar.daemonSessionId}`);
+    console.log(`[StartupRecovery] Restarted pending-delivery poller: daemonSessionId=${sidecar.daemonSessionId} gateResumeWired=${gateResumeCallback !== undefined}`);
   }
 }
 
