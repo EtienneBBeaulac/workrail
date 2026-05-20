@@ -732,7 +732,6 @@ function buildGitLabWorkflowTrigger(
     ...(trigger.branchStrategy !== undefined ? { branchStrategy: trigger.branchStrategy } : {}),
     ...(trigger.baseBranch !== undefined ? { baseBranch: trigger.baseBranch } : {}),
     ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
-    ...(trigger.reviewerIdentity !== undefined ? { reviewerIdentity: trigger.reviewerIdentity } : {}),
   };
 }
 
@@ -787,7 +786,6 @@ function buildGitHubWorkflowTrigger(
     ...(trigger.branchStrategy !== undefined ? { branchStrategy: trigger.branchStrategy } : {}),
     ...(trigger.baseBranch !== undefined ? { baseBranch: trigger.baseBranch } : {}),
     ...(trigger.branchPrefix !== undefined ? { branchPrefix: trigger.branchPrefix } : {}),
-    ...(trigger.reviewerIdentity !== undefined ? { reviewerIdentity: trigger.reviewerIdentity } : {}),
   };
 }
 

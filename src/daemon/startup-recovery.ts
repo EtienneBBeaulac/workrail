@@ -248,12 +248,13 @@ export async function runStartupRecovery(
   // always run, even if session recovery fails or ctx is absent.
   await clearQueueIssueSidecars(sessionsDir);
 
-  // Phase B: Restart PendingDraftReviewPoller for any orphaned pending-draft sidecars.
-  // WHY here (after queue-issue cleanup, before session recovery): pending-draft recovery
-  // is independent of session token state and runs regardless of ctx being present.
-  // Requires triggerIndex to look up reviewerIdentity.token (not stored in the sidecar).
+  // Phase B: Restart pollers for orphaned pending review sidecars.
+  // Both old (pending-draft-*.json) and new (pending-delivery-*.json) formats.
   if (ctx?.v2 && triggerIndex && triggerIndex.size > 0) {
     await recoverPendingDraftPollers(sessionsDir, ctx, triggerIndex, reviewApprovalAdapterFn);
+  }
+  if (ctx?.v2) {
+    await recoverPendingDeliveryPollers(sessionsDir, ctx, reviewApprovalAdapterFn);
   }
 
   // Read all parseable session files.
@@ -691,18 +692,15 @@ export async function clearQueueIssueSidecars(sessionsDir: string): Promise<void
 /**
  * Restart PendingDraftReviewPoller instances for orphaned pending-draft sidecars.
  *
- * Called by runStartupRecovery() when triggerIndex is available. For each
- * pending-draft-*.json sidecar found, looks up the trigger by triggerId to get
- * the reviewerIdentity.token (which is NOT stored in the sidecar for security),
- * then restarts polling. If the trigger no longer exists, logs a warning and
- * deletes the sidecar.
+ * Token is read directly from the sidecar (self-contained) -- no trigger index lookup needed.
+ * Sidecars without token/login (created before Phase 7) are deleted; they cannot be recovered.
  *
  * Non-fatal: any error is caught and logged. Never throws.
  */
 async function recoverPendingDraftPollers(
   sessionsDir: string,
   ctx: import('../mcp/types.js').V2ToolContext,
-  triggerIndex: ReadonlyMap<string, import('../trigger/types.js').TriggerDefinition>,
+  _triggerIndex: ReadonlyMap<string, import('../trigger/types.js').TriggerDefinition>,
   reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
 ): Promise<void> {
   const { readAllPendingDraftSidecars, PendingDraftReviewPoller, GitHubReviewApprovalAdapter } =
@@ -717,12 +715,13 @@ async function recoverPendingDraftPollers(
 
   console.log(`[StartupRecovery] Found ${sidecars.length} orphaned pending-draft review sidecar(s). Restarting pollers.`);
 
+  // WHY token from sidecar (not trigger): TriggerDefinition.reviewerIdentity was removed.
+  // Old pending-draft sidecars now store the token directly in the sidecar itself.
   for (const sidecar of sidecars) {
-    const trigger = triggerIndex.get(sidecar.triggerId);
-    if (!trigger?.reviewerIdentity) {
+    if (!sidecar.token || !sidecar.login) {
       console.warn(
-        `[StartupRecovery] Pending-draft sidecar trigger '${sidecar.triggerId}' not found or has no reviewerIdentity. ` +
-        `Deleting sidecar for daemonSessionId=${sidecar.daemonSessionId}.`,
+        `[StartupRecovery] Pending-draft sidecar for daemonSessionId=${sidecar.daemonSessionId} ` +
+        `has no token/login. Deleting (pre-Phase7 sidecar without self-contained credentials).`,
       );
       await fs.unlink(path.join(sessionsDir, `pending-draft-${sidecar.daemonSessionId}.json`)).catch(() => {});
       continue;
@@ -735,8 +734,8 @@ async function recoverPendingDraftPollers(
       prNumber: sidecar.prNumber,
       prRepo: sidecar.prRepo,
       reviewId: sidecar.reviewId,
-      token: trigger.reviewerIdentity.token,
-      login: trigger.reviewerIdentity.login,
+      token: sidecar.token,
+      login: sidecar.login,
       workrailSessionId: sidecar.workrailSessionId,
       daemonSessionId: sidecar.daemonSessionId,
       sessionStore: ctx.v2.sessionStore,
@@ -750,6 +749,60 @@ async function recoverPendingDraftPollers(
       `[StartupRecovery] Restarted PendingDraftReviewPoller: ` +
       `daemonSessionId=${sidecar.daemonSessionId} prRepo=${sidecar.prRepo} prNumber=${sidecar.prNumber}`,
     );
+  }
+}
+
+/**
+ * Restart pollers for orphaned pending-delivery-*.json sidecars (generalized format).
+ * Token and credentials are embedded in the sidecar state -- no external lookup needed.
+ * Dispatches by adapterId; only 'github_draft_review' is implemented today.
+ *
+ * Non-fatal: any error is caught and logged. Never throws.
+ */
+async function recoverPendingDeliveryPollers(
+  sessionsDir: string,
+  ctx: import('../mcp/types.js').V2ToolContext,
+  reviewApprovalAdapterFn?: () => import('../trigger/review-approval-adapter.js').ReviewApprovalAdapter,
+): Promise<void> {
+  const { readAllPendingDeliverySidecars, PendingDraftReviewPoller } =
+    await import('../trigger/pending-draft-review-poller.js');
+  const { GitHubReviewApprovalAdapter } =
+    await import('../trigger/review-approval-adapter.js');
+
+  const sidecars = await readAllPendingDeliverySidecars(sessionsDir);
+  if (sidecars.length === 0) return;
+
+  console.log(`[StartupRecovery] Found ${sidecars.length} orphaned pending-delivery sidecar(s). Restarting pollers.`);
+
+  for (const sidecar of sidecars) {
+    if (sidecar.adapterId !== 'github_draft_review') {
+      console.warn(`[StartupRecovery] Unknown adapterId '${sidecar.adapterId}' -- skipping.`);
+      continue;
+    }
+
+    const s = sidecar.state as { reviewId?: number; prNumber?: number; prRepo?: string; token?: string; login?: string; workrailSessionId?: string };
+    if (!s.reviewId || !s.prNumber || !s.prRepo || !s.token || !s.login) {
+      console.warn(`[StartupRecovery] Incomplete pending-delivery sidecar state for ${sidecar.daemonSessionId} -- skipping.`);
+      continue;
+    }
+
+    if (!ctx.v2) continue;
+    const adapter = reviewApprovalAdapterFn ? reviewApprovalAdapterFn() : new GitHubReviewApprovalAdapter();
+    const poller = new PendingDraftReviewPoller(adapter, {
+      prNumber: s.prNumber,
+      prRepo: s.prRepo,
+      reviewId: s.reviewId,
+      token: s.token,
+      login: s.login,
+      workrailSessionId: s.workrailSessionId ?? '',
+      daemonSessionId: sidecar.daemonSessionId,
+      sessionStore: ctx.v2.sessionStore,
+      gate: ctx.v2.gate,
+      mintEventId: ctx.v2.idFactory.mintEventId.bind(ctx.v2.idFactory),
+      sessionsDir,
+    });
+    poller.start();
+    console.log(`[StartupRecovery] Restarted pending-delivery poller: daemonSessionId=${sidecar.daemonSessionId}`);
   }
 }
 
