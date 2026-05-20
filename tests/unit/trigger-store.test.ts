@@ -1942,3 +1942,93 @@ describe('delivery: block parsing', () => {
     expect(result.value.triggers).toHaveLength(0);
   });
 });
+
+describe('delivery: block with adapter-specific fields', () => {
+  it('parses delivery: { kind: github_draft_review, token, login } correctly', () => {
+    const yaml = `
+triggers:
+  - id: review-trigger
+    provider: generic
+    workflowId: wr.mr-review
+    workspacePath: /workspace
+    goal: Review PR
+    delivery:
+      kind: github_draft_review
+      token: mytoken
+      login: myuser
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const trigger = result.value.triggers[0];
+    expect(trigger?.deliveryConfig?.source).toBe('explicit');
+    const adapter = trigger?.deliveryConfig?.adapters[0];
+    expect(adapter?.kind).toBe('github_draft_review');
+    if (adapter?.kind === 'github_draft_review') {
+      expect(adapter.token).toBe('mytoken');
+      expect(adapter.login).toBe('myuser');
+    }
+  });
+
+  it('resolves $SECRET_NAME for delivery token', () => {
+    const yaml = `
+triggers:
+  - id: review-trigger
+    provider: generic
+    workflowId: wr.mr-review
+    workspacePath: /workspace
+    goal: Review PR
+    delivery:
+      kind: github_draft_review
+      token: $REVIEW_TOKEN
+      login: myuser
+`;
+    const result = loadTriggerConfig(yaml, { REVIEW_TOKEN: 'resolved-token' });
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    const adapter = result.value.triggers[0]?.deliveryConfig?.adapters[0];
+    if (adapter?.kind === 'github_draft_review') {
+      expect(adapter.token).toBe('resolved-token');
+    }
+  });
+
+  it('rejects delivery: { kind: github_draft_review } without token', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const yaml = `
+triggers:
+  - id: review-trigger
+    provider: generic
+    workflowId: wr.mr-review
+    workspacePath: /workspace
+    goal: Review PR
+    delivery:
+      kind: github_draft_review
+      login: myuser
+`;
+    const result = loadTriggerConfig(yaml, {});
+    warnSpy.mockRestore();
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('rejects delivery: { kind: github_draft_review } without login', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const yaml = `
+triggers:
+  - id: review-trigger
+    provider: generic
+    workflowId: wr.mr-review
+    workspacePath: /workspace
+    goal: Review PR
+    delivery:
+      kind: github_draft_review
+      token: mytoken
+`;
+    const result = loadTriggerConfig(yaml, {});
+    warnSpy.mockRestore();
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(0);
+  });
+});
