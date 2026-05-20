@@ -116,7 +116,11 @@ export function synthesizeDeliveryConfig(fields: SynthesizeDeliveryFields): Deli
     });
   }
 
-  // callback_url: fire-and-forget HTTP notification
+  // callback_url: fire-and-forget HTTP notification.
+  // Delivery still goes through runCallbackUrlDelivery() in route() (not _runDeliveryByKind())
+  // to preserve the delivery_failed result that suppresses autoCommit.
+  // The synthesized entry here is for observability (delivery_planned event) and
+  // future Phase 8 unification through _runDeliveryByKind().
   if (fields.callbackUrl) {
     adapters.push({ kind: 'callback_url', url: fields.callbackUrl });
   }
@@ -127,18 +131,6 @@ export function synthesizeDeliveryConfig(fields: SynthesizeDeliveryFields): Deli
   }
 
   return { source: 'synthesized', adapters };
-}
-
-// ---------------------------------------------------------------------------
-// Config resolver (pure)
-// ---------------------------------------------------------------------------
-
-export function resolveDeliveryConfig(
-  triggerDeliveryConfig: DeliveryConfig | undefined,
-  _workflowId: string,
-  _globalConfig: Readonly<Record<string, unknown>>,
-): DeliveryConfig {
-  return triggerDeliveryConfig ?? { source: 'synthesized', adapters: [{ kind: 'cli_inbox' }] };
 }
 
 // ---------------------------------------------------------------------------

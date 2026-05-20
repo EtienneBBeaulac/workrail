@@ -27,7 +27,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { WorkflowRunSuccess } from '../daemon/types.js';
 import { DAEMON_SESSIONS_DIR } from '../daemon/workflow-runner.js';
-import type { TriggerDefinition } from './types.js';
+import type { TriggerDefinition, TriggerId } from './types.js';
 import type { ExecFn, HandoffArtifact } from './delivery-action.js';
 import { parseHandoffArtifact, runDelivery } from './delivery-action.js';
 import type { ExecutionSessionGateV2 } from '../v2/usecases/execution-session-gate.js';
@@ -69,7 +69,7 @@ export interface DeliveryStage {
   readonly name: string;
   run(
     result: WorkflowRunSuccess,
-    trigger: TriggerDefinition,
+    trigger: GitCommitDeliveryContext,
     execFn: ExecFn,
     ctx: PipelineContext,
     deps?: DeliveryPipelineDeps,
@@ -116,6 +116,24 @@ export interface DeliveryPipelineDeps {
 // ---------------------------------------------------------------------------
 
 /**
+ * The exact fields runDeliveryPipeline() reads from TriggerDefinition.
+ * Using this interface instead of the full TriggerDefinition prevents
+ * silent regressions when new fields are added to delivery-pipeline.ts --
+ * the compiler will require callers to provide them explicitly.
+ */
+export interface GitCommitDeliveryContext {
+  readonly id: TriggerId;
+  readonly workflowId: string;
+  readonly workspacePath: string;
+  readonly autoCommit: boolean;
+  readonly autoOpenPR?: boolean;
+  readonly secretScan?: boolean;
+  readonly branchStrategy?: TriggerDefinition['branchStrategy'];
+  readonly branchPrefix?: string;
+  readonly baseBranch?: string;
+}
+
+/**
  * Run all stages in order. Stop on the first 'stop' outcome.
  *
  * Never throws -- errors inside stages are caught internally by each stage.
@@ -124,14 +142,14 @@ export interface DeliveryPipelineDeps {
  *
  * @param stages - The ordered pipeline to execute
  * @param result - The completed workflow's success result
- * @param trigger - Source of workspacePath, autoCommit, branchStrategy flags
+ * @param trigger - Git commit delivery context (subset of TriggerDefinition)
  * @param execFn - Injectable exec function (production: execFileAsync; tests: fake)
  * @param triggerId - Used in log messages for traceability
  */
 export async function runDeliveryPipeline(
   stages: readonly DeliveryStage[],
   result: WorkflowRunSuccess,
-  trigger: TriggerDefinition,
+  trigger: GitCommitDeliveryContext,
   execFn: ExecFn,
   triggerId: string,
   deps?: DeliveryPipelineDeps,

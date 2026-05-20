@@ -180,11 +180,55 @@ export class GitHubReviewApprovalAdapter implements ReviewApprovalAdapter {
         return { kind: 'ok', value: { reviewId: existingResult.reviewId, reused: true } };
       }
 
-      // Step 2: Build review body from findings.
+      // Step 2: Build review body from findings (summary for all findings).
       const body = buildReviewBody(findings, prUrl);
 
-      // Step 3: POST a new PENDING draft review (no inline comments in v1 --
-      // filePath/lineNumber not yet in wr.review_verdict schema).
+      // Step 3: Fetch PR HEAD commit SHA so we can attach inline comments.
+      // Inline comments require commit_id -- degrade to body-only if the GET fails.
+      let commitId: string | undefined;
+      try {
+        const prResponse = await this.fetchFn(`https://api.github.com/repos/${prRepo}/pulls/${prNumber}`, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+          },
+        });
+        if (prResponse.ok) {
+          const prBody = await prResponse.json() as Record<string, unknown>;
+          const head = prBody['head'] as Record<string, unknown> | undefined;
+          if (typeof head?.['sha'] === 'string') commitId = head['sha'];
+        }
+      } catch {
+        // Degraded: no inline comments, body-only review
+      }
+
+      // Step 4: Build inline comments for findings with file + line data.
+      // Uses the GitHub review 'comments' array so everything is in one POST.
+      const inlineComments: Array<{ path: string; line: number; side: string; body: string }> = [];
+      if (commitId) {
+        for (const f of findings) {
+          const ff = f as Record<string, unknown>;
+          if (typeof ff['file'] === 'string' && typeof ff['startLine'] === 'number') {
+            inlineComments.push({
+              path: ff['file'],
+              line: ff['startLine'],
+              side: 'RIGHT',
+              body: buildInlineCommentBody(f),
+            });
+          }
+        }
+      }
+
+      // Step 5: POST a new PENDING draft review.
+      // Omitting `event` creates a PENDING (draft) review -- correct GitHub API behavior.
+      const reviewPayload: Record<string, unknown> = { body };
+      if (commitId && inlineComments.length > 0) {
+        reviewPayload['commit_id'] = commitId;
+        reviewPayload['comments'] = inlineComments;
+      }
+
       const apiUrl = `https://api.github.com/repos/${prRepo}/pulls/${prNumber}/reviews`;
       let response: { ok: boolean; status: number; json(): Promise<unknown> };
       try {
@@ -196,9 +240,7 @@ export class GitHubReviewApprovalAdapter implements ReviewApprovalAdapter {
             'X-GitHub-Api-Version': '2022-11-28',
             'Content-Type': 'application/json',
           },
-          // Omitting `event` creates a PENDING (draft) review -- omission is the correct
-          // way to create drafts. Passing event:'PENDING' returns a 422 from the GitHub API.
-          body: JSON.stringify({ body }),
+          body: JSON.stringify(reviewPayload),
         });
       } catch (e) {
         return { kind: 'err', error: { kind: 'network_error', message: `POST draft review failed: ${e instanceof Error ? e.message : String(e)}` } };
@@ -218,6 +260,10 @@ export class GitHubReviewApprovalAdapter implements ReviewApprovalAdapter {
       const reviewId = (responseBody as Record<string, unknown>)['id'];
       if (typeof reviewId !== 'number') {
         return { kind: 'err', error: { kind: 'parse_error', message: `POST draft review response missing numeric 'id' field` } };
+      }
+
+      if (inlineComments.length > 0) {
+        console.log(`[ReviewApprovalAdapter] Posted ${inlineComments.length} inline comment(s) on draft review: prRepo=${prRepo} prNumber=${prNumber} reviewId=${reviewId}`);
       }
 
       return { kind: 'ok', value: { reviewId, reused: false } };
@@ -335,6 +381,14 @@ function buildReviewBody(
     lines.push(`- **[${f.severity.toUpperCase()}]** ${f.summary}`);
   }
   lines.push('', `PR: ${prUrl}`);
+  return lines.join('\n');
+}
+
+function buildInlineCommentBody(finding: { readonly summary: string; readonly severity: string }): string {
+  const f = finding as Record<string, unknown>;
+  const lines: string[] = [`**[${finding.severity.toUpperCase()}]** ${finding.summary}`];
+  if (typeof f['remediation'] === 'string') lines.push('', `_Remediation:_ ${f['remediation']}`);
+  if (typeof f['causalLink'] === 'string') lines.push('', `_Why:_ ${f['causalLink']}`);
   return lines.join('\n');
 }
 

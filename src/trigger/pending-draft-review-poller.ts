@@ -58,6 +58,12 @@ export interface PendingDraftReviewPollerOptions {
    * Fire-and-forget from the caller's perspective -- errors are logged internally.
    */
   readonly onSubmitted?: (submittedAt: string) => void;
+  /**
+   * Called after submission is detected to resume a gate-parked session.
+   * Receives the daemonSessionId so the caller can look up the sidecar and call resumeFromGate().
+   * Fire-and-forget -- must never throw or block the tick.
+   */
+  readonly onGateResume?: (daemonSessionId: string) => void;
 }
 
 export interface PendingDraftSidecar {
@@ -202,8 +208,12 @@ export class PendingDraftReviewPoller {
       );
     });
 
-    // Notify caller.
+    // Notify caller that submission was detected.
     try { this.opts.onSubmitted?.(submittedAt); } catch { /* fire-and-forget */ }
+
+    // Resume a gate-parked session now that the operator has approved via review submission.
+    // Fire-and-forget -- gate resume is best-effort; failure does not undo the review posting.
+    try { this.opts.onGateResume?.(this.opts.daemonSessionId); } catch { /* fire-and-forget */ }
   }
 }
 
