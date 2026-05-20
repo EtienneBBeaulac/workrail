@@ -131,6 +131,28 @@ triggers:
     branchStrategy: worktree
 `;
 
+const WITH_EXPLICIT_DELIVERY_YAML = `
+triggers:
+  - id: delivery-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    delivery:
+      kind: cli_inbox
+`;
+
+const WITH_INVALID_DELIVERY_KIND_YAML = `
+triggers:
+  - id: bad-delivery-trigger
+    provider: generic
+    workflowId: my-workflow
+    workspacePath: /workspace
+    goal: Run workflow
+    delivery:
+      kind: not_a_real_adapter
+`;
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -238,6 +260,35 @@ describe('loadTriggerConfig', () => {
       expect(result.kind).toBe('ok');
       if (result.kind !== 'ok') return;
       expect(result.value.triggers[0]?.autoOpenPR).toBe(true);
+    });
+
+    it('parses explicit delivery: { kind: cli_inbox } and sets explicit: true', () => {
+      const result = loadTriggerConfig(WITH_EXPLICIT_DELIVERY_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      const trigger = result.value.triggers[0];
+      expect(trigger?.deliveryConfig?.source).toBe('explicit');
+      expect(trigger?.deliveryConfig?.adapters).toHaveLength(1);
+      expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('cli_inbox');
+    });
+
+    it('synthesized deliveryConfig (no delivery: block) has no explicit flag', () => {
+      const result = loadTriggerConfig(MINIMAL_TRIGGER_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      const trigger = result.value.triggers[0];
+      expect(trigger?.deliveryConfig?.source).toBe('synthesized');
+      expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('cli_inbox'); // fallback
+    });
+
+    it('synthesizes git_commit adapter for autoCommit: true trigger', () => {
+      const result = loadTriggerConfig(WITH_AUTO_COMMIT_TRUE_YAML, {});
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') return;
+      const trigger = result.value.triggers[0];
+      // Regression guard: synthesizeDeliveryConfig must produce git_commit for autoCommit triggers
+      expect(trigger?.deliveryConfig?.adapters[0]?.kind).toBe('git_commit');
+      expect(trigger?.deliveryConfig?.source).toBe('synthesized'); // synthesized, not explicit
     });
   });
 
@@ -1877,5 +1928,17 @@ describe('validateTriggerStrict maxQueueDepth rules', () => {
     const issues = validateTriggerStrict(trigger);
     const depthIssue = issues.find((i) => i.rule === 'missing-max-queue-depth');
     expect(depthIssue).toBeUndefined();
+  });
+});
+
+describe('delivery: block parsing', () => {
+  it('rejects unknown delivery.kind with invalid_field_value error', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = loadTriggerConfig(WITH_INVALID_DELIVERY_KIND_YAML, {});
+    warnSpy.mockRestore();
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Invalid delivery.kind causes the trigger to be skipped (loadTriggerConfig warns + skips)
+    expect(result.value.triggers).toHaveLength(0);
   });
 });

@@ -188,7 +188,7 @@ describe('TriggerRouter queue depth guard', () => {
 
     const router = new TriggerRouter(
       makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, blockingFn,
-      undefined, undefined, fakeEmitter,
+      { emitter: fakeEmitter },
     );
 
     // First route -- fills the queue to maxQueueDepth

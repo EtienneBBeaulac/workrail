@@ -45,6 +45,7 @@ import {
   asTriggerId,
   asWorkspaceName,
 } from './types.js';
+import { synthesizeDeliveryConfig, type DeliveryConfig, type AdapterConfig } from './delivery-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -129,6 +130,9 @@ interface ParsedTriggerRaw {
   // token may be a $SECRET_REF, resolved at assembly time.
   // platform discriminates which ReviewApprovalAdapter is used ('github' | 'gitlab').
   reviewerIdentity?: { platform?: string; token?: string; login?: string };
+  // Explicit delivery configuration. When present, overrides the synthesized default
+  // from synthesizeDeliveryConfig(). Assembled and validated in validateAndResolveTrigger().
+  delivery?: { kind?: string };
   // Polling trigger source (present for gitlab_poll, github_issues_poll, github_prs_poll).
   // Stored as raw strings; resolved and validated in validateAndResolveTrigger().
   // Fields from all providers are unioned here -- the assembler validates which
@@ -483,6 +487,38 @@ function parseTriggersYaml(
           lineIndex++;
         }
         trigger.reviewerIdentity = reviewerIdentity;
+        continue;
+      }
+
+      if (key === 'delivery') {
+        // delivery: is a sub-object block for explicit delivery configuration.
+        // Currently supports only: kind (the adapter kind string).
+        lineIndex++;
+        const delivery: NonNullable<ParsedTriggerRaw['delivery']> = {};
+        while (lineIndex < lines.length) {
+          const dlLine = lines[lineIndex];
+          if (dlLine === undefined) break;
+          const dlTrimmed = dlLine.trim();
+          if (dlTrimmed === '' || dlTrimmed.startsWith('#')) { lineIndex++; continue; }
+          const dlIndent = dlLine.search(/\S/);
+          if (dlIndent <= lineIndent) break;
+          const dlColonIdx = dlTrimmed.indexOf(':');
+          if (dlColonIdx === -1) {
+            return err({ kind: 'parse_error', message: `Missing colon in delivery entry at line ${lineIndex + 1}: "${dlTrimmed}"`, lineNumber: lineIndex + 1 });
+          }
+          const dlKey = dlTrimmed.slice(0, dlColonIdx).trim();
+          const dlRawValue = dlTrimmed.slice(dlColonIdx + 1).trim();
+          if (dlRawValue !== '') {
+            const dlValueResult = parseScalar(dlRawValue, lineIndex + 1);
+            if (dlValueResult.kind === 'err') return dlValueResult;
+            switch (dlKey) {
+              case 'kind': delivery.kind = dlValueResult.value; break;
+              default: break; // unknown sub-keys silently ignored
+            }
+          }
+          lineIndex++;
+        }
+        trigger.delivery = delivery;
         continue;
       }
 
@@ -1404,6 +1440,24 @@ function validateAndResolveTrigger(
     dispatchCondition = { payloadPath: rawDcPayloadPath, equals: rawDcEquals };
   }
 
+  // Validate and assemble explicit delivery config from YAML delivery: block.
+  // When present, it overrides the synthesized default (explicit: true flag enables
+  // route() to distinguish operator-configured delivery from the synthesized fallback).
+  const KNOWN_ADAPTER_KINDS: ReadonlySet<AdapterConfig['kind']> = new Set([
+    'cli_inbox', 'github_draft_review', 'gitlab_mr_note', 'slack_webhook', 'callback_url', 'git_commit',
+  ]);
+  let explicitDeliveryConfig: DeliveryConfig | undefined;
+  if (raw.delivery?.kind !== undefined) {
+    const rawKind = raw.delivery.kind.trim();
+    if (!KNOWN_ADAPTER_KINDS.has(rawKind as AdapterConfig['kind'])) {
+      return err({ kind: 'invalid_field_value', field: `delivery.kind (unknown adapter kind: "${rawKind}")`, triggerId: rawId });
+    }
+    explicitDeliveryConfig = {
+      source: 'explicit' as const,
+      adapters: [{ kind: rawKind as AdapterConfig['kind'] } as AdapterConfig],
+    };
+  }
+
   const trigger: TriggerDefinition = {
     id: asTriggerId(rawId),
     provider,
@@ -1439,6 +1493,14 @@ function validateAndResolveTrigger(
     ...(maxQueueDepth !== undefined ? { maxQueueDepth } : {}),
     // Reviewer identity for GitHub PENDING draft review creation after review sessions.
     ...(reviewerIdentity !== undefined ? { reviewerIdentity } : {}),
+    // Delivery config: explicit YAML block beats synthesized legacy-field default.
+    deliveryConfig: explicitDeliveryConfig ?? synthesizeDeliveryConfig({
+      autoCommit: autoCommit || undefined,
+      autoOpenPR: autoOpenPR || undefined,
+      secretScan,
+      callbackUrl,
+      reviewerIdentity,
+    }),
   };
 
   return ok(trigger);

@@ -195,6 +195,27 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Pluggable output delivery: workflows produce structured artifacts, delivery is configured externally (May 19, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+Workflows currently hardcode their delivery mechanism. `wr.mr-review` parks at a `requireConfirmation` gate before posting a GitHub draft review -- which means the review sits in a local worktree file, invisible to anyone, until a human approves it via `worktrain inbox`. This conflates two orthogonal concerns: **delivery** (how the result reaches the human) and **gating** (whether execution should pause for human approval before proceeding). The current design forces every workflow to treat delivery as a control flow decision, and there is no way to route output to Slack, a webhook, a GitLab MR note, or any other channel without editing the workflow definition.
+
+The underlying issue is broader than mr-review: any workflow that produces a meaningful artifact (a PR link, a deploy summary, a coding task report) has no principled way to notify the operator or deliver the result to the right place. Operators using GitLab instead of GitHub, or teams that want Slack notifications, are blocked entirely.
+
+A clean model: workflows declare what they produce via typed output contracts (`kind: "draft_review"`, `kind: "summary"`, `kind: "pr_link"`). Delivery is configured on the trigger or as a user/org preference via pluggable output adapters. The `requireConfirmation` gate remains a separate, explicit concept for cases where execution genuinely needs to pause -- but it is not the delivery mechanism; it uses the configured delivery channel to send the "awaiting approval" notification.
+
+**Things to hash out:**
+- What does the output contract declaration look like in the workflow JSON schema? Does it live on the final step, on the workflow root, or as a separate `outputs` block?
+- Where is the adapter configured -- per trigger in `triggers.yml`, globally in `.workrailrc`, or both? What happens when neither is set (sensible default: CLI inbox)?
+- Does the gate's "awaiting approval" message go through the same delivery channel, or does it always go to CLI inbox regardless?
+- GitLab MR notes are not the same as GitHub draft reviews -- some adapters are lossless (Slack, webhook) but others require semantic translation. How much of that translation lives in the adapter vs. the workflow's output contract?
+- First phase scope: is it sufficient to wire up GitHub draft review posting as the first real adapter and define the interface, leaving Slack/GitLab/webhook for follow-on phases?
+
+---
+
 ### Local LLM support: use Gemma, Llama, or any Ollama-compatible model as the agent backend (May 15, 2026)
 
 **Status: idea** | Priority: high

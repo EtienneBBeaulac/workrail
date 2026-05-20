@@ -223,6 +223,11 @@ export interface WorkflowTrigger {
    * Default: 'worktrain/' (applied at parse time or at use time in runWorkflow()).
    */
   readonly branchPrefix?: string;
+  /**
+   * Delivery configuration for this session.
+   * When absent: resolveDeliveryConfig() falls back to CLI inbox.
+   */
+  readonly deliveryConfig?: import('../trigger/delivery-adapter.js').DeliveryConfig;
 }
 
 // ---------------------------------------------------------------------------

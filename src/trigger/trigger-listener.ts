@@ -45,6 +45,8 @@ import { runReviewOnlyPipeline } from '../coordinators/modes/review-only.js';
 import { runImplementPipeline } from '../coordinators/modes/implement.js';
 import { runFullPipeline } from '../coordinators/modes/full-pipeline.js';
 import { createCoordinatorDeps } from './coordinator-deps.js';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -445,7 +447,14 @@ export async function startTriggerListener(
   const baseRunWorkflow = options.runWorkflowFn ?? runWorkflow;
   const runWorkflowFn: RunWorkflowFn = (trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet, _statsDir, _sessionsDir, source) =>
     baseRunWorkflow(trigger, ctx, apiKey, daemonRegistry, emitter, activeSessionSet, _statsDir, _sessionsDir, source, enricherDeps);
-  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, undefined, maxConcurrentSessions, options.emitter, notificationService, activeSessionSet, undefined, modeExecutors);
+  const router = new TriggerRouter(triggerIndex, ctx, apiKey, runWorkflowFn, {
+    maxConcurrentSessions,
+    emitter: options.emitter,
+    notificationService,
+    activeSessionSet,
+    modeExecutors,
+    workrailDir: path.join(os.homedir(), '.workrail'),
+  });
   const coordinatorDeps = createCoordinatorDeps({ ctx, execFileAsync, dispatch: router.dispatch.bind(router) });
   router.setCoordinatorDeps(coordinatorDeps);
   const app = createTriggerApp(router, activeSessionSet);

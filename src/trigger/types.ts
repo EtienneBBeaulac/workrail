@@ -711,6 +711,11 @@ export interface TriggerDefinition {
    */
   readonly reviewerIdentity?: ReviewerIdentity;
 
+  /**
+   * Delivery configuration for this trigger.
+   * Always set by validateAndResolveTrigger(): explicit YAML block or synthesized from legacy fields.
+   */
+  readonly deliveryConfig: import('./delivery-adapter.js').DeliveryConfig;
 
   /**
    * Base branch for the worktree. Only used when branchStrategy === 'worktree'.
