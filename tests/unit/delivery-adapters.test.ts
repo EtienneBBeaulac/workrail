@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { DeliveryPayload, AdapterConfig } from '../../src/trigger/delivery-adapter.js';
 import { GitHubDraftReviewAdapter } from '../../src/trigger/adapters/github-draft-review-adapter.js';
 import { GitCommitAdapter } from '../../src/trigger/adapters/git-commit-adapter.js';
@@ -116,7 +118,7 @@ describe('GitHubDraftReviewAdapter', () => {
   });
 
   it('returns pending receipt on success', async () => {
-    const sessionsDir = '/tmp/test-sessions-' + Math.random().toString(36).slice(2);
+    const sessionsDir = path.join(os.tmpdir(), 'test-sessions-' + Math.random().toString(36).slice(2));
     const { mkdir } = await import('node:fs/promises');
     await mkdir(sessionsDir, { recursive: true });
 
@@ -141,7 +143,7 @@ describe('GitHubDraftReviewAdapter', () => {
   });
 
   it('writes pending-delivery sidecar before starting poller (sidecar exists after deliver)', async () => {
-    const sessionsDir = '/tmp/test-sessions-sidecar-' + Math.random().toString(36).slice(2);
+    const sessionsDir = path.join(os.tmpdir(), 'test-sessions-sidecar-' + Math.random().toString(36).slice(2));
     const { mkdir, readdir } = await import('node:fs/promises');
     await mkdir(sessionsDir, { recursive: true });
 
