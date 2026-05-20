@@ -61,7 +61,7 @@ The session receives targeted guidance when it fails, not just a confusing error
 
 **Scaffold content generation (critical):** Once the builder starts generating schema examples from outputContract at runtime, they'll want to handle every edge case -- optional fields, oneOf, nested objects, loop body steps with dynamic context. This could become a full schema-to-example serializer.
 
-*Mitigation:* Scaffold content is drawn from the `getBlockedMessage()` function already present on each artifact contract schema file (e.g. `loop-control.ts`, `review-verdict.ts`). These functions produce minimal canonical examples and are collected in a shared `blocked-messages` registry (created as part of the engine hint content fix -- see `docs/plans/cortex-hint-content-design.md`). No hand-authored strings, no dynamic schema introspection. If a contractRef has no registry entry, the hint says "check the step prompt for the required artifact format and pass it in `output.artifacts`." The cortex draws from the same registry as the engine -- single source of truth.
+*Mitigation:* Scaffold content is drawn from a fixed registry of known contractRefs (`wr.contracts.loop_control`, `wr.contracts.review_verdict`, `wr.contracts.assessment`, etc.) with hand-authored minimal examples. Dynamic schema introspection is out of scope. If a contractRef is unknown, the hint says "check the step prompt for the required artifact format."
 
 **Pre-turn reminder flooding (medium):** The pre-turn reminder could fire on every single turn of a step, flooding the agent with repeated reminders and degrading its attention to the actual work.
 
@@ -74,7 +74,7 @@ The session receives targeted guidance when it fails, not just a confusing error
 ## No-Gos
 
 - No modification to `_executeTools()` or the tool result pipeline -- guidance arrives as a pre-turn steer message only
-- No dynamic JSON schema introspection for scaffold generation -- scaffold content drawn from the shared `blocked-messages` registry (uses existing `getBlockedMessage()` per contract, not hand-authored strings)
+- No dynamic JSON schema introspection for scaffold generation -- scaffold content drawn from a fixed registry of known contractRefs with hand-authored minimal examples
 - No new stuck detector or replacement of the existing `repeated_tool_call` / `no_progress` / `stall` detectors -- the cortex is complementary, not a replacement
 - No operator-facing UI changes or new CLI commands -- cortex interventions appear only in the existing session event log via `worktrain session events`
 - No step rewind, session suspension, or operator escalation -- those are Phases 3+4 with unresolved design prerequisites
