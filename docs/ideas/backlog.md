@@ -114,6 +114,66 @@ A session harness is a layer that sits between the agent loop and the engine and
 
 ---
 
+### wr.mr-review spawns full workflow children -- blocking review MVP (May 21, 2026)
+
+**Status: bug** | Priority: critical
+
+**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+
+`wr.mr-review` phase-4b spawns reviewer families via `spawn_agent` with `workflowId: wr.mr-review`. Each child independently runs the full 9-phase review from scratch -- rebuilding context, running synthesis loops, potentially spawning its own sub-agents. Three children × full review session = 3× the token cost, 200+ turns per child, and the parent's stall timer fires before any child advances a step (C2 callback only fires on step advances, not LLM turns -- see C2 bug below). The session confirmed: parent died at turn 67, all three children ran to max_turns or stuck independently, results were never collected.
+
+**Immediate fix (MVP unblock):** Change phase-4b to spawn bounded routines instead of full `wr.mr-review` instances. Options: (a) use `wr.routine-hypothesis-challenge` for adversarial review passes, (b) use a custom bounded auditor routine that takes the parent's pre-assembled fact packet as context and returns a structured finding report, (c) remove parallel delegation entirely for now and run reviewer families sequentially as steps. Option (c) is the safest MVP fix -- no infrastructure changes needed, just workflow edits.
+
+**Related:** The C2 stall timer bug (parent stall timer not reset by child LLM activity) makes this worse but is a separate issue.
+
+---
+
+### C2 callback bug: parent stall timer not reset by child LLM activity (May 21, 2026)
+
+**Status: bug** | Priority: high
+
+**Score: 13** | Cor:3 Cap:1 Eff:3 Lev:2 Con:3 | Blocked: no
+
+`spawn_agent` is supposed to use the C2 mechanism to reset the parent's stall timer whenever a child session makes progress, preventing the parent from being killed while legitimately waiting for children. The callback (`notifyParentActivity`) is only wired to the `onAdvance` closure -- it fires only when a child **advances a workflow step**. Children that spend their first 2+ minutes in phase-0 research (no step advances) do not reset the parent's stall timer at all. The parent's `stallTimeoutSeconds=120` fires while children are actively running, killing the parent.
+
+**Evidence:** `df8c006c` stalled at 07:57:43 exactly 120s after spawning children at 07:55:29. Children `5a2f73c8`, `4429275c`, `9d58c9fe` were making LLM turns every 3-5 seconds the entire time but no step advances occurred, so C2 never fired.
+
+**Fix:** Wire `notifyParentActivity` to `onLlmTurnStarted` and `onLlmTurnCompleted` in `buildAgentCallbacks()` in `agent-loop-runner.ts`, not just to `onAdvance`. The comment on lines 192-204 already describes this intent but it's not implemented -- `notifyParentActivity` is only passed to `onAdvance`, not to `agentCallbacks`.
+
+---
+
+### Coordinator-intercepted delegation: workflow-declared parallel tasks owned by coordinator, not agent (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:3 Eff:1 Lev:3 Con:1 | Blocked: no
+
+**Needs full exploration before any implementation.** The design direction is promising but has open questions that require a `wr.discovery` session before coding begins.
+
+**The problem:** `spawn_agent` as a tool called from within the agent loop puts too much responsibility on the agent: it decides to delegate, constructs child tasks, blocks waiting for children, and synthesizes results -- all while burning turns and stall timer budget. The parent's stall timer has no awareness that the agent is legitimately waiting for children. When a review workflow spawns 3 parallel reviewer families, the parent dies waiting because C2 doesn't fire fast enough.
+
+**The direction:** The coordinator intercepts structured delegation instead of the agent executing it. A workflow step emits a `wr.coordinator_signal` artifact with `signalKind: delegation_needed` and a task list. The coordinator sees it, spawns bounded task agents autonomously (not workflow sessions -- just goal + tools + return last message), waits for them deterministically outside any agent loop, assembles results, and steers them back into the parent session via `agent.steer()`. The parent's stall timer is irrelevant because the parent's agent loop is **parked** (not running) during delegation.
+
+**Why this is architecturally better than the current model:**
+- Parent stall timer never fires during child execution -- parent isn't running
+- Children are bounded task workers, not full workflow instances
+- Coordinator owns delegation logic deterministically (no LLM routing)
+- Results are assembled and injected cleanly before the parent resumes
+
+**What the workflow declares:** A step can include a `delegationSpec` (needs design) describing what tasks to parallelize, what context to pass each, and how to assemble results. The coordinator reads this at step advance time and decides whether to handle delegation or pass through to the normal advance path.
+
+**Open questions (need discovery before implementation):**
+- Does `wr.coordinator_signal` need a new variant, or does the existing `delegation_needed` signalKind suffice?
+- Should delegation be declared in the workflow JSON (compile-time) or emitted by the agent (runtime)? Compile-time is more predictable; runtime is more flexible.
+- How does the coordinator know which bounded task type to use for each delegation? Does the workflow specify this?
+- What is the interface for a "bounded task agent"? Just goal + tools + end_turn with findings in the last message? Or something more structured?
+- How does this interact with `spawn_agent` as an agent-initiated tool? Both probably have their place -- bounded parallel reviewer families via coordinator vs. dynamic agent-initiated delegation for less structured cases.
+- Is `wr.mr-review` the only workflow that needs this, or does `wr.coding-task` parallel slice execution also benefit?
+
+**MVP path (before coordinator interception):** Fix `wr.mr-review` to use bounded routines or sequential reviewer passes (see above). Coordinator interception is the right long-term architecture but not required to unblock MVP review.
+
+---
+
 ### wr.coding-task forEach loop exposes broken agent-facing state (Apr 30, 2026)
 
 **Status: done** | Shipped May 1, 2026 (PR #926)
