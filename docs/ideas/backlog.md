@@ -130,15 +130,9 @@ A session harness is a layer that sits between the agent loop and the engine and
 
 ### C2 callback bug: parent stall timer not reset by child LLM activity (May 21, 2026)
 
-**Status: bug** | Priority: high
+**Status: done** | Shipped PR #1054 (May 19, 2026)
 
-**Score: 13** | Cor:3 Cap:1 Eff:3 Lev:2 Con:3 | Blocked: no
-
-`spawn_agent` is supposed to use the C2 mechanism to reset the parent's stall timer whenever a child session makes progress, preventing the parent from being killed while legitimately waiting for children. The callback (`notifyParentActivity`) is only wired to the `onAdvance` closure -- it fires only when a child **advances a workflow step**. Children that spend their first 2+ minutes in phase-0 research (no step advances) do not reset the parent's stall timer at all. The parent's `stallTimeoutSeconds=120` fires while children are actively running, killing the parent.
-
-**Evidence:** `df8c006c` stalled at 07:57:43 exactly 120s after spawning children at 07:55:29. Children `5a2f73c8`, `4429275c`, `9d58c9fe` were making LLM turns every 3-5 seconds the entire time but no step advances occurred, so C2 never fired.
-
-**Fix:** Wire `notifyParentActivity` to `onLlmTurnStarted` and `onLlmTurnCompleted` in `buildAgentCallbacks()` in `agent-loop-runner.ts`, not just to `onAdvance`. The comment on lines 192-204 already describes this intent but it's not implemented -- `notifyParentActivity` is only passed to `onAdvance`, not to `agentCallbacks`.
+Fixed in `src/daemon/runner/agent-loop-runner.ts` -- `notifyParentActivity` now fires in `onLlmTurnStarted` and `onToolCallStarted`, not just `onAdvance`. The fix was diagnosed and shipped two days before this backlog item was written.
 
 ---
 
