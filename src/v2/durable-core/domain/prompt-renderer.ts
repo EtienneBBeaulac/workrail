@@ -575,25 +575,37 @@ export function renderPendingPrompt(args: {
   // (e.g. { var: 'taskComplexity', equals: 'Large' }) are evaluated against live session context.
   // Boolean(conditionObject) would always be true -- we need evaluateCondition() here.
   //
-  // Object form { kind: 'coordinator_eval' | 'human_approval' }: extract gateKind FIRST,
-  // then treat the value as boolean true. Must happen before evaluateCondition() since
-  // { kind: '...' } is not a valid condition expression.
-  let rc = step.requireConfirmation;
-  let gateKind: import('../constants.js').GateKind | undefined;
-  if (typeof rc === 'object' && rc !== null && !Array.isArray(rc) && 'kind' in rc) {
-    const kindObj = rc as { kind: string };
-    if (kindObj.kind === 'coordinator_eval' || kindObj.kind === 'human_approval') {
-      gateKind = kindObj.kind as import('../constants.js').GateKind;
-      rc = true; // normalize to boolean for the requireConfirmation evaluation below
+  // Object form { kind: 'coordinator_eval' | 'human_approval', condition?: Condition }: extract gateKind FIRST,
+  // then treat the value as boolean true or evaluate condition since { kind: '...' } is not a valid condition expression.
+  const rawRc = step.requireConfirmation;
+  const { conditionToEvaluate, initialRc, gateKindFromObj } = (() => {
+    if (typeof rawRc === 'object' && rawRc !== null && !Array.isArray(rawRc) && 'kind' in rawRc) {
+      const kindObj = rawRc as { kind: string; condition?: unknown };
+      if (kindObj.kind === 'coordinator_eval' || kindObj.kind === 'human_approval') {
+        const extractedKind = kindObj.kind as import('../constants.js').GateKind;
+        if ('condition' in kindObj) {
+          return { conditionToEvaluate: kindObj.condition, initialRc: rawRc, gateKindFromObj: extractedKind };
+        } else {
+          return { conditionToEvaluate: undefined, initialRc: true, gateKindFromObj: extractedKind };
+        }
+      }
     }
-  }
-  const requireConfirmation = rc === true || rc === false || rc === undefined
-    ? Boolean(rc)
-    : evaluateCondition(rc as Exclude<typeof rc, { kind: string }>, renderContext);
+    return { conditionToEvaluate: undefined, initialRc: rawRc, gateKindFromObj: undefined };
+  })();
+
+  const requireConfirmation = conditionToEvaluate !== undefined
+    ? evaluateCondition(conditionToEvaluate, renderContext)
+    : (initialRc === true || initialRc === false || initialRc === undefined
+        ? Boolean(initialRc)
+        : evaluateCondition(initialRc as Exclude<typeof initialRc, { kind: string }>, renderContext));
+
   // Default gateKind to 'coordinator_eval' when requireConfirmation is true but no kind was specified.
-  if (requireConfirmation && gateKind === undefined) {
-    gateKind = 'coordinator_eval';
-  }
+  const gateKind = (() => {
+    if (requireConfirmation) {
+      return gateKindFromObj ?? 'coordinator_eval';
+    }
+    return undefined;
+  })();
 
   // Resolve both prompt and title — titles are agent-visible (inspect output, UI headers).
   // prompt is optional (steps may use promptBlocks instead); default to '' so the resolver

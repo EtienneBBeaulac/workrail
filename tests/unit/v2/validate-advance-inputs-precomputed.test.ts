@@ -141,4 +141,46 @@ describe('validateAdvanceInputs with precomputedIndex', () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe('invariant_violation');
   });
+
+  it('correctly normalizes nested conditional requireConfirmation and extracts gateKind', () => {
+    const conditionalWorkflowDef = {
+      id: 'test-wf-conditional',
+      name: 'Test',
+      description: 'Test workflow',
+      version: '1',
+      steps: [
+        {
+          id: 'step-1',
+          label: 'Step 1',
+          prompt: 'Do step 1',
+          requireConfirmation: {
+            kind: 'human_approval',
+            condition: {
+              not: { var: 'verdict', equals: 'clean' }
+            }
+          }
+        },
+      ],
+    };
+    const condWorkflow = createWorkflow(conditionalWorkflowDef as any, createBundledSource());
+
+    const sorted = asSortedEventLog([makeRunStarted(0, 'run_1'), makeNodeCreated(1, 'run_1', 'node_1')]);
+    const index = buildSessionIndex(sorted._unsafeUnwrap());
+
+    const result = validateAdvanceInputs({
+      truth: { events: [], manifest: [] },
+      runId,
+      currentNodeId: nodeId,
+      inputContext: undefined,
+      inputOutput: undefined,
+      pinnedWorkflow: condWorkflow,
+      pendingStep,
+      precomputedIndex: index,
+    });
+
+    expect(result.isOk()).toBe(true);
+    const val = result._unsafeUnwrap();
+    expect(val.gateKind).toBe('human_approval');
+    expect(val.requireConfirmation).toEqual({ not: { var: 'verdict', equals: 'clean' } });
+  });
 });

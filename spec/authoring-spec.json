@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-05-14",
+  "lastReviewed": "2026-05-20",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -977,6 +977,34 @@
           "antiPatterns": [
             "Confirming every draft or artifact creation by default",
             "Using requireConfirmation as a substitute for clear loop or rigor policy"
+          ]
+        },
+        {
+          "id": "conditional-gate-context-timing",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "step.confirmation",
+            "workflow.authoring"
+          ],
+          "rule": "The context variable referenced in a requireConfirmation condition must be set by a prior step, not by the gated step itself.",
+          "why": "requireConfirmation is evaluated when the engine advances INTO the step, before the step runs. A variable set by the gated step is not yet in context when the condition fires -- it will be undefined and the condition will silently produce the wrong result.",
+          "enforcement": [
+            "advisory"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/mcp/handlers/v2-advance-core/index.ts",
+              "note": "isGateRequired() is called at advance time, before the step executes."
+            }
+          ],
+          "checks": [
+            "The condition var must reference a context key set by a previous step via inputContext.",
+            "Do not reference output artifact fields produced by the current step -- those are not yet in context at gate evaluation time."
+          ],
+          "antiPatterns": [
+            "Conditioning on verdict (set by the current step's outputContract) instead of recommendation (set by a prior synthesis step)"
           ]
         }
       ]

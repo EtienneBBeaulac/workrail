@@ -467,6 +467,7 @@ export async function runStartupRecovery(
             firstStepPrompt: rehydrated.pending.prompt ?? '',
             isComplete: rehydrated.isComplete,
             triggerSource: 'daemon',
+            stepId: rehydrated.pending.stepId,
             // Pass the effective workspace path so buildPreAgentSession() can override
             // sessionWorkspacePath for recovered worktree sessions. Without this, the
             // recovery trigger has workspacePath=worktreePath (so the agent uses the

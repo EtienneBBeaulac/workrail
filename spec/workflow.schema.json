@@ -845,6 +845,10 @@
               "type": "string",
               "enum": ["coordinator_eval", "human_approval"],
               "description": "coordinator_eval: spawn wr.gate-eval-generic; human_approval: route to human approval mechanism (e.g. GitHub draft review)"
+            },
+            "condition": {
+              "$ref": "#/$defs/condition",
+              "description": "Conditional logic that determines if confirmation is required"
             }
           },
           "required": ["kind"],

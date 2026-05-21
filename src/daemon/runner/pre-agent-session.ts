@@ -96,6 +96,7 @@ export async function buildPreAgentSession(
     checkpointToken = s.checkpointToken ?? null;
     firstStepPrompt = s.firstStepPrompt;
     isComplete = s.isComplete;
+    state.pendingStepIdAfterAdvance = s.stepId ?? null;
   } else {
     const startResult = await executeStartWorkflow(
       { workflowId: trigger.workflowId, workspacePath: trigger.workspacePath, goal: trigger.goal },
@@ -120,6 +121,9 @@ export async function buildPreAgentSession(
     checkpointToken = r.checkpointToken ?? null;
     firstStepPrompt = r.pending?.prompt ?? '';
     isComplete = r.isComplete;
+    if (r.pending) {
+      state.pendingStepIdAfterAdvance = r.pending.stepId;
+    }
   }
   updateToken(state, continueToken);
 

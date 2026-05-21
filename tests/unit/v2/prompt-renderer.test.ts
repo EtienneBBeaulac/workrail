@@ -947,4 +947,76 @@ describe('buildMetricsSection', () => {
       expect(result.value.prompt).not.toContain('final step');
     }
   });
+
+  describe('nested conditional requireConfirmation', () => {
+    const conditionalWorkflow = createWorkflow(
+      {
+        id: 'conditional-test',
+        name: 'Conditional Test',
+        description: 'Test nested conditional gates',
+        version: '1.0.0',
+        steps: [
+          {
+            id: 'step1',
+            title: 'Step 1',
+            prompt: 'Do step 1',
+            notesOptional: true,
+            requireConfirmation: {
+              kind: 'human_approval',
+              condition: {
+                not: { var: 'verdict', equals: 'clean' }
+              }
+            }
+          }
+        ],
+      } as any,
+      createBundledSource()
+    );
+
+    it('requires confirmation with human_approval when condition is met (verdict = blocking)', () => {
+      const indexWithBlocking = {
+        runContextByRunId: new Map([['run_1', { verdict: 'blocking' }]])
+      } as any;
+
+      const result = renderPendingPrompt({
+        workflow: conditionalWorkflow,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+        precomputedIndex: indexWithBlocking,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.requireConfirmation).toBe(true);
+        expect((result.value as any).gateKind).toBe('human_approval');
+      }
+    });
+
+    it('does not require confirmation when condition is not met (verdict = clean)', () => {
+      const indexWithClean = {
+        runContextByRunId: new Map([['run_1', { verdict: 'clean' }]])
+      } as any;
+
+      const result = renderPendingPrompt({
+        workflow: conditionalWorkflow,
+        stepId: 'step1',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+        precomputedIndex: indexWithClean,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.requireConfirmation).toBe(false);
+        expect((result.value as any).gateKind).toBeUndefined();
+      }
+    });
+  });
 });

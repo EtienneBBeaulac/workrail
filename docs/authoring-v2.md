@@ -308,6 +308,30 @@ The boolean form (`requireConfirmation: true`) is equivalent to `{ "kind": "coor
 
 MCP sessions are unaffected by gate kind -- `requireConfirmation` never fires for MCP sessions (only daemon sessions with `is_autonomous: 'true'` context).
 
+#### Conditional gates
+
+Both gate kinds accept an optional `condition` field that controls whether the gate fires at all:
+
+```json
+{ "requireConfirmation": { "kind": "human_approval", "condition": { "not": { "var": "recommendation", "equals": "clean" } } } }
+```
+
+When `condition` is present, the gate only fires if the condition evaluates to `true` against the session context at advance time. When absent, the gate fires unconditionally (same as `{ "kind": "..." }` without a condition).
+
+**Critical invariant:** The context variable referenced in a `condition` must be set by a **prior step**, not by the gated step itself. `requireConfirmation` is evaluated when the engine advances INTO the step -- before the step executes. A variable produced by the current step's outputContract or agent notes is not yet in context when the condition fires.
+
+Wrong:
+```json
+{ "kind": "human_approval", "condition": { "not": { "var": "verdict", "equals": "clean" } } }
+```
+`verdict` is the field the agent will set on the `wr.review_verdict` artifact in THIS step -- it doesn't exist in context yet.
+
+Correct:
+```json
+{ "kind": "human_approval", "condition": { "not": { "var": "recommendation", "equals": "clean" } } }
+```
+`recommendation` is set by a prior synthesis step via `inputContext`.
+
 ---
 
 ### Assessment-gate authoring (v1)
