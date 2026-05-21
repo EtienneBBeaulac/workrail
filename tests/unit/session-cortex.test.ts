@@ -64,7 +64,7 @@ describe('SessionCortex', () => {
       ],
     };
 
-    await cortex.handleTurnEnd(blockEvent, mockAgent, state);
+    await cortex.handleTurnEnd(blockEvent, state);
 
     expect(state.pendingSteerParts).toHaveLength(1);
     expect(state.pendingSteerParts[0]).toContain('Cortex Interceded (Tier-2 Scaffold)');
@@ -105,21 +105,21 @@ describe('SessionCortex', () => {
     };
 
     // First failure: Hint
-    await cortex.handleTurnEnd(blockEvent, mockAgent, state);
+    await cortex.handleTurnEnd(blockEvent, state);
     expect(state.pendingSteerParts).toHaveLength(1);
     expect(state.pendingSteerParts[0]).toContain('Cortex Interceded (Tier-1 Hint)');
     expect(state.pendingSteerParts[0]).toContain('wr.contracts.loop_control');
 
     // Second failure: Scaffold
     state.pendingSteerParts = [];
-    await cortex.handleTurnEnd(blockEvent, mockAgent, state);
+    await cortex.handleTurnEnd(blockEvent, state);
     expect(state.pendingSteerParts).toHaveLength(1);
     expect(state.pendingSteerParts[0]).toContain('Cortex Interceded (Tier-2 Scaffold)');
     expect(state.pendingSteerParts[0]).toContain('wr.contracts.loop_control');
 
     // Third failure: No-op (exceeded Phase 2 maximum of tier 2)
     state.pendingSteerParts = [];
-    await cortex.handleTurnEnd(blockEvent, mockAgent, state);
+    await cortex.handleTurnEnd(blockEvent, state);
     expect(state.pendingSteerParts).toHaveLength(0);
   });
 
@@ -157,7 +157,7 @@ describe('SessionCortex', () => {
     };
 
     // First failure on step-1: Hint
-    await cortex.handleTurnEnd(blockEvent, mockAgent, state);
+    await cortex.handleTurnEnd(blockEvent, state);
     expect(state.pendingSteerParts).toHaveLength(1);
     expect(state.pendingSteerParts[0]).toContain('Tier-1 Hint');
 
@@ -170,11 +170,11 @@ describe('SessionCortex', () => {
       type: 'turn_end' as const,
       toolResults: [],
     };
-    await cortex.handleTurnEnd(successEvent, mockAgent, state);
+    await cortex.handleTurnEnd(successEvent, state);
     expect(state.pendingSteerParts).toHaveLength(0);
 
     // Now step-2 fails: should trigger Tier-1 Hint, NOT Tier-2 Scaffold
-    await cortex.handleTurnEnd(blockEvent, mockAgent, state);
+    await cortex.handleTurnEnd(blockEvent, state);
     expect(state.pendingSteerParts).toHaveLength(1);
     expect(state.pendingSteerParts[0]).toContain('Tier-1 Hint');
   });

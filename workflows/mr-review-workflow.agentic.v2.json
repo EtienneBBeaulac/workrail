@@ -300,7 +300,7 @@
       "requireConfirmation": {
         "kind": "human_approval",
         "condition": {
-          "not": { "var": "verdict", "equals": "clean" }
+          "not": { "var": "recommendation", "equals": "clean" }
         }
       }
     }

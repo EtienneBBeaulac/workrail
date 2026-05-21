@@ -48,28 +48,32 @@ export class SessionCortex {
 
       for (const event of events) {
         switch (event.kind) {
-          case 'step_failure_observed': {
-            const current = this.stepStates.get(event.stepId);
-            const status = current?.status ?? 'none';
-            if (status === 'none') {
-              this.stepStates.set(event.stepId, { status: 'none', failureCount: 0 });
-            } else if (status === 'hint_injected') {
-              this.stepStates.set(event.stepId, { status: 'hint_injected', failureCount: 1 });
-            } else {
-              this.stepStates.set(event.stepId, { status: 'scaffold_injected', failureCount: event.failureCount });
+          case 'step_failure_observed':
+            // step_failure_observed is authoritative: its failureCount IS the count at that moment.
+            // Only update if this event's count is higher than current (events are in order,
+            // but be defensive). Status is determined by subsequent hint/scaffold_injected events.
+            {
+              const current = this.stepStates.get(event.stepId);
+              if (!current || event.failureCount > current.failureCount) {
+                // Preserve status if already set by a prior event; default to 'none'.
+                // Cast needed because TypeScript can't prove (status, failureCount) pairing
+                // is valid without the full union check -- the status is set authoritatively
+                // by hint_injected/scaffold_injected events which follow in the log.
+                const status = current?.status ?? 'none';
+                this.stepStates.set(event.stepId, { status, failureCount: event.failureCount } as StepCortexState);
+              }
             }
             break;
-          }
-          case 'hint_injected': {
+          case 'hint_injected':
             this.stepStates.set(event.stepId, { status: 'hint_injected', failureCount: 1 });
             break;
-          }
-          case 'scaffold_injected': {
-            const current = this.stepStates.get(event.stepId);
-            const failureCount = current?.failureCount ?? 2;
-            this.stepStates.set(event.stepId, { status: 'scaffold_injected', failureCount });
+          case 'scaffold_injected':
+            {
+              const current = this.stepStates.get(event.stepId);
+              const failureCount = Math.max(2, current?.failureCount ?? 2);
+              this.stepStates.set(event.stepId, { status: 'scaffold_injected', failureCount });
+            }
             break;
-          }
           case 'step_advanced':
             this.stepStates.delete(event.stepId);
             break;
@@ -104,7 +108,6 @@ export class SessionCortex {
    */
   async handleTurnEnd(
     event: { readonly type: 'turn_end'; readonly toolResults: ReadonlyArray<AgentToolCallResult> },
-    agent: { steer(msg: { role: 'user'; content: string; timestamp: number }): void },
     state: { pendingStepIdAfterAdvance: string | null; pendingSteerParts: string[] },
   ): Promise<void> {
     // 1. Detect step advancement/transition

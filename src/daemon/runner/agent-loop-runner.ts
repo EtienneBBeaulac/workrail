@@ -148,7 +148,7 @@ export function buildTurnEndSubscriber(
 
     // Cortex intervention: intercept rejections and inject guidance
     if (ctx.cortex) {
-      await ctx.cortex.handleTurnEnd(event, ctx.agent, ctx.state);
+      await ctx.cortex.handleTurnEnd(event, ctx.state);
     }
 
     // Steer injection: drain pendingSteerParts into the next turn.
