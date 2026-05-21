@@ -423,6 +423,26 @@ There is no way today to say "use Haiku for sub-agents, Sonnet for the main agen
 
 ---
 
+### Migrate daemon subprocess handling to Bun (May 21, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 9** | Cor:1 Cap:2 Eff:1 Lev:2 Con:2 | Blocked: no
+
+The daemon (`src/daemon/`) uses Node's `child_process.exec()` for all subprocess execution. Node's `exec()` types don't support the `stdio` option, requiring `as any` casts throughout. Bun's `Bun.spawn()` provides a cleaner lower-level API with native TypeScript types, direct stream access, and clean AbortSignal support -- no type casting hacks needed.
+
+Beyond correctness, Bun is faster at startup and file I/O, which matters for a daemon that creates worktrees, reads many files, and spawns many processes per session. Bun also has native TypeScript support, eliminating the `tsc` build step for the daemon.
+
+**Scope:** The daemon (`src/daemon/`) is the natural migration target first -- it's where subprocess handling matters most and is relatively self-contained. The MCP server, console, and CLI could remain on Node initially.
+
+**Things to hash out:**
+- Which npm packages used by the daemon have Bun compatibility gaps, if any?
+- Does vitest (the test runner) need changes to test Bun-native code?
+- Does the `npm run dev:daemon` dev loop change with Bun (no `tsc` needed)?
+- What's the right migration boundary -- daemon only, or full codebase?
+
+---
+
 ### ProviderConfig: first-class LLM provider concept with interchangeable providers (May 20, 2026)
 
 **Status: idea** | Priority: high
