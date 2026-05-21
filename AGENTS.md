@@ -314,6 +314,44 @@ npm run dev:mcp
 
 **Config note:** The project `.mcp.json` `workrail` entry should shadow the global `~/.claude/settings.json` entry when Claude Code is started from this repo. Verify via `/mcp` on first use -- if two `workrail` entries appear, rename the `.mcp.json` entry to `workrail-dev`.
 
+### Local dev loop (daemon / WorkTrain)
+
+To test the WorkTrain daemon from a branch before merging -- including full autonomous pipeline runs, webhook dispatch, and end-to-end review flows:
+
+```bash
+# Terminal 1: build and start an isolated daemon instance
+npm run build && npm run dev:daemon
+
+# Terminal 2: use any worktrain command against the running dev daemon
+worktrain dispatch --pr 1051 -w /path/to/repo
+worktrain dispatch "implement the foo feature" -w /path/to/repo
+worktrain logs --follow
+worktrain diagnose
+worktrain session events <id>
+worktrain console
+```
+
+**What `dev:daemon` does differently from the production daemon:**
+- Writes all session data, logs, and sidecars to `~/.workrail/dev/` instead of `~/.workrail/` -- no contamination of production sessions
+- Sets `WORKRAIL_DEFAULT_WORKSPACE` to the repo root automatically
+- Reads `triggers.yml` from the repo root (same as production)
+- All `worktrain` commands talk to port 3200 regardless of how the daemon was started -- they work identically against a dev daemon
+
+**No watch mode for the daemon** -- unlike the MCP server, the daemon has in-flight sessions that would be killed ungracefully on restart.
+
+**Investigating rg hangs** -- there is a known intermittent issue where `rg` run inside a worktree hangs for 120s before being killed by the stall timer. Root cause is not yet confirmed. To capture diagnostics when the hang occurs, run this in a third terminal alongside the daemon:
+
+```bash
+npm run dev:watch-hangs
+```
+
+This polls for rg processes in worktrees and auto-captures `lsof` (open files), `sample` (call stack / blocked syscall), and `opensnoop` (real-time file opens) when any rg takes longer than 2 seconds. Diagnostics are written to `~/.workrail/dev/rg-hang-<timestamp>.txt`. To test a code change: stop the daemon (Ctrl-C), run `npm run build`, restart with `npm run dev:daemon`.
+
+**To wipe dev session state between test runs:**
+```bash
+rm -rf ~/.workrail/dev
+```
+
 ## When adding a new engine feature
 
 A "new engine feature" means any of:

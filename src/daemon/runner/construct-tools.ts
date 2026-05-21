@@ -40,7 +40,7 @@ import type { runWorkflow } from '../workflow-runner.js';
  */
 export function constructTools(
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   schemas: Record<string, any>,
   scope: SessionScope,

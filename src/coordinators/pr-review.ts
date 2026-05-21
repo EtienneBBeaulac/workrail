@@ -1105,10 +1105,12 @@ export async function runPrReviewCoordinator(
       const elapsedMs = sessionResult.durationMs;
       const handle = sessionResult.handle;
 
-      // Get notes and artifacts for this session
+      // Get notes and artifacts for this session.
+      // paused_at_gate: pre-gate artifacts are available (the gate fires after the step emits
+      // its artifact); treat the same as success for artifact reading.
       let notes: string | null = null;
       let artifacts: readonly unknown[] = [];
-      if (sessionResult.outcome === 'success') {
+      if (sessionResult.outcome === 'success' || sessionResult.outcome === 'paused_at_gate') {
         const agentResult = await deps.getAgentResult(handle);
         notes = agentResult.recapMarkdown;
         artifacts = agentResult.artifacts;
@@ -1152,8 +1154,8 @@ export async function runPrReviewCoordinator(
         prNumber: prNum,
         severity,
         merged: false,
-        escalated: sessionResult.outcome !== 'success' || severity === 'blocking' || severity === 'unknown',
-        escalationReason: sessionResult.outcome !== 'success'
+        escalated: (sessionResult.outcome !== 'success' && sessionResult.outcome !== 'paused_at_gate') || severity === 'blocking' || severity === 'unknown',
+        escalationReason: (sessionResult.outcome !== 'success' && sessionResult.outcome !== 'paused_at_gate')
           ? `session ${sessionResult.outcome}`
           : severity === 'blocking' || severity === 'unknown'
             ? `severity: ${severity}`

@@ -97,7 +97,7 @@ export type RouteResult =
 export type RunWorkflowFn = (
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   daemonRegistry?: import('../v2/infra/in-memory/daemon-registry/index.js').DaemonRegistry,
   emitter?: DaemonEventEmitter,
   activeSessionSet?: ActiveSessionSet,
@@ -478,7 +478,7 @@ export class TriggerRouter {
   constructor(
     private readonly index: ReadonlyMap<string, TriggerDefinition>,
     private readonly ctx: V2ToolContext,
-    private readonly apiKey: string,
+    private readonly apiKey: string | undefined,
     private readonly runWorkflowFn: RunWorkflowFn,
     opts: TriggerRouterOptions = {},
   ) {

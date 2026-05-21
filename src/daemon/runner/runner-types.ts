@@ -148,6 +148,22 @@ export type SessionOutcome =
 // ---------------------------------------------------------------------------
 
 /** Context for finalizing a completed runWorkflow() session. */
+/**
+ * Typed pair of session-scoped file paths, both derived from sessionId + sessionsDir.
+ * Passed together so neither path can be derived independently via string manipulation.
+ */
+export interface SessionPaths {
+  readonly conversationPath: string;
+  readonly cortexPath: string;
+}
+
+export function buildSessionPaths(sessionsDir: string, sessionId: string): SessionPaths {
+  return {
+    conversationPath: `${sessionsDir}/${sessionId}-conversation.jsonl`,
+    cortexPath: `${sessionsDir}/${sessionId}-cortex.jsonl`,
+  };
+}
+
 export interface FinalizationContext {
   readonly sessionId: RunId;
   readonly workrailSessionId: SessionId | null;
