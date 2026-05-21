@@ -325,6 +325,23 @@ Agents asked to rebase a branch routinely make the same mistakes: they skip conf
 
 ---
 
+### Per-role model configuration: different models for different session roles (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Child sessions spawned via `spawn_agent` currently inherit no model configuration from the parent trigger -- they fall through to the default Bedrock model (`us.anthropic.claude-sonnet-4-6`), which may differ from the parent's intended model. More broadly, different roles in a pipeline have genuinely different model requirements: a reviewer family doing targeted code analysis benefits from a capable model; a gate evaluator doing a simple verdict check could use a cheaper/faster model; a coordinator deciding routing needs deterministic behavior more than raw capability.
+
+There is no way today to say "use Haiku for sub-agents, Sonnet for the main agent" or "use Sonnet for review, Haiku for gate evaluation." All sessions in a pipeline use whichever model was configured on the trigger (for root sessions) or the default (for child sessions).
+
+**Things to hash out:**
+- Where does model config live for child sessions? Options: (a) spawn_agent spec includes a model field the spawner can set; (b) workflow author declares a `agentModel` at the step level for steps that spawn; (c) a workspace-level role mapping (`{ "reviewer": "haiku", "main": "sonnet", "gate_eval": "haiku" }`) that the daemon uses to resolve models by session role
+- Is this a trigger concern (configure per-trigger which model each spawned role uses) or a workflow concern (workflow declares model requirements per step)?
+- How does this interact with ProviderConfig DU (above) -- ideally they compose cleanly
+
+---
+
 ### ProviderConfig: first-class LLM provider concept with interchangeable providers (May 20, 2026)
 
 **Status: idea** | Priority: high
