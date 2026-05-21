@@ -147,7 +147,9 @@ import type {
   SessionOutcome,
   FinalizationContext,
   TurnEndSubscriberContext,
+  SessionPaths,
 } from './runner/index.js';
+import { buildSessionPaths } from './runner/index.js';
 export type {
   PreAgentSession,
   PreAgentSessionResult,
@@ -157,6 +159,7 @@ export type {
   TurnEndSubscriberContext,
 } from './runner/index.js';
 export { WORKTREES_DIR } from './runner/runner-types.js';
+export { buildSessionPaths } from './runner/index.js';
 export {
   buildPreAgentSession,
   buildTurnEndSubscriber,
@@ -440,8 +443,8 @@ export async function runWorkflow(
   );
 
   // ---- Agent loop phase: run prompt loop to completion ----
-  const conversationPath = path.join(sessionsDir, `${sessionId}-conversation.jsonl`);
-  const outcome = await runAgentLoop(readySession, trigger, conversationPath);
+  const sessionPaths = buildSessionPaths(sessionsDir, String(sessionId));
+  const outcome = await runAgentLoop(readySession, trigger, sessionPaths);
 
   // Map SessionOutcome back to the raw stopReason/errorMessage that buildSessionResult expects.
   const stopReason = outcome.kind === 'aborted' ? 'error' : outcome.stopReason;
@@ -457,7 +460,7 @@ export async function runWorkflow(
     branchStrategy: trigger.branchStrategy,
     statsDir,
     sessionsDir,
-    conversationPath,
+    conversationPath: sessionPaths.conversationPath,
     emitter,
     daemonRegistry,
     workflowId: trigger.workflowId,

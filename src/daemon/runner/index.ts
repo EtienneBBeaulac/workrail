@@ -11,13 +11,14 @@
  * type-only, erased at compile time, no runtime circular dependency.
  */
 
-export { WORKTREES_DIR } from './runner-types.js';
+export { WORKTREES_DIR, buildSessionPaths } from './runner-types.js';
 export type {
   PreAgentSession,
   PreAgentSessionResult,
   AgentReadySession,
   SessionOutcome,
   FinalizationContext,
+  SessionPaths,
 } from './runner-types.js';
 export { getSchemas } from './tool-schemas.js';
 export { constructTools } from './construct-tools.js';

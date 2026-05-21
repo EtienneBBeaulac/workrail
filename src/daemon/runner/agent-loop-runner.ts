@@ -40,7 +40,7 @@ import { injectPendingSteps } from '../turn-end/step-injector.js';
 import { flushConversation } from '../turn-end/conversation-flusher.js';
 import { SessionCortex } from '../cortex/session-cortex.js';
 import type { WorkflowTrigger } from '../types.js';
-import type { PreAgentSession, AgentReadySession, SessionOutcome } from './runner-types.js';
+import type { PreAgentSession, AgentReadySession, SessionOutcome, SessionPaths } from './runner-types.js';
 import { getSchemas } from './tool-schemas.js';
 import { constructTools } from './construct-tools.js';
 import type { runWorkflow } from '../workflow-runner.js';
@@ -408,8 +408,9 @@ export async function buildAgentReadySession(
 export async function runAgentLoop(
   session: AgentReadySession,
   trigger: WorkflowTrigger,
-  conversationPath: string,
+  sessionPaths: SessionPaths,
 ): Promise<SessionOutcome> {
+  const { conversationPath, cortexPath } = sessionPaths;
   const { agent, preAgentSession, sessionCtx, sessionId, handle } = session;
   const { state } = preAgentSession;
   const { emitter } = session.scope;
@@ -426,11 +427,6 @@ export async function runAgentLoop(
 
   const lastFlushedRef = { count: 0 };
 
-  const CONVERSATION_SUFFIX = '-conversation.jsonl';
-  if (!conversationPath.endsWith(CONVERSATION_SUFFIX)) {
-    throw new Error(`Invariant violation: conversationPath must end with '${CONVERSATION_SUFFIX}', got: ${conversationPath}`);
-  }
-  const cortexPath = conversationPath.slice(0, -CONVERSATION_SUFFIX.length) + '-cortex.jsonl';
   const cortex = new SessionCortex(cortexPath);
   await cortex.load(state.pendingStepIdAfterAdvance);
 
