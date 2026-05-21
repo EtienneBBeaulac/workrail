@@ -33,12 +33,12 @@ import type { WorkflowTrigger } from '../types.js';
  * When absent, detects AWS credentials in env (Bedrock) vs. direct API key.
  *
  * @param trigger - WorkflowTrigger carrying optional agentConfig.model override.
- * @param apiKey - Anthropic API key (used only when not using Bedrock).
+ * @param apiKey - Anthropic API key. Required when not using Bedrock; ignored when AWS credentials are present.
  * @param env - Process environment variables (for AWS credential detection).
  */
 export function buildAgentClient(
   trigger: WorkflowTrigger,
-  apiKey: string,
+  apiKey: string | undefined,
   env: NodeJS.ProcessEnv,
 ): { agentClient: Anthropic | AnthropicBedrock; modelId: string } {
   if (trigger.agentConfig?.model) {
@@ -51,8 +51,13 @@ export function buildAgentClient(
     }
     const provider = trigger.agentConfig.model.slice(0, slashIdx);
     const modelId = trigger.agentConfig.model.slice(slashIdx + 1);
+    if (provider !== 'amazon-bedrock' && !apiKey) {
+      throw new Error(
+        `ANTHROPIC_API_KEY is required when not using Bedrock (agentConfig.model="${trigger.agentConfig.model}")`,
+      );
+    }
     const agentClient: Anthropic | AnthropicBedrock =
-      provider === 'amazon-bedrock' ? new AnthropicBedrock() : new Anthropic({ apiKey });
+      provider === 'amazon-bedrock' ? new AnthropicBedrock() : new Anthropic({ apiKey: apiKey! });
     return { agentClient, modelId };
   }
 
@@ -64,6 +69,11 @@ export function buildAgentClient(
       agentClient: new AnthropicBedrock(),
       modelId: 'us.anthropic.claude-sonnet-4-6',
     };
+  }
+  if (!apiKey) {
+    throw new Error(
+      'ANTHROPIC_API_KEY is required when AWS credentials (AWS_PROFILE or AWS_ACCESS_KEY_ID) are not set',
+    );
   }
   return {
     agentClient: new Anthropic({ apiKey }),

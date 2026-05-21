@@ -325,11 +325,31 @@ Agents asked to rebase a branch routinely make the same mistakes: they skip conf
 
 ---
 
+### ProviderConfig: first-class LLM provider concept with interchangeable providers (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 14** | Cor:2 Cap:3 Eff:1 Lev:3 Con:3 | Blocked: no
+
+WorkTrain has no first-class LLM provider concept. Credentials are threaded as a raw `apiKey: string` parameter through 9 call sites (trigger-listener -> TriggerRouter -> runWorkflow -> startup-recovery -> gate-resume -> buildAgentReadySession -> constructTools -> spawn-agent -> buildPreAgentSession -> buildAgentClient), but `buildAgentClient` is the ONLY consumer. All other sites are pure pass-through couriers. The immediate symptom -- daemon fails to start with `missing_api_key` when only Bedrock credentials are present -- was patched with a `hasBedrock` guard, but the underlying threading antipattern remains. Without a typed ProviderConfig concept, adding a new provider (Ollama, Vertex, OpenAI) requires changing if-branches in a single growing function rather than adding a new variant to a discriminated union.
+
+**The right architecture:** `ProviderConfig = { kind: 'anthropic'; apiKey: string } | { kind: 'bedrock' } | { kind: 'ollama'; baseUrl: string }` resolved once at the composition root (`startTriggerListener`). `buildAgentClient(providerConfig, trigger)` becomes the sole construction site with `Result<{agentClient, modelId}, ProviderError>` return type (no throw). The `apiKey: string | undefined` parameter is deleted from all 9 call sites. New providers plug in by adding a union variant -- exhaustiveness checking enforces that all switch sites handle the new case. This also provides a natural anchor for Bedrock credential expiry detection (backlog score 14).
+
+**Design doc:** `docs/plans/provider-config-design.md` (completed May 20, 2026). Selected direction is the ProviderConfig DU after `wr.discovery` session. Full rationale, rejected alternatives, and implementation constraints are documented there.
+
+**Upgrade trigger from current patch:** When Bedrock credential expiry detection (this backlog) is scoped, check if it needs a stateful refreshable credential handle. If yes, implement ProviderConfig DU at that time. If Ollama support is being built first, ProviderConfig DU is required as a prerequisite (Ollama needs a `baseUrl` that doesn't come from env).
+
+**Things to hash out:**
+- When `agentConfig.model` specifies a provider prefix (e.g. `anthropic/claude-opus`) but only Bedrock creds are present, should `buildAgentClient` fail fast with a clear error or fall back to Bedrock with the model stripped of its prefix?
+- Should ProviderConfig be resolved from `config.json` (operator-declared default) or purely from env detection? `config.json` gives better startup observability but adds schema complexity.
+
+---
+
 ### Local LLM support: use Gemma, Llama, or any Ollama-compatible model as the agent backend (May 15, 2026)
 
 **Status: idea** | Priority: high
 
-**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: yes (needs ProviderConfig DU above)
 
 WorkTrain currently supports two backends: Anthropic direct (`ANTHROPIC_API_KEY`) and Amazon Bedrock (`AWS_PROFILE`). Both are cloud APIs with per-token costs, rate limits, and latency. A local LLM backend would enable: offline operation, zero API cost for iteration and testing, privacy for sensitive codebases, and much faster iteration cycles on workflow development.
 
@@ -337,7 +357,7 @@ WorkTrain currently supports two backends: Anthropic direct (`ANTHROPIC_API_KEY`
 
 **Implementation path:** `AgentClientInterface` in `agent-loop.ts` is already duck-typed -- it only requires `messages.create(params, options)` returning `Promise<Anthropic.Message>`. Ollama's `/api/chat` endpoint with `stream: false` can be wrapped in a thin adapter that maps to this interface. The key translation: Ollama uses OpenAI-style tool calling format, not Anthropic's `tool_use` content blocks -- the adapter needs to normalize this.
 
-**Where it fits:** `buildAgentClient()` in `src/daemon/core/agent-client.ts` parses `agentConfig.model` and constructs the right client. Adding an `ollama/` prefix case there is the natural extension point. No changes needed to AgentLoop, runWorkflow, or any workflow definitions.
+**Where it fits:** Requires ProviderConfig DU (item above) as a prerequisite -- Ollama needs a `baseUrl` that is not an env var, making it structurally incompatible with the current env-read-only approach in `buildAgentClient`. Once ProviderConfig DU ships, adding Ollama is one new union variant + one new class implementing `AgentClientInterface`.
 
 **Things to hash out:**
 - Ollama tool calling quality varies significantly by model -- Llama 3.2 and Gemma 3 support tool use but reliability is lower than Claude. How does WorkTrain handle an agent that frequently hallucinates tool names or ignores tool results?
