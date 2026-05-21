@@ -245,6 +245,36 @@ The delivery pipeline was extracted into `delivery-pipeline.ts` with explicit st
 
 ## WorkTrain Daemon
 
+### Dedicated Philosophy Compliance Gate Routine in `wr.coding-task` (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:3 Cap:2 Eff:2 Lev:2 Con:2 | Blocked: no
+
+Implementing agents suffer from severe "focus-split" during active coding sessions (handling typescript compilations, terminal test errors, and multi-file logic), causing them to overlook high-level coding philosophies (immutability, exact ESM imports, avoiding parallel mutable states, type safety over primitives). Currently, there is no step in the `wr.coding-task` workflow that forces a late-stage cognitive audit checking for repository-level principles before handoff. This leads to codebases slowly decaying into localized patches despite system-wide instructions.
+
+**Things to hash out:**
+- How should the `routine-philosophy-audit` be modeled? It should likely run as a separate read-only session with a dedicated, isolated subagent that only receives the git diff and the repository principles.
+- What should the `wr.contracts.philosophy_compliance` artifact structure look like? A simple JSON schema mapping modified files to the specific principles applied or trade-offs made.
+- At what point should this gate fire? In Phase 7 (Final Verification) after the build and tests pass but before the handoff PR is created.
+
+---
+
+### Autonomous Session Context Pruning in WorkTrain Daemon (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:2 Cap:2 Eff:2 Lev:3 Con:2 | Blocked: no
+
+As long-running autonomous sessions proceed slice-by-slice, their context window gets bloated with thousands of lines of terminal outputs, compiler dumps, and raw file reads. This "attention decay" causes the agent to lose track of high-level system rules and repository philosophies in the noise of the active session, leading to compile-first-design-last shortcuts. Because MCP servers are stateless, the engine cannot prune context. However, the WorkTrain daemon manages the active LLM context and conversation payload directly.
+
+**Things to hash out:**
+- Should the daemon support a `pruneContext` directive at step boundaries in the workflow definition?
+- How do we preserve essential session history (such as the initial task description, the implementation plan, and high-level decisions) while purging intermediate tool outputs and prior compilation failures?
+- Does context pruning affect the agent's ability to maintain cross-turn consistency, and if so, how can we summarize the pruned turns to mitigate it?
+
+---
+
 ### Git rebase workflow for agents (May 20, 2026)
 
 **Status: idea** | Priority: high

@@ -297,7 +297,12 @@
       "outputContract": {
         "contractRef": "wr.contracts.review_verdict"
       },
-      "requireConfirmation": { "kind": "human_approval" }
+      "requireConfirmation": {
+        "kind": "human_approval",
+        "condition": {
+          "not": { "var": "verdict", "equals": "clean" }
+        }
+      }
     }
   ]
 }

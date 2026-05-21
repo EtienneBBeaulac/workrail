@@ -38,6 +38,7 @@ import { ActiveSessionSet } from '../active-sessions.js';
 import { withWorkrailSession } from '../tools/_shared.js';
 import { injectPendingSteps } from '../turn-end/step-injector.js';
 import { flushConversation } from '../turn-end/conversation-flusher.js';
+import { SessionCortex } from '../cortex/session-cortex.js';
 import type { WorkflowTrigger } from '../types.js';
 import type { PreAgentSession, AgentReadySession, SessionOutcome } from './runner-types.js';
 import { getSchemas } from './tool-schemas.js';
@@ -73,6 +74,7 @@ export interface TurnEndSubscriberContext {
    */
   readonly lastFlushedRef: { count: number };
   readonly stuckRepeatThreshold: number;
+  readonly cortex?: SessionCortex;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +145,11 @@ export function buildTurnEndSubscriber(
 
     // Conversation history: delta-append after each turn.
     flushConversation(ctx.agent.state.messages, ctx.lastFlushedRef, ctx.conversationPath, appendConversationMessages);
+
+    // Cortex intervention: intercept rejections and inject guidance
+    if (ctx.cortex) {
+      await ctx.cortex.handleTurnEnd(event, ctx.agent, ctx.state);
+    }
 
     // Steer injection: drain pendingSteerParts into the next turn.
     injectPendingSteps(ctx.state, ctx.agent);
@@ -419,6 +426,10 @@ export async function runAgentLoop(
 
   const lastFlushedRef = { count: 0 };
 
+  const cortexPath = conversationPath.replace('-conversation.jsonl', '-cortex.jsonl');
+  const cortex = new SessionCortex(cortexPath);
+  await cortex.load(state.pendingStepIdAfterAdvance);
+
   const unsubscribe = agent.subscribe(buildTurnEndSubscriber({
     agent,
     state,
@@ -429,6 +440,7 @@ export async function runAgentLoop(
     conversationPath,
     lastFlushedRef,
     stuckRepeatThreshold,
+    cortex,
   }));
 
   let stopReason = 'stop';

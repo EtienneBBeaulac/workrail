@@ -179,6 +179,7 @@ export async function resumeFromGate(
     firstStepPrompt,
     isComplete: false,
     triggerSource: 'daemon',
+    stepId: rehydrated.pending?.stepId,
     ...(sidecar.worktreePath !== undefined ? { sessionWorkspacePath: sidecar.worktreePath } : {}),
   };
 

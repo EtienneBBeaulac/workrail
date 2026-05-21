@@ -261,20 +261,12 @@ export class SessionReader {
   async fetchChildSessionResult(handle: string): Promise<ChildSessionResult> {
     const statusResult = await this.deriveSessionStatus(handle);
 
-    if (statusResult.kind === 'complete') {
+    if (statusResult.kind === 'complete' || statusResult.kind === 'paused_at_gate') {
       const agentResult = await this.fetchAgentResult(handle);
       return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
     }
     if (statusResult.kind === 'blocked') {
       return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} reached blocked state` };
-    }
-    // Gate checkpoint: session paused at a requireConfirmation gate. PR 2 will dispatch
-    // the gate evaluator; for now, treat as failed to unblock the coordinator.
-    if (statusResult.kind === 'paused_at_gate') {
-      // Gate evaluation for child sessions spawned by spawn_agent is not yet wired.
-      // The TriggerRouter handles top-level gate evaluation; child session gates escalate
-      // to the parent as 'stuck' so the parent can report_issue and the operator is notified.
-      return { kind: 'failed', reason: 'stuck', message: `Child session ${handle.slice(0, 16)} paused at gate checkpoint (step '${statusResult.stepId}'). Parent session should report_issue.` };
     }
     if (statusResult.kind === 'hard_fail') {
       process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] fetchChildSessionResult: ${statusResult.message}\n`);
@@ -306,8 +298,8 @@ export class SessionReader {
             results.set(handle, { handle, outcome: 'failed', status: 'blocked', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'paused_at_gate') {
-            // Gate checkpoint: treat as terminal for now. PR 2 will dispatch the gate evaluator.
-            results.set(handle, { handle, outcome: 'failed', status: 'paused_at_gate', durationMs: Date.now() - startMs });
+            // Gate checkpoint: treat as success so the coordinator can read its artifacts and proceed.
+            results.set(handle, { handle, outcome: 'success', status: 'paused_at_gate', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'hard_fail') {
             process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] awaitSessions: ${statusResult.message}\n`);
@@ -412,6 +404,7 @@ class CoordinatorDepsImpl implements AdaptiveCoordinatorDeps {
       firstStepPrompt: r.pending?.prompt ?? '',
       isComplete: r.isComplete,
       triggerSource: 'daemon',
+      stepId: r.pending?.stepId,
     };
     const source: SessionSource = { kind: 'pre_allocated', trigger: opts.trigger, session: allocatedSession };
     this.dispatch(opts.trigger, source);

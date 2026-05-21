@@ -1,8 +1,6 @@
 ---
-name: workrail-executor
 description: Executes WorkRail workflows step by step using the WorkRail MCP tools. Use when the user wants to run a workflow, follow a structured process, or resume a previous workflow session. Handles start, continue, checkpoint, and resume operations, interpreting each step's instructions faithfully and advancing only when the step is complete.
-model: inherit
-callable: true
+globs: *
 ---
 
 # WorkRail Executor

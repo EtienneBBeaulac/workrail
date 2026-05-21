@@ -269,6 +269,7 @@ export interface AllocatedSession {
    * buildPreAgentSession() derives sessionWorkspacePath from trigger as usual.
    */
   readonly sessionWorkspacePath?: string;
+  readonly stepId?: string;
 }
 
 /**

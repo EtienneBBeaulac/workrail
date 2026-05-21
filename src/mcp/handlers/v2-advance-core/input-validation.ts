@@ -170,6 +170,19 @@ export function validateAdvanceInputs(args: {
   const autonomy = rawAutonomy as typeof VALID_AUTONOMY[number];
   const riskPolicy = rawRiskPolicy as typeof VALID_RISK_POLICY[number];
 
+  const rawRc = typedStep?.requireConfirmation;
+  const { requireConfirmation, gateKind } = (() => {
+    if (typeof rawRc === 'object' && rawRc !== null && !Array.isArray(rawRc) && 'kind' in rawRc) {
+      const kindObj = rawRc as { kind: string; condition?: Condition };
+      if (kindObj.kind === 'coordinator_eval' || kindObj.kind === 'human_approval') {
+        const extractedKind = kindObj.kind as import('../../../v2/durable-core/constants.js').GateKind;
+        const condition = 'condition' in kindObj ? kindObj.condition : true;
+        return { requireConfirmation: condition as boolean | Condition | undefined, gateKind: extractedKind };
+      }
+    }
+    return { requireConfirmation: rawRc as boolean | Condition | undefined, gateKind: undefined };
+  })();
+
   return ok({
     pendingStep,
     mergedContext: mergedContextRes.value as Record<string, unknown>,
@@ -185,18 +198,7 @@ export function validateAdvanceInputs(args: {
     riskPolicy,
     effectivePrefs,
     notesOptional,
-    requireConfirmation: typedStep?.requireConfirmation,
-    // Extract gateKind from the object form of requireConfirmation. Must happen here
-    // (boundary) so executeAdvanceCore receives a typed GateKind, not a raw object.
-    gateKind: (() => {
-      const rc = typedStep?.requireConfirmation;
-      if (typeof rc === 'object' && rc !== null && !Array.isArray(rc) && 'kind' in rc) {
-        const k = (rc as { kind: unknown }).kind;
-        if (k === 'coordinator_eval' || k === 'human_approval') {
-          return k as import('../../../v2/durable-core/constants.js').GateKind;
-        }
-      }
-      return undefined;
-    })(),
+    requireConfirmation,
+    gateKind,
   });
 }
