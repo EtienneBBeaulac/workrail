@@ -66,7 +66,7 @@ No proposed solutions here -- just the problem.]
 
 ### Engine hint content fixes: correct misleading guidance on artifact validation failures (May 20, 2026)
 
-**Status: active** | Priority: critical
+**Status: done** | Shipped PR #1079 (v3.101.2, May 20, 2026)
 
 **Score: 14** | Cor:3 Cap:2 Eff:3 Lev:3 Con:3 | Blocked: no
 
@@ -85,7 +85,7 @@ When an agent fails to submit a required artifact, the engine's blocked response
 
 ### Daemon session harness: intelligent layer between agent loop and engine (May 20, 2026)
 
-**Status: idea** | Priority: critical
+**Status: partial** | Priority: critical
 
 **Score: 15** | Cor:3 Cap:3 Eff:1 Lev:3 Con:3 | Blocked: no
 
@@ -110,21 +110,25 @@ A session harness is a layer that sits between the agent loop and the engine and
 - Step rewind mechanism for HMAC token / append-only log protocol
 - Operator escalation timeout and notification/response interface
 
-**GitHub issues:** Phase 0 (engine fixes): #1074 | Phase 1+2 (cortex): #1075
+**Shipped:** Phase 0 (PR #1079, v3.101.2) -- engine hint fixes. Phase 1+2 (PR #1081/#1084, v3.102.0) -- SessionCortex hint+scaffold injection, crash recovery, typed StepCortexState union.
+
+**Remaining open:** Phase 3 (step rewind -- HMAC protocol rewind not yet designed), Phase 4 (operator escalation -- notification mechanism not specified). Phase 5+ (synthetic tool calls, context checkpointing) -- future.
+
+**GitHub issues:** Phase 0 (engine fixes): #1074 (closed) | Phase 1+2 (cortex): #1075 (closed)
 
 ---
 
 ### wr.mr-review spawns full workflow children -- blocking review MVP (May 21, 2026)
 
-**Status: bug** | Priority: critical
+**Status: partial** | Priority: high
 
-**Score: 15** | Cor:3 Cap:3 Eff:3 Lev:3 Con:3 | Blocked: no
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
 
-`wr.mr-review` phase-4b spawns reviewer families via `spawn_agent` with `workflowId: wr.mr-review`. Each child independently runs the full 9-phase review from scratch -- rebuilding context, running synthesis loops, potentially spawning its own sub-agents. Three children × full review session = 3× the token cost, 200+ turns per child, and the parent's stall timer fires before any child advances a step (C2 callback only fires on step advances, not LLM turns -- see C2 bug below). The session confirmed: parent died at turn 67, all three children ran to max_turns or stuck independently, results were never collected.
+**Shipped (PR #1084):** Reviewer families now spawn `wr.routine-reviewer-family` (1-step bounded routine) instead of full `wr.mr-review` instances. This is explicitly a **temporary shim** -- see the routine's description for the permanent fix direction. The proper architecture is `spawn_agent` task worker mode (no workflowId, typed context contract, terminates on end_turn).
 
-**Immediate fix (MVP unblock):** Change phase-4b to spawn bounded routines instead of full `wr.mr-review` instances. Options: (a) use `wr.routine-hypothesis-challenge` for adversarial review passes, (b) use a custom bounded auditor routine that takes the parent's pre-assembled fact packet as context and returns a structured finding report, (c) remove parallel delegation entirely for now and run reviewer families sequentially as steps. Option (c) is the safest MVP fix -- no infrastructure changes needed, just workflow edits.
+**What remains wrong:** The routine is a 1-step workflow container, not a true bounded task worker. The parent still blocks inside `spawn_agent.execute()` waiting for children. Context passed to children is free-form `Record<string, unknown>` -- no compile-time enforcement. The `spawn_agent task worker mode` backlog item captures the proper fix.
 
-**Related:** The C2 stall timer bug (parent stall timer not reset by child LLM activity) makes this worse but is a separate issue.
+**Related:** `spawn_agent task worker mode` (backlog item below) is the architectural fix. `Coordinator-intercepted delegation` is the longer-term direction.
 
 ---
 
@@ -482,26 +486,32 @@ Shipped as `worktrain session events <id>`. Reads the daemon event log (not conv
 
 **Score: 16** | Cor:3 Cap:3 Eff:3 Lev:3 Con:4 | Blocked: no
 
-We have never successfully completed a full end-to-end run of the reviewer-assigned MR review feature. Every attempt so far has stalled mid-session due to hung Bedrock calls before reaching the `human_approval` gate. We don't know if the gate routing works, if the draft review gets created, if the poller starts, or if the macOS notification fires. Until we see this work once, we're shipping untested infrastructure.
+We have never successfully completed a full end-to-end autonomous `wr.mr-review` run that reaches the gate, posts a draft review, and completes after the operator publishes it.
 
-**What needs to happen:**
-1. A `wr.mr-review` session runs on a real PR to completion (reaches phase-6 final handoff)
-2. The `human_approval` gate fires (not `coordinator_eval` -- verify this in session events)
-3. `maybeRunPostWorkflowActions()` reads `wr.review_verdict` from session artifacts
-4. `GitHubReviewApprovalAdapter.createDraftReview()` posts a PENDING draft to GitHub
-5. The operator sees "Finish your review" in GitHub with real findings
-6. Operator publishes the draft
-7. `PendingDraftReviewPoller` detects submission within 60s
-8. `review_draft_submitted` event appears in the session event log
-9. macOS notification fires at draft creation
+**Root causes cleared (May 2026):**
+- ~~Engine misdirects agents on artifact failures~~ -- fixed PR #1079 (blocked-messages registry, wrong-kind detection)
+- ~~`wr.mr-review` reviewer families spawn full child review sessions~~ -- fixed PR #1084 (bounded `wr.routine-reviewer-family` shim)
+- ~~Bedrock-only daemon startup fails~~ -- fixed PR #1084 (hasBedrock guard)
+- ~~rg/bash stdin hang~~ -- fixed PR #1054 (stdin closed)
+- ~~C2 parent stall timer not reset by child LLM activity~~ -- fixed PR #1054
+- ~~human_approval gate fires before draft is posted~~ -- not true, gate fires AFTER draft posts; gate removed as prerequisite to draft posting (PR #1081 conditional gate, fires only for non-clean verdicts)
 
-**Blockers cleared:**
-- ~~`worktrain session-log` command~~ -- **shipped** as `worktrain session events <id>` (PRs #1039, #1043)
-- ~~Per-call timeout in AgentLoop~~ -- **shipped** (PR #1030, May 2026)
+**What the gate now does (as of PR #1081/1084):**
+- `recommendation == 'clean'` → session completes autonomously, draft posts via delivery adapter, no gate
+- `recommendation != 'clean'` (minor/blocking) → gate fires, draft posts, session waits for operator to publish draft
 
-**Requirement:** Haiku MUST be able to complete a full review session and produce excellent findings. Switching to Sonnet is not an acceptable workaround -- if the pipeline cannot run on cheap models, that is a bug to fix, not a model to upgrade.
+**What still needs to happen:**
+1. `wr.mr-review` session runs to completion on a real PR (reaches phase-6)
+2. Draft review posts to GitHub via `GitHubReviewApprovalAdapter`
+3. For non-clean verdict: `PendingDraftReviewPoller` detects operator submission within 60s, session resumes and completes
 
-**Success signal:** a real pending draft review visible under your GitHub account on PR #1022, with findings that reflect the actual code in the PR.
+**Remaining concerns:**
+- `wr.routine-reviewer-family` is a shim -- reviewer families run 1-step but context is free-form (see `spawn_agent task worker mode` backlog item)
+- `paused_at_gate` coordinator fix: `fetchChildSessionResult` still returns `kind: 'success'` for both `complete` and `paused_at_gate` -- only `awaitSessions` distinguishes them at the outcome level. Not blocking for MVP but a latent type ambiguity.
+
+**Success signal:** real pending draft review visible on GitHub, with findings. Operator publishes it, session completes, `session_completed` event in logs.
+
+**GitHub issue:** #1077
 
 ---
 
