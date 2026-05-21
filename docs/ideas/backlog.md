@@ -4583,6 +4583,29 @@ The desired behavior: certain content (rules, behavioral constraints, workspace 
 
 ---
 
+### Operator-facing capability toggles: named, discoverable WorkTrain behaviors (May 20, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 11** | Cor:1 Cap:3 Eff:1 Lev:3 Con:2 | Blocked: no
+
+There is no operator-facing concept of "what WorkTrain does." To enable autonomous PR review, an operator must write a `github_prs_poll` trigger with the right provider, workflowId, branchStrategy, delivery config, and agent config -- 15+ lines of YAML requiring deep knowledge of WorkTrain internals. There is no way to look at a config and understand at a human level what behaviors are active. Operators cannot discover what WorkTrain is capable of, only configure it from scratch.
+
+The idea: a `capabilities.yml` or `capabilities:` section in config declares named, toggleable behaviors. Each capability is a pre-configured, opinionated behavior that just works when enabled. Examples: `pr_review` (automatically reviews open PRs assigned to a reviewer), `queue_processor` (picks up tickets assigned to WorkTrain from GitHub), `dependency_bumps` (auto-reviews and merges clean dependabot PRs), `self_improvement` (runs WorkTrain on WorkTrain's own issue queue). The capabilities layer generates the underlying triggers -- operators never write trigger YAML unless they need fine-grained control.
+
+This makes WorkTrain feel like a product rather than a framework. An operator starting fresh can enable `pr_review: true` and have it work without reading documentation about polling providers, delivery adapters, or branch strategies.
+
+**Key design question:** Is this a config-generation layer (capabilities compile down to triggers.yml at daemon start) or a replacement for triggers.yml (capabilities ARE the configuration, triggers are an implementation detail)? The first is backward compatible and lower risk; the second is the cleaner long-term UX. A discovery session is needed before implementation.
+
+**Things to hash out:**
+- Where does capability config live -- `~/.workrail/capabilities.yml`, a section in `config.json`, or alongside triggers.yml in the workspace?
+- How do capabilities interact with existing hand-written triggers -- do they coexist, override, or merge?
+- What is the right set of first-party capabilities to ship? PR review and queue processor are clear; what else is there?
+- Should capabilities expose the same configuration knobs as triggers (model, timeouts, branch strategy), or hide them entirely with sensible defaults?
+- Does `worktrain init` become the entry point for enabling capabilities, replacing manual trigger authoring?
+
+---
+
 ## Platform Vision (longer-term)
 
 ### Epic-mode: full autonomous delivery of a multi-task feature from discovery to merged PRs (Apr 30, 2026)
