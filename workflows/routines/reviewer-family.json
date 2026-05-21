@@ -1,0 +1,17 @@
+{
+  "id": "wr.routine-reviewer-family",
+  "name": "Reviewer Family Audit",
+  "description": "Bounded single-step code review auditor. Receives a specific reviewer family mission, checklist, and frozen fact packet. Runs the checklist directly against the diff using tools and delivers structured findings. Designed to be spawned in parallel by wr.mr-review phase-3 -- each instance gets a distinct family mission and fresh context with no cross-contamination from sibling families or the parent session.",
+  "version": "1.0.0",
+  "metricsProfile": "none",
+  "recommendedPreferences": {
+    "recommendedAutonomy": "full_auto_never_stop"
+  },
+  "steps": [
+    {
+      "id": "audit-and-deliver",
+      "title": "Run Checklist and Deliver Findings",
+      "prompt": "You are a specialized code reviewer. Your mission and checklist are in the context variables `familyMission`, `familyChecklist`, and `familyName`. The frozen fact packet (PR diff summary, changed files, intent alignment, caller enumeration results, acceptance criteria) is in `reviewFactPacket`.\n\nRun through your checklist directly:\n1. Read the relevant diff sections and code using your tools\n2. For each checklist item, make a concrete determination -- do not speculate\n3. Any finding must satisfy the FINDING CONTRACT:\n   - Specific file and line number\n   - Affected code path or trust boundary\n   - Concrete failure mode or risk\n   - Why THIS PR introduced or worsened it (not just that the issue exists)\n   - Smallest credible remediation or verification step\n4. Cap at 3 findings for STANDARD, 5 for THOROUGH. Rank by severity × confidence × actionability. Extras are noise.\n5. When context is insufficient for a confident finding, emit 'Clarification needed: [specific question]' instead of a low-confidence finding.\n\nDeliver your findings in notes. Use this structure:\n\n## Family: {{familyName}}\n\n### Checklist Results\n[For each checklist item: checked / not checked / clarification needed]\n\n### Findings\n[Each finding with file, line, failure mode, causal link, remediation]\n\n### Recommendation Contribution\n[clean | minor | blocking] -- one word + one sentence rationale"
+    }
+  ]
+}
