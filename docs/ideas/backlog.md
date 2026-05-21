@@ -450,6 +450,36 @@ All three bugs fixed. `WorkflowContextSlots` typed interface + `extractContextSl
 
 ---
 
+### Richer PR context pre-assembly: inject diff, description, commits, and linked ticket before first turn (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:3 Cap:2 Eff:3 Lev:2 Con:3 | Blocked: no
+
+The `context-assembly` subsystem already runs before the first LLM turn and injects a `## Prior Context` section into the system prompt. For `pr_review` tasks, it currently fetches only a file list (`gh pr diff --name-only`) and prior session notes. The agent must spend turns fetching the actual diff content, PR description, linked issues, and commit history itself -- work that deterministic scripts could do in under a second before the session starts.
+
+**What to add to `context-assembly/index.ts` for `pr_review` tasks:**
+
+- **Full diff** (`gh pr diff <n>`) -- the actual changed lines, not just filenames. Truncate to a budget (e.g. 50KB) if large; include a note when truncated. This is the single highest-value addition: the agent currently reads individual files to reconstruct what the diff is doing.
+- **PR description + body** (`gh pr view <n> --json title,body,labels,milestone,state`) -- acceptance criteria and intent live here.
+- **Linked issues** (`gh pr view <n> --json closingIssuesReferences`) -- follows "closes #N" references and fetches issue body. One level deep only.
+- **Commit list with messages** (`gh pr view <n> --json commits`) -- author intent is often clearer in commit messages than in the diff.
+- **Existing review comments** (`gh pr view <n> --json reviews,comments`) -- prior reviewer feedback and author responses. Only relevant for re-review sessions.
+
+**Where it fits:** `assembleGitDiff()` in `src/context-assembly/index.ts` already has the `pr_review` branch with the `gh` CLI call. Expanding it and adding sibling functions follows the existing pattern. The `renderContextBundle()` function adds rendered sections to the system prompt.
+
+**Implementation notes:**
+- All fetches should be parallel (`Promise.all`) with individual timeouts and graceful fallback on failure
+- The total injected context budget matters -- full diffs can be large. Use `gh pr diff --stat` as a summary fallback when diff exceeds budget
+- `contextMapping` in `triggers.yml` already passes `itemNumber: "$.pull_request.number"` -- no trigger config changes needed
+
+**Things to hash out:**
+- What's the right budget for full diff injection? 50KB covers most PRs; very large diffs need truncation with a clear note
+- Should linked issue fetch be depth-1 only, or follow issue->epic->spec chains?
+- For re-review sessions, how do we distinguish first review (no prior comments relevant) from re-review (prior comments are primary context)?
+
+---
+
 ### MemoryStore: indexed session history as a coordinator and enricher dependency (Apr 30, 2026)
 
 **Status: idea** | Priority: medium
