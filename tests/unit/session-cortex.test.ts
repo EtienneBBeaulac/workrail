@@ -35,7 +35,6 @@ describe('SessionCortex', () => {
     await cortex.load('step-2');
 
     // To verify state, we can run a new handleTurnEnd with step-2 which should trigger a scaffold (failureCount 2)
-    const mockAgent = { steer: () => {} };
     const state = {
       pendingStepIdAfterAdvance: 'step-2',
       pendingSteerParts: [] as string[],
@@ -75,7 +74,6 @@ describe('SessionCortex', () => {
     const cortex = new SessionCortex(cortexLogPath);
     await cortex.load('step-1');
 
-    const mockAgent = { steer: () => {} };
     const state = {
       pendingStepIdAfterAdvance: 'step-1',
       pendingSteerParts: [] as string[],
@@ -127,7 +125,6 @@ describe('SessionCortex', () => {
     const cortex = new SessionCortex(cortexLogPath);
     await cortex.load('step-1');
 
-    const mockAgent = { steer: () => {} };
     const state = {
       pendingStepIdAfterAdvance: 'step-1',
       pendingSteerParts: [] as string[],

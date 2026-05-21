@@ -261,7 +261,15 @@ export class SessionReader {
   async fetchChildSessionResult(handle: string): Promise<ChildSessionResult> {
     const statusResult = await this.deriveSessionStatus(handle);
 
-    if (statusResult.kind === 'complete' || statusResult.kind === 'paused_at_gate') {
+    if (statusResult.kind === 'complete') {
+      const agentResult = await this.fetchAgentResult(handle);
+      return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
+    }
+    if (statusResult.kind === 'paused_at_gate') {
+      // Session is parked at a gate; pre-gate artifacts are available but the gated step has
+      // not executed. Return success so callers can read artifacts (e.g. wr.review_verdict
+      // emitted before the gate). The 'paused_at_gate' outcome in awaitSessions lets callers
+      // distinguish this case if needed.
       const agentResult = await this.fetchAgentResult(handle);
       return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
     }
@@ -278,12 +286,12 @@ export class SessionReader {
   }
 
   async awaitSessions(handles: readonly string[], timeoutMs: number): Promise<{
-    results: Array<{ handle: string; outcome: 'success' | 'failed' | 'timeout'; status: string | null; durationMs: number }>;
+    results: Array<{ handle: string; outcome: 'success' | 'paused_at_gate' | 'failed' | 'timeout'; status: string | null; durationMs: number }>;
     allSucceeded: boolean;
   }> {
     const startMs = Date.now();
     const pending = new Set(handles);
-    const results = new Map<string, { handle: string; outcome: 'success' | 'failed' | 'timeout'; status: string | null; durationMs: number }>();
+    const results = new Map<string, { handle: string; outcome: 'success' | 'paused_at_gate' | 'failed' | 'timeout'; status: string | null; durationMs: number }>();
 
     while (pending.size > 0) {
       if (Date.now() - startMs >= timeoutMs) break;
@@ -298,8 +306,9 @@ export class SessionReader {
             results.set(handle, { handle, outcome: 'failed', status: 'blocked', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'paused_at_gate') {
-            // Gate checkpoint: treat as success so the coordinator can read its artifacts and proceed.
-            results.set(handle, { handle, outcome: 'success', status: 'paused_at_gate', durationMs: Date.now() - startMs });
+            // Gate checkpoint: session is parked waiting for gate evaluation. Artifacts from
+            // pre-gate steps are available, but the gated step has not yet executed.
+            results.set(handle, { handle, outcome: 'paused_at_gate', status: 'paused_at_gate', durationMs: Date.now() - startMs });
             pending.delete(handle);
           } else if (statusResult.kind === 'hard_fail') {
             process.stderr.write(`[WARN coord:reason=store_error handle=${handle.slice(0, 16)}] awaitSessions: ${statusResult.message}\n`);

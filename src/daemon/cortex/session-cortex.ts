@@ -156,8 +156,10 @@ export class SessionCortex {
     // 5. Escalate and inject steer guidance
     if (newCount === 1) {
       if (currentState.status === 'none') {
-        this.stepStates.set(currentStepId, { status: 'hint_injected', failureCount: 1 });
+        // Log before mutating in-memory state: if logEvent fails silently, the in-memory
+        // state should not advance -- crash recovery replays the log to restore state.
         await this.logEvent({ kind: 'hint_injected', stepId: currentStepId, ts: Date.now() });
+        this.stepStates.set(currentStepId, { status: 'hint_injected', failureCount: 1 });
 
         const hint = contractRef
           ? this.buildHintMessage(currentStepId, contractRef)
@@ -167,8 +169,8 @@ export class SessionCortex {
       }
     } else if (newCount === 2) {
       if (currentState.status === 'hint_injected') {
-        this.stepStates.set(currentStepId, { status: 'scaffold_injected', failureCount: 2 });
         await this.logEvent({ kind: 'scaffold_injected', stepId: currentStepId, ts: Date.now() });
+        this.stepStates.set(currentStepId, { status: 'scaffold_injected', failureCount: 2 });
 
         const scaffoldLines = contractRef ? getArtifactBlockedMessage(contractRef) : null;
         const scaffold = (contractRef && scaffoldLines)

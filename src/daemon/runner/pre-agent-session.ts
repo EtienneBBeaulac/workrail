@@ -50,7 +50,7 @@ const execFileAsync = promisify(execFile);
 export async function buildPreAgentSession(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   sessionId: RunId,
   startMs: number,
   statsDir: string,

@@ -81,7 +81,7 @@ export interface WorktrainAwaitCommandOpts {
  *                    NOT the same as 'timeout': the session was not stuck or slow, we simply
  *                    no longer needed it.
  */
-export type SessionOutcome = 'success' | 'failed' | 'timeout' | 'not_found' | 'not_awaited';
+export type SessionOutcome = 'success' | 'paused_at_gate' | 'failed' | 'timeout' | 'not_found' | 'not_awaited';
 
 export interface SessionResult {
   readonly handle: string;
