@@ -1,7 +1,7 @@
 {
   "id": "wr.routine-reviewer-family",
   "name": "Reviewer Family Audit",
-  "description": "Bounded single-step code review auditor. Receives a specific reviewer family mission, checklist, and frozen fact packet. Runs the checklist directly against the diff using tools and delivers structured findings. Designed to be spawned in parallel by wr.mr-review phase-3 -- each instance gets a distinct family mission and fresh context with no cross-contamination from sibling families or the parent session.",
+  "description": "TEMPORARY SHIM -- replace when spawn_agent supports workflowId-less task worker spawning. The proper architecture is a bare agent session (goal + tools + end_turn) with a typed ReviewerFamilyContext contract enforced at spawn time. This 1-step routine exists because spawn_agent currently requires a workflowId. See backlog: 'spawn_agent task worker mode'.\n\nBounded single-step code review auditor. Receives a specific reviewer family mission, checklist, and frozen fact packet. Runs the checklist directly against the diff using tools and delivers structured findings. Designed to be spawned in parallel by wr.mr-review phase-3 -- each instance gets a distinct family mission and fresh context with no cross-contamination from sibling families or the parent session.",
   "version": "1.0.0",
   "metricsProfile": "none",
   "recommendedPreferences": {

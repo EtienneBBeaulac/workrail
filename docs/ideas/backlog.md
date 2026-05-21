@@ -385,6 +385,29 @@ Agents asked to rebase a branch routinely make the same mistakes: they skip conf
 
 ---
 
+### spawn_agent task worker mode: workflowId-less bounded task spawning (May 21, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 13** | Cor:2 Cap:3 Eff:2 Lev:3 Con:3 | Blocked: no
+
+`spawn_agent` currently requires a `workflowId`, which forces all child sessions into a workflow container even when the child's job is simply "execute this bounded task and return findings." This is architecturally wrong: it makes illegal states representable (a reviewer family that re-runs the full parent workflow), it uses stringly-typed context (no compile-time enforcement that `reviewFactPacket` has the required fields), and it violates the principle that types must constrain not just label.
+
+The proper architecture is a `taskWorker` mode on `spawn_agent`: spawn a bare agent session with goal + tools + typed context contract, runs until `end_turn`, parent reads findings from the final assistant message. No workflow, no `complete_step`, no phases. The task worker terminates naturally when its work is done.
+
+**Current shim:** `wr.routine-reviewer-family` is a 1-step workflow that approximates this behavior. It is explicitly marked as a temporary shim in its description. It should be replaced when this item ships.
+
+**What the proper design requires:**
+- `spawn_agent` gains a `mode: 'task_worker'` field (or workflowId becomes optional)
+- A typed `taskContext` schema replaces the free-form `context: Record<string, unknown>` for task worker spawns
+- The engine validates `taskContext` against the declared schema at spawn time (validate at boundaries)
+- The parent reads the child's final message as the task result -- no artifacts, no outputContract
+- Cancellation propagates: if the parent is aborted, task worker children are also aborted
+
+**Prerequisite for:** coordinator-intercepted delegation (above), proper reviewer family implementation, any future bounded task delegation pattern.
+
+---
+
 ### Per-role model configuration: different models for different session roles (May 21, 2026)
 
 **Status: idea** | Priority: high
