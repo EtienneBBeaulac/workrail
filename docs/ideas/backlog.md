@@ -4583,6 +4583,25 @@ The desired behavior: certain content (rules, behavioral constraints, workspace 
 
 ---
 
+### Unified daemon control plane: consolidate trigger listener and console into one HTTP server (May 20, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:2 Cap:2 Eff:1 Lev:3 Con:2 | Blocked: no
+
+WorkTrain currently runs two separate HTTP servers per daemon instance: the trigger listener on port 3200 (webhooks, session steer) and the console on port 3456 (read-only session/worktree data, plus `/api/v2/auto/dispatch` bolted on). This means `worktrain dispatch` requires `worktrain console` to be running alongside the daemon, `worktrain console` cannot dispatch sessions when run standalone, and there is no single operator-facing control plane. The dispatch endpoint on the console is marked "LOCAL DEVELOPER USE ONLY" with a security TODO, which is a signal it was added to the wrong server.
+
+The right architecture is one HTTP server per daemon instance -- the trigger listener on port 3200 -- serving everything the operator and CLI need: webhooks, session steer, operator dispatch, session state queries, worktree state, trigger list, and health. The console becomes a pure frontend that reads from this one server. `worktrain dispatch`, `worktrain logs`, and all other CLI commands talk to port 3200 only. `worktrain console` opens the browser UI pointing at the same port.
+
+This would let `npm run dev:daemon` give a fully functional WorkTrain instance with one process and one port instead of requiring a second terminal for `worktrain console`.
+
+**Things to hash out:**
+- Does the console frontend need CORS changes when served from the same port as the API?
+- What happens to the standalone `worktrain console` command for users who don't have the daemon running -- does it still work as a read-only view of the session store?
+- Should the migration be incremental (mount console routes on the trigger listener in addition to the console server) or a clean cutover?
+
+---
+
 ### Operator-facing capability toggles: named, discoverable WorkTrain behaviors (May 20, 2026)
 
 **Status: idea** | Priority: high
