@@ -994,7 +994,7 @@
           ],
           "sourceRefs": [
             {
-              "kind": "implementation",
+              "kind": "runtime",
               "path": "src/mcp/handlers/v2-advance-core/index.ts",
               "note": "isGateRequired() is called at advance time, before the step executes."
             }

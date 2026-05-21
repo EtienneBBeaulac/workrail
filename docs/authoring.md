@@ -468,6 +468,24 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 **Source refs**
 - `workflows/coding-task-workflow-agentic.json` (example) — Uses confirmation for real review barriers like MultiPR checkpoints.
 
+### conditional-gate-context-timing
+- **Level**: required
+- **Status**: active
+- **Scope**: step.confirmation, workflow.authoring
+- **Rule**: The context variable referenced in a requireConfirmation condition must be set by a prior step, not by the gated step itself.
+- **Why**: requireConfirmation is evaluated when the engine advances INTO the step, before the step runs. A variable set by the gated step is not yet in context when the condition fires -- it will be undefined and the condition will silently produce the wrong result.
+- **Enforced by**: advisory
+
+**Checks**
+- The condition var must reference a context key set by a previous step via inputContext.
+- Do not reference output artifact fields produced by the current step -- those are not yet in context at gate evaluation time.
+
+**Anti-patterns**
+- Conditioning on verdict (set by the current step's outputContract) instead of recommendation (set by a prior synthesis step)
+
+**Source refs**
+- `src/mcp/handlers/v2-advance-core/index.ts` (runtime) — isGateRequired() is called at advance time, before the step executes.
+
 
 ## Assessment gates
 ### assessment-use-for-bounded-judgment
