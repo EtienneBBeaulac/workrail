@@ -262,6 +262,9 @@ export class SessionReader {
     const statusResult = await this.deriveSessionStatus(handle);
 
     if (statusResult.kind === 'complete' || statusResult.kind === 'paused_at_gate') {
+      // NOTE: for paused_at_gate, this returns pre-gate artifacts only -- the gated step has not
+      // yet executed. The coordinator can read artifacts produced before the gate fired (e.g.
+      // wr.review_verdict from a prior step), but must not assume the gated step completed.
       const agentResult = await this.fetchAgentResult(handle);
       return { kind: 'success', notes: agentResult.recapMarkdown, artifacts: agentResult.artifacts };
     }

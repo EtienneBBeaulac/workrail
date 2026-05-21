@@ -426,7 +426,11 @@ export async function runAgentLoop(
 
   const lastFlushedRef = { count: 0 };
 
-  const cortexPath = conversationPath.replace('-conversation.jsonl', '-cortex.jsonl');
+  const CONVERSATION_SUFFIX = '-conversation.jsonl';
+  if (!conversationPath.endsWith(CONVERSATION_SUFFIX)) {
+    throw new Error(`Invariant violation: conversationPath must end with '${CONVERSATION_SUFFIX}', got: ${conversationPath}`);
+  }
+  const cortexPath = conversationPath.slice(0, -CONVERSATION_SUFFIX.length) + '-cortex.jsonl';
   const cortex = new SessionCortex(cortexPath);
   await cortex.load(state.pendingStepIdAfterAdvance);
 
