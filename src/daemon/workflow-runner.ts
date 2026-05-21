@@ -305,7 +305,7 @@ function buildUserMessage(text: string): { role: 'user'; content: string; timest
 export async function runWorkflow(
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,
   activeSessionSet?: ActiveSessionSet,

@@ -73,7 +73,7 @@ export async function resumeFromGate(
   sessionId: string,
   verdict: GateVerdict,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   runWorkflowFn: typeof runWorkflow,
   daemonRegistry?: DaemonRegistry,
   emitter?: DaemonEventEmitter,

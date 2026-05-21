@@ -129,7 +129,7 @@ function parseParams(raw: unknown): ParsedParams {
  */
 interface SpawnContext {
   readonly ctx: V2ToolContext;
-  readonly apiKey: string;
+  readonly apiKey: string | undefined;
   readonly sessionId: RunId;
   readonly thisWorkrailSessionId: string;
   readonly currentDepth: number;
@@ -353,7 +353,7 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
 export function makeSpawnAgentTool(
   sessionId: RunId,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   thisWorkrailSessionId: string,
   currentDepth: number,
   maxDepth: number,

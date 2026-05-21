@@ -251,7 +251,7 @@ export async function buildAgentReadySession(
   preAgentSession: PreAgentSession,
   trigger: WorkflowTrigger,
   ctx: V2ToolContext,
-  apiKey: string,
+  apiKey: string | undefined,
   sessionId: RunId,
   emitter: DaemonEventEmitter | undefined,
   daemonRegistry: DaemonRegistry | undefined,
