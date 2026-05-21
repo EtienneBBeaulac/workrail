@@ -337,7 +337,15 @@ worktrain console
 - Reads `triggers.yml` from the repo root (same as production)
 - All `worktrain` commands talk to port 3200 regardless of how the daemon was started -- they work identically against a dev daemon
 
-**No watch mode for the daemon** -- unlike the MCP server, the daemon has in-flight sessions that would be killed ungracefully on restart. To test a code change: stop the daemon (Ctrl-C), run `npm run build`, restart with `npm run dev:daemon`.
+**No watch mode for the daemon** -- unlike the MCP server, the daemon has in-flight sessions that would be killed ungracefully on restart.
+
+**Investigating rg hangs** -- there is a known intermittent issue where `rg` run inside a worktree hangs for 120s before being killed by the stall timer. Root cause is not yet confirmed. To capture diagnostics when the hang occurs, run this in a third terminal alongside the daemon:
+
+```bash
+npm run dev:watch-hangs
+```
+
+This polls for rg processes in worktrees and auto-captures `lsof` (open files), `sample` (call stack / blocked syscall), and `opensnoop` (real-time file opens) when any rg takes longer than 2 seconds. Diagnostics are written to `~/.workrail/dev/rg-hang-<timestamp>.txt`. To test a code change: stop the daemon (Ctrl-C), run `npm run build`, restart with `npm run dev:daemon`.
 
 **To wipe dev session state between test runs:**
 ```bash
