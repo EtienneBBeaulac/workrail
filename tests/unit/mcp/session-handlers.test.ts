@@ -5,15 +5,30 @@
  * and the requireSessionTools guard after HttpServer removal.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ToolContext } from '../../../src/mcp/types.js';
 import { handleOpenDashboard } from '../../../src/mcp/handlers/session.js';
 import { DEFAULT_CONSOLE_PORT } from '../../../src/infrastructure/console-defaults.js';
 
 // Mock fs/promises so tests don't touch the real filesystem.
-// handleOpenDashboard reads ~/.workrail/daemon-console.lock via fs.readFile.
 vi.mock('fs/promises', () => ({
   readFile: vi.fn(),
+}));
+
+vi.mock('child_process', () => ({
+  spawn: vi.fn(() => ({ unref: () => {} })),
+}));
+
+vi.mock('http', () => ({
+  request: vi.fn((opts, cb) => {
+    if (cb) {
+      cb({
+        resume: () => {},
+        statusCode: 200,
+      });
+    }
+    return { end: vi.fn(), on: vi.fn() };
+  }),
 }));
 
 // Import the mocked readFile after vi.mock hoisting.
@@ -34,8 +49,16 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
 }
 
 describe('handleOpenDashboard', () => {
+  let originalKill: typeof process.kill;
+
   beforeEach(() => {
     vi.resetAllMocks();
+    originalKill = process.kill;
+    process.kill = vi.fn().mockReturnValue(true) as any;
+  });
+
+  afterEach(() => {
+    process.kill = originalKill;
   });
 
   it('returns live URL from daemon-console.lock when running on a custom port', async () => {

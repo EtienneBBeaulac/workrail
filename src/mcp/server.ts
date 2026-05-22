@@ -62,6 +62,7 @@ import {
   handleUpdateSession,
   handleReadSession,
   handleOpenDashboard,
+  autoBootConsoleBackground,
 } from './handlers/session.js';
 
 // -----------------------------------------------------------------------------
@@ -269,6 +270,11 @@ export async function composeServer(): Promise<ComposedServerInternal> {
 
   // Create tool context with all dependencies
   const ctx = await createToolContext();
+
+  // Upfront console background auto-boot hook (capability-based)
+  if (ctx.featureFlags.isEnabled('sessionTools')) {
+    autoBootConsoleBackground().catch(() => {});
+  }
 
   // ---------------------------------------------------------------------------
   // Timing ring buffer -- created here so it can be shared between the

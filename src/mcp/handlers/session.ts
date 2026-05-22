@@ -6,8 +6,11 @@
  */
 
 import * as fs from 'fs/promises';
+import { existsSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { spawn } from 'child_process';
+import { request } from 'http';
 import type { ToolContext, ToolResult } from '../types.js';
 import { success, errNotRetryable } from '../types.js';
 import type {
@@ -141,10 +144,17 @@ export async function handleCreateSession(
   }
 
   const session = res.value;
-  // Static URL hint -- the actual port is served by `worktrain console`.
-  // Use DEFAULT_CONSOLE_PORT as the documented default; users running
-  // `worktrain console --port N` should use open_dashboard to get the live URL.
-  const dashboardUrl = `http://localhost:${DEFAULT_CONSOLE_PORT}?session=${input.sessionId}`;
+
+  let port = DEFAULT_CONSOLE_PORT;
+  try {
+    const lock = await readConsoleLock();
+    if (lock) {
+      port = lock.port;
+    }
+  } catch {
+    // Ignore and use default
+  }
+  const dashboardUrl = `http://localhost:${port}?session=${input.sessionId}`;
 
   const payload: CreateSessionOutput = {
     sessionId: session.id,
@@ -224,26 +234,108 @@ export async function handleReadSession(
   return success(payload);
 }
 
-/**
- * Read the console port from the daemon-console.lock file.
- * Returns the port number if the lock file exists and is valid JSON,
- * otherwise returns DEFAULT_CONSOLE_PORT as a fallback.
- *
- * The lock file is written by `worktrain console` at startup:
- *   { "pid": number, "port": number }
- */
-async function readConsoleLockPort(): Promise<number> {
+interface ConsoleLockInfo {
+  pid: number;
+  port: number;
+}
+
+export function getCliWorktrainPath(): string {
+  // Try compiled dist path relative to handlers
+  const compiledPath = path.resolve(__dirname, '..', '..', 'cli-worktrain.js');
+  try {
+    if (existsSync(compiledPath)) {
+      return compiledPath;
+    }
+    // Try source-tree path pointing to compiled dist
+    const devPath = path.resolve(__dirname, '..', '..', '..', 'dist', 'cli-worktrain.js');
+    if (existsSync(devPath)) {
+      return devPath;
+    }
+  } catch {
+    // Fallback
+  }
+  return compiledPath;
+}
+
+async function readConsoleLock(): Promise<ConsoleLockInfo | null> {
   const lockPath = path.join(os.homedir(), '.workrail', 'daemon-console.lock');
   try {
     const raw = await fs.readFile(lockPath, 'utf-8');
-    const data = JSON.parse(raw) as unknown;
-    if (data !== null && typeof data === 'object' && 'port' in data && typeof (data as Record<string, unknown>).port === 'number') {
-      return (data as { port: number }).port;
+    const data = JSON.parse(raw);
+    if (
+      data &&
+      typeof data === 'object' &&
+      typeof data.pid === 'number' &&
+      typeof data.port === 'number'
+    ) {
+      return data as ConsoleLockInfo;
     }
-    return DEFAULT_CONSOLE_PORT;
   } catch {
-    // Lock file absent (worktrain console not running) or parse error -- use default
-    return DEFAULT_CONSOLE_PORT;
+    // Ignore, lock doesn't exist or is invalid
+  }
+  return null;
+}
+
+function isPidAlive(pid: number): boolean {
+  if (process.platform === 'win32') {
+    return true; // Signal 0 is not emulated on Windows; let ping check handle liveness
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e: any) {
+    return e.code === 'EPERM'; // Process exists but we lack signal permissions
+  }
+}
+
+async function pingConsolePort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path: '/api/v2/sessions',
+        method: 'GET',
+        timeout: 400, // Very fast local ping
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode === 200);
+      }
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+export async function autoBootConsoleBackground(options?: { forceSpawnInTest?: boolean }): Promise<void> {
+  if ((process.env.VITEST || process.env.NODE_ENV === 'test') && !options?.forceSpawnInTest) {
+    return;
+  }
+  try {
+    const lock = await readConsoleLock();
+    if (lock && isPidAlive(lock.pid)) {
+      const active = await pingConsolePort(lock.port);
+      if (active) {
+        return; // Alive and listening -- skip spawn
+      }
+    }
+    const cliPath = getCliWorktrainPath();
+    const child = spawn(process.execPath, [cliPath, 'console'], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+  } catch (err: any) {
+    try {
+      process.stderr.write(`[ConsoleAutoBoot] Warning: Failed to spawn console background: ${err?.message || err}\n`);
+    } catch {
+      // Ignored
+    }
   }
 }
 
@@ -254,7 +346,48 @@ export async function handleOpenDashboard(
   const guardError = requireSessionTools(ctx);
   if (guardError) return guardError;
 
-  const port = await readConsoleLockPort();
+  let active = false;
+  let port = DEFAULT_CONSOLE_PORT;
+
+  try {
+    const lock = await readConsoleLock();
+    if (lock && isPidAlive(lock.pid)) {
+      active = await pingConsolePort(lock.port);
+      if (active) {
+        port = lock.port;
+      }
+    }
+
+    if (!active) {
+      // Spawn console in the background
+      await autoBootConsoleBackground();
+
+      // Poll for up to 2 seconds (20 * 100ms) for lock file and liveness
+      const startTime = Date.now();
+      const timeoutMs = 2000;
+      const intervalMs = 100;
+
+      while (Date.now() - startTime < timeoutMs) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        const newLock = await readConsoleLock();
+        if (newLock && isPidAlive(newLock.pid)) {
+          const isUp = await pingConsolePort(newLock.port);
+          if (isUp) {
+            port = newLock.port;
+            active = true;
+            break;
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    try {
+      process.stderr.write(`[handleOpenDashboard] Warning: Self-healing lookup failed: ${err?.message || err}\n`);
+    } catch {
+      // Ignored
+    }
+  }
+
   const sessionQuery = input.sessionId ? `?session=${input.sessionId}` : '';
   const url = `http://localhost:${port}${sessionQuery}`;
 
