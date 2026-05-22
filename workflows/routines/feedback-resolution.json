@@ -1,0 +1,60 @@
+{
+  "id": "wr.routine-feedback-resolution",
+  "name": "Feedback Resolution Routine",
+  "version": "1.0.0",
+  "metricsProfile": "none",
+  "description": "Guides the analytical deconstruction and deep, structural resolution of code review feedback. Forces the agent to trace root causes and compare deep architectural alignments against quick patches, preventing technical debt.",
+  "clarificationPrompts": [
+    "Where is the source feedback located? (PR comments, issue, file path, markdown summary)",
+    "What branch/worktree am I working on?",
+    "What is the name of the feedback resolution artifact I should produce?"
+  ],
+  "preconditions": [
+    "Active code review feedback is available and accessible",
+    "Codebase is in a state where the original implementation can be analyzed",
+    "Agent has read/write tools enabled for code modification"
+  ],
+  "metaGuidance": [
+    "PURPOSE: Resolve review feedback thoroughly, focusing on long-term architecture over quick patches.",
+    "ROLE: You are a senior refactoring engineer executing a high-integrity resolution plan.",
+    "ANTI-PATTERN: Never copy-paste suggested reviewer snippets blindly. Understand the systemic reason for the comment first.",
+    "COMPLIANCE: All resolutions must maintain strict JSDoc typing, ESM imports, and isolation boundaries."
+  ],
+  "steps": [
+    {
+      "id": "step-deconstruct-feedback",
+      "title": "Step 1: Deconstruct & Catalog Feedback",
+      "prompt": "Read and deconstruct the code review feedback fully. Do NOT modify any code yet.\n\nExtract and catalog each review comment into a structured list:\n1. **Local Nits / Typos**: Simple typos, formatting, name tweaks with zero architectural impact.\n2. **Bugs / Correctness**: Logical flaws, unhandled edge cases, missing test coverages.\n3. **Systemic / Architectural**: Feedback indicating violation of design principles, leaky boundaries, tight coupling, or suboptimal abstractions.\n\nWorking notes:\n- Discovered feedback list\n- Categorization per item\n- Initial impact assessment",
+      "agentRole": "You are organizing the feedback to ensure no comment is lost and structural items are isolated.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-trace-root-cause",
+      "title": "Step 2: Trace Systemic Root Causes",
+      "prompt": "For every systemic or architectural finding identified in Step 1, perform a root cause analysis (RCA):\n- **Why** was the code written this way initially? Identify the underlying constraint, assumption, or friction.\n- **Where** does the flaw originate? Is it a local shortcut, or a reflection of a missing pattern in the wider module?\n- **Blast Radius**: Trace which files and modules are affected if this systemic issue is fully resolved.\n\nWorking notes:\n- Root cause analysis per systemic comment\n- Blast radius mapping (files/modules impacted)\n- Implicit design assumptions surfaced",
+      "agentRole": "You are identifying the core engineering problem rather than just looking at the symptom.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-develop-resolutions",
+      "title": "Step 3: Develop Deep Resolution Options",
+      "prompt": "For each systemic or architectural issue, formulate exactly TWO distinct resolution candidates:\n\n1. **Candidate A (The Quick Patch / Band-Aid)**: The superficial fix (often suggested inline by the reviewer) that satisfies the text of the comment but leaves the underlying structure or technical debt intact.\n2. **Candidate B (The Deep Architectural Alignment)**: The robust, clean refactoring that resolves the root tension, protects type safety, preserves module isolation, and improves long-term codebase health.\n\nCreate a comparison table or structured list contrasting Candidate A vs Candidate B across:\n- Pros and Cons\n- Introduced Technical Debt\n- Architectural Alignment score\n\nWorking notes:\n- Options formulated per systemic comment\n- Trade-offs analyzed in detail\n- Rationale for selecting the deeper architectural approach",
+      "agentRole": "You are forcing a cognitive challenge between simple patches and true structural fixes.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-formulate-resolution-plan",
+      "title": "Step 4: Formulate the Resolution Plan",
+      "prompt": "Select Candidate B (the deep alignment approach) by default, and design the precise plan of execution:\n- Specify the exact, file-by-file changes required to implement Candidate B.\n- List the local, unit, or integration tests that must be run to verify the fix works.\n- Note any temporary migrations or intermediate steps needed to keep the build passing during refactoring.\n\nWorking notes:\n- Selected candidates and justification\n- Refactoring sequence plan\n- Verification checklist",
+      "agentRole": "You are mapping out the precise engineering steps before touching code.",
+      "requireConfirmation": false
+    },
+    {
+      "id": "step-execute-and-verify",
+      "title": "Step 5: Execute, Compile, and Double-Loop Verify",
+      "prompt": "Execute your resolution plan inside your worktree workspace:\n1. Apply all refactorings cleanly, preserving codebase comments and typing protocols.\n2. Compile the project: `npm run build` or equivalent. Fix any TypeScript errors immediately.\n3. Run the tests: `npx vitest run` or equivalent. Ensure all tests pass successfully.\n\nWrite a `{deliverableName}` detailing:\n- **Feedback Resolution Table**: Highlighting each original feedback item, the selected resolution strategy (Patch vs. Deep Refactor), and the files changed.\n- **Architectural Enhancements**: Explain the structural improvements made to resolve the root cause.\n- **Verification Evidence**: Build and test outputs proving correctness.\n\nWorking notes:\n- Verification results (build, tests, lints)\n- Final diff inspection\n- Deliverable generated successfully",
+      "agentRole": "You are implementing the deep fix and independently proving it solves the feedback thoroughly.",
+      "requireConfirmation": false
+    }
+  ]
+}
