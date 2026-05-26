@@ -145,6 +145,7 @@ export async function buildPreAgentSession(
       workflowId: trigger.workflowId,
       goal: trigger.goal,
       workspacePath: trigger.workspacePath,
+      context: trigger.context,
     });
     if (persistResult.kind === 'err') {
       return {
@@ -189,7 +190,7 @@ export async function buildPreAgentSession(
 
       const worktreePersistResult = await persistTokens(
         sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
-        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath },
+        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, context: trigger.context },
       );
       if (worktreePersistResult.kind === 'err') {
         console.error(`[WorkflowRunner] Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
@@ -252,7 +253,7 @@ export async function buildPreAgentSession(
 
       const worktreePersistResult = await persistTokens(
         sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
-        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, branchStrategy: 'read-only' },
+        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, branchStrategy: 'read-only', context: trigger.context },
       );
       if (worktreePersistResult.kind === 'err') {
         console.error(`[WorkflowRunner] Read-only worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);

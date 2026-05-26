@@ -334,6 +334,7 @@ export async function buildAgentReadySession(
     triggerWorkspacePath: trigger.workspacePath,
     triggerGoal: trigger.goal ?? '',
     triggerBranchStrategy: trigger.branchStrategy,
+    triggerContext: trigger.context,
     activeSessionSet,
     // C2: pass the parent activity notifier through scope so constructTools can
     // forward it to makeSpawnAgentTool. When a grandchild spawns further children,

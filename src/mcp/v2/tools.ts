@@ -93,6 +93,14 @@ const continueWorkflowContextAliasField = z.record(z.unknown()).optional().descr
   'Compatibility alias for context. Canonical field name: "context".'
 );
 
+const continueWorkflowNotesAliasField = z.string().optional().describe(
+  'Compatibility alias for output.notesMarkdown. Provide your step notes here directly.'
+);
+
+const continueWorkflowArtifactsAliasField = z.array(z.unknown()).optional().describe(
+  'Compatibility alias for output.artifacts. Provide structured step artifacts here directly.'
+);
+
 /**
  * Validation schema for continue_workflow (runtime contract).
  *
@@ -105,6 +113,8 @@ const continueWorkflowContextAliasField = z.record(z.unknown()).optional().descr
 export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
   .extend({
     contextVariables: continueWorkflowContextAliasField,
+    notes: continueWorkflowNotesAliasField,
+    artifacts: continueWorkflowArtifactsAliasField,
   })
   .superRefine((data, ctx) => {
     const aliasMap = CONTINUE_WORKFLOW_PROTOCOL.aliasMap;
@@ -118,7 +128,21 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
         message: `Provide either "${canonical}" or "${alias}", not both. Canonical field: "${canonical}".`,
       });
     }
-    if (data.intent === 'rehydrate' && data.output) {
+    if (data.notes !== undefined && data.output?.notesMarkdown !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['notes'],
+        message: 'Provide either "notes" or "output.notesMarkdown", not both.',
+      });
+    }
+    if (data.artifacts !== undefined && data.output?.artifacts !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['artifacts'],
+        message: 'Provide either "artifacts" or "output.artifacts", not both.',
+      });
+    }
+    if (data.intent === 'rehydrate' && (data.output || data.notes !== undefined || data.artifacts !== undefined)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['output'],
@@ -140,12 +164,18 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
     const normalized = CONTINUE_WORKFLOW_PROTOCOL.aliasMap
       ? normalizeAliasedFields(data as Readonly<Record<string, unknown>>, CONTINUE_WORKFLOW_PROTOCOL.aliasMap)
       : (data as Record<string, unknown>);
-    const intent = data.intent ?? (data.output ? 'advance' : 'rehydrate');
+    const notesMarkdown = data.notes ?? data.output?.notesMarkdown;
+    const artifacts = data.artifacts ?? data.output?.artifacts;
+    const output = (notesMarkdown !== undefined || artifacts !== undefined) ? {
+      ...(notesMarkdown !== undefined ? { notesMarkdown } : {}),
+      ...(artifacts !== undefined ? { artifacts } : {}),
+    } : undefined;
+    const intent = data.intent ?? (output ? 'advance' : 'rehydrate');
     return {
       intent,
       continueToken: data.continueToken,
       ...(normalized.context ? { context: normalized.context } : {}),
-      ...(data.output ? { output: data.output } : {}),
+      ...(output ? { output } : {}),
       ...(data.workspacePath !== undefined ? { workspacePath: data.workspacePath } : {}),
     };
   });
