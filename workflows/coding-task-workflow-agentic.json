@@ -202,7 +202,48 @@
     {
       "id": "phase-0-understand-and-classify",
       "title": "Phase 0: Understand & Classify",
-      "prompt": "Understand this before you touch anything.\n\nMake sure the expected behavior is clear enough to proceed. If it really isn't, ask me only what you can't answer yourself. Don't ask me things you can find with tools.\n\nThen dig through the code. Figure out:\n- where this starts and what the call chain looks like\n- which files, modules, and functions matter\n- what patterns this should follow\n- how this repo verifies similar work\n- what the real risks, invariants, and non-goals are\n\nFigure out what philosophy to use while doing the work. Prefer, in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then me only if those still conflict or aren't enough.\n\nRecord where that philosophy lives, not a summary. If the stated rules and repo patterns disagree, capture the conflict.\n\nOnce you actually understand the task, classify it:\n- `taskComplexity`: Small / Medium / Large\n- `riskLevel`: Low / Medium / High\n- `rigorMode`: QUICK / STANDARD / THOROUGH\n- `automationLevel`: High / Medium / Low\n- `prStrategy`: SinglePR / MultiPR\n\nUse this guidance:\n- QUICK: small, low-risk, clear path, little ambiguity\n- STANDARD: medium scope or moderate risk\n- THOROUGH: large scope, architectural uncertainty, or high-risk change\n\nThen force a context-clarity check. Score each from 0-2 and give one sentence of evidence for each score:\n- `entryPointClarity`: 0 = clear entry point and call chain, 1 = partial chain with gaps, 2 = still unclear where behavior starts or flows\n- `boundaryClarity`: 0 = clear boundary, 1 = likely boundary but some uncertainty, 2 = patch-vs-boundary decision still unclear\n- `invariantClarity`: 0 = important invariants are explicit, 1 = some are inferred or uncertain, 2 = important invariants are still unclear\n- `verificationClarity`: 0 = clear deterministic verification path, 1 = partial verification path, 2 = verification is still weak or unclear\n\nUse the rubric, not vibes:\n- QUICK: do not run the deeper context batch; if the rubric says you're missing too much context, your classification is probably wrong and you should reclassify upward before moving on\n- STANDARD: run the deeper context batch if the total score is 3 or more, or if `boundaryClarity`, `invariantClarity`, or `verificationClarity` is 2\n- THOROUGH: always run the deeper context batch\n\nThe deeper context batch is:\n- `routine-context-gathering` with `focus=COMPLETENESS`\n- `routine-context-gathering` with `focus=DEPTH`\n\nAfter the batch, synthesize what changed, what stayed the same, and what is still unknown. If the extra context changes the classification, update it before you leave this step.\n\nCapture:\n- `taskComplexity`\n- `riskLevel`\n- `rigorMode`\n- `automationLevel`\n- `prStrategy`\n- `contextSummary`\n- `candidateFiles`\n- `invariants`\n- `nonGoals`\n- `openQuestions` (only real human-decision questions)\n- `philosophySources`\n- `philosophyConflicts`\n\n**Architecture alignment check (do this last, after candidateFiles is known):**\n\nFor each candidate file, scan for violations of the philosophy you just discovered. Name each violation explicitly and specifically (e.g. \"runWorkflow() is 4900 lines -- violates compose-with-small-pure-functions\", \"tool factories use params: any -- violates validate-at-boundaries\"). Do not assert absence without checking. If you found no violations, list the principles you checked and why each passes.\n\nThen decide:\n- `architectureViolations`: list of specific violations found (may be empty)\n- `architectureStartsFromScratch`: true if violations are significant enough that the correct design starts from the user's philosophy rather than adapting the existing code. False if violations are minor or out of scope for this task.\n\nIf `architectureStartsFromScratch` is true, the design phase will be constrained: Candidate A (simplest) must still honor the philosophy -- adapting an existing violation is not a valid candidate. Record this now so the design phase uses it.\n\n**Constraint Derivation (mandatory after architecture check, before leaving Phase 0):**\n\nThe architecture check above finds violations in existing code. This step converts what you observed into forward-facing rules that will gate your design -- before a single candidate is written.\n\nCollect constraints from all three sources. Each source catches different failure modes:\n\n**Source 1 -- General coding philosophy** (from session rules, AGENTS.md, CLAUDE.md): What principles from the philosophy apply specifically to this task? Do not list all principles -- only ones that constrain your design space. Example: 'make illegal states unrepresentable' applied here means: 'the loading/error/success states must not be encoded as three nullable fields.'\n\n**Source 2 -- Codebase conventions** (from observed patterns in candidate files): For each recurring pattern you observed, write the rule it implies for new code. Example: 'FormattedDates is always computed in the Reducer' implies 'all display strings must be pre-computed in the Reducer -- never in ViewModel, UseCase, or call site.'\n\n**Source 3 -- Explicit team/project rules** (from AGENTS.md conventions, ADRs, architecture docs, README): Read these if present. Explicit documented rules have higher authority than inferred conventions. Example from a project doc: 'Repository methods must be suspend fun returning Result<T> -- synchronous or nullable-returning methods are not allowed in this layer.'\n\nA constraint is specific when: it names the subject (which component/layer/type), the rule (what must/must not happen), and the prohibited alternative. Generic constraints ('follow patterns', 'maintain separation') fail the specificity gate.\n\nIf a source has no applicable constraints for this task, state what you checked and why. Empty is valid with justification; empty without justification fails the coverage gate.\n\nStore as `derivedConstraints`: array of strings tagged with source. Format: '[PHILOSOPHY] rule text' | '[CONVENTION] rule text' | '[TEAM_RULE] rule text'\n\nThese constraints gate Phase 0-6 and must be cited by each design candidate in Phase 1b.",
+      "promptBlocks": {
+        "goal": "Understand the task, analyze the codebase call chain, locate the philosophy source, classify task complexity/risk/rigor, perform an architecture alignment check, and derive explicit forward-facing constraints.",
+        "constraints": [
+          "Make sure the expected behavior is clear enough to proceed. If it really isn't, ask the user only what you can't answer yourself with tools.",
+          "Figure out what philosophy to use. Prefer in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then user only if they conflict or are not enough.",
+          "Record where the philosophy lives, not a summary. If the rules and repo patterns conflict, capture that conflict.",
+          "Perform the architecture alignment check: scan candidate files for specific philosophy violations. If `architectureStartsFromScratch` is true, Candidate A (simplest) must still honor the philosophy; adapting an existing violation is not valid.",
+          "Constraint Derivation is mandatory: collect and write specific constraints governed by the format '[PHILOSOPHY] rule text', '[CONVENTION] rule text', and '[TEAM_RULE] rule text'. Constraints must name the subject, the rule, and the prohibited alternative."
+        ],
+        "procedure": [
+          "1. Dig through the code to find where behavior starts, candidate files, module/function dependencies, repo verification patterns, risks, invariants, and non-goals.",
+          "2. Classify the task: `taskComplexity` (Small/Medium/Large), `riskLevel` (Low/Medium/High), `rigorMode` (QUICK/STANDARD/THOROUGH), `automationLevel` (High/Medium/Low), and `prStrategy` (SinglePR/MultiPR).",
+          "3. Perform context-clarity check scoring 0-2 (with one sentence of evidence) for: `entryPointClarity`, `boundaryClarity`, `invariantClarity`, and `verificationClarity`.",
+          "4. Run deeper context batch if required by the rubric: STANDARD (total score >= 3 or boundary/invariant/verification clarity = 2) or THOROUGH (always). The batch consists of `routine-context-gathering` with `focus=COMPLETENESS` and `focus=DEPTH`.",
+          "5. Perform the architecture alignment check on candidate files, listing specific violations in `architectureViolations` and setting `architectureStartsFromScratch`.",
+          "6. Derive explicit constraints from all three sources (General coding philosophy, codebase conventions, explicit team/project rules) and store them in `derivedConstraints`."
+        ],
+        "outputRequired": {
+          "taskComplexity": "Small / Medium / Large",
+          "riskLevel": "Low / Medium / High",
+          "rigorMode": "QUICK / STANDARD / THOROUGH",
+          "automationLevel": "High / Medium / Low",
+          "prStrategy": "SinglePR / MultiPR",
+          "contextSummary": "Understanding of problem space and call chain",
+          "candidateFiles": "List of target files",
+          "invariants": "Specific codebase/behavioral invariants",
+          "nonGoals": "Exclusions from scope",
+          "openQuestions": "Clarifying decisions for the user",
+          "philosophySources": "Exact paths/sources where philosophy is declared",
+          "philosophyConflicts": "Any conflicts found between rules and patterns",
+          "architectureViolations": "List of specific violations or principles checked",
+          "architectureStartsFromScratch": "Boolean flag",
+          "derivedConstraints": "List of constraints in '[SOURCE] rule' format"
+        },
+        "verify": [
+          "Complexity, risk, and rigor classifications are set based on the rubric, not vibes.",
+          "A context-clarity check is scored 0-2 for all 4 dimensions with evidence sentences.",
+          "Deeper context gathering batch is run when required by the classification rubric.",
+          "Philosophy violations in candidate files are named specifically or checked principles are listed.",
+          "derivedConstraints is populated with specific rules labeled with [PHILOSOPHY], [CONVENTION], or [TEAM_RULE]."
+        ]
+      },
       "requireConfirmation": {
         "or": [
           {
@@ -260,7 +301,26 @@
     {
       "id": "phase-0-5-upstream-context",
       "title": "Phase 0.5: Locate Upstream Context",
-      "prompt": "Before you start designing, find out what has already been decided upstream. Use whatever tools you have -- repo search, WebFetch, MCP integrations (Confluence, Notion, Google Docs, Glean, Linear, Jira), Memory MCP, whatever is available.\n\nLook for any document that describes this work: a pitch, PRD, BRD, RFC, design doc, user story with acceptance criteria, epic, Jira ticket, or equivalent. Also scan for URLs in the task description -- if someone linked a document, read it.\n\nIf nothing relevant exists, say so and move on. Do not fabricate context.\n\nIf you find something, read it and commit to three questions:\n\n1. **Is the problem fixed?** Does this document commit to a specific problem or need -- or is the framing still open?\n2. **Is the solution fixed?** Does this document commit to a specific technical direction -- or is that still yours to decide?\n3. **What are the hard boundaries?** Extract any explicit effort bounds, out-of-scope exclusions, required constraints, acceptance criteria, or invariants that must hold. Free-form summary -- do not force a schema onto it.\n\nFor the two booleans: if you are genuinely uncertain, default `solutionFixed = false`. Running design ideation when it wasn't strictly needed is a smaller cost than skipping it when it was.\n\nCapture:\n- `upstreamSpecDetected` (boolean)\n- `upstreamSource` (string: where you found it, or 'none')\n- `upstreamContext` (string: short summary of what you found and why it's relevant)\n- `problemFixed` (boolean)\n- `solutionFixed` (boolean)\n- `upstreamBoundaries` (string: the hard constraints extracted -- effort bound, out-of-scope items, required invariants, acceptance criteria)",
+      "promptBlocks": {
+        "goal": "Locate and analyze upstream context (pitches, PRDs, specs, user stories, links) to identify fixed constraints, out-of-scope exclusions, and fixed solutions.",
+        "constraints": [
+          "If nothing relevant exists, say so and move on. Do not fabricate context.",
+          "For the two booleans (problemFixed, solutionFixed): if you are genuinely uncertain, default `solutionFixed = false` to be safe (running design ideation unnecessarily has less cost than skipping it when required)."
+        ],
+        "procedure": [
+          "1. Search for any upstream documents describing this work using all available tools (repo search, Confluence, Notion, Glean, Linear, Jira, Memory MCP).",
+          "2. Scan for URLs in the task description and read any linked resources.",
+          "3. If an upstream document is found, read it and commit to three questions: Is the problem fixed? Is the solution fixed? What are the hard boundaries?"
+        ],
+        "outputRequired": {
+          "upstreamSpecDetected": "Boolean indicating if an upstream spec was found",
+          "upstreamSource": "Source location string (or 'none')",
+          "upstreamContext": "Short summary of relevance",
+          "problemFixed": "Boolean",
+          "solutionFixed": "Boolean",
+          "upstreamBoundaries": "Hard constraints summary (effort bounds, out-of-scope items, required invariants, acceptance criteria)"
+        }
+      },
       "requireConfirmation": false
     },
     {
@@ -312,21 +372,30 @@
       ],
       "assessmentConsequences": [
         {
-          "when": { "anyEqualsLevel": "low", "forAssessment": "constraint-derivation-gate" },
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "constraint-derivation-gate"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "One or more constraints scored low on specificity or source coverage. Rewrite vague constraints to name the specific subject, rule, and prohibited alternative. For any unchecked source (philosophy, codebase conventions, team/project rules): explicitly state what you checked and why no constraints apply, or add the missing constraints."
           }
         },
         {
-          "when": { "anyEqualsLevel": "low", "forAssessment": "type-design-gate" },
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "type-design-gate"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "At least one proposed type has a nullable or optional field that encodes semantically distinct states. Redesign that type: replace the nullable field with explicit state variants (a discriminated union or sealed class) so that illegal state combinations cannot be constructed."
           }
         },
         {
-          "when": { "anyEqualsLevel": "low", "forAssessment": "interface-responsibility-gate" },
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "interface-responsibility-gate"
+          },
           "effect": {
             "kind": "require_followup",
             "guidance": "At least one interface you plan to extend has an unstated responsibility. For each interface: write one sentence stating what it takes, what it returns, and what invariant it preserves. Then verify the new behavior does not violate that responsibility before proceeding to design."
@@ -354,7 +423,20 @@
           }
         ]
       },
-      "prompt": "Before you do design work, tell me your current best guess.\n\nKeep it short:\n1. what you think the right approach is\n2. what worries you about it\n3. what would most likely make it wrong\n\nCapture:\n- `initialHypothesis`",
+      "promptBlocks": {
+        "goal": "State your initial best-guess hypothesis of the technical approach before generating design candidates.",
+        "constraints": [
+          "Keep the hypothesis concise and focused."
+        ],
+        "procedure": [
+          "1. Summarize what you think the right technical approach is.",
+          "2. Identify what worries you most about this approach.",
+          "3. State what would most likely make this approach incorrect."
+        ],
+        "outputRequired": {
+          "initialHypothesis": "Short paragraph addressing the approach, concerns, and failure triggers"
+        }
+      },
       "requireConfirmation": false
     },
     {
@@ -376,7 +458,23 @@
           }
         ]
       },
-      "prompt": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.\n\nProduce two mandatory candidates:\n1. The simplest possible change that satisfies acceptance criteria\n2. Follow the existing repo pattern for this kind of change\n\nFor each candidate:\n- One-sentence summary\n- Which tensions it resolves and which it accepts\n- How it relates to existing repo patterns (follows / adapts / departs)\n- Failure mode to watch\n- Philosophy fit (name specific principles)\n\nCompare and recommend. If both converge on the same approach, say so honestly.\n\nWrite the output to `design-candidates.md` with this structure:\n- Problem Understanding (core tensions, what makes it hard)\n- Philosophy Constraints (which principles matter for this problem)\n- Candidates (each with: summary, tensions resolved/accepted, failure mode, philosophy fit)\n- Comparison and Recommendation\n- Open Questions (if any remain)",
+      "promptBlocks": {
+        "goal": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.",
+        "constraints": [
+          "Produce two mandatory candidates: 1. The simplest possible change that satisfies acceptance criteria; 2. The approach that follows the existing repo pattern.",
+          "Write the output to `design-candidates.md`.",
+          "If both candidates converge on the same approach, say so honestly."
+        ],
+        "procedure": [
+          "1. Formulate Candidate 1 (simplest possible change) and Candidate 2 (existing repo pattern).",
+          "2. For each candidate, provide: a one-sentence summary, tensions resolved/accepted, relation to repo patterns (follows/adapts/departs), failure mode to watch, and philosophy fit (specific principles).",
+          "3. Compare the candidates and recommend an approach.",
+          "4. Document the design in `design-candidates.md` using the structure: Problem Understanding, Philosophy Constraints, Candidates, Comparison & Recommendation, Open Questions."
+        ],
+        "outputRequired": {
+          "designCandidates": "Markdown structure containing design details, compared and documented in design-candidates.md"
+        }
+      },
       "requireConfirmation": false
     },
     {
@@ -440,7 +538,27 @@
           }
         ]
       },
-      "prompt": "Read `design-candidates.md`, compare it to your original guess, and make the call.\n\nBe explicit about three things:\n- what the design work confirmed\n- what changed your mind\n- what you missed the first time\n\nThen pressure-test the leading option:\n- what's the strongest case against it?\n- what assumption breaks it?\n\nAfter the challenge batch, say:\n- what changed your mind\n- what didn't\n- which findings you reject and why\n\nPick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.\n\nCapture:\n- `selectedApproach` — chosen design with rationale tied to tensions\n- `runnerUpApproach` — next-best option and why it lost\n- `architectureRationale` — tensions resolved vs accepted\n- `pivotTriggers` — conditions under which you'd switch to the runner-up\n- `keyRiskToMonitor` — failure mode of the selected approach\n- `acceptedTradeoffs`\n- `identifiedFailureModes`",
+      "promptBlocks": {
+        "goal": "Read `design-candidates.md`, compare it to your original guess, pressure-test the options, and make the final design selection.",
+        "constraints": [
+          "Pick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch."
+        ],
+        "procedure": [
+          "1. Read `design-candidates.md` and compare the proposed approaches against your original guess.",
+          "2. Be explicit about three things: what the design work confirmed, what changed your mind, and what you missed the first time.",
+          "3. Pressure-test the leading option: what is the strongest case against it? What assumption breaks it?",
+          "4. After the challenge batch, say what changed your mind, what did not, and which findings you reject and why."
+        ],
+        "outputRequired": {
+          "selectedApproach": "Chosen technical design with rationale tied to tensions",
+          "runnerUpApproach": "Next-best option and why it lost",
+          "architectureRationale": "Tensions resolved vs accepted",
+          "pivotTriggers": "Conditions under which you would switch to the runner-up",
+          "keyRiskToMonitor": "Failure mode of the selected approach",
+          "acceptedTradeoffs": "List of accepted compromises",
+          "identifiedFailureModes": "Specific failure paths identified"
+        }
+      },
       "promptFragments": [
         {
           "id": "phase-1c-challenge-standard",
@@ -533,7 +651,27 @@
           }
         ]
       },
-      "prompt": "An upstream document has fixed the solution direction. Your job is to translate it into a concrete engineering approach, then pressure-test the translation on technical grounds.\n\nFrom `upstreamContext` and `upstreamBoundaries`, derive:\n1. **selectedApproach** -- the technical strategy. Name key interfaces, types, and modules. Do not re-open decisions already fixed by the upstream document.\n2. **architectureRationale** -- which upstream constraints drove each technical decision.\n3. **pivotTriggers** -- conditions under which the approach needs revisiting (engineering discoveries only, not product pivots).\n4. **acceptedTradeoffs** -- engineering tradeoffs accepted to honor upstream constraints.\n5. **identifiedFailureModes** -- technical risks in this approach.\n\nThen challenge the translation on purely technical grounds: what is the strongest engineering case against this approach? Which module boundary assumption is most likely wrong? Which integration point is least understood? Record your honest answer before continuing.\n\nIf `upstreamBoundaries` includes an effort bound (appetite, deadline, sprint allocation), treat it as a ceiling -- scope down to fit rather than expand. Record any engineering concerns that exceed it as `followUpTickets`.\n\nCapture:\n- `selectedApproach`\n- `architectureRationale`\n- `pivotTriggers`\n- `acceptedTradeoffs`\n- `identifiedFailureModes`\n- `followUpTickets` (initialize if needed)",
+      "promptBlocks": {
+        "goal": "Translate the upstream solution direction into a concrete technical approach, then pressure-test the translation on purely engineering grounds.",
+        "constraints": [
+          "Do not re-open decisions already fixed by the upstream document.",
+          "If `upstreamBoundaries` includes an effort bound, treat it as a ceiling -- scope down to fit rather than expand."
+        ],
+        "procedure": [
+          "1. Read `upstreamContext` and `upstreamBoundaries` carefully.",
+          "2. Derive: a concrete technical strategy (`selectedApproach`), constraints that drove decisions (`architectureRationale`), pivot triggers (`pivotTriggers`), accepted engineering tradeoffs (`acceptedTradeoffs`), and technical risks (`identifiedFailureModes`).",
+          "3. Challenge the translation on technical grounds: identify the strongest case against it, which boundary assumption is most likely incorrect, and which integration point is least understood. Record your honest answer.",
+          "4. Record any engineering concerns exceeding the effort bounds as `followUpTickets`."
+        ],
+        "outputRequired": {
+          "selectedApproach": "The technical strategy",
+          "architectureRationale": "Upstream constraints that drove each decision",
+          "pivotTriggers": "Engineering discoveries that would trigger revisiting the design",
+          "acceptedTradeoffs": "List of engineering tradeoffs accepted",
+          "identifiedFailureModes": "Technical risks in this approach",
+          "followUpTickets": "List of deferred items (initialize if needed)"
+        }
+      },
       "requireConfirmation": {
         "or": [
           {
@@ -572,7 +710,23 @@
         {
           "id": "phase-2a-pre-assess-design-review",
           "title": "Pre-Assess Design Review",
-          "prompt": "Before the detailed design review, state your current assessment in 2-4 sentences.\n\nSay:\n- what you think the strongest part of the selected design is right now\n- what you think the weakest part is right now\n- which tradeoff or failure mode worries you most\n\nThis is your reference point for interpreting the review findings.\n\nSet this key in the next `continue_workflow` call's `context` object:\n- `designReviewAssessment`",
+          "promptBlocks": {
+            "goal": "State your initial, high-level assessment of the selected design in 2-4 sentences before starting the detailed design review.",
+            "constraints": [
+              "This serves as your reference point for interpreting the review findings."
+            ],
+            "procedure": [
+              "1. Summarize what you think the strongest part of the selected design is right now.",
+              "2. Summarize what you think the weakest part is right now.",
+              "3. Identify which tradeoff or failure mode worries you the most."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Summary of initial design review assessment"
+            },
+            "verify": [
+              "Set this key in the next `continue_workflow` call's `context` object:\n- `designReviewAssessment`"
+            ]
+          },
           "requireConfirmation": false
         },
         {
@@ -589,7 +743,23 @@
         {
           "id": "phase-2c-synthesize-design-review",
           "title": "Synthesize Design Review Findings",
-          "prompt": "Read `design-review-findings.md` and turn the review into workflow-owned decisions.\n\nCompare it against `designReviewAssessment`:\n- what did the review confirm?\n- what did it surface that you missed?\n- what changed your mind and what held firm?\n\nIf the findings are real, fix the design before you continue (`selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`).\n\nAfter any extra challenge, synthesize explicitly:\n- which findings actually matter\n- what changed in the design\n- what you reject and why\n\nFor any finding that changes the decision, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, artifacts, spec, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to drive the decision yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nCapture:\n- `designFindings`\n- `designRevised`",
+          "promptBlocks": {
+            "goal": "Read `design-review-findings.md` and turn the review findings into workflow-owned decisions.",
+            "constraints": [
+              "If the findings are real, revise the design before you continue.",
+              "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
+            ],
+            "procedure": [
+              "1. Compare findings against your `designReviewAssessment`: what did the review confirm? What did it surface that you missed? What changed your mind and what held firm?",
+              "2. If findings are verified, update the design: `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`.",
+              "3. Synthesize the findings explicitly, specifying which findings matter, what changed in the design, and what you reject and why.",
+              "4. Classify each finding that affects decisions as: `Confirmed` (verified against code, spec, build, or workflow context), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence)."
+            ],
+            "outputRequired": {
+              "designFindings": "Summary of findings and classifications",
+              "designRevised": "Boolean indicating whether the design was updated"
+            }
+          },
           "promptFragments": [
             {
               "id": "phase-2c-upstream-focus",
@@ -613,7 +783,21 @@
         {
           "id": "phase-2d-loop-decision",
           "title": "Design Review Loop Decision",
-          "prompt": "Decide whether the design needs another pass.\n\nIf `designFindings` is non-empty and the design was revised, keep going so the revision gets checked.\nIf `designFindings` is empty, stop.\nIf you've hit the limit, stop and record the remaining concerns.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "promptBlocks": {
+            "goal": "Decide whether the design needs another review pass or is ready to advance.",
+            "constraints": [
+              "If `designFindings` is non-empty and the design was revised, continue the loop so the revision gets checked.",
+              "If `designFindings` is empty, stop.",
+              "If you have hit the loop iteration limit, stop and record the remaining concerns."
+            ],
+            "procedure": [
+              "1. Evaluate whether to continue design review (`continue`) or stop (`stop`).",
+              "2. Emit the required `wr.loop_control` loop-control artifact in the correct format."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Loop exit decision rationale summary"
+            }
+          },
           "requireConfirmation": false,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -628,7 +812,26 @@
         "var": "taskComplexity",
         "not_equals": "Small"
       },
-      "prompt": "Turn the decision into a plan someone else could execute without guessing.\n\n**Open questions gate:** check `openQuestions` from Phase 0. If any remain unanswered and would materially affect implementation quality, either resolve them now with tools or record them in the risk register with an explicit decision about how to proceed without them. Do not silently carry unanswered questions into implementation.\n\nUpdate `implementation_plan.md`.\n\nIt should cover:\n1. Problem statement\n2. Acceptance criteria (mirror `spec.md` if it exists; `spec.md` owns observable behavior)\n3. Non-goals\n4. Philosophy-driven constraints\n5. Invariants\n6. Selected approach + rationale + runner-up\n7. Vertical slices\n8. Work packages only if they actually help\n9. Test design\n10. Risk register\n11. PR packaging strategy\n12. Philosophy alignment per slice:\n   - [principle] -> [satisfied / tension / violated + 1-line why]\n\nCapture:\n- `implementationPlan`\n- `slices`\n- `testDesign`\n- `estimatedPRCount`\n- `followUpTickets` (initialize if needed)\n- `unresolvedUnknownCount` — count of open questions that would materially affect implementation quality\n- `planConfidenceBand` — Low / Medium / High\n\nThe plan is the deliverable for this step. Do not implement anything -- not a \"quick win\", not a file read that bleeds into edits, nothing. Execution begins in Phase 6, one slice at a time. If you find yourself writing code or editing source files right now, stop immediately.",
+      "promptBlocks": {
+        "goal": "Turn the design decision into a plan someone else could execute without guessing, captured in `implementation_plan.md`.",
+        "constraints": [
+          "Check `openQuestions` from Phase 0: do not silently carry unanswered questions that would materially affect quality into implementation; resolve them or explicitly record decisions in the risk register.",
+          "The plan is the sole deliverable for this step. Do not write or edit any source files or implement anything (not even 'quick wins')."
+        ],
+        "procedure": [
+          "1. Update `implementation_plan.md` with: Problem statement, Acceptance criteria, Non-goals, Philosophy-driven constraints, Invariants, Selected approach + rationale, Slices, Test design, Risk register, PR packaging, and Philosophy alignment per slice.",
+          "2. Estimate PR count and specify unresolved questions count."
+        ],
+        "outputRequired": {
+          "implementationPlan": "Markdown content written to implementation_plan.md",
+          "slices": "Array of vertical slices with clear boundaries",
+          "testDesign": "Strategy for automated and manual verification",
+          "estimatedPRCount": "Estimated number of PRs for the task",
+          "followUpTickets": "List of deferred items (initialize if needed)",
+          "unresolvedUnknownCount": "Count of open questions that materially affect quality",
+          "planConfidenceBand": "Low / Medium / High confidence band"
+        }
+      },
       "assessmentRefs": [
         "plan-completeness-gate",
         "invariant-clarity-gate",
@@ -670,7 +873,19 @@
           }
         ]
       },
-      "prompt": "Write `spec.md`.\n\nKeep it about what the feature does from the outside, not how you plan to build it.\n\nInclude:\n1. Feature summary\n2. Acceptance criteria\n3. Non-goals\n4. External API / interface contract if it matters\n5. Edge cases and failure modes\n6. How each acceptance criterion will be verified\n\nKeep it tight. If something can't be verified, it doesn't belong as an acceptance criterion.\n\n`spec.md` is canonical for observable behavior.",
+      "promptBlocks": {
+        "goal": "Write the `spec.md` artifact representing the canonical specification for observable behavior.",
+        "constraints": [
+          "Keep the specification focused entirely on what the feature does from the outside, not how you plan to build it.",
+          "Keep it tight: if something cannot be verified, it does not belong as an acceptance criterion."
+        ],
+        "procedure": [
+          "1. Generate `spec.md` detailing: Feature summary, Acceptance criteria, Non-goals, External API/interface contracts (if applicable), Edge cases, Failure modes, and the Verification method for each acceptance criterion."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Summary of created/updated spec.md"
+        }
+      },
       "requireConfirmation": false
     },
     {
@@ -702,7 +917,26 @@
         {
           "id": "phase-4a-audit-and-refocus",
           "title": "Audit Plan and Apply Fixes",
-          "prompt": "Audit the plan and fix it in the same pass. Fix the plan -- do NOT write or edit source code here. If you find something that looks like a trivial code fix, note it in the plan for Phase 6. Do not implement anything.\n\nLook for:\n- missing work\n- weak assumptions and risks\n- invariant gaps\n- bad slice boundaries\n- philosophy violations or tensions\n- regressions from things you already fixed\n- mismatches between `implementation_plan.md` and `spec.md` if there is a spec\n\nBefore you delegate, say what looks weakest right now and what you trust least.\n\nAfter the audit batch, synthesize explicitly:\n- what multiple auditors agreed on\n- what only one auditor raised\n- what you reject and why\n- what changed in the plan because of the audit\n\nFor any finding that changes the plan, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, plan/spec artifacts, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to change the plan yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nThen fix the plan immediately:\n- update `implementation_plan.md`\n- update `spec.md` if acceptance criteria or other observable behavior changed\n- update `slices` if the shape changed\n- move out-of-scope work into `followUpTickets`\n- track resolved findings (cap at 10, drop oldest)\n\nCapture:\n- `planFindings`\n- `planConfidence`\n- `resolvedFindings`\n- `followUpTickets`\n\nIf the plan drifted, fix the plan. Don't just keep going.",
+          "promptBlocks": {
+            "goal": "Audit the implementation plan and spec artifacts for correctness, consistency, completeness, and alignment with the coding philosophy, and apply fixes immediately.",
+            "constraints": [
+              "Fix the plan -- do NOT write or edit source code in this step. If a minor code fix is discovered, note it for Phase 6; do not implement it early.",
+              "If the plan has drifted, update `implementation_plan.md` and `spec.md` immediately rather than continuing with a stale plan."
+            ],
+            "procedure": [
+              "1. Audit the plan for: missing work, weak assumptions, invariant gaps, bad slice boundaries, philosophy violations/tensions, regressions, and plan-spec mismatches.",
+              "2. Before you delegate to any subagent auditors, declare what looks weakest in the plan and what you trust least.",
+              "3. After the audit runs, synthesize the feedback: what did auditors agree on, what did only one raise, what do you reject and why, and what changed in the plan.",
+              "4. Classify each finding as: `Confirmed` (verified against code, artifacts, build/tests), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence).",
+              "5. Update `implementation_plan.md` and `spec.md` (if acceptance criteria changed), adjust `slices` if needed, track up to 10 `resolvedFindings`, and file out-of-scope work under `followUpTickets`."
+            ],
+            "outputRequired": {
+              "planFindings": "Summary of findings and classifications",
+              "planConfidence": "Confidence score / band",
+              "resolvedFindings": "List of resolved findings (up to 10)",
+              "followUpTickets": "Deferred items (initialize if needed)"
+            }
+          },
           "promptFragments": [
             {
               "id": "phase-4a-upstream-anchor",
@@ -742,7 +976,21 @@
         {
           "id": "phase-4b-loop-decision",
           "title": "Loop Exit Decision",
-          "prompt": "Decide whether the plan needs another pass.\n\nIf `planFindings` is non-empty, keep going.\nIf it's empty, stop — but say what you checked so the clean pass means something.\nIf you've hit the limit, stop and record what still bothers you.\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "promptBlocks": {
+            "goal": "Decide whether the plan needs another review/audit pass or is ready to execute.",
+            "constraints": [
+              "If `planFindings` is non-empty, continue the loop (`decision = continue`).",
+              "If `planFindings` is empty, stop the loop (`decision = stop`).",
+              "If you have hit the loop iteration limit, stop the loop and record the remaining concerns."
+            ],
+            "procedure": [
+              "1. Evaluate the exiting condition and declare what was checked to confirm a clean pass.",
+              "2. Emit the required `wr.loop_control` loop-control artifact in the correct format."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Loop exit decision rationale summary"
+            }
+          },
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -757,7 +1005,25 @@
         "var": "taskComplexity",
         "equals": "Small"
       },
-      "prompt": "For Small tasks, fast does not mean shallow. Every item below is required.\n\n**Upstream spec check:** if `upstreamSpecDetected = true` and `taskComplexity = Small`, verify this classification is correct. If the upstream document describes non-trivial scope (multiple requirements, explicit out-of-scope items, acceptance criteria beyond a single behavior), the Small classification is likely wrong. Reclassify upward to Medium before proceeding -- do not silently discard upstream constraints by staying on the fast path.\n\n**1. Confirm all wiring points with tools.**\nDon't assume a file you create is reachable. Check every public entry point:\n- Does the new symbol need to be exported from an index file?\n- Does it need to be imported and registered somewhere (CLI command map, router, DI container, plugin registry)?\n- Is there a test file that needs to reference it?\nTrace the full call path from the public interface down to your new code before writing anything.\n\n**2. Implement the smallest correct change.**\nChange exactly what needs changing. No drive-by refactors, no extra abstractions.\n\n**3. Verify end-to-end.**\n- Run build and tests. Both must pass.\n- Manually trace the new behavior through the public entry point (e.g. run the CLI command, check the export resolves, hit the endpoint). If you can't do this deterministically with tools, say why.\n- Apply the user's coding philosophy as the review lens. Flag any violation by principle name.\n\n**4. Produce a handoff note.**\nOutput a notes artifact containing a JSON fenced block with the following fields.\nThe daemon reads this block to run `git commit` and `gh pr create` -- write it exactly as shown:\n\n```json\n{\n  \"commitType\": \"feat\",\n  \"commitScope\": \"mcp\",\n  \"commitSubject\": \"imperative mood, max 72 chars total with type(scope): prefix, no period\",\n  \"prTitle\": \"same as full commit first line\",\n  \"prBody\": \"markdown with ## Summary (bullets) and ## Test plan (checklist)\",\n  \"followUpTickets\": [],\n  \"filesChanged\": [\"src/path/to/file.ts\", \"tests/unit/file.test.ts\"]\n}\n```\n\nFields:\n- `commitType`: feat / fix / chore / refactor / docs / test / perf (pick one)\n- `commitScope`: product area only (console / mcp / workflows / engine / schema / docs)\n- `commitSubject`: imperative mood, max 72 chars total with type(scope): prefix, no period\n- `prTitle`: same as full commit first line\n- `prBody`: markdown with ## Summary (bullets) and ## Test plan (checklist)\n- `followUpTickets`: list of deferred items, or empty array\n- `filesChanged`: list of every file you created or modified (required -- do not omit)\n\nThe daemon will use this artifact to run git commit and open the PR. Do not commit or push yourself.\n\nDo not create heavyweight planning artifacts unless risk unexpectedly grows.",
+      "promptBlocks": {
+        "goal": "Implement the task directly on the fast path for Small tasks.",
+        "constraints": [
+          "For Small tasks, fast does not mean shallow. Every item is required.",
+          "Upstream spec check: if `upstreamSpecDetected = true`, verify this classification is correct. If scope is non-trivial, reclassify upward to Medium -- do not silently discard upstream constraints.",
+          "Implement the smallest correct change: change exactly what needs changing, with no drive-by refactors and no extra abstractions.",
+          "Do not create heavyweight planning artifacts unless risk unexpectedly grows."
+        ],
+        "procedure": [
+          "1. Confirm all wiring points with tools: trace exports, index files, imports/registrations, CLI command maps, and tests before writing anything.",
+          "2. Implement the minimum correct change.",
+          "3. Verify end-to-end: run build and tests (both must pass), trace behavior through entry points, and review with the philosophy lens.",
+          "4. Produce a handoff note: output a notes artifact containing a JSON fenced block with fields: `commitType`, `commitScope`, `commitSubject`, `prTitle`, `prBody`, `followUpTickets`, `filesChanged`."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Summary of the implementation and verification findings",
+          "handoffBlock": "JSON block for daemon auto-commit"
+        }
+      },
       "requireConfirmation": false
     },
     {
@@ -779,7 +1045,26 @@
         {
           "id": "phase-6a-implement-slice",
           "title": "Implement Slice",
-          "prompt": "Implement the current slice: `{{currentSlice.name}}`.\n\nBefore writing a single line of code, declare your scope:\n- List the exact files and symbols this slice touches\n- Confirm none of them belong to a later slice\n- If you have already edited files from this or any other slice in a previous step, stop and report it\n\nHard scope rule: you may only modify what is described in `{{currentSlice.name}}`. Anything outside that boundary is out of scope for this iteration -- not \"do it early\", not \"while I'm here\". If you discover you need to touch something outside this slice to make it compile or integrate, set `unexpectedScopeChange = true` and do the minimum necessary to stay green, then stop.\n\nImplement incrementally. Run tests and build to prove the slice works before advancing.\n\nTrack:\n- `specialCaseIntroduced` -- did this slice require a new special-case?\n- `unplannedAbstractionIntroduced` -- did this slice introduce an abstraction not in the plan?\n- `unexpectedScopeChange` -- did this slice touch files outside its planned scope?\n\nSet `verifyNeeded` to true if ANY of:\n- `prStrategy = MultiPR`\n- `specialCaseIntroduced = true`\n- `unplannedAbstractionIntroduced = true`\n- `unexpectedScopeChange = true`\n- tests or build failed\n\nCapture: `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, `unexpectedScopeChange`, `verifyNeeded`",
+          "promptBlocks": {
+            "goal": "Implement the vertical slice `{{currentSlice.name}}` under strict scope discipline.",
+            "constraints": [
+              "Before writing a single line of code, declare your scope: list exact files/symbols touched, and confirm none belong to a later slice.",
+              "If you have already edited files from this or any other slice in a previous step, stop and report it immediately.",
+              "Hard scope rule: modify ONLY what is described in `{{currentSlice.name}}`. Anything outside that boundary is out of scope. If integration work is required, set `unexpectedScopeChange = true` and do the minimum necessary to compile, then stop."
+            ],
+            "procedure": [
+              "1. Declare the scope of files and symbols to touch.",
+              "2. Implement the changes incrementally, running tests and build to prove correctness before advancing.",
+              "3. Track metrics: `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, `unexpectedScopeChange`.",
+              "4. Determine if verification is needed: set `verifyNeeded` to true if multi-PR strategy is active, any of the tracking metrics are true, or if build/tests fail."
+            ],
+            "outputRequired": {
+              "specialCaseIntroduced": "Boolean flag",
+              "unplannedAbstractionIntroduced": "Boolean flag",
+              "unexpectedScopeChange": "Boolean flag",
+              "verifyNeeded": "Boolean flag indicating if verification is required before loop exits"
+            }
+          },
           "requireConfirmation": false
         },
         {
@@ -789,7 +1074,24 @@
             "var": "verifyNeeded",
             "equals": true
           },
-          "prompt": "Take a fresh look at what you just changed.\n\nCheck whether:\n- it matches the plan's intent, not just the letter\n- it hides assumptions or skips edge cases\n- invariants still hold\n- it regressed against the user's philosophy\n- multiple unverified slices now need to be reviewed together\n- `unexpectedScopeChange` was just harmless integration work or real plan drift\n\nIf any of `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, or `unexpectedScopeChange` is true, or if tests/build were shaky, run the verification batch before you decide this slice is done.\n\nAfter the verification batch, synthesize explicitly:\n- what multiple reviewers agreed on\n- what only one reviewer raised\n- what you reject and why\n- whether the drift was harmless integration work or real plan drift\n\nFor any finding that changes whether this slice is accepted, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, plan/spec artifacts, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to accept or block the slice yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nSay where you're least confident.\n\nIf the slice drifted materially, update `implementation_plan.md` and `spec.md` if observable behavior changed. If the drift changed boundaries or makes the current plan unreliable, stop and go back to planning.\n\nIf the concerns are serious, stop and go back to planning or ask me. Don't wave this through just because the code exists.\n\nCapture:\n- `verificationFindings`\n- `verificationFailed`",
+          "promptBlocks": {
+            "goal": "Verify the implemented vertical slice against plan intent, invariants, and coding philosophy.",
+            "constraints": [
+              "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence.",
+              "If the slice drifted materially, update `implementation_plan.md` and `spec.md` immediately. If the drift changed boundaries or makes the plan unreliable, stop and go back to planning."
+            ],
+            "procedure": [
+              "1. Evaluate whether the changes match the plan's intent, preserve invariants, and satisfy the user's coding philosophy.",
+              "2. Check if the drift or scope changes were harmless integration work or plan drift.",
+              "3. If any tracking metric is true or build/tests are shaky, run the verification batch before completing this step.",
+              "4. After the verification runs, synthesize the feedback explicitly: what did reviewers agree on, what did only one raise, what do you reject and why, and classify findings as `Confirmed`, `Plausible`, or `Rejected`.",
+              "5. Say where you are least confident."
+            ],
+            "outputRequired": {
+              "verificationFindings": "Summary of findings and classifications",
+              "verificationFailed": "Boolean flag indicating if verification failed and requires roll-back/replanning"
+            }
+          },
           "promptFragments": [
             {
               "id": "phase-6b-delegation-quick",
@@ -871,7 +1173,25 @@
         {
           "id": "phase-7b-fix-and-summarize",
           "title": "Synthesize Findings, Fix, and Re-Verify",
-          "prompt": "Read `final-verification-findings.md` and decide what actually needs fixing.\n\nDon't rubber-stamp it. The verifier is evidence, not the decision.\n\nIf `spec.md` exists, use it as the verification anchor and make sure every acceptance criterion is actually met.\n\nThis loop is verify, fix, then re-verify. If you fix anything here, the next pass exists to prove the fixes worked.\n\nSynthesize the verification output explicitly:\n- what the verifier found\n- what you agree with\n- what you reject and why\n- what changed because of the fixes\n\nFor any finding that changes final acceptance, classify it as:\n- `Confirmed`: you checked it against primary evidence (code, spec, tests/build, or direct workflow context)\n- `Plausible`: interesting, but not verified enough to accept or block final signoff yet\n- `Rejected`: contradicted by fuller context or direct evidence\n\nSubagent agreement alone is not enough for `Confirmed`.\n\nFix what has to be fixed now, rerun the affected verification, and update:\n- `implementation_plan.md` if the execution shape changed\n- `spec.md` if acceptance criteria, observable behavior, or external contracts changed\n\nCapture:\n- `integrationFindings`\n- `integrationPassed`\n- `regressionDetected`",
+          "promptBlocks": {
+            "goal": "Analyze the final verification findings, apply any required fixes, and update the implementation artifacts.",
+            "constraints": [
+              "Do not rubber-stamp results. The verification findings report is evidence, not the final decision.",
+              "If `spec.md` exists, use it as the canonical verification anchor to ensure every single acceptance criterion is met.",
+              "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
+            ],
+            "procedure": [
+              "1. Read `final-verification-findings.md` and decide what actually requires fixing.",
+              "2. Synthesize the findings explicitly, identifying what the verifier found, what you agree with, what you reject and why, and what changed because of fixes.",
+              "3. Classify findings that affect final acceptance as: `Confirmed`, `Plausible`, or `Rejected`.",
+              "4. Fix issues immediately, rerun affected verification, and update `implementation_plan.md` (if execution shape changed) and `spec.md` (if spec/contracts changed)."
+            ],
+            "outputRequired": {
+              "integrationFindings": "Summary of findings and classifications",
+              "integrationPassed": "Boolean flag indicating if integration pass succeeded",
+              "regressionDetected": "Boolean flag"
+            }
+          },
           "assessmentRefs": [
             "build-correctness-gate",
             "invariant-preservation-gate",
@@ -893,7 +1213,24 @@
         {
           "id": "phase-7c-loop-decision",
           "title": "Final Verification Loop Decision",
-          "prompt": "Decide whether final verification needs another pass or whether we're done.\n\nThis loop gets up to two verify/fix passes.\n- If verification found real issues and you fixed them, keep going so the fixes get re-verified.\n- If the issues are clean or resolved, stop.\n- If you've hit the limit, stop and record what remains.\n\nWhen you stop, include:\n- acceptance criteria status\n- invariant status\n- test/build summary\n- follow-up tickets\n- any philosophy tensions you accepted on purpose\n\n**Handoff block (required for daemon auto-commit):**\nInclude a JSON fenced block in your notes. The daemon reads this to run `git commit` and `gh pr create`:\n\n```json\n{\n  \"commitType\": \"feat\",\n  \"commitScope\": \"mcp\",\n  \"commitSubject\": \"imperative mood, max 72 chars total with type(scope): prefix, no period\",\n  \"prTitle\": \"same as full commit first line\",\n  \"prBody\": \"markdown with ## Summary (bullets) and ## Test plan (checklist)\",\n  \"followUpTickets\": [],\n  \"filesChanged\": [\"src/path/to/file.ts\", \"tests/unit/file.test.ts\"]\n}\n```\n\nFields: `commitType` (feat/fix/chore/refactor/docs/test/perf), `commitScope` (product area only: console/mcp/workflows/engine/schema/docs), `commitSubject` (imperative, <=72 chars including prefix, no period), `prTitle` (same as commit first line), `prBody` (markdown), `followUpTickets` (array), `filesChanged` (required -- every file created or modified).\n\nThen emit the required loop-control artifact in this shape (`decision` must be `continue` or `stop`):\n```json\n{\n  \"artifacts\": [{\n    \"kind\": \"wr.loop_control\",\n    \"decision\": \"continue\"\n  }]\n}\n```",
+          "promptBlocks": {
+            "goal": "Decide whether the final verification needs another pass or is ready to complete.",
+            "constraints": [
+              "This loop gets up to two verify/fix passes.",
+              "If verification found real issues and you fixed them, continue the loop (`decision = continue`) so fixes are re-verified.",
+              "If the issues are clean or resolved, stop (`decision = stop`).",
+              "If you have hit the loop iteration limit, stop and record what remains."
+            ],
+            "procedure": [
+              "1. When stopping, include in notes: acceptance criteria status, invariant status, test/build summary, follow-up tickets, and accepted philosophy compromises.",
+              "2. Include a JSON fenced block containing the `handoffBlock` in the exact structure specified in instructions.",
+              "3. Emit the required `wr.loop_control` loop-control artifact in the correct format."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Loop exit decision rationale summary",
+              "handoffBlock": "JSON block for daemon auto-commit"
+            }
+          },
           "requireConfirmation": true,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
@@ -905,7 +1242,24 @@
       "id": "phase-8-retrospective",
       "title": "Phase 8: Retrospective",
       "requireConfirmation": false,
-      "prompt": "The implementation is done and verified. Now look back.\n\nThis is not a re-run of tests. It is a short honest look at the work you just did.\n\nAsk yourself:\n\n1. **What would you do differently?** Now that the implementation is real, what approach, boundary, or decision looks wrong in hindsight?\n\n2. **What adjacent problems did this reveal?** Did the implementation expose gaps, tech debt, or fragile assumptions in the surrounding code that were not in scope but are worth noting?\n\n3. **What follow-up work is now visible?** What is the natural next step that became clear only after doing this work?\n\n4. **What was harder or easier than expected?** Were there surprises -- good or bad -- that would change how similar tasks are approached next time?\n\nProduce 2-4 concrete observations. Each should be specific enough to act on.\n\nFor each observation:\n- **File as follow-up**: add to backlog or open a ticket if it warrants tracking\n- **Accept**: note it explicitly if it is a known limitation you are consciously leaving\n- **Fix now**: if it is small and low-risk, fix it before closing\n\nCapture:\n- `retrospectiveObservations`: list of observations with disposition (filed/accepted/fixed)\n- `followUpTickets`: any new tickets created (append to existing list)\n\nBefore completing this step, emit a wr.coding_handoff artifact in your complete_step call:\n{\n  \"kind\": \"wr.coding_handoff\",\n  \"version\": 1,\n  \"branchName\": \"<git branch name containing your changes>\",\n  \"keyDecisions\": [\"<architectural decision + WHY>\", ...],\n  \"knownLimitations\": [\"<known gap or deliberate shortcut>\", ...],\n  \"testsAdded\": [\"<test file or test name added>\", ...],\n  \"filesChanged\": [\"<primary file path changed>\", ...]\n}\nNote: correctedAssumptions is populated ONLY by fix/retry agents when correcting assumptions from a prior coding session. On a first-run coding session, omit this field entirely.\n\n5. **Interpretation accuracy check.** Did this session build what was intended? If there was a gap between what you set out to build and what you actually built, classify it:\n- Subtype A: you misread or misunderstood the ticket (the task description said one thing and you built something else)\n- Subtype B: you had a wrong model of how this codebase works (you understood the task but your assumption about a design pattern, invariant, or module behavior turned out to be incorrect)\n- Unclear: you cannot confidently attribute the gap to one type\n\nIf there was no gap, say so explicitly. Add this classification to `retrospectiveObservations`.",
+      "promptBlocks": {
+        "goal": "Review the completed work and reflect on key decisions, learnings, assumptions, and adjacent problems.",
+        "constraints": [
+          "This is not a re-run of tests. It is a short, honest retrospective look at the work.",
+          "Produce 2-4 concrete, actionable observations.",
+          "Note: correctedAssumptions is populated ONLY by fix/retry agents when correcting assumptions from a prior coding session. On a first-run coding session, omit this field entirely."
+        ],
+        "procedure": [
+          "1. Answer four questions: What would you do differently? What adjacent problems did this reveal? What follow-up work is now visible? What was harder or easier than expected?",
+          "2. For each observation, specify the disposition: file as follow-up (backlog/ticket), accept (known limitation), or fix now (if small and low-risk).",
+          "3. Perform interpretation accuracy check: did this session build what was intended? Classify gaps as Subtype A (misunderstood ticket), Subtype B (wrong model of codebase), or Unclear. If no gap, say so explicitly.",
+          "4. Emit the `wr.coding_handoff` artifact in the exact structure specified in the schema."
+        ],
+        "outputRequired": {
+          "retrospectiveObservations": "List of observations with disposition and interpretation accuracy check",
+          "followUpTickets": "New follow-up tickets (append to existing list)"
+        }
+      },
       "outputContract": {
         "contractRef": "wr.contracts.coding_handoff"
       }
