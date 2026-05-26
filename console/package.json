@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",
-    "@tanstack/react-query": "^5.100.11",
-    "@tanstack/react-router": "^1.170.4",
+    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-router": "^1.170.8",
     "@xyflow/react": "^12.10.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -22,13 +22,13 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@testing-library/react": "^16.3.2",
-    "@types/react": "^19.0.0",
+    "@types/react": "^19.2.15",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.1.0",
     "typescript": "^6.0.3",
-    "vite": "^8.0.13",
-    "vitest": "^4.1.6"
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
   }
 }
