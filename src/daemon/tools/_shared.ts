@@ -89,6 +89,7 @@ export async function persistTokens(
     readonly goal: string;
     readonly workspacePath: string;
     readonly branchStrategy?: import('../types.js').BranchStrategy;
+    readonly context?: Readonly<Record<string, unknown>>;
   },
   gateState?: {
     readonly kind: 'gate_checkpoint';
@@ -112,6 +113,7 @@ export async function persistTokens(
           goal: recoveryContext.goal,
           workspacePath: recoveryContext.workspacePath,
           ...(recoveryContext.branchStrategy !== undefined ? { branchStrategy: recoveryContext.branchStrategy } : {}),
+          ...(recoveryContext.context !== undefined ? { context: recoveryContext.context } : {}),
         } : {}),
         ...(gateState !== undefined ? { gateState } : {}),
         ...(workrailSessionId != null ? { workrailSessionId } : {}),

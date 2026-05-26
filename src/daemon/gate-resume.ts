@@ -90,9 +90,10 @@ export async function resumeFromGate(
     workflowId?: string;
     goal?: string;
     workspacePath?: string;
-    branchStrategy?: 'worktree' | 'none';
+    branchStrategy?: 'worktree' | 'none' | 'read-only';
     worktreePath?: string;
     continueToken?: string;
+    context?: Record<string, unknown>;
   };
   try {
     const raw = await fs.readFile(sidecarPath, 'utf8');
@@ -188,6 +189,7 @@ export async function resumeFromGate(
     goal,
     workspacePath,
     branchStrategy: sidecar.branchStrategy ?? 'none',
+    context: sidecar.context,
   };
 
   const source: SessionSource = {

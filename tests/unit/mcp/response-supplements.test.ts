@@ -11,10 +11,12 @@ describe('buildResponseSupplements', () => {
     expect(supplements.map((supplement) => supplement.kind)).toEqual([
       'authority_context',
       'notes_guidance',
+      'subagent_guidance',
     ]);
-    expect(supplements.map((supplement) => supplement.order)).toEqual([10, 20]);
+    expect(supplements.map((supplement) => supplement.order)).toEqual([10, 20, 30]);
     expect(supplements[0]!.text).toContain('WorkRail is a separate live system');
     expect(supplements[1]!.text).toContain('How to write good notes');
+    expect(supplements[2]!.text).toContain('Interactive Session Advancement');
   });
 
   it('returns only authority context for rehydrate', () => {
@@ -25,8 +27,10 @@ describe('buildResponseSupplements', () => {
 
     expect(supplements.map((supplement) => supplement.kind)).toEqual([
       'authority_context',
+      'subagent_guidance',
     ]);
     expect(supplements[0]!.text).not.toContain('How to write good notes');
+    expect(supplements[1]!.text).toContain('Interactive Session Advancement');
   });
 
   it('supports once-per-session supplements without durable tracking', () => {

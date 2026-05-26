@@ -362,6 +362,10 @@ function formatRehydrate(data: V2ExecutionResponse): string {
   }
 
   lines.push('Continue working on this step. When done, call `continue_workflow` to advance.');
+  lines.push('');
+  lines.push('**Interactive Session Tips:**');
+  lines.push('- **Advancement:** You can call `continue_workflow` and pass `notes` and `artifacts` directly as top-level parameters (or nested under `output`).');
+  lines.push('- **Routines / Subagents:** If instructed to "spawn a WorkRail Executor" or execute a routine, use your client-side subagent spawning capabilities (e.g. `invoke_subagent` starting `start_workflow` for the routine) or run the steps inline yourself.');
 
   return lines.join('\n');
 }
@@ -387,7 +391,10 @@ function formatSuccess(data: V2ExecutionResponse): string {
   lines.push('');
   lines.push('Execute this step, then call `continue_workflow` to advance.');
   lines.push('');
-  lines.push('Include `output.notesMarkdown` documenting your work — what you did, key decisions, what you produced, and anything notable.');
+  lines.push('Include `output.notesMarkdown` documenting your work — what you did, key decisions, what you produced, and anything notable. (Providing flat top-level `notes` and `artifacts` is also fully supported as a compatibility alias).');
+  lines.push('');
+  lines.push('**Subagent & Routine Guidance:**');
+  lines.push('If this step instructs you to "spawn a WorkRail Executor" or run a parallel routine (e.g. `wr.routine-philosophy-alignment`), delegate it to a subagent using your native client-side tools (e.g. `invoke_subagent` running `start_workflow` for that routine) or execute it inline yourself if client-side subagent tools are unavailable.');
   lines.push('');
   lines.push(formatPreferences(data.preferences));
 

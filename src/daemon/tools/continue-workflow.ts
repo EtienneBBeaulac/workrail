@@ -24,7 +24,7 @@ export function makeContinueWorkflowTool(
   emitter?: DaemonEventEmitter,
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
-  gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy },
+  gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy; readonly context?: Readonly<Record<string, unknown>> },
 ): AgentTool {
   return {
     name: 'continue_workflow',
@@ -240,7 +240,7 @@ export function makeCompleteStepTool(
   emitter?: DaemonEventEmitter,
   workrailSessionId?: SessionId | null,
   onGateParked: (gateToken: string, stepId: string, gateKind: import('../../v2/durable-core/constants.js').GateKind) => void = () => { /* no-op for callers that predate gate support */ },
-  gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy },
+  gateRecoveryContext?: { readonly workflowId: string; readonly goal: string; readonly workspacePath: string; readonly branchStrategy?: import('../types.js').BranchStrategy; readonly context?: Readonly<Record<string, unknown>> },
 ): AgentTool {
   return {
     name: 'complete_step',

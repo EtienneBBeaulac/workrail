@@ -117,10 +117,11 @@ describe('toMcpResult — clean response supplements', () => {
       }),
     }, ctx);
 
-    expect(result.content).toHaveLength(3);
+    expect(result.content).toHaveLength(4);
     expect((result.content[0] as { text: string }).text).toContain('Execute the first task.');
     expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
     expect((result.content[2] as { text: string }).text).toContain('How to write good notes');
+    expect((result.content[3] as { text: string }).text).toContain('Interactive Session Advancement');
   });
 
   it('rehydrate responses include authority context but not notes guidance', () => {
@@ -136,9 +137,10 @@ describe('toMcpResult — clean response supplements', () => {
       }),
     }, ctx);
 
-    expect(result.content).toHaveLength(2);
+    expect(result.content).toHaveLength(3);
     expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
     expect((result.content[1] as { text: string }).text).not.toContain('How to write good notes');
+    expect((result.content[2] as { text: string }).text).toContain('Interactive Session Advancement');
   });
 
   it('advance responses do not include supplemental content items', () => {

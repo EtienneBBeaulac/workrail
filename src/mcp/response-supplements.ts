@@ -34,7 +34,13 @@ const NOTES_GUIDANCE = [
   '- Omitting notes will block the step.',
 ].join('\n');
 
-export type SupplementKind = 'authority_context' | 'notes_guidance';
+const SUBAGENT_GUIDANCE = [
+  'Interactive Session Advancement & Subagent Guidance:',
+  '- **Advancement**: When you have completed all work for this step, call `continue_workflow` with the provided `continueToken`. You can pass `notes` and `artifacts` directly at the top level or nested inside `output` — both formats are fully supported.',
+  '- **Spawning Routines / Executors**: If a step instructs you to "spawn a WorkRail Executor" or execute a parallel routine (e.g. `wr.routine-philosophy-alignment`), you should delegate it to a subagent using your native client capabilities (e.g. `invoke_subagent` to start a child agent running the routine with `start_workflow`) or execute it inline if client-side subagent tools are unavailable.',
+].join('\n');
+
+export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance';
 
 export interface FormattedSupplement {
   readonly kind: SupplementKind;
@@ -93,6 +99,13 @@ const CLEAN_RESPONSE_SUPPLEMENTS: readonly ResponseSupplementSpec[] = [
     lifecycles: ['start', 'rehydrate'],
     delivery: { mode: 'once_per_session', emitOn: 'start' },
     renderText: () => NOTES_GUIDANCE,
+  }),
+  defineResponseSupplement({
+    kind: 'subagent_guidance',
+    order: 30,
+    lifecycles: ['start', 'rehydrate'],
+    delivery: { mode: 'per_lifecycle' },
+    renderText: () => SUBAGENT_GUIDANCE,
   }),
 ];
 

@@ -55,7 +55,7 @@ export function constructTools(
     fileTracker, onAdvance, onComplete, onTokenUpdate, onIssueReported, onGateParked,
     getCurrentToken, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth,
     emitter, activeSessionSet, workflowId: scopeWorkflowId,
-    triggerWorkspacePath, triggerGoal, triggerBranchStrategy,
+    triggerWorkspacePath, triggerGoal, triggerBranchStrategy, triggerContext,
     onChildStepAdvance,
   } = scope;
   const sid = scope.sessionId;
@@ -79,9 +79,9 @@ export function constructTools(
       emitter,
       workrailSid,
       onGateParked,
-      { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy },
+      { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext },
     ),
-    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked, { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy }),
+    makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked, { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext }),
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
     // must target the isolated worktree, not the main checkout.
     makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),

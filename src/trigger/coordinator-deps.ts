@@ -375,15 +375,25 @@ class CoordinatorDepsImpl implements AdaptiveCoordinatorDeps {
     trigger: WorkflowTrigger;
     parentSessionId?: string;
   }): Promise<{ kind: 'ok'; handle: string } | { kind: 'err'; error: string }> {
+    const startContext: Record<string, string> = {
+      is_autonomous: 'true',
+      workspacePath: opts.workspace,
+      triggerSource: 'daemon',
+      ...(opts.parentSessionId !== undefined ? { parentSessionId: opts.parentSessionId } : {}),
+    };
+
+    if (opts.trigger.context) {
+      for (const [k, v] of Object.entries(opts.trigger.context)) {
+        if (v !== undefined && v !== null) {
+          startContext[k] = typeof v === 'string' ? v : JSON.stringify(v);
+        }
+      }
+    }
+
     const startResult = await executeStartWorkflow(
       { workflowId: opts.workflowId, workspacePath: opts.workspace, goal: opts.goal },
       this.ctx,
-      {
-        is_autonomous: 'true',
-        workspacePath: opts.workspace,
-        triggerSource: 'daemon',
-        ...(opts.parentSessionId !== undefined ? { parentSessionId: opts.parentSessionId } : {}),
-      },
+      startContext,
     );
     if (startResult.isErr()) {
       const detail = `${startResult.error.kind}${'message' in startResult.error ? ': ' + (startResult.error as { message: string }).message : ''}`;

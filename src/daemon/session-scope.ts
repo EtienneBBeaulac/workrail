@@ -272,6 +272,12 @@ export interface SessionScope {
   readonly triggerBranchStrategy: import('./types.js').BranchStrategy | undefined;
 
   /**
+   * The trigger's context variables. Stored in the gate sidecar so resumeFromGate()
+   * can reconstruct the WorkflowTrigger with the original context.
+   */
+  readonly triggerContext?: Readonly<Record<string, unknown>>;
+
+  /**
    * Registry mapping workrailSessionId -> abort callback.
    * Used by `spawn_agent` to register/deregister child sessions.
    * May be undefined if graceful shutdown is not enabled.
