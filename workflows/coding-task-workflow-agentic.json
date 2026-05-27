@@ -209,7 +209,7 @@
           "Figure out what philosophy to use. Prefer in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then user only if they conflict or are not enough.",
           "Record where the philosophy lives, not a summary. If the rules and repo patterns conflict, capture that conflict.",
           "Perform the architecture alignment check: scan candidate files for specific philosophy violations. If `architectureStartsFromScratch` is true, Candidate A (simplest) must still honor the philosophy; adapting an existing violation is not valid.",
-          "Constraint Derivation is mandatory: collect and write specific constraints governed by the format '[PHILOSOPHY] rule text', '[CONVENTION] rule text', and '[TEAM_RULE] rule text'. Constraints must name the subject, the rule, and the prohibited alternative."
+          "Constraint Derivation is mandatory: you MUST collect and list EVERY SINGLE rule, guideline, philosophy principle, best practice, convention, standard, and norm from all three sources (General coding philosophy, codebase conventions, explicit team/project rules) inside `derivedConstraints`. Do not filter, guess, or limit them to a subset — every single rule and principle is important and must be fully listed so that the implementation faithfully satisfies all of them without omitting any. Each constraint must be governed by the format '[PHILOSOPHY] rule text', '[CONVENTION] rule text', or '[TEAM_RULE] rule text'. Each constraint must name the subject, the rule, and the prohibited alternative."
         ],
         "procedure": [
           "1. Dig through the code to find where behavior starts, candidate files, module/function dependencies, repo verification patterns, risks, invariants, and non-goals.",
@@ -217,7 +217,7 @@
           "3. Perform context-clarity check scoring 0-2 (with one sentence of evidence) for: `entryPointClarity`, `boundaryClarity`, `invariantClarity`, and `verificationClarity`.",
           "4. Run deeper context batch if required by the rubric: STANDARD (total score >= 3 or boundary/invariant/verification clarity = 2) or THOROUGH (always). The batch consists of `routine-context-gathering` with `focus=COMPLETENESS` and `focus=DEPTH`.",
           "5. Perform the architecture alignment check on candidate files, listing specific violations in `architectureViolations` and setting `architectureStartsFromScratch`.",
-          "6. Derive explicit constraints from all three sources (General coding philosophy, codebase conventions, explicit team/project rules) and store them in `derivedConstraints`."
+          "6. Derive and list EVERY SINGLE constraint, rule, philosophy principle, codebase convention, and team rule from all three sources (General coding philosophy, codebase conventions, and explicit team/project rules) in full detail. Store them in `derivedConstraints` so they are fully available to guide all design candidates and implementation phases."
         ],
         "outputRequired": {
           "taskComplexity": "Small / Medium / Large",
@@ -234,14 +234,14 @@
           "philosophyConflicts": "Any conflicts found between rules and patterns",
           "architectureViolations": "List of specific violations or principles checked",
           "architectureStartsFromScratch": "Boolean flag",
-          "derivedConstraints": "List of constraints in '[SOURCE] rule' format"
+          "derivedConstraints": "List of ALL constraints, guidelines, philosophy principles, best practices, conventions, standards, and norms from all three sources in '[SOURCE] rule' format"
         },
         "verify": [
           "Complexity, risk, and rigor classifications are set based on the rubric, not vibes.",
           "A context-clarity check is scored 0-2 for all 4 dimensions with evidence sentences.",
           "Deeper context gathering batch is run when required by the classification rubric.",
           "Philosophy violations in candidate files are named specifically or checked principles are listed.",
-          "derivedConstraints is populated with specific rules labeled with [PHILOSOPHY], [CONVENTION], or [TEAM_RULE]."
+          "derivedConstraints is populated with ALL rules, guidelines, principles, best practices, conventions, standards, and norms labeled with [PHILOSOPHY], [CONVENTION], or [TEAM_RULE] without omitting any."
         ]
       },
       "requireConfirmation": {
@@ -347,7 +347,7 @@
           "The three checks are mandatory -- do not skip them even if they feel redundant with Phase 0."
         ],
         "procedure": [
-          "1. **Constraint quality + coverage check.** Read `derivedConstraints`. For each constraint: is it specific enough to falsify a wrong candidate? If vague, rewrite it. Then verify all three sources (PHILOSOPHY, CONVENTION, TEAM_RULE) are represented or explicitly justified as empty.",
+          "1. **Constraint quality + coverage check.** Read `derivedConstraints`. For each constraint: is it specific enough to falsify a wrong candidate? If vague, rewrite it. Then verify all three sources (PHILOSOPHY, CONVENTION, TEAM_RULE) are fully represented (since listing them in full is mandatory) or explicitly justified as empty (e.g. if the project truly has no explicit team rules documented).",
           "2. **Nullable field gate.** For every type you plan to propose or modify: does it have a nullable or optional field? If yes, does that field represent two distinct states? Name every illegal state combination the nullable type makes representable.",
           "3. **Interface responsibility gate.** For every interface, abstract class, or service you plan to extend: write its responsibility in one sentence ('X takes Y, returns Z'). Does the behavior you are adding violate that responsibility?",
           "4. Set `constraintGatePassed` to true only if all three checks produced no blocking violations."
@@ -461,13 +461,15 @@
       "promptBlocks": {
         "goal": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.",
         "constraints": [
+          "Read `derivedConstraints` from context (derived in Phase 0). Every candidate must satisfy or explicitly exempt each constraint.",
+          "A candidate that violates a [TEAM_RULE] or [CONVENTION] constraint is not a valid candidate -- remove it or revise it before including it.",
           "Produce two mandatory candidates: 1. The simplest possible change that satisfies acceptance criteria; 2. The approach that follows the existing repo pattern.",
           "Write the output to `design-candidates.md`.",
           "If both candidates converge on the same approach, say so honestly."
         ],
         "procedure": [
           "1. Formulate Candidate 1 (simplest possible change) and Candidate 2 (existing repo pattern).",
-          "2. For each candidate, provide: a one-sentence summary, tensions resolved/accepted, relation to repo patterns (follows/adapts/departs), failure mode to watch, and philosophy fit (specific principles).",
+          "2. For each candidate, provide: a one-sentence summary, tensions resolved/accepted, relation to repo patterns (follows/adapts/departs), failure mode to watch, and philosophy fit (specific principles and how they satisfy derivedConstraints).",
           "3. Compare the candidates and recommend an approach.",
           "4. Document the design in `design-candidates.md` using the structure: Problem Understanding, Philosophy Constraints, Candidates, Comparison & Recommendation, Open Questions."
         ],
@@ -507,7 +509,7 @@
           "Write output to `design-candidates.md`."
         ],
         "procedure": [
-          "1. **Orient from constraints.** Read `derivedConstraints`. For each constraint tagged [TEAM_RULE] or [CONVENTION], write one sentence: 'Candidate X must satisfy this because...' or 'This constraint rules out approach Y because...' This orientation step is not optional -- it is what makes the candidates grounded rather than generic.",
+          "1. **Orient from constraints.** Read `derivedConstraints`. For each constraint tagged [PHILOSOPHY], [TEAM_RULE], or [CONVENTION], write one sentence: 'Candidate X must satisfy this because...' or 'This constraint rules out approach Y because...' This orientation step is not optional -- it is what makes the candidates grounded rather than generic.",
           "2. **Discover tensions.** Read the candidate files and the problem description. What are the real tensions the design must resolve? (e.g. type safety vs ergonomics, performance vs simplicity, consistency with existing pattern vs improving on it.) List 2-4 tensions explicitly.",
           "3. **Generate candidates.** For each candidate: (a) one-sentence summary of the approach; (b) which tensions it resolves and which it accepts; (c) which derivedConstraints it satisfies and how; (d) which derivedConstraints it conflicts with and why that conflict is acceptable or why the constraint might be wrong.",
           "4. **Mandatory candidates (standalone mode):** (a) simplest change that satisfies criteria without new architecture; (b) the approach that most faithfully extends the existing codebase pattern while satisfying derivedConstraints.",
