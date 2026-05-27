@@ -3,7 +3,7 @@
   "name": "Differentiation & Niche Discovery",
   "version": "1.0.0",
   "description": "Systematic B2B SaaS and Developer Tool differentiation & niche discovery workflow. Blends Blue Ocean Strategy, Jobs to Be Done (JTBD), and Counter-positioning to extract pain points from public review, forum, and repo sources, score opportunity candidates, and run adversarial incumbent stress testing.",
-  "about": "## Differentiation & Niche Discovery\n\nThis workflow is designed to discover a highly defensible product niche and killer features for B2B SaaS and Developer Tools. It moves beyond generic brainstorming by treating differentiation as a rigorous, evidence-driven optimization problem.\n\n**Autonomy Model:**\nThe workflow is **guided at start, end, and candidate generation**, requiring active human confirmation before proceeding. It is **highly autonomous during evidence harvesting and adversarial red-teaming** steps, fanning out parallel retrievers and red-team agents to execute strategic analyses without manual intervention.\n\n**What it does:**\nThe workflow guides the agent through a structured process: mapping the market boundary and ICP, fanning out parallel subagents to harvest complaint-rich first-person evidence from public review sites, developer forums, and GitHub repos, synthesizing this data using Blue Ocean Strategy and Jobs to Be Done (JTBD), generating distinct candidates, running a mandatory three-agent adversarial stress test (incumbent red-teaming), and producing a highly structured value proposition, differentiation ledger, and shaping handoff.\n\n**When to use it:**\n- You are starting a new B2B SaaS or developer-facing product and want to find a unique, highly defensible entry niche.\n- You have an existing product and want to discover a new killer feature that incumbents cannot easily copy.\n- You want to evaluate whether a proposed feature is structurally protected before committing engineering resources.\n\n**What it produces:**\n- `02_friction_matrix.md`: normalized pain points and user complaint clusters.\n- `03_value_curve.md`: Blue Ocean competitor factor catalog and rating curve.\n- `04_candidates.md`: 3-4 distinct opportunity candidates (Niche, Simplicity, or Structural Defense).\n- `05_adversarial_critique.md`: red-team incumbent copy-cost and brand-conflict grading.\n- `06_value_proposition.md`: a refined 3-sentence Value Prop and We Win When statement.\n- `06_differentiation_ledger.md`: forced-choice differentiators under strict count constraints.\n- `07_shaping_handoff.json`: Zod-validated handoff for `wr.shaping`.\n\n**How to get good results:**\nProvide a clear market category, target ICP, and 2-4 seed competitors. Focus research config on allowed public platforms (Reddit, GitHub, Trustpilot, StackExchange, Discourse). Ensure the human-in-the-loop confirms G2 access rules before evidence harvesting.",
+  "about": "## Differentiation & Niche Discovery\n\nThis workflow is designed to discover a highly defensible product niche and killer features for B2B SaaS and Developer Tools. It moves beyond generic brainstorming by treating differentiation as a rigorous, evidence-driven optimization problem.\n\n**Autonomy Model:**\nThe workflow is **guided at start, end, and candidate generation**, requiring active human confirmation before proceeding. It is **highly autonomous during evidence harvesting and adversarial red-teaming** steps, fanning out parallel retrievers and red-team agents to execute strategic analyses without manual intervention.\n\n**What it does:**\nThe workflow guides the agent through a structured process: mapping the market boundary and ICP, fanning out parallel subagents to harvest complaint-rich first-person evidence from public review sites, developer forums, and GitHub repos, synthesizing this data using Blue Ocean Strategy and Jobs to Be Done (JTBD), generating distinct candidates, running a mandatory three-agent adversarial stress test (incumbent red-teaming), and producing a highly structured value proposition, differentiation ledger, and shaping handoff.\n\n**When to use it:**\n- You are starting a new B2B SaaS or developer-facing product and want to find a unique, highly defensible entry niche.\n- You want to evaluate whether a proposed feature is structurally protected before committing engineering resources.\n\n**What it produces:**\n- `02_friction_matrix.md`: normalized pain points and user complaint clusters.\n- `03_value_curve.md`: Blue Ocean competitor factor catalog and rating curve.\n- `04_candidates.md`: 3-4 distinct opportunity candidates with qualitative defensibility profiles.\n- `.workrail/history/transcripts/{transcriptRef}.md`: raw multi-agent adversarial simulation transcripts.\n- `05_adversarial_critique.md`: red-team incumbent copy-cost and brand-conflict grading summary.\n- `06_value_proposition.md`: a refined 3-sentence Value Prop and We Win When statement.\n- `06_differentiation_ledger.md`: forced-choice differentiators under strict count constraints.\n- `.workrail/differentiation-handoff.json`: Zod-validated Shape Up-faithful handoff for `wr.shaping`.\n\n**How to get good results:**\nProvide a clear market category, target ICP, and 2-4 seed competitors. Focus research config on allowed public platforms (Reddit, GitHub, Trustpilot, StackExchange, Discourse). Ensure the human-in-the-loop confirms G2 access rules before evidence harvesting.",
   "examples": [
     "Discover a highly defensible niche for an AI-powered code review tool against GitHub Copilot",
     "Find a simplified, counter-positioned killer feature for a project management tool competing with Linear",
@@ -31,7 +31,7 @@
     "EVIDENCE INTEGRITY: every pain cluster must be grounded in raw, complaint-rich user text. Marketing copy, press releases, or high-level landing pages are low-signal and weighted near zero in synthesis.",
     "COUNTER-POSITIONING IS PRIMARY: a candidate is not defensible simply because it solves a user pain. If a competitor can copy it in a 90-day sprint without hurting their current pricing, channel, brand, or database model, it is a roadmap item, not a moat.",
     "ERRC RESTRICTION: reject value curves that only raise everything. A valid Blue Ocean curve must systematically Eliminate and Reduce factors the industry over-supplies to fund what it Creates.",
-    "CONGESTION CONSTRAINT: the differentiation ledger has a hard cap of at most 1 'positioning-defining' move and 3 'killer features'. If the draft exceeds this, re-rank by Candidate Score and demote."
+    "CONGESTION CONSTRAINT: final ledger has a hard cap of <= 1 positioning move and <= 3 features. If the draft exceeds this, re-rank by the composite rank (ODI score * adversarial defensibility score) and demote lower entries."
   ],
   "assessments": [
     {
@@ -301,6 +301,7 @@
           "  buyerUtilityGap: z.string(),",
           "  counterPositioningRationale: z.string(),",
           "  targetOpportunityScore: z.number(), // The real ODI Opportunity Score from Step 3",
+          "  hypothesizedPower: z.enum(['Counter-Positioning', 'Switching Costs', 'Network Economies', 'Scale Economies', 'Cornered Resource', 'Process Power', 'Branding', 'None_Imitable']),",
           "  qualitativeDefensibilityRubric: z.object({",
           "    cannibalizationRisk: z.enum(['low', 'medium', 'high']),",
           "    channelConflict: z.enum(['low', 'medium', 'high']),",
@@ -314,12 +315,12 @@
           "Write the generated candidates and their strategic profiles to `04_candidates.md`."
         ],
         "outputRequired": {
-          "notesMarkdown": "Candidate opportunity summary: candidate names, target ODI opportunity scores, and qualitative defensibility profiles."
+          "notesMarkdown": "Candidate opportunity summary: candidate names, target ODI opportunity scores, hypothesized power types, and qualitative defensibility profiles."
         },
         "verify": [
           "04_candidates.md is written.",
           "At least 3 distinct candidates are generated with complete ERRC grids.",
-          "Every candidate has a defensibility profile backed by Helmer's counter-positioning principles.",
+          "Every candidate has a hypothesizedPower and a defensibility profile backed by Helmer's counter-positioning principles.",
           "Human validation gate is executed before proceeding to Step 5."
         ]
       }
@@ -353,7 +354,7 @@
         "procedure": [
           "// v2: add cross-model verdict comparison to collapse sycophantic agreement by running Claude as Head of Product and a second model (e.g. GPT-4) as CFO.",
           "For each candidate opportunity in `04_candidates.md`, execute the 3-agent adversarial loop:",
-          "  - **Incumbent Persona:** Head of Product/CFO of the target competitor. Focus on economic self-harm. Prompt: 'Your bonus is tied to keeping gross margin > 70%. If you copy this, what profitable part of your business do you cannibalize? Vague answers are forbidden.'",
+          "  - **Incumbent Persona:** Head of Product/CFO of the target competitor. Focus on economic self-harm. You MUST be fed the candidate's `qualitativeDefensibilityRubric` and `hypothesizedPower` from Step 4 as prior hypotheses to stress-test (e.g. 'The Challenger hypothesis is that your brandConflict is High and your hypothesizedPower is Counter-Positioning — stress-test if this is actually true, or if you can copy/neutralize this easily without brand pain'). Prompt: 'Your bonus is tied to keeping gross margin > 70%. If you copy this, what profitable part of your business do you cannibalize? Vague answers are forbidden.'",
           "  - **Challenger Persona:** Revise candidate details to patch identified rabbit holes and limit mimicry paths.",
           "  - **Judge Persona:** Assess and populate the `AdversarialVerdictSchema`:",
           "```ts",
@@ -400,16 +401,16 @@
           "Integrate Singer's Shape Up Pitch structure by preparing: Problem (verbatim user friction story), Appetite Hint (small_batch = 1-2wk vs big_batch = 6wk), and No-gos (from ERRC eliminate). Deliberately leave Solution and Rabbit Holes empty for subsequent shaping owned by wr.shaping."
         ],
         "procedure": [
-          "If there are viable candidates that survived Step 5, select the highest-scoring candidate opportunity. Otherwise, trigger the fallback 'No-Viable-Niche' procedure and write the lockdown diagnostic report.",
+          "If there are viable candidates that survived Step 5, select the highest-scoring candidate opportunity based on the `Composite Score = targetOpportunityScore * finalDefensibilityScore` (where `targetOpportunityScore` is the real Tony Ulwick ODI score from Step 3 and `finalDefensibilityScore` is parsed from Step 5's Zod verdicts). Otherwise, trigger the fallback 'No-Viable-Niche' procedure and write the lockdown diagnostic report.",
           "Section 1: Value Proposition (06_value_proposition.md)",
           "  - Write the 3-sentence Value Proposition.",
           "  - Define the 'We Win When' statement (3 concrete points, each backed by evidence).",
           "  - Define the 'We Lose When' statement (2 honest boundary conditions where the incumbent still wins, avoiding empty sales talk).",
           "Section 2: Shape Up Pitch Inception & Differentiation Ledger (06_differentiation_ledger.md)",
           "  - Compile every proposed move, feature, and constraint into a structured table: `Feature/Move | Target JTBD | Competitor Self-Harm | Copy Delay | Verdict (positioning | killer_feature | backlog | ignore)`.",
-          "  - Enforce the hard cap constraint: re-rank using candidate scores and demote excess moves to 'backlog' or 'ignore'.",
+          "  - Enforce the hard cap constraint: re-rank candidates using the composite score (`Composite Score = targetOpportunityScore * finalDefensibilityScore`) and demote excess moves to 'backlog' or 'ignore'.",
           "  - Calculate evidence freshness bounds: identify the `oldestCapturedAt` and `newestCapturedAt` timestamps from all findings. Check if fast-moving categories (e.g. LLM/AI tooling) have captures older than 18 months, or slow-moving categories (databases, systems) older than 36 months, and note freshness alerts accordingly.",
-          "  - Pre-populate the Shape Up Pitch boundaries: draft a single concrete Problem story from raw evidence, set the appetiteHint, and map the noGos (pre-populated from the ERRC Eliminate column). Solution and Rabbit Holes are explicitly marked empty.",
+          "  - Pre-populate the Shape Up Pitch boundaries: draft a single concrete Problem story from raw evidence, set the appetiteHint, synthesize `baseline` (what customers currently do without the solution) from the most-frequent workaround values and status-quo habits in the evidence pool (avoiding generic marketing prose; describing actual user actions), and map the noGos (pre-populated from the ERRC Eliminate column). Solution and Rabbit Holes are explicitly marked empty.",
           "Write all files to disk."
         ],
         "outputRequired": {
@@ -419,7 +420,7 @@
           "06_value_proposition.md and 06_differentiation_ledger.md are written.",
           "If no niche is viable, the No-Viable-Niche diagnostic report is completely written.",
           "The We Lose When section is present with honest bounds.",
-          "Ledger strictly respects the <=1 positioning and <=3 killer feature constraints.",
+          "Ledger strictly respects the <=1 positioning and <=3 killer feature constraints based on the Composite Score ranking.",
           "Evidence freshness dates are parsed and validated against domain category speed.",
           "Shape Up pre-seeding is structured with Solution and Rabbit Holes left empty."
         ]
@@ -446,17 +447,11 @@
           "  - `schemaVersion`: '1.0.0'",
           "  - `generatedAt`: string (current ISO datetime)",
           "  - `evidenceFreshness`: object with `oldestCapturedAt` and `newestCapturedAt` strings.",
-          "  - `winningCandidate`: name and description of the promoted opportunity.",
-          "  - `targetSegment`: description of the target ICP.",
-          "  - `targetJTBD`: object with functional, emotional, and social job statements.",
-          "  - `killerFeatures`: array of selected features from the ledger.",
-          "  - `incumbentVulnerabilities`: list of competitor self-harm and brand conflicts.",
-          "  - `shapingAppetite`: target appetite description.",
           "  - `validationChecklist`: verifiable acceptance criteria for the subsequent implementation agent.",
           "  - `shapingHandoff`: object matching Singer's Shape Up 'Pitch' contract:",
           "    - `rawIdea`: string (the promoted differentiator as a raw idea)",
           "    - `problem`: string (Singer's specific customer friction story)",
-          "    - `baseline`: string (what customers currently do without the solution)",
+          "    - `baseline`: string (what customers currently do without the solution, synthesized from raw competitor workarounds)",
           "    - `appetiteHint`: 'small_batch' (1-2 weeks) or 'big_batch' (6 weeks)",
           "    - `noGosHints`: array of strings (things we will NOT build, pre-populated from the ERRC Eliminate quadrant)",
           "    - `constraints`: object containing teamSize, technicalCapabilities, and exclusions",

@@ -6,8 +6,7 @@ import { z } from 'zod';
  * Typed artifact for threading context from the wr.differentiation workflow session
  * to the wr.shaping workflow session.
  * 
- * Incorporates Tony Ulwick's ODI, Helmer's Counter-Positioning taxonomy,
- * and Singer's Shape Up "Pitch" contract primitives.
+ * Strictly non-redundant: shapingHandoff is the single source of truth.
  */
 
 export const DIFFERENTIATION_HANDOFF_CONTRACT_REF = 'wr.contracts.differentiation_handoff' as const;
@@ -36,22 +35,10 @@ export const DifferentiationHandoffArtifactV1Schema = z
       newestCapturedAt: z.string().datetime()
     }),
 
-    /** Winning candidate info */
-    winningCandidate: z.string().min(1),
-    targetSegment: z.string().min(1),
-    targetJTBD: z.object({
-      functional: z.string().min(1),
-      emotional: z.string().optional(),
-      social: z.string().optional()
-    }),
-
-    /** prioritized ledger differentiators */
-    killerFeatures: z.array(z.string().min(1).max(200)).max(6),
-    incumbentVulnerabilities: z.array(z.string().min(1).max(300)).max(8),
-    shapingAppetite: z.string().min(1).max(100),
+    /** Verifiable acceptance criteria for subsequent coding/review agents. */
     validationChecklist: z.array(z.string().min(1).max(200)).max(10),
 
-    /** Singer's Shape Up "Pitch" contract primitives */
+    /** Singer's Shape Up "Pitch" contract primitives - Canonical Handoff */
     shapingHandoff: z.object({
       rawIdea: z.string().min(1),
       problem: z.string().min(1), // Singer's specific friction story
@@ -95,7 +82,7 @@ export function getDifferentiationHandoffBlockedMessage(): readonly string[] {
   return [
     `Artifact contract: ${DIFFERENTIATION_HANDOFF_CONTRACT_REF}`,
     `Provide a wr.differentiation_handoff artifact in complete_step's artifacts[] parameter.`,
-    `Required fields: schemaVersion ("1.0.0"), evidenceFreshness (object), winningCandidate (string), targetSegment (string), targetJTBD (object), killerFeatures (string[]), incumbentVulnerabilities (string[]), shapingAppetite (string), validationChecklist (string[]), shapingHandoff (object containing rawIdea, problem, baseline, appetiteHint, noGosHints, constraints, evidenceTopK, defensibilityClaim).`,
+    `Required fields: schemaVersion ("1.0.0"), evidenceFreshness (object), validationChecklist (string[]), shapingHandoff (object containing rawIdea, problem, baseline, appetiteHint, noGosHints, constraints, evidenceTopK, defensibilityClaim).`,
     `See the step prompt for the full schema.`,
   ];
 }
