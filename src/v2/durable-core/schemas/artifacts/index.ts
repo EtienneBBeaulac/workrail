@@ -90,6 +90,15 @@ export {
   type PhaseHandoffArtifact,
 } from './phase-handoff.js';
 
+export {
+  // Differentiation Handoff
+  DIFFERENTIATION_HANDOFF_CONTRACT_REF,
+  DifferentiationHandoffArtifactV1Schema,
+  isDifferentiationHandoffArtifact,
+  parseDifferentiationHandoffArtifact,
+  type DifferentiationHandoffArtifactV1,
+} from './differentiation-handoff.js';
+
 /**
  * Registry of all artifact contract references.
  * Used for validation and documentation.
@@ -103,6 +112,7 @@ export const ARTIFACT_CONTRACT_REFS = [
   'wr.contracts.shaping_handoff',
   'wr.contracts.coding_handoff',
   'wr.contracts.gate_verdict',
+  'wr.contracts.differentiation_handoff',
 ] as const;
 
 export type ArtifactContractRef = (typeof ARTIFACT_CONTRACT_REFS)[number];

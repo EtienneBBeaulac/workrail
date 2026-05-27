@@ -6,6 +6,7 @@ import { getBlockedMessage as getReviewVerdictBlockedMessage } from './review-ve
 import { getBlockedMessage as getDiscoveryHandoffBlockedMessage } from './discovery-handoff.js';
 import { getBlockedMessage as getGateVerdictBlockedMessage } from './gate-verdict.js';
 import { getShapingHandoffBlockedMessage, getCodingHandoffBlockedMessage } from './phase-handoff.js';
+import { getDifferentiationHandoffBlockedMessage } from './differentiation-handoff.js';
 
 /**
  * Registry mapping each artifact contract reference to its actionable blocked message.
@@ -26,6 +27,7 @@ export const ARTIFACT_BLOCKED_MESSAGES: Readonly<Record<ArtifactContractRef, () 
   'wr.contracts.shaping_handoff': getShapingHandoffBlockedMessage,
   'wr.contracts.coding_handoff': getCodingHandoffBlockedMessage,
   'wr.contracts.gate_verdict': getGateVerdictBlockedMessage,
+  'wr.contracts.differentiation_handoff': getDifferentiationHandoffBlockedMessage,
 };
 
 /**
