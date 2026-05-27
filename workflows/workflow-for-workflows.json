@@ -212,11 +212,23 @@
         "constraints": [
           "Premium external models with native web search and deep reasoning capabilities are far superior for open-ended domain research than a local in-context agent.",
           "Do NOT proceed to Phase 2 without generating the prompt and ingesting the user's pasted deep research results.",
-          "The generated prompt must be highly customized to the target workflow's archetype, domain, and primary failure modes identified in Phase 0 and Phase 1."
+          "The generated prompt must serve as a compact, self-contained research control system, structured and procedurally constrained to prevent query drift, echo-chamber bias, and narrative smoothing."
         ],
         "procedure": [
           "Generate a highly specific 'Deep Research Prompt' tailored for the workflow being authored/modernized.",
-          "The prompt must instruct the external AI to: (1) Outline the best-practice real-world procedures and milestones for this specific task, (2) List the 3 most common and insidious human/system failure modes and blind spots, (3) Recommend specific evidence-gathering strategies and verification rubrics, (4) Suggest concrete metrics/observable signals for validating output quality.",
+          "The prompt must be structured exactly as a self-contained research control system conforming to the Blueprint for Deep Research Prompting, containing these mandatory pre-populated sections:",
+          "  - **Goal & Decision Context:** The exact target deliverable or decision, deadline/recency horizon, and target audience.",
+          "  - **Priors Ledger:** A list of what is already known, settled, and open questions (do not waste tool budget re-explaining them).",
+          "  - **Core Research Questions:** Structured around the workflow's primary failure modes and mandatory subquestions.",
+          "  - **Source Permissions and Evidence Hierarchy:** Ranked by primary sources/filings/APIs down to community threads, specific to the domain.",
+          "  - **Epistemic Rules:** Explicit verification thresholds for when a claim is 'verified' vs 'provisional', and how conflicting evidence must be handled (never smooth over ambiguity).",
+          "  - **Adversarial Search Protocol:** Explicit confirming vs disconfirming search paths, alternative explanations, and source-quality challenges to counter confirmation bias.",
+          "  - **Nuance Preservation Rules:** A mandatory requirement to maintain contradiction and minority-view ledgers, preventing lossy context compression.",
+          "  - **Strategic Anchors:** Specific cognitive analysis frames (e.g., JTBD, causal analysis, pre-mortem) mapped to the target archetype.",
+          "  - **Out-of-Scope and Noise Filters:** Explicit list of tangents and generic background topics to exclude to preserve search budget.",
+          "  - **Search Depth and Stop Rules:** Specific limits on tool calls and time, and stop conditions (e.g., two consecutive rounds with no new evidence).",
+          "  - **Deliverable:** Specific report structure requiring executive summary, inline citations, confidence labels, and a contradiction section.",
+          "  - **Plan Gate:** A final gate allowing plan review/edits before the research run starts.",
           "Present the generated prompt to the user inside a clear markdown block.",
           "Instruct the user: 'Copy the prompt below, run it in a state-of-the-art deep research model (e.g., ChatGPT Deep Research, Gemini Advanced, or Claude), and paste the full resulting text here.'",
           "Ingest the user's pasted research text and set it in context as `domainResearchBrief`.",
