@@ -482,6 +482,30 @@ describe('coding-task workflow protocol wording', () => {
       ).toBe(true);
     }
   });
+
+  it('enforces modern promptBlocks usage (no legacy monolithic prompt fields) in coding-task workflow steps', () => {
+    for (const workflowPath of workflowPaths) {
+      const workflow = JSON.parse(readFileSync(workflowPath, 'utf8'));
+      
+      function verifyNoLegacyPrompt(steps: any[]) {
+        for (const step of steps) {
+          expect(
+            step.prompt,
+            `Step "${step.id}" in ${path.basename(workflowPath)} must not use the legacy "prompt" field. Use "promptBlocks" instead.`
+          ).toBeUndefined();
+          
+          if (step.body && Array.isArray(step.body)) {
+            verifyNoLegacyPrompt(step.body);
+          }
+          if (step.loop?.steps && Array.isArray(step.loop.steps)) {
+            verifyNoLegacyPrompt(step.loop.steps);
+          }
+        }
+      }
+      
+      verifyNoLegacyPrompt(workflow.steps);
+    }
+  });
 });
 
 // -----------------------------------------------------------------------------
