@@ -1,10 +1,10 @@
 {
   "id": "wr.ui-ux-design",
   "name": "UI/UX Design Workflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "metricsProfile": "design",
-  "description": "Design UI/UX from scratch with enforced process. Makes problem framing structurally required before solution proposals, forces exploration of multiple design directions before convergence, and applies reviewer families for information architecture, UX laws, accessibility, edge cases, and content. Output: a design spec concrete enough to implement or review.",
-  "about": "## UI/UX Design Workflow\n\nThis workflow produces a design spec for a new feature, screen, component, or interaction. It is built around a single principle: problem framing must happen before any solutions are proposed. The workflow makes this structurally impossible to skip, which prevents the most common failure mode in AI-assisted design  -- going straight from \"I need a settings screen\" to a layout without ever asking who uses it or what they are trying to do.\n\n**What it does:**\nPhase 0 frames the problem by reading existing code patterns and asking only what tools cannot answer. Phase 1 generates 2-3 genuinely different design directions before any one is chosen. Phases 2-5 run parallel reviewer families  -- information architecture, UX laws (Hick's Law, Miller's Law, Fitts's Law, and others), accessibility (specific WCAG requirements, not just \"follow WCAG\"), edge cases (empty, error, loading, first-use), and content quality  -- then synthesize their findings, resolve contradictions, and write a spec only after all hard quality gates pass.\n\n**When to use it:**\n- You need to design a new screen, feature, or non-trivial component\n- You want explicit coverage of accessibility, edge states, and UX laws, not just a layout sketch\n- You need a spec concrete enough for an engineer to implement or a designer to review\n- Simple single-component changes also work through a lighter direct-spec path\n\n**What it produces:**\nA design spec with 8 sections: design decision, information architecture, interaction design, all element states, specific accessibility requirements, content copy, reviewer findings with citations, and open questions that still require human visual review.\n\n**How to get good results:**\nPoint the workflow to your codebase so it can read existing components and patterns. Provide the design system location if it is not in the repo. Share any known user pain points or research. The workflow will surface what it cannot determine on its own.",
+  "description": "Design UI/UX from scratch with enforced process. Injects outcome-contract and constraint anchors to defeat LLM homogenization, forces divergent directions via independent seed framings, adds mandatory pre-mortem and contrarian reviewers, and applies debate-resolution synthesis requiring explicit accept/reject/escalate. Output: a spec with Kill Conditions, Open Risks, and a 'What This Design Gets Wrong' section.",
+  "about": "## UI/UX Design Workflow\n\nThis workflow produces a design spec for a new feature, screen, component, or interaction. It is built around two principles: (1) problem framing must happen before any solutions are proposed, and (2) design recommendations must be opinionated -- designed for one specific user, with a falsifiable point of view.\n\n**Why opinionated matters:** LLMs systematically produce homogenized design outputs. Studies show this persists even with 'be creative' instructions and parameter changes. The fix is structural: seed framings that force divergence in Phase 1, a kill-criterion that makes direction selection falsifiable in Phase 2, and mandatory pre-mortem and contrarian reviewers that are required to argue the chosen direction is wrong in Phase 3.\n\n**What it does:**\nPhase 0 frames the problem and extracts a measurable outcome statement, constraint set, and assumption inventory -- the three anchors that all later phases depend on. Phase 1 generates 2-3 directions with independent seed framings plus a negative-space alternative, each stating what it sacrifices. Phase 2 commits to one direction with explicit elimination of others and a falsification clause. Phase 3 runs parallel reviewer families -- IA, UX laws, accessibility, edge cases, content, plus a pre-mortem reviewer and a contrarian reviewer required to argue for a different direction. Phase 4 synthesizes via accept/reject/escalate, never averaging. The final spec includes Kill Conditions and a mandatory 'What This Design Gets Wrong' section.\n\n**When to use it:**\n- You need to design a new screen, feature, or non-trivial component\n- You want a recommendation, not a balanced description of options\n- You need a spec concrete enough for an engineer to implement or a designer to push back on\n- Simple single-component changes also work through a lighter direct-spec path\n\n**What it produces:**\nA design spec with 7 sections: Why (outcome), What (chosen direction with eliminated alternatives), How (all element states, edge cases, copy), Constraints (accessibility and technical minimums), Open Risks (escalated contrarian points), Kill Conditions (falsification clause), and What This Design Gets Wrong (known weaknesses).\n\n**How to get good results:**\nPoint the workflow to your codebase. Provide the design system location if it is not in the repo. The outcome statement and constraint set you approve in Phase 0 are the most important inputs -- weak outcome statements produce generic directions.",
   "examples": [
     "Design the empty state and onboarding flow for a new team dashboard feature",
     "Design a settings panel for notification preferences with accessibility requirements",
@@ -18,114 +18,191 @@
   "features": [
     "wr.features.subagent_guidance"
   ],
+  "assessments": [
+    {
+      "id": "evidence-quality-gate",
+      "purpose": "Every reviewer finding cites a specific design element from the context packet -- not a UX law citation detached from the actual design.",
+      "dimensions": [
+        {
+          "id": "evidence_quality",
+          "purpose": "Each finding names a specific element, component, or decision from the design. Generic advice ('consider reducing cognitive load') is not a finding.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "contrarian-addressed-gate",
+      "purpose": "Every contrarian point from the contrarian reviewer and pre-mortem is explicitly adopted, rejected with a reason, or escalated as an open risk in the spec.",
+      "dimensions": [
+        {
+          "id": "contrarian_addressed",
+          "purpose": "The contrarianResolutionLog is complete: every contrarian argument has a decision (adopt|reject|escalate) and a one-sentence reason. Nothing is silently smoothed over.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "edge-case-coverage-gate",
+      "purpose": "Every interactive element has its full state set addressed: empty, error, loading, first-use.",
+      "dimensions": [
+        {
+          "id": "edge_case_coverage",
+          "purpose": "Empty state, error state, loading state, and first-use are explicitly addressed for each interactive element in the spec. If an element has no loading state, that must be stated explicitly.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "kill-condition-gate",
+      "purpose": "The chosen direction has a falsification clause -- a real-world observation that would invalidate the design choice post-ship.",
+      "dimensions": [
+        {
+          "id": "kill_condition_stated",
+          "purpose": "The spec includes a Kill Conditions section with at least one falsifiable condition derived from the selectionKillCondition set in Phase 2.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    }
+  ],
   "preconditions": [
     "User has a UI/UX design task: a new feature, screen, component, or interaction to design.",
     "Agent has enough context about the product or codebase to understand existing patterns.",
     "A human will review the design spec before implementation begins."
   ],
   "metaGuidance": [
-    "PROCESS IS THE VALUE: the biggest failure mode in AI-assisted design is skipping to solutions before understanding the problem. This workflow makes that structurally impossible. Do not shortcut Phase 0.",
-    "EVIDENCE OVER PLATITUDES: every finding must cite a specific element from the context packet. 'Consider reducing cognitive load' is not a finding. 'The settings panel has 14 options, violating Miller\u2019s Law (7\u00b12)' is a finding.",
+    "OUTCOME CONTRACT IS THE ANCHOR: every phase depends on primaryOutcomeStatement and constraintSet from Phase 0. If these are vague ('users should feel good') the workflow produces generic output. Do not proceed with an unmeasurable outcome statement.",
+    "OPINIONATED MEANS FALSIFIABLE: a recommendation no agent argued against should be flagged as suspect. The contrarian reviewer ensures every selection is challenged. If contrarianFindings is empty after Phase 3, re-run with stronger adversarial framing.",
+    "BOTH-SIDES-ISM IS A FAILURE MODE: synthesis that says 'both have merits' without choosing is not synthesis. Phase 4 requires explicit accept/reject/escalate for every contrarian point. 'Escalate' produces an Open Risk in the spec.",
+    "SEED FRAMINGS PREVENT HOMOGENIZATION: generate each direction with a different optimization lens. Same framing twice produces structurally identical directions. The negative-space direction (simplest alternative) must always be included.",
+    "EVIDENCE OVER PLATITUDES: every finding must cite a specific element. 'The settings panel has 14 options, violating Miller's Law (7±2)' is a finding. 'Consider reducing cognitive load' is not.",
     "SIMPLE CRITERIA: designComplexity=Simple is only valid for a single existing component with a minor change, no new user flows, no information architecture changes, and no new interaction patterns. If uncertain, classify upward.",
-    "HONEST LIMITS: this workflow produces a text-based design spec. It cannot produce visual mockups, conduct usability testing, or verify visual quality. Say so explicitly in the handoff and flag what still needs human visual review.",
-    "CONTEXT BLINDNESS: if the user has not provided design system, existing component patterns, or platform conventions, surface this gap in Phase 0 and ask. Do not silently design without this context.",
+    "HONEST LIMITS: this workflow produces a text-based design spec. It cannot produce visual mockups, conduct usability testing, or verify visual quality. Say so in the handoff and name what still needs human visual review.",
     "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do not create DESIGN_CONTEXT.md or other sidecar files.",
-    "OWNERSHIP: the main agent owns synthesis, design decision, and final spec. Reviewer families provide independent perspectives only.",
-    "EDGE CASES ARE NOT OPTIONAL: every interactive design must address empty state, error state, loading state, and first-use. If any of these are not addressed in the spec, the spec is incomplete."
+    "OWNERSHIP: the main agent owns synthesis, direction selection, and final spec. Reviewer families provide independent perspectives only."
   ],
   "steps": [
     {
       "id": "phase-0-problem-framing",
-      "title": "Phase 0: Frame the Problem and Establish Design Context",
+      "title": "Phase 0: Frame the Problem and Extract the Outcome Contract",
       "promptBlocks": {
-        "goal": "Understand the design problem, the users it serves, and the context it exists in before proposing any solutions.",
+        "goal": "Understand the design problem and extract the three artifacts all later phases depend on: a measurable outcome statement, a constraint set, and an assumption inventory.",
         "constraints": [
           "Explore the codebase to find existing patterns, components, and conventions before asking questions.",
-          "Ask only for information tools cannot answer: design system location, target platform if ambiguous, user research or known pain points.",
-          "Do not propose any design solutions in this phase."
+          "Ask only for information tools cannot answer.",
+          "Do not propose any design solutions in this phase.",
+          "The primaryOutcomeStatement must be measurable. 'Users should feel good' is not acceptable. 'Users complete notification configuration in under 30 seconds on first use' is."
         ],
         "procedure": [
-          "Read the codebase to understand: existing UI components and patterns, platform (web/iOS/Android/cross-platform), tech stack constraints that affect UI, and any existing design documentation.",
-          "Identify the primary user and their goal: who will use this feature, what are they trying to accomplish, and what context are they in when they use it?",
-          "Identify constraints: technical limitations, existing design system components to use, platform conventions to follow, accessibility requirements, and any stated non-goals.",
-          "Identify the existing design context: what screens or components does this new design connect to? What does the user do before and after?",
-          "Surface any context you could not determine from tools: missing design system information, unknown user research, unclear platform target.",
+          "Read the codebase to understand: existing UI components and patterns, platform (web/iOS/Android), tech stack constraints that affect UI, and any existing design documentation.",
+          "Identify the primary user and their goal: who will use this feature, what are they trying to accomplish, what context are they in?",
+          "Write the primaryOutcomeStatement in JTBD-style: '[user] wants to [verb] [object] so they can [outcome]; success = [measurable change]'. This is the single criterion all direction selection must serve.",
+          "Write the constraintSet: at least 3 forced constraints that eliminate solution space (e.g., 'must work on a 320px viewport', 'must complete primary action in ≤2 taps', 'cannot use a modal for the primary flow'). Constraints that eliminate nothing are not constraints.",
+          "Write the assumptionInventory: the top 5 beliefs the design depends on, ranked by importance × unknown. These become the Kill Conditions in Phase 2 and the pre-mortem targets in Phase 3.",
+          "Identify existing design context: what screens or components does this connect to? What does the user do before and after?",
+          "Surface any context you could not determine: missing design system, unknown user research, unclear platform target.",
           "Classify designComplexity: Simple = single existing component, minor change, no new flows, no IA changes. Standard = new screen or component, moderate scope. Complex = new user flows, significant IA changes, multiple screens or interaction patterns.",
           "Set needsReviewerBundle = true for Standard and Complex; false for Simple."
         ],
         "outputRequired": {
-          "notesMarkdown": "User and goal, design constraints, existing context, gaps that need human input, and complexity classification with rationale.",
-          "context": "Capture userGoals, userConstraints, existingDesignContext, designComplexity, needsReviewerBundle, designContextGaps, and openQuestions."
+          "notesMarkdown": "Primary user and goal, primaryOutcomeStatement (must be measurable), constraintSet (at least 3 real constraints), assumptionInventory (top 5 beliefs), existing context, gaps requiring human input, and complexity classification with rationale.",
+          "context": "Capture primaryOutcomeStatement, constraintSet, assumptionInventory, userGoals, userConstraints, existingDesignContext, designComplexity, needsReviewerBundle, designContextGaps, and openQuestions."
         },
         "verify": [
-          "The user and their goal are explicit before any design work begins.",
-          "designComplexity is classified with a concrete reason, not a guess.",
-          "Any missing context (design system, platform, user research) is surfaced, not silently assumed."
+          "primaryOutcomeStatement is measurable -- there is a concrete success criterion, not a vibe.",
+          "constraintSet eliminates at least some solution space -- it is not a list of things that are generally true.",
+          "assumptionInventory names at least 3 specific beliefs the design depends on.",
+          "designComplexity is classified with a concrete reason."
         ]
       },
       "requireConfirmation": true
     },
     {
       "id": "phase-1-design-directions",
-      "title": "Phase 1: Explore Design Directions",
+      "title": "Phase 1: Divergent Direction Generation",
       "runCondition": {
         "var": "needsReviewerBundle",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Generate 2-3 genuinely different design directions before committing to any one of them.",
+        "goal": "Generate 2-3 genuinely different design directions using independent seed framings that force divergence, plus one negative-space alternative.",
         "constraints": [
-          "Directions must be genuinely different \u2014 not variations of the same pattern with different labels.",
-          "Each direction needs an information architecture sketch: how is content organized, what is the primary navigation path, what is the visual hierarchy?",
-          "Do not select a direction in this phase. Exploration comes before convergence."
+          "Directions must be genuinely different in IA or interaction model -- not variations of the same pattern with different labels.",
+          "Each direction is generated from an independent seed framing that biases the exploration in a different direction. The same framing applied twice will produce superficially different but structurally identical directions.",
+          "The negative-space direction is required: what is the simplest possible alternative -- the one that removes a feature, reduces scope, or does less? This forces evaluation of whether the full design is justified.",
+          "Do not select a direction in this phase."
         ],
         "procedure": [
-          "Generate Direction A: the most conventional approach that follows existing platform patterns and design system. Low risk, familiar to users.",
-          "Generate Direction B: an approach that prioritizes the primary user goal differently \u2014 different IA, different entry point, or different interaction model.",
-          "Generate Direction C (if designComplexity=Complex): a third direction that challenges the assumptions in A and B \u2014 a more radical rethinking of the problem.",
-          "For each direction, describe: (1) the primary IA sketch (main sections, navigation path, content hierarchy), (2) the core interaction model (how does the user accomplish their goal?), (3) the key tradeoffs relative to user goals and constraints.",
-          "After describing all directions, restate which user goals each direction serves well and where each direction is weakest."
+          "Generate Direction A with seed framing: 'as if optimizing for a first-time user who has never seen this product'. Prioritize clarity, progressive disclosure, and the shortest path to first success. Describe: IA sketch, primary interaction model, what it sacrifices for first-time-user clarity.",
+          "Generate Direction B with seed framing: 'as if a competitor solved this problem 10x better than the obvious solution'. What would they do differently? What assumption does this challenge? Describe: IA sketch, primary interaction model, what it sacrifices.",
+          "Generate Direction C (if designComplexity=Complex) with seed framing: 'as if you had to eliminate one entire category of UI element from this design'. What structural change does this force? Describe: IA sketch, primary interaction model, what it sacrifices.",
+          "Generate the Negative-Space Direction: what is the simplest alternative -- the one that does less, removes a feature, or solves the problem by changing a constraint instead of building a UI? State why this could be correct and what would have to be true for it to be the best answer.",
+          "For each direction, explicitly score it 1-5 against the primaryOutcomeStatement with one sentence of reasoning.",
+          "For each direction, name one constraint from constraintSet that it violates (if any).",
+          "After all directions, state which assumptionInventory items each direction depends on most heavily -- this seeds the pre-mortem in Phase 3."
         ],
         "outputRequired": {
-          "notesMarkdown": "All design directions with IA sketches and explicit tradeoffs. No recommendation yet.",
-          "context": "Capture designDirections (array of direction objects with name, iaSketch, interactionModel, tradeoffs)."
+          "notesMarkdown": "All directions with seed framings, IA sketches, outcome scores, sacrifices, constraint violations, and assumption dependencies. No recommendation yet.",
+          "context": "Capture designDirections (array: seedFraming, iaSketch, interactionModel, outcomeScore, sacrifices, constraintsViolated, assumptionDependencies), negativeSpaceDirection."
         },
         "verify": [
-          "At least 2 directions are genuinely different in IA or interaction model, not just surface styling.",
-          "Each direction has an explicit IA sketch and tradeoff analysis.",
+          "At least 2 directions have different seed framings and are genuinely different in IA or interaction model.",
+          "The negative-space direction is present.",
+          "Each direction names what it sacrifices -- not just what it offers.",
           "No direction has been selected or recommended yet."
         ]
       },
       "requireConfirmation": true
     },
     {
-      "id": "phase-2-freeze-context-packet",
-      "title": "Phase 2: Freeze Context Packet and Select Reviewer Families",
+      "id": "phase-2-opinionated-selection",
+      "title": "Phase 2: Opinionated Direction Selection",
       "runCondition": {
         "var": "needsReviewerBundle",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Assemble a neutral context packet that all reviewer families will use as shared truth, then declare which reviewers are needed.",
+        "goal": "Commit to one direction with explicit elimination of alternatives, a falsification clause, and a neutral context packet for reviewers.",
         "constraints": [
-          "The context packet is neutral \u2014 it presents the design problem and directions without advocating for any one.",
-          "Select the direction to develop further before running reviewers \u2014 reviewers evaluate a specific direction, not an abstract problem.",
-          "All 5 reviewer families are active for Complex designs; IA and UX laws reviewers are always included for Standard."
+          [
+            {
+              "kind": "ref",
+              "refId": "wr.refs.notes_first_durability"
+            }
+          ],
+          "Direction selection must be opinionated. If the rationale for selecting a direction applies equally to the alternatives, the selection is not opinionated enough.",
+          "Apply the Field test: if no agent in this system has argued against the selection, flag it and strengthen the contrarian reviewer's mandate in Phase 3.",
+          "The selectionKillCondition must be specific and falsifiable -- a real-world observation, not a truism."
         ],
         "procedure": [
-          "Select the design direction to develop: based on the user goals and constraints from Phase 0, choose the direction from Phase 1 that best fits. State which direction and the specific reason it was chosen over the others.",
-          "Assemble the designContextPacket containing: (1) the selected direction's IA sketch and interaction model, (2) user goals and constraints from Phase 0, (3) existing design context (what connects to this), (4) platform and tech constraints, (5) any known user pain points or requirements.",
-          "Select reviewer families: IA reviewer (always), UX laws reviewer (always), accessibility reviewer (Standard and Complex), edge cases reviewer (Standard and Complex), content reviewer (Complex or when copy is a significant design concern).",
-          "Set selectedReviewerFamilies and needsReviewerBundle context."
+          "Select the design direction: name which direction and state the specific reason it was chosen over the others against the primaryOutcomeStatement. The reason must be specific enough that it could NOT apply to the alternatives.",
+          "Eliminate the other directions: for each eliminated direction, write one sentence naming the specific thing it fails at relative to the primaryOutcomeStatement or constraintSet.",
+          "Write the selectionKillCondition: 'This direction is wrong if [specific real-world observation] turns out to be true.' Pull from the assumptionInventory -- the highest-importance unknown becomes the kill condition.",
+          "Apply the Field test: does any agent in this system have a strong argument against this selection? If yes, name it now and ensure the contrarian reviewer in Phase 3 must address it explicitly. If no, flag the selection as 'unchallenged' and instruct the contrarian reviewer to work harder.",
+          "Assemble the designContextPacket: (1) selected direction's IA sketch and interaction model, (2) primaryOutcomeStatement and constraintSet, (3) existing design context, (4) platform and tech constraints, (5) known user pain points, (6) eliminated directions and their elimination reasons.",
+          "Select reviewer families: IA reviewer (always), UX laws reviewer (always), accessibility reviewer (Standard and Complex), edge cases reviewer (Standard and Complex), content reviewer (Complex or when copy is significant), pre-mortem reviewer (always), contrarian reviewer (always).",
+          "Set selectedReviewerFamilies, designContextPacket, selectedDirection, eliminatedDirections, selectionKillCondition, fieldTestFlag."
         ],
         "outputRequired": {
-          "notesMarkdown": "Selected direction with rationale, frozen context packet summary, and selected reviewer families with justification.",
-          "context": "Capture designContextPacket, selectedDirection, selectedReviewerFamilies, contradictionCount (init 0), evidenceWeakCount (init 0)."
+          "notesMarkdown": "Selected direction with specific reason (not a reason that applies to all directions), eliminated directions each with one elimination sentence, selectionKillCondition, Field test result, frozen context packet summary, reviewer families.",
+          "context": "Capture designContextPacket, selectedDirection, eliminatedDirections, selectionKillCondition, fieldTestFlag, selectedReviewerFamilies, contradictionCount (init 0), evidenceWeakCount (init 0), contrarianResolutionLog (init [])."
         },
         "verify": [
-          "A specific direction is selected with a concrete reason.",
-          "The context packet is complete enough that a reviewer can evaluate the design without regathering context.",
-          "Reviewer family selection is justified by designComplexity."
+          "The selection rationale is specific enough that it could NOT apply to the eliminated directions.",
+          "Every eliminated direction has a one-sentence elimination reason citing the primaryOutcomeStatement or a specific constraint.",
+          "selectionKillCondition is a specific falsifiable observation, not 'if users don't like it'.",
+          "The context packet is complete enough that a reviewer can evaluate the design without regathering context."
         ]
       },
       "requireConfirmation": false
@@ -138,7 +215,7 @@
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Run the selected reviewer families in parallel against the frozen context packet, then synthesize their findings as evidence rather than verdicts.",
+        "goal": "Run the selected reviewer families in parallel -- each with a persona, named failure mode, verbatim-evidence requirement, and calibrated confidence -- then synthesize their output as evidence, not conclusions.",
         "constraints": [
           [
             {
@@ -147,23 +224,27 @@
             }
           ],
           "Every finding must cite a specific element, component, or decision from the designContextPacket. Generic UX advice without a specific reference is not a valid finding.",
-          "Reviewer output is raw evidence. The main agent owns synthesis and design decisions."
+          "Every finding must include a confidence score (1-5) and severity score (1-5). Findings where BOTH confidence ≤ 2 AND severity ≤ 2 are automatically discarded before synthesis.",
+          "Reviewer output is raw evidence. The main agent owns synthesis and design decisions.",
+          "The contrarian reviewer and pre-mortem reviewer are mandatory -- they run even for Standard designs."
         ],
         "procedure": [
-          "Before delegating, restate the selected direction and the user goal it serves best.",
-          "Spawn one WorkRail Executor per selected reviewer family simultaneously. Each executor receives: the designContextPacket, their specific reviewer mission, and the finding format requirement.",
-          "Reviewer family missions: (1) IA reviewer \u2014 evaluate content hierarchy, navigation paths, grouping logic, and information scent against user goals; cite specific IA decisions; (2) UX laws reviewer \u2014 check each relevant law: Hick's Law (decision count), Miller's Law (working memory), Jakob's Law (familiar patterns), Fitts's Law (target size and distance), Peak-End Rule (emotional journey), Tesler's Law (irreducible complexity), Von Restorff Effect (visual differentiation of important elements); cite specific violations or confirmations; (3) accessibility reviewer \u2014 check WCAG requirements: color contrast ratios (4.5:1 normal, 3:1 large text), keyboard navigation path, touch target sizes (44x44px minimum), screen reader labels, focus indicators, animation controls; produce specific requirements not 'follow WCAG'; (4) edge cases reviewer \u2014 for each interactive element, explicitly address: empty state (no data), error state (failed action), loading state, first-use/onboarding, offline or degraded state, destructive actions; flag any state not addressed in the current design; (5) content reviewer \u2014 evaluate every label, button copy, placeholder, error message, and helper text against clarity, user language vs. technical jargon, and actionability of error messages.",
-          "After receiving all executor outputs, synthesize explicitly: what was confirmed, what was new, what looks weak or generic, and what has citations vs. what is speculation.",
-          "Set evidenceWeakCount to the number of findings without specific citations."
+          "Before delegating, restate the selectedDirection, the primary reason it was chosen, and the selectionKillCondition.",
+          "Spawn one WorkRail Executor per selected reviewer family simultaneously. Each executor receives the designContextPacket, their specific mission, and the finding format: {finding, specificElement, confidence (1-5), severity (1-5), whatWouldChangeMind}.",
+          "Reviewer family missions:\n\n(1) IA reviewer -- persona: information architect who has watched navigation redesigns destroy user retention. Named failure mode: content hierarchy that forces the user to navigate more than once to complete the primary goal. Mission: evaluate the selected direction's IA against the primaryOutcomeStatement; identify the longest path to success and whether any grouping decision contradicts user mental models. State one thing that would make the IA acceptable as-is.\n\n(2) UX laws reviewer -- persona: cognitive psychologist applied to product design. Named failure mode: design decisions that add friction the user will attribute to the product feeling 'hard to use' without being able to say why. Mission: check each relevant law against specific elements. Hick's Law: count the decision points on the primary path and state whether the count is above the threshold for this user's context. Miller's Law: count working-memory items in the most complex screen state. Fitts's Law: identify the smallest touch target and whether it meets 44x44px minimum for the primary action. Peak-End Rule: what is the emotional peak and the end state -- are they positive? Tesler's Law: what complexity has been shifted to the user that could be handled by the system? Cite the specific element for each finding.\n\n(3) Accessibility reviewer -- persona: accessibility engineer who has watched three product launches regress WCAG compliance under deadline pressure. Named failure mode: accessibility requirements that are listed generically and then ignored during implementation because they weren't specific enough to verify. Mission: produce requirements as implementation contracts, not WCAG citations. Check: text-on-image or text-on-color-background -- what is the actual contrast ratio requirement for this element? State changes communicated by color alone -- which specific states are affected? Touch targets -- which specific interactive elements are at risk? Keyboard navigation path -- what is the expected tab order? Focus indicators -- are they visible without additional CSS? Screen reader labels -- which elements need explicit aria-label and what should they say?\n\n(4) Edge cases reviewer -- persona: QA engineer who has shipped three products where the error state was designed at 2am the night before launch. Named failure mode: specs that describe only the happy path and force engineers to invent error states during implementation, where they get it wrong. Mission: for each interactive element in the selected direction, explicitly address: empty state (what shows when there is no data?), error state (what shows when the action fails? what is the recovery path?), loading state (what shows while the action is in progress? how long before a timeout?), first-use (what does a new user see before any data exists?), offline or degraded state (what happens if network is unavailable?). Flag every state that is not addressed in the current design with a severity score.\n\n(5) Content reviewer -- persona: UX writer who has rewritten the same error messages four times because the first three were written by engineers. Named failure mode: copy that uses technical language the user doesn't understand, or action labels that don't say what will happen. Mission: evaluate every label, button copy, placeholder, error message, and helper text against: is it in user language (not system language)? does the action label say what will happen (not what the system is called)? does the error message tell the user what to do next (not just what went wrong)? is there any copy that assumes the user knows how the system works internally?\n\n(6) Pre-mortem reviewer -- persona: a product manager writing a post-mortem six months after this design shipped and failed. Named failure mode: overconfidence in direction selection before real-world signals. Mission: the chosen direction shipped and failed. Write the post-mortem. Identify 3 plausible failure modes with mechanism -- not generic risks, but specific failure paths grounded in the assumptionInventory and selectionKillCondition. For each failure mode: what was the assumption that turned out to be wrong, what user behavior did that produce, and what was the impact? You must argue that the direction failed, not that it might fail.\n\n(7) Contrarian reviewer -- persona: a senior designer who argued in the direction-selection meeting that a different direction was correct and was overruled. Named failure mode: direction selection that is consensus-driven rather than evidence-driven. Mission: argue that one of the eliminated directions was actually correct. Compare head-to-head against the selected direction on the primaryOutcomeStatement. You may not raise generic concerns -- you must argue that the eliminated direction scores higher on the outcome metric and state why. You must also argue against the selected direction's kill condition: if the kill condition turns out to be true, what happens? Use the fieldTestFlag to calibrate intensity -- if the selection was flagged as 'unchallenged', work harder.",
+          "After receiving all executor outputs, discard findings where confidence ≤ 2 AND severity ≤ 2. Then synthesize: what was confirmed, what was new, what was weak, and what has citations vs. what is speculation. Separate contrarianFindings and preMortemFindings from reviewerFindings.",
+          "Set evidenceWeakCount to findings without specific element citations after discarding low-quality ones."
         ],
         "outputRequired": {
-          "notesMarkdown": "Per-family synthesis, contradiction flags, evidence quality assessment, and overall finding count.",
-          "context": "Capture reviewerFindings (per-family), contradictionCount, evidenceWeakCount."
+          "notesMarkdown": "Per-family synthesis, pre-mortem failure modes, contrarian arguments, discarded findings count, evidence quality assessment, contradiction flags.",
+          "context": "Capture reviewerFindings (per family, excluding contrarian and pre-mortem), contrarianFindings, preMortemFindings, contradictionCount, evidenceWeakCount."
         },
         "verify": [
-          "Every declared reviewer family has at least one substantive finding.",
+          "Every declared reviewer family has at least one substantive finding with a specific element citation.",
+          "contrarianFindings is non-empty -- the contrarian reviewer argued against the selection.",
+          "preMortemFindings names at least one specific failure mode with mechanism.",
           "Reviewer output was synthesized by the main agent, not adopted verbatim.",
-          "Findings with specific citations are distinguished from generic advice."
+          "Low-confidence-low-severity findings were discarded before synthesis."
         ]
       },
       "requireConfirmation": false
@@ -171,7 +252,7 @@
     {
       "id": "phase-4-synthesis-loop",
       "type": "loop",
-      "title": "Phase 4: Synthesis and Contradiction Resolution",
+      "title": "Phase 4: Debate Resolution Loop",
       "loop": {
         "type": "while",
         "conditionSource": {
@@ -183,28 +264,30 @@
       },
       "body": [
         {
-          "id": "phase-4a-resolve",
-          "title": "Resolve Contradictions and Strengthen Weak Evidence",
+          "id": "phase-4a-debate-resolution",
+          "title": "Resolve Contrarian Arguments and Strengthen Weak Evidence",
           "promptBlocks": {
-            "goal": "Resolve any contradictions between reviewer findings and strengthen evidence-weak findings before finalizing the design decision.",
+            "goal": "Respond to every contrarian argument and pre-mortem failure mode via explicit accept/reject/escalate. This is debate resolution, not averaging.",
             "constraints": [
-              "Contradiction resolution is main-agent work. Do not delegate synthesis.",
-              "If two reviewers disagree about the same design element, explicitly adjudicate which evidence is stronger."
+              "Synthesis is forbidden from silently smoothing over disagreement. Every contrarian point must have a decision.",
+              "Adopting a contrarian point means changing the design. Rejecting it means stating the specific reason the selected direction is still correct. Escalating it means naming it as an Open Risk in the spec.",
+              "If no contrarian points are adopted, flag for human review -- synthesis that accepts nothing from the contrarian is suspect."
             ],
             "procedure": [
-              "List any contradictions: cases where two reviewer families disagree about the same design element or recommendation.",
-              "Adjudicate each contradiction: which evidence is more specific, which is better grounded in the design context packet?",
-              "For any finding with evidenceWeak=true, either find the specific citation yourself or downgrade the finding to advisory.",
-              "Update reviewerFindings with resolved contradictions and strengthened evidence.",
-              "Update contradictionCount to 0 when resolved; update evidenceWeakCount."
+              "For each finding in contrarianFindings: make a decision -- (a) adopt: state what changes in the design as a result; (b) reject: state the specific reason the selected direction is still correct against the primaryOutcomeStatement; (c) escalate: add to openRisks with a description of the risk and what would need to be validated before building. Add each to contrarianResolutionLog.",
+              "For each failure mode in preMortemFindings: make a decision -- (a) addressed: state how the current design mitigates this failure mode; (b) escalate: add to openRisks.",
+              "For any finding with evidenceWeak=true, find the specific element citation yourself or downgrade to advisory.",
+              "Update contradictionCount to 0 when all contrarian points are addressed; update evidenceWeakCount.",
+              "If contrarianResolutionLog has no 'adopt' entries after processing all points, flag this explicitly."
             ],
             "outputRequired": {
-              "notesMarkdown": "Contradictions resolved, evidence-weak findings addressed, updated finding summary.",
-              "context": "Capture contradictionCount, evidenceWeakCount, reviewerFindings."
+              "notesMarkdown": "Contrarian resolution log with decision and reason for each point, pre-mortem failure modes addressed or escalated, openRisks list, no-adopt flag if applicable.",
+              "context": "Capture contrarianResolutionLog, openRisks, contradictionCount, evidenceWeakCount, reviewerFindings."
             },
             "verify": [
-              "Each resolved contradiction names which evidence won and why.",
-              "No unresolved contradictions remain."
+              "Every contrarian point has a decision (adopt|reject|escalate) with a reason.",
+              "Every pre-mortem failure mode is addressed or escalated.",
+              "If no contrarian points were adopted, this is explicitly flagged."
             ]
           },
           "requireConfirmation": false
@@ -219,14 +302,14 @@
             ],
             "procedure": [
               "Continue if contradictionCount > 0.",
-              "Otherwise continue if evidenceWeakCount > 3 (more than 3 findings still lack specific citations).",
+              "Otherwise continue if evidenceWeakCount > 3.",
               "Otherwise stop."
             ],
             "outputRequired": {
               "artifact": "Emit a `wr.loop_control` artifact for `design_synthesis_loop` with `decision` set to `continue` or `stop`."
             },
             "verify": [
-              "The loop does not stop while material contradictions remain unresolved."
+              "The loop does not stop while material contrarian points remain unresolved."
             ]
           },
           "outputContract": {
@@ -241,64 +324,85 @@
       }
     },
     {
-      "id": "phase-5-hard-gate",
-      "title": "Phase 5: Hard Gate Check",
+      "id": "phase-5-design-spec-handoff",
+      "title": "Phase 5: Design Spec",
       "runCondition": {
         "var": "needsReviewerBundle",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Verify all quality gates pass before writing the design spec.",
+        "goal": "Produce a complete design spec ready for engineering review and implementation -- opinionated, complete, and honest about its limits.",
         "constraints": [
-          "If any gate fails, fix the underlying issue before advancing \u2014 do not write the spec over known gaps."
-        ],
-        "procedure": [
-          "Gate 1 \u2014 Evidence citations: confirm every finding in reviewerFindings cites a specific design element from the context packet. Flag any finding that is generic advice without a specific reference and either improve it or mark it advisory-only.",
-          "Gate 2 \u2014 Reviewer coverage: confirm every declared reviewer family has at least one substantive finding. If a family has no findings, state explicitly why (e.g., 'IA reviewer found no issues \u2014 the single-screen design has no navigation structure to evaluate').",
-          "Gate 3 \u2014 Edge case coverage: confirm empty state, error state, loading state, and first-use are addressed for each interactive element in the selected design direction. List any that are not yet addressed.",
-          "Gate 4 \u2014 Accessibility specificity: confirm accessibility requirements are listed as specific constraints (color contrast ratios, touch target sizes, keyboard tab order), not as a generic 'follow WCAG' instruction."
-        ],
-        "outputRequired": {
-          "notesMarkdown": "Gate check results: which passed, which failed, what was fixed.",
-          "context": "Capture hardGatesPassed, hardGateFailures."
-        },
-        "verify": [
-          "hardGatesPassed = true before advancing to spec writing.",
-          "Any gate failures were fixed, not silently accepted."
-        ]
-      },
-      "requireConfirmation": false
-    },
-    {
-      "id": "phase-5-design-spec-handoff",
-      "title": "Phase 5: Design Spec",
-      "promptBlocks": {
-        "goal": "Produce a complete design spec ready for engineering review and implementation.",
-        "constraints": [
-          "Every interactive element must have its edge cases addressed in the spec.",
-          "Accessibility requirements must be specific, not 'follow WCAG'.",
-          "The spec must acknowledge what still requires human visual review and what requires usability testing.",
+          "Every interactive element must have its states addressed: default, hover/focus, loading, error, empty, first-use, disabled.",
+          "Accessibility requirements must be specific implementation contracts, not 'follow WCAG'.",
+          "The spec must include Kill Conditions (from selectionKillCondition) and Open Risks (from openRisks).",
+          "The 'What This Design Gets Wrong' section is mandatory -- it names known weaknesses and things the user should validate before building. A spec without this section is false confidence.",
           "Do not drift into implementation planning (specific component libraries, code) unless explicitly asked."
         ],
         "procedure": [
-          "Write the design spec covering: (1) Design Decision \u2014 which direction was chosen and the specific reason it was chosen over the others; (2) Information Architecture \u2014 content hierarchy, navigation structure, primary user path; (3) Interaction Design \u2014 how each interactive element works, what triggers what, what feedback the user gets; (4) States \u2014 for each element: default, hover/focus, loading, error, empty, first-use, disabled; (5) Accessibility Requirements \u2014 specific requirements (color contrast ratios, keyboard tab order, touch target sizes, screen reader labels); (6) Content \u2014 all copy, labels, error messages, placeholders, and onboarding text; (7) Reviewer Findings \u2014 per-dimension findings with citations that the design should address or has already addressed; (8) Open Questions \u2014 what still needs human input (visual design, usability testing, design system component availability).",
-          "Close the spec by naming: what visual review a human designer should perform, and what this workflow cannot verify (visual quality, usability, emotional feel)."
+          "Write the design spec with these 7 sections:\n\n**1. Why** -- the primaryOutcomeStatement and the user it serves. One paragraph.\n\n**2. What** -- the chosen direction and why it was selected over the alternatives. Name each eliminated direction and its one-sentence elimination reason. This is the opinionated design decision.\n\n**3. How** -- concrete implementation primitives:\n- For each interactive element: default state, hover/focus, loading, error, empty, first-use, disabled\n- Every edge case surfaced by the edge-cases reviewer\n- All copy strings (no placeholders)\n- Breakpoint behavior if applicable\n\n**4. Constraints** -- non-negotiables as implementation contracts:\n- Specific accessibility requirements (contrast ratios as numbers, touch target sizes as pixels, keyboard tab order as a list, aria-labels as exact strings)\n- Technical constraints from the constraintSet\n\n**5. Open Risks** -- every item escalated from the contrarianResolutionLog and preMortemFindings. Each with: the risk, what would need to be validated, and by when. If empty, state 'No open risks escalated.'\n\n**6. Kill Conditions** -- the selectionKillCondition verbatim, plus any additional falsification clauses from the contrarian reviewer's strongest argument. These are what would invalidate this design post-ship.\n\n**7. What This Design Gets Wrong** -- name the known weaknesses. What does the spec not answer? What did the contrarian reviewer argue that you rejected -- and is there a chance they were right? What would a usability test most likely break? This section is not a failure; it is honesty. A spec without it is making a claim about the design's completeness that no text-based spec can make.",
+          "Close by naming: what visual review a human designer should perform, and what this workflow cannot verify (visual quality, usability, emotional feel, whether the copy actually reads clearly to real users)."
         ],
         "outputRequired": {
-          "notesMarkdown": "Complete design spec with all 8 sections. Open questions and human-review items explicitly listed."
+          "notesMarkdown": "Complete design spec with all 7 sections. Open questions and human-review items explicitly listed."
         },
         "verify": [
-          "All 8 spec sections are present and substantive.",
+          "All 7 spec sections are present and substantive.",
           "Every interactive element has states addressed.",
-          "Accessibility requirements are specific, not generic.",
-          "Open questions acknowledge the limits of agent-generated design specs."
+          "Accessibility requirements are specific contracts, not generic.",
+          "Kill Conditions and Open Risks are present (even if the Open Risks section is empty, it must say so explicitly).",
+          "'What This Design Gets Wrong' is present and names real weaknesses, not just 'we should do usability testing'."
         ]
       },
-      "requireConfirmation": false,
-      "runCondition": {
-        "var": "needsReviewerBundle",
-        "equals": true
-      }
+      "assessmentRefs": [
+        "evidence-quality-gate",
+        "contrarian-addressed-gate",
+        "edge-case-coverage-gate",
+        "kill-condition-gate"
+      ],
+      "assessmentConsequences": [
+        {
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "evidence-quality-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "evidence_quality low: every reviewer finding must cite a specific design element. Replace any finding that says only '[UX law] applies here' with the specific element it applies to and why it matters for this design."
+          }
+        },
+        {
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "contrarian-addressed-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "contrarian_addressed low: the contrarianResolutionLog is incomplete. For every item in contrarianFindings and preMortemFindings, add an entry with decision (adopt|reject|escalate) and a one-sentence reason. 'Escalate' means it appears in the Open Risks section of the spec."
+          }
+        },
+        {
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "edge-case-coverage-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "edge_case_coverage low: add missing states for interactive elements. For each element missing a state, write what the user sees and what action is available. If loading state is not applicable to an element, state that explicitly."
+          }
+        },
+        {
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "kill-condition-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "kill_condition_stated low: add a Kill Conditions section to the spec. The selectionKillCondition from Phase 2 must appear verbatim. Add at least one additional falsification clause from the contrarian reviewer's strongest argument."
+          }
+        }
+      ],
+      "requireConfirmation": false
     },
     {
       "id": "phase-simple-design",
@@ -311,19 +415,23 @@
         "goal": "Produce a focused design spec for a simple, bounded change without the full reviewer pipeline.",
         "constraints": [
           "Simple means: single existing component, minor change, no new flows, no IA changes.",
+          "Even simple changes must state a primaryOutcomeStatement -- what specifically does this change accomplish for the user?",
           "If during spec writing you discover the change is more complex than classified, stop, update designComplexity to Standard, set needsReviewerBundle=true, and return to Phase 1.",
           "Even simple changes must address: error state, empty state if applicable, accessibility."
         ],
         "procedure": [
+          "State the primaryOutcomeStatement for this change: what specifically does it accomplish for the user?",
           "Write the design spec: what changes, why, the specific interaction or visual change, any states affected, and the accessibility impact.",
           "Apply quick UX checks: does the change violate any obvious UX laws (Fitts's Law for target size, consistency with nearby elements)? Is the copy clear and in user language?",
+          "Name one thing this change gets wrong or leaves unresolved -- even simple specs benefit from honesty about their limits.",
           "Note what a human reviewer should visually verify."
         ],
         "outputRequired": {
-          "notesMarkdown": "Focused design spec: what changes, why, states, accessibility impact, and what needs visual review."
+          "notesMarkdown": "Focused design spec: primaryOutcomeStatement, what changes, why, states, accessibility impact, one known weakness, and what needs visual review."
         },
         "verify": [
           "The change is genuinely simple by the stated criteria.",
+          "primaryOutcomeStatement is present.",
           "Error and empty states are addressed if applicable.",
           "Accessibility impact is stated."
         ]
