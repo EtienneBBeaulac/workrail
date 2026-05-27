@@ -201,6 +201,38 @@
       "requireConfirmation": false
     },
     {
+      "id": "phase-1b-domain-research-gate",
+      "title": "Phase 1b: Domain Research & Fact-Gathering",
+      "requireConfirmation": {
+        "var": "workflowComplexity",
+        "not_equals": "Simple"
+      },
+      "promptBlocks": {
+        "goal": "Generate a tailored Deep Research Prompt for the user to execute on an external state-of-the-art model (such as ChatGPT, Gemini, or Claude Desktop), and ingest the resulting domain research brief to serve as the workflow's authoritative domain-knowledge source.",
+        "constraints": [
+          "Premium external models with native web search and deep reasoning capabilities are far superior for open-ended domain research than a local in-context agent.",
+          "Do NOT proceed to Phase 2 without generating the prompt and ingesting the user's pasted deep research results.",
+          "The generated prompt must be highly customized to the target workflow's archetype, domain, and primary failure modes identified in Phase 0 and Phase 1."
+        ],
+        "procedure": [
+          "Generate a highly specific 'Deep Research Prompt' tailored for the workflow being authored/modernized.",
+          "The prompt must instruct the external AI to: (1) Outline the best-practice real-world procedures and milestones for this specific task, (2) List the 3 most common and insidious human/system failure modes and blind spots, (3) Recommend specific evidence-gathering strategies and verification rubrics, (4) Suggest concrete metrics/observable signals for validating output quality.",
+          "Present the generated prompt to the user inside a clear markdown block.",
+          "Instruct the user: 'Copy the prompt below, run it in a state-of-the-art deep research model (e.g., ChatGPT Deep Research, Gemini Advanced, or Claude), and paste the full resulting text here.'",
+          "Ingest the user's pasted research text and set it in context as `domainResearchBrief`.",
+          "Confirm that the pasted text is rich, non-empty, and covers domain-specific details."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Confirmation that the Deep Research Prompt was generated and the resulting domain research brief was successfully ingested.",
+          "context": "Set generatedResearchPrompt and domainResearchBrief."
+        },
+        "verify": [
+          "The Deep Research Prompt is highly tailored to the specific target workflow, not generic.",
+          "domainResearchBrief is captured in context and is non-empty."
+        ]
+      }
+    },
+    {
       "id": "phase-2-design-workflow-architecture",
       "title": "Phase 2: Design the Workflow Architecture",
       "promptBlocks": {
@@ -211,6 +243,7 @@
         ],
         "procedure": [
           "Decide the phase list, one-line goal for each phase, and overall ordering.",
+          "Incorporate the domain-specific procedures, milestones, and evidence-gathering strategies from `domainResearchBrief` (if present) into the step structure and phase design.",
           "Design loops with explicit exit rules, bounded maxIterations, and real reasons for another pass.",
           "Decide confirmation gates, delegation vs template injection vs direct execution, promptFragments, references, artifacts, and metaGuidance."
         ],
@@ -264,6 +297,7 @@
         ],
         "procedure": [
           "Decide whether the authored workflow needs a hypothesis step, neutral fact packet, reviewer or validator families, contradiction loop, final validation bundle, or explicit blind-spot handling.",
+          "Incorporate the failure modes, blind spots, and verification rubrics from `domainResearchBrief` (if present) to design highly targeted assessments, hard gates, and adversarial checks.",
           "Design the confidence model, blind-spot model, and state economy plan.",
           "Decide the hard-gate dimensions that would make the authored workflow unsafe or unsatisfying if they fail. If hard gates exist, implement them using the native `assessments` + `assessmentRefs` + `assessmentConsequences` schema fields rather than informal notes or `requireConfirmation` alone. Each dimension should capture a distinct orthogonal failure mode -- not restate the workflow's existing confidence band. See `mr-review-workflow.agentic.v2.json` and `bug-investigation.agentic.v2.json` as exemplars.",
           "Write the redesign triggers that should force architectural revision rather than cosmetic refinement."
