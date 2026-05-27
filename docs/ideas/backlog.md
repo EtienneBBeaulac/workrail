@@ -3675,6 +3675,22 @@ Ghost nodes represent steps that were compiled into the DAG but skipped at runti
 
 ## Workflow Library
 
+### Workflow Flavors: Parameterized Execution Profiles (May 26, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 10** | Cor:1 Cap:2 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Currently, workflows like `wr.coding-task` are monolithic and generic. To adapt them for specific domains (like UI, Kotlin, or backend), operators must either author completely separate workflow files (creating maintenance duplication) or accept generic prompts that miss domain-specific guidelines. There is no first-class way to parameterize a workflow session with a specific "flavor" that alters its prompts, injected guidelines, or verification gates while retaining a single canonical DAG definition.
+
+**Things to hash out:**
+- Should the "flavor" be explicitly configured in the trigger/session start, or dynamically inferred by the coordinator looking at the files touched in the workspace?
+- How should flavor-specific prompt additions be structured? Can we avoid inline JSON string bloat in `promptFragments` by using the reference system (`references` pointing to clean `.md` files) and just dynamically linking/injecting references based on the flavor?
+- Can a workflow support multiple simultaneous flavors (e.g., both `kotlin` and `backend`), or should it be restricted to a single primary flavor?
+- Does this compose cleanly with global `metaGuidance` template injection, allowing stack-specific rulesets to be injected workflow-wide without cluttering individual step JSON files?
+
+---
+
 ### Remove human_approval gate from wr.mr-review final handoff step (May 20, 2026)
 
 **Status: idea** | Priority: medium
