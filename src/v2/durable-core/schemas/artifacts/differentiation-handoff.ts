@@ -5,39 +5,70 @@ import { z } from 'zod';
  *
  * Typed artifact for threading context from the wr.differentiation workflow session
  * to the wr.shaping workflow session.
+ * 
+ * Incorporates Tony Ulwick's ODI, Helmer's Counter-Positioning taxonomy,
+ * and Singer's Shape Up "Pitch" contract primitives.
  */
 
 export const DIFFERENTIATION_HANDOFF_CONTRACT_REF = 'wr.contracts.differentiation_handoff' as const;
+
+export const SevenPowersSchema = z.enum([
+  'Counter-Positioning',
+  'Switching Costs',
+  'Network Economies',
+  'Scale Economies',
+  'Cornered Resource',
+  'Process Power',
+  'Branding',
+  'None_Imitable'
+]);
 
 export const DifferentiationHandoffArtifactV1Schema = z
   .object({
     kind: z.literal('wr.differentiation_handoff'),
     version: z.literal(1),
+    schemaVersion: z.literal('1.0.0'),
+    generatedAt: z.string().datetime(),
 
-    /** The winning differentiation candidate name and description. */
+    /** Freshness markers for data-stale gating */
+    evidenceFreshness: z.object({
+      oldestCapturedAt: z.string().datetime(),
+      newestCapturedAt: z.string().datetime()
+    }),
+
+    /** Winning candidate info */
     winningCandidate: z.string().min(1),
-
-    /** The target segment (ICP) description. */
     targetSegment: z.string().min(1),
-
-    /** Target Jobs-To-Be-Done functional, emotional, and social statements. */
     targetJTBD: z.object({
       functional: z.string().min(1),
       emotional: z.string().optional(),
       social: z.string().optional()
     }),
 
-    /** Killer features prioritized from the ledger. */
+    /** prioritized ledger differentiators */
     killerFeatures: z.array(z.string().min(1).max(200)).max(6),
-
-    /** Incumbent self-harm points, brand conflicts, or data-model friction. */
     incumbentVulnerabilities: z.array(z.string().min(1).max(300)).max(8),
-
-    /** Sizing appetite (e.g. "Small batch (1-2 days)", "Medium (1 week)"). */
     shapingAppetite: z.string().min(1).max(100),
+    validationChecklist: z.array(z.string().min(1).max(200)).max(10),
 
-    /** Verifiable acceptance criteria for subsequent coding/review agents. */
-    validationChecklist: z.array(z.string().min(1).max(200)).max(10)
+    /** Singer's Shape Up "Pitch" contract primitives */
+    shapingHandoff: z.object({
+      rawIdea: z.string().min(1),
+      problem: z.string().min(1), // Singer's specific friction story
+      baseline: z.string().min(1), // what customers are doing without it
+      appetiteHint: z.enum(['small_batch', 'big_batch']),
+      noGosHints: z.array(z.string()), // things we will NOT build
+      constraints: z.object({
+        teamSize: z.number().int().positive(),
+        technicalCapabilities: z.array(z.string()).min(1),
+        exclusions: z.array(z.string()).default([])
+      }),
+      evidenceTopK: z.array(z.string().uuid()).max(10),
+      defensibilityClaim: z.object({
+        power: SevenPowersSchema,
+        cannibalization: z.string()
+      })
+    })
   })
   .strict();
 
@@ -64,7 +95,7 @@ export function getDifferentiationHandoffBlockedMessage(): readonly string[] {
   return [
     `Artifact contract: ${DIFFERENTIATION_HANDOFF_CONTRACT_REF}`,
     `Provide a wr.differentiation_handoff artifact in complete_step's artifacts[] parameter.`,
-    `Required fields: winningCandidate (string), targetSegment (string), targetJTBD (object), killerFeatures (string[]), incumbentVulnerabilities (string[]), shapingAppetite (string), validationChecklist (string[]).`,
+    `Required fields: schemaVersion ("1.0.0"), evidenceFreshness (object), winningCandidate (string), targetSegment (string), targetJTBD (object), killerFeatures (string[]), incumbentVulnerabilities (string[]), shapingAppetite (string), validationChecklist (string[]), shapingHandoff (object containing rawIdea, problem, baseline, appetiteHint, noGosHints, constraints, evidenceTopK, defensibilityClaim).`,
     `See the step prompt for the full schema.`,
   ];
 }

@@ -3,7 +3,7 @@
   "name": "Differentiation & Niche Discovery",
   "version": "1.0.0",
   "description": "Systematic B2B SaaS and Developer Tool differentiation & niche discovery workflow. Blends Blue Ocean Strategy, Jobs to Be Done (JTBD), and Counter-positioning to extract pain points from public review, forum, and repo sources, score opportunity candidates, and run adversarial incumbent stress testing.",
-  "about": "## Differentiation & Niche Discovery\n\nThis workflow is designed to discover a highly defensible product niche and killer features for B2B SaaS and Developer Tools. It moves beyond generic brainstorming by treating differentiation as a rigorous, evidence-driven optimization problem.\n\n**What it does:**\nThe workflow guides the agent through a structured process: mapping the market boundary and ICP, fanning out parallel subagents to harvest complaint-rich first-person evidence from public review sites, developer forums, and GitHub repos, synthesizing this data using Blue Ocean Strategy and Jobs to Be Done (JTBD), generating distinct candidates, running a mandatory three-agent adversarial stress test (incumbent red-teaming), and producing a highly structured value proposition, differentiation ledger, and shaping handoff.\n\n**When to use it:**\n- You are starting a new B2B SaaS or developer-facing product and want to find a unique, highly defensible entry niche.\n- You have an existing product and want to discover a new killer feature that incumbents cannot easily copy.\n- You want to evaluate whether a proposed feature is structurally protected before committing engineering resources.\n\n**What it produces:**\n- `02_friction_matrix.md`: normalized pain points and user complaint clusters.\n- `03_value_curve.md`: Blue Ocean competitor factor catalog and rating curve.\n- `04_candidates.md`: 3-4 distinct opportunity candidates (Niche, Simplicity, or Structural Defense).\n- `05_adversarial_critique.md`: red-team incumbent copy-cost and brand-conflict grading.\n- `06_value_proposition.md`: a refined 3-sentence Value Prop and We Win When statement.\n- `06_differentiation_ledger.md`: forced-choice differentiators under strict count constraints.\n- `07_shaping_handoff.json`: Zod-validated handoff for `wr.shaping`.\n\n**How to get good results:**\nProvide a clear market category, target ICP, and 2-4 seed competitors. Focus research config on allowed public platforms (Reddit, GitHub, Trustpilot, StackExchange, Discourse). Ensure the human-in-the-loop confirms G2 access rules before evidence harvesting.",
+  "about": "## Differentiation & Niche Discovery\n\nThis workflow is designed to discover a highly defensible product niche and killer features for B2B SaaS and Developer Tools. It moves beyond generic brainstorming by treating differentiation as a rigorous, evidence-driven optimization problem.\n\n**Autonomy Model:**\nThe workflow is **guided at start, end, and candidate generation**, requiring active human confirmation before proceeding. It is **highly autonomous during evidence harvesting and adversarial red-teaming** steps, fanning out parallel retrievers and red-team agents to execute strategic analyses without manual intervention.\n\n**What it does:**\nThe workflow guides the agent through a structured process: mapping the market boundary and ICP, fanning out parallel subagents to harvest complaint-rich first-person evidence from public review sites, developer forums, and GitHub repos, synthesizing this data using Blue Ocean Strategy and Jobs to Be Done (JTBD), generating distinct candidates, running a mandatory three-agent adversarial stress test (incumbent red-teaming), and producing a highly structured value proposition, differentiation ledger, and shaping handoff.\n\n**When to use it:**\n- You are starting a new B2B SaaS or developer-facing product and want to find a unique, highly defensible entry niche.\n- You have an existing product and want to discover a new killer feature that incumbents cannot easily copy.\n- You want to evaluate whether a proposed feature is structurally protected before committing engineering resources.\n\n**What it produces:**\n- `02_friction_matrix.md`: normalized pain points and user complaint clusters.\n- `03_value_curve.md`: Blue Ocean competitor factor catalog and rating curve.\n- `04_candidates.md`: 3-4 distinct opportunity candidates (Niche, Simplicity, or Structural Defense).\n- `05_adversarial_critique.md`: red-team incumbent copy-cost and brand-conflict grading.\n- `06_value_proposition.md`: a refined 3-sentence Value Prop and We Win When statement.\n- `06_differentiation_ledger.md`: forced-choice differentiators under strict count constraints.\n- `07_shaping_handoff.json`: Zod-validated handoff for `wr.shaping`.\n\n**How to get good results:**\nProvide a clear market category, target ICP, and 2-4 seed competitors. Focus research config on allowed public platforms (Reddit, GitHub, Trustpilot, StackExchange, Discourse). Ensure the human-in-the-loop confirms G2 access rules before evidence harvesting.",
   "examples": [
     "Discover a highly defensible niche for an AI-powered code review tool against GitHub Copilot",
     "Find a simplified, counter-positioned killer feature for a project management tool competing with Linear",
@@ -138,7 +138,7 @@
           "  }),",
           "  researchConfig: z.object({",
           "    recencyWindowDays: z.number().default(365),",
-          "    allowedSources: z.array(z.enum(['reddit', 'trustpilot', 'g2', 'stackexchange', 'discourse', 'github', 'search'])),",
+          "    allowedSources: z.array(z.enum(['reddit', 'trustpilot', 'g2', 'capterra', 'trustradius', 'stackexchange', 'discourse', 'github', 'hackernews', 'producthunt', 'wayback_diff', 'stackoverflow', 'search'])),",
           "    g2AccessMode: z.enum(['none', 'manual', 'licensed']).default('none')",
           "  })",
           "});",
@@ -171,9 +171,9 @@
         ],
         "procedure": [
           "Determine the retrieval path based on `allowedSources` in `01_intake_brief.json`:",
-          "  - **Hacker News (Algolia Search API):** Fetch stories and comment trees. Query templates: `/search?query={INCUMBENT}&tags=story&numericFilters=points>10`, `/search?query={INCUMBENT}+(broken|frustrating|hate)&tags=comment`, `/search?query=\"we built this because\"+{CATEGORY}&tags=story`, `/search?query=\"alternative to {INCUMBENT}\"&tags=(story,comment)`. Fetch complete comment trees in one request using `/items/{story_id}`.",
-          "  - **Reddit:** Use standard queries: `site:reddit.com/r/SaaS \"alternative to {INCUMBENT}\"`, `site:reddit.com/r/devops \"switched from {INCUMBENT} to\"`, `site:reddit.com/r/programming \"{INCUMBENT}\" (hate|frustrating|broken)`. Fetch target thread URLs with `.json` appended using User-Agent: `workrail-discovery/0.1 (+contact)`.",
-          "  - **GitHub Issues:** Fetch repo issues, wontfix tags, and category complaints. Query templates: `repo:{ORG}/{REPO} is:issue is:open label:bug sort:reactions-+1-desc`, `repo:{ORG}/{REPO} is:issue is:closed label:wontfix`, `repo:{ORG}/{REPO} is:issue is:open label:enhancement sort:created-asc`. Extract wontfix comments specifically checking if closed comment phrasings match \"by design\", \"out of scope\", or \"not aligned with our roadmap\" to identify strategic incumbent limits.",
+          "  - **Hacker News (Algolia Search API):** Fetch stories and comment trees. Query templates: `/search?query={INCUMBENT}&tags=story&numericFilters=points>10`, `/search?query={INCUMBENT}+(broken OR frustrating OR hate)&tags=comment`, `/search?query=\"we built this because\"+{CATEGORY}&tags=story`, `/search?query=\"alternative to {INCUMBENT}\"&tags=(story,comment)`. Fetch complete comment trees in one request using `/items/{story_id}`.",
+          "  - **Reddit:** Use standard queries: `site:reddit.com/r/SaaS \"alternative to {INCUMBENT}\"`, `site:reddit.com/r/devops \"switched from {INCUMBENT} to\"`, `site:reddit.com/r/programming \"{INCUMBENT}\" (hate OR frustrating OR broken)`. Fetch target thread URLs with `.json` appended using User-Agent: `workrail-discovery/0.1 (+contact)`.",
+          "  - **GitHub Issues:** Fetch repo issues, wontfix tags, and category complaints. Query templates: `repo:{ORG}/{REPO} is:issue is:open label:bug sort:reactions-+1-desc`, `repo:{ORG}/{REPO} is:issue is:closed label:wontfix`, `repo:{ORG}/{REPO} is:issue is:open label:enhancement sort:created-asc`. Extract wontfix comments specifically: if the closing comment does NOT contain strategic by-design, out-of-scope, or roadmap-misalignment language (indicating it is instead a community-management rot, user-specific setup, or environment mismatch), mark `evidenceQualityScore <= 0.4` and exclude it from the defensibility synthesis.",
           "  - **Wayback Machine (CDX Server):** Track pricing and feature page diffs. Query template: `/cdx/search/cdx?url={INCUMBENT}/pricing&output=json&collapse=digest`. Identify paywall moves, removed features, and roadmap changes. Deduplicate identical captures using `collapse=digest`.",
           "  - **Stack Overflow:** Fetch unanswered questions with high view counts: `/questions/tagged/{TAG}?tab=Unanswered&pagesize=50`.",
           "  - **ProductHunt:** Fetch launch page comment sections to extract pros/cons and competitor comparison comments.",
@@ -183,11 +183,11 @@
           "    Please visit G2 or Capterra for competitor: {competitorName}",
           "    Copy and paste the 'What you dislike' / 'Cons' text of 3-5 recent critical (1-3 star) reviews here.",
           "    ```",
-          "    Otherwise, use Google site: Custom Search query fallbacks (`site:g2.com \"{INCUMBENT}\" \"dislike\" OR \"cons\"`) and capture search snippet texts with URL as evidence. Mark `extractionConfidence: \"snippet_only\"`.",
+          "    Otherwise, use Google site: Custom Search query fallbacks (`site:g2.com \"{INCUMBENT}\" \"dislike\" OR \"cons\" OR \"switched\"`) and capture search snippet texts with URL as evidence. Mark `extractionConfidence: \"snippet_only\"`.",
           "Validate each extracted evidence item against the following schema:",
           "```ts",
           "export const EvidenceItemSchema = z.object({",
-          "  source: z.enum(['reddit', 'trustpilot', 'g2', 'capterra', 'trustradius', 'stackexchange', 'discourse', 'github', 'hackernews', 'producthunt', 'wayback_diff', 'search']),",
+          "  source: z.enum(['reddit', 'trustpilot', 'g2', 'capterra', 'trustradius', 'stackexchange', 'discourse', 'github', 'hackernews', 'producthunt', 'wayback_diff', 'stackoverflow', 'search']),",
           "  url: z.string(),",
           "  competitor: z.string().optional(),",
           "  createdAt: z.string().optional(),",
@@ -255,6 +255,9 @@
     {
       "id": "candidate-opportunity-generation",
       "title": "Candidate Opportunity Generation",
+      "requireConfirmation": {
+        "kind": "human_approval"
+      },
       "assessmentRefs": [
         "opportunity-soundness-gate"
       ],
@@ -271,7 +274,7 @@
         }
       ],
       "promptBlocks": {
-        "goal": "Generate 3-4 highly distinct opportunity candidates using diverse strategic lenses and score them using the combined frameworks formula.",
+        "goal": "Generate 3-4 highly distinct opportunity candidates using diverse strategic lenses, grounding them in the ODI opportunity scores and preparing them for the red-team stress test.",
         "constraints": [
           "Ensure candidates represent fundamentally different approaches (e.g. Laser-Focus Niche, Simplicity/Counter-Positioning, Structural Defense).",
           "Ensure at least one candidate leverages structural asymmetry (pricing model, data-ownership, local-first) that incumbents cannot easily match.",
@@ -297,24 +300,27 @@
           "  }),",
           "  buyerUtilityGap: z.string(),",
           "  counterPositioningRationale: z.string(),",
-          "  copyRiskScore: z.number().min(0).max(1),",
-          "  defensibilityScore: z.number().min(0).max(1)",
+          "  targetOpportunityScore: z.number(), // The real ODI Opportunity Score from Step 3",
+          "  qualitativeDefensibilityRubric: z.object({",
+          "    cannibalizationRisk: z.enum(['low', 'medium', 'high']),",
+          "    channelConflict: z.enum(['low', 'medium', 'high']),",
+          "    brandConflict: z.enum(['low', 'medium', 'high']),",
+          "    technicalAsymmetry: z.enum(['low', 'medium', 'high'])",
+          "  })",
           "});",
           "```",
-          "Calculate the opportunity scores using the strategic synthesis formulas:",
-          "  - **Pain Score** = `frequency * severity * recency * evidence_quality * switching_signal` (scale all factors 0.0 - 1.0).",
-          "  - **Utility Gap Score** = `pain_score * absence_of_good_incumbent_solution * buyer_stage_criticality` (scale 0.0 - 1.0).",
-          "  - **Defensibility Score** = `counter_positioning_score * copy_delay * incumbent_self_harm * trust_or_data_asymmetry * channel_conflict` (using Helmer's Counter-Positioning benefit-and-barrier principles: the newcomer adopts a superior business model that the incumbent does not mimic due to anticipated collateral damage to their core high-margin business).",
-          "  - **Candidate Score** = `utility_gap_score * defensibility_score * capability_fit` (scale all factors 0.0 - 1.0).",
-          "Write the generated candidates and their mathematical scores to `04_candidates.md`."
+          "Do NOT construct multi-factor multiplied math scores (e.g. Pain Score, Utility Gap Score, Defensibility Score). Instead, ground opportunities on the explicit ODI `targetOpportunityScore` (Opportunity = Importance + max(Importance - Satisfaction, 0)) and the qualitative defensibility rubric fields.",
+          "Present the generated candidates to the human user for explicit review and confirmation before proceeding to the expensive adversarial red-teaming phase.",
+          "Write the generated candidates and their strategic profiles to `04_candidates.md`."
         ],
         "outputRequired": {
-          "notesMarkdown": "Candidate opportunity summary: candidate names, strategic lenses applied, and candidate scores."
+          "notesMarkdown": "Candidate opportunity summary: candidate names, target ODI opportunity scores, and qualitative defensibility profiles."
         },
         "verify": [
           "04_candidates.md is written.",
           "At least 3 distinct candidates are generated with complete ERRC grids.",
-          "Every candidate has a defensibility score backed by Helmer's counter-positioning principles."
+          "Every candidate has a defensibility profile backed by Helmer's counter-positioning principles.",
+          "Human validation gate is executed before proceeding to Step 5."
         ]
       }
     },
@@ -342,9 +348,10 @@
         "constraints": [
           "Deploy four strict sycophancy-mitigation techniques: (1) Hostile Persona Binding (Head of Product/CFO with direct margin/bonus constraints), (2) Forced Numeric Grounding (exact integers for cost and ARR percent), (3) Forced Cannibalization Identification (must specify which revenue line is cannibalized or fail defensibility), (4) Closed Power Enum (restricted to Helmer's taxonomy).",
           "For each candidate opportunity, run the red-team loop against the top 3 incumbents in parallel or sequentially. Aggregate using the merge rule: Candidate is 'defensible' iff every incumbent verdict is 'defensible', at least one competitor's cannibalized ARR >= 5%, and the power type is one of: Counter-Positioning, Switching Costs, Cornered Resource, or Process Power.",
-          "Every red-team step must be persisted to disk as an auditable transcript with a unique UUID mapping to transcriptRef."
+          "Every red-team step must be persisted to disk as an auditable transcript saved at `.workrail/history/transcripts/{transcriptRef}.md` containing the full system prompt, user prompt, and completion."
         ],
         "procedure": [
+          "// v2: add cross-model verdict comparison to collapse sycophantic agreement by running Claude as Head of Product and a second model (e.g. GPT-4) as CFO.",
           "For each candidate opportunity in `04_candidates.md`, execute the 3-agent adversarial loop:",
           "  - **Incumbent Persona:** Head of Product/CFO of the target competitor. Focus on economic self-harm. Prompt: 'Your bonus is tied to keeping gross margin > 70%. If you copy this, what profitable part of your business do you cannibalize? Vague answers are forbidden.'",
           "  - **Challenger Persona:** Revise candidate details to patch identified rabbit holes and limit mimicry paths.",
@@ -367,7 +374,8 @@
           "});",
           "```",
           "Verify the aggregate merge rules are met for each candidate opportunity.",
-          "Save the complete red-team transcript and Zod verdicts to `05_adversarial_critique.md`."
+          "Write the complete, raw transcripts for every red-team simulation run to `.workrail/history/transcripts/{transcriptRef}.md` containing the full prompts and response text.",
+          "Save the summarized red-team metrics and Zod verdicts to `05_adversarial_critique.md`."
         ],
         "outputRequired": {
           "notesMarkdown": "Red-team results: candidates promoted vs rejected, merged competitor verdicts, specific self-harm and copy delay metrics, and transcript references."
@@ -376,7 +384,7 @@
           "05_adversarial_critique.md is written.",
           "All candidates are tested against the top 3 incumbents with completed Zod schema validations.",
           "Aggregate merge rules (ARR percentage and Power type checks) were strictly applied.",
-          "Every simulation run includes a valid transcriptRef UUID."
+          "Every simulation run includes a valid transcriptRef UUID and has been persisted as a markdown transcript on disk."
         ]
       }
     },
@@ -399,18 +407,20 @@
           "  - Define the 'We Lose When' statement (2 honest boundary conditions where the incumbent still wins, avoiding empty sales talk).",
           "Section 2: Shape Up Pitch Inception & Differentiation Ledger (06_differentiation_ledger.md)",
           "  - Compile every proposed move, feature, and constraint into a structured table: `Feature/Move | Target JTBD | Competitor Self-Harm | Copy Delay | Verdict (positioning | killer_feature | backlog | ignore)`.",
-          "  - Enforce the hard cap constraint: re-rank using the Candidate Score, demoting excess moves to 'backlog' or 'ignore'.",
+          "  - Enforce the hard cap constraint: re-rank using candidate scores and demote excess moves to 'backlog' or 'ignore'.",
+          "  - Calculate evidence freshness bounds: identify the `oldestCapturedAt` and `newestCapturedAt` timestamps from all findings. Check if fast-moving categories (e.g. LLM/AI tooling) have captures older than 18 months, or slow-moving categories (databases, systems) older than 36 months, and note freshness alerts accordingly.",
           "  - Pre-populate the Shape Up Pitch boundaries: draft a single concrete Problem story from raw evidence, set the appetiteHint, and map the noGos (pre-populated from the ERRC Eliminate column). Solution and Rabbit Holes are explicitly marked empty.",
           "Write all files to disk."
         ],
         "outputRequired": {
-          "notesMarkdown": "Winning candidate name or fallback No-Viable-Niche diagnostic summary, value proposition draft, ledger entry count, Shape Up pre-seeding status, and confirmation of hard-cap constraint enforcement."
+          "notesMarkdown": "Winning candidate name or fallback No-Viable-Niche diagnostic summary, value proposition draft, ledger entry count, computed oldest/newest evidence timestamps, Shape Up pre-seeding status, and confirmation of hard-cap constraint enforcement."
         },
         "verify": [
           "06_value_proposition.md and 06_differentiation_ledger.md are written.",
           "If no niche is viable, the No-Viable-Niche diagnostic report is completely written.",
           "The We Lose When section is present with honest bounds.",
           "Ledger strictly respects the <=1 positioning and <=3 killer feature constraints.",
+          "Evidence freshness dates are parsed and validated against domain category speed.",
           "Shape Up pre-seeding is structured with Solution and Rabbit Holes left empty."
         ]
       }
@@ -433,13 +443,25 @@
           "Compile the final `wr.contracts.differentiation_handoff` JSON object containing:",
           "  - `kind`: 'wr.differentiation_handoff'",
           "  - `version`: 1",
+          "  - `schemaVersion`: '1.0.0'",
+          "  - `generatedAt`: string (current ISO datetime)",
+          "  - `evidenceFreshness`: object with `oldestCapturedAt` and `newestCapturedAt` strings.",
           "  - `winningCandidate`: name and description of the promoted opportunity.",
           "  - `targetSegment`: description of the target ICP.",
           "  - `targetJTBD`: object with functional, emotional, and social job statements.",
           "  - `killerFeatures`: array of selected features from the ledger.",
           "  - `incumbentVulnerabilities`: list of competitor self-harm and brand conflicts.",
-          "  - `shapingAppetite`: target appetite (e.g., 'Small batch (1-2 weeks)', 'Big batch (6 weeks)') for shaping.",
+          "  - `shapingAppetite`: target appetite description.",
           "  - `validationChecklist`: verifiable acceptance criteria for the subsequent implementation agent.",
+          "  - `shapingHandoff`: object matching Singer's Shape Up 'Pitch' contract:",
+          "    - `rawIdea`: string (the promoted differentiator as a raw idea)",
+          "    - `problem`: string (Singer's specific customer friction story)",
+          "    - `baseline`: string (what customers currently do without the solution)",
+          "    - `appetiteHint`: 'small_batch' (1-2 weeks) or 'big_batch' (6 weeks)",
+          "    - `noGosHints`: array of strings (things we will NOT build, pre-populated from the ERRC Eliminate quadrant)",
+          "    - `constraints`: object containing teamSize, technicalCapabilities, and exclusions",
+          "    - `evidenceTopK`: array of up to 10 UUIDs linking to raw findings",
+          "    - `defensibilityClaim`: object with power (Helmer taxonomy enum) and cannibalization (specific competitor self-harm point)",
           "Save the handoff file as `07_shaping_handoff.json` at `.workrail/differentiation-handoff.json` and archively under `.workrail/history/`."
         ],
         "outputRequired": {
