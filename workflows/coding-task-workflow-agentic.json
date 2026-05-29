@@ -1,7 +1,7 @@
 {
   "id": "wr.coding-task",
   "name": "Agentic Task Dev Workflow",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Use this to implement a software feature or task. Follows a plan-then-execute approach with architecture decisions, invariant tracking, and final verification.",
   "about": "## Agentic Coding Task Workflow\n\nThis workflow structures the full lifecycle of a software implementation task: from understanding and classifying the work, through architecture decisions and incremental implementation, to final verification and handoff.\n\n### What it does\n\nThe workflow guides an AI agent through a disciplined plan-then-execute process. It begins by analyzing the task to determine complexity, risk, and the right level of rigor (QUICK, STANDARD, or THOROUGH). For non-trivial tasks, it then gathers codebase context, surfaces invariants and non-goals, generates competing design candidates, and selects an approach before writing a single line of code. Implementation proceeds slice by slice, with built-in verification gates after each slice. A final integration verification pass confirms acceptance criteria are met before handoff.\n\n### Upstream context (Phase 0.5)\n\nPhase 0.5 looks for any upstream document that has already defined what to build -- a Shape Up pitch, PRD, BRD, RFC, design doc, user story with acceptance criteria, Jira epic, or equivalent. The agent uses whatever tools are available (repo search, WebFetch, Confluence/Notion/Glean MCPs, Memory MCP) to find it. If found, two flags are set: `upstreamSpecDetected` (something exists) and `solutionFixed` (whether the document commits to a specific technical direction). When `solutionFixed = true`, design ideation phases (1a-1c) are skipped and Phase 1d translates the upstream constraints directly into an engineering approach. When `solutionFixed = false`, design ideation runs normally but is constrained by whatever the upstream document does specify. The plan audit (Phase 4) checks for drift against `upstreamBoundaries` whenever an upstream document was found.\n\n### When to use it\n\nUse this workflow whenever you are implementing a feature, fixing a non-trivial bug, or making an architectural change in a real codebase. It is especially valuable when:\n- The task touches multiple files or systems\n- There is meaningful risk of regressions or invariant violations\n- You want the agent to surface trade-offs and commit to a reasoned design decision rather than guessing\n- You need a resumable, auditable record of what was decided and why\n\nFor quick one-liner fixes or very small changes, the workflow includes a fast path that skips heavyweight planning.\n\n### What it produces\n\n- An `implementation_plan.md` artifact covering the selected approach, vertical slices, test design, and philosophy alignment\n- A `spec.md` for large or high-risk tasks, capturing observable behavior and acceptance criteria\n- Step-level notes in WorkRail that serve as a durable execution log\n- A PR-ready handoff summary with acceptance criteria status, invariant proofs, and follow-up tickets\n\n### How to get good results\n\n- Provide a clear task description and at least partial acceptance criteria before starting\n- If you have coding philosophy or project conventions configured in session rules or Memory MCP, the workflow will apply them automatically as a design lens\n- Let the workflow classify complexity and rigor itself; override only if the classification is clearly wrong\n- For large or high-risk tasks, review the architecture decision step before implementation begins",
   "examples": [
@@ -15,6 +15,9 @@
     "recommendedRiskPolicy": "conservative"
   },
   "metricsProfile": "coding",
+  "features": [
+    "wr.features.subagent_guidance"
+  ],
   "assessments": [
     {
       "id": "design-soundness-gate",
@@ -200,24 +203,19 @@
   ],
   "steps": [
     {
-      "id": "phase-0-understand-and-classify",
-      "title": "Phase 0: Understand & Classify",
+      "id": "phase-0a-explore-and-classify",
+      "title": "Phase 0a: Explore & Classify",
       "promptBlocks": {
-        "goal": "Understand the task, analyze the codebase call chain, locate the philosophy source, classify task complexity/risk/rigor, perform an architecture alignment check, and derive explicit forward-facing constraints.",
+        "goal": "Explore the codebase to understand the task's call chain and scope, then classify it by complexity, risk, and rigor.",
         "constraints": [
           "Make sure the expected behavior is clear enough to proceed. If it really isn't, ask the user only what you can't answer yourself with tools.",
-          "Figure out what philosophy to use. Prefer in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session/Firebender rules, repo patterns, then user only if they conflict or are not enough.",
-          "Record where the philosophy lives, not a summary. If the rules and repo patterns conflict, capture that conflict.",
-          "Perform the architecture alignment check: scan candidate files for specific philosophy violations. If `architectureStartsFromScratch` is true, Candidate A (simplest) must still honor the philosophy; adapting an existing violation is not valid.",
-          "Constraint Derivation is mandatory: you MUST collect and list EVERY SINGLE rule, guideline, philosophy principle, best practice, convention, standard, and norm from all three sources (General coding philosophy, codebase conventions, explicit team/project rules) inside `derivedConstraints`. Do not filter, guess, or limit them to a subset — every single rule and principle is important and must be fully listed so that the implementation faithfully satisfies all of them without omitting any. Each constraint must be governed by the format '[PHILOSOPHY] rule text', '[CONVENTION] rule text', or '[TEAM_RULE] rule text'. Each constraint must name the subject, the rule, and the prohibited alternative."
+          "Classification must be based on what you found in the code, not the task description alone."
         ],
         "procedure": [
           "1. Dig through the code to find where behavior starts, candidate files, module/function dependencies, repo verification patterns, risks, invariants, and non-goals.",
           "2. Classify the task: `taskComplexity` (Small/Medium/Large), `riskLevel` (Low/Medium/High), `rigorMode` (QUICK/STANDARD/THOROUGH), `automationLevel` (High/Medium/Low), and `prStrategy` (SinglePR/MultiPR).",
           "3. Perform context-clarity check scoring 0-2 (with one sentence of evidence) for: `entryPointClarity`, `boundaryClarity`, `invariantClarity`, and `verificationClarity`.",
-          "4. Run deeper context batch if required by the rubric: STANDARD (total score >= 3 or boundary/invariant/verification clarity = 2) or THOROUGH (always). The batch consists of `routine-context-gathering` with `focus=COMPLETENESS` and `focus=DEPTH`.",
-          "5. Perform the architecture alignment check on candidate files, listing specific violations in `architectureViolations` and setting `architectureStartsFromScratch`.",
-          "6. Derive and list EVERY SINGLE constraint, rule, philosophy principle, codebase convention, and team rule from all three sources (General coding philosophy, codebase conventions, and explicit team/project rules) in full detail. Store them in `derivedConstraints` so they are fully available to guide all design candidates and implementation phases."
+          "4. Run deeper context batch if required by the rubric: STANDARD (total score >= 3 or boundary/invariant/verification clarity = 2) or THOROUGH (always). The batch consists of `routine-context-gathering` with `focus=COMPLETENESS` and `focus=DEPTH`."
         ],
         "outputRequired": {
           "taskComplexity": "Small / Medium / Large",
@@ -229,19 +227,12 @@
           "candidateFiles": "List of target files",
           "invariants": "Specific codebase/behavioral invariants",
           "nonGoals": "Exclusions from scope",
-          "openQuestions": "Clarifying decisions for the user",
-          "philosophySources": "Exact paths/sources where philosophy is declared",
-          "philosophyConflicts": "Any conflicts found between rules and patterns",
-          "architectureViolations": "List of specific violations or principles checked",
-          "architectureStartsFromScratch": "Boolean flag",
-          "derivedConstraints": "List of ALL constraints, guidelines, philosophy principles, best practices, conventions, standards, and norms from all three sources in '[SOURCE] rule' format"
+          "openQuestions": "Clarifying decisions for the user"
         },
         "verify": [
           "Complexity, risk, and rigor classifications are set based on the rubric, not vibes.",
           "A context-clarity check is scored 0-2 for all 4 dimensions with evidence sentences.",
-          "Deeper context gathering batch is run when required by the classification rubric.",
-          "Philosophy violations in candidate files are named specifically or checked principles are listed.",
-          "derivedConstraints is populated with ALL rules, guidelines, principles, best practices, conventions, standards, and norms labeled with [PHILOSOPHY], [CONVENTION], or [TEAM_RULE] without omitting any."
+          "Deeper context gathering batch is run when required by the classification rubric."
         ]
       },
       "requireConfirmation": {
@@ -258,8 +249,60 @@
       }
     },
     {
-      "id": "phase-0c-assumption-verification",
-      "title": "Phase 0c: Interpretation & Assumption Verification",
+      "id": "phase-0b-philosophy-and-architecture",
+      "title": "Phase 0b: Philosophy & Architecture Alignment",
+      "promptBlocks": {
+        "goal": "Locate the coding philosophy source, then scan candidate files for architecture violations against it.",
+        "constraints": [
+          "Record where the philosophy lives, not a summary. If the rules and repo patterns conflict, capture that conflict.",
+          "If `architectureStartsFromScratch` is true, the simplest valid candidate must still honor the philosophy -- adapting an existing violation is not valid."
+        ],
+        "procedure": [
+          "1. Locate the philosophy source. Prefer in order: Memory MCP (`mcp_memory_conventions`, `mcp_memory_prefer`, `mcp_memory_recall`), active session rules, repo patterns. Ask the user only if sources conflict and you cannot resolve it.",
+          "2. Scan the `candidateFiles` from Phase 0a for specific philosophy violations. List each violation by file, line, and principle broken.",
+          "3. Set `architectureStartsFromScratch` to true if the existing code in candidate files is itself a philosophy violation that should not be adapted."
+        ],
+        "outputRequired": {
+          "philosophySources": "Exact paths/sources where philosophy is declared",
+          "philosophyConflicts": "Any conflicts found between rules and repo patterns",
+          "architectureViolations": "List of specific violations found, or principles checked with no violation",
+          "architectureStartsFromScratch": "Boolean flag"
+        },
+        "verify": [
+          "Philosophy source is a specific path or location, not a summary.",
+          "Architecture violations are named by file and principle, or the checked principles are listed explicitly."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-0c-derive-constraints",
+      "title": "Phase 0c: Derive Constraints",
+      "promptBlocks": {
+        "goal": "Derive the explicit forward-facing constraints that will gate design candidates in Phase 0-6.",
+        "constraints": [
+          "Constraints must be specific enough to falsify a wrong candidate. A constraint no plausible candidate fails is decorative -- name the design it would reject, or replace it with an executable check.",
+          "All three sources are required: [PHILOSOPHY], [CONVENTION], [TEAM_RULE]. A source with no constraints must be explicitly justified -- silent omission is not acceptable."
+        ],
+        "procedure": [
+          "1. Read `philosophySources` and `architectureViolations` from context.",
+          "2. Derive constraints from all three sources: general coding philosophy, codebase conventions visible in `candidateFiles`, and explicit team/project rules.",
+          "3. For each constraint, use the format '[SOURCE] subject -- rule -- prohibited alternative'.",
+          "4. For each constraint, name one design it would reject. If you cannot name one, the constraint is decorative and must be rewritten or dropped."
+        ],
+        "outputRequired": {
+          "derivedConstraints": "List of constraints in '[SOURCE] subject -- rule -- prohibited alternative' format"
+        },
+        "verify": [
+          "derivedConstraints is populated with entries labeled [PHILOSOPHY], [CONVENTION], and [TEAM_RULE] (or each absence is explicitly justified).",
+          "Each constraint names a specific prohibited alternative or a design it would reject."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-0d-assumption-verification",
+      "title": "Phase 0d: Interpretation & Assumption Verification",
       "promptBlocks": {
         "goal": "State your interpretation of what you are building, make three explicit assumptions about codebase state, verify each by reading the predicted location, and produce an InterpretationArtifact that the coordinator can inspect and route on.",
         "constraints": [
@@ -347,7 +390,7 @@
           "The three checks are mandatory -- do not skip them even if they feel redundant with Phase 0."
         ],
         "procedure": [
-          "1. **Constraint quality + coverage check.** Read `derivedConstraints`. For each constraint: is it specific enough to falsify a wrong candidate? If vague, rewrite it. Then verify all three sources (PHILOSOPHY, CONVENTION, TEAM_RULE) are fully represented (since listing them in full is mandatory) or explicitly justified as empty (e.g. if the project truly has no explicit team rules documented).",
+          "1. **Constraint quality + coverage check.** Read `derivedConstraints`. For each constraint: is it specific enough to falsify a wrong candidate? If vague, rewrite it. Then verify all three sources (PHILOSOPHY, CONVENTION, TEAM_RULE) are represented or explicitly justified as empty.",
           "2. **Nullable field gate.** For every type you plan to propose or modify: does it have a nullable or optional field? If yes, does that field represent two distinct states? Name every illegal state combination the nullable type makes representable.",
           "3. **Interface responsibility gate.** For every interface, abstract class, or service you plan to extend: write its responsibility in one sentence ('X takes Y, returns Z'). Does the behavior you are adding violate that responsibility?",
           "4. Set `constraintGatePassed` to true only if all three checks produced no blocking violations."
@@ -378,7 +421,7 @@
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "One or more constraints scored low on specificity or source coverage. Rewrite vague constraints to name the specific subject, rule, and prohibited alternative. For any unchecked source (philosophy, codebase conventions, team/project rules): explicitly state what you checked and why no constraints apply, or add the missing constraints."
+            "guidance": "Rewrite vague constraints to name the subject, rule, and prohibited alternative. For unchecked sources (philosophy, conventions, team rules): state what you checked and why no constraints apply, or add them. For each rewritten constraint: name one design it would reject -- a constraint no candidate fails is decorative and must be replaced with an executable check."
           }
         },
         {
@@ -402,6 +445,38 @@
           }
         }
       ],
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-0-7-pre-register-done",
+      "title": "Phase 0-7: Pre-Register Definition of Done",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "promptBlocks": {
+        "goal": "Write observable acceptance criteria for this task before any design candidates are generated.",
+        "constraints": [
+          "Write criteria now, before you have a design. The purpose is pre-registration: criteria written before design selection cannot be back-fit to the design you already favor.",
+          "Each criterion must describe observable behavior from outside the implementation -- what a caller sees, what a test can assert, what a user experiences. Internal implementation details are not acceptance criteria.",
+          "Each criterion must be falsifiable: state what a failing case looks like. A criterion with no failing case is a tautology.",
+          "Do NOT consult `design-candidates.md` or think about implementation approach while writing these. If a solution direction is already fixed (`solutionFixed = true`), derive criteria from `upstreamBoundaries`, not from implementation intuition."
+        ],
+        "procedure": [
+          "1. Read the task description, `invariants`, `nonGoals`, and `upstreamBoundaries` (if present).",
+          "2. Write 2-6 acceptance criteria. For each: one sentence stating the observable behavior, and one sentence stating what failure looks like.",
+          "3. Assign each criterion a `verificationMethod`: `automated` (can be asserted by a test command) or `manual` (requires human observation). Default to `automated`; use `manual` only when automated verification is genuinely impossible.",
+          "4. Assign a short stable ID to each criterion (e.g. AC-1, AC-2)."
+        ],
+        "outputRequired": {
+          "acceptanceCriteria": "Array of {id, statement, failureCase, verificationMethod} -- these become the Phase 7 exit target"
+        },
+        "verify": [
+          "Each criterion states observable behavior, not implementation plan.",
+          "Each criterion has an explicit failure case.",
+          "Criteria were written before looking at any design candidate."
+        ]
+      },
       "requireConfirmation": false
     },
     {
@@ -461,15 +536,13 @@
       "promptBlocks": {
         "goal": "Generate a lightweight design inline. QUICK rigor means the path is clear and risk is low.",
         "constraints": [
-          "Read `derivedConstraints` from context (derived in Phase 0). Every candidate must satisfy or explicitly exempt each constraint.",
-          "A candidate that violates a [TEAM_RULE] or [CONVENTION] constraint is not a valid candidate -- remove it or revise it before including it.",
           "Produce two mandatory candidates: 1. The simplest possible change that satisfies acceptance criteria; 2. The approach that follows the existing repo pattern.",
           "Write the output to `design-candidates.md`.",
           "If both candidates converge on the same approach, say so honestly."
         ],
         "procedure": [
           "1. Formulate Candidate 1 (simplest possible change) and Candidate 2 (existing repo pattern).",
-          "2. For each candidate, provide: a one-sentence summary, tensions resolved/accepted, relation to repo patterns (follows/adapts/departs), failure mode to watch, and philosophy fit (specific principles and how they satisfy derivedConstraints).",
+          "2. For each candidate, provide: a one-sentence summary, tensions resolved/accepted, relation to repo patterns (follows/adapts/departs), failure mode to watch, and philosophy fit (specific principles).",
           "3. Compare the candidates and recommend an approach.",
           "4. Document the design in `design-candidates.md` using the structure: Problem Understanding, Philosophy Constraints, Candidates, Comparison & Recommendation, Open Questions."
         ],
@@ -509,7 +582,7 @@
           "Write output to `design-candidates.md`."
         ],
         "procedure": [
-          "1. **Orient from constraints.** Read `derivedConstraints`. For each constraint tagged [PHILOSOPHY], [TEAM_RULE], or [CONVENTION], write one sentence: 'Candidate X must satisfy this because...' or 'This constraint rules out approach Y because...' This orientation step is not optional -- it is what makes the candidates grounded rather than generic.",
+          "1. **Orient from constraints.** Read `derivedConstraints`. For each constraint tagged [TEAM_RULE] or [CONVENTION], write one sentence: 'Candidate X must satisfy this because...' or 'This constraint rules out approach Y because...' This orientation step is not optional -- it is what makes the candidates grounded rather than generic.",
           "2. **Discover tensions.** Read the candidate files and the problem description. What are the real tensions the design must resolve? (e.g. type safety vs ergonomics, performance vs simplicity, consistency with existing pattern vs improving on it.) List 2-4 tensions explicitly.",
           "3. **Generate candidates.** For each candidate: (a) one-sentence summary of the approach; (b) which tensions it resolves and which it accepts; (c) which derivedConstraints it satisfies and how; (d) which derivedConstraints it conflicts with and why that conflict is acceptable or why the constraint might be wrong.",
           "4. **Mandatory candidates (standalone mode):** (a) simplest change that satisfies criteria without new architecture; (b) the approach that most faithfully extends the existing codebase pattern while satisfying derivedConstraints.",
@@ -543,13 +616,15 @@
       "promptBlocks": {
         "goal": "Read `design-candidates.md`, compare it to your original guess, pressure-test the options, and make the final design selection.",
         "constraints": [
-          "Pick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch."
+          "Pick the approach yourself. Don't hide behind the artifact. If the simplest thing works, prefer it. If the front-runner stops looking right after challenge, switch.",
+          "Evaluate candidates simultaneously, not sequentially. Read all candidates at once and score each against `derivedConstraints` before favoring any one. Sequential evaluation -- reacting to one candidate at a time -- amplifies confirmation bias toward whichever you read first."
         ],
         "procedure": [
           "1. Read `design-candidates.md` and compare the proposed approaches against your original guess.",
-          "2. Be explicit about three things: what the design work confirmed, what changed your mind, and what you missed the first time.",
-          "3. Pressure-test the leading option: what is the strongest case against it? What assumption breaks it?",
-          "4. After the challenge batch, say what changed your mind, what did not, and which findings you reject and why."
+          "2. Score ALL candidates simultaneously against `derivedConstraints` before picking a front-runner. List each candidate's constraint satisfaction side by side.",
+          "3. Be explicit about three things: what the design work confirmed, what changed your mind, and what you missed the first time.",
+          "4. Pressure-test the leading option: what is the strongest case against it? What assumption breaks it?",
+          "5. After the challenge batch, say what changed your mind, what did not, and which findings you reject and why."
         ],
         "outputRequired": {
           "selectedApproach": "Chosen technical design with rationale tied to tensions",
@@ -603,7 +678,7 @@
               }
             ]
           },
-          "text": "\n\n**Constraint citation check (fires when phase-0-6 ran):** Before selecting a direction, verify that each candidate in `design-candidates.md` explicitly cites which `derivedConstraints` it satisfies. A candidate that does not address a derived constraint either satisfies it by construction (state why) or violates it (which disqualifies it unless the constraint is wrong). If a candidate violates a derived constraint, that is a structural finding -- not a tradeoff to accept."
+          "text": "\n\n**Constraint citation check (fires when phase-0-6 ran):** Before selecting a direction, verify that each candidate in `design-candidates.md` explicitly cites which `derivedConstraints` it satisfies. A candidate that does not address a derived constraint either satisfies it by construction (state why) or violates it (which disqualifies it unless the constraint is wrong). If a candidate violates a derived constraint, that is a structural finding -- not a tradeoff to accept.\n\n**Discrimination check:** After constraint × candidate scoring, flag any `derivedConstraint` that *every* live candidate satisfies. A constraint all candidates pass did not gate this decision. It must be either (a) justified as a guardrail against a previously-rejected direction (name it), or (b) marked non-discriminating here and noted as a guardrail only. A constraint that rejects none of the actual candidates is decorative for this selection regardless of what strawman it names."
         }
       ],
       "assessmentRefs": [
@@ -818,10 +893,11 @@
         "goal": "Turn the design decision into a plan someone else could execute without guessing, captured in `implementation_plan.md`.",
         "constraints": [
           "Check `openQuestions` from Phase 0: do not silently carry unanswered questions that would materially affect quality into implementation; resolve them or explicitly record decisions in the risk register.",
-          "The plan is the sole deliverable for this step. Do not write or edit any source files or implement anything (not even 'quick wins')."
+          "The plan is the sole deliverable for this step. Do not write or edit any source files or implement anything (not even 'quick wins').",
+          "AC traceability is required: every acceptance criterion in the plan must either (a) trace to a Phase 0-7 `acceptanceCriteria` ID, or (b) be explicitly flagged as a new requirement discovered during planning with a one-sentence rationale. Silent re-invention of criteria from the design is not permitted."
         ],
         "procedure": [
-          "1. Update `implementation_plan.md` with: Problem statement, Acceptance criteria, Non-goals, Philosophy-driven constraints, Invariants, Selected approach + rationale, Slices, Test design, Risk register, PR packaging, and Philosophy alignment per slice.",
+          "1. Update `implementation_plan.md` with: Problem statement, Acceptance criteria (traced to Phase 0-7 IDs), Non-goals, Philosophy-driven constraints, Invariants, Selected approach + rationale, Slices, Test design, Risk register, PR packaging, and Philosophy alignment per slice.",
           "2. Estimate PR count and specify unresolved questions count."
         ],
         "outputRequired": {
@@ -879,10 +955,11 @@
         "goal": "Write the `spec.md` artifact representing the canonical specification for observable behavior.",
         "constraints": [
           "Keep the specification focused entirely on what the feature does from the outside, not how you plan to build it.",
-          "Keep it tight: if something cannot be verified, it does not belong as an acceptance criterion."
+          "Keep it tight: if something cannot be verified, it does not belong as an acceptance criterion.",
+          "AC traceability is required: every acceptance criterion in spec.md must either (a) trace to a Phase 0-7 `acceptanceCriteria` ID, or (b) be explicitly flagged as a new requirement discovered during design or planning with a one-sentence rationale. Do not silently re-author criteria."
         ],
         "procedure": [
-          "1. Generate `spec.md` detailing: Feature summary, Acceptance criteria, Non-goals, External API/interface contracts (if applicable), Edge cases, Failure modes, and the Verification method for each acceptance criterion."
+          "1. Generate `spec.md` detailing: Feature summary, Acceptance criteria (each traced to a Phase 0-7 AC ID or flagged as new), Non-goals, External API/interface contracts (if applicable), Edge cases, Failure modes, and the Verification method for each acceptance criterion."
         ],
         "outputRequired": {
           "notesMarkdown": "Summary of created/updated spec.md"
@@ -930,7 +1007,7 @@
               "2. Before you delegate to any subagent auditors, declare what looks weakest in the plan and what you trust least.",
               "3. After the audit runs, synthesize the feedback: what did auditors agree on, what did only one raise, what do you reject and why, and what changed in the plan.",
               "4. Classify each finding as: `Confirmed` (verified against code, artifacts, build/tests), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence).",
-              "5. Update `implementation_plan.md` and `spec.md` (if acceptance criteria changed), adjust `slices` if needed, track up to 10 `resolvedFindings`, and file out-of-scope work under `followUpTickets`."
+              "5. Update `implementation_plan.md` and `spec.md` as needed. If any acceptance criterion is added, removed, or changed: record it as an explicit requirements-change delta with rationale -- do not overwrite silently. Each changed AC must still trace to a Phase 0-7 root ID or be flagged as a discovered requirement. Adjust `slices` if needed, track up to 10 `resolvedFindings`, and file out-of-scope work under `followUpTickets`."
             ],
             "outputRequired": {
               "planFindings": "Summary of findings and classifications",
@@ -993,7 +1070,7 @@
               "notesMarkdown": "Loop exit decision rationale summary"
             }
           },
-          "requireConfirmation": true,
+          "requireConfirmation": false,
           "outputContract": {
             "contractRef": "wr.contracts.loop_control"
           }
@@ -1019,7 +1096,7 @@
           "1. Confirm all wiring points with tools: trace exports, index files, imports/registrations, CLI command maps, and tests before writing anything.",
           "2. Implement the minimum correct change.",
           "3. Verify end-to-end: run build and tests (both must pass), trace behavior through entry points, and review with the philosophy lens.",
-          "4. Produce a handoff note: output a notes artifact containing a JSON fenced block with fields: `commitType`, `commitScope`, `commitSubject`, `prTitle`, `prBody`, `followUpTickets`, `filesChanged`."
+          "4. Produce a handoff note: output a notes artifact containing a JSON fenced block with fields: `commitType`, `commitScope`, `commitSubject`, `prTitle`, `prBody`, `followUpTickets`, `filesChanged`. The `prTitle` must complete the sentence 'This PR [verb]s [specific thing]' and be actionable to a reviewer who has not read the plan."
         ],
         "outputRequired": {
           "notesMarkdown": "Summary of the implementation and verification findings",
@@ -1050,15 +1127,19 @@
           "promptBlocks": {
             "goal": "Implement the vertical slice `{{currentSlice.name}}` under strict scope discipline.",
             "constraints": [
+              "Re-read the `derivedConstraints` and `invariants` from context that apply to this slice's declared files before writing anything. Pull only constraints relevant to `{{currentSlice.name}}`'s files and symbols -- do not re-read the full list. Constraints set in earlier phases decay over long sessions; treat this re-read as mandatory, not optional.",
               "Before writing a single line of code, declare your scope: list exact files/symbols touched, and confirm none belong to a later slice.",
               "If you have already edited files from this or any other slice in a previous step, stop and report it immediately.",
-              "Hard scope rule: modify ONLY what is described in `{{currentSlice.name}}`. Anything outside that boundary is out of scope. If integration work is required, set `unexpectedScopeChange = true` and do the minimum necessary to compile, then stop."
+              "Hard scope rule: modify ONLY what is described in `{{currentSlice.name}}`. Anything outside that boundary is out of scope. If integration work is required, set `unexpectedScopeChange = true` and do the minimum necessary to compile, then stop.",
+              "Do not modify test files to make tests pass. If a test must be updated because the spec changed, state the spec change explicitly and update `implementation_plan.md` first.",
+              "`verifyNeeded` MUST be set to `true` if any of these conditions hold: (a) more than one file was modified, (b) the build was not run as a tool call during this step with an observed exit code, or (c) any of the tracking metrics fired. You may NOT set `verifyNeeded = false` when any of these conditions hold."
             ],
             "procedure": [
               "1. Declare the scope of files and symbols to touch.",
               "2. Implement the changes incrementally, running tests and build to prove correctness before advancing.",
-              "3. Track metrics: `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, `unexpectedScopeChange`.",
-              "4. Determine if verification is needed: set `verifyNeeded` to true if multi-PR strategy is active, any of the tracking metrics are true, or if build/tests fail."
+              "3. After implementation, run `git diff --name-only` and compare the output against your declared scope. Any file outside the declared scope is an out-of-scope edit and must be explicitly justified or reverted.",
+              "4. Track metrics: `specialCaseIntroduced`, `unplannedAbstractionIntroduced`, `unexpectedScopeChange`.",
+              "5. Determine if verification is needed: set `verifyNeeded` to true per the constraints above, or if multi-PR strategy is active."
             ],
             "outputRequired": {
               "specialCaseIntroduced": "Boolean flag",
@@ -1206,7 +1287,7 @@
               },
               "effect": {
                 "kind": "require_followup",
-                "guidance": "Address whichever gate scored low: build_correctness low -- the build or tests are still failing; fix them before this step can complete. invariant_preservation low -- one or more invariants from the plan are violated; fix the implementation. implementation_gaps low -- the gap scan was not completed or found unaddressed gaps; fix them inline, file as follow-up tickets, or explicitly defer with rationale."
+                "guidance": "Address whichever gate scored low: build_correctness low -- re-run build and tests as tool calls in this step and cite the exit code and test output; prior-run prose is not sufficient. invariant_preservation low -- one or more invariants from the plan are violated; fix the implementation. implementation_gaps low -- gap scan incomplete or gaps found; fix inline, file as tickets, or explicitly defer."
               }
             }
           ],
@@ -1225,7 +1306,7 @@
             ],
             "procedure": [
               "1. When stopping, include in notes: acceptance criteria status, invariant status, test/build summary, follow-up tickets, and accepted philosophy compromises.",
-              "2. Include a JSON fenced block containing the `handoffBlock` in the exact structure specified in instructions.",
+              "2. Include a JSON fenced block containing the `handoffBlock` in the exact structure specified in instructions. The `prTitle` must complete the sentence 'This PR [verb]s [specific thing]' and be actionable to a reviewer who has not read the plan -- a title like 'Implement the task' or 'Fix the bug' is not acceptable.",
               "3. Emit the required `wr.loop_control` loop-control artifact in the correct format."
             ],
             "outputRequired": {
