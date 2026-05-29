@@ -230,7 +230,9 @@ describe('Lean workflow — Phase 1 orchestration with injected routine', () => 
     const steps = result._unsafeUnwrap().steps;
     const stepIds = steps.map(s => s.id);
 
-    expect(stepIds).toContain('phase-0-understand-and-classify');
+    expect(stepIds).toContain('phase-0a-explore-and-classify');
+    expect(stepIds).toContain('phase-0b-philosophy-and-architecture');
+    expect(stepIds).toContain('phase-0c-derive-constraints');
     expect(stepIds).toContain('phase-2-design-review');
     expect(stepIds).toContain('phase-3-plan-and-test-design');
     expect(stepIds).toContain('phase-4-plan-audit');
