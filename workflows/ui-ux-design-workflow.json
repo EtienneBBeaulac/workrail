@@ -1,15 +1,15 @@
 {
   "id": "wr.ui-ux-design",
   "name": "UI/UX Design Workflow",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "metricsProfile": "design",
-  "description": "Design UI/UX from scratch with enforced process. Injects outcome-contract and constraint anchors to defeat LLM homogenization, forces divergent directions via independent seed framings, adds mandatory pre-mortem and contrarian reviewers, and applies debate-resolution synthesis requiring explicit accept/reject/escalate. Output: a spec with Kill Conditions, Open Risks, and a 'What This Design Gets Wrong' section.",
-  "about": "## UI/UX Design Workflow\n\nThis workflow produces a design spec for a new feature, screen, component, or interaction. It is built around two principles: (1) problem framing must happen before any solutions are proposed, and (2) design recommendations must be opinionated -- designed for one specific user, with a falsifiable point of view.\n\n**Why opinionated matters:** LLMs systematically produce homogenized design outputs. Studies show this persists even with 'be creative' instructions and parameter changes. The fix is structural: seed framings that force divergence in Phase 1, a kill-criterion that makes direction selection falsifiable in Phase 2, and mandatory pre-mortem and contrarian reviewers that are required to argue the chosen direction is wrong in Phase 3.\n\n**What it does:**\nPhase 0 frames the problem and extracts a measurable outcome statement, constraint set, and assumption inventory -- the three anchors that all later phases depend on. Phase 1 generates 2-3 directions with independent seed framings plus a negative-space alternative, each stating what it sacrifices. Phase 2 commits to one direction with explicit elimination of others and a falsification clause. Phase 3 runs parallel reviewer families -- IA, UX laws, accessibility, edge cases, content, plus a pre-mortem reviewer and a contrarian reviewer required to argue for a different direction. Phase 4 synthesizes via accept/reject/escalate, never averaging. The final spec includes Kill Conditions and a mandatory 'What This Design Gets Wrong' section.\n\n**When to use it:**\n- You need to design a new screen, feature, or non-trivial component\n- You want a recommendation, not a balanced description of options\n- You need a spec concrete enough for an engineer to implement or a designer to push back on\n- Simple single-component changes also work through a lighter direct-spec path\n\n**What it produces:**\nA design spec with 7 sections: Why (outcome), What (chosen direction with eliminated alternatives), How (all element states, edge cases, copy), Constraints (accessibility and technical minimums), Open Risks (escalated contrarian points), Kill Conditions (falsification clause), and What This Design Gets Wrong (known weaknesses).\n\n**How to get good results:**\nPoint the workflow to your codebase. Provide the design system location if it is not in the repo. The outcome statement and constraint set you approve in Phase 0 are the most important inputs -- weak outcome statements produce generic directions.",
+  "description": "Designs UI by generating actual HTML/CSS rather than a text spec. Frames the problem, selects an opinionated direction, generates 2-3 rendered variants, self-critiques against a slop-pattern checklist and visual quality criteria, iterates autonomously, then presents the result to the human for review.",
+  "about": "## UI/UX Design Workflow\n\nThis workflow is the designer, not the spec writer. It produces actual HTML/CSS you can render -- not a document describing what the HTML/CSS should look like.\n\n**What it does:**\nPhase 0 frames the problem: behavioral outcome, aesthetic outcome, aesthetic direction (a named style with explicit font/palette/layout character that overrides AI defaults), and target platform. It also checks for Playwright MCP and offers to install it -- visual critique is significantly stronger with screenshot rendering.\n\nPhase 1 generates 2-3 design directions with visual briefs, including one direction seeded from 'reduce cognitive anxiety at a glance.' Phase 2 commits to one direction and produces a generation brief with explicit anti-slop CSS values.\n\nPhase 3 generates 2-3 HTML/CSS variants and -- if Playwright is available -- screenshots them before selecting the strongest.\n\nPhase 4 runs an autonomous iteration loop with two layers of critique: (1) CSS property checks against 15 known AI-slop patterns and 13 visual quality criteria; (2) if Playwright is available, 6 scoped visual passes on a real screenshot -- hierarchy, spacing, palette, density, mood, and a holistic Spark Joy pass that asks whether the design has a point of view. Structural fixes identified by visual passes are applied alongside CSS fixes. The loop stops when the design earns a SPARKS JOY verdict (when Playwright rendering is available), or on CSS quality signals alone when it is not -- not just when a fixed iteration count is reached.\n\nPhase 5 presents the HTML/CSS with the Spark Joy verdict, iteration log, and a clear statement of what still needs human visual verification.\n\n**When to use it:**\n- You need a rendered UI design, not a spec\n- You want to see something, not read about something\n- Simple single-component changes work through a lighter direct path\n\n**How to get good results:**\nInstall Playwright MCP before running -- it is the difference between code-reading critique and actually seeing the design. The aesthetic direction is the second most important input: name a specific font character, palette character, and layout character. 'Modern' produces generic output. 'Warm editorial with Fraunces headings and a coral accent on cream' does not.",
   "examples": [
-    "Design the empty state and onboarding flow for a new team dashboard feature",
-    "Design a settings panel for notification preferences with accessibility requirements",
+    "Design the empty state for a new team dashboard feature",
+    "Design a settings panel for notification preferences",
     "Design the error and loading states for the file upload component",
-    "Redesign the search results screen to reduce cognitive load for first-time users"
+    "Redesign the search results screen to reduce cognitive load"
   ],
   "recommendedPreferences": {
     "recommendedAutonomy": "guided",
@@ -20,12 +20,12 @@
   ],
   "assessments": [
     {
-      "id": "evidence-quality-gate",
-      "purpose": "Every reviewer finding cites a specific design element from the context packet -- not a UX law citation detached from the actual design.",
+      "id": "anti-slop-gate",
+      "purpose": "The generated HTML/CSS does not exhibit the known AI-slop patterns that make output look generic and default.",
       "dimensions": [
         {
-          "id": "evidence_quality",
-          "purpose": "Each finding names a specific element, component, or decision from the design. Generic advice ('consider reducing cognitive load') is not a finding.",
+          "id": "slop_pattern_count",
+          "purpose": "After iteration, output triggers at most 1 of 15 slop patterns. Clean: <=1 triggered. See Phase 4 critique step for the full pattern list.",
           "levels": [
             "low",
             "high"
@@ -34,12 +34,12 @@
       ]
     },
     {
-      "id": "contrarian-addressed-gate",
-      "purpose": "Every contrarian point from the contrarian reviewer and pre-mortem is explicitly adopted, rejected with a reason, or escalated as an open risk in the spec.",
+      "id": "implementability-gate",
+      "purpose": "The generated HTML/CSS is droppable into a project without requiring structural rewrite.",
       "dimensions": [
         {
-          "id": "contrarian_addressed",
-          "purpose": "The contrarianResolutionLog is complete: every contrarian argument has a decision (adopt|reject|escalate) and a one-sentence reason. Nothing is silently smoothed over.",
+          "id": "code_quality",
+          "purpose": "Output uses semantic HTML (h1-h2 in document order, article/section for content containers, not div-only), CSS custom properties for all spacing/color/radius values, no inline style attributes, and a consistent 8px-based spacing token system.",
           "levels": [
             "low",
             "high"
@@ -48,12 +48,26 @@
       ]
     },
     {
-      "id": "edge-case-coverage-gate",
-      "purpose": "Every interactive element has its full state set addressed: empty, error, loading, first-use.",
+      "id": "aesthetic-outcome-gate",
+      "purpose": "The generated output visually delivers on the aestheticOutcomeStatement, not just avoids slop.",
       "dimensions": [
         {
-          "id": "edge_case_coverage",
-          "purpose": "Empty state, error state, loading state, and first-use are explicitly addressed for each interactive element in the spec. If an element has no loading state, that must be stated explicitly.",
+          "id": "visual_direction_achieved",
+          "purpose": "The named dominant element is primary (font-size or visual weight at least 2x secondary elements), all spacing values are multiples of the stated base unit, and the aestheticDirection style is recognizable in the output.",
+          "levels": [
+            "low",
+            "high"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "behavioral-outcome-gate",
+      "purpose": "Guards against the aesthetic-usability effect: visual polish masking task-completion failures. The final output must plausibly serve the primaryOutcomeStatement's behavioral success metric.",
+      "dimensions": [
+        {
+          "id": "behavioral_outcome_supported",
+          "purpose": "Walking the primary task step by step, every step has a visible, reachable affordance. No aesthetic decision blocks the success metric: CTA above fold, next-action contrast not lower than decorative elements, density does not bury the next step.",
           "levels": [
             "low",
             "high"
@@ -63,11 +77,11 @@
     },
     {
       "id": "kill-condition-gate",
-      "purpose": "The chosen direction has a falsification clause -- a real-world observation that would invalidate the design choice post-ship.",
+      "purpose": "The chosen direction has a falsifiable kill condition -- a real-world observation that would invalidate the design choice post-ship.",
       "dimensions": [
         {
           "id": "kill_condition_stated",
-          "purpose": "The spec includes a Kill Conditions section with at least one falsifiable condition derived from the selectionKillCondition set in Phase 2.",
+          "purpose": "The generationBrief includes a selectionKillCondition: a specific real-world observation that would prove the direction wrong, not a truism.",
           "levels": [
             "low",
             "high"
@@ -79,237 +93,375 @@
   "preconditions": [
     "User has a UI/UX design task: a new feature, screen, component, or interaction to design.",
     "Agent has enough context about the product or codebase to understand existing patterns.",
-    "A human will review the design spec before implementation begins."
+    "A human will review the rendered output before implementation begins."
   ],
   "metaGuidance": [
-    "OUTCOME CONTRACT IS THE ANCHOR: every phase depends on primaryOutcomeStatement and constraintSet from Phase 0. If these are vague ('users should feel good') the workflow produces generic output. Do not proceed with an unmeasurable outcome statement.",
-    "OPINIONATED MEANS FALSIFIABLE: a recommendation no agent argued against should be flagged as suspect. The contrarian reviewer ensures every selection is challenged. If contrarianFindings is empty after Phase 3, re-run with stronger adversarial framing.",
-    "BOTH-SIDES-ISM IS A FAILURE MODE: synthesis that says 'both have merits' without choosing is not synthesis. Phase 4 requires explicit accept/reject/escalate for every contrarian point. 'Escalate' produces an Open Risk in the spec.",
-    "SEED FRAMINGS PREVENT HOMOGENIZATION: generate each direction with a different optimization lens. Same framing twice produces structurally identical directions. The negative-space direction (simplest alternative) must always be included.",
-    "EVIDENCE OVER PLATITUDES: every finding must cite a specific element. 'The settings panel has 14 options, violating Miller's Law (7±2)' is a finding. 'Consider reducing cognitive load' is not.",
-    "SIMPLE CRITERIA: designComplexity=Simple is only valid for a single existing component with a minor change, no new user flows, no information architecture changes, and no new interaction patterns. If uncertain, classify upward.",
-    "HONEST LIMITS: this workflow produces a text-based design spec. It cannot produce visual mockups, conduct usability testing, or verify visual quality. Say so in the handoff and name what still needs human visual review.",
-    "V2 DURABILITY: use output.notesMarkdown as the primary durable record. Do not create DESIGN_CONTEXT.md or other sidecar files.",
-    "OWNERSHIP: the main agent owns synthesis, direction selection, and final spec. Reviewer families provide independent perspectives only."
+    "THE OUTPUT IS THE DESIGN: this workflow produces HTML/CSS, not a description of HTML/CSS. Every phase serves that goal. Do not produce a text spec as an intermediate artifact.",
+    "AESTHETIC DIRECTION OVERRIDES DEFAULTS: AI defaults to Inter, purple gradients, all-caps, symmetrical cards. aestheticDirection must explicitly override these. If output looks like it needed no brief, the brief was not used.",
+    "SLOP CHECKLIST IS NOT OPTIONAL: self-critique in Phase 4 must check each of the 15 slop patterns by name and report slopCount as a number. 'Looks clean' without a count is not a valid critique result.",
+    "TARGETED FIXES ONLY: name the specific CSS property and value changed. Not 'improved visual hierarchy' -- 'increased h1 font-size from 1.5rem to 3rem'. Fix-everything revisions cause regression.",
+    "AESTHETIC OUTCOME IS NOT A FEELING: aestheticOutcomeStatement must name a structural decision. 'Feels calm' is not valid. 'Primary action identifiable in <5s via a dominant element at 3x the weight of secondary elements, section breathing room >=24px' is.",
+    "VISUAL PASSES ARE SCOPED: passes 1-5 each look at one thing only. Pass 6 is holistic. Hierarchy ignores color. Palette ignores layout. Scope violations produce 'looks great' -- not findings.",
+    "VISUAL FINDINGS REQUIRE EVIDENCE: a visual pass finding must name what was seen and where. Not 'hierarchy feels weak' -- 'eye lands on the subtitle in the upper-left before the primary CTA, which is smaller and lower-contrast'. No evidence = not a finding.",
+    "HUMAN REVIEW IS STRUCTURAL: Phase 5 is not a fallback for failed iteration -- it is the correct endpoint. Code-only critique cannot verify rendering, color perception, or viewport feel. The human sees the output because that is the right architecture.",
+    "HONEST LIMITS: micro-interaction delight requires a motion prototype -- out of scope here. Squint/blur runs on a real blurred screenshot when Playwright is available; deferred otherwise. Composition balance and discrete emotional tone require user testing.",
+    "V2 DURABILITY: use output.notesMarkdown as the primary durable record. The final HTML/CSS is the deliverable; do not create sidecar files."
   ],
   "steps": [
     {
       "id": "phase-0-problem-framing",
-      "title": "Phase 0: Frame the Problem and Extract the Outcome Contract",
+      "title": "Phase 0: Frame the Problem",
       "promptBlocks": {
-        "goal": "Understand the design problem and extract the three artifacts all later phases depend on: a measurable outcome statement, a constraint set, and an assumption inventory.",
+        "goal": "Understand the design problem and extract four artifacts: a behavioral outcome statement, an aesthetic outcome statement, an aesthetic direction, and a constraint set.",
         "constraints": [
-          "Explore the codebase to find existing patterns, components, and conventions before asking questions.",
-          "Ask only for information tools cannot answer.",
-          "Do not propose any design solutions in this phase.",
-          "The primaryOutcomeStatement must be measurable. 'Users should feel good' is not acceptable. 'Users complete notification configuration in under 30 seconds on first use' is."
+          "Explore the codebase to find existing patterns before asking questions. Ask only for what tools cannot answer.",
+          "Do not propose or sketch any solutions in this phase.",
+          "primaryOutcomeStatement must be measurable. 'Users should feel good' is not valid. 'Users complete notification setup in under 30 seconds on first use' is.",
+          "aestheticOutcomeStatement must name a structural decision: hierarchy, spacing, or density. 'Should feel clean' is not valid. 'Primary action identifiable in <5 seconds via a dominant element at 3x the visual weight of secondary elements, section padding >= 24px' is.",
+          "aestheticDirection must be a named style the generation can be held to. 'Modern' is not a direction. 'Warm editorial with a coral accent and serif display headings' or 'high-contrast minimal with an 8px grid and a single accent color' are directions."
         ],
         "procedure": [
-          "Read the codebase to understand: existing UI components and patterns, platform (web/iOS/Android), tech stack constraints that affect UI, and any existing design documentation.",
-          "Identify the primary user and their goal: who will use this feature, what are they trying to accomplish, what context are they in?",
-          "Write the primaryOutcomeStatement in JTBD-style: '[user] wants to [verb] [object] so they can [outcome]; success = [measurable change]'. This is the single criterion all direction selection must serve.",
-          "Write the constraintSet: at least 3 forced constraints that eliminate solution space (e.g., 'must work on a 320px viewport', 'must complete primary action in ≤2 taps', 'cannot use a modal for the primary flow'). Constraints that eliminate nothing are not constraints.",
-          "Write the assumptionInventory: the top 5 beliefs the design depends on, ranked by importance × unknown. These become the Kill Conditions in Phase 2 and the pre-mortem targets in Phase 3.",
-          "Identify existing design context: what screens or components does this connect to? What does the user do before and after?",
-          "Surface any context you could not determine: missing design system, unknown user research, unclear platform target.",
-          "Classify designComplexity: Simple = single existing component, minor change, no new flows, no IA changes. Standard = new screen or component, moderate scope. Complex = new user flows, significant IA changes, multiple screens or interaction patterns.",
-          "Set needsReviewerBundle = true for Standard and Complex; false for Simple."
+          "List the top-level directory structure of the workspace to identify where UI code and design system files likely live (src/, components/, styles/, tokens/, etc.). You will pass these paths to the context-gathering executor -- do not read files yourself.",
+          "Spawn a WorkRail Executor with workflowId='wr.routine-context-gathering', depth=1. Give it everything it needs -- it has no knowledge of the workspace or this task: mission='Gather UI/design context for this design task', targets=[the specific directories identified above, e.g. src/components, styles/, tokens/], goal='Extract: (1) existing UI components and visual patterns, (2) platform (web/iOS/Android), (3) tech stack constraints affecting UI, (4) any design documentation or design system, (5) existing CSS/design token files -- color palette variable names and values, spacing scale, font stack, border-radius conventions. Also identify: what screens or components does the design task connect to? What does the user do before and after this screen? If no design system exists, record that explicitly.' Synthesize the executor output into: existingDesignTokens (color, spacing, font, radius values if found; empty object if not) and existingDesignContext (what adjacent screens exist, user journey before/after, relevant patterns).",
+          "Identify the primary user and their goal: who, what they are trying to accomplish, what context they are in.",
+          "Write the primaryOutcomeStatement: '[user] wants to [verb] [object] so they can [outcome]; success = [measurable change]'.",
+          "Write the aestheticOutcomeStatement: 'At a glance, before reading a word, this layout must communicate [priority order]. Success = [structural decision that achieves this].'",
+          "Write the aestheticDirection: a named visual style that will guide generation and explicitly override AI defaults. Include: font character (e.g. 'distinctive display serif, not Inter'), palette character (e.g. 'warm earth tones with a sharp coral accent, not purple gradient'), and layout character (e.g. 'asymmetric with generous whitespace, not symmetrical centered cards').",
+          "Write the constraintSet: at least 3 constraints that eliminate solution space.",
+          "Write the assumptionInventory: top 5 beliefs the design depends on.",
+          "Identify targetPlatform: web, iOS, Android, or cross-platform. If non-web, note that HTML/CSS will be used as the iteration medium and CSS values will be translated to native equivalents at handoff.",
+          "Classify designComplexity: Simple = single existing component, minor change, no new flows. Standard = new screen or component. Complex = new user flows, multiple screens.",
+          "Set needsFullPipeline = true for Standard and Complex; false for Simple."
         ],
         "outputRequired": {
-          "notesMarkdown": "Primary user and goal, primaryOutcomeStatement (must be measurable), constraintSet (at least 3 real constraints), assumptionInventory (top 5 beliefs), existing context, gaps requiring human input, and complexity classification with rationale.",
-          "context": "Capture primaryOutcomeStatement, constraintSet, assumptionInventory, userGoals, userConstraints, existingDesignContext, designComplexity, needsReviewerBundle, designContextGaps, and openQuestions."
+          "notesMarkdown": "Primary user and goal, primaryOutcomeStatement (measurable), aestheticOutcomeStatement (structural decision), aestheticDirection (named style with font/palette/layout character), constraintSet, assumptionInventory, targetPlatform, designComplexity with rationale, existingDesignContext summary.",
+          "context": "Capture primaryOutcomeStatement, aestheticOutcomeStatement, aestheticDirection, constraintSet, assumptionInventory, targetPlatform, designComplexity, needsFullPipeline, existingDesignTokens (empty object if no design system found), existingDesignContext."
         },
         "verify": [
-          "primaryOutcomeStatement is measurable -- there is a concrete success criterion, not a vibe.",
-          "constraintSet eliminates at least some solution space -- it is not a list of things that are generally true.",
-          "assumptionInventory names at least 3 specific beliefs the design depends on.",
-          "designComplexity is classified with a concrete reason."
+          "primaryOutcomeStatement is measurable.",
+          "aestheticOutcomeStatement names a structural decision with a mechanism, not a mood word.",
+          "aestheticDirection explicitly names font character, palette character, and layout character -- enough to override AI defaults.",
+          "designComplexity is classified with a concrete reason.",
+          "existingDesignTokens is set (may be empty object).",
+          "existingDesignContext describes adjacent screens and user journey."
         ]
       },
       "requireConfirmation": true
+    },
+    {
+      "id": "phase-0b-playwright-setup",
+      "title": "Phase 0b: Playwright Setup",
+      "promptBlocks": {
+        "goal": "Check for Playwright MCP and set playwrightAvailable. This is a tooling check -- separate from design framing.",
+        "constraints": [
+          "Do not do any design work in this step."
+        ],
+        "procedure": [
+          "Check for Playwright MCP: look for a tool named 'playwright' or 'browser' in the available MCP tools. If found, set playwrightAvailable = true and advance.",
+          "If not found: tell the human -- 'Visual critique is significantly stronger with Playwright for screenshot-based review. Without it, Phase 4 can only check CSS properties, not what the design actually looks like when rendered. I can install @playwright/mcp now with: npx -y @playwright/mcp@latest. Should I proceed?'",
+          "If the human agrees: run the install, verify the tool is now available, set playwrightAvailable = true.",
+          "If the human declines: set playwrightAvailable = false. Record in context: 'User opted out of Playwright. Visual critique is CSS-property checks only. Layout feel, color rendering, and the Spark Joy verdict cannot be evaluated from code alone -- the human review in Phase 5 is the only real visual check.'"
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Playwright status: available / installed / declined. Any install output.",
+          "context": "Set playwrightAvailable (true or false)."
+        },
+        "verify": [
+          "playwrightAvailable is set to true or false.",
+          "If false: opt-out note is in context."
+        ]
+      },
+      "requireConfirmation": false
     },
     {
       "id": "phase-1-design-directions",
       "title": "Phase 1: Divergent Direction Generation",
       "runCondition": {
-        "var": "needsReviewerBundle",
+        "var": "needsFullPipeline",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Generate 2-3 genuinely different design directions using independent seed framings that force divergence, plus one negative-space alternative.",
+        "goal": "Generate 2-3 genuinely different design directions, each with an IA sketch and a visual brief. At least one direction must be seeded from a visual/emotional framing.",
         "constraints": [
-          "Directions must be genuinely different in IA or interaction model -- not variations of the same pattern with different labels.",
-          "Each direction is generated from an independent seed framing that biases the exploration in a different direction. The same framing applied twice will produce superficially different but structurally identical directions.",
-          "The negative-space direction is required: what is the simplest possible alternative -- the one that removes a feature, reduces scope, or does less? This forces evaluation of whether the full design is justified.",
+          "Directions must differ in IA or interaction model -- not just label variations of the same pattern.",
+          "Each direction includes a visual brief: what visual decisions does this direction force? What does the dominant element look like? What is the density?",
+          "The negative-space direction is required.",
           "Do not select a direction in this phase."
         ],
         "procedure": [
-          "Generate Direction A with seed framing: 'as if optimizing for a first-time user who has never seen this product'. Prioritize clarity, progressive disclosure, and the shortest path to first success. Describe: IA sketch, primary interaction model, what it sacrifices for first-time-user clarity.",
-          "Generate Direction B with seed framing: 'as if a competitor solved this problem 10x better than the obvious solution'. What would they do differently? What assumption does this challenge? Describe: IA sketch, primary interaction model, what it sacrifices.",
-          "Generate Direction C (if designComplexity=Complex) with seed framing: 'as if you had to eliminate one entire category of UI element from this design'. What structural change does this force? Describe: IA sketch, primary interaction model, what it sacrifices.",
-          "Generate the Negative-Space Direction: what is the simplest alternative -- the one that does less, removes a feature, or solves the problem by changing a constraint instead of building a UI? State why this could be correct and what would have to be true for it to be the best answer.",
-          "For each direction, explicitly score it 1-5 against the primaryOutcomeStatement with one sentence of reasoning.",
-          "For each direction, name one constraint from constraintSet that it violates (if any).",
-          "After all directions, state which assumptionInventory items each direction depends on most heavily -- this seeds the pre-mortem in Phase 3."
+          "Spawn 3 WorkRail Executor subagents SIMULTANEOUSLY, one per seed framing, each with workflowId='wr.routine-ideation'. Subagents have zero knowledge of this conversation, the codebase, or anything discussed so far -- give each everything it needs in its context. Each executor receives:\n- problem: [the full design problem stated in 2-3 sentences from primaryOutcomeStatement and the user request]\n- constraints: [the full constraintSet from Phase 0]\n- context: [paste the full existingDesignTokens object from Phase 0 -- include all color/spacing/font/radius values verbatim; and the full existingDesignContext from Phase 0 -- adjacent screens, user journey before/after, relevant patterns; plus targetPlatform and designComplexity]\n- aestheticTarget: [the full aestheticOutcomeStatement and aestheticDirection]\n- quantity: 1 (one developed direction only)\n- perspective: as follows per executor:\n  * Executor A perspective: 'first-time-user clarity -- optimize for a user who has never seen this product. Prioritize progressive disclosure, the shortest path to first success, and a single unmistakable dominant element. Describe what this direction sacrifices.'\n  * Executor B perspective: 'challenger assumption -- imagine a competitor solved this 10x better by challenging one of the core assumptions. What did they do differently? Describe what this direction sacrifices.'\n  * Executor C perspective: 'cognitive-anxiety reduction -- design as if the user has exactly 5 seconds to understand what this screen is for before reading a word. Force the visual hierarchy decision first: name the single dominant element, the minimum breathing room between sections, and the density level that communicates structure not busyness. Describe what this direction sacrifices.'\n- deliverable: 'One design direction: IA sketch, visual brief (dominant element, density, key visual decisions), outcome score 1-5 against the aestheticTarget, what it sacrifices'",
+          "Generate Direction D yourself (Complex only) with seed: 'eliminate one entire category of UI element from this design -- what structural change does that force?'. Describe: IA sketch, visual brief, what it sacrifices. Do not delegate this -- it is a constraint-removal thought experiment best done inline.",
+          "Generate the Negative-Space Direction yourself: what is the simplest possible alternative -- does less, removes a feature, solves the problem by changing a constraint? State what would have to be true for this to be the best answer.",
+          "Receive all executor outputs. Synthesize into the designDirections array -- do not adopt any executor output verbatim. For each direction: extract the IA sketch, visual brief, outcome score, and sacrifices.",
+          "Score each direction 1-5 against aestheticOutcomeStatement (the executors scored against it too -- note any disagreements).",
+          "State which assumptionInventory items each direction depends on most heavily."
         ],
         "outputRequired": {
-          "notesMarkdown": "All directions with seed framings, IA sketches, outcome scores, sacrifices, constraint violations, and assumption dependencies. No recommendation yet.",
-          "context": "Capture designDirections (array: seedFraming, iaSketch, interactionModel, outcomeScore, sacrifices, constraintsViolated, assumptionDependencies), negativeSpaceDirection."
+          "notesMarkdown": "All directions with seed framings, IA sketches, visual briefs, outcome scores, aesthetic outcome scores, sacrifices, assumption dependencies. No recommendation yet.",
+          "context": "Capture designDirections (array: seedFraming, iaSketch, visualBrief, outcomeScore, aestheticScore, sacrifices, assumptionDependencies), negativeSpaceDirection."
         },
         "verify": [
-          "At least 2 directions have different seed framings and are genuinely different in IA or interaction model.",
-          "The negative-space direction is present.",
-          "Each direction names what it sacrifices -- not just what it offers.",
-          "No direction has been selected or recommended yet."
+          "At least 2 directions differ in IA or interaction model.",
+          "Direction C (visual/anxiety framing) is present.",
+          "Each direction has a visual brief, not just an IA sketch.",
+          "Each direction scored against both outcome statements.",
+          "No direction selected yet."
         ]
       },
       "requireConfirmation": true
     },
     {
-      "id": "phase-2-opinionated-selection",
-      "title": "Phase 2: Opinionated Direction Selection",
+      "id": "phase-2-direction-selection",
+      "title": "Phase 2: Direction Selection and Generation Brief",
       "runCondition": {
-        "var": "needsReviewerBundle",
+        "var": "needsFullPipeline",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Commit to one direction with explicit elimination of alternatives, a falsification clause, and a neutral context packet for reviewers.",
+        "goal": "Commit to one direction and produce the generation brief that will drive HTML/CSS creation.",
         "constraints": [
-          [
-            {
-              "kind": "ref",
-              "refId": "wr.refs.notes_first_durability"
-            }
-          ],
-          "Direction selection must be opinionated. If the rationale for selecting a direction applies equally to the alternatives, the selection is not opinionated enough.",
-          "Apply the Field test: if no agent in this system has argued against the selection, flag it and strengthen the contrarian reviewer's mandate in Phase 3.",
-          "The selectionKillCondition must be specific and falsifiable -- a real-world observation, not a truism."
+          "Direction selection must be opinionated. A rationale that applies equally to all directions is not a rationale.",
+          "The generationBrief must include explicit anti-slop overrides -- specific CSS values that override AI defaults.",
+          "selectionKillCondition must be specific and falsifiable, not a truism."
         ],
         "procedure": [
-          "Select the design direction: name which direction and state the specific reason it was chosen over the others against the primaryOutcomeStatement. The reason must be specific enough that it could NOT apply to the alternatives.",
-          "Eliminate the other directions: for each eliminated direction, write one sentence naming the specific thing it fails at relative to the primaryOutcomeStatement or constraintSet.",
-          "Write the selectionKillCondition: 'This direction is wrong if [specific real-world observation] turns out to be true.' Pull from the assumptionInventory -- the highest-importance unknown becomes the kill condition.",
-          "Apply the Field test: does any agent in this system have a strong argument against this selection? If yes, name it now and ensure the contrarian reviewer in Phase 3 must address it explicitly. If no, flag the selection as 'unchallenged' and instruct the contrarian reviewer to work harder.",
-          "Assemble the designContextPacket: (1) selected direction's IA sketch and interaction model, (2) primaryOutcomeStatement and constraintSet, (3) existing design context, (4) platform and tech constraints, (5) known user pain points, (6) eliminated directions and their elimination reasons.",
-          "Select reviewer families: IA reviewer (always), UX laws reviewer (always), accessibility reviewer (Standard and Complex), edge cases reviewer (Standard and Complex), content reviewer (Complex or when copy is significant), pre-mortem reviewer (always), contrarian reviewer (always).",
-          "Set selectedReviewerFamilies, designContextPacket, selectedDirection, eliminatedDirections, selectionKillCondition, fieldTestFlag."
+          "Select the direction: name which direction and state the specific reason it was chosen against the primaryOutcomeStatement. The reason must not apply equally to the alternatives.",
+          "Eliminate the others: one sentence per eliminated direction naming what it fails at.",
+          "Write selectionKillCondition: 'This direction is wrong if [specific real-world observation] turns out to be true.'",
+          "Assemble the generationBrief:\n(1) Chosen direction's IA sketch and visual brief\n(2) primaryOutcomeStatement and constraintSet\n(3) aestheticOutcomeStatement -- this is the quality target for generation\n(4) aestheticDirection -- the named style\n(5) Design token baseline: if existingDesignTokens is non-empty, use those values as the starting point for palette, spacing, and radius -- the generated design must integrate with the surrounding product. Override only where the aestheticDirection requires a deliberate departure, and name that departure explicitly. If existingDesignTokens is empty, define fresh tokens:\n    - Font: a specific non-Inter font family (e.g. 'Space Grotesk' or 'Fraunces' or 'Geist')\n    - Palette: specific CSS variable values for background, primary, accent (warm/distinctive, not purple gradient)\n    - Spacing: '--space-1: 8px; --space-2: 16px; --space-3: 24px; --space-4: 32px; --space-5: 48px;'\n    - Border-radius: one consistent token value (e.g. '--radius: 8px')\n    - Shadow: subtle elevation only ('0 4px 12px rgba(0,0,0,0.08)'), not glow\n    - Typography: h1 font-size target (minimum 2.5rem), body at 1rem -- minimum 2.5x ratio\n(6) Implementability requirements: semantic HTML, CSS custom properties, no inline styles\n(7) selectionKillCondition"
         ],
         "outputRequired": {
-          "notesMarkdown": "Selected direction with specific reason (not a reason that applies to all directions), eliminated directions each with one elimination sentence, selectionKillCondition, Field test result, frozen context packet summary, reviewer families.",
-          "context": "Capture designContextPacket, selectedDirection, eliminatedDirections, selectionKillCondition, fieldTestFlag, selectedReviewerFamilies, contradictionCount (init 0), evidenceWeakCount (init 0), contrarianResolutionLog (init [])."
+          "notesMarkdown": "Selected direction with specific rationale, eliminated directions with elimination sentences, selectionKillCondition, complete generationBrief including anti-slop CSS overrides.",
+          "context": "Capture generationBrief, selectedDirection, eliminatedDirections, selectionKillCondition."
         },
         "verify": [
-          "The selection rationale is specific enough that it could NOT apply to the eliminated directions.",
-          "Every eliminated direction has a one-sentence elimination reason citing the primaryOutcomeStatement or a specific constraint.",
-          "selectionKillCondition is a specific falsifiable observation, not 'if users don't like it'.",
-          "The context packet is complete enough that a reviewer can evaluate the design without regathering context."
+          "Selection rationale could not apply to eliminated directions.",
+          "generationBrief includes explicit CSS values for font, palette, spacing tokens, border-radius, shadow, and typography ratio.",
+          "selectionKillCondition is a specific falsifiable observation.",
+          "Anti-slop overrides are present and specific -- not 'use a good font' but an actual font name."
         ]
       },
       "requireConfirmation": false
     },
     {
-      "id": "phase-3-reviewer-bundle",
-      "title": "Phase 3: Parallel Reviewer Bundle",
+      "id": "phase-3-variant-generation",
+      "title": "Phase 3: HTML/CSS Variant Generation",
       "runCondition": {
-        "var": "needsReviewerBundle",
+        "var": "needsFullPipeline",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Run the selected reviewer families in parallel -- each with a persona, named failure mode, verbatim-evidence requirement, and calibrated confidence -- then synthesize their output as evidence, not conclusions.",
+        "goal": "Generate 2-3 HTML/CSS variants implementing the chosen direction, then select the strongest before iterating.",
         "constraints": [
-          [
-            {
-              "kind": "ref",
-              "refId": "wr.refs.synthesis_under_disagreement"
-            }
-          ],
-          "Every finding must cite a specific element, component, or decision from the designContextPacket. Generic UX advice without a specific reference is not a valid finding.",
-          "Every finding must include a confidence score (1-5) and severity score (1-5). Findings where BOTH confidence ≤ 2 AND severity ≤ 2 are automatically discarded before synthesis.",
-          "Reviewer output is raw evidence. The main agent owns synthesis and design decisions.",
-          "The contrarian reviewer and pre-mortem reviewer are mandatory -- they run even for Standard designs."
+          "Every variant must use the anti-slop overrides from generationBrief exactly -- font, palette tokens, spacing tokens, border-radius, shadow.",
+          "Every variant must use semantic HTML and CSS custom properties. No inline styles.",
+          "Variants must differ in visual interpretation of the chosen direction -- not just color swaps.",
+          "Do not iterate yet. Generate, compare, select the strongest variant."
         ],
         "procedure": [
-          "Before delegating, restate the selectedDirection, the primary reason it was chosen, and the selectionKillCondition.",
-          "Spawn one WorkRail Executor per selected reviewer family simultaneously. Each executor receives the designContextPacket, their specific mission, and the finding format: {finding, specificElement, confidence (1-5), severity (1-5), whatWouldChangeMind}.",
-          "Reviewer family missions:\n\n(1) IA reviewer -- persona: information architect who has watched navigation redesigns destroy user retention. Named failure mode: content hierarchy that forces the user to navigate more than once to complete the primary goal. Mission: evaluate the selected direction's IA against the primaryOutcomeStatement; identify the longest path to success and whether any grouping decision contradicts user mental models. State one thing that would make the IA acceptable as-is.\n\n(2) UX laws reviewer -- persona: cognitive psychologist applied to product design. Named failure mode: design decisions that add friction the user will attribute to the product feeling 'hard to use' without being able to say why. Mission: check each relevant law against specific elements. Hick's Law: count the decision points on the primary path and state whether the count is above the threshold for this user's context. Miller's Law: count working-memory items in the most complex screen state. Fitts's Law: identify the smallest touch target and whether it meets 44x44px minimum for the primary action. Peak-End Rule: what is the emotional peak and the end state -- are they positive? Tesler's Law: what complexity has been shifted to the user that could be handled by the system? Cite the specific element for each finding.\n\n(3) Accessibility reviewer -- persona: accessibility engineer who has watched three product launches regress WCAG compliance under deadline pressure. Named failure mode: accessibility requirements that are listed generically and then ignored during implementation because they weren't specific enough to verify. Mission: produce requirements as implementation contracts, not WCAG citations. Check: text-on-image or text-on-color-background -- what is the actual contrast ratio requirement for this element? State changes communicated by color alone -- which specific states are affected? Touch targets -- which specific interactive elements are at risk? Keyboard navigation path -- what is the expected tab order? Focus indicators -- are they visible without additional CSS? Screen reader labels -- which elements need explicit aria-label and what should they say?\n\n(4) Edge cases reviewer -- persona: QA engineer who has shipped three products where the error state was designed at 2am the night before launch. Named failure mode: specs that describe only the happy path and force engineers to invent error states during implementation, where they get it wrong. Mission: for each interactive element in the selected direction, explicitly address: empty state (what shows when there is no data?), error state (what shows when the action fails? what is the recovery path?), loading state (what shows while the action is in progress? how long before a timeout?), first-use (what does a new user see before any data exists?), offline or degraded state (what happens if network is unavailable?). Flag every state that is not addressed in the current design with a severity score.\n\n(5) Content reviewer -- persona: UX writer who has rewritten the same error messages four times because the first three were written by engineers. Named failure mode: copy that uses technical language the user doesn't understand, or action labels that don't say what will happen. Mission: evaluate every label, button copy, placeholder, error message, and helper text against: is it in user language (not system language)? does the action label say what will happen (not what the system is called)? does the error message tell the user what to do next (not just what went wrong)? is there any copy that assumes the user knows how the system works internally?\n\n(6) Pre-mortem reviewer -- persona: a product manager writing a post-mortem six months after this design shipped and failed. Named failure mode: overconfidence in direction selection before real-world signals. Mission: the chosen direction shipped and failed. Write the post-mortem. Identify 3 plausible failure modes with mechanism -- not generic risks, but specific failure paths grounded in the assumptionInventory and selectionKillCondition. For each failure mode: what was the assumption that turned out to be wrong, what user behavior did that produce, and what was the impact? You must argue that the direction failed, not that it might fail.\n\n(7) Contrarian reviewer -- persona: a senior designer who argued in the direction-selection meeting that a different direction was correct and was overruled. Named failure mode: direction selection that is consensus-driven rather than evidence-driven. Mission: argue that one of the eliminated directions was actually correct. Compare head-to-head against the selected direction on the primaryOutcomeStatement. You may not raise generic concerns -- you must argue that the eliminated direction scores higher on the outcome metric and state why. You must also argue against the selected direction's kill condition: if the kill condition turns out to be true, what happens? Use the fieldTestFlag to calibrate intensity -- if the selection was flagged as 'unchallenged', work harder.",
-          "After receiving all executor outputs, discard findings where confidence ≤ 2 AND severity ≤ 2. Then synthesize: what was confirmed, what was new, what was weak, and what has citations vs. what is speculation. Separate contrarianFindings and preMortemFindings from reviewerFindings.",
-          "Set evidenceWeakCount to findings without specific element citations after discarding low-quality ones."
+          "Generate Variant 1: implements the chosen direction's IA and visual brief with the anti-slop overrides applied. Prioritize the aestheticOutcomeStatement as the primary quality target.",
+          "Generate Variant 2: implements the same IA but with a different visual interpretation -- different layout composition (e.g. more asymmetric, different dominant element placement), while still using the anti-slop overrides.",
+          "Generate Variant 3 (Complex only, or if Variants 1 and 2 feel too similar): a third visual interpretation pushing the aestheticDirection further.",
+          "For each variant, run a quick CSS slop check -- flag any obvious patterns present (Inter font, purple colors, all-caps, magic-number spacing).",
+          "If playwrightAvailable is true: screenshot each variant at 1280x800. Check font loading: if the page renders in a system fallback font (Arial, Times, serif with no character) instead of the specified font, note this as a font-loading issue and add a Google Fonts <link> tag or @import to the HTML before screenshotting again. Evaluate each screenshot for the hierarchy pass only (where does the eye land first?) -- this single pass is enough to differentiate variants visually before deep iteration.",
+          "Select the strongest variant: if Playwright was used, the one with the clearest hierarchy from the screenshot and fewest CSS slop flags. If Playwright was not used, the one with the fewest slop flags and strongest alignment to the aestheticOutcomeStatement on paper. State the rationale in one sentence.",
+          "Set selectedVariant to the full HTML/CSS of the winner. This is what Phase 4 iterates."
         ],
         "outputRequired": {
-          "notesMarkdown": "Per-family synthesis, pre-mortem failure modes, contrarian arguments, discarded findings count, evidence quality assessment, contradiction flags.",
-          "context": "Capture reviewerFindings (per family, excluding contrarian and pre-mortem), contrarianFindings, preMortemFindings, contradictionCount, evidenceWeakCount."
+          "notesMarkdown": "All variants described with brief visual assessment, initial slop flags per variant, selected variant with rationale.",
+          "context": "Capture selectedVariant (full HTML/CSS), variantSelectionRationale, initialSlopFlags."
         },
         "verify": [
-          "Every declared reviewer family has at least one substantive finding with a specific element citation.",
-          "contrarianFindings is non-empty -- the contrarian reviewer argued against the selection.",
-          "preMortemFindings names at least one specific failure mode with mechanism.",
-          "Reviewer output was synthesized by the main agent, not adopted verbatim.",
-          "Low-confidence-low-severity findings were discarded before synthesis."
+          "At least 2 variants were generated with genuinely different visual interpretations.",
+          "All variants use the anti-slop overrides from generationBrief.",
+          "selectedVariant is the full HTML/CSS, not a description of it.",
+          "Variant selection rationale references the aestheticOutcomeStatement."
         ]
       },
       "requireConfirmation": false
     },
     {
-      "id": "phase-4-synthesis-loop",
+      "id": "phase-4-iteration-loop",
       "type": "loop",
-      "title": "Phase 4: Debate Resolution Loop",
+      "title": "Phase 4: Self-Critique and Iteration Loop",
       "loop": {
         "type": "while",
         "conditionSource": {
           "kind": "artifact_contract",
           "contractRef": "wr.contracts.loop_control",
-          "loopId": "design_synthesis_loop"
+          "loopId": "design_iteration_loop"
         },
-        "maxIterations": 2
+        "maxIterations": 3
       },
       "body": [
         {
-          "id": "phase-4a-debate-resolution",
-          "title": "Resolve Contrarian Arguments and Strengthen Weak Evidence",
+          "id": "phase-4a-slop-check",
+          "title": "CSS Critique: AI Slop Patterns",
           "promptBlocks": {
-            "goal": "Respond to every contrarian argument and pre-mortem failure mode via explicit accept/reject/escalate. This is debate resolution, not averaging.",
+            "goal": "Check the selectedVariant CSS against the 15 known AI-slop patterns. Report slopCount as an integer. Do not check anything else in this step.",
             "constraints": [
-              "Synthesis is forbidden from silently smoothing over disagreement. Every contrarian point must have a decision.",
-              "Adopting a contrarian point means changing the design. Rejecting it means stating the specific reason the selected direction is still correct. Escalating it means naming it as an Open Risk in the spec.",
-              "If no contrarian points are adopted, flag for human review -- synthesis that accepts nothing from the contrarian is suspect."
+              "Check only the 15 slop patterns. Do not evaluate design principles here.",
+              "Report slopCount as an integer. 'Looks clean' without a count is not valid.",
+              "Do not modify the HTML/CSS. Critique only."
             ],
             "procedure": [
-              "For each finding in contrarianFindings: make a decision -- (a) adopt: state what changes in the design as a result; (b) reject: state the specific reason the selected direction is still correct against the primaryOutcomeStatement; (c) escalate: add to openRisks with a description of the risk and what would need to be validated before building. Add each to contrarianResolutionLog.",
-              "For each failure mode in preMortemFindings: make a decision -- (a) addressed: state how the current design mitigates this failure mode; (b) escalate: add to openRisks.",
-              "For any finding with evidenceWeak=true, find the specific element citation yourself or downgrade to advisory.",
-              "Update contradictionCount to 0 when all contrarian points are addressed; update evidenceWeakCount.",
-              "If contrarianResolutionLog has no 'adopt' entries after processing all points, flag this explicitly."
+              "Check each of the 15 slop patterns against the CSS:\n(1) Inter/Roboto as sole font: is font-family anything other than the specified anti-slop font?\n(2) Purple/lavender gradient background: is background a gradient using purple/violet/lavender?\n(3) All-caps labels/headings: does any text-transform: uppercase appear on headings or labels?\n(4) Colored left card borders: do any cards have a left border with a color value?\n(5) Symmetrical centered identical cards: are all cards the same size and center-aligned with no asymmetry?\n(6) Neon/colored glow shadows: does any box-shadow use high-opacity color or non-black color?\n(7) Inconsistent spacing magic numbers: are spacing values arbitrary integers not divisible by 8?\n(8) Inconsistent border-radius values: are multiple different radius values used instead of one token?\n(9) Heading/body size ratio below 2x: is h1 less than 2x the body font-size?\n(10) Decorative text-shadow on headings: is text-shadow applied to h1/h2?\n(11) Stat-banner rows with icons: are there rows of 3-4 identical stat cards with icons?\n(12) Numbered list sections: are sections labeled with numbers as a decorative pattern?\n(13) Frosted glass effects: is backdrop-filter: blur used?\n(14) Excessive borders on containers: do containers/cards have visible borders on all four sides?\n(15) Pastel palette with no accent: are all colors low-saturation with no bold accent?\nReport slopCount = total patterns triggered.",
+              "For each triggered pattern: state the pattern name, the specific CSS property/value causing it, and the targeted fix."
             ],
             "outputRequired": {
-              "notesMarkdown": "Contrarian resolution log with decision and reason for each point, pre-mortem failure modes addressed or escalated, openRisks list, no-adopt flag if applicable.",
-              "context": "Capture contrarianResolutionLog, openRisks, contradictionCount, evidenceWeakCount, reviewerFindings."
+              "notesMarkdown": "slopCount (integer). For each triggered pattern: name, property, value, fix.",
+              "context": "Update slopCount. Set slopFixes = list of {pattern, property, oldValue, fix}."
             },
             "verify": [
-              "Every contrarian point has a decision (adopt|reject|escalate) with a reason.",
-              "Every pre-mortem failure mode is addressed or escalated.",
-              "If no contrarian points were adopted, this is explicitly flagged."
+              "slopCount is an integer.",
+              "Every triggered pattern names a specific CSS property and value.",
+              "No HTML/CSS was modified."
             ]
           },
           "requireConfirmation": false
         },
         {
-          "id": "phase-4b-loop-decision",
-          "title": "Synthesis Loop Decision",
+          "id": "phase-4b-criteria-check",
+          "title": "CSS Critique: Visual Quality Criteria",
           "promptBlocks": {
-            "goal": "Decide whether another synthesis pass is needed.",
+            "goal": "Check the selectedVariant against the 13 visual quality criteria (a-m). Report criteriaFailures as an integer. Do not check slop patterns here.",
             "constraints": [
-              "Use trigger rules, not vibes."
+              "Check all 13 visual quality criteria (a-m). Slop patterns were already checked in 4a.",
+              "A passing check names the element and value: 'h1 is 3rem, body is 1rem -- 3x ratio, passes.' A failing check: 'looks good' is not valid.",
+              "Do not modify the HTML/CSS. Critique only."
             ],
             "procedure": [
-              "Continue if contradictionCount > 0.",
-              "Otherwise continue if evidenceWeakCount > 3.",
-              "Otherwise stop."
+              "Check each criterion:\n(a) Spacing unit: all spacing values multiples of base unit? No two scale values closer than ~25% apart.\n(b) Declared-primary count: exactly ONE element declared as primary (by font-size, weight, or color prominence)? Zero or 2+ declared primaries = fail. Note: this checks the declaration, not whether the eye actually lands there -- that is verified by the squint pass in phase-4d.\n(c) Three-tier emphasis: every element assignable to dominant / sub-dominant / subordinate? More than 3 distinct levels = fail.\n(d) Hierarchy lever diversity: emphasis uses at least 2 of {size, weight, color/contrast}? Max 3 font weights, max 3 text colors.\n(e) Breathing room: minimum padding between major sections met? Inner spacing < outer spacing?\n(f) Spacing rhythm: spacing smaller within groups, larger between groups? Uniform throughout = fail.\n(g) Line-length: body text 50-75 chars (max 80)? Below 45ch or above 80ch = fail.\n(h) Line-height: body 1.4-1.6x font-size? Headings 1.1-1.3x? Outside range = fail.\n(i) Focal-point size ratio: dominant element at least 2x the font-size or visual weight of secondary elements (ignoring color)? This is a CSS proxy for focal dominance -- whether the eye actually lands there is verified by the squint pass in phase-4d, not here.\n(j) Alignment: related elements share a common alignment axis? Floating elements = fail.\n(k) Content chunking: dense content (5+ related items) divided with headers or card boundaries?\n(l) Density budget: count equally-weighted top-level modules. >7 = dimensional warning (not hard fail).\n(m) Scan-path: primary CTA/message at top-left or upper-center? Below fold or off scan path = flag.\nReport criteriaFailures = hard failures only (not density warnings).",
+              "For each failure: state the criterion name, the specific element and property, and the targeted fix."
             ],
             "outputRequired": {
-              "artifact": "Emit a `wr.loop_control` artifact for `design_synthesis_loop` with `decision` set to `continue` or `stop`."
+              "notesMarkdown": "criteriaFailures (integer), densityWarnings if any. For each failure: criterion, element, property, fix.",
+              "context": "Update criteriaFailures, densityWarnings. Set criteriaFixes = list of {criterion, element, property, fix}."
             },
             "verify": [
-              "The loop does not stop while material contrarian points remain unresolved."
+              "criteriaFailures is an integer.",
+              "Every failure names a specific element and property.",
+              "Density budget is noted as a warning, not a hard failure.",
+              "No HTML/CSS was modified."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4c-render",
+          "title": "Render and Verify Fonts (Playwright)",
+          "promptBlocks": {
+            "goal": "If Playwright is available, save selectedVariant to a temp file, open it at 1280x800, verify that the specified font loaded correctly, and take a screenshot. If fonts did not load, add a Google Fonts import and re-verify before proceeding.",
+            "constraints": [
+              "If playwrightAvailable is false, set screenshotReady = false and advance immediately.",
+              "Do not run any visual passes in this step. Rendering and font verification only.",
+              "A screenshot taken while fonts have not loaded is unreliable for color and mood assessment -- do not proceed to passes until fonts are confirmed."
+            ],
+            "procedure": [
+              "If playwrightAvailable is false: set screenshotReady = false. Done.",
+              "Save selectedVariant to a temporary HTML file. Open in Playwright at 1280x800.",
+              "Evaluate document.fonts.ready. Check whether the font family specified in generationBrief appears in the loaded fonts list.",
+              "If the font is NOT loaded (falling back to Arial, Times, or system-ui): add a Google Fonts <link> tag or @import for the specified font to the HTML. Reload. Verify fonts again.",
+              "If fonts are confirmed loaded: take a screenshot. Set screenshotReady = true, screenshotPath = path to screenshot file.",
+              "If fonts still fail after one retry: note the fallback font in use, set screenshotReady = true with a fontLoadWarning, take a screenshot, set screenshotPath, and proceed -- the visual passes will note the limitation.",
+              "Once a screenshot has been captured -- whether on the confirmed-fonts path or the fallback path -- produce a SQUINT screenshot: apply a CSS filter of 'blur(8px) grayscale(1)' to the document root (document.documentElement.style.filter = 'blur(8px) grayscale(1)'), screenshot again at 1280x800, then clear the filter (document.documentElement.style.filter = ''). Save as screenshotSquintPath. This blurred, desaturated image is the literal squint/blur test -- it strips detail and color so only large shapes and contrast remain. If the filter cannot be applied or the blurred capture fails, set screenshotSquintPath = null and note it; the hierarchy pass will fall back to manual size/weight inspection on the clean screenshot."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "Font loading result (loaded / fallback / warning). screenshotReady status. screenshotSquintPath status.",
+              "context": "Set screenshotReady, screenshotPath (if ready), screenshotSquintPath (if produced, else null), fontLoadWarning (if applicable)."
+            },
+            "verify": [
+              "screenshotReady is set to true or false. If true: screenshotPath is set and screenshotSquintPath is set or null with a noted reason.",
+              "If true: screenshotPath is set and font loading result is recorded.",
+              "No visual evaluation was done in this step."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4d-visual-passes",
+          "title": "Visual Critique: 6 Scoped Screenshot Passes",
+          "promptBlocks": {
+            "goal": "Run 6 sequential scoped visual passes on the screenshot. Each pass looks at exactly one concern and produces a specific finding or explicit PASS. If screenshotReady is false, skip and set visualIssueCount = 0.",
+            "constraints": [
+              "If screenshotReady is false, set visualIssueCount = 0, sparkJoyVerdict = 'UNKNOWN (no screenshot)', and advance.",
+              "Each pass is scoped to one concern only. Hierarchy pass does not comment on color. Palette pass does not comment on spacing. Scope violations produce useless findings.",
+              "A finding must name what was seen and where: element, position, observable property. 'Hierarchy feels weak' is not a finding. 'The subtitle reads before the CTA because it is larger and higher-contrast' is.",
+              "Do not modify the HTML/CSS. Observe and record only."
+            ],
+            "procedure": [
+              "Run the 6 passes sequentially on the screenshot at screenshotPath:\n\n(1) HIERARCHY / SQUINT PASS -- run on the BLURRED screenshot at screenshotSquintPath if available; this is the actual squint test, not an approximation. If screenshotSquintPath is null, fall back to the clean screenshot judging size and visual weight only, and label the finding as an approximation.\nBAD: in the blurred image, 2+ shapes hold equal weight; no single dark/large mass anchors the eye; the dominant blob does not correspond to the intended primary element.\nGOOD: in the blurred image, one shape is unmistakably the heaviest/largest mass and it corresponds to the intended primary element; everything else recedes.\nFormat: 'In the blurred render, the dominant mass is [element/region] at [position]. This [matches / does not match] the intended primary [name]. Source: [squint screenshot / approximation].' Verdict: PASS or FAIL.\n\n(2) SPACING PASS -- gaps only, ignore content and color.\nBAD: cramped sections; uniform spacing (no rhythm); packed grid.\nGOOD: generous breathing room between groups; rhythm visible (tight within, loose between); resting zones present.\nFormat: 'Spacing between [A] and [B] reads as [generous/cramped/arbitrary]. Rhythm: [present/absent] -- [evidence].' Verdict: PASS or FAIL.\n\n(3) PALETTE PASS -- color only, ignore layout and typography.\nBAD: accent lost against background; multiple competing colors; default palette (grey+blue, purple gradient, pastels with no punch); flat white/black with no warmth.\nGOOD: one dominant color; accent pops cleanly; palette has a point of view (warm/cool/earthy/high-contrast); colors feel chosen.\nFormat: 'Accent [description] reads as [strong/weak/muddy] against [background]. Palette: [cohesive/accidental/default] because [evidence].' Verdict: PASS or FAIL.\n\n(4) DENSITY PASS -- whole page at a glance, do not read text.\nBAD: wall of content; every pixel occupied; no resting zones; communicates 'a lot of stuff' not 'here is what matters'.\nGOOD: negative space used intentionally; resting zones; priority order communicates before reading; breathing room feels deliberate.\nFormat: 'At a glance, page reads as [structured/busy/empty/breathable]. Density issue: [area if any].' Verdict: PASS or FAIL.\n\n(5) MOOD PASS -- arousal and order dimensions only. Do NOT assign discrete emotions.\nEvaluate on two axes only (per Tuch 2009 physiological research):\n- AROUSAL: LOW (spacious, clear hierarchy, few competing elements) or HIGH (dense, many equal-weight elements, tight spacing).\n- ORDER: ORDERED (consistent rhythm, clear grouping, strong alignment) or CHAOTIC (inconsistent rhythm, ambiguous grouping, floating elements).\nBAD: high-arousal + chaotic = overwhelm risk. Low-arousal + chaotic = sparse and incoherent.\nGOOD: low-to-moderate arousal + ordered = fluent and likeable. Recognizable character matching aestheticDirection.\nFormat: 'Arousal: [low/moderate/high] because [reason]. Order: [ordered/chaotic] because [reason]. Target: [restate aestheticOutcomeStatement]. Match: [yes/partial/no].' Verdict: PASS or FAIL.\n\n(6) SPARK JOY PASS -- holistic. No checklist. One question only: does this design have a quality that would make a user feel something?\nBAD: competent but forgettable; could have been generated without a brief; no distinctive element; user would feel nothing.\nGOOD: one element, decision, or moment gives it personality -- a font pairing that feels considered, a color relationship that feels warm, a layout choice that surprises pleasantly; has a point of view.\nFormat: 'This design [has/lacks] a quality that makes it memorable. [If has: name the specific element.] [If lacks: name the single highest-leverage change that would give it a point of view.] Verdict: SPARKS JOY / COMPETENT BUT FORGETTABLE / NEEDS WORK.'",
+              "Count FAIL verdicts from passes 1-5. Set visualIssueCount = that count. Record pass 6 verdict separately as sparkJoyVerdict.",
+              "For each FAIL in passes 1-5: state the specific change that would address it. For COMPETENT BUT FORGETTABLE or NEEDS WORK: state the single highest-leverage change."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "All 6 pass verdicts with findings. visualIssueCount (integer). sparkJoyVerdict. Specific changes needed for each failure.",
+              "context": "Update visualIssueCount, sparkJoyVerdict. Append all 6 pass findings to iterationLog current entry."
+            },
+            "verify": [
+              "All 6 passes have a verdict (PASS/FAIL or SPARKS JOY/COMPETENT BUT FORGETTABLE/NEEDS WORK).",
+              "visualIssueCount is an integer.",
+              "sparkJoyVerdict is set.",
+              "Every FAIL names a specific element and observable property.",
+              "No HTML/CSS was modified."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4e-apply-fixes",
+          "title": "Apply Targeted Fixes",
+          "promptBlocks": {
+            "goal": "Apply all fixes identified across slop check, criteria check, and visual passes. One fix per named issue. Do not improve anything not on the list.",
+            "constraints": [
+              "Fix only what the critique named. No opportunistic improvements.",
+              "CSS fixes: state property, old value, new value.",
+              "Structural fixes (from visual passes): state the HTML change and which visual finding it addresses. Permitted when a visual pass found a problem CSS alone cannot fix -- wrong DOM position causing hierarchy, section needing a split for density. IA and features are locked.",
+              "Spark Joy fix: apply the single highest-leverage change from pass 6 if verdict was not SPARKS JOY. May be CSS or structural.",
+              "If a fix requires IA changes or adding/removing features: flag for Phase 5, do not apply."
+            ],
+            "procedure": [
+              "Apply CSS fixes from slopFixes and criteriaFixes. Log each: property, old value, new value.",
+              "Apply structural fixes from visual pass failures. Log each: what changed, which pass finding required it.",
+              "If sparkJoyVerdict is not SPARKS JOY: apply the specific change named in the pass 6 finding. Log it as a spark-joy fix.",
+              "If the same issue appeared in the previous iteration unchanged: mark as stabilized, do not re-apply.",
+              "Update selectedVariant with all fixes applied."
+            ],
+            "outputRequired": {
+              "notesMarkdown": "CSS fixes (property/old/new). Structural fixes (change/finding). Spark-joy fix if applied. Stabilized issues. Items flagged for Phase 5.",
+              "context": "Update selectedVariant. Append fix summary to iterationLog current entry."
+            },
+            "verify": [
+              "Every CSS fix names property, old value, new value.",
+              "Every structural fix names what changed and which finding required it.",
+              "No IA or feature changes were made.",
+              "selectedVariant is updated."
+            ]
+          },
+          "requireConfirmation": false
+        },
+        {
+          "id": "phase-4f-loop-decision",
+          "title": "Iteration Loop Decision",
+          "promptBlocks": {
+            "goal": "Decide whether another pass is needed. Use counts, not impressions.",
+            "constraints": [
+              "Use the numbers only."
+            ],
+            "procedure": [
+              "If screenshotReady is false (no Playwright): stop when slopCount <= 1 AND criteriaFailures = 0. Visual passes did not run, so sparkJoyVerdict is 'UNKNOWN' and is NOT a stop requirement on this path -- a design cannot earn a SPARKS JOY verdict without a render. Do not loop waiting for a verdict that cannot be produced; the Phase 5 human review is the first real visual check.",
+              "If screenshotReady is true: stop if slopCount <= 1 AND criteriaFailures = 0 AND visualIssueCount = 0 AND sparkJoyVerdict = 'SPARKS JOY'.",
+              "If screenshotReady is true: stop if sparkJoyVerdict = 'SPARKS JOY' and only minor CSS issues remain (slopCount <= 2, no structural visual failures) -- do not iterate away a design that earned its point of view.",
+              "Stop if the current iterationLog entry has the same issues as the previous entry (stabilized) -- applies on both paths.",
+              "Continue otherwise."
+            ],
+            "outputRequired": {
+              "artifact": "Emit a `wr.loop_control` artifact for `design_iteration_loop` with `decision` set to `continue` or `stop`."
+            },
+            "verify": [
+              "Loop does not stop while fixable issues remain.",
+              "Loop stops if stabilized to prevent regression.",
+              "On the no-Playwright path, the loop stops on CSS signals (slopCount, criteriaFailures) or stabilization -- it never waits on sparkJoyVerdict."
             ]
           },
           "outputContract": {
@@ -319,76 +471,123 @@
         }
       ],
       "runCondition": {
-        "var": "needsReviewerBundle",
+        "var": "needsFullPipeline",
         "equals": true
       }
     },
     {
-      "id": "phase-5-design-spec-handoff",
-      "title": "Phase 5: Design Spec",
+      "id": "phase-4g-blind-review",
+      "title": "Blind Subagent Review",
       "runCondition": {
-        "var": "needsReviewerBundle",
+        "var": "needsFullPipeline",
         "equals": true
       },
       "promptBlocks": {
-        "goal": "Produce a complete design spec ready for engineering review and implementation -- opinionated, complete, and honest about its limits.",
+        "goal": "Spawn one or more fresh subagents to evaluate the final selectedVariant with no knowledge of the design decisions that produced it. They receive only the output and the target -- not the brief, the iteration log, or the directions considered.",
         "constraints": [
-          "Every interactive element must have its states addressed: default, hover/focus, loading, error, empty, first-use, disabled.",
-          "Accessibility requirements must be specific implementation contracts, not 'follow WCAG'.",
-          "The spec must include Kill Conditions (from selectionKillCondition) and Open Risks (from openRisks).",
-          "The 'What This Design Gets Wrong' section is mandatory -- it names known weaknesses and things the user should validate before building. A spec without this section is false confidence.",
-          "Do not drift into implementation planning (specific component libraries, code) unless explicitly asked."
+          "Subagents receive ONLY: the HTML/CSS of selectedVariant, the aestheticOutcomeStatement, the aestheticDirection name, and (if screenshotReady) the clean screenshot and the blurred squint screenshot. Nothing else -- no generationBrief, no iterationLog, no slopCount, no directions considered.",
+          "The main agent must not prime subagents with its own assessment before they respond.",
+          "Each subagent runs the same 6 visual passes independently. Their verdicts are raw evidence -- the main agent synthesizes.",
+          "If screenshotReady is false: subagents evaluate the HTML/CSS only, using the criteria checks. Skip visual passes.",
+          "Spawn at least 2 subagents in parallel for independent perspectives."
         ],
         "procedure": [
-          "Write the design spec with these 7 sections:\n\n**1. Why** -- the primaryOutcomeStatement and the user it serves. One paragraph.\n\n**2. What** -- the chosen direction and why it was selected over the alternatives. Name each eliminated direction and its one-sentence elimination reason. This is the opinionated design decision.\n\n**3. How** -- concrete implementation primitives:\n- For each interactive element: default state, hover/focus, loading, error, empty, first-use, disabled\n- Every edge case surfaced by the edge-cases reviewer\n- All copy strings (no placeholders)\n- Breakpoint behavior if applicable\n\n**4. Constraints** -- non-negotiables as implementation contracts:\n- Specific accessibility requirements (contrast ratios as numbers, touch target sizes as pixels, keyboard tab order as a list, aria-labels as exact strings)\n- Technical constraints from the constraintSet\n\n**5. Open Risks** -- every item escalated from the contrarianResolutionLog and preMortemFindings. Each with: the risk, what would need to be validated, and by when. If empty, state 'No open risks escalated.'\n\n**6. Kill Conditions** -- the selectionKillCondition verbatim, plus any additional falsification clauses from the contrarian reviewer's strongest argument. These are what would invalidate this design post-ship.\n\n**7. What This Design Gets Wrong** -- name the known weaknesses. What does the spec not answer? What did the contrarian reviewer argue that you rejected -- and is there a chance they were right? What would a usability test most likely break? This section is not a failure; it is honesty. A spec without it is making a claim about the design's completeness that no text-based spec can make.",
-          "Close by naming: what visual review a human designer should perform, and what this workflow cannot verify (visual quality, usability, emotional feel, whether the copy actually reads clearly to real users)."
+          "Assemble the frozen fact packet for each subagent reviewer. Subagents have zero knowledge of this session -- they do not know what directions were considered, what iterations ran, what the slop count was, or why any decision was made. Give them ONLY what a fresh designer would have:\n  factPacket = {\n    htmlCss: [the full selectedVariant HTML/CSS text -- paste it in full, do not summarize it],\n    screenshotPath: [screenshotPath if screenshotReady is true, else null],\n    squintScreenshotPath: [screenshotSquintPath if screenshotReady is true and screenshotSquintPath is non-null, else null],\n    aestheticOutcomeStatement: [the exact text from Phase 0],\n    aestheticDirection: [the exact named style from Phase 0, e.g. 'warm editorial with Fraunces headings and a coral accent on cream'],\n    platform: [targetPlatform],\n    taskDescription: [one sentence describing the design task, e.g. 'Design a settings panel for notification preferences']\n  }\n  Do NOT include: generationBrief, iterationLog, slopCount, criteriaFailures, sparkJoyVerdict, any directions that were considered or eliminated, or any assessment from Phase 4.",
+          "Spawn 2 plain agents (NOT WorkRail Executors -- no workflow overhead needed, just a direct task) SIMULTANEOUSLY. Each receives the factPacket above as its full context and this prompt: 'You are a fresh designer who has never seen this design before. You know nothing about how it was made, what alternatives were considered, or what iterations ran. Evaluate honestly.\n\nYou have: [the full HTML/CSS], [the screenshot if available], the aesthetic target: [aestheticOutcomeStatement], the aesthetic direction: [aestheticDirection], the task: [taskDescription].\n\nRun these 6 passes in order. Each pass looks at exactly one thing:\n(1) HIERARCHY / SQUINT: if a blurred screenshot is provided (squintScreenshotPath), evaluate on it -- the single heaviest/largest mass should correspond to the intended primary element. If no blurred image, judge size and weight on the clean screenshot and label your finding as an approximation. Verdict: PASS or FAIL + one sentence of evidence.\n(2) SPACING: gaps only, ignore content and color. Is there rhythm -- tight within groups, loose between groups? Resting zones? Verdict: PASS or FAIL + evidence.\n(3) PALETTE: color only, ignore layout. Does the accent pop against the background? Does the palette feel chosen or defaulted to? Verdict: PASS or FAIL + evidence.\n(4) DENSITY: whole page at a glance, do not read text. Structured or wall of content? Intentional negative space? Verdict: PASS or FAIL + evidence.\n(5) MOOD: arousal (low/moderate/high) and order (ordered/chaotic) dimensions only. Do NOT assign discrete emotions like calm or trustworthy. Verdict: PASS or FAIL + arousal + order.\n(6) SPARK JOY: holistic. Does this design have a quality that would make a user feel something? Or is it competent but forgettable? Verdict: SPARKS JOY / COMPETENT BUT FORGETTABLE / NEEDS WORK + the single highest-leverage change you would make.\n\nDeliver: all 6 verdicts with evidence, and your single most important finding.'",
+          "Receive both executor outputs. Do not average them. Treat disagreements as signal.",
+          "Synthesize: where do the two reviewers agree? Where do they disagree with each other? Where do they contradict the Phase 4 assessments (sparkJoyVerdict, visualIssueCount)? Contradictions between blind review and Phase 4 are the most important finding -- they mean iteration optimized toward a local judgment, not a genuine quality signal.",
+          "Set blindReviewVerdict to 'CONFIRMED' if both agree the design SPARKS JOY, 'SPLIT' if they disagree with each other, 'CONTRADICTS' if they contradict the Phase 4 sparkJoyVerdict.",
+          "Identify the single most important finding from the blind review not surfaced in Phase 4."
         ],
         "outputRequired": {
-          "notesMarkdown": "Complete design spec with all 7 sections. Open questions and human-review items explicitly listed."
+          "notesMarkdown": "Both subagent verdicts (verbatim key findings). Synthesis: agreements, disagreements, contradictions with Phase 4. blindReviewVerdict. Most important new finding not surfaced in Phase 4.",
+          "context": "Set blindReviewVerdict, blindReviewNewFinding, blindReviewSummary."
         },
         "verify": [
-          "All 7 spec sections are present and substantive.",
-          "Every interactive element has states addressed.",
-          "Accessibility requirements are specific contracts, not generic.",
-          "Kill Conditions and Open Risks are present (even if the Open Risks section is empty, it must say so explicitly).",
-          "'What This Design Gets Wrong' is present and names real weaknesses, not just 'we should do usability testing'."
+          "At least 2 subagents were spawned with no design context beyond the output and targets.",
+          "Subagent verdicts are reported verbatim before synthesis.",
+          "blindReviewVerdict is one of: CONFIRMED, SPLIT, CONTRADICTS.",
+          "Main agent synthesized -- did not adopt either subagent output verbatim."
+        ]
+      },
+      "requireConfirmation": false
+    },
+    {
+      "id": "phase-5a-present",
+      "title": "Phase 5a: Present Output for Human Review",
+      "runCondition": {
+        "var": "needsFullPipeline",
+        "equals": true
+      },
+      "promptBlocks": {
+        "goal": "Present the final HTML/CSS and all review context to the human. One job: give them everything they need to evaluate and decide.",
+        "constraints": [
+          "Present the full HTML/CSS -- do not summarize it.",
+          "If sparkJoyVerdict is not SPARKS JOY: name the single highest-leverage change and whether it requires a human decision or can be applied by the agent."
+        ],
+        "procedure": [
+          "Present the HTML/CSS with this context:\n- The aestheticOutcomeStatement it was targeting\n- The aestheticDirection it was built from\n- sparkJoyVerdict (Phase 4) and blindReviewVerdict (blind subagents) -- if they disagree, name both and the key disagreement\n- blindReviewNewFinding: most important finding from blind review not surfaced in Phase 4\n- Final slopCount, criteriaFailures, visualIssueCount\n- Brief iterationLog summary: what was found and fixed\n- selectionKillCondition for the chosen direction\n- If playwrightAvailable was false: note visual critique was CSS-only, human review is the first real visual check",
+          "Behavioral re-check: walk the primary user task from primaryOutcomeStatement step by step against the rendered output (use the screenshot if screenshotReady, else the HTML structure). For each step the task requires, record: task step -> affordance present / absent / buried. This is the one place the workflow re-tests behavior after four phases focused on visual quality -- the aesthetic-usability effect means a beautiful output can still fail the task, and nothing earlier in the pipeline catches it.",
+          "If sparkJoyVerdict is not SPARKS JOY: explicitly state what the highest-leverage change would be and whether the agent can apply it or needs a human design decision.",
+          "If targetPlatform is not web: append a translation note mapping each CSS custom property to its platform-native equivalent."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Full HTML/CSS, all review context (sparkJoyVerdict, blindReviewVerdict, slopCount, iterationLog summary, killCondition), behavioral re-check results (task step -> affordance), platform translation note if applicable."
+        },
+        "verify": [
+          "Full HTML/CSS is present.",
+          "Both sparkJoyVerdict and blindReviewVerdict are shown (or noted as unavailable).",
+          "If verdicts disagree, the disagreement is named.",
+          "Behavioral re-check ran: every primary task step maps to a present/absent/buried affordance.",
+          "Platform translation note present if targetPlatform is not web."
         ]
       },
       "assessmentRefs": [
-        "evidence-quality-gate",
-        "contrarian-addressed-gate",
-        "edge-case-coverage-gate",
+        "anti-slop-gate",
+        "implementability-gate",
+        "aesthetic-outcome-gate",
+        "behavioral-outcome-gate",
         "kill-condition-gate"
       ],
       "assessmentConsequences": [
         {
           "when": {
             "anyEqualsLevel": "low",
-            "forAssessment": "evidence-quality-gate"
+            "forAssessment": "anti-slop-gate"
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "evidence_quality low: every reviewer finding must cite a specific design element. Replace any finding that says only '[UX law] applies here' with the specific element it applies to and why it matters for this design."
+            "guidance": "slop_pattern_count low: 2+ slop patterns remain. List each triggered pattern, the specific CSS property causing it, and the replacement value. Apply targeted fixes -- do not 'revise for better aesthetics'."
           }
         },
         {
           "when": {
             "anyEqualsLevel": "low",
-            "forAssessment": "contrarian-addressed-gate"
+            "forAssessment": "implementability-gate"
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "contrarian_addressed low: the contrarianResolutionLog is incomplete. For every item in contrarianFindings and preMortemFindings, add an entry with decision (adopt|reject|escalate) and a one-sentence reason. 'Escalate' means it appears in the Open Risks section of the spec."
+            "guidance": "code_quality low: extract inline styles to CSS custom properties, replace magic-number spacing with --space-* tokens, replace div wrappers on content with semantic elements (article, section, h2)."
           }
         },
         {
           "when": {
             "anyEqualsLevel": "low",
-            "forAssessment": "edge-case-coverage-gate"
+            "forAssessment": "aesthetic-outcome-gate"
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "edge_case_coverage low: add missing states for interactive elements. For each element missing a state, write what the user sees and what action is available. If loading state is not applicable to an element, state that explicitly."
+            "guidance": "visual_direction_achieved low: name the element that should be dominant, state its required font-size or weight relative to others, and apply that value. Verify all spacing values are multiples of the base unit from generationBrief."
+          }
+        },
+        {
+          "when": {
+            "anyEqualsLevel": "low",
+            "forAssessment": "behavioral-outcome-gate"
+          },
+          "effect": {
+            "kind": "require_followup",
+            "guidance": "behavioral_outcome_supported low: name the specific task step the visual design blocks or slows, and the aesthetic decision causing it (e.g. 'primary CTA is below the fold because the hero occupies the first viewport'). Apply a targeted hierarchy/placement/contrast fix that restores the behavioral path without abandoning the aesthetic direction. If aesthetic direction and behavioral outcome genuinely conflict, surface the tradeoff to the human rather than silently resolving toward beauty."
           }
         },
         {
@@ -398,42 +597,71 @@
           },
           "effect": {
             "kind": "require_followup",
-            "guidance": "kill_condition_stated low: add a Kill Conditions section to the spec. The selectionKillCondition from Phase 2 must appear verbatim. Add at least one additional falsification clause from the contrarian reviewer's strongest argument."
+            "guidance": "kill_condition_stated low: add a selectionKillCondition to the generationBrief. State the specific real-world observation that would prove the chosen direction wrong post-ship."
           }
         }
       ],
+      "requireConfirmation": true
+    },
+    {
+      "id": "phase-5b-revise-and-handoff",
+      "title": "Phase 5b: Apply Feedback and Produce Final Artifact",
+      "runCondition": {
+        "var": "needsFullPipeline",
+        "equals": true
+      },
+      "promptBlocks": {
+        "goal": "Apply any directed feedback from the human and produce the final handoff artifact with honest limits.",
+        "constraints": [
+          "Apply feedback precisely -- do not interpret vague feedback as license to redesign.",
+          "Log every change: what was requested, what changed.",
+          "Do not make changes beyond what was explicitly requested."
+        ],
+        "procedure": [
+          "If the human approved without changes: proceed directly to the handoff statement.",
+          "If feedback was given: apply each requested change. Log: what was requested, what CSS/HTML changed. Do not make additional changes.",
+          "Produce the final HTML/CSS as the deliverable.",
+          "Close with a specific honest limits statement: (0) the SPARKS JOY verdict itself -- this is a single-architecture aesthetic judgment with unverified correlation to real user delight. Two LLM raters share training priors and are not independent the way two humans are; a CONFIRMED blind-review verdict is evidence, not proof. Reinecke and Gajos (2014, 2.4M ratings, ~40K participants) found 'what users perceive as good design is subject to individual preferences, questioning the feasibility of universal design guidelines.' The workflow produces ordered, breathable, non-anxious structure reliably; whether that crosses into memorable delight for this specific user population requires real users. (1) squint/blur test -- when Playwright was available, a blurred/desaturated screenshot was generated and the hierarchy pass ran against it, so the focal-point check is real rather than approximated; but a single viewport at placeholder-content scale is not the test across real content, real viewport sizes, and a human eye -- treat the result as strong evidence, not proof. When Playwright was unavailable, the squint test did not run and the focal point's dominance is unverified; (2) discrete emotional tone -- arousal/order dimensions were evaluated, not specific emotions; 'calm' or 'trustworthy' require user testing to verify; (3) micro-interaction delight -- button pops, transitions, celebratory moments are out of scope for a static output and require a motion prototype; (4) composition feel at real content scale -- placeholder text hides emergent balance issues; (5) aesthetic-usability tradeoff -- whether visual decisions help or hurt task completion for this specific product requires usability testing."
+        ],
+        "outputRequired": {
+          "notesMarkdown": "Final HTML/CSS deliverable. Changes applied (if any): what was requested and what changed. Honest limits statement."
+        },
+        "verify": [
+          "Final HTML/CSS is present.",
+          "Every applied change names what was requested and what changed.",
+          "Honest limits statement is present and specific."
+        ]
+      },
       "requireConfirmation": false
     },
     {
-      "id": "phase-simple-design",
-      "title": "Simple Path: Direct Design Spec",
+      "id": "phase-simple-generation",
+      "title": "Simple Path: Direct Component Generation",
       "runCondition": {
-        "var": "needsReviewerBundle",
+        "var": "needsFullPipeline",
         "equals": false
       },
       "promptBlocks": {
-        "goal": "Produce a focused design spec for a simple, bounded change without the full reviewer pipeline.",
+        "goal": "Generate HTML/CSS for a simple, bounded component change and present it to the human.",
         "constraints": [
           "Simple means: single existing component, minor change, no new flows, no IA changes.",
-          "Even simple changes must state a primaryOutcomeStatement -- what specifically does this change accomplish for the user?",
-          "If during spec writing you discover the change is more complex than classified, stop, update designComplexity to Standard, set needsReviewerBundle=true, and return to Phase 1.",
-          "Even simple changes must address: error state, empty state if applicable, accessibility."
+          "Apply the anti-slop brief: use a non-Inter font, consistent spacing tokens, no magic numbers, no inline styles.",
+          "If the change turns out more complex, stop, set needsFullPipeline=true, and return to Phase 1."
         ],
         "procedure": [
-          "State the primaryOutcomeStatement for this change: what specifically does it accomplish for the user?",
-          "Write the design spec: what changes, why, the specific interaction or visual change, any states affected, and the accessibility impact.",
-          "Apply quick UX checks: does the change violate any obvious UX laws (Fitts's Law for target size, consistency with nearby elements)? Is the copy clear and in user language?",
-          "Name one thing this change gets wrong or leaves unresolved -- even simple specs benefit from honesty about their limits.",
-          "Note what a human reviewer should visually verify."
+          "State what the change accomplishes for the user (a one-sentence outcome).",
+          "Generate the HTML/CSS for the component. Use CSS custom properties, semantic HTML, 8px spacing tokens.",
+          "Run a quick slop check: are any of the 15 patterns present? If yes, fix before presenting.",
+          "State whether this change increases, decreases, or maintains visual density relative to surrounding elements.",
+          "Present the HTML/CSS. Note what a human should verify visually."
         ],
         "outputRequired": {
-          "notesMarkdown": "Focused design spec: primaryOutcomeStatement, what changes, why, states, accessibility impact, one known weakness, and what needs visual review."
+          "notesMarkdown": "Outcome statement, full HTML/CSS, slop check result, density impact, and what needs visual verification."
         },
         "verify": [
-          "The change is genuinely simple by the stated criteria.",
-          "primaryOutcomeStatement is present.",
-          "Error and empty states are addressed if applicable.",
-          "Accessibility impact is stated."
+          "HTML/CSS uses semantic elements and CSS custom properties.",
+          "Slop check was run and any patterns fixed.",
+          "Density impact is stated."
         ]
       },
       "requireConfirmation": false
