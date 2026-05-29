@@ -73,8 +73,8 @@ afterEach(async () => {
 
 describe('ClaudeCodeUsageReader.searchDirs', () => {
   it('encodes workspace path by replacing slashes with hyphens', () => {
-    const reader = new ClaudeCodeUsageReader('/fake/home');
-    const dirs = reader.searchDirs('/Users/etienneb/git/personal/workrail');
+    const reader = new ClaudeCodeUsageReader(path.join('/fake', 'home'));
+    const dirs = reader.searchDirs(path.join('/Users', 'etienneb', 'git', 'personal', 'workrail'));
     expect(dirs).toHaveLength(1);
     expect(dirs[0]).toContain('-Users-etienneb-git-personal-workrail');
     expect(dirs[0]).toContain('.claude');
@@ -82,9 +82,11 @@ describe('ClaudeCodeUsageReader.searchDirs', () => {
   });
 
   it('uses the injected homeDir', () => {
-    const reader = new ClaudeCodeUsageReader('/custom/home');
-    const dirs = reader.searchDirs('/my/project');
-    expect(dirs[0]).toContain('/custom/home');
+    const customHome = path.join('/custom', 'home');
+    const reader = new ClaudeCodeUsageReader(customHome);
+    const dirs = reader.searchDirs(path.join('/my', 'project'));
+    // Use path.join segment check so it passes on both Unix (/) and Windows (\)
+    expect(dirs[0]).toContain(path.join('custom', 'home'));
   });
 });
 

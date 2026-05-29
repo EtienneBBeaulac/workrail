@@ -46,9 +46,15 @@ interface ClaudeCodeAssistantEntry {
  * Claude Code replaces each path separator with a hyphen.
  * Example: /Users/etienneb/git/personal/workrail
  *       -> -Users-etienneb-git-personal-workrail
+ * Example (Windows):   C:\Users\etienneb\git\workrail
+ *                   -> C:-Users-etienneb-git-workrail
+ *
+ * WHY both separators: Claude Code runs on macOS and Windows. On Windows, Node.js
+ * path functions return backslash-separated paths. Claude Code uses the same
+ * replace-separators-with-hyphens encoding on all platforms.
  */
 function encodeWorkspacePath(workspacePath: string): string {
-  return workspacePath.replace(/\//g, '-');
+  return workspacePath.replace(/[/\\]/g, '-');
 }
 
 /**

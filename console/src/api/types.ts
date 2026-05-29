@@ -82,6 +82,17 @@ export type ConsoleSessionHealth = 'healthy' | 'corrupt';
  * Mirror of SessionMetricsV2 in src/v2/projections/session-metrics.ts.
  * Keep in sync with the backend definition.
  */
+
+export type ClientUsage = {
+  readonly client: string;
+  readonly model: string | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly turns: number;
+};
+
 export interface SessionMetricsV2 {
   // From run_completed event (engine-authoritative)
   readonly startGitSha: string | null;
@@ -96,6 +107,8 @@ export interface SessionMetricsV2 {
   readonly filesChanged: number | null;
   readonly linesAdded: number | null;
   readonly linesRemoved: number | null;
+  // From usage_recorded events (one entry per MCP client detected)
+  readonly usageEvents: readonly ClientUsage[];
 }
 
 export interface ConsoleSessionSummary {

@@ -255,7 +255,7 @@ async function collectAndRecordUsage(
           timestampMs: Date.now(),
         }));
 
-        return sessionStore.append(lock, { events: eventsToAppend, snapshotPins: [] });
+        return sessionStore.append(lock, { events: eventsToAppend, snapshotPins: [] }, truth);
       })
     ).match(
       () => {
