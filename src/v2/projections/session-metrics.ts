@@ -1,6 +1,7 @@
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND, VALID_METRICS_OUTCOME } from '../durable-core/constants.js';
 import type { MetricsOutcome } from '../durable-core/constants.js';
+import type { ClientUsage } from '../durable-core/schemas/session/usage.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -37,6 +38,14 @@ export interface SessionMetricsV2 {
   readonly filesChanged: number | null;
   readonly linesAdded: number | null;
   readonly linesRemoved: number | null;
+  /**
+   * Token usage per MCP client, derived from usage_recorded events.
+   *
+   * Empty array when no usage was recorded (e.g. session completed before the
+   * ClientUsageReader pipeline was deployed, or no client log was found).
+   * One element per client that reported usage (typically just claude-code).
+   */
+  readonly usageEvents: readonly ClientUsage[];
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +188,24 @@ export function projectSessionMetricsV2(
   const finalCaptureConfidence: 'high' | 'none' =
     deliveryShas.length > 0 ? 'high' : captureConfidence;
 
+  // Collect usage_recorded events for the matching runId.
+  // One element per client that reported usage. Order follows event log order.
+  const usageEvents: ClientUsage[] = [];
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.USAGE_RECORDED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const d = e.data;
+    usageEvents.push({
+      client: typeof d.client === 'string' ? d.client : '',
+      model: typeof d.model === 'string' ? d.model : null,
+      inputTokens: typeof d.inputTokens === 'number' ? d.inputTokens : 0,
+      outputTokens: typeof d.outputTokens === 'number' ? d.outputTokens : 0,
+      cacheReadTokens: typeof d.cacheReadTokens === 'number' ? d.cacheReadTokens : 0,
+      cacheWriteTokens: typeof d.cacheWriteTokens === 'number' ? d.cacheWriteTokens : 0,
+      turns: typeof d.turns === 'number' ? d.turns : 0,
+    });
+  }
+
   return {
     startGitSha,
     endGitSha,
@@ -191,5 +218,6 @@ export function projectSessionMetricsV2(
     filesChanged,
     linesAdded,
     linesRemoved,
+    usageEvents,
   };
 }

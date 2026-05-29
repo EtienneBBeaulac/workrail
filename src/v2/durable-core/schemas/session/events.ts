@@ -377,6 +377,33 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       submittedAt: z.string(),
     }),
   }),
+  /**
+   * usage_recorded: appended fire-and-forget after run_completed by the
+   * ClientUsageReader pipeline (src/mcp/client-usage/).
+   *
+   * WHY a separate event (not part of run_completed): usage data is collected
+   * asynchronously after the session lock is released. run_completed fires
+   * inside the lock; usage_recorded fires after it.
+   *
+   * WHY per-client: multiple MCP clients (Claude Code, Cursor, etc.) may run
+   * the same session. One event per client that was detected.
+   *
+   * WHY model is nullable: the client log may not record the model for every turn.
+   * null means 'model not recorded', not 'no model was used'.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('usage_recorded'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      client: z.string().min(1),
+      model: z.string().nullable(),
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      cacheReadTokens: z.number().int().nonnegative(),
+      cacheWriteTokens: z.number().int().nonnegative(),
+      turns: z.number().int().nonnegative(),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;
