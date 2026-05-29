@@ -456,12 +456,14 @@ export function executeContinueWorkflow(
               // WHY kind check + isComplete: gate_checkpoint has no isComplete field;
               // only ok/blocked variants with isComplete=true represent a finished session.
               if (response.kind !== 'gate_checkpoint' && response.isComplete) {
-                void collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
-                // workspacePath re-read from session events inside recordTokenCheckpoint
-                void recordTokenCheckpoint(
-                  sessionId, 'end', undefined,
-                  sessionStore, gate, idFactory,
-                );
+                // WHY sequential (not concurrent): both functions acquire the same
+                // session gate lock. Concurrent void calls would cause the second
+                // to hit SESSION_LOCK_REENTRANT and silently fail. The lock is
+                // released after each operation, so sequential is correct and safe.
+                void (async () => {
+                  await collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
+                  await recordTokenCheckpoint(sessionId, 'end', undefined, sessionStore, gate, idFactory);
+                })();
               }
               return { response };
             });
