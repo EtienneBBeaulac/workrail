@@ -109,6 +109,14 @@ export interface SessionMetricsV2 {
   readonly linesRemoved: number | null;
   // From usage_recorded events (one entry per MCP client detected)
   readonly usageEvents: readonly ClientUsage[];
+  // From token_checkpoint events (start/end delta for this workflow run)
+  readonly tokenDelta: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens: number;
+    readonly cacheWriteTokens: number;
+    readonly turns: number;
+  } | null;
 }
 
 export interface ConsoleSessionSummary {
