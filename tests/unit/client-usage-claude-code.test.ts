@@ -200,3 +200,87 @@ describe('ClaudeCodeUsageReader.parseUsage', () => {
     expect(result).toBeNull();
   });
 });
+
+// ── snapshotCurrentConversation ────────────────────────────────────────────────
+
+describe('ClaudeCodeUsageReader.snapshotCurrentConversation', () => {
+  it('returns null when project directory does not exist', async () => {
+    const reader = new ClaudeCodeUsageReader(path.join(tmpDir, 'nonexistent'));
+    const result = await reader.snapshotCurrentConversation('/some/workspace');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when project directory is empty', async () => {
+    const encoded = '/some/workspace'.replace(/[/\\]/g, '-');
+    const projDir = path.join(tmpDir, '.claude', 'projects', encoded);
+    await fs.mkdir(projDir, { recursive: true });
+    const reader = new ClaudeCodeUsageReader(tmpDir);
+    const result = await reader.snapshotCurrentConversation('/some/workspace');
+    expect(result).toBeNull();
+  });
+
+  it('returns summed tokens from the most recently modified JSONL', async () => {
+    const encoded = '/my/project'.replace(/[/\\]/g, '-');
+    const projDir = path.join(tmpDir, '.claude', 'projects', encoded);
+    await fs.mkdir(projDir, { recursive: true });
+
+    const content = [
+      makeAssistantLine('claude-sonnet-4-6', 100, 50, 200, 10),
+      makeAssistantLine('claude-sonnet-4-6', 300, 80, 500, 20),
+    ].join('\n');
+    await fs.writeFile(path.join(projDir, 'session.jsonl'), content);
+
+    const reader = new ClaudeCodeUsageReader(tmpDir);
+    const result = await reader.snapshotCurrentConversation('/my/project');
+    expect(result).not.toBeNull();
+    expect(result!.inputTokens).toBe(400);
+    expect(result!.outputTokens).toBe(130);
+    expect(result!.cacheReadTokens).toBe(700);
+    expect(result!.cacheWriteTokens).toBe(30);
+    expect(result!.turns).toBe(2);
+  });
+
+  it('deduplicates consecutive entries with identical usage blocks', async () => {
+    const encoded = '/dedup/project'.replace(/[/\\]/g, '-');
+    const projDir = path.join(tmpDir, '.claude', 'projects', encoded);
+    await fs.mkdir(projDir, { recursive: true });
+
+    // Two identical consecutive entries -- should count as one turn
+    const line = makeAssistantLine('model', 100, 50, 0, 0);
+    await fs.writeFile(path.join(projDir, 'session.jsonl'), [line, line].join('\n'));
+
+    const reader = new ClaudeCodeUsageReader(tmpDir);
+    const result = await reader.snapshotCurrentConversation('/dedup/project');
+    expect(result).not.toBeNull();
+    expect(result!.turns).toBe(1);
+    expect(result!.inputTokens).toBe(100);
+  });
+
+  it('returns null when sessionId is provided but file does not contain it', async () => {
+    const encoded = '/verify/project'.replace(/[/\\]/g, '-');
+    const projDir = path.join(tmpDir, '.claude', 'projects', encoded);
+    await fs.mkdir(projDir, { recursive: true });
+
+    const content = makeAssistantLine('model', 100, 50, 0, 0);
+    await fs.writeFile(path.join(projDir, 'session.jsonl'), content);
+
+    const reader = new ClaudeCodeUsageReader(tmpDir);
+    const result = await reader.snapshotCurrentConversation('/verify/project', 'sess_notpresent');
+    expect(result).toBeNull();
+  });
+
+  it('returns result when sessionId is present in the file', async () => {
+    const encoded = '/verify2/project'.replace(/[/\\]/g, '-');
+    const projDir = path.join(tmpDir, '.claude', 'projects', encoded);
+    await fs.mkdir(projDir, { recursive: true });
+
+    const toolLine = makeToolUseLine('sess_mymatchingsession');
+    const usageLine = makeAssistantLine('model', 100, 50, 0, 0);
+    await fs.writeFile(path.join(projDir, 'session.jsonl'), [usageLine, toolLine].join('\n'));
+
+    const reader = new ClaudeCodeUsageReader(tmpDir);
+    const result = await reader.snapshotCurrentConversation('/verify2/project', 'sess_mymatchingsession');
+    // Verification passed -- result is non-null because the session ID is present
+    expect(result).not.toBeNull();
+  });
+});

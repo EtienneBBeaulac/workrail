@@ -1,7 +1,7 @@
 import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND, VALID_METRICS_OUTCOME } from '../durable-core/constants.js';
 import type { MetricsOutcome } from '../durable-core/constants.js';
-import type { ClientUsage } from '../durable-core/schemas/session/usage.js';
+import type { ClientUsage, TokenSnapshot } from '../durable-core/schemas/session/usage.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -46,6 +46,14 @@ export interface SessionMetricsV2 {
    * One element per client that reported usage (typically just claude-code).
    */
   readonly usageEvents: readonly ClientUsage[];
+  /**
+   * Token delta for this workflow run: end snapshot minus start snapshot.
+   *
+   * null when either token_checkpoint event is absent (pre-feature sessions,
+   * or sessions where the JSONL snapshot failed). Non-null means both
+   * checkpoints were written and the delta is computable.
+   */
+  readonly tokenDelta: TokenSnapshot | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +214,36 @@ export function projectSessionMetricsV2(
     });
   }
 
+  // Compute token delta from token_checkpoint events (start and end).
+  // null when either checkpoint is absent (pre-feature sessions or failed JSONL scan).
+  let startCheckpoint: TokenSnapshot | null = null;
+  let endCheckpoint: TokenSnapshot | null = null;
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.TOKEN_CHECKPOINT) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const d = e.data;
+    const snap: TokenSnapshot = {
+      inputTokens: typeof d.inputTokens === 'number' ? d.inputTokens : 0,
+      outputTokens: typeof d.outputTokens === 'number' ? d.outputTokens : 0,
+      cacheReadTokens: typeof d.cacheReadTokens === 'number' ? d.cacheReadTokens : 0,
+      cacheWriteTokens: typeof d.cacheWriteTokens === 'number' ? d.cacheWriteTokens : 0,
+      turns: typeof d.turns === 'number' ? d.turns : 0,
+    };
+    if (d.phase === 'start' && !startCheckpoint) startCheckpoint = snap;
+    if (d.phase === 'end' && !endCheckpoint) endCheckpoint = snap;
+  }
+
+  const tokenDelta: TokenSnapshot | null =
+    startCheckpoint && endCheckpoint
+      ? {
+          inputTokens: Math.max(0, endCheckpoint.inputTokens - startCheckpoint.inputTokens),
+          outputTokens: Math.max(0, endCheckpoint.outputTokens - startCheckpoint.outputTokens),
+          cacheReadTokens: Math.max(0, endCheckpoint.cacheReadTokens - startCheckpoint.cacheReadTokens),
+          cacheWriteTokens: Math.max(0, endCheckpoint.cacheWriteTokens - startCheckpoint.cacheWriteTokens),
+          turns: Math.max(0, endCheckpoint.turns - startCheckpoint.turns),
+        }
+      : null;
+
   return {
     startGitSha,
     endGitSha,
@@ -219,5 +257,6 @@ export function projectSessionMetricsV2(
     linesAdded,
     linesRemoved,
     usageEvents,
+    tokenDelta,
   };
 }

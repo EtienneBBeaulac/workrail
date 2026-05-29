@@ -57,6 +57,8 @@ const REFERENCE_RESOLUTION_TIMEOUT_MS = 5_000;
 export interface StartWorkflowResult {
   readonly response: z.infer<typeof V2StartWorkflowOutputSchema>;
   readonly contentEnvelope: StepContentEnvelope;
+  /** The newly created session ID. Used by the caller to fire token checkpoints. */
+  readonly sessionId: SessionId;
 }
 
 /**
@@ -593,7 +595,7 @@ export function executeStartWorkflow(
             ...(stalePaths.length > 0 ? { staleRoots: [...stalePaths] } : {}),
             ...(startWarnings !== undefined ? { warnings: startWarnings } : {}),
           };
-          return okAsync({ response: parsed, contentEnvelope });
+          return okAsync({ response: parsed, contentEnvelope, sessionId });
       });
     });
 }

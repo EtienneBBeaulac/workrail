@@ -404,6 +404,33 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       turns: z.number().int().nonnegative(),
     }),
   }),
+  /**
+   * token_checkpoint: point-in-time snapshot of cumulative conversation token usage,
+   * written fire-and-forget at workflow start (phase='start') and session completion
+   * (phase='end'). The delta between end and start gives tokens consumed by the run.
+   *
+   * WHY two checkpoints instead of one: the start snapshot captures conversation state
+   * before the workflow, isolating the workflow's contribution from prior turns.
+   *
+   * WHY no client/model fields: the snapshot is taken before per-session correlation
+   * is possible (at start) or in addition to usage_recorded (at end). The data is
+   * conversation-level, not session-attributed.
+   *
+   * WHY empirically validated: we confirmed the current turn IS written to the JSONL
+   * before the MCP handler executes, so both snapshots are complete at capture time.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('token_checkpoint'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      phase: z.enum(['start', 'end']),
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      cacheReadTokens: z.number().int().nonnegative(),
+      cacheWriteTokens: z.number().int().nonnegative(),
+      turns: z.number().int().nonnegative(),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;
