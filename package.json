@@ -114,11 +114,13 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "model-context-protocol",
     "workflow",
-    "orchestration",
-    "ai-assistant",
-    "task-management"
+    "workflow-enforcement",
+    "ai-agents",
+    "claude-code",
+    "step-by-step"
   ],
   "devDependencies": {
     "@duckdb/node-api": "^1.5.2-r.1",
