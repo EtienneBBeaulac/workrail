@@ -17,6 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
@@ -261,20 +262,20 @@ describe('executeWorktrainReportCommand', () => {
   describe('--out file option', () => {
     it('writes JSON to file and does not write to stdout', async () => {
       const { deps, outputLines, writtenFiles } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { out: '/tmp/report.json' });
+      await executeWorktrainReportCommand(deps, { out: path.join(os.tmpdir(), 'report.json') });
 
       expect(outputLines).toHaveLength(0);
       expect(writtenFiles).toHaveLength(1);
-      expect(writtenFiles[0]!.path).toBe('/tmp/report.json');
+      expect(writtenFiles[0]!.path).toBe(path.join(os.tmpdir(), 'report.json'));
       const written = JSON.parse(writtenFiles[0]!.content) as ReportOutput;
       expect(written.version).toBe(1);
     });
 
     it('emits stderr confirmation when writing to file', async () => {
       const { deps, stderrLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { out: '/tmp/report.json' });
+      await executeWorktrainReportCommand(deps, { out: path.join(os.tmpdir(), 'report.json') });
 
-      const hasConfirmation = stderrLines.some((l) => l.includes('/tmp/report.json'));
+      const hasConfirmation = stderrLines.some((l) => l.includes(path.join(os.tmpdir(), 'report.json')));
       expect(hasConfirmation).toBe(true);
     });
   });
