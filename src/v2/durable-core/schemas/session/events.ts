@@ -475,8 +475,12 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       linesAdded: z.number().int().nonnegative().nullable(),
       linesRemoved: z.number().int().nonnegative().nullable(),
       truncated: z.boolean(),
-      changedFilePaths: z.array(z.string()),
-      languageBreakdown: z.record(z.string(), z.number().int().nonnegative()),
+      // WHY optional().default(): these fields were added after the initial git_metrics_recorded
+      // schema shipped in #1129. Existing events in the session store lack them. Zod requires
+      // optional() to avoid treating missing fields as corruption; default() ensures the
+      // projection always receives a usable zero value rather than undefined.
+      changedFilePaths: z.array(z.string()).optional().default([]),
+      languageBreakdown: z.record(z.string(), z.number().int().nonnegative()).optional().default({}),
       /** null means the status command failed. */
       stagedFiles: z.number().int().nonnegative().nullable(),
       unstagedFiles: z.number().int().nonnegative().nullable(),
@@ -485,7 +489,7 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       churnSignal: z.object({
         filesRemodified: z.number().int().nonnegative(),
         windowDays: z.number().int().positive(),
-      }).nullable(),
+      }).nullable().optional().default(null),
     }),
   }),
 ]);

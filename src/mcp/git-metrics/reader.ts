@@ -240,6 +240,15 @@ export async function readChurnSignal(
     return { filesRemodified: 0, windowDays };
   }
 
+  // WHY cap at 100: each file requires a separate git log subprocess. With no cap,
+  // a session touching MAX_NUMSTAT_LINES (10k) files could run 10k sequential
+  // subprocesses. 100 files covers the vast majority of real sessions and keeps
+  // worst-case runtime under ~10 minutes even with full timeouts.
+  const MAX_CHURN_FILES = 100;
+  const filesToCheck = changedFilePaths.length > MAX_CHURN_FILES
+    ? changedFilePaths.slice(0, MAX_CHURN_FILES)
+    : changedFilePaths;
+
   try {
     // Resolve the Unix timestamp of endSha to use as the --after boundary.
     const { stdout: tsOut } = await execFile(
@@ -256,7 +265,7 @@ export async function readChurnSignal(
 
     let filesRemodified = 0;
 
-    for (const filePath of changedFilePaths) {
+    for (const filePath of filesToCheck) {
       try {
         const { stdout } = await execFile(
           'git',

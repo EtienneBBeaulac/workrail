@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { projectSessionMetricsV2 } from '../../src/v2/projections/session-metrics.js';
+import { DomainEventV1Schema } from '../../src/v2/durable-core/schemas/session/events.js';
 import type { DomainEventV1 } from '../../src/v2/durable-core/schemas/session/index.js';
 
 // ---------------------------------------------------------------------------
@@ -329,5 +330,47 @@ describe('projectSessionMetricsV2 -- languageBreakdown and churnSignal', () => {
     ];
     const result = projectSessionMetricsV2(events);
     expect(result!.gitEvidence?.churnSignal).toBeNull();
+  });
+});
+
+describe('DomainEventV1Schema backward compat -- git_metrics_recorded', () => {
+  it('parses a pre-#1131 event that lacks changedFilePaths, languageBreakdown, and churnSignal', () => {
+    // Simulates an event written by #1129 code before the new fields were added.
+    // These events are in existing session stores and must not be treated as corrupt.
+    const oldFormatEvent = {
+      v: 1,
+      eventId: 'evt_old',
+      eventIndex: 5,
+      sessionId: 'sess_test',
+      kind: 'git_metrics_recorded',
+      dedupeKey: 'git-metrics-recorded:sess_test',
+      scope: { runId: 'run_1' },
+      data: {
+        startSha: 'abc123',
+        endSha: 'def456',
+        commitShas: ['def456'],
+        prRefs: [],
+        filesChanged: 3,
+        linesAdded: 50,
+        linesRemoved: 10,
+        truncated: false,
+        // changedFilePaths, languageBreakdown, churnSignal intentionally absent
+        stagedFiles: 0,
+        unstagedFiles: 0,
+        captureConfidence: 'high',
+      },
+      timestampMs: Date.now(),
+    };
+
+    const result = DomainEventV1Schema.safeParse(oldFormatEvent);
+    expect(result.success).toBe(true);
+
+    if (result.success) {
+      const d = result.data.data as Record<string, unknown>;
+      // Defaults applied by Zod
+      expect(d['changedFilePaths']).toEqual([]);
+      expect(d['languageBreakdown']).toEqual({});
+      expect(d['churnSignal']).toBeNull();
+    }
   });
 });
