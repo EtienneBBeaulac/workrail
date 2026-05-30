@@ -1,0 +1,63 @@
+---
+title: "Session Console"
+description: "A browser dashboard for inspecting active and completed WorkRail workflow sessions"
+---
+
+The WorkRail Console is a read-only browser dashboard that shows every workflow session -- active and completed. It lets you see what the agent did at each step, what decisions were made, and what output was produced.
+
+The console reads session files directly from `~/.workrail/data/sessions/`. It does not require the MCP server to be running and has no connection to your agent -- it is a standalone viewer.
+
+## Opening the console
+
+```sh
+workrail console
+```
+
+This starts a local HTTP server and opens the dashboard in your browser. Sessions appear automatically as they are created and updated.
+
+## What you can see
+
+**Session list** -- all sessions, sorted by most recent activity. Each entry shows the workflow name, current step, and outcome (running, complete, or failed).
+
+**Session detail** -- click any session to see:
+- The full step history in order
+- The prompt the agent received at each step
+- The output and notes the agent produced
+- Artifacts attached to each step
+- The DAG visualization showing which path through the workflow was taken
+
+**Step output** -- the notes, decisions, and artifacts the agent recorded at each step. This is the audit trail WorkRail maintains automatically -- no extra logging or setup required.
+
+## Use cases
+
+**Reviewing agent work.** After a long workflow run, open the console to see what the agent actually did at each step rather than reading through chat history.
+
+**Debugging a workflow.** If a workflow produces unexpected results, the step-by-step view shows exactly where things went wrong and what the agent understood at each point.
+
+**Sharing session results.** Session files are plain JSON on disk -- you can copy them, archive them, or reference them later. The console is just a convenient viewer.
+
+## Sessions on disk
+
+Sessions are stored at:
+
+```
+~/.workrail/data/sessions/
+```
+
+Each session is a directory containing append-only event log files. Sessions accumulate until you delete them. There is no automatic cleanup.
+
+```sh
+# List all session directories
+ls ~/.workrail/data/sessions/
+
+# Remove a specific session
+rm -rf ~/.workrail/data/sessions/<session-id>
+
+# Remove all sessions (irreversible)
+rm -rf ~/.workrail/data/sessions/
+```
+
+## Further reading
+
+- [Architecture](/docs/architecture) -- how sessions are persisted and how the console reads them
+- [Troubleshooting](/docs/troubleshooting) -- session resumption and common issues
