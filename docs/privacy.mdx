@@ -1,0 +1,70 @@
+---
+title: "Privacy and Local-Only Operation"
+description: "WorkRail runs entirely on your machine -- no telemetry, no cloud, no data leaving your system"
+---
+
+WorkRail is a local MCP server. Everything it does happens on your machine.
+
+## What stays local
+
+**Session data.** Every workflow session -- the prompts, the agent's output, the notes, the decisions -- is saved to `~/.workrail/data/sessions/` as plain files on your local disk. Nothing is transmitted to any external service.
+
+**Workflow definitions.** The 30+ bundled workflows ship with the npm package. Custom workflows you write live in `~/.workrail/workflows/`. No workflow content is uploaded or synced anywhere.
+
+**Metrics and reports.** `workrail report` reads session files locally and outputs JSON to your terminal. The data never leaves your machine unless you pipe it somewhere yourself.
+
+## What WorkRail does not do
+
+- No telemetry. WorkRail does not collect usage data, crash reports, or analytics.
+- No accounts. There is no WorkRail account, no login, no registration.
+- No cloud sync. Sessions are not backed up or mirrored to any server.
+- No callbacks. The MCP server does not make outbound network requests during normal operation.
+
+## When network access occurs
+
+WorkRail touches the network only in two opt-in cases:
+
+**Git repository workflows** (opt-in). If you configure `WORKFLOW_GIT_REPOS`, WorkRail clones or pulls from those repositories at startup to load workflow definitions. You control which repos and when. No repos are configured by default.
+
+**npm installation** (`npx @exaudeus/workrail`). The initial install downloads the package from npm. After that, running the installed version requires no network access.
+
+## Your data, your control
+
+Sessions accumulate in `~/.workrail/data/sessions/` until you delete them. There is no retention policy, no automatic cleanup, and no third party with access. You can inspect, archive, or delete them at any time:
+
+```sh
+# View all sessions
+ls ~/.workrail/data/sessions/
+
+# Delete a specific session
+rm -rf ~/.workrail/data/sessions/<session-id>
+
+# Delete everything
+rm -rf ~/.workrail/data/sessions/
+```
+
+## Using WorkRail in air-gapped environments
+
+WorkRail works without internet access as long as the package is already installed:
+
+```sh
+# Install once with network access
+npm install -g @exaudeus/workrail
+
+# Then configure your MCP client to use the global install directly
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "workrail"
+    }
+  }
+}
+```
+
+This avoids `npx` (which checks npm on each invocation) and works in environments where outbound network access is restricted.
+
+## Further reading
+
+- [Architecture](/docs/architecture) - How session data is structured on disk
+- [Session Report](/docs/report) - Analyzing your local session data
+- [Configuration](/docs/configuration) - Environment variables and data directory settings
