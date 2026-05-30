@@ -1,8 +1,6 @@
 # Available Workflows
 
-> **Auto-generated** from workflow files. Run `workrail list` for the latest.
->
-> Last updated: 2026-03-24
+> Run `workrail list` in your MCP client for a live, up-to-date list.
 
 ## Overview
 
