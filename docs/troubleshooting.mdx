@@ -81,32 +81,26 @@ After editing: quit Claude Desktop fully (do not just close the window), then re
 
 **Claude Code CLI:**
 
+```sh
+# Add via CLI (recommended)
+claude mcp add workrail npx -y @exaudeus/workrail
+```
+
+Or add manually to `.mcp.json` in your project root:
+
 ```json
-// .claude.json in your project root
 {
-  "projects": {
-    "/absolute/path/to/your/project": {
-      "mcpServers": {
-        "workrail": {
-          "type": "stdio",
-          "command": "npx",
-          "args": ["-y", "@exaudeus/workrail"],
-          "env": {}
-        }
-      }
+  "mcpServers": {
+    "workrail": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"]
     }
   }
 }
 ```
 
-After editing: exit and start a new Claude Code session. You can verify the server loaded by running `/mcp` in the session.
-
-```sh
-# Add via CLI instead of editing manually
-claude mcp add workrail npx -y @exaudeus/workrail
-```
-
-**Important:** The project path in `.claude.json` must be an absolute path that exactly matches your project directory.
+After editing: exit and start a new Claude Code session. Verify the server loaded by running `/mcp` in the session.
 
 ---
 

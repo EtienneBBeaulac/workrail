@@ -181,20 +181,12 @@ Workflow IDs use a `namespace.name` format. The `wr.*` namespace is reserved for
 
 ## The Console
 
-The WorkRail Console is a read-only browser dashboard for inspecting workflow sessions.
-
-```
-worktrain console
-```
-
-The console reads session files directly from `~/.workrail/data/sessions/` - it does not require the MCP server to be running. It renders session lists, per-session step history, DAG visualization, and per-node output artifacts.
+The WorkRail Console is a read-only browser dashboard for inspecting workflow sessions. It reads session files directly from `~/.workrail/data/sessions/` and does not require the MCP server to be running. It renders session lists, per-session step history, DAG visualization, and per-node output artifacts.
 
 Source: `src/console/standalone-console.ts`.
 
 ## Further Reading
 
-- [Workflow Execution Contract](./reference/workflow-execution-contract.md) - Normative token protocol, blocker shapes, output contracts, and branching semantics.
-- [Authoring Guide (v2)](./authoring-v2.md) - How to write workflow JSON: steps, templates, features, conditions, loops, and output contracts.
-- [v2 Core Design Locks](./design/v2-core-design-locks.md) - Locked design decisions for the execution engine: event log invariants, token scoping, preferences, and capabilities.
-- [Configuration](./configuration.md) - Environment variables, Git repository sources, and local paths.
-- [All Workflows](./workflows.md) - Full catalog of bundled workflows with descriptions and when to use each.
+- [Authoring Guide](/docs/authoring-guide) - How to write workflow JSON: steps, guidance, loops, and output contracts.
+- [Configuration](/docs/configuration) - Environment variables, Git repository sources, and local paths.
+- [All Workflows](/docs/workflows) - Full catalog of bundled workflows with descriptions and when to use each.

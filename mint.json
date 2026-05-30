@@ -37,6 +37,7 @@
       "group": "Reference",
       "pages": [
         "docs/architecture",
+        "docs/console",
         "docs/troubleshooting"
       ]
     }

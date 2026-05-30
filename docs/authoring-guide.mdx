@@ -77,13 +77,13 @@ WorkRail picks up changes the next time you call a workflow tool. No restart nee
 
 ### Validating your workflow
 
-Before testing with an agent, run a quick structural check:
+Before testing with an agent, do a quick sanity check for JSON syntax errors:
 
 ```bash
-workrail validate ~/.workrail/workflows/my-first-workflow.json
+node -e "require('/Users/you/.workrail/workflows/my-first-workflow.json')" && echo "Valid JSON"
 ```
 
-This catches missing required fields, invalid field types, and schema violations before the agent sees the file. Fix any errors it reports, then test with the agent.
+WorkRail silently skips files it cannot parse, so a syntax error means the workflow simply won't appear. Fix any errors, then test with the agent.
 
 ---
 
