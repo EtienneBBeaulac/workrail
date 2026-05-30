@@ -1,0 +1,322 @@
+---
+title: "Writing Custom Workflows"
+description: "A tutorial for developers who want to encode their team's process into a WorkRail workflow"
+---
+
+WorkRail comes with 30+ built-in workflows. But the real power is writing your own -- encoding your team's review checklist, your architecture guidelines, or your deployment process into a step-by-step workflow that any agent will follow every time.
+
+This guide walks you through writing your first workflow, improving it, and building up to a complete real-world example.
+
+---
+
+## Your first workflow
+
+A WorkRail workflow is a JSON file with a list of steps. Each step gives the agent a single, focused instruction. The agent cannot see future steps until it finishes the current one.
+
+Here is the minimal structure that WorkRail accepts:
+
+```json
+{
+  "id": "my-first-workflow",
+  "name": "My First Workflow",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "step-one",
+      "title": "Understand the task",
+      "prompt": "Read the task description carefully. Summarize what needs to be done in two to three sentences."
+    },
+    {
+      "id": "step-two",
+      "title": "Do the work",
+      "prompt": "Complete the task based on your summary from the previous step."
+    }
+  ]
+}
+```
+
+### Required fields
+
+At the workflow level, three fields are required:
+
+| Field | Type | What it does |
+|-------|------|--------------|
+| `id` | string | A unique identifier for your workflow. Use lowercase letters, numbers, and hyphens. |
+| `name` | string | A human-readable name shown in the workflow list. |
+| `version` | string | A version string for your own tracking (e.g. `"1.0.0"`). |
+
+Each step in the `steps` array requires:
+
+| Field | Type | What it does |
+|-------|------|--------------|
+| `id` | string | A unique identifier within this workflow. |
+| `title` | string | A short label for the step, shown in the console and session view. |
+| `prompt` | string | The instruction the agent receives for this step. |
+
+That is the complete minimum. Save this file and you have a working workflow.
+
+---
+
+## Where to put your workflow
+
+WorkRail automatically discovers workflows from a specific directory on your machine:
+
+```
+~/.workrail/workflows/
+```
+
+Create that directory if it does not exist, then save your workflow file there:
+
+```
+~/.workrail/workflows/
+  my-first-workflow.json
+  team-code-review.json
+```
+
+WorkRail picks up changes the next time you call a workflow tool. No restart needed.
+
+### Validating your workflow
+
+Before testing with an agent, run a quick structural check:
+
+```bash
+workrail validate ~/.workrail/workflows/my-first-workflow.json
+```
+
+This catches missing required fields, invalid field types, and schema violations before the agent sees the file. Fix any errors it reports, then test with the agent.
+
+---
+
+## Using your workflow
+
+Once your workflow file is in `~/.workrail/workflows/`, tell the agent to use it by name:
+
+```
+Use the my-first-workflow workflow to summarize and complete this task
+```
+
+The agent will call `start_workflow` with your workflow ID, receive the first step prompt, complete it, call `continue_workflow`, and proceed step by step until the workflow is done.
+
+WorkRail matches workflows by their `id` field -- so `my-first-workflow` in the prompt maps to the `"id": "my-first-workflow"` in your JSON.
+
+---
+
+## Writing better step prompts
+
+The quality of your workflow depends almost entirely on the quality of your step prompts. A few principles that make a significant difference:
+
+**Be specific about the output.** Instead of "Review the code", write "Read each changed file and list any bugs you find. For each bug, include the file name, line number, and a one-sentence description."
+
+**Focus each step on one thing.** Steps that ask the agent to do five things at once produce mixed results. Break complex tasks into separate steps -- the agent will execute them in sequence.
+
+**Write in the user's voice.** Prompts that sound like a direct instruction ("Check that every new function has a test") work better than impersonal narration ("The agent should verify test coverage").
+
+### The `agentRole` field
+
+You can give the agent a specific perspective for a step using `agentRole`:
+
+```json
+{
+  "id": "security-review",
+  "title": "Security Review",
+  "prompt": "Look for injection risks, authentication gaps, and data exposure. Report each finding with the affected code path.",
+  "agentRole": "You are a security engineer reviewing code for vulnerabilities. Approach this as an attacker looking for exploits, not as a code auditor."
+}
+```
+
+`agentRole` sets the agent's stance for that step only. It does not carry over to subsequent steps.
+
+### The `guidance` field
+
+The `guidance` field is a list of specific requirements or reminders for a step. Think of it as a checklist the agent must address before moving on:
+
+```json
+{
+  "id": "check-tests",
+  "title": "Verify Test Coverage",
+  "prompt": "Review the test coverage for this change.",
+  "guidance": [
+    "List every public function added or changed",
+    "For each function, state whether it has a corresponding test",
+    "If a function has no test, explain why or flag it as missing coverage"
+  ]
+}
+```
+
+`guidance` items are rendered as bullet points in the step prompt. They help the agent produce consistent, complete output rather than a free-form response.
+
+---
+
+## Adding validation with guidance
+
+You cannot enforce schema-level acceptance criteria on a step without advanced features -- but you can make your expectations explicit enough that the agent reliably meets them.
+
+The most effective pattern is combining a clear `prompt` with a `guidance` list that describes exactly what the output must contain:
+
+```json
+{
+  "id": "root-cause-analysis",
+  "title": "Root Cause Analysis",
+  "prompt": "Identify the root cause of the bug described in the previous step.",
+  "guidance": [
+    "State the root cause in one sentence",
+    "Identify which file and function contains the defect",
+    "Explain why this causes the observed symptom",
+    "Rate your confidence as High, Medium, or Low and give a reason"
+  ]
+}
+```
+
+When the agent knows exactly what format is expected, it produces more structured and verifiable output. This also makes it easier to review the session log later.
+
+---
+
+## Loops
+
+WorkRail supports looping over a step a fixed number of times. This is useful for retry logic, processing a list of items, or running a check multiple times.
+
+### Fixed-count loop
+
+Use `type: "loop"` with `loop.type: "for"` to repeat a step a set number of times:
+
+```json
+{
+  "id": "my-loop-workflow",
+  "name": "Loop Example",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "setup",
+      "title": "Setup",
+      "prompt": "Set the variable maxAttempts to 3."
+    },
+    {
+      "id": "retry-loop",
+      "type": "loop",
+      "title": "Retry Operation",
+      "loop": {
+        "type": "for",
+        "count": "maxAttempts",
+        "maxIterations": 5,
+        "iterationVar": "attemptNumber"
+      },
+      "body": "attempt-step"
+    },
+    {
+      "id": "attempt-step",
+      "title": "Attempt",
+      "prompt": "Run the operation. This is attempt {{attemptNumber}} of {{maxAttempts}}."
+    },
+    {
+      "id": "finish",
+      "title": "Finish",
+      "prompt": "Summarize the result of all attempts."
+    }
+  ]
+}
+```
+
+Key fields for a `for` loop:
+
+| Field | What it does |
+|-------|--------------|
+| `loop.type` | Set to `"for"` for fixed-count iteration |
+| `loop.count` | A context variable holding the number of iterations |
+| `loop.maxIterations` | A hard cap on iterations (safety limit) |
+| `loop.iterationVar` | Name of the variable injected with the current iteration number |
+| `body` | The `id` of the step to execute each iteration |
+
+The `{{attemptNumber}}` and `{{maxAttempts}}` syntax substitutes context variables into prompt text at runtime.
+
+Loops are best suited for retry patterns, processing a bounded list, or running a quality check multiple times. For most workflows, a linear sequence of steps is simpler and easier to reason about.
+
+---
+
+## A complete example
+
+Here is a realistic code review checklist workflow. A developer drops it in `~/.workrail/workflows/` and tells the agent "use the team-code-review workflow to review this PR" before any code review task.
+
+```json
+{
+  "id": "team-code-review",
+  "name": "Team Code Review",
+  "version": "1.0.0",
+  "description": "Our standard code review process for pull requests",
+  "steps": [
+    {
+      "id": "understand-intent",
+      "title": "Understand the Change",
+      "prompt": "Read the pull request description, linked ticket, and diff. Summarize what this change is supposed to do and why.",
+      "guidance": [
+        "State the problem being solved in one sentence",
+        "List the files changed and the main purpose of each change",
+        "Note any parts of the diff you do not fully understand yet"
+      ]
+    },
+    {
+      "id": "correctness",
+      "title": "Correctness Review",
+      "prompt": "Review the changed code for logic errors, edge cases, and incorrect assumptions.",
+      "agentRole": "You are a careful code reviewer looking for bugs, not style issues.",
+      "guidance": [
+        "Check every conditional branch -- are all cases handled?",
+        "Look for null or undefined values that could cause runtime errors",
+        "Verify that error paths are handled correctly",
+        "Check that data flowing into the change is validated before use"
+      ]
+    },
+    {
+      "id": "test-coverage",
+      "title": "Test Coverage",
+      "prompt": "Assess whether the change has adequate test coverage.",
+      "guidance": [
+        "List the new or changed functions and methods",
+        "For each one, state whether a test covers it",
+        "Flag any code path that has no test as missing coverage",
+        "Note whether existing tests still accurately test the behavior after this change"
+      ]
+    },
+    {
+      "id": "security",
+      "title": "Security Check",
+      "prompt": "Look for security issues in the change. Focus on what an attacker could do with this code.",
+      "agentRole": "You are a security engineer. Start by identifying all inputs that come from outside the system, then trace how they are used.",
+      "guidance": [
+        "Identify all inputs the changed code accepts",
+        "Check whether each input is validated before use",
+        "Look for injection risks: SQL, shell commands, file paths, HTML",
+        "Check whether any authentication or authorization logic changed"
+      ]
+    },
+    {
+      "id": "summary",
+      "title": "Review Summary",
+      "prompt": "Write a final review summary based on your findings from all previous steps.",
+      "guidance": [
+        "Rate the overall review: Approve, Request Changes, or Needs Discussion",
+        "List any blocking issues (bugs, security problems) that must be fixed",
+        "List any non-blocking suggestions",
+        "Keep the summary under 300 words"
+      ]
+    }
+  ]
+}
+```
+
+Save this as `~/.workrail/workflows/team-code-review.json` and use it:
+
+```
+Use the team-code-review workflow to review this PR
+```
+
+The agent will work through each step in sequence, gathering information before writing the final summary. Because each step is focused and has specific guidance, the review is consistently thorough -- even if the agent would normally skip steps on its own.
+
+---
+
+## Next steps
+
+- **Loading from Git:** If your team wants to share workflows from a central repository, WorkRail can load workflows from a Git repo. See [Configuration](./configuration.md) for how to set that up.
+
+- **Included workflows:** WorkRail ships with 30+ workflows for common tasks. See [All Workflows](./workflows.md) for the full list -- these are also good examples to learn from.
+
+- **Conditions and branching:** Steps can be skipped or run conditionally using `runCondition`. This is documented in the full schema reference at `spec/workflow.schema.json`.
