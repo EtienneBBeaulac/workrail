@@ -225,3 +225,77 @@ The fix removes the wrong inference but a future developer could re-introduce it
 ## Residual Concerns
 
 None. This is a one-line fix with clear correct behavior. All three recommended revisions are straightforward and do not require human decisions.
+
+---
+---
+
+# Design Review Findings: MCP Handoffs and Step-Attempt Exhaustion
+
+*Generated: 2026-05-30 | Workflow: wr.discovery*
+
+---
+
+## Tradeoff Review
+
+| Tradeoff | Assessment | Notes |
+|----------|------------|-------|
+| Relaxed circuit breaker limit (10 attempts) for MCP sessions | Acceptable | Protects against infinite loops / API quota runway in background agent sessions while granting ample room for human-in-the-loop debugging and corrections. |
+| Passing `{ isAutonomous }` options bag from infra handlers to domain core | Acceptable | Keeps the domain model decoupled from MCP server or daemon runner execution processes. Uses standard TypeScript/Zod options bag pattern. |
+| Non-blocking advisory logging on context mismatch | Acceptable | If `runContext` is missing, defaults to MCP-mode (false) which is safer for developer ergonomics. |
+
+---
+
+## Failure Mode Review
+
+| Failure Mode | Risk | Coverage |
+|---|---|---|
+| FM1: `runContext` lookup fails or defaults to `false` in production daemon | Low | Handled gracefully. Autonomous daemon runs always register `is_autonomous: 'true'` at session startup. If lookups fail, the system falls back to `isAutonomous = false` (MCP mode), which prevents permanent locking of the session. |
+| FM2: MCP client loops endlessly and exhausts 10 attempts | Medium | Enforced. Once 10 attempts are exhausted, the circuit breaker still blocks the step, returning a clear `PRECONDITION_FAILED` error. In the error message, we provide clear instructions on how to rewind or rehydrate to recover. |
+| FM3: Architectural boundaries violated by imports in domain | None | No infra libraries or MCP handlers are imported inside `reason-model.ts` or individual Zod schema files. The boundary is fully respected. |
+
+**Most dangerous**: FM2. Mitigated by adding clear recovery/rewind instructions to the `blocked_attempt_limit_exceeded` error message.
+
+---
+
+## Runner-Up / Simpler Alternative Review
+
+- **Runner-up (Candidate 2: Relaxed Limits with Console Banners)**: Console banners are completely invisible to automated MCP client agents (e.g. Claude Code), preventing automated recovery and self-correction. Candidate 1 is far superior.
+- **Simpler variant (Candidate 4: Generic Dual Messages)**: Using vague, dual-referenced messages everywhere degrades the ergonomics for both the daemon and MCP runs. Dynamic formatting is much cleaner.
+
+---
+
+## Philosophy Alignment
+
+**Satisfied**: context-aware safety, architectural decoupling, actionable self-correction, errors-as-data, type safety, validate-at-boundaries.
+
+**No risky tensions**.
+
+---
+
+## Findings
+
+### RED: None
+
+### ORANGE: None
+
+### YELLOW
+
+**Y1: MCP attempt limit exceeded recovery instructions**
+When an MCP session actually exhausts the 10-attempt limit, the error message returned must not just state that the limit is exceeded. It must explicitly tell the user how to recover (e.g., by checking their input or using a session rehydrate/rewind).
+
+**Y2: First-pass validation requirements schema drift**
+The prompt renderer renders system requirements on the very first try using static getBlockedMessage() calls which hardcode complete_step and outdated schema fields. This guarantees validation failure on attempt #1. We must pass `{ isAutonomous }` options to getBlockedMessage inside formatOutputContractRequirements in prompt-renderer.ts.
+
+---
+
+## Recommended Revisions
+
+1. Ensure the `blocked_attempt_limit_exceeded` mapping in `continue-advance.ts` and `v2-error-mapping.ts` provides a generic, contract-accurate suggested fix and includes recovery instructions for the interactive human developer.
+2. In `getArtifactBlockedMessage` and individual Zod schema functions, verify that the options bag is typed as `{ readonly isAutonomous?: boolean }` and defaults `isAutonomous` to `false` when omitted.
+3. In `prompt-renderer.ts`, query the projected `sessionContext.is_autonomous` and pass it as options when calling `formatOutputContractRequirements` to ensure dynamic requirements are rendered correctly on the very first try.
+
+---
+
+## Residual Concerns
+
+None. The design is robust, clean, and has clear, verifiable safety bounds.

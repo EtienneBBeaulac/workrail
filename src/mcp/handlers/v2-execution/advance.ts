@@ -131,21 +131,33 @@ export function advanceAndRecord(args: {
       // Circuit breaker: refuse to accept another retry when the chain has already
       // hit the maximum consecutive blocked_attempt depth. This prevents daemon sessions
       // from looping forever on a step they cannot pass.
+      const runContext = args.lockedIndex.runContextByRunId.get(String(runId)) ?? {};
+      const isAutonomous = runContext['is_autonomous'] === 'true' || runContext['is_autonomous'] === true;
+      const limit = isAutonomous ? 3 : 10;
+
       const chainDepth = countBlockedAttemptChainDepth(nodeId, args.lockedIndex);
-      if (chainDepth >= MAX_BLOCKED_ATTEMPT_RETRIES) {
+      if (chainDepth >= limit) {
         // Extract contractRef from the blocked snapshot's primary output_contract blocker.
         // `blocked` is already narrowed above (blocked.kind === 'retryable_block').
         const primaryPointer = blocked.blockers.blockers.find(b => b.pointer.kind === 'output_contract')?.pointer;
         const primaryContractRef = primaryPointer?.kind === 'output_contract' ? primaryPointer.contractRef : undefined;
-        const lines = primaryContractRef ? getArtifactBlockedMessage(primaryContractRef) : null;
+        const lines = primaryContractRef ? getArtifactBlockedMessage(primaryContractRef, { isAutonomous }) : null;
         const contractLabel = primaryContractRef ?? 'the required artifact';
         const scaffold = lines
           ? `Required format:\n${lines.join('\n')}`
           : `Check the step's outputContract for the required artifact format and pass it in \`output.artifacts\`.`;
+
+        let recoveryMsg = '';
+        if (!isAutonomous) {
+          recoveryMsg = ' If you need to inspect the requirements or reset the attempt counter, you can: ' +
+            '(1) Rehydrate: Call continue_workflow with the current continueToken and intent: "rehydrate" (without output data). ' +
+            '(2) Rewind: Retrieve a historical resumeToken or checkpointToken from a prior successful step in your chat history, and call resume_session (or continue_workflow with intent: "rehydrate") to rewind the session state.';
+        }
+
         return neErrorAsync({
           kind: 'blocked_attempt_limit_exceeded' as const,
-          message: `Step failed after ${MAX_BLOCKED_ATTEMPT_RETRIES} attempts. ` +
-            `Submit a valid ${contractLabel} artifact in \`output.artifacts\`. ${scaffold}`,
+          message: `Step failed after ${limit} attempts. ` +
+            `Submit a valid ${contractLabel} artifact in \`output.artifacts\`. ${scaffold}${recoveryMsg}`,
         } as InternalError);
       }
 

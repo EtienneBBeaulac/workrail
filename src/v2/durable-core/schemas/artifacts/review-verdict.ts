@@ -146,10 +146,15 @@ export function parseReviewVerdictArtifact(
  *
  * Injected into the retry prompt so the agent knows exactly what to fix.
  */
-export function getBlockedMessage(): readonly string[] {
+export function getBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
+  const exampleFormat = isAutonomous
+    ? `{ "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing null check", "findingCategory": "correctness", "file": "src/foo.ts", "startLine": 42, "causalLink": "PR removed the guard", "remediation": "Restore null check" }], "summary": "Minor issues found" }] }`
+    : `{ "output": { "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing null check", "findingCategory": "correctness", "file": "src/foo.ts", "startLine": 42, "causalLink": "PR removed the guard", "remediation": "Restore null check" }], "summary": "Minor issues found" }] } }`;
   return [
     `Artifact contract: ${REVIEW_VERDICT_CONTRACT_REF}`,
-    `Provide a valid wr.review_verdict artifact in complete_step's artifacts[] parameter.`,
+    `Provide a valid wr.review_verdict artifact in ${paramPath}.`,
     `Required schema (verdict, confidence, findings, summary are mandatory):`,
     `  verdict: "clean" | "minor" | "blocking"`,
     `  confidence: "high" | "medium" | "low"`,
@@ -158,7 +163,7 @@ export function getBlockedMessage(): readonly string[] {
     `Enrichment fields allowed on each finding (optional): file, startLine, endLine, causalLink, remediation`,
     `Canonical format:`,
     `\`\`\`json`,
-    `{ "artifacts": [{ "kind": "wr.review_verdict", "verdict": "minor", "confidence": "medium", "findings": [{ "severity": "minor", "summary": "Missing null check", "findingCategory": "correctness", "file": "src/foo.ts", "startLine": 42, "causalLink": "PR removed the guard", "remediation": "Restore null check" }], "summary": "Minor issues found" }] }`,
+    exampleFormat,
     `\`\`\``,
     `For a clean review with no findings use: "verdict": "clean", "findings": []`,
   ];

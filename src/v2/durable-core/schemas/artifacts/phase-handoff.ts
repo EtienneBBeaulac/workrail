@@ -174,21 +174,26 @@ export function parseCodingHandoffArtifact(
 }
 
 /** Actionable blocked message for wr.shaping_handoff contract. */
-export function getShapingHandoffBlockedMessage(): readonly string[] {
+export function getShapingHandoffBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
   return [
     `Artifact contract: ${SHAPING_HANDOFF_CONTRACT_REF}`,
-    `Provide a wr.shaping_handoff artifact in complete_step's artifacts[] parameter.`,
-    `Required fields: pitchTitle (string), pitchPath (string), selectedApproach (string).`,
+    `Provide a wr.shaping_handoff artifact in ${paramPath}.`,
+    `Required fields: pitchPath (string), selectedShape (string), appetite (string), keyConstraints (string[]), rabbitHoles (string[]), outOfScope (string[]), validationChecklist (string[]).`,
     `See the step prompt for the full schema.`,
   ];
 }
 
 /** Actionable blocked message for wr.coding_handoff contract. */
-export function getCodingHandoffBlockedMessage(): readonly string[] {
+export function getCodingHandoffBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
   return [
     `Artifact contract: ${CODING_HANDOFF_CONTRACT_REF}`,
-    `Provide a wr.coding_handoff artifact in complete_step's artifacts[] parameter.`,
-    `Required fields: branchName (string), keyDecisions (string[]), knownLimitations (string[]), testsAdded (string[]), filesChanged (string[]).`,
+    `Provide a wr.coding_handoff artifact in ${paramPath}.`,
+    `Required fields: keyDecisions (string[]), knownLimitations (string[]), testsAdded (string[]), filesChanged (string[]).`,
+    `Optional fields: branchName (string), correctedAssumptions (array of { assumed, actual }).`,
     `See the step prompt for the full schema.`,
   ];
 }

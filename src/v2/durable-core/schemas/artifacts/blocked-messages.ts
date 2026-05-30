@@ -18,7 +18,9 @@ import { getDifferentiationHandoffBlockedMessage } from './differentiation-hando
  * not import from infra. This registry lives in the artifact schema layer which has no
  * circular dependency risk. The architecture test enforces durable-core purity.
  */
-export const ARTIFACT_BLOCKED_MESSAGES: Readonly<Record<ArtifactContractRef, () => readonly string[]>> = {
+export const ARTIFACT_BLOCKED_MESSAGES: Readonly<
+  Record<ArtifactContractRef, (options?: { readonly isAutonomous?: boolean }) => readonly string[]>
+> = {
   'wr.contracts.assessment': getAssessmentBlockedMessage,
   'wr.contracts.loop_control': getLoopControlBlockedMessage,
   'wr.contracts.coordinator_signal': getCoordinatorSignalBlockedMessage,
@@ -34,7 +36,10 @@ export const ARTIFACT_BLOCKED_MESSAGES: Readonly<Record<ArtifactContractRef, () 
  * Get the actionable blocked message for a given contract reference.
  * Returns null when the contractRef is not in the registry (unknown contract).
  */
-export function getArtifactBlockedMessage(contractRef: string): readonly string[] | null {
-  const fn = (ARTIFACT_BLOCKED_MESSAGES as Record<string, (() => readonly string[]) | undefined>)[contractRef];
-  return fn ? fn() : null;
+export function getArtifactBlockedMessage(
+  contractRef: string,
+  options?: { readonly isAutonomous?: boolean },
+): readonly string[] | null {
+  const fn = (ARTIFACT_BLOCKED_MESSAGES as Record<string, ((opts?: { readonly isAutonomous?: boolean }) => readonly string[]) | undefined>)[contractRef];
+  return fn ? fn(options) : null;
 }
