@@ -31,7 +31,7 @@ import { attachV2ExecutionRenderMetadata } from '../../render-envelope.js';
 import type { StepContentEnvelope } from '../../step-content-envelope.js';
 import { rememberExplicitWorkspaceRoot } from '../shared/remembered-roots.js';
 import { collect } from '../../client-usage/index.js';
-import { claudeCodeUsageReader } from '../../client-usage/claude-code.js';
+import { USAGE_READERS } from '../../client-usage/registry.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
@@ -222,8 +222,17 @@ async function recordTokenCheckpoint(
 
     if (!workspacePath || !runId) return;
 
+    // Try each registered reader in order; use the first snapshot found.
+    // WHY registry (not hardcoded): supports Cursor, Antigravity, and future clients
+    // without changing this function. Readers that don't implement snapshotConversation
+    // are skipped automatically.
     const verifyId = phase === 'end' ? String(sessionId) : undefined;
-    const snapshot = await claudeCodeUsageReader.snapshotCurrentConversation(workspacePath, verifyId);
+    let snapshot = null;
+    for (const reader of USAGE_READERS) {
+      if (!reader.snapshotConversation) continue;
+      snapshot = await reader.snapshotConversation(workspacePath, verifyId);
+      if (snapshot) break;
+    }
     if (!snapshot) return;
 
     await gate.withHealthySessionLock(sessionId, (lock) =>

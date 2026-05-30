@@ -15,9 +15,10 @@
  * allows both layers to reference it without cross-boundary imports.
  */
 
-// ClientUsage is defined in durable-core to avoid a mcp -> v2/projections import cycle.
-import type { ClientUsage } from '../../v2/durable-core/schemas/session/usage.js';
-export type { ClientUsage };
+// ClientUsage and TokenSnapshot are defined in durable-core to avoid a
+// mcp -> v2/projections import cycle.
+import type { ClientUsage, TokenSnapshot } from '../../v2/durable-core/schemas/session/usage.js';
+export type { ClientUsage, TokenSnapshot };
 
 /**
  * Interface for an MCP client that writes local usage logs.
@@ -59,4 +60,26 @@ export interface ClientUsageReader {
    * - No assistant entries with usage data are present
    */
   parseUsage(filePath: string, sessionId: string, startMs: number): Promise<ClientUsage | null>;
+
+  /**
+   * Optional: snapshot the current conversation's cumulative token usage.
+   *
+   * Used by the token checkpoint system to capture a point-in-time total at
+   * workflow start and completion. The delta between end and start gives the
+   * tokens consumed by one workflow run.
+   *
+   * WHY optional: not all clients store per-turn token data in a greppable local
+   * file. Clients that cannot implement this simply omit it -- the checkpoint
+   * system falls back gracefully to null (no tokenDelta recorded).
+   *
+   * WHY sessionId optional: at start_workflow time the session has not yet appeared
+   * in any tool call, so verification is impossible. At end time the sessionId is
+   * provided to confirm the file belongs to this session.
+   *
+   * Returns null when:
+   * - The client's log directory does not exist
+   * - No active conversation file is found
+   * - The sessionId verification fails (end checkpoint only)
+   */
+  snapshotConversation?(workspacePath: string, sessionId?: string): Promise<TokenSnapshot | null>;
 }
