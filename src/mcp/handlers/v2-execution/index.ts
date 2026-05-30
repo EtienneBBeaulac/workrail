@@ -14,7 +14,7 @@ import {
   type RunId,
   type NodeId,
 } from '../../../v2/durable-core/ids/index.js';
-import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+import { ResultAsync as RA, errAsync as neErrorAsync, okAsync } from 'neverthrow';
 import {
   mapStartWorkflowErrorToToolError,
   mapContinueWorkflowErrorToToolError,
@@ -30,6 +30,10 @@ import { handleAdvanceIntent } from './continue-advance.js';
 import { attachV2ExecutionRenderMetadata } from '../../render-envelope.js';
 import type { StepContentEnvelope } from '../../step-content-envelope.js';
 import { rememberExplicitWorkspaceRoot } from '../shared/remembered-roots.js';
+import { collect } from '../../client-usage/index.js';
+import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
+import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
+import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 
 /** Unified result for continue_workflow — envelope present on rehydrate with pending step. */
 interface ContinueWorkflowResult {
@@ -164,6 +168,108 @@ function loadAndRehydrate(
     }));
 }
 
+// ── Usage collection (fire-and-forget) ───────────────────────────────────
+
+/**
+ * Collect MCP client token usage and write usage_recorded events to the session store.
+ *
+ * Called fire-and-forget after a session completes (isComplete === true).
+ * Must never throw or reject -- all errors are caught and logged.
+ *
+ * WHY standalone function (not inside the lock chain): the session lock is held
+ * throughout handleAdvanceIntent. This function runs after the lock is released,
+ * acquiring its own fresh lock for the append. This is the same pattern as
+ * delivery_recorded in the daemon delivery pipeline.
+ *
+ * WHY re-reads the session store: the post-advance truth is not accessible at
+ * the index.ts call site without threading it through the response. The extra
+ * read is fire-and-forget and does not affect response latency.
+ */
+async function collectAndRecordUsage(
+  sessionId: SessionId,
+  sessionStore: V2ToolContext['v2']['sessionStore'],
+  gate: V2ToolContext['v2']['gate'],
+  idFactory: V2ToolContext['v2']['idFactory'],
+): Promise<void> {
+  try {
+    // Re-read session events to extract workspacePath, startMs, and runId.
+    const loadResult = await sessionStore.load(sessionId);
+    if (loadResult.isErr()) return;
+
+    const events = loadResult.value.events;
+    if (events.length === 0) return;
+
+    // workspacePath: from repo_root observation event
+    let workspacePath: string | null = null;
+    for (const e of events) {
+      if (e.kind === 'observation_recorded' && e.data.key === 'repo_root') {
+        workspacePath = e.data.value.value;
+        break;
+      }
+    }
+
+    // startMs: from the first event's timestampMs
+    const startMs = events[0]?.timestampMs ?? Date.now();
+
+    // runId: from the run_completed event's scope
+    let runId: string | null = null;
+    for (const e of events) {
+      if (e.kind === EVENT_KIND.RUN_COMPLETED) {
+        runId = e.scope.runId;
+        break;
+      }
+    }
+    if (!runId) return;
+
+    // Collect usage from all registered readers
+    const usageResults = await collect(String(sessionId), workspacePath, startMs);
+    if (usageResults.length === 0) return;
+
+    // Append one usage_recorded event per client that was detected.
+    // Each append uses a fresh session lock to avoid lock re-entrancy.
+    await gate.withHealthySessionLock(sessionId, (lock) =>
+      sessionStore.load(sessionId).andThen((truth) => {
+        const sortedResult = asSortedEventLog(truth.events);
+        if (sortedResult.isErr()) return okAsync(undefined as void);
+        const index = buildSessionIndex(sortedResult.value);
+
+        // Build one event per usage result, chaining the appends.
+        // Each event gets a sequential eventIndex derived from the post-append index.
+        const eventsToAppend = usageResults.map((usage, i) => ({
+          v: 1 as const,
+          eventId: idFactory.mintEventId(),
+          eventIndex: index.nextEventIndex + i,
+          sessionId: String(sessionId),
+          kind: EVENT_KIND.USAGE_RECORDED,
+          dedupeKey: `usage-recorded:${String(sessionId)}:${usage.client}`,
+          scope: { runId: runId! },
+          data: {
+            client: usage.client,
+            model: usage.model,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheWriteTokens: usage.cacheWriteTokens,
+            turns: usage.turns,
+          },
+          timestampMs: Date.now(),
+        }));
+
+        return sessionStore.append(lock, { events: eventsToAppend, snapshotPins: [] }, truth);
+      })
+    ).match(
+      () => {
+        // Success -- usage recorded
+      },
+      (err) => {
+        console.warn(`[workrail:usage] Could not record usage for session ${String(sessionId)}: ${JSON.stringify(err)}`);
+      }
+    );
+  } catch (err: unknown) {
+    console.warn(`[workrail:usage] Unexpected error collecting usage for session ${String(sessionId)}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────
 
 export function executeContinueWorkflow(
@@ -248,7 +354,16 @@ export function executeContinueWorkflow(
               entropy,
               cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
             }))
-            .map((response) => ({ response }));
+            .map((response) => {
+              // Fire-and-forget: collect MCP client usage after session completion.
+              // WHY void (no await): usage collection must never block the session response.
+              // WHY kind check + isComplete: gate_checkpoint has no isComplete field;
+              // only ok/blocked variants with isComplete=true represent a finished session.
+              if (response.kind !== 'gate_checkpoint' && response.isComplete) {
+                void collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
+              }
+              return { response };
+            });
         });
     }
   }

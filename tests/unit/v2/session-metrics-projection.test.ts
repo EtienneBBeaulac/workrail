@@ -426,4 +426,90 @@ describe('projectSessionMetricsV2', () => {
     expect(result.agentCommitShas).toEqual([]);
     expect(result.captureConfidence).toBe('none');
   });
+
+  it('usageEvents is empty when no usage_recorded events present', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.usageEvents).toEqual([]);
+  });
+
+  it('usageEvents contains entries from usage_recorded events for the matching runId', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+      {
+        v: 1,
+        eventId: 'evt_usage',
+        eventIndex: 3,
+        sessionId: 'sess_1',
+        kind: 'usage_recorded',
+        dedupeKey: 'usage-recorded:sess_1:claude-code',
+        scope: { runId: 'run_1' },
+        data: {
+          client: 'claude-code',
+          model: 'claude-sonnet-4-6',
+          inputTokens: 286,
+          outputTokens: 1234,
+          cacheReadTokens: 50000,
+          cacheWriteTokens: 2000,
+          turns: 10,
+        },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.usageEvents).toHaveLength(1);
+    expect(result.usageEvents[0]).toMatchObject({
+      client: 'claude-code',
+      model: 'claude-sonnet-4-6',
+      inputTokens: 286,
+      outputTokens: 1234,
+      cacheReadTokens: 50000,
+      cacheWriteTokens: 2000,
+      turns: 10,
+    });
+  });
+
+  it('usageEvents ignores usage_recorded events from a different runId', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+      {
+        v: 1,
+        eventId: 'evt_usage_other',
+        eventIndex: 3,
+        sessionId: 'sess_1',
+        kind: 'usage_recorded',
+        dedupeKey: 'usage-recorded:sess_1:claude-code',
+        scope: { runId: 'run_2' }, // different runId -- should be ignored
+        data: {
+          client: 'claude-code',
+          model: 'claude-sonnet-4-6',
+          inputTokens: 999,
+          outputTokens: 999,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          turns: 5,
+        },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.usageEvents).toEqual([]);
+  });
 });
