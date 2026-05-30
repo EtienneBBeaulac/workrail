@@ -21,8 +21,7 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ClientUsage, ClientUsageReader } from './types.js';
-import type { TokenSnapshot } from '../../v2/durable-core/schemas/session/usage.js';
+import type { ClientUsage, ClientUsageReader, TokenSnapshot } from './types.js';
 
 /**
  * Shape of an assistant message in Claude Code's JSONL format.
@@ -270,6 +269,15 @@ export class ClaudeCodeUsageReader implements ClientUsageReader {
     if (sessionId && !content.includes(sessionId)) return null;
 
     return sumSnapshotFromLines(content.split('\n'));
+  }
+
+  /**
+   * Implements ClientUsageReader.snapshotConversation -- delegates to
+   * snapshotCurrentConversation so the registry can drive checkpoints
+   * without knowing the concrete class.
+   */
+  snapshotConversation(workspacePath: string, sessionId?: string): Promise<TokenSnapshot | null> {
+    return this.snapshotCurrentConversation(workspacePath, sessionId);
   }
 }
 
