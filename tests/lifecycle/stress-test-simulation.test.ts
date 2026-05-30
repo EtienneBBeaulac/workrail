@@ -223,7 +223,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
             await fs.writeFile(filePath, newContentBytes);
 
             // Update digest in the manifest for closed segment
-            const relPath = path.join('events', file);
+            const relPath = `events/${file}`;
             const segRecord = manifestLines.find(m => m.kind === 'segment_closed' && m.segmentRelPath === relPath);
             if (segRecord) {
               const newDigest = 'sha256:' + createHash('sha256').update(newContentBytes).digest('hex');
