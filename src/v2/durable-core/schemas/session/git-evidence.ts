@@ -29,6 +29,18 @@ export type GitCommittedDiff = {
    * The stats reflect partial data only.
    */
   readonly truncated: boolean;
+  /**
+   * Changed file paths from this diff (bounded by the numstat line limit).
+   * Used for churn detection: which files to check for post-session re-modification.
+   */
+  readonly changedFilePaths: readonly string[];
+  /**
+   * File count per extension, derived from changedFilePaths.
+   * Keys are lowercase extensions including the dot (e.g. '.ts', '.swift').
+   * Files with no extension map to '' (empty string).
+   * Empty object when no files changed or diff was unavailable.
+   */
+  readonly languageBreakdown: Readonly<Record<string, number>>;
 };
 
 /**
@@ -72,4 +84,11 @@ export type GitEvidence = {
   readonly workingTree: GitWorkingTreeState | null;
   /** Authoritative confidence level for the diff data. */
   readonly captureConfidence: 'high' | 'partial' | 'none';
+  /**
+   * Code churn signal: files that were re-modified by other commits within
+   * windowDays after this session ended.
+   * null means the churn check was not run (git unavailable or no changed files).
+   * { filesRemodified: 0 } means no churn detected.
+   */
+  readonly churnSignal: { readonly filesRemodified: number; readonly windowDays: number } | null;
 };

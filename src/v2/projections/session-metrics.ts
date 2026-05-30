@@ -74,6 +74,18 @@ export interface SessionMetricsV2 {
    * fields, which are populated from run_completed and have known accuracy issues.
    */
   readonly gitEvidence: GitEvidence | null;
+  /**
+   * Number of workflow steps completed in this run.
+   * Derived from node_created events with nodeKind='step'.
+   * 0 for sessions that completed before any steps advanced.
+   */
+  readonly stepsCompleted: number;
+  /**
+   * Number of step retries (blocked_attempt nodes) in this run.
+   * A blocked_attempt is created when a step's output contract is not met
+   * and the engine re-presents the step. High values indicate workflow quality issues.
+   */
+  readonly retriesCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +290,12 @@ export function projectSessionMetricsV2(
             linesAdded: gd.linesAdded,
             linesRemoved: gd.linesRemoved,
             truncated: gd.truncated,
+            changedFilePaths: Array.isArray(gd.changedFilePaths)
+              ? gd.changedFilePaths.filter((s): s is string => typeof s === 'string')
+              : [],
+            languageBreakdown: (gd.languageBreakdown != null && typeof gd.languageBreakdown === 'object' && !Array.isArray(gd.languageBreakdown))
+              ? gd.languageBreakdown as Record<string, number>
+              : {},
           }
         : null;
     const workingTree =
@@ -285,6 +303,13 @@ export function projectSessionMetricsV2(
         ? {
             stagedFiles: gd.stagedFiles,
             unstagedFiles: gd.unstagedFiles,
+          }
+        : null;
+    const churnSignal =
+      gd.churnSignal != null && typeof gd.churnSignal === 'object'
+        ? {
+            filesRemodified: typeof gd.churnSignal.filesRemodified === 'number' ? gd.churnSignal.filesRemodified : 0,
+            windowDays: typeof gd.churnSignal.windowDays === 'number' ? gd.churnSignal.windowDays : 7,
           }
         : null;
     gitEvidence = {
@@ -299,8 +324,20 @@ export function projectSessionMetricsV2(
       committedDiff,
       workingTree,
       captureConfidence: gd.captureConfidence,
+      churnSignal,
     };
     break; // first git_metrics_recorded by event order wins
+  }
+
+  // Count step and retry nodes from node_created events for the matching runId.
+  let stepsCompleted = 0;
+  let retriesCount = 0;
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.NODE_CREATED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const nodeKind = e.data.nodeKind;
+    if (nodeKind === 'step') stepsCompleted++;
+    else if (nodeKind === 'blocked_attempt') retriesCount++;
   }
 
   return {
@@ -318,5 +355,7 @@ export function projectSessionMetricsV2(
     usageEvents,
     tokenDelta,
     gitEvidence,
+    stepsCompleted,
+    retriesCount,
   };
 }

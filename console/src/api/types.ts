@@ -114,6 +114,8 @@ export type GitCommittedDiff = {
   readonly linesAdded: number;
   readonly linesRemoved: number;
   readonly truncated: boolean;
+  readonly changedFilePaths: readonly string[];
+  readonly languageBreakdown: Readonly<Record<string, number>>;
 };
 
 /**
@@ -140,6 +142,8 @@ export type GitEvidence = {
   /** null means the status command failed or timed out. */
   readonly workingTree: GitWorkingTreeState | null;
   readonly captureConfidence: 'high' | 'partial' | 'none';
+  /** null means churn check was not run (git unavailable or no changed files). */
+  readonly churnSignal: { readonly filesRemodified: number; readonly windowDays: number } | null;
 };
 
 export interface SessionMetricsV2 {
@@ -163,6 +167,9 @@ export interface SessionMetricsV2 {
   readonly tokenDelta: TokenSnapshot | null;
   // From git_metrics_recorded event (engine-authoritative git diff, null for old sessions)
   readonly gitEvidence: GitEvidence | null;
+  // From node_created events (step and blocked_attempt counts)
+  readonly stepsCompleted: number;
+  readonly retriesCount: number;
 }
 
 export interface ConsoleSessionSummary {

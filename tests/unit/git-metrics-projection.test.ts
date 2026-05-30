@@ -54,9 +54,12 @@ function makeGitMetricsEvent(opts: {
   linesAdded?: number | null;
   linesRemoved?: number | null;
   truncated?: boolean;
+  changedFilePaths?: string[];
+  languageBreakdown?: Record<string, number>;
   stagedFiles?: number | null;
   unstagedFiles?: number | null;
   captureConfidence?: 'high' | 'partial' | 'none';
+  churnSignal?: { filesRemodified: number; windowDays: number } | null;
 }): DomainEventV1 {
   return {
     v: 1,
@@ -74,10 +77,26 @@ function makeGitMetricsEvent(opts: {
       linesAdded: opts.linesAdded ?? null,
       linesRemoved: opts.linesRemoved ?? null,
       truncated: opts.truncated ?? false,
+      changedFilePaths: opts.changedFilePaths ?? [],
+      languageBreakdown: opts.languageBreakdown ?? {},
       stagedFiles: opts.stagedFiles ?? null,
       unstagedFiles: opts.unstagedFiles ?? null,
       captureConfidence: opts.captureConfidence ?? 'none',
+      churnSignal: opts.churnSignal ?? null,
     },
+    timestampMs: Date.now(),
+  } as unknown as DomainEventV1;
+}
+
+function makeNodeCreatedEvent(nodeKind: 'step' | 'checkpoint' | 'blocked_attempt' | 'gate_checkpoint', eventIndex: number): DomainEventV1 {
+  return {
+    v: 1,
+    eventId: `evt_nc_${eventIndex}`,
+    eventIndex,
+    sessionId: SESSION_ID,
+    kind: 'node_created',
+    scope: { runId: RUN_ID, nodeId: `node_${eventIndex}` },
+    data: { nodeKind, parentNodeId: null, snapshotRef: 'sha256:abc', workflowHash: 'sha256:abc' },
     timestampMs: Date.now(),
   } as unknown as DomainEventV1;
 }
@@ -136,12 +155,15 @@ describe('projectSessionMetricsV2 -- gitEvidence field', () => {
         linesAdded: 50,
         linesRemoved: 10,
         truncated: false,
+        changedFilePaths: [],
+        languageBreakdown: {},
       },
       workingTree: {
         stagedFiles: 0,
         unstagedFiles: 0,
       },
       captureConfidence: 'high',
+      churnSignal: null,
     });
   });
 
@@ -236,5 +258,76 @@ describe('projectSessionMetricsV2 -- gitEvidence field', () => {
     const result = projectSessionMetricsV2(events);
 
     expect(result!.gitEvidence).toBeNull(); // different runId ignored
+  });
+});
+
+describe('projectSessionMetricsV2 -- stepsCompleted and retriesCount', () => {
+  it('returns stepsCompleted=0 and retriesCount=0 when no node_created events', () => {
+    const events: DomainEventV1[] = [makeRunCompletedEvent({})];
+    const result = projectSessionMetricsV2(events);
+    expect(result!.stepsCompleted).toBe(0);
+    expect(result!.retriesCount).toBe(0);
+  });
+
+  it('counts step nodes and blocked_attempt nodes separately', () => {
+    const events: DomainEventV1[] = [
+      makeRunCompletedEvent({}),
+      makeNodeCreatedEvent('step', 2),
+      makeNodeCreatedEvent('step', 3),
+      makeNodeCreatedEvent('step', 4),
+      makeNodeCreatedEvent('blocked_attempt', 5),
+      makeNodeCreatedEvent('checkpoint', 6),
+    ];
+    const result = projectSessionMetricsV2(events);
+    expect(result!.stepsCompleted).toBe(3);
+    expect(result!.retriesCount).toBe(1);
+  });
+
+  it('ignores node_created events from a different runId', () => {
+    const events: DomainEventV1[] = [
+      makeRunCompletedEvent({}),
+      {
+        ...makeNodeCreatedEvent('step', 2),
+        scope: { runId: 'run_different', nodeId: 'node_2' },
+      } as unknown as DomainEventV1,
+    ];
+    const result = projectSessionMetricsV2(events);
+    expect(result!.stepsCompleted).toBe(0);
+  });
+});
+
+describe('projectSessionMetricsV2 -- languageBreakdown and churnSignal', () => {
+  it('surfaces languageBreakdown from committedDiff', () => {
+    const events: DomainEventV1[] = [
+      makeRunCompletedEvent({}),
+      makeGitMetricsEvent({
+        filesChanged: 3,
+        linesAdded: 10,
+        linesRemoved: 5,
+        changedFilePaths: ['src/foo.ts', 'src/bar.ts', 'README.md'],
+        languageBreakdown: { '.ts': 2, '.md': 1 },
+      }),
+    ];
+    const result = projectSessionMetricsV2(events);
+    expect(result!.gitEvidence?.committedDiff?.languageBreakdown).toEqual({ '.ts': 2, '.md': 1 });
+    expect(result!.gitEvidence?.committedDiff?.changedFilePaths).toEqual(['src/foo.ts', 'src/bar.ts', 'README.md']);
+  });
+
+  it('surfaces churnSignal when present', () => {
+    const events: DomainEventV1[] = [
+      makeRunCompletedEvent({}),
+      makeGitMetricsEvent({ churnSignal: { filesRemodified: 2, windowDays: 7 } }),
+    ];
+    const result = projectSessionMetricsV2(events);
+    expect(result!.gitEvidence?.churnSignal).toEqual({ filesRemodified: 2, windowDays: 7 });
+  });
+
+  it('churnSignal is null when not in event', () => {
+    const events: DomainEventV1[] = [
+      makeRunCompletedEvent({}),
+      makeGitMetricsEvent({}),
+    ];
+    const result = projectSessionMetricsV2(events);
+    expect(result!.gitEvidence?.churnSignal).toBeNull();
   });
 });

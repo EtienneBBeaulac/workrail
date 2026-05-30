@@ -22,6 +22,7 @@ import { okAsync } from 'neverthrow';
 import {
   readWorkingTreeState,
   readCommittedDiff,
+  readChurnSignal,
   readCommitShasAndPrRefs,
 } from './reader.js';
 
@@ -160,6 +161,13 @@ export async function recordGitMetrics(
       }
     }
 
+    // Run churn detection after we have the committed diff (needs changedFilePaths and endSha).
+    const CHURN_WINDOW_DAYS = 7;
+    const churnSignal =
+      endSha && committedDiff && committedDiff.changedFilePaths.length > 0
+        ? await readChurnSignal(repoRoot, committedDiff.changedFilePaths, endSha, CHURN_WINDOW_DAYS, STATUS_TIMEOUT_MS)
+        : null;
+
     // Compute captureConfidence.
     const captureConfidence = computeCaptureConfidence({
       startSha,
@@ -191,9 +199,12 @@ export async function recordGitMetrics(
             linesAdded: committedDiff?.linesAdded ?? null,
             linesRemoved: committedDiff?.linesRemoved ?? null,
             truncated: committedDiff?.truncated ?? false,
+            changedFilePaths: committedDiff?.changedFilePaths ? Array.from(committedDiff.changedFilePaths) : [],
+            languageBreakdown: committedDiff?.languageBreakdown ?? {},
             stagedFiles: workingTree?.stagedFiles ?? null,
             unstagedFiles: workingTree?.unstagedFiles ?? null,
             captureConfidence,
+            churnSignal: churnSignal ?? null,
           },
           timestampMs: Date.now(),
         } as const;
