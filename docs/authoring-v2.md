@@ -1,8 +1,8 @@
 # Workflow Authoring Guide (v2)
 
-WorkRail v2 authoring is **JSON-first** and is designed for **determinism**, **rewind-safety**, and **resumability**.
+> **Note:** This is an internal reference document. For the public-facing authoring tutorial, see [Writing Custom Workflows](./authoring-guide.mdx).
 
-> **Status:** v2 authoring is design-locked but not necessarily shipped yet. This doc is a v2-only entry point.
+WorkRail v2 authoring is **JSON-first** and is designed for **determinism**, **rewind-safety**, and **resumability**.
 
 ## Canonical references (v2)
 

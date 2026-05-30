@@ -310,7 +310,7 @@ export function reasonToBlocker(
           code: 'MISSING_REQUIRED_NOTES' as const,
           pointer: { kind: 'workflow_step' as const, stepId },
           message: `Step "${stepId}" requires notes documenting your work (output.notesMarkdown).`,
-          suggestedFix: 'Add output.notesMarkdown with a detailed recap: what you did, key decisions/trade-offs, what you produced (files, paths, numbers), and anything notable. Use markdown formatting. 10–30 lines. Use the retryAckToken to retry without rehydrating.',
+          suggestedFix: 'Add output.notesMarkdown with a detailed recap: what you did, key decisions/trade-offs, what you produced (files, paths, numbers), and anything notable. Use markdown formatting. 10–30 lines. Then call continue_workflow again with the same continueToken.',
         }))
         .andThen(ensureBlockerTextBudgets);
 
