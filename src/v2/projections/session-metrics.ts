@@ -29,8 +29,10 @@ export interface SessionMetricsV2 {
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
   /**
-   * @deprecated Always 'none' for sessions since PR #903 (agentCommitShas is always empty).
-   * Use `gitEvidence.captureConfidence` for accurate confidence from engine-side git metrics.
+   * Confidence that git capture succeeded for this session run.
+   * Populated from run_completed; supports 'high' and 'none' only.
+   * For three-level confidence ('high' | 'partial' | 'none') and authoritative
+   * engine-side git evidence, prefer gitEvidence.captureConfidence.
    */
   readonly captureConfidence: 'high' | 'none';
   /**

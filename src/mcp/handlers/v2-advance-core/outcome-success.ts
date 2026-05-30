@@ -269,12 +269,9 @@ export function buildSuccessOutcome(args: {
         // The port runs git rev-parse HEAD and git log --no-merges --first-parent in parallel,
         // capturing both the end SHA and the branch-local commits produced during this session.
         const agentCommitShas: readonly string[] = commitShas;
-        // WHY endGitSha !== null && agentCommitShas.length > 0:
-        // agentCommitShas (from git log startSha..HEAD) is the authoritative commit list.
-        // The previous condition `agentCommitShas.length > 0 ? 'high' : 'none'` was permanently
-        // broken since PR #903 -- commitShas was always empty. This fix produces correct values:
-        // 'high' when we actually found commits between startSha and endSha,
-        // 'none' in all other cases (no git, no repo, no commits made).
+        // WHY endGitSha !== null guard: if gitSnapshot cannot resolve the end SHA
+        // (git rev-parse failed), captureConfidence should be 'none' even if commit
+        // SHAs were somehow present -- we cannot confirm the end state was captured.
         const captureConfidence: 'high' | 'none' = (endGitSha !== null && agentCommitShas.length > 0) ? 'high' : 'none';
         extraEventsToAppend.push(buildRunCompletedEvent({
           sessionId: String(sessionId),
