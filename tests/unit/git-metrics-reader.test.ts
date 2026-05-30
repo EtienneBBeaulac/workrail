@@ -109,6 +109,8 @@ describe('readCommittedDiff', () => {
       linesAdded: 13,
       linesRemoved: 7,
       truncated: false,
+      changedFilePaths: ['file1.ts', 'file2.ts', 'binary.bin'],
+      languageBreakdown: { '.ts': 2, '.bin': 1 },
     });
   });
 
@@ -122,6 +124,8 @@ describe('readCommittedDiff', () => {
       linesAdded: 0,
       linesRemoved: 0,
       truncated: false,
+      changedFilePaths: [],
+      languageBreakdown: {},
     });
   });
 

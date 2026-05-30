@@ -166,18 +166,29 @@ function parseNumstat(stdout: string): GitCommittedDiff {
   let filesChanged = 0;
   let linesAdded = 0;
   let linesRemoved = 0;
+  const changedFilePaths: string[] = [];
+  const languageBreakdown: Record<string, number> = {};
 
   for (const line of effectiveLines) {
     const parts = line.split('\t');
-    if (parts.length < 2) continue;
+    if (parts.length < 3) continue;
     filesChanged++;
     const added = parseInt(parts[0] ?? '0', 10);
     const removed = parseInt(parts[1] ?? '0', 10);
     if (!isNaN(added)) linesAdded += added;
     if (!isNaN(removed)) linesRemoved += removed;
+
+    const filePath = parts[2] ?? '';
+    changedFilePaths.push(filePath);
+
+    // Extract extension for language breakdown (lowercase, includes dot).
+    // Files with no dot (e.g. 'Makefile') map to empty string.
+    const lastDot = filePath.lastIndexOf('.');
+    const ext = lastDot > 0 ? filePath.slice(lastDot).toLowerCase() : '';
+    languageBreakdown[ext] = (languageBreakdown[ext] ?? 0) + 1;
   }
 
-  return { filesChanged, linesAdded, linesRemoved, truncated };
+  return { filesChanged, linesAdded, linesRemoved, truncated, changedFilePaths, languageBreakdown };
 }
 
 /**
@@ -198,4 +209,77 @@ function parsePrRefs(text: string): readonly number[] {
   }
 
   return Array.from(found).sort((a, b) => a - b);
+}
+
+// ---------------------------------------------------------------------------
+// Code churn detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Check how many of the session's changed files were re-modified by subsequent
+ * commits within `windowDays` after the session's end SHA.
+ *
+ * WHY churn signal: files re-modified shortly after a session indicate the
+ * session's output required follow-up work -- a quality signal.
+ *
+ * @param repoRoot  Workspace path
+ * @param changedFilePaths  Files changed during the session (from committedDiff)
+ * @param endSha  Session's end commit SHA -- used to anchor the after-window
+ * @param windowDays  How many days after session end to look for re-modifications
+ * @param timeoutMs  Per-command timeout
+ * @returns { filesRemodified, windowDays } or null on git failure
+ */
+export async function readChurnSignal(
+  repoRoot: string,
+  changedFilePaths: readonly string[],
+  endSha: string,
+  windowDays: number,
+  timeoutMs: number,
+): Promise<{ readonly filesRemodified: number; readonly windowDays: number } | null> {
+  if (changedFilePaths.length === 0) {
+    return { filesRemodified: 0, windowDays };
+  }
+
+  // WHY cap at 100: each file requires a separate git log subprocess. With no cap,
+  // a session touching MAX_NUMSTAT_LINES (10k) files could run 10k sequential
+  // subprocesses. 100 files covers the vast majority of real sessions and keeps
+  // worst-case runtime under ~10 minutes even with full timeouts.
+  const MAX_CHURN_FILES = 100;
+  const filesToCheck = changedFilePaths.length > MAX_CHURN_FILES
+    ? changedFilePaths.slice(0, MAX_CHURN_FILES)
+    : changedFilePaths;
+
+  try {
+    // Resolve the Unix timestamp of endSha to use as the --after boundary.
+    const { stdout: tsOut } = await execFile(
+      'git',
+      ['-C', repoRoot, 'log', '-1', '--format=%ct', endSha],
+      { timeout: timeoutMs, maxBuffer: MAX_BUFFER },
+    );
+    const endTs = parseInt(tsOut.trim(), 10);
+    if (isNaN(endTs)) return null;
+
+    // Compute the after boundary as a local date string git understands.
+    const afterDate = new Date(endTs * 1000).toISOString();
+    const beforeDate = new Date((endTs + windowDays * 86_400) * 1000).toISOString();
+
+    let filesRemodified = 0;
+
+    for (const filePath of filesToCheck) {
+      try {
+        const { stdout } = await execFile(
+          'git',
+          ['-C', repoRoot, 'log', '--oneline', `--after=${afterDate}`, `--before=${beforeDate}`, '--', filePath],
+          { timeout: timeoutMs, maxBuffer: MAX_BUFFER },
+        );
+        if (stdout.trim().length > 0) filesRemodified++;
+      } catch {
+        // Skip files that error -- partial results are acceptable
+      }
+    }
+
+    return { filesRemodified, windowDays };
+  } catch {
+    return null;
+  }
 }
