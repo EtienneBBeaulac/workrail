@@ -36,6 +36,7 @@ import { isSnapshotCapable } from '../../client-usage/types.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
+import { recordGitStart, recordGitMetrics } from '../../git-metrics/index.js';
 
 /** Unified result for continue_workflow — envelope present on rehydrate with pending step. */
 interface ContinueWorkflowResult {
@@ -96,6 +97,13 @@ export async function handleV2StartWorkflow(
       // Fire-and-forget: snapshot conversation tokens at workflow start.
       void recordTokenCheckpoint(
         result.sessionId, 'start', input.workspacePath,
+        guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
+      );
+      // Fire-and-forget: capture baseline working-tree dirty state at session start.
+      // WHY fire-and-forget (not await): must never block the MCP response.
+      // WHY here (not inside executeStartWorkflow): git I/O belongs outside the session lock.
+      void recordGitStart(
+        result.sessionId, input.workspacePath,
         guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
       );
       return success(attachV2ExecutionRenderMetadata({
@@ -474,6 +482,9 @@ export function executeContinueWorkflow(
                 void (async () => {
                   await collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
                   await recordTokenCheckpoint(sessionId, 'end', undefined, sessionStore, gate, idFactory);
+                  // WHY sequential (not concurrent): acquires the same session gate lock.
+                  // WHY here (not inside outcome-success.ts): git diff runs outside the session lock.
+                  await recordGitMetrics(sessionId, sessionStore, gate, idFactory);
                 })();
               }
               return { response };

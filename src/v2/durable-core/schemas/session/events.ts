@@ -431,6 +431,56 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
       turns: z.number().int().nonnegative(),
     }),
   }),
+  /**
+   * git_start_recorded: baseline working-tree state captured fire-and-forget after
+   * start_workflow succeeds. Records staged and unstaged file counts at the moment
+   * the agent began working, enabling detection of pre-existing dirty state.
+   *
+   * WHY scope: undefined (same as observation_recorded): fires before any run_started
+   * event, so no runId is available yet.
+   *
+   * WHY separate from git_metrics_recorded: start-time dirty state is only observable
+   * at session start; it cannot be retroactively captured at session completion.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('git_start_recorded'),
+    scope: z.undefined(),
+    data: z.object({
+      repoRoot: z.string().min(1),
+      stagedFiles: z.number().int().nonnegative(),
+      unstagedFiles: z.number().int().nonnegative(),
+    }),
+  }),
+  /**
+   * git_metrics_recorded: authoritative committed diff and working-tree state captured
+   * fire-and-forget after session completion (isComplete === true). Replaces agent-reported
+   * metrics_* context_set values as the canonical source for lines/files changed.
+   *
+   * WHY a separate event (not part of run_completed): git diff runs after the session lock
+   * is released. run_completed fires inside the lock; git_metrics_recorded fires after it.
+   *
+   * WHY captureConfidence: 'high'|'partial'|'none': distinct from run_completed's
+   * 'high'|'none' -- partial means endSha is available but diff failed or was truncated.
+   */
+  DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('git_metrics_recorded'),
+    scope: z.object({ runId: z.string().min(1) }),
+    data: z.object({
+      startSha: z.string().nullable(),
+      endSha: z.string().nullable(),
+      commitShas: z.array(z.string()),
+      prRefs: z.array(z.number().int().positive()),
+      /** null means the diff command failed or timed out; zero-change is a zero-valued struct. */
+      filesChanged: z.number().int().nonnegative().nullable(),
+      linesAdded: z.number().int().nonnegative().nullable(),
+      linesRemoved: z.number().int().nonnegative().nullable(),
+      truncated: z.boolean(),
+      /** null means the status command failed. */
+      stagedFiles: z.number().int().nonnegative().nullable(),
+      unstagedFiles: z.number().int().nonnegative().nullable(),
+      captureConfidence: z.enum(['high', 'partial', 'none']),
+    }),
+  }),
 ]);
 
 export type DomainEventV1 = z.infer<typeof DomainEventV1Schema>;

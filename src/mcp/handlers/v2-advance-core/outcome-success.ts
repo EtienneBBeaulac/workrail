@@ -269,7 +269,10 @@ export function buildSuccessOutcome(args: {
         // The port runs git rev-parse HEAD and git log --no-merges --first-parent in parallel,
         // capturing both the end SHA and the branch-local commits produced during this session.
         const agentCommitShas: readonly string[] = commitShas;
-        const captureConfidence: 'high' | 'none' = agentCommitShas.length > 0 ? 'high' : 'none';
+        // WHY endGitSha !== null guard: if gitSnapshot cannot resolve the end SHA
+        // (git rev-parse failed), captureConfidence should be 'none' even if commit
+        // SHAs were somehow present -- we cannot confirm the end state was captured.
+        const captureConfidence: 'high' | 'none' = (endGitSha !== null && agentCommitShas.length > 0) ? 'high' : 'none';
         extraEventsToAppend.push(buildRunCompletedEvent({
           sessionId: String(sessionId),
           runId: String(runId),

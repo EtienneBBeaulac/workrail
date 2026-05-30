@@ -105,12 +105,50 @@ export type TokenSnapshot = {
   readonly turns: number;
 };
 
+/**
+ * Mirror of GitCommittedDiff in src/mcp/git-metrics/types.ts.
+ * Keep in sync with the backend definition.
+ */
+export type GitCommittedDiff = {
+  readonly filesChanged: number;
+  readonly linesAdded: number;
+  readonly linesRemoved: number;
+  readonly truncated: boolean;
+};
+
+/**
+ * Mirror of GitWorkingTreeState in src/mcp/git-metrics/types.ts.
+ * Keep in sync with the backend definition.
+ */
+export type GitWorkingTreeState = {
+  readonly stagedFiles: number;
+  readonly unstagedFiles: number;
+};
+
+/**
+ * Mirror of GitEvidence in src/mcp/git-metrics/types.ts.
+ * Authoritative engine-side git diff evidence for a completed session.
+ * Keep in sync with the backend definition.
+ */
+export type GitEvidence = {
+  readonly startSha: string | null;
+  readonly endSha: string | null;
+  readonly commitShas: readonly string[];
+  readonly prRefs: readonly number[];
+  /** null means the diff command failed or timed out. */
+  readonly committedDiff: GitCommittedDiff | null;
+  /** null means the status command failed or timed out. */
+  readonly workingTree: GitWorkingTreeState | null;
+  readonly captureConfidence: 'high' | 'partial' | 'none';
+};
+
 export interface SessionMetricsV2 {
   // From run_completed event (engine-authoritative)
   readonly startGitSha: string | null;
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
+  /** @deprecated Always 'none' since PR #903. Use gitEvidence.captureConfidence. */
   readonly captureConfidence: 'high' | 'none';
   readonly durationMs: number | undefined;
   // From context_set metrics_* keys (agent-reported, each independently nullable)
@@ -123,6 +161,8 @@ export interface SessionMetricsV2 {
   readonly usageEvents: readonly ClientUsage[];
   // From token_checkpoint events (start/end delta for this workflow run)
   readonly tokenDelta: TokenSnapshot | null;
+  // From git_metrics_recorded event (engine-authoritative git diff, null for old sessions)
+  readonly gitEvidence: GitEvidence | null;
 }
 
 export interface ConsoleSessionSummary {
