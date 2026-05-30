@@ -78,10 +78,12 @@ export function parseDifferentiationHandoffArtifact(
   return result.success ? result.data : null;
 }
 
-export function getDifferentiationHandoffBlockedMessage(): readonly string[] {
+export function getDifferentiationHandoffBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
   return [
     `Artifact contract: ${DIFFERENTIATION_HANDOFF_CONTRACT_REF}`,
-    `Provide a wr.differentiation_handoff artifact in complete_step's artifacts[] parameter.`,
+    `Provide a wr.differentiation_handoff artifact in ${paramPath}.`,
     `Required fields: schemaVersion ("1.0.0"), evidenceFreshness (object), validationChecklist (string[]), shapingHandoff (object containing rawIdea, problem, baseline, appetiteHint, noGosHints, constraints, evidenceTopK, defensibilityClaim).`,
     `See the step prompt for the full schema.`,
   ];

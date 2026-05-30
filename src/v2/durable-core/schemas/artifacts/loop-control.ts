@@ -166,7 +166,11 @@ export function findLoopControlArtifact(
  * Actionable blocked message for when a step requires a wr.loop_control artifact.
  * Migrated from prompt-renderer.ts so the contract owns its guidance.
  */
-export function getBlockedMessage(): readonly string[] {
+export function getBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const exampleFormat = isAutonomous
+    ? `{ "artifacts": [{ "kind": "wr.loop_control", "decision": "stop" }] }`
+    : `{ "output": { "artifacts": [{ "kind": "wr.loop_control", "decision": "stop" }] } }`;
   return [
     `Artifact contract: ${LOOP_CONTROL_CONTRACT_REF}`,
     `Provide an artifact with kind: "wr.loop_control"`,
@@ -174,7 +178,7 @@ export function getBlockedMessage(): readonly string[] {
     `Do NOT include loopId — the engine matches automatically`,
     `Canonical format:`,
     `\`\`\`json`,
-    `{ "artifacts": [{ "kind": "wr.loop_control", "decision": "stop" }] }`,
+    exampleFormat,
     `\`\`\``,
   ];
 }

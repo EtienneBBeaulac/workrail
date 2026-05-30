@@ -88,14 +88,19 @@ export function parseGateVerdictArtifact(
 }
 
 /** Actionable blocked message for wr.gate_verdict contract. */
-export function getBlockedMessage(): readonly string[] {
+export function getBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
+  const exampleFormat = isAutonomous
+    ? `{ "artifacts": [{ "kind": "wr.gate_verdict", "verdict": "approved", "rationale": "Output meets criteria", "confidence": "high", "stepId": "phase-6-final-handoff" }] }`
+    : `{ "output": { "artifacts": [{ "kind": "wr.gate_verdict", "verdict": "approved", "rationale": "Output meets criteria", "confidence": "high", "stepId": "phase-6-final-handoff" }] } }`;
   return [
     `Artifact contract: ${GATE_VERDICT_CONTRACT_REF}`,
-    `Provide a wr.gate_verdict artifact in complete_step's artifacts[] parameter.`,
+    `Provide a wr.gate_verdict artifact in ${paramPath}.`,
     `Required fields: verdict ("approved"|"rejected"|"uncertain"), rationale (string), confidence ("high"|"medium"|"low"), stepId (string).`,
     `Canonical format:`,
     `\`\`\`json`,
-    `{ "artifacts": [{ "kind": "wr.gate_verdict", "verdict": "approved", "rationale": "Output meets criteria", "confidence": "high", "stepId": "phase-6-final-handoff" }] }`,
+    exampleFormat,
     `\`\`\``,
   ];
 }

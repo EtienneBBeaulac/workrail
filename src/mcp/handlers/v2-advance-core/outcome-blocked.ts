@@ -43,7 +43,8 @@ export function buildBlockedOutcome(args: {
 
   // Single source of truth: reasons = post-guardrail blocking reasons.
   // Use the same array for both blockers and primaryReason (architectural fix).
-  const blockersRes = buildBlockerReport(reasons);
+  const isAutonomous = args.v.mergedContext['is_autonomous'] === 'true' || args.v.mergedContext['is_autonomous'] === true;
+  const blockersRes = buildBlockerReport(reasons, { isAutonomous });
   if (blockersRes.isErr()) {
     return errAsync({ kind: 'invariant_violation' as const, message: blockersRes.error.message } as const);
   }

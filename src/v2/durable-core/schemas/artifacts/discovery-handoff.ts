@@ -141,10 +141,12 @@ export function parseDiscoveryHandoffArtifact(
 }
 
 /** Actionable blocked message for wr.discovery_handoff contract. */
-export function getBlockedMessage(): readonly string[] {
+export function getBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
   return [
     `Artifact contract: ${DISCOVERY_HANDOFF_CONTRACT_REF}`,
-    `Provide a wr.discovery_handoff artifact in complete_step's artifacts[] parameter.`,
+    `Provide a wr.discovery_handoff artifact in ${paramPath}.`,
     `Required fields: selectedDirection (string), designDocPath (string), confidenceBand ("high"|"medium"|"low"), keyInvariants (string[]), selectionTier ("strong_recommendation"|"provisional_recommendation"|"insufficient_signal").`,
     `See the step prompt for the full schema.`,
   ];

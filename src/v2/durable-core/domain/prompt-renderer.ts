@@ -303,7 +303,9 @@ function buildLoopContextBanner(args: {
  * Adding a new contract never requires changing this function; add getBlockedMessage()
  * to the contract file and register it here.
  */
-const CONTRACT_BLOCKED_MESSAGES: Readonly<Record<string, () => readonly string[]>> = {
+const CONTRACT_BLOCKED_MESSAGES: Readonly<
+  Record<string, (options?: { readonly isAutonomous?: boolean }) => readonly string[]>
+> = {
   [LOOP_CONTROL_CONTRACT_REF]: getLoopControlBlockedMessage,
   [REVIEW_VERDICT_CONTRACT_REF]: getReviewVerdictBlockedMessage,
   [DISCOVERY_HANDOFF_CONTRACT_REF]: getDiscoveryHandoffBlockedMessage,
@@ -318,12 +320,13 @@ const CONTRACT_BLOCKED_MESSAGES: Readonly<Record<string, () => readonly string[]
  * Delegates to each contract's getBlockedMessage() so contracts own their guidance.
  */
 function formatOutputContractRequirements(
-  outputContract: { readonly contractRef?: string } | undefined
+  outputContract: { readonly contractRef?: string } | undefined,
+  options?: { readonly isAutonomous?: boolean },
 ): readonly string[] {
   const contractRef = outputContract?.contractRef;
   if (!contractRef) return [];
   const getMsg = CONTRACT_BLOCKED_MESSAGES[contractRef];
-  if (getMsg) return getMsg();
+  if (getMsg) return getMsg(options);
   // Unknown contract: generic fallback
   return [
     `Artifact contract: ${contractRef}`,
@@ -629,7 +632,8 @@ export function renderPendingPrompt(args: {
       : `\n\n**OUTPUT REQUIREMENTS:**\n${requirements.map(r => `- ${r}`).join('\n')}`
     : '';
   
-  const contractRequirements = formatOutputContractRequirements(outputContract);
+  const isAutonomous = sessionContext.is_autonomous === true || sessionContext.is_autonomous === 'true';
+  const contractRequirements = formatOutputContractRequirements(outputContract, { isAutonomous });
   const contractSection = contractRequirements.length > 0
     ? cleanResponseFormat
       ? `\n\n${contractRequirements.map(r => `- ${r}`).join('\n')}`

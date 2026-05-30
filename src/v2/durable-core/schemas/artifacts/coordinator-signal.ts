@@ -144,14 +144,19 @@ export function parseCoordinatorSignalArtifact(
 }
 
 /** Actionable blocked message for wr.coordinator_signal contract. */
-export function getBlockedMessage(): readonly string[] {
+export function getBlockedMessage(options?: { readonly isAutonomous?: boolean }): readonly string[] {
+  const isAutonomous = options?.isAutonomous ?? false;
+  const paramPath = isAutonomous ? "complete_step's artifacts[] parameter" : "continue_workflow's output.artifacts parameter (or top-level artifacts)";
+  const exampleFormat = isAutonomous
+    ? `{ "artifacts": [{ "kind": "wr.coordinator_signal", "signalKind": "finding", "payload": { "summary": "..." } }] }`
+    : `{ "output": { "artifacts": [{ "kind": "wr.coordinator_signal", "signalKind": "finding", "payload": { "summary": "..." } }] } }`;
   return [
     `Artifact contract: ${COORDINATOR_SIGNAL_CONTRACT_REF}`,
-    `Provide a wr.coordinator_signal artifact in complete_step's artifacts[] parameter.`,
+    `Provide a wr.coordinator_signal artifact in ${paramPath}.`,
     `Required fields: signalKind ("progress"|"finding"|"data_needed"|"approval_needed"|"blocked"), payload (object).`,
     `Canonical format:`,
     `\`\`\`json`,
-    `{ "artifacts": [{ "kind": "wr.coordinator_signal", "signalKind": "finding", "payload": { "summary": "..." } }] }`,
+    exampleFormat,
     `\`\`\``,
   ];
 }

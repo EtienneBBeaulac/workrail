@@ -221,7 +221,10 @@ export function blockerSortKey(b: BlockerV1): string {
   return `${b.code}|${p.kind}|${ptrStable}`;
 }
 
-export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModelError> {
+export function reasonToBlocker(
+  reason: ReasonV1,
+  options?: { readonly isAutonomous?: boolean },
+): Result<BlockerV1, ReasonModelError> {
   switch (reason.kind) {
     case 'missing_context_key':
       return ensureDelimiterSafeId('context_key.key', reason.key)
@@ -244,7 +247,7 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
     case 'missing_required_output': {
       return ensureContractRef(reason.contractRef)
         .map((contractRef) => {
-          const lines = getArtifactBlockedMessage(contractRef);
+          const lines = getArtifactBlockedMessage(contractRef, options);
           const submittedKinds = reason.submittedKinds;
           let message: string;
           if (submittedKinds && submittedKinds.length > 0) {
@@ -255,9 +258,11 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
           } else {
             message = `Missing required output (contractRef=${contractRef}).`;
           }
+          const isAutonomous = options?.isAutonomous ?? false;
+          const toolName = isAutonomous ? 'complete_step' : 'continue_workflow';
           const suggestedFix = lines
-            ? `Pass this artifact in \`output.artifacts\` of your \`complete_step\` call:\n${lines.join('\n')}`
-            : `Check the step's outputContract for the required artifact format and pass it in \`output.artifacts\` of your \`complete_step\` call.`;
+            ? `Pass this artifact in \`output.artifacts\` of your \`${toolName}\` call:\n${lines.join('\n')}`
+            : `Check the step's outputContract for the required artifact format and pass it in \`output.artifacts\` of your \`${toolName}\` call.`;
           return {
             code: 'MISSING_REQUIRED_OUTPUT' as const,
             pointer: { kind: 'output_contract' as const, contractRef },
@@ -271,10 +276,12 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
     case 'invalid_required_output': {
       return ensureContractRef(reason.contractRef)
         .map((contractRef) => {
-          const lines = getArtifactBlockedMessage(contractRef);
+          const lines = getArtifactBlockedMessage(contractRef, options);
+          const isAutonomous = options?.isAutonomous ?? false;
+          const toolName = isAutonomous ? 'complete_step' : 'continue_workflow';
           const suggestedFix = lines
-            ? `Fix the artifact and pass it in \`output.artifacts\` of your \`complete_step\` call:\n${lines.join('\n')}`
-            : `Fix the artifact to match the required contract and pass it in \`output.artifacts\` of your \`complete_step\` call. Replaying the same invalid advance will keep returning this blocked result.`;
+            ? `Fix the artifact and pass it in \`output.artifacts\` of your \`${toolName}\` call:\n${lines.join('\n')}`
+            : `Fix the artifact to match the required contract and pass it in \`output.artifacts\` of your \`${toolName}\` call. Replaying the same invalid advance will keep returning this blocked result.`;
           return {
             code: 'INVALID_REQUIRED_OUTPUT' as const,
             pointer: { kind: 'output_contract' as const, contractRef },
@@ -371,10 +378,13 @@ export function reasonToBlocker(reason: ReasonV1): Result<BlockerV1, ReasonModel
  * blocked_attempt node snapshots rather than advance_recorded outcomes. This function is still
  * used to build blocker reports, but they're attached to blocked snapshots instead.
  */
-export function buildBlockerReport(reasons: readonly ReasonV1[]): Result<BlockerReportV1, ReasonModelError> {
+export function buildBlockerReport(
+  reasons: readonly ReasonV1[],
+  options?: { readonly isAutonomous?: boolean },
+): Result<BlockerReportV1, ReasonModelError> {
   const blockers: BlockerV1[] = [];
   for (const reason of reasons) {
-    const b = reasonToBlocker(reason);
+    const b = reasonToBlocker(reason, options);
     if (b.isErr()) return err(b.error);
     blockers.push(b.value);
   }

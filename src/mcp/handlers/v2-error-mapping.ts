@@ -221,7 +221,12 @@ export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
       return errNotRetryable(
         'PRECONDITION_FAILED',
         e.message,
-        { suggestion: 'Submit a valid wr.assessment artifact with the correct dimensions. Use the format shown in the blocked step prompt.' },
+        {
+          suggestion:
+            'Submit a valid artifact. If you need to inspect the requirements or reset the attempt counter, you can: ' +
+            '(1) Rehydrate: Call continue_workflow with the current continueToken and intent: "rehydrate" (without output data). ' +
+            '(2) Rewind: Retrieve a historical resumeToken or checkpointToken from a prior successful step in your chat history, and call resume_session (or continue_workflow with intent: "rehydrate") to rewind the session state.',
+        },
       ) as ToolFailure;
     default:
       const _exhaustive: never = e;

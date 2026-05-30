@@ -242,7 +242,7 @@ export function executeAdvanceCore(args: {
     }
 
     const validation = phase.validation;
-    const effectiveValidation =
+    let effectiveValidation =
       v.assessmentValidation && !v.assessmentValidation.validation.valid
         ? v.assessmentValidation.validation
         : validation;
@@ -257,6 +257,10 @@ export function executeAdvanceCore(args: {
       notesMarkdown: v.notesMarkdown,
       validation: effectiveValidation,
     });
+
+    if (outputRequirement.kind === 'invalid') {
+      effectiveValidation = outputRequirement.validation;
+    }
 
     // Missing notes: required unless the step declares notesOptional (outputContract steps
     // are auto-exempt — the typed artifact IS the evidence). A whitespace-only string is
