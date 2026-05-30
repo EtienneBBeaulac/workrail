@@ -1,0 +1,39 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "WorkRail",
+  "logo": {
+    "dark": "/assets/logo-dark.svg",
+    "light": "/assets/logo.svg"
+  },
+  "favicon": "/assets/logo.png",
+  "colors": {
+    "primary": "#F59E0B",
+    "light": "#FCD34D",
+    "dark": "#D97706"
+  },
+  "topbarCtaButton": {
+    "name": "GitHub",
+    "url": "https://github.com/EtienneBBeaulac/workrail"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "docs/introduction",
+        "docs/integrations/claude-code",
+        "docs/integrations/firebender"
+      ]
+    },
+    {
+      "group": "Workflows",
+      "pages": [
+        "docs/workflows",
+        "docs/authoring-v2",
+        "docs/configuration"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/EtienneBBeaulac/workrail"
+  }
+}
