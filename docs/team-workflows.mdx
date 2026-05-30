@@ -1,0 +1,102 @@
+---
+title: "Team Workflow Sharing"
+description: "Share workflows across your team with a Git repository -- everyone gets the same workflows, updated automatically"
+---
+
+WorkRail can load workflows from a Git repository. Point it at a shared repo and every developer on the team has access to the same workflows, always in sync with the latest version in the repo.
+
+## How it works
+
+At startup, WorkRail clones or pulls the configured repositories and loads any `.json` workflow files it finds. These merge with the built-in `wr.*` workflows and any workflows in `~/.workrail/workflows/`. The agent sees the full combined set.
+
+When someone updates a workflow in the shared repo, every team member gets it on their next session -- no manual distribution, no copy-pasting JSON files around.
+
+## Setup
+
+Add `WORKFLOW_GIT_REPOS` to your MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"],
+      "env": {
+        "WORKFLOW_GIT_REPOS": "https://github.com/your-org/ai-workflows.git",
+        "GITHUB_TOKEN": "ghp_your_token_here"
+      }
+    }
+  }
+}
+```
+
+For private repositories, a token with read access to the repo is required. For public repositories, `GITHUB_TOKEN` is not needed.
+
+## Multiple repositories
+
+Use a comma-separated list to load from more than one source. Workflows from later repos override earlier ones with the same ID:
+
+```json
+{
+  "WORKFLOW_GIT_REPOS": "https://github.com/your-org/shared-workflows.git,https://github.com/your-org/team-workflows.git"
+}
+```
+
+This lets you maintain a shared company-wide set and layer team-specific workflows on top.
+
+## Namespace conventions
+
+Workflow IDs use a `namespace.name` format. The `wr.*` namespace is reserved for WorkRail's built-in workflows. Choose a namespace that identifies your team or organization:
+
+```json
+{
+  "id": "acme.code-review",
+  "name": "ACME Code Review",
+  "version": "1.0.0",
+  "steps": [...]
+}
+```
+
+IDs must be unique across all sources. If two repositories define the same ID, the later repo in the list wins.
+
+## Structuring the repository
+
+WorkRail loads all `.json` files from the repository root. For larger teams, organize by subdirectory if your Git host supports it, or use namespacing to make ownership clear:
+
+```
+workflows/
+  acme.code-review.json
+  acme.feature-implementation.json
+  acme.incident-response.json
+  platform.database-migration.json
+  platform.deploy-checklist.json
+```
+
+There is no required directory structure -- WorkRail loads every `.json` file it finds at the root.
+
+## Authentication
+
+| Service | Env variable |
+|---|---|
+| GitHub | `GITHUB_TOKEN` |
+| GitLab | `GITLAB_TOKEN` |
+| Bitbucket | `BITBUCKET_TOKEN` |
+| Any Git (HTTP Basic) | `GIT_USERNAME` + `GIT_PASSWORD` |
+
+Set the token in the `env` block of your MCP server config, not in your shell profile. MCP servers do not inherit shell environment variables automatically.
+
+## Combining with local workflows
+
+Team Git workflows, local personal workflows (`~/.workrail/workflows/`), and built-in `wr.*` workflows all coexist. An individual developer can have their own personal workflows that only they use, alongside the shared team set.
+
+| Source | Location | Who sees it |
+|---|---|---|
+| Built-in | npm package | Everyone |
+| Team (Git) | Shared repo | Everyone configured with the repo |
+| Personal | `~/.workrail/workflows/` | That developer only |
+| Project | `./workflows/` in project root | Anyone running WorkRail from that project |
+
+## Further reading
+
+- [Configuration](/docs/configuration) - Full reference for `WORKFLOW_GIT_REPOS` and all related environment variables
+- [Writing Custom Workflows](/docs/authoring-guide) - How to write and structure workflow JSON files

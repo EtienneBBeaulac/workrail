@@ -21,6 +21,7 @@
       "pages": [
         "docs/introduction",
         "docs/why-workrail",
+        "docs/privacy",
         "docs/integrations/claude-code",
         "docs/integrations/firebender"
       ]
@@ -30,12 +31,14 @@
       "pages": [
         "docs/workflows",
         "docs/authoring-guide",
+        "docs/team-workflows",
         "docs/configuration"
       ]
     },
     {
       "group": "Reference",
       "pages": [
+        "docs/report",
         "docs/architecture",
         "docs/console",
         "docs/troubleshooting"
