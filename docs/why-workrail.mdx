@@ -1,0 +1,88 @@
+---
+title: "Why WorkRail?"
+description: "WorkRail enforces step-by-step workflows for AI agents through structural constraints -- not instructions the agent can ignore"
+---
+
+Ask an AI agent to implement a feature and it might plan carefully before touching code. Ask it again tomorrow and it jumps straight to editing. Same model, same task, different behavior. The inconsistency is not a model problem -- it is a structural one. There is no mechanism forcing the agent to work the way you want.
+
+WorkRail is that mechanism.
+
+## What breaks without it
+
+When you rely on system prompts and instructions to shape agent behavior, several things predictably go wrong:
+
+- **Instructions fade as context grows.** A system prompt that says "plan before implementing" carries full weight at turn one and almost none by turn fifty. The agent reverts to its default: assume, predict, move fast.
+- **The agent decides what to follow.** Custom skills and instructions front-load all guidance at once. For short tasks this works. For long, multi-step work, the agent picks the parts it thinks are relevant and ignores the rest.
+- **There is no audit trail.** When AI work goes wrong, there is no record of what decisions were made or why. You are debugging a black box.
+- **Context vanishes between sessions.** Every new conversation starts from zero. Prior decisions, work in progress, and documented reasoning disappear.
+- **Quality depends on babysitting.** Consistent results require you to stay engaged and keep redirecting. That defeats the purpose.
+
+## The mechanism
+
+WorkRail drip-feeds workflow steps to the agent one at a time through the [Model Context Protocol](https://modelcontextprotocol.org). The agent calls `start_workflow`, receives step 1, completes it, then calls `continue_workflow`. It cannot skip ahead because it does not know future steps exist yet.
+
+```
+Agent                     WorkRail
+  |                          |
+  |  start_workflow()        |
+  |------------------------->|
+  |                          |
+  |   Step 1: Understand     |
+  |      the problem         |
+  |<-------------------------|
+  |                          |
+  |  continue_workflow()     |
+  |------------------------->|
+  |                          |
+  |   Step 2: Plan your      |
+  |      approach            |
+  |<-------------------------|
+```
+
+This is not an instruction the agent can choose to follow. It is a structural constraint. Step 2 is not in the agent's context window until step 1 is complete. The enforcement is physical, not advisory.
+
+## Why it works
+
+**Step-hiding enforcement.** The agent cannot skip the investigation step and jump to implementation because the implementation step does not exist yet from its perspective. Enforcement comes from what the agent cannot see, not from what you tell it to do.
+
+**MCP-native.** WorkRail is just an MCP server. There is no separate process to run, no infrastructure to provision, no sidecar to keep alive. Add one entry to your MCP config and your agent has access to every workflow:
+
+```json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"]
+    }
+  }
+}
+```
+
+**Durable sessions.** Work is saved to disk at every step. Close the chat, come back tomorrow, pick up exactly where you left off with `resume_session`. Sessions carry all prior decisions, notes, and artifacts automatically -- no re-explaining context in a new conversation.
+
+**Repeatable execution.** The same workflow executes the same way every time, regardless of model or conversation context. When a workflow works, it keeps working. When you improve a workflow, every future run gets the improvement.
+
+**Composable.** Workflows mix deterministic structure -- required steps, validation gates, sequencing -- with AI intelligence within each step. You define what the agent must do and in what order. The agent decides how to do it. The structure is yours; the reasoning is the model's.
+
+## How it compares to the alternatives
+
+| Approach | The gap |
+|---|---|
+| System prompts | Fade as context grows; agent decides which parts to follow; no durability across sessions |
+| Custom skills | Front-load all guidance at once; break down for long multi-step tasks; no enforcement of sequencing |
+| Workflow harnesses that run as separate processes | Require infrastructure setup and management; another process to keep alive, monitor, and restart |
+| WorkRail | Structural enforcement via step-hiding; zero infrastructure -- one MCP config entry; durable sessions out of the box |
+
+## Write your own workflows
+
+WorkRail ships with 30+ workflows for coding, review, debugging, and documentation. You can also write your own -- drop a JSON file in `~/.workrail/workflows/` and WorkRail discovers it automatically. The schema is straightforward and the [authoring guide](/docs/authoring-v2) covers everything from basic step sequences to branching and validation gates.
+
+## Get started
+
+Add WorkRail to your MCP client configuration and prompt your agent:
+
+```
+Use the bug-investigation workflow to debug this auth issue
+```
+
+WorkRail discovers available workflows automatically, starts at step 1, and walks the agent through systematically. See [What is WorkRail?](/docs/introduction) for the full quick-start and a detailed walkthrough.

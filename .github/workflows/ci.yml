@@ -184,17 +184,22 @@ jobs:
       - name: Verify dist artifacts
         run: |
           test -f dist/mcp-server.js || (echo "Missing dist/mcp-server.js" && exit 1)
+          test -f dist/cli-workrail.js || (echo "Missing dist/cli-workrail.js" && exit 1)
           test -f dist/cli.js || (echo "Missing dist/cli.js" && exit 1)
           test -x dist/mcp-server.js || (echo "dist/mcp-server.js is not executable -- bin symlink will fail" && exit 1)
+          test -x dist/cli-workrail.js || (echo "dist/cli-workrail.js is not executable -- workrail bin symlink will fail" && exit 1)
 
       - name: Verify packed tarball has executable bit
         run: |
           npm pack --quiet 2>/dev/null
           tarball=$(ls *.tgz | head -1)
           mode=$(tar -tvzf "$tarball" package/dist/mcp-server.js | awk '{print $1}')
-          echo "packed permissions: $mode"
+          echo "dist/mcp-server.js packed permissions: $mode"
+          mode2=$(tar -tvzf "$tarball" package/dist/cli-workrail.js | awk '{print $1}')
+          echo "dist/cli-workrail.js packed permissions: $mode2"
           rm -f "$tarball"
           [[ "${mode:3:1}" == "x" ]] || (echo "dist/mcp-server.js is not executable in published tarball -- prepack script may have failed" && exit 1)
+          [[ "${mode2:3:1}" == "x" ]] || (echo "dist/cli-workrail.js is not executable in published tarball -- prepack script may have failed" && exit 1)
 
       - name: Write dist manifest
         run: node scripts/dist-manifest.js --dist dist --write dist/manifest.json

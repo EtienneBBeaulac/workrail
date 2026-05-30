@@ -1,0 +1,200 @@
+---
+title: "Architecture"
+description: "How WorkRail works internally -- execution engine, session persistence, token protocol, and the MCP surface"
+---
+
+WorkRail is an MCP server that enforces step-by-step workflow execution for AI agents. This page explains how it works internally: the components involved, the data that flows through them, and the invariants that make step-hiding and session durability possible.
+
+## System Overview
+
+WorkRail has three logical layers:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  MCP Surface                                                    │
+│  start_workflow  continue_workflow  resume_session              │
+│  list_workflows  inspect_workflow   checkpoint_workflow         │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────────┐
+│  Execution Engine                                               │
+│  Compiler (JSON -> DAG)  |  Advance (DAG traversal)            │
+│  Token minting (HMAC)    |  Projections (event log -> state)   │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────────────┐
+│  Session Store                                                  │
+│  ~/.workrail/data/sessions/                                     │
+│  Append-only JSONL event logs (one per session)                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+The MCP server receives tool calls from the agent, delegates execution to the engine, and returns step prompts and tokens. The engine compiles workflow definitions, traverses the execution DAG, and persists every state transition as an append-only event. The session store is plain files on disk - no database, no server process required.
+
+## Component Map
+
+The source tree reflects this layering:
+
+- **`src/mcp/`** - MCP server: tool handlers, request validation, response formatting, transport. Entry point: `src/mcp-server.ts`.
+- **`src/v2/durable-core/`** - v2 execution engine core: domain types, token encoding, projections, session index, sorted event log.
+- **`src/v2/durable-core/domain/`** - Core domain types: `CompiledWorkflow`, `SessionState`, `DagNode`, `StateToken`, `AckToken`.
+- **`src/v2/durable-core/tokens/`** - HMAC token minting and validation.
+- **`src/v2/durable-core/projections/`** - Pure functions that derive session state from the event log.
+- **`src/v2/usecases/`** - Use case implementations: start, advance, resume, checkpoint.
+- **`src/v2/infra/`** - Storage infrastructure: segment writer, manifest, session reader.
+- **`src/application/`** - v1 legacy layer (not actively developed; v2 is the default).
+- **`workflows/`** - Bundled workflow JSON definitions (30+ shipped with the package).
+- **`src/console/`** - Standalone read-only session dashboard server.
+
+## The Execution Flow
+
+A complete workflow execution looks like this:
+
+```
+Agent                         WorkRail
+  │                               │
+  │  start_workflow(workflowId)   │
+  │──────────────────────────────>│
+  │                               │  1. Load workflow JSON
+  │                               │  2. Compile to DAG + hash
+  │                               │  3. Create session, write start event
+  │                               │  4. Mint stateToken + ackToken
+  │                               │
+  │  { pending: { prompt: "..." } │
+  │    stateToken, ackToken }     │
+  │<──────────────────────────────│
+  │                               │
+  │  [agent executes step 1]      │
+  │                               │
+  │  continue_workflow(           │
+  │    stateToken, ackToken,      │
+  │    output.notesMarkdown)      │
+  │──────────────────────────────>│
+  │                               │  5. Validate ackToken scope
+  │                               │  6. Validate output contract (if declared)
+  │                               │  7. Append advance event to log
+  │                               │  8. Traverse DAG to next node
+  │                               │  9. Mint new stateToken + ackToken
+  │                               │
+  │  { pending: { prompt: "..." } │
+  │    stateToken, ackToken }     │
+  │<──────────────────────────────│
+  │                               │
+  │  [repeat until isComplete]    │
+```
+
+At every step, the engine appends an event to the session's event log before returning. If the process crashes between steps, the session can be rehydrated from the log exactly as it was.
+
+The agent never sees the workflow definition. It only ever receives the current step's prompt, the tokens needed to advance, and a boolean indicating whether the workflow is complete.
+
+## Workflow Compilation
+
+When `start_workflow` is called, WorkRail loads the workflow JSON and compiles it into a `CompiledWorkflow` - an in-memory directed acyclic graph (DAG) of nodes. The compiler runs several passes:
+
+1. **Template expansion** - `templateCall` steps are replaced with the full step sequences they reference.
+2. **Feature middleware** - declared `features` inject reusable guidance blocks into step prompts at well-defined injection points.
+3. **Contract pack resolution** - `outputContract.contractRef` references are resolved to their WorkRail-owned schemas.
+4. **Binding resolution** - `{{wr.bindings.*}}` tokens are replaced with values from `.workrail/bindings.json` (project-local overrides) or workflow defaults.
+
+After all passes, the engine computes a **`workflowHash`** - a content hash of the fully expanded compiled workflow. This hash is embedded into every `stateToken` issued for that run.
+
+Workflow pinning by hash is the mechanism that makes runs deterministic: even if the workflow JSON file changes on disk after a session starts, subsequent `continue_workflow` calls execute against the snapshot that was hashed at start time. The compiled snapshot is persisted in the session store alongside the event log.
+
+## Step Hiding
+
+Step hiding is a structural property of WorkRail, not a prompt instruction.
+
+The engine returns exactly one step at a time. The compiled DAG exists only inside the engine process - the agent receives the current step's rendered prompt and nothing else. Future steps are not transmitted. There is no API surface through which the agent can request or preview upcoming steps.
+
+This means agents cannot skip ahead, reorder steps, or shortcut the workflow. Each `continue_workflow` call advances the DAG by exactly one node (or stays on the same node if a required output contract is not satisfied). The engine decides what comes next; the agent executes the step it is given.
+
+Conditional steps (`runCondition`) and loops are also resolved inside the engine. The agent does not make routing decisions - it sets context variables that the engine evaluates against conditions when selecting the next node.
+
+## Session Persistence
+
+Sessions are durable. Every state transition is written to disk as an append-only event before the engine returns a response.
+
+**Storage location:** `~/.workrail/data/sessions/<sessionId>/`
+
+Each session directory contains:
+- **`events/*.jsonl`** - Domain event segments. Each file is a sequence of JSON lines, one event per line, ordered by a monotonic `EventIndex`.
+- **`manifest.jsonl`** - Control stream. Records attested segment boundaries and pinned workflow snapshot references. The manifest is the integrity anchor: a segment without a corresponding `segment_closed` record in the manifest is treated as an orphan and ignored.
+
+**Crash-safe append protocol:** The engine writes events atomically using a temp-file rename sequence:
+1. Write events to a temp segment file
+2. `fsync` the file, then `rename` to its final path
+3. Append a `segment_closed` record to `manifest.jsonl` and `fsync`
+
+A crash before step 3 leaves an orphan segment that is silently ignored on load. A crash after step 3 leaves a fully committed, integrity-verified segment. There is no ambiguous middle state.
+
+**Rehydration:** `resume_session` scans session directories, reads the manifest and event log, and rebuilds the current execution state by replaying events through pure projection functions. No mutable in-memory state is required - the event log is the single source of truth.
+
+The projections (`src/v2/durable-core/projections/`) are pure functions: `reduce(events) -> SessionState`. They are deterministic and have no side effects, which makes replay exact and export/import safe.
+
+## Token Protocol
+
+WorkRail uses three opaque token types to make execution replay-safe and tamper-evident:
+
+- **`stateToken`** (`st_...`) - Encodes the current execution snapshot: workflow ID, workflow hash, run ID, and DAG position. Issued by `start_workflow` and every `continue_workflow` response.
+- **`ackToken`** (`ack_...`) - Represents authority to advance the workflow from a specific snapshot. The engine accepts an ackToken only once per snapshot - replaying the same `(stateToken, ackToken)` pair returns the same response without re-advancing.
+- **`checkpointToken`** (`chk_...`) - Represents authority to append a checkpoint (durable notes without DAG advancement) at a specific snapshot.
+
+All three token types are HMAC-signed. The engine validates the signature on every call. Clients must treat tokens as opaque strings and round-trip them exactly as received - inspecting or constructing token values is not supported.
+
+**Branching:** If the agent rewinds a conversation and replays an older `stateToken`, the engine detects that the snapshot already has children (the earlier advance) and creates a new branch in the run graph rather than overwriting prior work. Both branches coexist in the session store.
+
+A minimal `start_workflow` response looks like this:
+
+```json
+{
+  "stateToken": "st_...",
+  "ackToken":   "ack_...",
+  "checkpointToken": "chk_...",
+  "pending": {
+    "stepId": "phase-0-triage",
+    "title": "Phase 0: Triage",
+    "prompt": "..."
+  },
+  "isComplete": false,
+  "session": {
+    "sessionId": "sess_...",
+    "runId": "run_..."
+  }
+}
+```
+
+The `session` field is informational (for dashboard display). Execution correctness is entirely token-driven.
+
+For full normative token semantics - idempotency guarantees, blocker shapes, branching policy, and output contract enforcement - see the [Workflow Execution Contract](./reference/workflow-execution-contract.md).
+
+## Workflow Sources
+
+WorkRail discovers workflows from multiple sources at startup and merges them into a single registry:
+
+- **Bundled workflows** - Shipped with the npm package. IDs are in the reserved `wr.*` namespace (e.g. `wr.bug-investigation`, `wr.coding-task`). Cannot be overridden.
+- **User workflows** - JSON files placed in `~/.workrail/workflows/`. Use any non-`wr.*` namespace (e.g. `project.my-review`).
+- **Git repositories** - Configured in `~/.workrail/config.json`. WorkRail clones or pulls the repo and loads workflows from the configured path.
+
+Workflow IDs use a `namespace.name` format. The `wr.*` namespace is reserved for bundled workflows. Non-bundled workflows that claim `wr.*` IDs are rejected at load time. Legacy IDs (no dot separator) remain runnable for backward compatibility but cannot be created.
+
+`list_workflows` returns all discovered workflows with their source and namespace status. `inspect_workflow` returns metadata and a step preview without starting execution.
+
+## The Console
+
+The WorkRail Console is a read-only browser dashboard for inspecting workflow sessions.
+
+```
+worktrain console
+```
+
+The console reads session files directly from `~/.workrail/data/sessions/` - it does not require the MCP server to be running. It renders session lists, per-session step history, DAG visualization, and per-node output artifacts.
+
+Source: `src/console/standalone-console.ts`.
+
+## Further Reading
+
+- [Workflow Execution Contract](./reference/workflow-execution-contract.md) - Normative token protocol, blocker shapes, output contracts, and branching semantics.
+- [Authoring Guide (v2)](./authoring-v2.md) - How to write workflow JSON: steps, templates, features, conditions, loops, and output contracts.
+- [v2 Core Design Locks](./design/v2-core-design-locks.md) - Locked design decisions for the execution engine: event log invariants, token scoping, preferences, and capabilities.
+- [Configuration](./configuration.md) - Environment variables, Git repository sources, and local paths.
+- [All Workflows](./workflows.md) - Full catalog of bundled workflows with descriptions and when to use each.

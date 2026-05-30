@@ -1405,6 +1405,83 @@ triggerCommand
   });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// REPORT COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('report')
+  .description(
+    'Generate a machine-readable JSON report of session history and metrics.\n' +
+    'All progress goes to stderr. stdout is always valid JSON.\n' +
+    'Covers at most 500 most-recently-modified sessions.\n' +
+    'Use --schedule daily|weekly to install an automatic recurring report.',
+  )
+  .option('--days <n>', 'Sessions modified in the last N days (default: 30)', parseInt)
+  .option('--since <date>', 'Override start date (YYYY-MM-DD)')
+  .option('--until <date>', 'Override end date (YYYY-MM-DD, default: today)')
+  .option('--out <file>', 'Write JSON to this file instead of stdout')
+  .addOption(
+    new Option('--schedule <frequency>', 'Install a recurring schedule (mutually exclusive with report output)')
+      .choices(['daily', 'weekly']),
+  )
+  .action(async (options: { days?: number; since?: string; until?: string; out?: string; schedule?: string }) => {
+    // --schedule mode: install launchd plist or crontab, then exit.
+    // Mutually exclusive with JSON report output.
+    if (options.schedule !== undefined) {
+      const { installReportSchedule } = await import('./cli/commands/worktrain-report-schedule.js');
+      const frequency = options.schedule as 'daily' | 'weekly';
+
+      const result = await installReportSchedule(
+        {
+          platform: process.platform,
+          worktrainBinPath: process.argv[1] ?? 'worktrain',
+          nodeBinPath: process.execPath,
+          homedir: os.homedir,
+          joinPath: path.join,
+          writeFile: async (filePath: string, content: string) => {
+            await fs.promises.writeFile(filePath, content, 'utf-8');
+          },
+          mkdir: async (dirPath: string) => {
+            await fs.promises.mkdir(dirPath, { recursive: true });
+          },
+          exec: async (command: string, args: string[]) => {
+            try {
+              const { stdout, stderr } = await execFileAsync(command, args, { encoding: 'utf-8' });
+              return { stdout: stdout ?? '', stderr: stderr ?? '', exitCode: 0 };
+            } catch (err: unknown) {
+              const e = err as { stdout?: string; stderr?: string; code?: number };
+              return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: typeof e.code === 'number' ? e.code : 1 };
+            }
+          },
+          print: (line: string) => process.stdout.write(line + '\n'),
+          printErr: (line: string) => process.stderr.write(line + '\n'),
+        },
+        frequency,
+      );
+
+      if (result.kind === 'ok') {
+        process.stdout.write(result.detail + '\n');
+      } else {
+        process.stderr.write(`[report] Schedule install failed: ${result.message}\n`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Report mode: generate JSON.
+    const { executeWorktrainReportCommand, buildWorktrainReportCommandDeps } =
+      await import('./cli/commands/worktrain-report.js');
+
+    const deps = buildWorktrainReportCommandDeps();
+    await executeWorktrainReportCommand(deps, {
+      days: options.days,
+      since: options.since,
+      until: options.until,
+      out: options.out,
+    });
+  });
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ENTRY POINT
 // ═══════════════════════════════════════════════════════════════════════════
 

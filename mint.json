@@ -20,6 +20,7 @@
       "group": "Getting Started",
       "pages": [
         "docs/introduction",
+        "docs/why-workrail",
         "docs/integrations/claude-code",
         "docs/integrations/firebender"
       ]
@@ -28,8 +29,15 @@
       "group": "Workflows",
       "pages": [
         "docs/workflows",
-        "docs/authoring-v2",
+        "docs/authoring-guide",
         "docs/configuration"
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        "docs/architecture",
+        "docs/troubleshooting"
       ]
     }
   ],

@@ -1,0 +1,449 @@
+---
+title: "Troubleshooting"
+description: "Solutions to common problems when setting up and using WorkRail"
+---
+
+This page covers the most common issues developers run into when installing WorkRail, connecting it as an MCP server, and running workflows. If your problem is not listed here, check the [GitHub Discussions](https://github.com/EtienneBBeaulac/workrail/discussions) or open an issue.
+
+---
+
+## Installation and Startup
+
+### "Permission denied" when WorkRail starts
+
+**Symptom:** The MCP server fails immediately with a `Permission denied` error.
+
+**Cause:** Versions before 3.19.0 were published without the execute bit set on the binary.
+
+**Fix:**
+
+```sh
+# Option A: reinstall (recommended)
+npm install -g @exaudeus/workrail
+
+# Option B: fix in place without reinstalling
+chmod +x $(npm root -g)/@exaudeus/workrail/dist/mcp-server.js
+```
+
+After fixing, restart your MCP client.
+
+---
+
+### npx fails or hangs on first run
+
+**Symptom:** `npx @exaudeus/workrail` hangs, times out, or throws a network error.
+
+**Cause:** The first run downloads the package from npm. A slow network, proxy, or corporate firewall can interrupt this.
+
+**Fix:**
+
+```sh
+# Pre-install globally so npx resolves locally
+npm install -g @exaudeus/workrail
+
+# Verify the install
+workrail --version
+```
+
+Once installed globally, the MCP config still works unchanged -- `npx -y @exaudeus/workrail` prefers the global install when one exists.
+
+---
+
+## MCP Server Connection
+
+### WorkRail tools not available in the agent
+
+**Symptom:** The agent says it does not have access to WorkRail tools, or commands like `list_workflows` are not recognized.
+
+**Cause:** The MCP server did not start, the config is malformed, or the client was not restarted after the config was added.
+
+**Diagnostic steps:**
+
+1. Verify the config is valid JSON and in the correct location.
+2. Restart the client -- MCP servers are loaded at startup, not mid-session.
+3. Check for errors in the client's MCP log or developer console.
+
+**Claude Desktop (macOS):**
+
+```json
+// ~/Library/Application Support/Claude/claude_desktop_config.json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"]
+    }
+  }
+}
+```
+
+After editing: quit Claude Desktop fully (do not just close the window), then relaunch.
+
+**Claude Code CLI:**
+
+```json
+// .claude.json in your project root
+{
+  "projects": {
+    "/absolute/path/to/your/project": {
+      "mcpServers": {
+        "workrail": {
+          "type": "stdio",
+          "command": "npx",
+          "args": ["-y", "@exaudeus/workrail"],
+          "env": {}
+        }
+      }
+    }
+  }
+}
+```
+
+After editing: exit and start a new Claude Code session. You can verify the server loaded by running `/mcp` in the session.
+
+```sh
+# Add via CLI instead of editing manually
+claude mcp add workrail npx -y @exaudeus/workrail
+```
+
+**Important:** The project path in `.claude.json` must be an absolute path that exactly matches your project directory.
+
+---
+
+### MCP server starts but immediately exits
+
+**Symptom:** The server appears in the MCP client for a moment, then disappears. Subsequent tool calls fail.
+
+**Common causes and fixes:**
+
+| Cause | Fix |
+|-------|-----|
+| Node.js version too old | WorkRail requires Node 18+. Run `node --version` to check. |
+| `npx` resolves the wrong version | Run `npm install -g @exaudeus/workrail` and use the global binary. |
+| `WORKFLOW_GIT_REPOS` points to an unreachable repo | Remove the env var or fix the URL; the server exits if it cannot clone on startup. |
+| Missing `GITHUB_TOKEN` for a private repo | Add `"GITHUB_TOKEN": "ghp_..."` to the `env` block in your MCP config. |
+
+---
+
+### Two "workrail" entries appear in /mcp
+
+**Symptom:** Running `/mcp` in Claude Code shows two workrail entries -- one from global settings and one from the project `.mcp.json` or `.claude.json`.
+
+**Fix:** Rename one of the entries. The project-level entry should shadow the global one. If both have the same name, the behavior is client-specific and can cause tool conflicts.
+
+```json
+// In .mcp.json, rename to distinguish from the global entry
+{
+  "mcpServers": {
+    "workrail-project": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"]
+    }
+  }
+}
+```
+
+---
+
+## Workflow Discovery
+
+### Agent can't find a workflow
+
+**Symptom:** The agent says a workflow does not exist, or `list_workflows` returns an empty list.
+
+**Diagnostic steps:**
+
+```sh
+# See what workflows WorkRail can discover
+npx @exaudeus/workrail list
+
+# Check your custom workflow directory
+ls -la ~/.workrail/workflows/
+
+# Verify the env var is set if using a custom path
+echo $WORKFLOW_STORAGE_PATH
+```
+
+**Common causes:**
+
+- **Custom workflow file has a JSON syntax error.** WorkRail silently skips files it cannot parse. Validate your JSON with `node -e "require('./my-workflow.json')"`.
+- **Wrong workflow ID in the prompt.** Workflow IDs are case-sensitive and must match exactly. Ask the agent to `list_workflows` and use the ID from the list.
+- **`WORKFLOW_STORAGE_PATH` not passed to the server.** Environment variables must be set in the MCP server config `env` block, not in your shell profile:
+  ```json
+  {
+    "env": {
+      "WORKFLOW_STORAGE_PATH": "/path/to/your/workflows"
+    }
+  }
+  ```
+- **Git repository failed to clone.** If using `WORKFLOW_GIT_REPOS`, test connectivity:
+  ```sh
+  git ls-remote https://github.com/your-org/workflows.git
+  ```
+
+---
+
+### Custom workflow file is ignored
+
+**Symptom:** You added a `.json` file to `~/.workrail/workflows/` but the workflow does not appear.
+
+**Checklist:**
+
+1. The file must be valid JSON -- a single syntax error silently skips the file.
+2. The `id` field must be present and unique. Duplicate IDs cause unpredictable behavior.
+3. The `steps` array must have at least one entry.
+4. File extension must be `.json` (not `.jsonc` or `.json5`).
+
+**Minimal valid workflow:**
+
+```json
+{
+  "id": "my-checklist",
+  "name": "My Checklist",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "step-1",
+      "title": "First step",
+      "prompt": "Do this thing."
+    }
+  ]
+}
+```
+
+---
+
+## Workflow Execution
+
+### Workflow won't start
+
+**Symptom:** `start_workflow` returns an error or the agent says it cannot start the workflow.
+
+**Common causes:**
+
+- **Wrong workflow ID.** Use `list_workflows` to get the exact ID. Example: `wr.bug-investigation`, not `bug-investigation`.
+- **Missing required parameters.** Some workflows require a `goal` parameter or other context. Check the workflow's description in `list_workflows`.
+- **Workspace path mismatch.** Pass `workspacePath` matching your project directory. The server uses this to resolve project-local workflow variants.
+
+---
+
+### Agent skips `continue_workflow` and writes a summary instead
+
+**Symptom:** The agent completes a step but does not call `continue_workflow`. Instead, it writes out the next steps in prose.
+
+**Cause:** The agent did not understand it must call WorkRail to advance. This is a prompting issue, not a server issue.
+
+**Fix:** Prompt the agent explicitly:
+
+```
+Use the WorkRail start_workflow and continue_workflow tools to execute the workflow.
+Do not summarize -- call continue_workflow after each step.
+```
+
+For persistent setups, add this instruction to your system prompt or agent config.
+
+---
+
+### Step completes but the next step prompt looks wrong
+
+**Symptom:** After advancing with `continue_workflow`, the returned step seems out of sequence or irrelevant.
+
+**Cause:** This can happen if a `continueToken` from one session is used in a different session, or if the token was modified. Tokens are opaque signed values and must be passed exactly as returned -- never decoded or modified.
+
+**Fix:** Start a fresh session with `start_workflow`. If the workflow is long and you need to resume it, use the session resumption flow (see below).
+
+---
+
+## Session Resumption
+
+### Cannot resume a session from a previous conversation
+
+**Symptom:** You want to continue a workflow from yesterday, but the session context is gone.
+
+**How resumption works:** WorkRail saves sessions to disk at every step. You can resume from any new conversation by calling `resume_session` with the session ID.
+
+**Step-by-step:**
+
+1. Find the session ID. If you saved a checkpoint token (`st_...`) in the previous session, use that. Otherwise, ask the agent:
+   ```
+   List my recent WorkRail sessions
+   ```
+2. Resume:
+   ```
+   Resume WorkRail session <session-id>
+   ```
+   The agent calls `resume_session`, and WorkRail returns the current step exactly where you left off.
+
+**If the session is not found:**
+
+```sh
+# Sessions are stored here
+ls ~/.workrail/data/sessions/
+
+# Check for the session file directly
+ls ~/.workrail/data/sessions/ | grep <partial-session-id>
+```
+
+If the directory is empty or missing, the session data was not written -- this can happen if the server process was killed mid-step before the write completed.
+
+---
+
+### Checkpoint token does not work after a long pause
+
+**Symptom:** A `st_...` resume token that worked before now returns an error.
+
+**Cause:** Session tokens encode a snapshot of the session state. If the workflow definition itself was updated or removed after the checkpoint was created, the token may no longer resolve to a valid step.
+
+**Fix:** Start a fresh session. For long-lived workflows, keep the session files in `~/.workrail/data/sessions/` and use the session ID (not just the token) for resumption.
+
+---
+
+## Git Repository Workflows
+
+### Git repository authentication fails
+
+**Symptom:** Workflows from a private Git repository are not available, or the server logs show authentication errors.
+
+**Fix:**
+
+```sh
+# Verify your token has repo read access
+curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
+
+# Test the specific repo is accessible
+git ls-remote https://github.com/your-org/workflows.git
+```
+
+If the test succeeds but WorkRail still fails, make sure `GITHUB_TOKEN` is in the MCP config `env` block, not just your shell:
+
+```json
+{
+  "mcpServers": {
+    "workrail": {
+      "command": "npx",
+      "args": ["-y", "@exaudeus/workrail"],
+      "env": {
+        "WORKFLOW_GIT_REPOS": "https://github.com/your-org/workflows.git",
+        "GITHUB_TOKEN": "ghp_your_token_here"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Firebender-Specific Issues
+
+### WorkRail Executor subagent can't find workflow tools
+
+**Symptom:** A Firebender subagent reports it cannot call `list_workflows` or `start_workflow`.
+
+**Cause:** The subagent has an explicit `tools` whitelist that does not include WorkRail tools. In Firebender, any `tools` field -- even a partial one -- overrides tool inheritance. The subagent only sees what is explicitly listed.
+
+**Fix A (recommended):** Remove the `tools` field entirely from the subagent YAML frontmatter. Without a `tools` field, the subagent inherits all tools from the main agent, including WorkRail.
+
+**Fix B:** If you need a whitelist, add WorkRail tools explicitly:
+
+```json
+{
+  "tools": [
+    "read_file",
+    "grep",
+    "list_workflows",
+    "start_workflow",
+    "continue_workflow",
+    "checkpoint_workflow"
+  ]
+}
+```
+
+---
+
+### Subagent returns incomplete or shallow results
+
+**Symptom:** A delegated workflow completes but the output is missing key content or seems superficial.
+
+**Cause:** The delegation prompt did not include enough context for the subagent to work with.
+
+**Fix:** Provide a complete work package when delegating:
+
+- **Workflow** -- the exact workflow name or ID to run
+- **Mission** -- what to accomplish
+- **Target** -- which files, directories, or code areas to analyze
+- **Context** -- relevant background, prior findings, constraints
+- **Deliverable** -- what artifact to produce and in what format
+
+---
+
+## Claude Code-Specific Issues
+
+### workrail-executor agent reports wrong tool names
+
+**Symptom:** The `workrail-executor` subagent says a tool like `mcp_workrail_start_workflow` does not exist.
+
+**Cause:** Tool names in Claude Code MCP use double underscores as separators. Single underscores are wrong.
+
+**Correct tool name format:**
+
+```
+mcp__workrail__start_workflow   (correct -- double underscores)
+mcp_workrail_start_workflow     (wrong -- single underscores)
+```
+
+Fix the tool names in your `~/.claude/agents/workrail-executor.md` and start a fresh session.
+
+---
+
+### Agent config changes not taking effect
+
+**Symptom:** You edited `~/.claude/agents/workrail-executor.md` but the agent still behaves the old way.
+
+**Fix:** Agent configs are loaded at session start. Start a fresh Claude Code session after editing agent files.
+
+---
+
+## Diagnostics Reference
+
+### Quick health check commands
+
+```sh
+# Is the package installed?
+npx @exaudeus/workrail --version
+
+# What workflows are visible?
+npx @exaudeus/workrail list
+
+# Are custom workflow files valid JSON?
+node -e "require('/path/to/your/workflow.json')" && echo "Valid"
+
+# Where are sessions stored?
+ls ~/.workrail/data/sessions/
+
+# Is WORKFLOW_STORAGE_PATH set?
+echo $WORKFLOW_STORAGE_PATH
+
+# Can the server reach a private Git repo?
+git ls-remote $WORKFLOW_GIT_REPOS
+```
+
+### Environment variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `WORKFLOW_STORAGE_PATH` | Directory for custom workflow JSON files | `~/.workrail/workflows/` |
+| `WORKFLOW_GIT_REPOS` | Comma-separated list of Git repo URLs to load workflows from | (none) |
+| `GITHUB_TOKEN` | Auth token for private GitHub repositories | (none) |
+| `WORKFLOW_INCLUDE_BUNDLED` | Set to `false` to disable the 30+ built-in workflows | `true` |
+| `WORKRAIL_ENABLE_SESSION_TOOLS` | Set to `true` to expose session inspection tools | `false` |
+
+See the [Configuration Reference](/docs/configuration) for the full list.
+
+---
+
+## Still stuck?
+
+- [GitHub Issues](https://github.com/EtienneBBeaulac/workrail/issues) -- search before opening a new one
+- [Configuration Reference](/docs/configuration) -- all environment variables and settings
+- [Claude Code Integration Guide](/docs/integrations/claude-code) -- setup walkthrough for Claude Code and Claude Desktop
+- [Firebender Integration Guide](/docs/integrations/firebender) -- Firebender-specific setup
