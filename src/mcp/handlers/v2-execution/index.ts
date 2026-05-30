@@ -32,6 +32,7 @@ import type { StepContentEnvelope } from '../../step-content-envelope.js';
 import { rememberExplicitWorkspaceRoot } from '../shared/remembered-roots.js';
 import { collect } from '../../client-usage/index.js';
 import { USAGE_READERS } from '../../client-usage/registry.js';
+import { isSnapshotCapable } from '../../client-usage/types.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
@@ -223,14 +224,15 @@ async function recordTokenCheckpoint(
     if (!workspacePath || !runId) return;
 
     // Try each registered reader in order; use the first snapshot found.
-    // WHY registry (not hardcoded): supports Cursor, Antigravity, and future clients
-    // without changing this function. Readers that don't implement snapshotConversation
-    // are skipped automatically.
-    const verifyId = phase === 'end' ? String(sessionId) : undefined;
+    // WHY isSnapshotCapable guard: only readers that explicitly implement the
+    // SnapshotCapable interface are eligible -- no partial implementations possible.
+    const request = phase === 'end'
+      ? { kind: 'end' as const, sessionId }
+      : { kind: 'start' as const };
     let snapshot = null;
     for (const reader of USAGE_READERS) {
-      if (!reader.snapshotConversation) continue;
-      snapshot = await reader.snapshotConversation(workspacePath, verifyId);
+      if (!isSnapshotCapable(reader)) continue;
+      snapshot = await reader.snapshotConversation(workspacePath, request);
       if (snapshot) break;
     }
     if (!snapshot) return;

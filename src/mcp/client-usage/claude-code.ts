@@ -21,7 +21,7 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ClientUsage, ClientUsageReader, TokenSnapshot } from './types.js';
+import type { ClientUsage, ClientUsageReader, SnapshotCapable, SnapshotRequest, TokenSnapshot } from './types.js';
 
 /**
  * Shape of an assistant message in Claude Code's JSONL format.
@@ -168,7 +168,7 @@ function sumSnapshotFromLines(lines: string[]): TokenSnapshot | null {
   };
 }
 
-export class ClaudeCodeUsageReader implements ClientUsageReader {
+export class ClaudeCodeUsageReader implements ClientUsageReader, SnapshotCapable {
   readonly clientName = 'claude-code';
 
   constructor(
@@ -272,11 +272,11 @@ export class ClaudeCodeUsageReader implements ClientUsageReader {
   }
 
   /**
-   * Implements ClientUsageReader.snapshotConversation -- delegates to
-   * snapshotCurrentConversation so the registry can drive checkpoints
-   * without knowing the concrete class.
+   * Implements SnapshotCapable.snapshotConversation.
+   * Switches on request.kind to derive the optional sessionId for verification.
    */
-  snapshotConversation(workspacePath: string, sessionId?: string): Promise<TokenSnapshot | null> {
+  snapshotConversation(workspacePath: string, request: SnapshotRequest): Promise<TokenSnapshot | null> {
+    const sessionId = request.kind === 'end' ? String(request.sessionId) : undefined;
     return this.snapshotCurrentConversation(workspacePath, sessionId);
   }
 }
