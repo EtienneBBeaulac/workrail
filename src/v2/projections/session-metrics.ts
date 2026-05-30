@@ -2,6 +2,9 @@ import type { DomainEventV1 } from '../durable-core/schemas/session/index.js';
 import { EVENT_KIND, VALID_METRICS_OUTCOME } from '../durable-core/constants.js';
 import type { MetricsOutcome } from '../durable-core/constants.js';
 import type { ClientUsage, TokenSnapshot } from '../durable-core/schemas/session/usage.js';
+import type { GitEvidence } from '../durable-core/schemas/session/git-evidence.js';
+
+export type { GitEvidence, GitCommittedDiff, GitWorkingTreeState } from '../durable-core/schemas/session/git-evidence.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -25,6 +28,10 @@ export interface SessionMetricsV2 {
   readonly endGitSha: string | null;
   readonly gitBranch: string | null;
   readonly agentCommitShas: readonly string[];
+  /**
+   * @deprecated Always 'none' for sessions since PR #903 (agentCommitShas is always empty).
+   * Use `gitEvidence.captureConfidence` for accurate confidence from engine-side git metrics.
+   */
   readonly captureConfidence: 'high' | 'none';
   /**
    * Wall-clock duration of the run in milliseconds.
@@ -54,6 +61,17 @@ export interface SessionMetricsV2 {
    * checkpoints were written and the delta is computable.
    */
   readonly tokenDelta: TokenSnapshot | null;
+  /**
+   * Authoritative engine-side git diff evidence for this session.
+   *
+   * Populated from the `git_metrics_recorded` event when present.
+   * null when that event is absent (session predates the feature, session
+   * is still in progress, or the fire-and-forget recording failed silently).
+   *
+   * Prefer this field over the legacy startGitSha/endGitSha/agentCommitShas
+   * fields, which are populated from run_completed and have known accuracy issues.
+   */
+  readonly gitEvidence: GitEvidence | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +262,45 @@ export function projectSessionMetricsV2(
         }
       : null;
 
+  // Project gitEvidence from git_metrics_recorded event (if present).
+  // Backward compat: null for sessions that predate the git_metrics feature.
+  let gitEvidence: GitEvidence | null = null;
+  for (const e of events) {
+    if (e.kind !== EVENT_KIND.GIT_METRICS_RECORDED) continue;
+    if (e.scope?.runId !== runCompletedRunId) continue;
+    const gd = e.data;
+    const committedDiff =
+      gd.filesChanged !== null && gd.linesAdded !== null && gd.linesRemoved !== null
+        ? {
+            filesChanged: gd.filesChanged,
+            linesAdded: gd.linesAdded,
+            linesRemoved: gd.linesRemoved,
+            truncated: gd.truncated,
+          }
+        : null;
+    const workingTree =
+      gd.stagedFiles !== null && gd.unstagedFiles !== null
+        ? {
+            stagedFiles: gd.stagedFiles,
+            unstagedFiles: gd.unstagedFiles,
+          }
+        : null;
+    gitEvidence = {
+      startSha: typeof gd.startSha === 'string' ? gd.startSha : null,
+      endSha: typeof gd.endSha === 'string' ? gd.endSha : null,
+      commitShas: Array.isArray(gd.commitShas)
+        ? gd.commitShas.filter((s): s is string => typeof s === 'string')
+        : [],
+      prRefs: Array.isArray(gd.prRefs)
+        ? gd.prRefs.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
+        : [],
+      committedDiff,
+      workingTree,
+      captureConfidence: gd.captureConfidence,
+    };
+    break; // first git_metrics_recorded by event order wins
+  }
+
   return {
     startGitSha,
     endGitSha,
@@ -258,5 +315,6 @@ export function projectSessionMetricsV2(
     linesRemoved,
     usageEvents,
     tokenDelta,
+    gitEvidence,
   };
 }

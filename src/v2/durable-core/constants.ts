@@ -278,6 +278,8 @@ export const EVENT_KIND = {
   REVIEW_DRAFT_SUBMITTED: 'review_draft_submitted',
   USAGE_RECORDED: 'usage_recorded',
   TOKEN_CHECKPOINT: 'token_checkpoint',
+  GIT_START_RECORDED: 'git_start_recorded',
+  GIT_METRICS_RECORDED: 'git_metrics_recorded',
 } as const;
 
 export type EventKindV1 = typeof EVENT_KIND[keyof typeof EVENT_KIND];
