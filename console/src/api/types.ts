@@ -93,6 +93,18 @@ export type ClientUsage = {
   readonly turns: number;
 };
 
+/**
+ * Mirror of TokenSnapshot in src/v2/durable-core/schemas/session/usage.ts.
+ * Keep in sync with the backend definition.
+ */
+export type TokenSnapshot = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly turns: number;
+};
+
 export interface SessionMetricsV2 {
   // From run_completed event (engine-authoritative)
   readonly startGitSha: string | null;
@@ -109,6 +121,8 @@ export interface SessionMetricsV2 {
   readonly linesRemoved: number | null;
   // From usage_recorded events (one entry per MCP client detected)
   readonly usageEvents: readonly ClientUsage[];
+  // From token_checkpoint events (start/end delta for this workflow run)
+  readonly tokenDelta: TokenSnapshot | null;
 }
 
 export interface ConsoleSessionSummary {

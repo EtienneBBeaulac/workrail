@@ -25,3 +25,21 @@ export type ClientUsage = {
   readonly cacheWriteTokens: number;
   readonly turns: number;
 };
+
+/**
+ * A point-in-time snapshot of cumulative token usage for a conversation.
+ *
+ * Used by token_checkpoint events (phase: start | end). The delta between
+ * end and start gives the tokens consumed by a single workflow run.
+ *
+ * WHY separate from ClientUsage: checkpoints are conversation-level totals,
+ * not session-attributed usage. They have no client or model field because
+ * the snapshot is taken before the per-session correlation is possible.
+ */
+export type TokenSnapshot = {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly turns: number;
+};

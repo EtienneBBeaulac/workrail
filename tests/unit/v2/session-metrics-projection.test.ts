@@ -512,4 +512,95 @@ describe('projectSessionMetricsV2', () => {
     if (!result) return;
     expect(result.usageEvents).toEqual([]);
   });
+
+  it('tokenDelta is null when no token_checkpoint events present', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.tokenDelta).toBeNull();
+  });
+
+  it('tokenDelta is null when only one checkpoint present', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+      {
+        v: 1, eventId: 'evt_ck', eventIndex: 3, sessionId: 'sess_1',
+        kind: 'token_checkpoint', dedupeKey: 'ck:start', scope: { runId: 'run_1' },
+        data: { phase: 'start', inputTokens: 1000, outputTokens: 50, cacheReadTokens: 500, cacheWriteTokens: 100, turns: 5 },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.tokenDelta).toBeNull();
+  });
+
+  it('tokenDelta equals end minus start for each field', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+      {
+        v: 1, eventId: 'evt_start', eventIndex: 3, sessionId: 'sess_1',
+        kind: 'token_checkpoint', dedupeKey: 'ck:start', scope: { runId: 'run_1' },
+        data: { phase: 'start', inputTokens: 1000, outputTokens: 50, cacheReadTokens: 5000, cacheWriteTokens: 200, turns: 10 },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+      {
+        v: 1, eventId: 'evt_end', eventIndex: 4, sessionId: 'sess_1',
+        kind: 'token_checkpoint', dedupeKey: 'ck:end', scope: { runId: 'run_1' },
+        data: { phase: 'end', inputTokens: 1500, outputTokens: 120, cacheReadTokens: 8000, cacheWriteTokens: 350, turns: 18 },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.tokenDelta).toEqual({
+      inputTokens: 500,
+      outputTokens: 70,
+      cacheReadTokens: 3000,
+      cacheWriteTokens: 150,
+      turns: 8,
+    });
+  });
+
+  it('tokenDelta clamps negative values to 0 (guard against clock skew)', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2 }),
+      {
+        v: 1, eventId: 'evt_start', eventIndex: 3, sessionId: 'sess_1',
+        kind: 'token_checkpoint', dedupeKey: 'ck:start', scope: { runId: 'run_1' },
+        data: { phase: 'start', inputTokens: 2000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, turns: 20 },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+      {
+        v: 1, eventId: 'evt_end', eventIndex: 4, sessionId: 'sess_1',
+        kind: 'token_checkpoint', dedupeKey: 'ck:end', scope: { runId: 'run_1' },
+        data: { phase: 'end', inputTokens: 1800, outputTokens: 80, cacheReadTokens: 0, cacheWriteTokens: 0, turns: 18 },
+        timestampMs: 0,
+      } as unknown as DomainEventV1,
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    // end < start should clamp to 0, not go negative
+    expect(result.tokenDelta!.inputTokens).toBe(0);
+    expect(result.tokenDelta!.outputTokens).toBe(0);
+    expect(result.tokenDelta!.turns).toBe(0);
+  });
 });

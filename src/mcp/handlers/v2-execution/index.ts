@@ -31,6 +31,8 @@ import { attachV2ExecutionRenderMetadata } from '../../render-envelope.js';
 import type { StepContentEnvelope } from '../../step-content-envelope.js';
 import { rememberExplicitWorkspaceRoot } from '../shared/remembered-roots.js';
 import { collect } from '../../client-usage/index.js';
+import { USAGE_READERS } from '../../client-usage/registry.js';
+import { isSnapshotCapable } from '../../client-usage/types.js';
 import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
@@ -90,11 +92,18 @@ export async function handleV2StartWorkflow(
   if (rememberedRootFailure) return rememberedRootFailure;
 
   return executeStartWorkflow(input, guard.ctx, { triggerSource: 'mcp' }).match(
-    (result) => success(attachV2ExecutionRenderMetadata({
-      response: result.response,
-      lifecycle: 'start',
-      contentEnvelope: result.contentEnvelope,
-    })),
+    (result) => {
+      // Fire-and-forget: snapshot conversation tokens at workflow start.
+      void recordTokenCheckpoint(
+        result.sessionId, 'start', input.workspacePath,
+        guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
+      );
+      return success(attachV2ExecutionRenderMetadata({
+        response: result.response,
+        lifecycle: 'start',
+        contentEnvelope: result.contentEnvelope,
+      }));
+    },
     (e) => mapStartWorkflowErrorToToolError(e)
   );
 }
@@ -166,6 +175,104 @@ function loadAndRehydrate(
       resolvedRootUris: args.ctx.v2.resolvedRootUris,
       cleanResponseFormat: args.ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
     }));
+}
+
+// ── Token checkpoint (fire-and-forget) ───────────────────────────────────
+
+/**
+ * Snapshot the current conversation's cumulative token usage and write a
+ * token_checkpoint event to the session store.
+ *
+ * Called fire-and-forget at workflow start (phase='start') and completion (phase='end').
+ * Must never throw or reject -- all errors are caught and logged.
+ *
+ * WHY at both boundaries: the delta between end and start gives tokens consumed
+ * by this specific workflow run, isolated from prior conversation turns.
+ *
+ * WHY sessionId optional at start: the session has just been created and has not
+ * appeared in any tool call yet, so JSONL verification would always fail. At end
+ * time, the session ID has been used in tool calls and verification is meaningful.
+ */
+async function recordTokenCheckpoint(
+  sessionId: SessionId,
+  phase: 'start' | 'end',
+  /** Workspace path known at call time (start phase). When undefined, re-read from session events. */
+  workspacePathHint: string | undefined,
+  sessionStore: V2ToolContext['v2']['sessionStore'],
+  gate: V2ToolContext['v2']['gate'],
+  idFactory: V2ToolContext['v2']['idFactory'],
+): Promise<void> {
+  try {
+    // Re-read session events to get workspacePath and runId.
+    const loadResult = await sessionStore.load(sessionId);
+    if (loadResult.isErr()) return;
+    const events = loadResult.value.events;
+
+    let workspacePath: string | null = workspacePathHint ?? null;
+    let runId: string | null = null;
+
+    for (const e of events) {
+      if (!workspacePath && e.kind === 'observation_recorded' && e.data.key === 'repo_root') {
+        workspacePath = e.data.value.value;
+      }
+      if (!runId && e.kind === EVENT_KIND.RUN_STARTED) {
+        runId = e.scope.runId;
+      }
+      if (workspacePath && runId) break;
+    }
+
+    if (!workspacePath || !runId) return;
+
+    // Try each registered reader in order; use the first snapshot found.
+    // WHY isSnapshotCapable guard: only readers that explicitly implement the
+    // SnapshotCapable interface are eligible -- no partial implementations possible.
+    const request = phase === 'end'
+      ? { kind: 'end' as const, sessionId }
+      : { kind: 'start' as const };
+    let snapshot = null;
+    for (const reader of USAGE_READERS) {
+      if (!isSnapshotCapable(reader)) continue;
+      snapshot = await reader.snapshotConversation(workspacePath, request);
+      if (snapshot) break;
+    }
+    if (!snapshot) return;
+
+    await gate.withHealthySessionLock(sessionId, (lock) =>
+      sessionStore.load(sessionId).andThen((truth) => {
+        const sortedResult = asSortedEventLog(truth.events);
+        if (sortedResult.isErr()) return okAsync(undefined as void);
+        const index = buildSessionIndex(sortedResult.value);
+
+        const event = {
+          v: 1 as const,
+          eventId: idFactory.mintEventId(),
+          eventIndex: index.nextEventIndex,
+          sessionId: String(sessionId),
+          kind: EVENT_KIND.TOKEN_CHECKPOINT,
+          dedupeKey: `token-checkpoint:${String(sessionId)}:${phase}`,
+          scope: { runId },
+          data: {
+            phase,
+            inputTokens: snapshot.inputTokens,
+            outputTokens: snapshot.outputTokens,
+            cacheReadTokens: snapshot.cacheReadTokens,
+            cacheWriteTokens: snapshot.cacheWriteTokens,
+            turns: snapshot.turns,
+          },
+          timestampMs: Date.now(),
+        };
+
+        return sessionStore.append(lock, { events: [event], snapshotPins: [] }, truth);
+      })
+    ).match(
+      () => { /* success */ },
+      (err) => {
+        console.warn(`[workrail:checkpoint] Could not write token_checkpoint(${phase}) for ${String(sessionId)}: ${JSON.stringify(err)}`);
+      }
+    );
+  } catch (err: unknown) {
+    console.warn(`[workrail:checkpoint] Unexpected error writing token_checkpoint(${phase}) for ${String(sessionId)}: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // ── Usage collection (fire-and-forget) ───────────────────────────────────
@@ -360,7 +467,14 @@ export function executeContinueWorkflow(
               // WHY kind check + isComplete: gate_checkpoint has no isComplete field;
               // only ok/blocked variants with isComplete=true represent a finished session.
               if (response.kind !== 'gate_checkpoint' && response.isComplete) {
-                void collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
+                // WHY sequential (not concurrent): both functions acquire the same
+                // session gate lock. Concurrent void calls would cause the second
+                // to hit SESSION_LOCK_REENTRANT and silently fail. The lock is
+                // released after each operation, so sequential is correct and safe.
+                void (async () => {
+                  await collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
+                  await recordTokenCheckpoint(sessionId, 'end', undefined, sessionStore, gate, idFactory);
+                })();
               }
               return { response };
             });

@@ -277,6 +277,7 @@ export const EVENT_KIND = {
   DELIVERY_RECORDED: 'delivery_recorded',
   REVIEW_DRAFT_SUBMITTED: 'review_draft_submitted',
   USAGE_RECORDED: 'usage_recorded',
+  TOKEN_CHECKPOINT: 'token_checkpoint',
 } as const;
 
 export type EventKindV1 = typeof EVENT_KIND[keyof typeof EVENT_KIND];
