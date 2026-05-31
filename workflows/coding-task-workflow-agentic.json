@@ -841,11 +841,28 @@
         {
           "id": "phase-2b-design-review-core",
           "title": "Design Review Core",
-          "templateCall": {
-            "templateId": "wr.templates.routine.design-review",
-            "args": {
-              "deliverableName": "design-review-findings.md"
-            }
+          "promptBlocks": {
+            "goal": "Spawn parallel design-review subagents with distinct cognitive lenses to review the design, keeping the main agent's context clean and reducing confirmation bias.",
+            "constraints": [
+              "If client-side subagent tools (like `invoke_subagent`) are available, you MUST spawn three parallel design-review subagents using your client's native tools: (1) Simplicity & Scope Auditor, (2) Robustness & Failure-Mode Auditor, (3) Philosophy & Conventions Auditor. Do not run them inline unless native subagent tools are completely unavailable in your client.",
+              "Have each subagent run the `wr.routine-design-review` routine in parallel and write their findings to separate files under `docs/design/` (e.g., `design-review-simplicity.md`, `design-review-robustness.md`, `design-review-philosophy.md`)."
+            ],
+            "procedure": [
+              "1. Check if client-side subagent tools (such as `invoke_subagent`) are available.",
+              "2. If available, spawn three parallel design-review subagents in the background:",
+              "   - **Simplicity & Scope Auditor**: Run `wr.routine-design-review` focusing entirely on simpler alternatives, unnecessary abstractions, and pruning scope. Write findings to `docs/design/design-review-simplicity.md`.",
+              "   - **Robustness & Failure-Mode Auditor**: Run `wr.routine-design-review` focusing entirely on race conditions, error boundaries, state invalidity, and edge cases. Write findings to `docs/design/design-review-robustness.md`.",
+              "   - **Philosophy & Conventions Auditor**: Run `wr.routine-design-review` focusing entirely on alignment with codebase coding philosophies, ESM rules, and type safety constraints. Write findings to `docs/design/design-review-philosophy.md`.",
+              "3. If subagent tools are completely unavailable, perform the design-review routine inline yourself and write findings to `docs/design/design-review-findings.md`.",
+              "4. Await and collect all reviewer findings."
+            ],
+            "outputRequired": {
+              "designReviewsCompleted": "Boolean indicating if all parallel design reviews are completed and stored"
+            },
+            "verify": [
+              "Three parallel design-review subagents were spawned (or inline execution was performed if tools were unavailable).",
+              "Review findings were written to their respective markdown files under `docs/design/`."
+            ]
           },
           "requireConfirmation": false
         },
@@ -853,16 +870,17 @@
           "id": "phase-2c-synthesize-design-review",
           "title": "Synthesize Design Review Findings",
           "promptBlocks": {
-            "goal": "Read `design-review-findings.md` and turn the review findings into workflow-owned decisions.",
+            "goal": "Read design-review findings from the parallel reviewers (or the single inline file) and turn the review findings into workflow-owned decisions.",
             "constraints": [
               "If the findings are real, revise the design before you continue.",
               "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
             ],
             "procedure": [
-              "1. Compare findings against your `designReviewAssessment`: what did the review confirm? What did it surface that you missed? What changed your mind and what held firm?",
-              "2. If findings are verified, update the design: `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`.",
-              "3. Synthesize the findings explicitly, specifying which findings matter, what changed in the design, and what you reject and why.",
-              "4. Classify each finding that affects decisions as: `Confirmed` (verified against code, spec, build, or workflow context), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence)."
+              "1. Read the design review findings from the three files (`docs/design/design-review-simplicity.md`, `docs/design/design-review-robustness.md`, and `docs/design/design-review-philosophy.md`) if parallel reviewers were spawned, or `docs/design/design-review-findings.md` if run inline.",
+              "2. Compare findings against your `designReviewAssessment`: what did each reviewer confirm? What did they surface that you missed? What changed your mind and what held firm?",
+              "3. If findings are verified, update the design: `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`.",
+              "4. Synthesize the findings explicitly, specifying which findings matter, what changed in the design, and what you reject and why.",
+              "5. Classify each finding that affects decisions as: `Confirmed` (verified against code, spec, build, or workflow context), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence)."
             ],
             "outputRequired": {
               "designFindings": "Summary of findings and classifications",
@@ -1277,11 +1295,27 @@
         {
           "id": "phase-7a-final-verification-core",
           "title": "Run Final Verification Batch",
-          "templateCall": {
-            "templateId": "wr.templates.routine.final-verification",
-            "args": {
-              "deliverableName": "final-verification-findings.md"
-            }
+          "promptBlocks": {
+            "goal": "Spawn parallel verifier subagents to check the implementation against acceptance criteria, invariants, and coding philosophy, ensuring absolute readiness before PR submission.",
+            "constraints": [
+              "If client-side subagent tools (like `invoke_subagent`) are available, you MUST spawn two parallel verifier subagents: (1) Invariant & AC Prover, (2) Code Smell & Philosophy Auditor. Do not run them inline unless subagent tools are completely unavailable in your client.",
+              "Have each verifier run the `wr.routine-final-verification` routine in parallel and write their findings to separate files under `docs/design/` (e.g., `final-verification-prover.md`, `final-verification-smells.md`)."
+            ],
+            "procedure": [
+              "1. Check if client-side subagent tools (such as `invoke_subagent`) are available.",
+              "2. If available, spawn two parallel verifier subagents in the background:",
+              "   - **Invariant & AC Prover**: Run `wr.routine-final-verification` focusing entirely on proving every acceptance criterion is covered by a test and every invariant holds. Write findings to `docs/design/final-verification-prover.md`.",
+              "   - **Code Smell & Philosophy Auditor**: Run `wr.routine-final-verification` focusing entirely on codebase smell detection, comment sizes, ESM imports, and code hygiene. Write findings to `docs/design/final-verification-smells.md`.",
+              "3. If subagent tools are completely unavailable, perform the final-verification routine inline yourself and write findings to `docs/design/final-verification-findings.md`.",
+              "4. Await and collect all verifier findings."
+            ],
+            "outputRequired": {
+              "finalVerificationCompleted": "Boolean indicating if all parallel verifications are completed and stored"
+            },
+            "verify": [
+              "Two parallel verifier subagents were spawned (or inline execution was performed if tools were unavailable).",
+              "Verifier findings were written to their respective markdown files under `docs/design/`."
+            ]
           },
           "requireConfirmation": false
         },
@@ -1289,17 +1323,18 @@
           "id": "phase-7b-fix-and-summarize",
           "title": "Synthesize Findings, Fix, and Re-Verify",
           "promptBlocks": {
-            "goal": "Analyze the final verification findings, apply any required fixes, and update the implementation artifacts.",
+            "goal": "Analyze the final verification findings from parallel reviewers (or the single inline file), apply any required fixes, and update the implementation artifacts.",
             "constraints": [
               "Do not rubber-stamp results. The verification findings report is evidence, not the final decision.",
               "If `spec.md` exists, use it as the canonical verification anchor to ensure every single acceptance criterion is met.",
               "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
             ],
             "procedure": [
-              "1. Read `final-verification-findings.md` and decide what actually requires fixing.",
-              "2. Synthesize the findings explicitly, identifying what the verifier found, what you agree with, what you reject and why, and what changed because of fixes.",
-              "3. Classify findings that affect final acceptance as: `Confirmed`, `Plausible`, or `Rejected`.",
-              "4. Fix issues immediately, rerun affected verification, and update `implementation_plan.md` (if execution shape changed) and `spec.md` (if spec/contracts changed)."
+              "1. Read the final verification findings from the two files (`docs/design/final-verification-prover.md` and `docs/design/final-verification-smells.md`) if parallel reviewers were spawned, or `docs/design/final-verification-findings.md` if run inline.",
+              "2. Decide what actually requires fixing, apply fixes immediately, and rerun affected verification.",
+              "3. Synthesize the findings explicitly, identifying what each verifier found, what you agree with, what you reject and why, and what changed because of fixes.",
+              "4. Classify findings that affect final acceptance as: `Confirmed`, `Plausible`, or `Rejected`.",
+              "5. Update `implementation_plan.md` (if execution shape changed) and `spec.md` (if spec/contracts changed)."
             ],
             "outputRequired": {
               "integrationFindings": "Summary of findings and classifications",
