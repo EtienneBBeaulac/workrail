@@ -16,7 +16,7 @@ triggers:
       maxSessionMinutes: 60
       # Dev/test: Haiku for fast, cheap iteration.
       # Switch to amazon-bedrock/us.anthropic.claude-sonnet-4-6 for production runs.
-      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      model: anthropic/claude-3-5-haiku-20241022
 
   # MR review: fires when a PR is opened/updated via GitHub PR polling or webhook.
   # Dispatch manually: POST /webhook/mr-review {"pull_request": {"title": "PR #123: ...", "number": 123}}
@@ -31,7 +31,7 @@ triggers:
     agentConfig:
       maxSessionMinutes: 30
       # Dev/test: Haiku for fast, cheap iteration.
-      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      model: anthropic/claude-3-5-haiku-20241022
 
   # Review with draft posting: same as mr-review but creates a GitHub PENDING draft
   # review under the operator's identity. Operator publishes via GitHub "Finish your review".
@@ -59,7 +59,7 @@ triggers:
       maxSessionMinutes: 45
       stallTimeoutSeconds: 120
       stuckAbortPolicy: abort
-      model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      model: anthropic/claude-3-5-haiku-20241022
 
   # Self-improvement queue: assign issues to worktrain-etienneb to queue them.
   # WorkTrain acts as EtienneBBeaulac. PRs get [WT] prefix and worktrain/ branch.

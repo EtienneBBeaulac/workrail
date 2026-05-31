@@ -158,6 +158,17 @@ export function getSchemas(): Record<string, any> {
           additionalProperties: true,
           description: 'Optional initial context variables to pass to the child workflow. Used for single-spawn form only.',
         },
+        agentConfig: {
+          type: 'object',
+          properties: {
+            model: {
+              type: 'string',
+              description: 'Optional custom model ID override for the child session (e.g. "claude-3-5-haiku").'
+            }
+          },
+          additionalProperties: false,
+          description: 'Optional custom agent configuration for the child session (single-spawn form only).'
+        },
         agents: {
           type: 'array',
           // NOTE: top-level required[] is absent because the schema accepts two forms
@@ -176,6 +187,17 @@ export function getSchemas(): Record<string, any> {
               goal: { type: 'string', description: 'Goal for this child session.' },
               workspacePath: { type: 'string', description: 'Workspace path for this child session.' },
               context: { type: 'object', additionalProperties: true, description: 'Optional context variables.' },
+              agentConfig: {
+                type: 'object',
+                properties: {
+                  model: {
+                    type: 'string',
+                    description: 'Optional custom model ID override for the child session (e.g. "claude-3-5-haiku").'
+                  }
+                },
+                additionalProperties: false,
+                description: 'Optional custom agent configuration for the child session.'
+              },
             },
             required: ['workflowId', 'goal', 'workspacePath'],
             additionalProperties: false,

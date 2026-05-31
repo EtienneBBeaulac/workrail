@@ -108,7 +108,21 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
   afterEach(async () => {
     teardownIntegrationTest();
     process.env.WORKRAIL_DATA_DIR = prevDataDir;
-    await fs.rm(root, { recursive: true, force: true });
+    
+    // Retrying rm to handle Windows EBUSY/ENOTEMPTY file locking lag
+    const maxRetries = 5;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        await fs.rm(root, { recursive: true, force: true });
+        break;
+      } catch (err: any) {
+        if ((err.code === 'EBUSY' || err.code === 'ENOTEMPTY' || err.code === 'EPERM') && i < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, i)));
+        } else {
+          throw err;
+        }
+      }
+    }
   });
 
   async function buildCtx(): Promise<ToolContext> {

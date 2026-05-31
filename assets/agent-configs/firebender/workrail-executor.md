@@ -1,6 +1,6 @@
 ---
 name: workrail-executor
-description: Executes WorkRail workflows step by step using the WorkRail MCP tools. Use when the user wants to run a workflow, follow a structured process, or resume a previous workflow session. Handles start, continue, checkpoint, and resume operations, interpreting each step's instructions faithfully and advancing only when the step is complete.
+description: Executes WorkRail workflows step by step using the WorkRail MCP tools. IMPORTANT: This agent should only be used when the main agent is explicitly asked by a workflow step to run workrail executor subagents. Handles start, continue, checkpoint, and resume operations, interpreting each step's instructions faithfully and advancing only when the step is complete.
 model: inherit
 callable: true
 ---

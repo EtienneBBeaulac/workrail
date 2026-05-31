@@ -254,16 +254,15 @@
         "not_equals": "Small"
       },
       "promptBlocks": {
-        "goal": "Spawn a parallel scout subagent to systematically gather codebase context, map symbols, and find candidate files in the background, keeping the main agent's context clean and reducing discovery blind spots.",
+        "goal": "Systematically gather codebase context, map symbols, and find candidate files in the background to keep the main agent's context clean.",
         "constraints": [
           "Do NOT propagate InterpretationArtifact to coordinator-spawned subagents.",
-          "If the `spawn_agent` tool is available, you MUST spawn a parallel scout subagent using `spawn_agent` with parameters: `workflowId`='wr.routine-context-gathering', `goal`='Systematically gather codebase context, map symbols, and find candidate files.', `workspacePath`='<current workspace path>', and `context`={ \"depth\": 2 }. If only client-side subagent tools like `invoke_subagent` are available, use those to run the routine. Do not run it inline unless subagent tools are completely unavailable in your client.",
           "Treat the scout subagent's output as raw evidence, not final conclusions. Interrogate the findings: what was missed, what looks incorrect, and what is new?"
         ],
         "procedure": [
-          "1. Check if the `spawn_agent` tool or client-side subagent tools are available. If available, invoke a subagent running `workflowId`='wr.routine-context-gathering' with `goal`='Systematically gather codebase context, map symbols, and find candidate files.', `workspacePath`='<current workspace path>' and `context`={ \"depth\": 2 } in the background.",
-          "2. If subagent tools are unavailable, perform the systematic context-gathering routine inline yourself.",
-          "3. Read the scout's synthesized findings and apply the SUBAGENT SYNTHESIS protocol: write down your initial hypothesis, compare it with what the scout found, and document what changed your mind, what held firm, and what you reject and why.",
+          "1. If delegation is available, spawn a WorkRail Executor running `wr.routine-context-gathering` with `goal`='Systematically gather codebase context, map symbols, and find candidate files.' and `context`={ \"depth\": 2 } in the background.",
+          "2. If delegation is unavailable, perform the systematic context-gathering routine inline yourself.",
+          "3. Synthesize the findings using the SUBAGENT SYNTHESIS protocol: write down your initial hypothesis, compare it with what the scout found, and document what changed your mind, what held firm, and what you reject and why.",
           "4. Refine the lists of `candidateFiles`, `invariants`, and `nonGoals` based on the synthesized scout findings."
         ],
         "outputRequired": {
@@ -838,34 +837,33 @@
           },
           "requireConfirmation": false
         },
-        {
-          "id": "phase-2b-design-review-core",
-          "title": "Design Review Core",
-          "promptBlocks": {
-            "goal": "Spawn parallel design-review subagents with distinct cognitive lenses to review the design, keeping the main agent's context clean and reducing confirmation bias.",
-            "constraints": [
-              "If the `spawn_agent` tool is available, you MUST spawn three parallel subagents simultaneously by calling `spawn_agent` using its parallel form with the `agents` array. For each agent in the array, use: `workflowId`='wr.routine-design-review', `workspacePath`='<current workspace path>', and a dedicated `goal` and `context` block. If only client-side tools like `invoke_subagent` are available, use those instead. Do not run them inline unless subagent tools are completely unavailable in your client.",
-              "Have each subagent write its findings to a separate file under `docs/design/` by passing `deliverableName` in the `context` parameter."
-            ],
-            "procedure": [
-              "1. Check if the `spawn_agent` tool or client-side subagent tools are available.",
-              "2. If available, call `spawn_agent` using the parallel array format with three entries in the `agents` array:",
-              "   - **Simplicity & Scope Auditor**: `workflowId`='wr.routine-design-review', `goal`='Audit the selected design focusing on simpler alternatives, unnecessary abstractions, and pruning scope.', `workspacePath`='<current workspace path>', `context`={ \"deliverableName\": \"docs/design/design-review-simplicity.md\" }.",
-              "   - **Robustness & Failure-Mode Auditor**: `workflowId`='wr.routine-design-review', `goal`='Audit the selected design focusing on race conditions, error boundaries, state invalidity, and edge cases.', `workspacePath`='<current workspace path>', `context`={ \"deliverableName\": \"docs/design/design-review-robustness.md\" }.",
-              "   - **Philosophy & Conventions Auditor**: `workflowId`='wr.routine-design-review', `goal`='Audit the selected design focusing on codebase coding philosophies, ESM rules, and type safety constraints.', `workspacePath`='<current workspace path>', `context`={ \"deliverableName\": \"docs/design/design-review-philosophy.md\" }.",
-              "3. If subagent tools are completely unavailable, perform the design-review routine inline yourself and write findings to `docs/design/design-review-findings.md`.",
-              "4. Await and collect all reviewer findings."
-            ],
-            "outputRequired": {
-              "designReviewsCompleted": "Boolean indicating if all parallel design reviews are completed and stored"
-            },
-            "verify": [
-              "Three parallel design-review subagents were spawned (or inline execution was performed if tools were unavailable).",
-              "Review findings were written to their respective markdown files under `docs/design/`."
-            ]
-          },
-          "requireConfirmation": false
+    {
+      "id": "phase-2b-design-review-core",
+      "title": "Design Review Core",
+      "promptBlocks": {
+        "goal": "Run parallel design reviews to challenge the design, keeping the main agent's context clean and reducing confirmation bias.",
+        "constraints": [
+          "Ensure each reviewer has a distinct focus lens.",
+          "Have each subagent write its findings to a separate file under `docs/design/` by passing `deliverableName` in context."
+        ],
+        "procedure": [
+          "1. If delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `wr.routine-design-review` with these configurations:",
+          "   - **Simplicity & Scope**: goal='Audit the selected design focusing on simpler alternatives, unnecessary abstractions, and pruning scope.', context={ \"deliverableName\": \"docs/design/design-review-simplicity.md\" }",
+          "   - **Robustness & Failure-Modes**: goal='Audit the selected design focusing on race conditions, error boundaries, state invalidity, and edge cases.', context={ \"deliverableName\": \"docs/design/design-review-robustness.md\" }",
+          "   - **Philosophy & Conventions**: goal='Audit the selected design focusing on codebase coding philosophies, ESM rules, and type safety constraints.', context={ \"deliverableName\": \"docs/design/design-review-philosophy.md\" }",
+          "2. If delegation is unavailable, perform the design-review routine inline yourself and write findings to `docs/design/design-review-findings.md`.",
+          "3. Collect all reviewer findings and confirm they are written to disk."
+        ],
+        "outputRequired": {
+          "designReviewsCompleted": "Boolean indicating if all parallel design reviews are completed and stored"
         },
+        "verify": [
+          "Three parallel design-review WorkRail Executors were spawned (or inline execution was performed if tools were unavailable).",
+          "Review findings were written to their respective markdown files under `docs/design/`."
+        ]
+      },
+      "requireConfirmation": false
+    },
         {
           "id": "phase-2c-synthesize-design-review",
           "title": "Synthesize Design Review Findings",
@@ -1296,24 +1294,23 @@
           "id": "phase-7a-final-verification-core",
           "title": "Run Final Verification Batch",
           "promptBlocks": {
-            "goal": "Spawn parallel verifier subagents to check the implementation against acceptance criteria, invariants, and coding philosophy, ensuring absolute readiness before PR submission.",
+            "goal": "Run parallel verifier subagents to check the implementation against acceptance criteria, invariants, and coding philosophy before PR submission.",
             "constraints": [
-              "If the `spawn_agent` tool is available, you MUST spawn two parallel subagents simultaneously by calling `spawn_agent` using its parallel form with the `agents` array. For each agent in the array, use: `workflowId`='wr.routine-final-verification', `workspacePath`='<current workspace path>', and a dedicated `goal` and `context` block. If only client-side tools like `invoke_subagent` are available, use those instead. Do not run them inline unless subagent tools are completely unavailable in your client.",
-              "Have each verifier write its findings to a separate file under `docs/design/` by passing `deliverableName` in the `context` parameter."
+              "Ensure each verifier has a distinct focus lens.",
+              "Have each verifier write its findings to a separate file under `docs/design/` by passing `deliverableName` in context."
             ],
             "procedure": [
-              "1. Check if the `spawn_agent` tool or client-side subagent tools are available.",
-              "2. If available, call `spawn_agent` using the parallel array format with two entries in the `agents` array:",
-              "   - **Invariant & AC Prover**: `workflowId`='wr.routine-final-verification', `goal`='Proves every acceptance criterion is covered by a test and every invariant holds.', `workspacePath`='<current workspace path>', `context`={ \"deliverableName\": \"docs/design/final-verification-prover.md\" }.",
-              "   - **Code Smell & Philosophy Auditor**: `workflowId`='wr.routine-final-verification', `goal`='Audit codebase smell detection, comment sizes, ESM imports, and code hygiene.', `workspacePath`='<current workspace path>', `context`={ \"deliverableName\": \"docs/design/final-verification-smells.md\" }.",
-              "3. If subagent tools are completely unavailable, perform the final-verification routine inline yourself and write findings to `docs/design/final-verification-findings.md`.",
-              "4. Await and collect all verifier findings."
+              "1. If delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `wr.routine-final-verification` with these configurations:",
+              "   - **Invariant & AC Prover**: goal='Proves every acceptance criterion is covered by a test and every invariant holds.', context={ \"deliverableName\": \"docs/design/final-verification-prover.md\" }",
+              "   - **Code Smell & Philosophy Auditor**: goal='Audit codebase smell detection, comment sizes, ESM imports, and code hygiene.', context={ \"deliverableName\": \"docs/design/final-verification-smells.md\" }",
+              "2. If delegation is unavailable, perform the final-verification routine inline yourself and write findings to `docs/design/final-verification-findings.md`.",
+              "3. Collect all verifier findings and confirm they are written to disk."
             ],
             "outputRequired": {
               "finalVerificationCompleted": "Boolean indicating if all parallel verifications are completed and stored"
             },
             "verify": [
-              "Two parallel verifier subagents were spawned (or inline execution was performed if tools were unavailable).",
+              "Two parallel verifier WorkRail Executors were spawned (or inline execution was performed if tools were unavailable).",
               "Verifier findings were written to their respective markdown files under `docs/design/`."
             ]
           },

@@ -223,6 +223,16 @@ export interface LoopStepDefinition extends WorkflowStepDefinition {
   readonly body: string | readonly WorkflowStepDefinition[];
 }
 
+export interface ParallelDelegation {
+  readonly workflowId: string;
+  readonly contextMapping?: Readonly<Record<string, string>>;
+}
+
+export interface ParallelStepDefinition extends WorkflowStepDefinition {
+  readonly type: 'parallel';
+  readonly parallelDelegations: readonly ParallelDelegation[];
+}
+
 /**
  * Loop condition source: discriminated union controlling how loop
  * continuation is determined.
@@ -501,15 +511,21 @@ export interface WorkflowDefinition {
 // =============================================================================
 
 export function isLoopStepDefinition(
-  step: WorkflowStepDefinition | LoopStepDefinition
+  step: WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition
 ): step is LoopStepDefinition {
   return 'type' in step && step.type === 'loop';
 }
 
+export function isParallelStepDefinition(
+  step: WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition
+): step is ParallelStepDefinition {
+  return 'type' in step && step.type === 'parallel';
+}
+
 export function isWorkflowStepDefinition(
-  step: WorkflowStepDefinition | LoopStepDefinition
+  step: WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition
 ): step is WorkflowStepDefinition {
-  return !isLoopStepDefinition(step);
+  return !isLoopStepDefinition(step) && !isParallelStepDefinition(step);
 }
 
 /**

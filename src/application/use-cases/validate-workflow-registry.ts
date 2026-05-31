@@ -8,7 +8,7 @@ import { resolveWorkflowCandidates, detectDuplicateIds } from '../../infrastruct
 import type { RawWorkflowFile, VariantKind, ParsedRawWorkflowFile } from './raw-workflow-file-scanner.js';
 import { scanRawWorkflowFiles } from './raw-workflow-file-scanner.js';
 import { getSourcePath } from '../../types/workflow-source.js';
-import { createWorkflow } from '../../types/workflow.js';
+import { createWorkflow, isParallelStepDefinition } from '../../types/workflow.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Registry Snapshot Type
@@ -125,7 +125,48 @@ export function validateRegistry(
   const resolvedResults: ResolvedValidationEntry[] = [];
 
   for (const { workflow, resolvedBy } of snapshot.resolved) {
-    const outcome = validateWorkflowPhase1a(workflow, deps);
+    let outcome = validateWorkflowPhase1a(workflow, deps);
+
+    // Cross-reference checking for parallel steps in this workflow
+    const crossRefIssues: string[] = [];
+    for (const step of workflow.stepById.values()) {
+      if (isParallelStepDefinition(step)) {
+        for (const delegation of step.parallelDelegations) {
+          const targetId = delegation.workflowId;
+
+          // 1. Prohibit circular self-referencing
+          if (targetId === workflow.definition.id) {
+            crossRefIssues.push(
+              `Step '${step.id}' delegates to itself (self-spawning circular loop is prohibited)`
+            );
+          }
+
+          // 2. Validate targetId exists in registry
+          if (!resolvedWinnerIds.has(targetId)) {
+            crossRefIssues.push(
+              `Step '${step.id}' delegates to unregistered workflow ID '${targetId}'`
+            );
+          }
+        }
+      }
+    }
+
+    if (crossRefIssues.length > 0) {
+      if (outcome.kind === 'phase1a_valid') {
+        outcome = {
+          kind: 'structural_failed',
+          workflowId: workflow.definition.id,
+          issues: crossRefIssues,
+        };
+      } else if (outcome.kind === 'structural_failed') {
+        outcome = {
+          kind: 'structural_failed',
+          workflowId: workflow.definition.id,
+          issues: [...outcome.issues, ...crossRefIssues],
+        };
+      }
+    }
+
     resolvedResults.push({
       workflowId: workflow.definition.id,
       sourceRef: extractSourceRef(resolvedBy),

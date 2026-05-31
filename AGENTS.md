@@ -443,6 +443,7 @@ When the project owner asks you to create a PR or merge:
 
 These principles guide all code decisions in this project. When writing, reviewing, or analyzing code, justify structural choices against them. When multiple principles conflict, surface the tension explicitly.
 
+- **Both-sides-of-the-fence execution** -- compile once, execute polymorphically. Design every workflow step and feature to work seamlessly across two environments: interactive stdio MCP client sessions (zero control, precise directives) and autonomous Daemon runner sessions (total control, native execution).
 - **Immutability by default** -- make data read-only; confine mutation behind explicit, minimal APIs
 - **Architectural fixes over patches** -- solve root causes by changing constraints and invariants, not by adding localized special-cases
 - **Make illegal states unrepresentable** -- model domain states so invalid combinations cannot be constructed

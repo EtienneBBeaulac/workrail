@@ -64,6 +64,9 @@
           },
           {
             "$ref": "#/$defs/loopStep"
+          },
+          {
+            "$ref": "#/$defs/parallelStep"
           }
         ]
       },
@@ -1279,6 +1282,75 @@
       },
       "required": [
         "templateId"
+      ],
+      "additionalProperties": false
+    },
+    "parallelStep": {
+      "type": "object",
+      "description": "A step that spawns subagents or routines to execute concurrently in isolated cognitive contexts.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stepId",
+          "description": "Unique identifier for the parallel step"
+        },
+        "type": {
+          "const": "parallel",
+          "description": "Identifies this as a parallel step type"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-friendly title of the parallel step",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "parallelDelegations": {
+          "type": "array",
+          "description": "List of subagents or routines to execute in parallel",
+          "items": {
+            "$ref": "#/$defs/parallelDelegation"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "requireConfirmation": {
+          "$ref": "#/$defs/confirmationRule"
+        },
+        "runCondition": {
+          "$ref": "#/$defs/condition"
+        },
+        "notesOptional": {
+          "type": "boolean",
+          "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt."
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "parallelDelegations"
+      ],
+      "additionalProperties": false
+    },
+    "parallelDelegation": {
+      "type": "object",
+      "description": "A single subagent or routine cognitive delegation.",
+      "properties": {
+        "workflowId": {
+          "type": "string",
+          "description": "ID of the subagent workflow or routine to invoke",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "contextMapping": {
+          "type": "object",
+          "description": "Mapping from parent context keys to child input keys",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "workflowId"
       ],
       "additionalProperties": false
     }
