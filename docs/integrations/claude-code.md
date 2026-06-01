@@ -100,7 +100,7 @@ Create `~/.claude/agents/workrail-executor.md`:
 ```markdown
 ---
 name: workrail-executor
-description: Executes WorkRail workflows step by step using the WorkRail MCP tools. Use when the user wants to run a workflow, follow a structured process, or resume a previous workflow session. Handles start, continue, and checkpoint operations, interpreting each step's instructions faithfully and advancing only when the step is complete.
+description: Executes WorkRail workflows step by step using the WorkRail MCP tools. IMPORTANT: This agent should only be used when the main agent is explicitly asked by a workflow step to run workrail executor subagents. Handles start, continue, and checkpoint operations, interpreting each step's instructions faithfully and advancing only when the step is complete.
 tools: Bash, Read, Write, Edit, mcp__workrail__list_workflows, mcp__workrail__inspect_workflow, mcp__workrail__start_workflow, mcp__workrail__continue_workflow, mcp__workrail__checkpoint_workflow, mcp__workrail__resume_session, mcp__workrail__create_session, mcp__workrail__update_session, mcp__workrail__read_session, mcp__workrail__open_dashboard
 ---
 

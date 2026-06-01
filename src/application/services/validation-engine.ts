@@ -7,8 +7,9 @@ import type {
   LoopStepDefinition,
   FunctionDefinition,
   FunctionParameter,
+  ParallelStepDefinition,
 } from '../../types/workflow-definition';
-import { isLoopStepDefinition, stepHasPromptSource } from '../../types/workflow-definition';
+import { isLoopStepDefinition, isParallelStepDefinition, stepHasPromptSource } from '../../types/workflow-definition';
 import type { Workflow } from '../../types/workflow';
 import { BINDING_TOKEN_RE } from './compiler/resolve-bindings';
 import { 
@@ -588,7 +589,7 @@ export class ValidationEngine {
             suggestions.push('Add a title to all inline steps');
           }
           
-          if (!stepHasPromptSource(inlineStep as WorkflowStepDefinition)) {
+          if (!isParallelStepDefinition(inlineStep as any) && !stepHasPromptSource(inlineStep as WorkflowStepDefinition)) {
             issues.push(`Inline step '${inlineStep.id || 'unknown'}' must have prompt, promptBlocks, or templateCall`);
             suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to all inline steps');
           }
@@ -983,25 +984,27 @@ export class ValidationEngine {
         }
       } else {
         // Basic step validation
+        const typedStep = step as WorkflowStepDefinition;
         if (!step.id) {
           issues.push('Step missing required ID');
         }
         if (!step.title) {
           issues.push(`Step '${step.id}' missing required title`);
         }
-        if (!stepHasPromptSource(step as WorkflowStepDefinition)) {
-          issues.push(`Step '${step.id}' must have prompt, promptBlocks, or templateCall`);
-          suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to each step');
-        }
+        if (!isParallelStepDefinition(step)) {
+          if (!stepHasPromptSource(typedStep)) {
+            issues.push(`Step '${step.id}' must have prompt, promptBlocks, or templateCall`);
+            suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to each step');
+          }
 
-        // Enforce prompt-source XOR: exactly one of prompt, promptBlocks, templateCall
-        const typedStep = step as WorkflowStepDefinition;
-        const promptSourceCount =
-          (typedStep.prompt ? 1 : 0) +
-          ((typedStep as any).promptBlocks ? 1 : 0) +
-          ((typedStep as any).templateCall ? 1 : 0);
-        if (promptSourceCount > 1) {
-          issues.push(`Step '${step.id}' declares multiple prompt sources (prompt, promptBlocks, templateCall) — use exactly one`);
+          // Enforce prompt-source XOR: exactly one of prompt, promptBlocks, templateCall
+          const promptSourceCount =
+            (typedStep.prompt ? 1 : 0) +
+            ((typedStep as any).promptBlocks ? 1 : 0) +
+            ((typedStep as any).templateCall ? 1 : 0);
+          if (promptSourceCount > 1) {
+            issues.push(`Step '${step.id}' declares multiple prompt sources (prompt, promptBlocks, templateCall) — use exactly one`);
+          }
         }
 
         this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);

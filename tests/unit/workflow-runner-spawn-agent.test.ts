@@ -43,11 +43,18 @@ import type {
   WorkflowRunStuck,
 } from '../../src/daemon/workflow-runner.js';
 import type { V2ToolContext } from '../../src/mcp/types.js';
+import { okAsync } from 'neverthrow';
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
-/** Minimal fake V2ToolContext -- ctx.v2 is never accessed in these tests. */
-const FAKE_CTX = {} as V2ToolContext;
+/** Minimal fake V2ToolContext with mocked sessionStore */
+const FAKE_CTX = {
+  v2: {
+    sessionStore: {
+      load: () => okAsync({ events: [] }),
+    },
+  },
+} as unknown as V2ToolContext;
 
 /** Minimal fake API key. */
 const FAKE_API_KEY = 'test-api-key';

@@ -1,61 +1,79 @@
-# Design Review: GateKind Discriminated Union
+# Design Review Findings: Hybrid EAT and Subagent Model Routing (#1152)
 
-## Tradeoff Review
+This document contains the detailed findings and reviews of the selected Hybrid EAT (Environment Attestation Token) architecture.
 
-| Tradeoff | Acceptable? | Failure condition | Hidden assumption |
-|----------|-------------|-------------------|-------------------|
-| 'confirmation_required' legacy literal maps to coordinator_eval | Yes | No test fixtures encode it; replay path already handles arbitrary gateKind values | No production sessions need different routing after the change |
-| RenderedStep.gateKind is optional | Yes | Accepted: only meaningful when requireConfirmation is true; advance core reads it only inside the gate path | Developer adds a third gate kind and forgets to set it on RenderedStep -- caught by assertNever at TriggerRouter level |
-| gateKind not in crash recovery sidecar | Yes (non-blocking) | Startup recovery already discards gate-parked sessions -- sidecar gap is irrelevant for this PR | Future crash-recovery for gate-parked sessions will need sidecar extension (filed as follow-up) |
+---
 
-## Failure Mode Review
+## 1. Tradeoff Review
 
-| Failure mode | Handled? | Risk |
-|-------------|----------|------|
-| gateKind missing from TerminalSignal.gate_parked | **Fixed in this PR** -- add to type, onGateParked callback, setTerminalSignal, buildSessionResult | Was blocking without fix |
-| assertNever becomes stale on third gate kind | Handled by design -- compile error forces update | Zero risk |
-| human_approval gate fires in MCP session | Non-issue -- gate path requires is_autonomous:'true', MCP sessions never set it | Zero risk |
-| gateKind missing from crash recovery sidecar | Non-blocking -- startup recovery discards gate_parked sessions, doesn't resume them | Follow-up ticket |
+- **Tension 1: Programmatic Sniffing vs. Zero-Overhead Latency**
+  - *Verification:* Probing process ancestry and environmental variables takes <2ms, keeping standard linear workflows completely fast and free of active LLM turns, preserving startup invariants.
+  - *No Longer Acceptable If:* Client platforms strip all custom environment variables from child processes, forcing the engine to run the slow-path lazy handshake on 100% of workflows, which negates all fast-path benefits.
+  - *Hidden Assumptions:* Assumes environments consistently expose standard markers (like `CLAUDE_CODE` or process names) in terminal scopes.
 
-## Runner-Up / Simpler Alternative Review
+- **Tension 2: Keychain Isolation vs. Backward Compatibility**
+  - *Verification:* Centralizing key directory resolution via `LocalDataDirV2.keysDir()` with `WORKRAIL_KEYS_DIR` config variables and fallback checks for legacy `~/.workrail/data/keys/keyring.json` preserves 100% backward compatibility for all existing developer setups.
+  - *No Longer Acceptable If:* Operators run in extremely locked-down container environments that forbid home-directory write access entirely, causing first-run key creation to fail.
+  - *Hidden Assumptions:* Assumes the host environment allows write access to `~/.workrail/` to bootstrap the keys directory.
 
-No viable runner-up. Context-variable approach ruled out by explicit user decision (coupling infra into workflow violates philosophy). No simpler design exists that keeps gateKind as typed first-class data -- any simplification would require TriggerRouter to string-parse the snapshot, violating the typed-contracts constraint.
+- **Tension 3: Context-Embedded EAT vs. Shared File Caching**
+  - *Verification:* Persistent signed EAT context keys avoid flat file locking contention and concurrency races, fully preserving DAG purity and deterministic replay across machine boundaries.
+  - *No Longer Acceptable If:* Extremely recursive spawn chains inflate context payloads to a size that violates the 256KB limit or degrades JCS serialization speed.
+  - *Hidden Assumptions:* Assumes subagent depth is bounded by a hard limits safeguard (max depth 3) to prevent unbounded recursion.
 
-## Philosophy Alignment
+---
 
-| Principle | Status |
-|-----------|--------|
-| Make illegal states unrepresentable | Satisfied -- GateKind is a union literal, invalid values unrepresentable |
-| Exhaustiveness everywhere | Satisfied -- assertNever in TriggerRouter |
-| Zero LLM turns for routing | Satisfied -- TriggerRouter switch is pure TypeScript |
-| Typed contracts at phase boundaries | Satisfied -- WorkflowRunGateParked carries typed gateKind |
-| Functional core / imperative shell | Satisfied -- workflow declares intent; TriggerRouter routes |
-| Validate at boundaries, trust inside | Satisfied -- validated at schema compile, trusted downstream |
+## 2. Failure Mode Review
 
-## Findings
+- **Failure Mode 1: Distributed Keyring Mismatch (Highest Risk)**
+  - *Trace:* If the local MCP server (running in the user's IDE terminal) and the background system daemon do not share the exact same user-wide keyring directory (`~/.workrail/keys/`), token signatures in spawned subagents will fail validation.
+  - *Mitigation:* Centralize keyring path resolution in `LocalDataDirV2.keysDir()` to default to a user-wide standard (`~/.workrail/keys/`), check for `WORKRAIL_KEYS_DIR` overrides in both MCP and daemon configurations, and support backward-compatible fallbacks for legacy `data/keys` locations.
+  - *Severity:* **Red**
 
-### No RED findings.
+- **Failure Mode 2: Environment Variable Stripping in Virtual/Sandboxed Environments**
+  - *Trace:* Proxies or container gateways may strip custom environment markers (`CLAUDE_CODE`, `CURSOR_APP`).
+  - *Mitigation:* The sniff fast-path falls back cleanly to a conditional, lazy handshake step when variables are absent and advanced delegation features are requested. We also introduce a manual bypass override `WORKRAIL_FORCE_HARNESS` so operators can explicitly declare the environment.
+  - *Severity:* **Orange**
 
-### ORANGE
-**O1: out.gateKind exists in continue-workflow.ts:324 but is not passed to onGateParked() or stored in TerminalSignal.**
-This is the central gap. Without fixing it, `WorkflowRunGateParked.gateKind` will always be missing and TriggerRouter cannot route. Must be fixed in this PR. Specific locations:
-- `src/daemon/state/terminal-signal.ts:36` -- add `gateKind: GateKind` to `gate_parked` variant
-- `src/daemon/tools/continue-workflow.ts:91` and `322` -- pass `out.gateKind` to `onGateParked()`
-- `src/daemon/core/session-result.ts:141-150` -- read `signal.gateKind` into `WorkflowRunGateParked`
+- **Failure Mode 3: Context Size Budget Overflow in Deep Recursion Loops**
+  - *Trace:* Deep spawning cascades could accumulate context weight, violating `MAX_CONTEXT_BYTES = 256KB`.
+  - *Mitigation:* Keep the EAT payload extremely compact (less than 300 bytes) and mathematically short-circuit cascading loops at the token boundary using decrementing depth checks.
+  - *Severity:* **Yellow**
 
-### YELLOW
-**Y1: gateKind not in crash recovery gate sidecar** -- follow-up ticket, non-blocking.
-**Y2: RenderedStep.gateKind is optional** -- acceptable tension, TypeScript limitation, not a correctness risk.
-**Y3: spec/authoring-spec.json and validate:authoring-spec must be updated** -- mandatory but mechanical.
+---
 
-## Recommended Revisions
+## 3. Comparative Selection Review
 
-1. **Fix O1 before any other code** -- the gate kind chain is broken without it.
-2. Add `GateKind = 'coordinator_eval' | 'human_approval'` as a named export from `src/v2/durable-core/constants.ts` (alongside EVENT_KIND).
-3. Update `spec/authoring-spec.json` with a rule covering the new `requireConfirmation` object form.
-4. Update `wr.mr-review` phase-6: `requireConfirmation: { "kind": "human_approval" }`.
+- **Runner-up Strengths Worth Borrowing (Candidate B - Composable Sub-Graph EAT):**
+  - Fuses Candidate B's absolute security boundaries with 100% DAG purity by packing the signed attestation token directly inside the durably persisted session context parameters instead of writing to an out-of-band flat file.
+- **Simpler Alternative Analysis (Pure Offline Sniffing):**
+  - Pure offline detection without conditional lazy handshake fallback is rejected because in sandboxed CI/CD containers, an offline-only engine cannot verify local tool paths or subagent whitelists, leading to runtime failures during subagent spawning. The conditional lazy handshake is the essential safety valve that guarantees execution resilience in sandboxed settings.
 
-## Residual Concerns
+---
 
-- The `complete_step` tool (makeCompleteStepTool) may also have an `onGateParked` callback path -- verify it handles gateKind the same way as `continue_workflow`.
-- The authoring spec change requires `npm run validate:authoring-spec` and `npm run validate:feature-coverage` to pass before the PR can merge.
+## 4. Philosophy & Principles Alignment
+
+- **Durable Execution & Event Log Purity (Core Lock):** Perfect alignment. Storing the signed Environment Attestation Token (EAT) directly inside the durably persisted session `context` state preserves DAG purity and deterministic replay across machine boundaries.
+- **Zero-Overhead Footprint for Lightweight Workflows:** Perfect alignment. Standard linear developer execution loops bypass all active capability handshake turns completely.
+- **Rigorous Subagent Boundaries & Loop Prevention:** Perfect alignment. Mathematical depth bounds checked at the token boundary prevent cascading billing loops.
+
+---
+
+## 5. Findings & Recommended Revisions
+
+- **Finding [F-01] (Critical - Red): Distributed Keyring Contention**
+  - *Details:* The default keys directory resolved in `LocalDataDirV2.keysDir()` was hardcoded inside the data directory (`~/.workrail/data/keys/`). If separate processes (MCP and Daemon) do not share keys, token validation will reject otherwise authentic sessions.
+  - *Revision:* Add `WORKRAIL_KEYS_DIR` allowed config key, refactor `LocalDataDirV2.keysDir()` to default to `~/.workrail/keys/`, and fallback to legacy `data/keys` if `keyring.json` already exists.
+- **Finding [F-02] (High - Orange): Sniffing Fragility**
+  - *Details:* Integrated shells and sandbox proxies often strip environment variable markers.
+  - *Revision:* Enforce a robust conditional lazy handshake turn if sniffing indicators are ambiguous and advanced tools are explicitly requested, accompanied by a `WORKRAIL_FORCE_HARNESS` manual override variable.
+- **Finding [F-03] (Medium - Yellow): Recursion Overrun**
+  - *Details:* Unbounded subagent spawning chains could inflate context sizes, violating the 256KB context budget constraint.
+  - *Revision:* Enforce a strict max depth of 3 inside the engine, decrementing the depth at every subagent spawn turn.
+
+---
+
+## 6. Residual Concerns
+
+- **Upkeep overhead:** The programmatic sniffing logic must be maintained for new integrated IDE terminals or changing shell platforms.
+- **Keyring file permissions:** Keyring files must be created with `600` permissions securely so local non-privileged processes cannot harvest token keys.

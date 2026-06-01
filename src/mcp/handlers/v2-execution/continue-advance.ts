@@ -30,6 +30,7 @@ import type { ExecutionSessionGateErrorV2 } from '../../../v2/usecases/execution
 import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-log-store.port.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
+import { verifyEAT, signEAT } from './start.js';
 
 /**
  * Handle advance intent: execute next step and record the outcome.
@@ -196,42 +197,166 @@ export function handleAdvanceIntent(args: {
             const existingLocked = lockedIndex.advanceRecordedByDedupeKey.get(dedupeKey);
             if (existingLocked) return okAsync({ kind: 'replay' as const, truth: truthLocked, recordedEvent: existingLocked, precomputedIndex: lockedIndex });
 
-            return advanceAndRecord({
-              truth: truthLocked,
-              sessionId,
-              runId,
-              nodeId,
-              attemptId,
-              workflowHash,
-              dedupeKey,
-              inputContext: input.context as JsonValue | undefined,
-              inputOutput: input.output,
-              lock,
-              pinnedWorkflow,
-              snapshotStore,
-              sessionStore,
-              sha256,
-              idFactory,
-              gitSnapshot,
-              lockedIndex,
-            }).andThen(() =>
-              sessionStore
-                .load(sessionId)
-                .andThen((truthAfter) => {
-                  // Build an index over truth2 so the recordedEvent lookup and the
-                  // subsequent renderPendingPrompt scans can use the index.
-                  const afterSortedResult = asSortedEventLog(truthAfter.events);
-                  if (afterSortedResult.isErr()) {
-                    return neErrorAsync({
-                      kind: 'invariant_violation' as const,
-                      message: `Post-advance session events are not sorted: ${afterSortedResult.error.message}`,
-                    });
+            // --- EAT Resumption Capability Recheck (Slice 4) ---
+            let truthToUse = truthLocked;
+            let indexToUse = lockedIndex;
+
+            // Sniff current environment
+            let currentHarness: 'cursor' | 'claude_code' | 'daemon' | 'mcp' = 'mcp';
+            const forceHarness = process.env['WORKRAIL_FORCE_HARNESS'];
+            if (forceHarness === 'cursor' || forceHarness === 'claude_code' || forceHarness === 'daemon' || forceHarness === 'mcp') {
+              currentHarness = forceHarness;
+            } else if (process.env['CLAUDE_CODE'] === 'true' || process.env['CLAUDE_CLI'] === 'true') {
+              currentHarness = 'claude_code';
+            } else if (process.env['CURSOR_APP'] === 'true' || process.env['TERM_PROGRAM'] === 'vscode') {
+              currentHarness = 'cursor';
+            } else if (process.env['WORKRAIL_IS_DAEMON'] === 'true') {
+              currentHarness = 'daemon';
+            }
+
+            let currentActiveModel = 'claude-3-5-sonnet'; // fallback
+            const forceModel = process.env['WORKRAIL_FORCE_MODEL'] || process.env['WORKRAIL_ACTIVE_MODEL'] || process.env['WORKRAIL_MODEL'];
+            if (forceModel) {
+              currentActiveModel = forceModel;
+            }
+
+            // Find latest EAT token inside the session
+            let latestEatToken: string | undefined;
+            for (let i = truthToUse.events.length - 1; i >= 0; i--) {
+              const e = truthToUse.events[i];
+              if (e.kind === EVENT_KIND.CONTEXT_SET && (e.data as any)?.context?.['eat_token']) {
+                latestEatToken = (e.data as any).context['eat_token'];
+                break;
+              }
+            }
+
+            let shouldRefreshEat = false;
+            let parsedEatPayload: any = null;
+
+            if (latestEatToken) {
+              try {
+                const parsedEat = JSON.parse(latestEatToken);
+                if (parsedEat && parsedEat.payload) {
+                  parsedEatPayload = parsedEat.payload;
+                  const isValid = verifyEAT(parsedEatPayload, parsedEat.signature, tokenCodecPorts);
+                  if (isValid) {
+                    if (parsedEatPayload.harness !== currentHarness || parsedEatPayload.activeModel !== currentActiveModel) {
+                      shouldRefreshEat = true;
+                    }
+                  } else {
+                    shouldRefreshEat = true;
                   }
-                  const index2 = buildSessionIndex(afterSortedResult.value);
-                  const recordedEvent = index2.advanceRecordedByDedupeKey.get(dedupeKey) ?? null;
-                  return okAsync({ kind: 'replay' as const, truth: truthAfter, recordedEvent, precomputedIndex: index2 });
+                }
+              } catch (e) {
+                shouldRefreshEat = true;
+              }
+            } else {
+              // If there was no EAT token, let's refresh/generate EAT token!
+              shouldRefreshEat = true;
+            }
+
+            let preStepCheckRA: RA<void, ContinueWorkflowError> = okAsync<void, ContinueWorkflowError>(undefined);
+
+            if (shouldRefreshEat) {
+              const newDepth = parsedEatPayload ? parsedEatPayload.spawnDepth : 0;
+              const newParentSessionId = parsedEatPayload ? parsedEatPayload.parentSessionId : '';
+              const newEatPayload = {
+                harness: currentHarness,
+                activeModel: currentActiveModel,
+                parentSessionId: newParentSessionId,
+                spawnDepth: newDepth,
+              };
+              const newSignature = signEAT(newEatPayload, tokenCodecPorts);
+              if (newSignature) {
+                const newEatToken = JSON.stringify({ payload: newEatPayload, signature: newSignature });
+                const runContextObj = indexToUse.runContextByRunId.get(String(runId));
+                const existingContext = runContextObj ?? {};
+                const contextEventId = idFactory.mintEventId();
+                const contextId = idFactory.mintEventId();
+                const driftContextEvent: DomainEventV1 = {
+                  v: 1,
+                  eventId: contextEventId,
+                  eventIndex: truthToUse.events.length,
+                  sessionId,
+                  timestampMs: Date.now(),
+                  kind: EVENT_KIND.CONTEXT_SET,
+                  dedupeKey: `context_set:${sessionId}:${String(runId)}:drift-refresh:${contextEventId}`,
+                  scope: { runId: String(runId) },
+                  data: {
+                    contextId,
+                    context: {
+                      ...existingContext,
+                      eat_token: newEatToken,
+                      metrics_harness: currentHarness,
+                      metrics_active_model: currentActiveModel,
+                    } as Record<string, string>,
+                    source: 'agent_delta' as const,
+                  },
+                };
+
+                preStepCheckRA = sessionStore.append(lock, {
+                  events: [driftContextEvent],
+                  snapshotPins: [],
                 })
-            );
+                  .mapErr((cause) => ({ kind: 'advance_execution_failed' as const, cause }))
+                  .andThen(() => 
+                    sessionStore.load(sessionId)
+                      .mapErr((cause) => {
+                        console.log('drift sessionStore.load failed cause:', JSON.stringify(cause, null, 2));
+                        return { kind: 'session_load_failed' as const, cause };
+                      })
+                  )
+                  .andThen((reloadedTruth) => {
+                    truthToUse = reloadedTruth;
+                    const afterRefreshSorted = asSortedEventLog(reloadedTruth.events);
+                    if (afterRefreshSorted.isErr()) {
+                      return neErrorAsync<void, ContinueWorkflowError>({
+                        kind: 'invariant_violation' as const,
+                        message: `Sorted events fail after drift refresh: ${afterRefreshSorted.error.message}`,
+                      });
+                    }
+                    indexToUse = buildSessionIndex(afterRefreshSorted.value);
+                    return okAsync<void, ContinueWorkflowError>(undefined);
+                  });
+              }
+            }
+
+            return preStepCheckRA.andThen(() => {
+              return advanceAndRecord({
+                truth: truthToUse,
+                sessionId,
+                runId,
+                nodeId,
+                attemptId,
+                workflowHash,
+                dedupeKey,
+                inputContext: input.context as JsonValue | undefined,
+                inputOutput: input.output,
+                lock,
+                pinnedWorkflow,
+                snapshotStore,
+                sessionStore,
+                sha256,
+                idFactory,
+                gitSnapshot,
+                lockedIndex: indexToUse,
+              }).andThen(() =>
+                sessionStore
+                  .load(sessionId)
+                  .andThen((truthAfter) => {
+                    const afterSortedResult = asSortedEventLog(truthAfter.events);
+                    if (afterSortedResult.isErr()) {
+                      return neErrorAsync({
+                        kind: 'invariant_violation' as const,
+                        message: `Post-advance session events are not sorted: ${afterSortedResult.error.message}`,
+                      });
+                    }
+                    const index2 = buildSessionIndex(afterSortedResult.value);
+                    const recordedEvent = index2.advanceRecordedByDedupeKey.get(dedupeKey) ?? null;
+                    return okAsync({ kind: 'replay' as const, truth: truthAfter, recordedEvent, precomputedIndex: index2 });
+                  })
+              );
+            });
           })
         )
         .mapErr((cause) => {

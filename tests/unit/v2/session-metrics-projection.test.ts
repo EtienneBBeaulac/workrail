@@ -603,4 +603,27 @@ describe('projectSessionMetricsV2', () => {
     expect(result.tokenDelta!.outputTokens).toBe(0);
     expect(result.tokenDelta!.turns).toBe(0);
   });
+
+  it('11. projects harness and activeModel fields from context_set metrics_* keys', () => {
+    const events: DomainEventV1[] = [
+      makeSessionCreatedEvent(0),
+      makeRunStartedEvent('run_1', 1),
+      makeRunCompletedEvent({ runId: 'run_1', eventIndex: 2, captureConfidence: 'none' }),
+      makeContextSetEvent({
+        runId: 'run_1',
+        eventIndex: 3,
+        context: {
+          metrics_harness: 'antigravity-harness',
+          metrics_active_model: 'gemini-active-model',
+        },
+      }),
+    ];
+
+    const result = projectSessionMetricsV2(events);
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    expect(result.harness).toBe('antigravity-harness');
+    expect(result.activeModel).toBe('gemini-active-model');
+  });
 });

@@ -39,6 +39,7 @@ const ALLOWED_CONFIG_FILE_KEYS = new Set([
   // app-config.ts keys
   'CACHE_TTL',
   'WORKRAIL_WORKFLOWS_DIR',
+  'WORKRAIL_KEYS_DIR',
 
   // feature-flags.ts keys
   'WORKRAIL_DEV',

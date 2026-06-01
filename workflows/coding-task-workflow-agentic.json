@@ -206,16 +206,15 @@
       "id": "phase-0a-explore-and-classify",
       "title": "Phase 0a: Explore & Classify",
       "promptBlocks": {
-        "goal": "Explore the codebase to understand the task's call chain and scope, then classify it by complexity, risk, and rigor.",
+        "goal": "Perform a high-level survey of the task and a quick directory/file check to classify the task by complexity, risk, and rigor, preparing the setup for deeper parallel context gathering if needed.",
         "constraints": [
-          "Make sure the expected behavior is clear enough to proceed. If it really isn't, ask the user only what you can't answer yourself with tools.",
-          "Classification must be based on what you found in the code, not the task description alone."
+          "Do not perform deep implementation scans of individual files or extensive codebase research yet. Keep this initial survey extremely lightweight.",
+          "Classification must be based on the task description and a high-level codebase survey, focusing on the surface area and immediate entry points."
         ],
         "procedure": [
-          "1. Dig through the code to find where behavior starts, candidate files, module/function dependencies, repo verification patterns, risks, invariants, and non-goals.",
+          "1. Look at the task description, check if entry points exist, perform a quick high-level directory/file check, and identify the main systems involved.",
           "2. Classify the task: `taskComplexity` (Small/Medium/Large), `riskLevel` (Low/Medium/High), `rigorMode` (QUICK/STANDARD/THOROUGH), `automationLevel` (High/Medium/Low), and `prStrategy` (SinglePR/MultiPR).",
-          "3. Perform context-clarity check scoring 0-2 (with one sentence of evidence) for: `entryPointClarity`, `boundaryClarity`, `invariantClarity`, and `verificationClarity`.",
-          "4. Run deeper context batch if required by the rubric: STANDARD (total score >= 3 or boundary/invariant/verification clarity = 2) or THOROUGH (always). The batch consists of `routine-context-gathering` with `focus=COMPLETENESS` and `focus=DEPTH`."
+          "3. Perform context-clarity check scoring 0-2 (with one sentence of evidence) for: `entryPointClarity`, `boundaryClarity`, `invariantClarity`, and `verificationClarity`."
         ],
         "outputRequired": {
           "taskComplexity": "Small / Medium / Large",
@@ -223,16 +222,15 @@
           "rigorMode": "QUICK / STANDARD / THOROUGH",
           "automationLevel": "High / Medium / Low",
           "prStrategy": "SinglePR / MultiPR",
-          "contextSummary": "Understanding of problem space and call chain",
-          "candidateFiles": "List of target files",
+          "contextSummary": "High-level understanding of problem space and entry points",
+          "candidateFiles": "Initial list of target files (to be refined in next step if Medium/Large)",
           "invariants": "Specific codebase/behavioral invariants",
           "nonGoals": "Exclusions from scope",
           "openQuestions": "Clarifying decisions for the user"
         },
         "verify": [
           "Complexity, risk, and rigor classifications are set based on the rubric, not vibes.",
-          "A context-clarity check is scored 0-2 for all 4 dimensions with evidence sentences.",
-          "Deeper context gathering batch is run when required by the classification rubric."
+          "A context-clarity check is scored 0-2 for all 4 dimensions with evidence sentences."
         ]
       },
       "requireConfirmation": {
@@ -247,6 +245,39 @@
           }
         ]
       }
+    },
+    {
+      "id": "phase-0a-2-scout-codebase",
+      "title": "Phase 0a-2: Parallel Context Scouting",
+      "runCondition": {
+        "var": "taskComplexity",
+        "not_equals": "Small"
+      },
+      "promptBlocks": {
+        "goal": "Systematically gather codebase context, map symbols, and find candidate files in the background to keep the main agent's context clean.",
+        "constraints": [
+          "Do NOT propagate InterpretationArtifact to coordinator-spawned subagents.",
+          "Treat the scout subagent's output as raw evidence, not final conclusions. Interrogate the findings: what was missed, what looks incorrect, and what is new?"
+        ],
+        "procedure": [
+          "1. If delegation is available, spawn a WorkRail Executor running `wr.routine-context-gathering` with `goal`='Systematically gather codebase context, map symbols, and find candidate files.' and `context`={ \"depth\": 2 } in the background.",
+          "2. If delegation is unavailable, perform the systematic context-gathering routine inline yourself.",
+          "3. Synthesize the findings using the SUBAGENT SYNTHESIS protocol: write down your initial hypothesis, compare it with what the scout found, and document what changed your mind, what held firm, and what you reject and why.",
+          "4. Refine the lists of `candidateFiles`, `invariants`, and `nonGoals` based on the synthesized scout findings."
+        ],
+        "outputRequired": {
+          "scoutFindingsSynthesized": "Boolean indicating if the scout findings were processed and synthesized",
+          "candidateFiles": "Thoroughly refined list of target files based on scout evidence",
+          "invariants": "Refined and checkable codebase/behavioral invariants",
+          "nonGoals": "Refined exclusions from scope"
+        },
+        "verify": [
+          "A parallel scout subagent was invoked (or inline execution was performed if tools were unavailable).",
+          "Scout findings were synthesized using the SUBAGENT SYNTHESIS protocol, listing what changed your mind, what was rejected, and why.",
+          "candidateFiles, invariants, and nonGoals were thoroughly updated and refined based on the scout's findings."
+        ]
+      },
+      "requireConfirmation": false
     },
     {
       "id": "phase-0b-philosophy-and-architecture",
@@ -806,31 +837,48 @@
           },
           "requireConfirmation": false
         },
-        {
-          "id": "phase-2b-design-review-core",
-          "title": "Design Review Core",
-          "templateCall": {
-            "templateId": "wr.templates.routine.design-review",
-            "args": {
-              "deliverableName": "design-review-findings.md"
-            }
-          },
-          "requireConfirmation": false
+    {
+      "id": "phase-2b-design-review-core",
+      "title": "Design Review Core",
+      "promptBlocks": {
+        "goal": "Run parallel design reviews to challenge the design, keeping the main agent's context clean and reducing confirmation bias.",
+        "constraints": [
+          "Ensure each reviewer has a distinct focus lens.",
+          "Have each subagent write its findings to a separate file under `docs/design/` by passing `deliverableName` in context."
+        ],
+        "procedure": [
+          "1. If delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `wr.routine-design-review` with these configurations:",
+          "   - **Simplicity & Scope**: goal='Audit the selected design focusing on simpler alternatives, unnecessary abstractions, and pruning scope.', context={ \"deliverableName\": \"docs/design/design-review-simplicity.md\" }",
+          "   - **Robustness & Failure-Modes**: goal='Audit the selected design focusing on race conditions, error boundaries, state invalidity, and edge cases.', context={ \"deliverableName\": \"docs/design/design-review-robustness.md\" }",
+          "   - **Philosophy & Conventions**: goal='Audit the selected design focusing on codebase coding philosophies, ESM rules, and type safety constraints.', context={ \"deliverableName\": \"docs/design/design-review-philosophy.md\" }",
+          "2. If delegation is unavailable, perform the design-review routine inline yourself and write findings to `docs/design/design-review-findings.md`.",
+          "3. Collect all reviewer findings and confirm they are written to disk."
+        ],
+        "outputRequired": {
+          "designReviewsCompleted": "Boolean indicating if all parallel design reviews are completed and stored"
         },
+        "verify": [
+          "Three parallel design-review WorkRail Executors were spawned (or inline execution was performed if tools were unavailable).",
+          "Review findings were written to their respective markdown files under `docs/design/`."
+        ]
+      },
+      "requireConfirmation": false
+    },
         {
           "id": "phase-2c-synthesize-design-review",
           "title": "Synthesize Design Review Findings",
           "promptBlocks": {
-            "goal": "Read `design-review-findings.md` and turn the review findings into workflow-owned decisions.",
+            "goal": "Read design-review findings from the parallel reviewers (or the single inline file) and turn the review findings into workflow-owned decisions.",
             "constraints": [
               "If the findings are real, revise the design before you continue.",
               "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
             ],
             "procedure": [
-              "1. Compare findings against your `designReviewAssessment`: what did the review confirm? What did it surface that you missed? What changed your mind and what held firm?",
-              "2. If findings are verified, update the design: `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`.",
-              "3. Synthesize the findings explicitly, specifying which findings matter, what changed in the design, and what you reject and why.",
-              "4. Classify each finding that affects decisions as: `Confirmed` (verified against code, spec, build, or workflow context), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence)."
+              "1. Read the design review findings from the three files (`docs/design/design-review-simplicity.md`, `docs/design/design-review-robustness.md`, and `docs/design/design-review-philosophy.md`) if parallel reviewers were spawned, or `docs/design/design-review-findings.md` if run inline.",
+              "2. Compare findings against your `designReviewAssessment`: what did each reviewer confirm? What did they surface that you missed? What changed your mind and what held firm?",
+              "3. If findings are verified, update the design: `selectedApproach`, `architectureRationale`, `pivotTriggers`, `acceptedTradeoffs`, `identifiedFailureModes`.",
+              "4. Synthesize the findings explicitly, specifying which findings matter, what changed in the design, and what you reject and why.",
+              "5. Classify each finding that affects decisions as: `Confirmed` (verified against code, spec, build, or workflow context), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence)."
             ],
             "outputRequired": {
               "designFindings": "Summary of findings and classifications",
@@ -1245,11 +1293,26 @@
         {
           "id": "phase-7a-final-verification-core",
           "title": "Run Final Verification Batch",
-          "templateCall": {
-            "templateId": "wr.templates.routine.final-verification",
-            "args": {
-              "deliverableName": "final-verification-findings.md"
-            }
+          "promptBlocks": {
+            "goal": "Run parallel verifier subagents to check the implementation against acceptance criteria, invariants, and coding philosophy before PR submission.",
+            "constraints": [
+              "Ensure each verifier has a distinct focus lens.",
+              "Have each verifier write its findings to a separate file under `docs/design/` by passing `deliverableName` in context."
+            ],
+            "procedure": [
+              "1. If delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `wr.routine-final-verification` with these configurations:",
+              "   - **Invariant & AC Prover**: goal='Proves every acceptance criterion is covered by a test and every invariant holds.', context={ \"deliverableName\": \"docs/design/final-verification-prover.md\" }",
+              "   - **Code Smell & Philosophy Auditor**: goal='Audit codebase smell detection, comment sizes, ESM imports, and code hygiene.', context={ \"deliverableName\": \"docs/design/final-verification-smells.md\" }",
+              "2. If delegation is unavailable, perform the final-verification routine inline yourself and write findings to `docs/design/final-verification-findings.md`.",
+              "3. Collect all verifier findings and confirm they are written to disk."
+            ],
+            "outputRequired": {
+              "finalVerificationCompleted": "Boolean indicating if all parallel verifications are completed and stored"
+            },
+            "verify": [
+              "Two parallel verifier WorkRail Executors were spawned (or inline execution was performed if tools were unavailable).",
+              "Verifier findings were written to their respective markdown files under `docs/design/`."
+            ]
           },
           "requireConfirmation": false
         },
@@ -1257,17 +1320,18 @@
           "id": "phase-7b-fix-and-summarize",
           "title": "Synthesize Findings, Fix, and Re-Verify",
           "promptBlocks": {
-            "goal": "Analyze the final verification findings, apply any required fixes, and update the implementation artifacts.",
+            "goal": "Analyze the final verification findings from parallel reviewers (or the single inline file), apply any required fixes, and update the implementation artifacts.",
             "constraints": [
               "Do not rubber-stamp results. The verification findings report is evidence, not the final decision.",
               "If `spec.md` exists, use it as the canonical verification anchor to ensure every single acceptance criterion is met.",
               "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
             ],
             "procedure": [
-              "1. Read `final-verification-findings.md` and decide what actually requires fixing.",
-              "2. Synthesize the findings explicitly, identifying what the verifier found, what you agree with, what you reject and why, and what changed because of fixes.",
-              "3. Classify findings that affect final acceptance as: `Confirmed`, `Plausible`, or `Rejected`.",
-              "4. Fix issues immediately, rerun affected verification, and update `implementation_plan.md` (if execution shape changed) and `spec.md` (if spec/contracts changed)."
+              "1. Read the final verification findings from the two files (`docs/design/final-verification-prover.md` and `docs/design/final-verification-smells.md`) if parallel reviewers were spawned, or `docs/design/final-verification-findings.md` if run inline.",
+              "2. Decide what actually requires fixing, apply fixes immediately, and rerun affected verification.",
+              "3. Synthesize the findings explicitly, identifying what each verifier found, what you agree with, what you reject and why, and what changed because of fixes.",
+              "4. Classify findings that affect final acceptance as: `Confirmed`, `Plausible`, or `Rejected`.",
+              "5. Update `implementation_plan.md` (if execution shape changed) and `spec.md` (if spec/contracts changed)."
             ],
             "outputRequired": {
               "integrationFindings": "Summary of findings and classifications",

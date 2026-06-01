@@ -4,6 +4,8 @@ import {
   WorkflowStepDefinition,
   LoopStepDefinition,
   isLoopStepDefinition,
+  ParallelStepDefinition,
+  isParallelStepDefinition,
 } from '../../types/workflow';
 import type { LoopConditionSource } from '../../types/workflow-definition';
 import { LOOP_CONTROL_CONTRACT_REF, isValidContractRef } from '../../v2/durable-core/schemas/artifacts/index';
@@ -46,8 +48,8 @@ export interface CompiledLoop {
 
 export interface CompiledWorkflow {
   readonly workflow: Workflow;
-  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[];
-  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition>;
+  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[];
+  readonly stepById: ReadonlyMap<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>;
   readonly compiledLoops: ReadonlyMap<string, CompiledLoop>;
   /**
    * Step IDs that are loop body steps (either inline or referenced).
@@ -124,7 +126,7 @@ function getTemplateRegistry(): TemplateRegistry {
  * and the binding manifest captured during compilation.
  */
 export interface ResolvedDefinitionResult {
-  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[];
+  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[];
   /**
    * Full binding manifest: slotId → resolved routineId for all {{wr.bindings.*}}
    * tokens substituted during this compilation (both project overrides and defaults).
@@ -165,7 +167,7 @@ export interface ResolvedDefinitionResult {
  *   silently resolving for another.
  */
 export function resolveDefinitionSteps(
-  steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[],
+  steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[],
   features: readonly string[],
   extensionPoints: readonly ExtensionPoint[] = [],
   workflowId: string = '',
@@ -265,7 +267,7 @@ export class WorkflowCompiler {
     if (resolvedResult.isErr()) return err(resolvedResult.error);
     const { steps, resolvedBindings, resolvedOverrides } = resolvedResult.value;
 
-    const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition>();
+    const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>();
     for (const step of steps) {
       if (stepById.has(step.id)) {
         return err(Err.invalidState(`Duplicate step id '${step.id}' in workflow '${workflow.definition.id}'`));
@@ -477,7 +479,7 @@ export class WorkflowCompiler {
 
   private resolveLoopBody(
     loop: LoopStepDefinition,
-    stepById: Map<string, WorkflowStepDefinition | LoopStepDefinition>,
+    stepById: Map<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>,
     workflow: Workflow
   ): Result<readonly WorkflowStepDefinition[], DomainError> {
     // Inline body

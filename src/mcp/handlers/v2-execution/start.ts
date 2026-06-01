@@ -403,6 +403,71 @@ export function executeStartWorkflow(
   internalContext?: Readonly<Record<string, string>>,
 ): RA<StartWorkflowResult, StartWorkflowError> {
   const { gate, sessionStore, snapshotStore, pinnedStore, crypto, tokenCodecPorts, idFactory, validationPipelineDeps, tokenAliasStore, entropy } = ctx.v2;
+
+  // Programmatic EAT validation & depth check
+  let spawnDepth = 0;
+  let parentSessionId: string | undefined = internalContext?.['parentSessionId'];
+
+  if (internalContext?.['parent_eat_token']) {
+    try {
+      const parentEat = JSON.parse(internalContext['parent_eat_token']) as {
+        payload: {
+          harness: string;
+          activeModel: string;
+          parentSessionId?: string;
+          spawnDepth: number;
+        };
+        signature: string;
+      };
+      const parentEatPayload = parentEat.payload;
+      const parentSignature = parentEat.signature;
+      if (parentEatPayload && parentSignature) {
+        const isValid = verifyEAT(parentEatPayload, parentSignature, tokenCodecPorts);
+        if (!isValid) {
+          return neErrorAsync({
+            kind: 'precondition_failed' as const,
+            message: 'Parent Environment Attestation Token signature verification failed.',
+          });
+        }
+        spawnDepth = (parentEatPayload.spawnDepth ?? 0) + 1;
+        if (spawnDepth > 3) {
+          return neErrorAsync({
+            kind: 'precondition_failed' as const,
+            message: `Spawn depth limit exceeded. Maximum allowable depth is 3, requested depth is ${spawnDepth}.`,
+          });
+        }
+      }
+    } catch (e) {
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: `Failed to parse parent Environment Attestation Token: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }
+
+  // Sniff environment
+  let harness: 'cursor' | 'claude_code' | 'daemon' | 'mcp' = 'mcp';
+  const forceHarness = process.env['WORKRAIL_FORCE_HARNESS'];
+  if (forceHarness === 'cursor' || forceHarness === 'claude_code' || forceHarness === 'daemon' || forceHarness === 'mcp') {
+    harness = forceHarness;
+  } else if (process.env['CLAUDE_CODE'] === 'true' || process.env['CLAUDE_CLI'] === 'true') {
+    harness = 'claude_code';
+  } else if (process.env['CURSOR_APP'] === 'true' || process.env['TERM_PROGRAM'] === 'vscode') {
+    harness = 'cursor';
+  } else if (internalContext?.['triggerSource'] === 'daemon' || process.env['WORKRAIL_IS_DAEMON'] === 'true') {
+    harness = 'daemon';
+  } else if (internalContext?.['triggerSource'] === 'mcp') {
+    harness = 'mcp';
+  }
+
+  let activeModel = 'claude-3-5-sonnet'; // fallback
+  const forceModel = process.env['WORKRAIL_FORCE_MODEL'] || process.env['WORKRAIL_ACTIVE_MODEL'] || process.env['WORKRAIL_MODEL'];
+  if (forceModel) {
+    activeModel = forceModel;
+  } else if (internalContext?.['model']) {
+    activeModel = internalContext['model'];
+  }
+
   const shouldUseRequestReader =
     ctx.featureFlags != null && hasRequestWorkspaceSignal({
       workspacePath: input.workspacePath,
@@ -494,6 +559,24 @@ export function executeStartWorkflow(
                       ? `${workflow.source.pluginName}@${workflow.source.pluginVersion}`
                       : '(bundled)';
 
+            const childEatPayload = {
+              harness,
+              activeModel,
+              parentSessionId: parentSessionId ?? '',
+              spawnDepth,
+            };
+            const childEatSignature = signEAT(childEatPayload, tokenCodecPorts);
+            const childEat = childEatSignature ? { payload: childEatPayload, signature: childEatSignature } : null;
+
+            const enrichedContext: Record<string, string> = {
+              ...internalContext,
+              metrics_harness: harness,
+              metrics_active_model: activeModel,
+            };
+            if (childEat) {
+              enrichedContext['eat_token'] = JSON.stringify(childEat);
+            }
+
             const events = buildInitialEvents({
               sessionId,
               runId,
@@ -506,12 +589,8 @@ export function executeStartWorkflow(
               observations,
               idFactory,
               goal: input.goal,
-              extraContext: internalContext,
-              // WHY extract from internalContext: parentSessionId is injected by makeSpawnAgentTool()
-              // via internalContext so the public V2StartWorkflowInput schema stays unchanged.
-              // It is extracted here to populate session_created.data (typed, durable, DAG-queryable)
-              // rather than only living in a context_set event (which internalContext alone would produce).
-              parentSessionId: internalContext?.['parentSessionId'],
+              extraContext: enrichedContext,
+              parentSessionId,
             });
 
             // New session: truth is known to be empty at this point (session just created).
@@ -663,4 +742,73 @@ function enrichPinnedSnapshotWithResolvedReferences(
       resolvedReferences: result.resolved,
     };
   });
+}
+
+function canonicalEATString(eat: {
+  readonly harness: string;
+  readonly activeModel: string;
+  readonly parentSessionId?: string;
+  readonly spawnDepth: number;
+}): string {
+  return JSON.stringify({
+    harness: eat.harness,
+    activeModel: eat.activeModel,
+    parentSessionId: eat.parentSessionId ?? '',
+    spawnDepth: eat.spawnDepth,
+  });
+}
+
+export function signEAT(
+  eat: {
+    readonly harness: string;
+    readonly activeModel: string;
+    readonly parentSessionId?: string;
+    readonly spawnDepth: number;
+  },
+  ports: TokenCodecPorts
+): string | null {
+  const message = canonicalEATString(eat);
+  const messageBytes = new TextEncoder().encode(message);
+  const keyBase64Url = ports.keyring.current.keyBase64Url;
+  const decoded = ports.base64url.decodeBase64Url(keyBase64Url);
+  if (decoded.isErr()) {
+    return null;
+  }
+  const signatureBytes = ports.hmac.hmacSha256(decoded.value, messageBytes);
+  return ports.base64url.encodeBase64Url(signatureBytes);
+}
+
+export function verifyEAT(
+  eat: {
+    readonly harness: string;
+    readonly activeModel: string;
+    readonly parentSessionId?: string;
+    readonly spawnDepth: number;
+  },
+  signature: string,
+  ports: TokenCodecPorts
+): boolean {
+  const message = canonicalEATString(eat);
+  const messageBytes = new TextEncoder().encode(message);
+  const signatureDecoded = ports.base64url.decodeBase64Url(signature);
+  if (signatureDecoded.isErr()) {
+    return false;
+  }
+
+  const keys: string[] = [ports.keyring.current.keyBase64Url];
+  if (ports.keyring.previous) {
+    keys.push(ports.keyring.previous.keyBase64Url);
+  }
+
+  for (const k of keys) {
+    const keyDecoded = ports.base64url.decodeBase64Url(k);
+    if (keyDecoded.isErr()) continue;
+
+    const expected = ports.hmac.hmacSha256(keyDecoded.value, messageBytes);
+    if (ports.hmac.timingSafeEqual(expected, signatureDecoded.value)) {
+      return true;
+    }
+  }
+
+  return false;
 }

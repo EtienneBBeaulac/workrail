@@ -1,5 +1,6 @@
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 import type { DataDirPortV2 } from '../../../ports/data-dir.port.js';
 import type { SessionId, WorkflowHash, SnapshotRef } from '../../../durable-core/ids/index.js';
 
@@ -39,7 +40,24 @@ export class LocalDataDirV2 implements DataDirPortV2 {
   }
 
   keysDir(): string {
-    return path.join(this.root(), 'keys');
+    const keysDirConfigured = this.env['WORKRAIL_KEYS_DIR'];
+    if (keysDirConfigured) {
+      return keysDirConfigured;
+    }
+
+    const dataDirConfigured = this.env['WORKRAIL_DATA_DIR'];
+    if (dataDirConfigured) {
+      // If WORKRAIL_DATA_DIR is explicitly overridden (e.g. in tests or sandboxes),
+      // we must keep keys contained within it to preserve isolation and avoid contaminating user directories.
+      return path.join(dataDirConfigured, 'keys');
+    }
+
+    const legacyKeyring = path.join(this.root(), 'keys', 'keyring.json');
+    if (fs.existsSync(legacyKeyring)) {
+      return path.join(this.root(), 'keys');
+    }
+
+    return path.join(os.homedir(), '.workrail', 'keys');
   }
 
   keyringPath(): string {

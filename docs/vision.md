@@ -64,6 +64,7 @@ Most autonomous coding agents are single-session: they get a task, they work on 
 4. **Correctness over speed** -- do it right, not just done
 5. **Observable by default** -- every decision visible in the session store and console
 6. **Overnight-safe** -- the system must work while the operator is asleep
+7. **Both-Sides-of-the-Fence Execution** -- compile-once, execute polymorphically. Every workflow directive must work for both client-driven interactive MCP sessions (precise directives, zero control) and autonomous Daemon sessions (native programmatic execution, total control).
 
 ## Quality standards WorkTrain holds itself to
 

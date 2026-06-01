@@ -3,9 +3,10 @@
  *
  * @enforces data-dir-workrail-owned
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 
 import { LocalDataDirV2 } from '../../../src/v2/infra/local/data-dir/index.js';
 
@@ -56,15 +57,33 @@ describe('v2 data directory (Slice 2 locks)', () => {
     expect(snapshotsDir).toBe(path.join(customRoot, 'snapshots'));
   });
 
-  it('data-dir-workrail-owned: provides isolated keyring directory', () => {
-    const customRoot = path.join(os.tmpdir(), 'workrail-test');
-    const env = { WORKRAIL_DATA_DIR: customRoot };
+  it('data-dir-workrail-owned: keyring directory defaults to decoupled or legacy user home path when no overrides are set', () => {
+    const cleanEnv: Record<string, string | undefined> = {};
+    const dataDir = new LocalDataDirV2(cleanEnv);
+    const keysDir = dataDir.keysDir();
 
+    const expectedDecoupled = path.join(os.homedir(), '.workrail', 'keys');
+    const expectedLegacy = path.join(os.homedir(), '.workrail', 'data', 'keys');
+
+    expect(keysDir === expectedDecoupled || keysDir === expectedLegacy).toBe(true);
+  });
+
+  it('data-dir-workrail-owned: keyring directory defaults to WORKRAIL_DATA_DIR keys when overridden', () => {
+    const customRoot = path.join(os.tmpdir(), 'custom-workrail-root');
+    const env = { WORKRAIL_DATA_DIR: customRoot };
     const dataDir = new LocalDataDirV2(env);
     const keysDir = dataDir.keysDir();
 
-    expect(keysDir).toContain('keys');
     expect(keysDir).toBe(path.join(customRoot, 'keys'));
+  });
+
+  it('data-dir-workrail-owned: keyring directory respects WORKRAIL_KEYS_DIR override', () => {
+    const customKeysDir = path.join(os.tmpdir(), 'custom-keys-override');
+    const env = { WORKRAIL_KEYS_DIR: customKeysDir };
+    const dataDir = new LocalDataDirV2(env);
+    const keysDir = dataDir.keysDir();
+
+    expect(keysDir).toBe(customKeysDir);
   });
 
   it('data-dir-workrail-owned: provides isolated pinned workflows directory', () => {

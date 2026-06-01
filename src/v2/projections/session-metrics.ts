@@ -86,6 +86,16 @@ export interface SessionMetricsV2 {
    * and the engine re-presents the step. High values indicate workflow quality issues.
    */
   readonly retriesCount: number;
+  /**
+   * Detected client harness (e.g. 'claude-code', 'cursor', 'daemon') for this session.
+   * Null if not reported.
+   */
+  readonly harness: string | null;
+  /**
+   * Detected active model (e.g. 'claude-sonnet-4-6') for this session.
+   * Null if not reported.
+   */
+  readonly activeModel: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,6 +350,12 @@ export function projectSessionMetricsV2(
     else if (nodeKind === 'blocked_attempt') retriesCount++;
   }
 
+  const harnessRaw = metricsContext['metrics_harness'];
+  const harness = typeof harnessRaw === 'string' ? harnessRaw : null;
+
+  const activeModelRaw = metricsContext['metrics_active_model'];
+  const activeModel = typeof activeModelRaw === 'string' ? activeModelRaw : null;
+
   return {
     startGitSha,
     endGitSha,
@@ -357,5 +373,7 @@ export function projectSessionMetricsV2(
     gitEvidence,
     stepsCompleted,
     retriesCount,
+    harness,
+    activeModel,
   };
 }

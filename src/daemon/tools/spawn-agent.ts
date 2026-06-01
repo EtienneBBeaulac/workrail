@@ -13,7 +13,7 @@ import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
 import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
-import type { SessionId } from '../../v2/durable-core/ids/index.js';
+import { asSessionId, type SessionId } from '../../v2/durable-core/ids/index.js';
 // WHY import type: runWorkflow is passed as a parameter (runWorkflowFn), not called
 // directly. The type reference is erased at compile time -- no runtime circular dep.
 import type { runWorkflow } from '../workflow-runner.js';
@@ -33,6 +33,9 @@ interface SingleSpawnSpec {
   readonly goal: string;
   readonly workspacePath: string;
   readonly context?: Readonly<Record<string, unknown>>;
+  readonly agentConfig?: {
+    readonly model?: string;
+  };
 }
 
 /**
@@ -89,11 +92,25 @@ function parseParams(raw: unknown): ParsedParams {
       if (typeof a['goal'] !== 'string' || !a['goal']) throw new Error(`spawn_agent: agents[${i}].goal must be a non-empty string`);
       if (typeof a['workspacePath'] !== 'string' || !a['workspacePath']) throw new Error(`spawn_agent: agents[${i}].workspacePath must be a non-empty string`);
       if (a['context'] !== undefined && (typeof a['context'] !== 'object' || a['context'] === null || Array.isArray(a['context']))) throw new Error(`spawn_agent: agents[${i}].context must be a plain object if provided`);
+      if (a['agentConfig'] !== undefined && (typeof a['agentConfig'] !== 'object' || a['agentConfig'] === null || Array.isArray(a['agentConfig']))) throw new Error(`spawn_agent: agents[${i}].agentConfig must be a plain object if provided`);
+      
+      let agentConfig: { model?: string } | undefined;
+      if (a['agentConfig'] !== undefined) {
+        const ac = a['agentConfig'] as Record<string, unknown>;
+        if (ac['model'] !== undefined && typeof ac['model'] !== 'string') {
+          throw new Error(`spawn_agent: agents[${i}].agentConfig.model must be a string if provided`);
+        }
+        agentConfig = {
+          ...(ac['model'] !== undefined ? { model: ac['model'] as string } : {}),
+        };
+      }
+
       return {
         workflowId: a['workflowId'],
         goal: a['goal'],
         workspacePath: a['workspacePath'],
         ...(a['context'] !== undefined ? { context: a['context'] as Readonly<Record<string, unknown>> } : {}),
+        ...(agentConfig !== undefined ? { agentConfig } : {}),
       };
     });
     return { kind: 'parallel', agents };
@@ -103,6 +120,19 @@ function parseParams(raw: unknown): ParsedParams {
   if (typeof p['workflowId'] !== 'string' || !p['workflowId']) throw new Error('spawn_agent: workflowId must be a non-empty string');
   if (typeof p['goal'] !== 'string' || !p['goal']) throw new Error('spawn_agent: goal must be a non-empty string');
   if (typeof p['workspacePath'] !== 'string' || !p['workspacePath']) throw new Error('spawn_agent: workspacePath must be a non-empty string');
+  if (p['agentConfig'] !== undefined && (typeof p['agentConfig'] !== 'object' || p['agentConfig'] === null || Array.isArray(p['agentConfig']))) throw new Error('spawn_agent: agentConfig must be a plain object if provided');
+
+  let agentConfig: { model?: string } | undefined;
+  if (p['agentConfig'] !== undefined) {
+    const ac = p['agentConfig'] as Record<string, unknown>;
+    if (ac['model'] !== undefined && typeof ac['model'] !== 'string') {
+      throw new Error('spawn_agent: agentConfig.model must be a string if provided');
+    }
+    agentConfig = {
+      ...(ac['model'] !== undefined ? { model: ac['model'] as string } : {}),
+    };
+  }
+
   return {
     kind: 'single',
     spec: {
@@ -110,6 +140,7 @@ function parseParams(raw: unknown): ParsedParams {
       goal: p['goal'],
       workspacePath: p['workspacePath'],
       ...(p['context'] !== undefined ? { context: p['context'] as Readonly<Record<string, unknown>> } : {}), // object type validated by JSON Schema at call boundary
+      ...(agentConfig !== undefined ? { agentConfig } : {}),
     },
   };
 }
@@ -180,22 +211,51 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   // is observable in the store from the moment spawnOne() is called. If the process crashes
   // after executeStartWorkflow but before runWorkflow, the zombie session is traceable
   // via parentSessionId. Adapts the proven pattern from console-routes.ts.
+  let parentEatToken: string | undefined;
+  const parentLoadRes = await sc.ctx.v2.sessionStore.load(asSessionId(sc.thisWorkrailSessionId));
+  if (parentLoadRes.isOk()) {
+    const parentEvents = parentLoadRes.value.events;
+    for (let i = parentEvents.length - 1; i >= 0; i--) {
+      const e = parentEvents[i];
+      if (e.kind === 'context_set' && (e.data as any)?.context?.[ 'eat_token' ]) {
+        parentEatToken = (e.data as any).context[ 'eat_token' ];
+        break;
+      }
+    }
+  }
+
+  const internalContext: Record<string, string> = {
+    is_autonomous: 'true',
+    workspacePath: spec.workspacePath,
+    parentSessionId: sc.thisWorkrailSessionId,
+    triggerSource: 'daemon',
+  };
+  if (parentEatToken) {
+    internalContext['parent_eat_token'] = parentEatToken;
+  }
+  if (spec.agentConfig?.model) {
+    internalContext['model'] = spec.agentConfig.model;
+  }
+
   const startResult = await executeStartWorkflow(
     { workflowId: spec.workflowId, workspacePath: spec.workspacePath, goal: spec.goal },
     sc.ctx,
-    // WHY parentSessionId via internalContext: the public V2StartWorkflowInput schema
-    // stays unchanged. parentSessionId is extracted in buildInitialEvents() to populate
-    // session_created.data (typed, durable, DAG-queryable).
-    // is_autonomous: 'true' marks the child as a daemon-owned session.
-    { is_autonomous: 'true', workspacePath: spec.workspacePath, parentSessionId: sc.thisWorkrailSessionId, triggerSource: 'daemon' },
+    internalContext,
   );
 
   if (startResult.isErr()) {
+    const err = startResult.error;
+    const notesMsg = err.kind === 'precondition_failed' || err.kind === 'invariant_violation' || err.kind === 'workflow_compile_failed' || err.kind === 'hash_computation_failed' || err.kind === 'prompt_render_failed'
+      ? err.message
+      : err.kind === 'validation_failed'
+        ? err.failure.message
+        : JSON.stringify(err);
+
     return {
       kind: 'single',
       childSessionId: null,
       outcome: 'error',
-      notes: `Failed to start child workflow: ${startResult.error.kind} -- ${JSON.stringify(startResult.error)}`,
+      notes: `Failed to start child workflow: ${notesMsg}`,
     };
   }
 
