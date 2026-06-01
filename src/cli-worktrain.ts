@@ -1419,12 +1419,17 @@ program
   .option('--days <n>', 'Sessions modified in the last N days (default: 30)', parseInt)
   .option('--since <date>', 'Override start date (YYYY-MM-DD)')
   .option('--until <date>', 'Override end date (YYYY-MM-DD, default: today)')
-  .option('--out <file>', 'Write JSON to this file instead of stdout')
+  .option('--out <file>', 'Write output to this file instead of stdout')
+  .addOption(
+    new Option('--format <fmt>', 'Output format (default: ndjson)')
+      .choices(['ndjson', 'json', 'summary', 'csv'])
+      .default('ndjson'),
+  )
   .addOption(
     new Option('--schedule <frequency>', 'Install a recurring schedule (mutually exclusive with report output)')
       .choices(['daily', 'weekly']),
   )
-  .action(async (options: { days?: number; since?: string; until?: string; out?: string; schedule?: string }) => {
+  .action(async (options: { days?: number; since?: string; until?: string; out?: string; format?: string; schedule?: string }) => {
     // --schedule mode: install launchd plist or crontab, then exit.
     // Mutually exclusive with JSON report output.
     if (options.schedule !== undefined) {
@@ -1478,6 +1483,7 @@ program
       since: options.since,
       until: options.until,
       out: options.out,
+      format: options.format as import('./cli/commands/worktrain-report.js').ReportFormat | undefined,
     });
   });
 

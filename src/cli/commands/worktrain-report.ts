@@ -124,6 +124,16 @@ export interface WorktrainReportCommandDeps {
   readonly getDataDirEnv: () => string | undefined;
 }
 
+/**
+ * Output format for the report command.
+ *
+ * - ndjson  (default): one JSON object per line -- streamable, jq-friendly
+ * - json   : single pretty-printed JSON blob (legacy / machine consumers)
+ * - summary: aggregates only, no per-session detail
+ * - csv    : spreadsheet-friendly, one row per session
+ */
+export type ReportFormat = 'ndjson' | 'json' | 'summary' | 'csv';
+
 export interface WorktrainReportCommandOpts {
   /** Number of days to look back (default: 30). Ignored when `since` is provided. */
   readonly days?: number;
@@ -131,8 +141,10 @@ export interface WorktrainReportCommandOpts {
   readonly since?: string;
   /** Override end date (YYYY-MM-DD, default: today). */
   readonly until?: string;
-  /** Write JSON to this file path instead of stdout. */
+  /** Write output to this file path instead of stdout. */
   readonly out?: string;
+  /** Output format (default: ndjson). */
+  readonly format?: ReportFormat;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +166,163 @@ function parseDateToMs(dateStr: string): number | null {
  */
 function formatDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Remove internal-only fields before any renderer emits the session.
+ *
+ * WHY strip changedFilePaths: it is an implementation detail of churn
+ * detection (used to correlate post-session git activity). Emitting it
+ * inflates output by thousands of strings for large coding sessions and
+ * is not useful to report consumers. languageBreakdown already conveys
+ * the language composition without the raw path list.
+ */
+function sanitizeSession(s: ReportSession): Record<string, unknown> {
+  const { metrics, ...rest } = s;
+  if (metrics === null) return { ...rest, metrics: null };
+
+  const { gitEvidence, ...otherMetrics } = metrics;
+  const sanitizedGitEvidence = gitEvidence === null ? null : (() => {
+    const { committedDiff, ...otherGit } = gitEvidence;
+    const sanitizedCommittedDiff = committedDiff === null ? null : (() => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { changedFilePaths: _dropped, ...diffRest } = committedDiff;
+      return diffRest;
+    })();
+    return { ...otherGit, committedDiff: sanitizedCommittedDiff };
+  })();
+
+  return { ...rest, metrics: { ...otherMetrics, gitEvidence: sanitizedGitEvidence } };
+}
+
+// ---------------------------------------------------------------------------
+// Format renderers -- pure functions, no I/O
+// ---------------------------------------------------------------------------
+
+/**
+ * NDJSON (default): one JSON object per line -- streamable and jq-friendly.
+ * Sessions are emitted individually; the final line is the summary object.
+ */
+function renderNdjson(output: ReportOutput): string {
+  const lines: string[] = [];
+  for (const s of output.sessions) {
+    lines.push(JSON.stringify(sanitizeSession(s)));
+  }
+  lines.push(JSON.stringify({ _summary: true, ...output.summary }));
+  return lines.join('\n');
+}
+
+/** JSON (legacy): single pretty-printed blob. Strips changedFilePaths. */
+function renderJson(output: ReportOutput): string {
+  const sanitized = { ...output, sessions: output.sessions.map(sanitizeSession) };
+  return JSON.stringify(sanitized, null, 2);
+}
+
+/** Summary: aggregates only -- no per-session detail. */
+function renderSummary(output: ReportOutput): string {
+  return JSON.stringify({
+    version: output.version,
+    generatedAt: output.generatedAt,
+    dateRange: output.dateRange,
+    summary: output.summary,
+  }, null, 2);
+}
+
+/** A scalar value safe to embed in a CSV cell. */
+type CsvCellValue = string | number | boolean | null | undefined;
+
+/** Escape a scalar value for CSV (RFC 4180). */
+function csvEscape(value: CsvCellValue): string {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+const CSV_HEADERS = [
+  'sessionId', 'date', 'workflowId', 'repoRoot', 'triggerSource',
+  'outcome', 'stepsCompleted', 'retriesCount', 'durationMs',
+  'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens',
+  'linesAdded', 'linesRemoved', 'filesChanged', 'commitCount',
+  'captureConfidence', 'filesRemodified', 'goal',
+] as const;
+
+/** Typed row for a single CSV session. One field per CSV_HEADERS entry. */
+type CsvRow = {
+  readonly sessionId: string;
+  readonly date: string;
+  readonly workflowId: CsvCellValue;
+  readonly repoRoot: CsvCellValue;
+  readonly triggerSource: string;
+  readonly outcome: CsvCellValue;
+  readonly stepsCompleted: number;
+  readonly retriesCount: number;
+  readonly durationMs: CsvCellValue;
+  readonly inputTokens: CsvCellValue;
+  readonly outputTokens: CsvCellValue;
+  readonly cacheReadTokens: CsvCellValue;
+  readonly cacheWriteTokens: CsvCellValue;
+  readonly linesAdded: CsvCellValue;
+  readonly linesRemoved: CsvCellValue;
+  readonly filesChanged: CsvCellValue;
+  readonly commitCount: number;
+  readonly captureConfidence: CsvCellValue;
+  readonly filesRemodified: CsvCellValue;
+  readonly goal: CsvCellValue;
+};
+
+function buildCsvRow(s: ReportSession): CsvRow {
+  const m = s.metrics;
+  const ge = m?.gitEvidence ?? null;
+  const td = m?.tokenDelta ?? null;
+  const usage = m?.usageEvents[0] ?? null;
+  return {
+    sessionId:         s.sessionId,
+    date:              s.date,
+    workflowId:        s.workflowId,
+    repoRoot:          s.repoRoot,
+    triggerSource:     s.triggerSource,
+    outcome:           m?.outcome ?? null,
+    stepsCompleted:    m?.stepsCompleted ?? 0,
+    retriesCount:      m?.retriesCount ?? 0,
+    durationMs:        m?.durationMs ?? null,
+    inputTokens:       td?.inputTokens ?? usage?.inputTokens ?? null,
+    outputTokens:      td?.outputTokens ?? usage?.outputTokens ?? null,
+    cacheReadTokens:   td?.cacheReadTokens ?? usage?.cacheReadTokens ?? null,
+    cacheWriteTokens:  td?.cacheWriteTokens ?? usage?.cacheWriteTokens ?? null,
+    linesAdded:        ge?.committedDiff?.linesAdded ?? m?.linesAdded ?? null,
+    linesRemoved:      ge?.committedDiff?.linesRemoved ?? m?.linesRemoved ?? null,
+    filesChanged:      ge?.committedDiff?.filesChanged ?? m?.filesChanged ?? null,
+    commitCount:       ge?.commitShas.length ?? 0,
+    captureConfidence: ge?.captureConfidence ?? m?.captureConfidence ?? null,
+    filesRemodified:   ge?.churnSignal?.filesRemodified ?? null,
+    goal:              s.goal,
+  };
+}
+
+/** CSV: header row + one row per session. Goal is last (may contain commas). */
+function renderCsv(output: ReportOutput): string {
+  const rows: string[] = [CSV_HEADERS.join(',')];
+  for (const s of output.sessions) {
+    const row = buildCsvRow(s);
+    rows.push(CSV_HEADERS.map((h) => csvEscape(row[h])).join(','));
+  }
+  return rows.join('\n');
+}
+
+/**
+ * Dispatch to the correct renderer based on format.
+ * Pure function: no I/O.
+ */
+function render(output: ReportOutput, format: ReportFormat): string {
+  switch (format) {
+    case 'ndjson':  return renderNdjson(output);
+    case 'json':    return renderJson(output);
+    case 'summary': return renderSummary(output);
+    case 'csv':     return renderCsv(output);
+  }
 }
 
 /**
@@ -371,18 +540,19 @@ export async function executeWorktrainReportCommand(
     summary,
   };
 
-  const json = JSON.stringify(output, null, 2);
+  const format: ReportFormat = opts.format ?? 'ndjson';
+  const rendered = render(output, format);
 
   if (opts.out !== undefined) {
     try {
-      await deps.writeFile(opts.out, json);
+      await deps.writeFile(opts.out, rendered);
       deps.writeStderr(`[report] Report written to ${opts.out}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       deps.writeStderr(`[report] Error writing to ${opts.out}: ${msg}`);
     }
   } else {
-    deps.writeOutput(json);
+    deps.writeOutput(rendered);
   }
 }
 

@@ -157,11 +157,31 @@ function makeDeps(
   return { deps, outputLines, stderrLines, writtenFiles };
 }
 
-/** Parse output as JSON, assert it's a valid ReportOutput. */
-function parseOutput(outputLines: string[]): ReportOutput {
+/**
+ * Parse --format json output (single blob). Use for tests that explicitly
+ * pass format: 'json' so they are not affected by the default ndjson change.
+ */
+function parseJsonOutput(outputLines: string[]): ReportOutput {
   expect(outputLines).toHaveLength(1);
   return JSON.parse(outputLines[0]!) as ReportOutput;
 }
+
+/**
+ * Parse --format ndjson output (one object per line).
+ * Returns { sessions, summary } extracted from the NDJSON lines.
+ */
+function parseNdjsonOutput(outputLines: string[]): { sessions: unknown[]; summary: unknown } {
+  expect(outputLines).toHaveLength(1);
+  const lines = outputLines[0]!.split('\n').filter((l) => l.trim().length > 0);
+  expect(lines.length).toBeGreaterThan(0);
+  const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>);
+  const summaryLine = parsed.find((p) => p['_summary'] === true);
+  const sessions = parsed.filter((p) => p['_summary'] !== true);
+  expect(summaryLine).toBeDefined();
+  return { sessions, summary: summaryLine };
+}
+
+// parseJsonOutput is the canonical helper; no alias needed.
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -171,9 +191,9 @@ describe('executeWorktrainReportCommand', () => {
   describe('empty session store', () => {
     it('emits valid JSON with empty sessions array and zeroed summary', async () => {
       const { deps, outputLines, stderrLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.version).toBe(1);
       expect(report.sessions).toHaveLength(0);
       expect(report.summary.totalSessions).toBe(0);
@@ -190,9 +210,9 @@ describe('executeWorktrainReportCommand', () => {
 
     it('output JSON is parseable and has correct shape', async () => {
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { days: 7 });
+      await executeWorktrainReportCommand(deps, { days: 7, format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report).toHaveProperty('version', 1);
       expect(report).toHaveProperty('generatedAt');
       expect(report).toHaveProperty('dateRange');
@@ -215,9 +235,9 @@ describe('executeWorktrainReportCommand', () => {
       const { deps, outputLines } = makeDeps(
         makeFakeConsoleService([insideSession, outsideSession]),
       );
-      await executeWorktrainReportCommand(deps, { days: 30 });
+      await executeWorktrainReportCommand(deps, { days: 30, format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.sessions).toHaveLength(1);
       expect(report.sessions[0]!.sessionId).toBe('sess_inside');
     });
@@ -238,9 +258,10 @@ describe('executeWorktrainReportCommand', () => {
       await executeWorktrainReportCommand(deps, {
         since: '2026-05-01',
         until: '2026-05-31',
+        format: 'json',
       });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.sessions).toHaveLength(1);
       expect(report.sessions[0]!.sessionId).toBe('sess_inside');
     });
@@ -252,9 +273,9 @@ describe('executeWorktrainReportCommand', () => {
       });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([outsideSession]));
-      await executeWorktrainReportCommand(deps, { days: 7 });
+      await executeWorktrainReportCommand(deps, { days: 7, format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.sessions).toHaveLength(0);
     });
   });
@@ -262,7 +283,7 @@ describe('executeWorktrainReportCommand', () => {
   describe('--out file option', () => {
     it('writes JSON to file and does not write to stdout', async () => {
       const { deps, outputLines, writtenFiles } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { out: path.join(os.tmpdir(), 'report.json') });
+      await executeWorktrainReportCommand(deps, { out: path.join(os.tmpdir(), 'report.json'), format: 'json' });
 
       expect(outputLines).toHaveLength(0);
       expect(writtenFiles).toHaveLength(1);
@@ -273,7 +294,7 @@ describe('executeWorktrainReportCommand', () => {
 
     it('emits stderr confirmation when writing to file', async () => {
       const { deps, stderrLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { out: path.join(os.tmpdir(), 'report.json') });
+      await executeWorktrainReportCommand(deps, { out: path.join(os.tmpdir(), 'report.json'), format: 'json' });
 
       const hasConfirmation = stderrLines.some((l) => l.includes(path.join(os.tmpdir(), 'report.json')));
       expect(hasConfirmation).toBe(true);
@@ -302,9 +323,9 @@ describe('executeWorktrainReportCommand', () => {
       });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([session1, session2]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.totalInputTokens).toBe(3000);
       expect(report.summary.totalOutputTokens).toBe(600);
       expect(report.summary.totalCacheReadTokens).toBe(150);
@@ -319,9 +340,9 @@ describe('executeWorktrainReportCommand', () => {
       const s5 = makeSession({ sessionId: 'sess_5', metrics: null });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([s1, s2, s3, s4, s5]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.outcomeBreakdown['success']).toBe(2);
       expect(report.summary.outcomeBreakdown['error']).toBe(1);
       // null outcome (from metrics) and null metrics both count as 'unknown'
@@ -335,9 +356,9 @@ describe('executeWorktrainReportCommand', () => {
       const s4 = makeSession({ sessionId: 'sess_4', workflowId: null });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([s1, s2, s3, s4]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.workflowBreakdown['wr.coding-task']).toBe(2);
       expect(report.summary.workflowBreakdown['wr.mr-review']).toBe(1);
       expect(report.summary.workflowBreakdown['__unknown__']).toBe(1);
@@ -390,9 +411,9 @@ describe('executeWorktrainReportCommand', () => {
       });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([s1, s2]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.languageBreakdown['.ts']).toBe(120);
       expect(report.summary.languageBreakdown['.json']).toBe(20);
       expect(report.summary.languageBreakdown['.md']).toBe(10);
@@ -413,9 +434,9 @@ describe('executeWorktrainReportCommand', () => {
       });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.totalLinesAdded).toBe(50);
       expect(report.summary.totalLinesRemoved).toBe(10);
       expect(report.summary.totalFilesChanged).toBe(3);
@@ -430,9 +451,9 @@ describe('executeWorktrainReportCommand', () => {
       const { deps, outputLines } = makeDeps(
         makeFakeConsoleService([complete, completeWithGaps, inProgress, blocked]),
       );
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.totalSessions).toBe(4);
       expect(report.summary.completedSessions).toBe(2);
     });
@@ -450,9 +471,9 @@ describe('executeWorktrainReportCommand', () => {
       const withoutMetrics = makeSession({ sessionId: 'sess_2', metrics: null });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([withMetrics, withoutMetrics]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.summary.totalSessions).toBe(2);
       expect(report.summary.totalDurationMs).toBe(60000);
       expect(report.summary.totalStepsCompleted).toBe(5);
@@ -464,7 +485,7 @@ describe('executeWorktrainReportCommand', () => {
   describe('stderr and stdout separation', () => {
     it('all progress goes to stderr, stdout contains only the JSON blob', async () => {
       const { deps, outputLines, stderrLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
       expect(outputLines).toHaveLength(1);
       // Verify the single stdout line is valid JSON
@@ -481,10 +502,10 @@ describe('executeWorktrainReportCommand', () => {
   describe('session store error graceful degradation', () => {
     it('emits empty report with warning when session store fails', async () => {
       const { deps, outputLines, stderrLines } = makeDeps(makeErrorConsoleService());
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
       // Should still emit valid JSON
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.sessions).toHaveLength(0);
       // Should have warning in stderr
       const hasWarning = stderrLines.some((l) => l.toLowerCase().includes('warning') || l.includes('could not'));
@@ -498,7 +519,7 @@ describe('executeWorktrainReportCommand', () => {
       const { deps, stderrLines } = makeDeps(
         makeFakeConsoleService(sessions, 600), // pretend 600 total, only 1 returned
       );
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
       const hasTruncationWarning = stderrLines.some(
         (l) => l.includes('600') && l.includes('1'),
@@ -511,7 +532,7 @@ describe('executeWorktrainReportCommand', () => {
       const { deps, stderrLines } = makeDeps(
         makeFakeConsoleService(sessions, 1),
       );
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
       const hasTruncationWarning = stderrLines.some(
         (l) => l.toLowerCase().includes('only') && l.toLowerCase().includes('loaded'),
@@ -528,9 +549,9 @@ describe('executeWorktrainReportCommand', () => {
       });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.sessions[0]!.goal).toBe('Implement the foo feature');
     });
 
@@ -539,9 +560,9 @@ describe('executeWorktrainReportCommand', () => {
       const daemon = makeSession({ sessionId: 'sess_daemon', triggerSource: 'daemon' });
 
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([mcp, daemon]));
-      await executeWorktrainReportCommand(deps);
+      await executeWorktrainReportCommand(deps, { format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       const mcpSession = report.sessions.find((s) => s.sessionId === 'sess_mcp');
       const daemonSession = report.sessions.find((s) => s.sessionId === 'sess_daemon');
       expect(mcpSession?.triggerSource).toBe('mcp');
@@ -558,9 +579,10 @@ describe('executeWorktrainReportCommand', () => {
       await executeWorktrainReportCommand(deps, {
         since: '2026-05-01',
         until: '2026-05-31',
+        format: 'json',
       });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.sessions[0]!.date).toBe('2026-05-15');
     });
   });
@@ -571,9 +593,10 @@ describe('executeWorktrainReportCommand', () => {
       await executeWorktrainReportCommand(deps, {
         since: '2026-05-01',
         until: '2026-05-30',
+        format: 'json',
       });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       expect(report.dateRange.since).toBe('2026-05-01');
       expect(report.dateRange.until).toBe('2026-05-30');
     });
@@ -582,9 +605,9 @@ describe('executeWorktrainReportCommand', () => {
       const { deps, outputLines } = makeDeps(makeFakeConsoleService([]), {
         now: () => new Date('2026-05-30T12:00:00.000Z').getTime(),
       });
-      await executeWorktrainReportCommand(deps, { days: 7 });
+      await executeWorktrainReportCommand(deps, { days: 7, format: 'json' });
 
-      const report = parseOutput(outputLines);
+      const report = parseJsonOutput(outputLines);
       // since should be 2026-05-24 (7 days back, inclusive)
       expect(report.dateRange.since).toBe('2026-05-24');
       expect(report.dateRange.until).toBe('2026-05-30');
@@ -594,7 +617,7 @@ describe('executeWorktrainReportCommand', () => {
   describe('invalid date inputs', () => {
     it('writes error to stderr and returns without stdout when --since is invalid', async () => {
       const { deps, outputLines, stderrLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { since: 'not-a-date' });
+      await executeWorktrainReportCommand(deps, { since: 'not-a-date', format: 'json' });
 
       expect(outputLines).toHaveLength(0);
       const hasError = stderrLines.some((l) => l.includes('not-a-date'));
@@ -603,11 +626,173 @@ describe('executeWorktrainReportCommand', () => {
 
     it('writes error to stderr and returns without stdout when --until is invalid', async () => {
       const { deps, outputLines, stderrLines } = makeDeps(makeFakeConsoleService([]));
-      await executeWorktrainReportCommand(deps, { until: 'invalid' });
+      await executeWorktrainReportCommand(deps, { until: 'invalid', format: 'json' });
 
       expect(outputLines).toHaveLength(0);
       const hasError = stderrLines.some((l) => l.includes('invalid'));
       expect(hasError).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Format-specific tests
+// ---------------------------------------------------------------------------
+
+describe('output formats', () => {
+  const session = makeSession({
+    sessionId: 'sess_fmt',
+    metrics: makeMetrics({
+      outcome: 'success',
+      stepsCompleted: 3,
+      retriesCount: 1,
+      durationMs: 12000,
+      linesAdded: 42,
+      linesRemoved: 7,
+      filesChanged: 5,
+      gitEvidence: {
+        startSha: 'abc',
+        endSha: 'def',
+        commitShas: ['def'],
+        prRefs: [99],
+        committedDiff: {
+          filesChanged: 5,
+          linesAdded: 42,
+          linesRemoved: 7,
+          truncated: false,
+          changedFilePaths: ['src/foo.ts', 'src/bar.ts'],
+          languageBreakdown: { '.ts': 2 },
+        },
+        workingTree: null,
+        captureConfidence: 'high',
+        churnSignal: { filesRemodified: 1, windowDays: 7 },
+      },
+    }),
+  });
+
+  describe('ndjson (default)', () => {
+    it('emits one JSON object per session + one summary line', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps); // default format
+
+      const { sessions, summary } = parseNdjsonOutput(outputLines);
+      expect(sessions).toHaveLength(1);
+      expect((sessions[0] as Record<string, unknown>)['sessionId']).toBe('sess_fmt');
+      expect((summary as Record<string, unknown>)['_summary']).toBe(true);
+      expect((summary as Record<string, unknown>)['totalSessions']).toBe(1);
+    });
+
+    it('never includes changedFilePaths in ndjson output', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps);
+
+      expect(outputLines[0]).not.toContain('changedFilePaths');
+    });
+
+    it('each session line is valid standalone JSON', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps);
+
+      const lines = outputLines[0]!.split('\n').filter((l) => l.trim().length > 0);
+      for (const line of lines) {
+        expect(() => JSON.parse(line)).not.toThrow();
+      }
+    });
+  });
+
+  describe('json format', () => {
+    it('emits a single pretty-printed blob with sessions array and summary', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'json' });
+
+      const report = parseJsonOutput(outputLines);
+      expect(report.version).toBe(1);
+      expect(report.sessions).toHaveLength(1);
+      expect(report.summary.totalSessions).toBe(1);
+    });
+
+    it('never includes changedFilePaths in json output', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'json' });
+
+      expect(outputLines[0]).not.toContain('changedFilePaths');
+    });
+  });
+
+  describe('summary format', () => {
+    it('emits only the summary object -- no sessions array', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'summary' });
+
+      const parsed = JSON.parse(outputLines[0]!) as Record<string, unknown>;
+      expect(parsed['sessions']).toBeUndefined();
+      expect(parsed['summary']).toBeDefined();
+      expect((parsed['summary'] as Record<string, unknown>)['totalSessions']).toBe(1);
+    });
+
+    it('includes version, generatedAt, and dateRange', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([]));
+      await executeWorktrainReportCommand(deps, { format: 'summary' });
+
+      const parsed = JSON.parse(outputLines[0]!) as Record<string, unknown>;
+      expect(parsed['version']).toBe(1);
+      expect(typeof parsed['generatedAt']).toBe('string');
+      expect(parsed['dateRange']).toBeDefined();
+    });
+  });
+
+  describe('csv format', () => {
+    it('emits a header row followed by one data row per session', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'csv' });
+
+      const lines = outputLines[0]!.split('\n');
+      expect(lines).toHaveLength(2); // header + 1 session
+      expect(lines[0]).toContain('sessionId');
+      expect(lines[0]).toContain('outcome');
+      expect(lines[0]).toContain('linesAdded');
+      expect(lines[1]).toContain('sess_fmt');
+    });
+
+    it('never includes changedFilePaths in csv output', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'csv' });
+
+      expect(outputLines[0]).not.toContain('changedFilePaths');
+    });
+
+    it('escapes goal strings containing commas', async () => {
+      const sessionWithComma = makeSession({
+        sessionId: 'sess_csv_escape',
+        sessionTitle: 'Implement foo, bar, and baz',
+        metrics: null,
+      });
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([sessionWithComma]));
+      await executeWorktrainReportCommand(deps, { format: 'csv' });
+
+      const lines = outputLines[0]!.split('\n');
+      expect(lines[1]).toContain('"Implement foo, bar, and baz"');
+    });
+
+    it('outputs empty string for null metric fields', async () => {
+      const sessionNoMetrics = makeSession({ sessionId: 'sess_no_metrics', metrics: null });
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([sessionNoMetrics]));
+      await executeWorktrainReportCommand(deps, { format: 'csv' });
+
+      const lines = outputLines[0]!.split('\n');
+      // Row should exist with empty metric columns, not throw
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toContain('sess_no_metrics');
+    });
+  });
+
+  describe('changedFilePaths stripping (all formats)', () => {
+    it('changedFilePaths is not present in any of the four formats', async () => {
+      for (const format of ['ndjson', 'json', 'summary', 'csv'] as const) {
+        const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+        await executeWorktrainReportCommand(deps, { format });
+        expect(outputLines[0], `format=${format}`).not.toContain('changedFilePaths');
+      }
     });
   });
 });
