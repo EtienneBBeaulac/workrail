@@ -433,22 +433,26 @@ function renderHtml(output: ReportOutput): string {
     };
   });
 
-  // ── Breakdown: per-workflow ──────────────────────────────────────────────────
-  const wfMap = new Map<string, { started: number; completed: number; durations: number[]; linesAdded: number }>();
+  // ── Breakdown: per-workflow (routines separated -- they never report outcomes) ──
+  const wfMap = new Map<string, { started: number; completed: number; durations: number[]; linesAdded: number; isRoutine: boolean }>();
   for (const s of sessionsJs) {
     const label = s.workflow_label;
-    if (!wfMap.has(label)) wfMap.set(label, { started: 0, completed: 0, durations: [], linesAdded: 0 });
+    const isRoutine = s.workflow_id.startsWith('wr.routine-');
+    if (!wfMap.has(label)) wfMap.set(label, { started: 0, completed: 0, durations: [], linesAdded: 0, isRoutine });
     const e = wfMap.get(label)!;
     e.started++;
     if (s.completed) e.completed++;
     if (s.duration_min != null) e.durations.push(s.duration_min);
     e.linesAdded += s.lines_added;
   }
-  const breakdown = Array.from(wfMap.entries()).map(([label, d]) => {
+  const allBreakdown = Array.from(wfMap.entries()).map(([label, d]) => {
     const sorted = [...d.durations].sort((a, b) => a - b);
     const median = sorted.length ? sorted[Math.floor(sorted.length / 2)]!.toFixed(0) + 'm' : '--';
-    return { label, started: d.started, completed: d.completed, median, linesAdded: d.linesAdded };
+    return { label, started: d.started, completed: d.completed, median, linesAdded: d.linesAdded, isRoutine: d.isRoutine };
   }).sort((a, b) => b.completed - a.completed);
+  // Main workflows shown in chart; routines shown separately with a note
+  const breakdown = allBreakdown.filter(r => !r.isRoutine);
+  const routineBreakdown = allBreakdown.filter(r => r.isRoutine);
 
   // ── Per-project breakdown ────────────────────────────────────────────────────
   const projMap = new Map<string, { sessions: number; linesAdded: number; lang: Record<string, number> }>();
@@ -583,11 +587,11 @@ function renderHtml(output: ReportOutput): string {
 
   // ── Hero narrative (engine-authoritative only) ──────────────────────────────
   const heroLines = summary.totalLinesAdded;
-  const heroPRs = summary.languageBreakdown ? null : null; // prRefs come from sessions
   const totalPRs = sessionsJs.reduce((a, s) => a + s.pr_refs.length, 0);
   const uniquePRs = new Set(sessionsJs.flatMap(s => s.pr_refs)).size;
+  // Scope hero claims to the sessions that actually have the data
   const heroStatement = heroLines > 0
-    ? `${summary.totalSessions} guided sessions shipped ${heroLines.toLocaleString()} lines${uniquePRs > 0 ? ` across ${uniquePRs} PRs` : ''}.`
+    ? `${summary.totalSessions} guided sessions — ${heroLines.toLocaleString()} lines shipped across ${hasGitEvidence} sessions with git data${uniquePRs > 0 ? `, ${uniquePRs} PRs` : ''}.`
     : `${summary.totalSessions} guided sessions ran over ${Math.ceil(summary.totalDurationMs / 3_600_000)}h.`;
 
   // ── Main HTML output ─────────────────────────────────────────────────────────
@@ -741,10 +745,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 /* KPI GRID */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
 .kpi{background:var(--surface);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow)}
-.kpi-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
-.kpi-value{font-size:28px;font-weight:700;letter-spacing:-0.8px;color:var(--txt);line-height:1}
-.kpi-label{font-size:11px;color:var(--txt2);margin-top:4px}
-.kpi-delta{font-size:11px;color:var(--txt3);margin-top:6px}
+.kpi-value{font-size:36px;font-weight:700;letter-spacing:-1.5px;color:var(--txt);line-height:1;margin-bottom:6px}
+.kpi-label{font-size:12px;color:var(--txt2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.kpi-delta{font-size:11px;color:var(--txt3);margin-top:4px}
 /* SECTION HEADERS */
 .section-hdr{display:flex;align-items:baseline;gap:12px;margin:32px 0 16px}
 .section-num{font-size:11px;font-weight:700;color:var(--txt3);font-variant-numeric:tabular-nums;min-width:16px}
@@ -755,8 +758,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 .trust-legend-title{font-size:13px;font-weight:600;color:var(--txt);margin-bottom:4px}
 .trust-legend-sub{font-size:12px;color:var(--txt2);margin-bottom:16px}
 .trust-legend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:4px;display:flex;align-items:center;gap:6px}
-.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.5}
+.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:3px;display:flex;align-items:center;gap:6px}
+.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.4}
 /* COVERAGE */
 .coverage-table{width:100%;font-size:13px;margin-bottom:8px}
 .coverage-table td{padding:7px 0;border-bottom:1px solid var(--border)}
@@ -836,7 +839,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 <div class="hero">
   <div class="hero-inner">
     <div class="hero-nav">
-      <strong>workrail</strong> report &mdash; <strong>--fmt</strong> ${htmlEscape(dateRange.since)} <strong>--read</strong> ${Math.ceil((new Date(dateRange.until).getTime() - new Date(dateRange.since).getTime()) / 86_400_000)}d
+      $ <strong>workrail</strong> report <strong>--since</strong> ${htmlEscape(dateRange.since)} <strong>--until</strong> ${htmlEscape(dateRange.until)} <strong>--format</strong> html
     </div>
     <h1 class="hero-h1">${htmlEscape(heroStatement.split(' ').slice(0, -3).join(' '))} <span>${htmlEscape(heroStatement.split(' ').slice(-3).join(' '))}</span></h1>
     <p class="hero-sub">
@@ -865,35 +868,23 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 <!-- KPI GRID -->
 <div class="kpi-grid">
   <div class="kpi">
-    <div class="kpi-top">
-      <span class="trust trust-engine">engine</span>
-    </div>
-    <div class="kpi-value">${fmtTokens(summary.totalLinesAdded)}</div>
-    <div class="kpi-label">Net lines shipped</div>
-    <div class="kpi-delta" style="color:#6e6e73">git diff --numstat</div>
+    <div class="kpi-value">${summary.totalLinesAdded > 0 ? summary.totalLinesAdded.toLocaleString() : '--'}</div>
+    <div class="kpi-label">Net lines shipped <span class="trust trust-engine">engine</span></div>
+    <div class="kpi-delta">from ${hasGitEvidence} sessions with git data</div>
   </div>
   <div class="kpi">
-    <div class="kpi-top">
-      <span class="trust ${uniquePRs > 0 ? 'trust-interp' : 'trust-none'}">${uniquePRs > 0 ? 'from commits' : 'not tracked'}</span>
-    </div>
     <div class="kpi-value">${uniquePRs > 0 ? uniquePRs : '--'}</div>
-    <div class="kpi-label">PRs attributed</div>
-    <div class="kpi-delta">parsed from commit messages</div>
+    <div class="kpi-label">PRs attributed <span class="trust ${uniquePRs > 0 ? 'trust-interp' : 'trust-none'}">${uniquePRs > 0 ? 'from commits' : 'not tracked'}</span></div>
+    <div class="kpi-delta">${uniquePRs > 0 ? `across ${hasGitEvidence} sessions with git data` : 'parsed from commit messages'}</div>
   </div>
   <div class="kpi">
-    <div class="kpi-top">
-      <span class="trust trust-engine">engine</span>
-    </div>
     <div class="kpi-value">${totalHours}h</div>
-    <div class="kpi-label">Autonomous work</div>
+    <div class="kpi-label">Autonomous work <span class="trust trust-engine">engine</span></div>
     <div class="kpi-delta">${summary.completedSessions} sessions completed</div>
   </div>
   <div class="kpi">
-    <div class="kpi-top">
-      <span class="trust ${estCostCents > 0 ? 'trust-interp' : 'trust-none'}">${estCostCents > 0 ? 'estimated' : 'not tracked'}</span>
-    </div>
     <div class="kpi-value">${estCostCents > 0 ? htmlEscape(estCostStr) : '--'}</div>
-    <div class="kpi-label">Total spend</div>
+    <div class="kpi-label">Total spend <span class="trust ${estCostCents > 0 ? 'trust-interp' : 'trust-none'}">${estCostCents > 0 ? 'estimated' : 'not tracked'}</span></div>
     <div class="kpi-delta">${estCostCents > 0 ? 'Anthropic list pricing' : 'requires Claude Code JSONL'}</div>
   </div>
 </div>
@@ -905,19 +896,19 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
   <div class="trust-legend-grid">
     <div class="trust-legend-item">
       <h4><span class="trust trust-engine">engine</span></h4>
-      <p>Read directly from git history, event logs, or JSONL files. These figures lead with primary evidence: diff stats, token counts, timestamps.</p>
+      <p>Read from git, event logs, or JSONL. Primary evidence -- diff stats, token counts, timestamps.</p>
     </div>
     <div class="trust-legend-item">
       <h4><span class="trust trust-interp">interpretive</span></h4>
-      <p>Real data, uncertain meaning. PR refs parsed from commit messages, cost estimates at list pricing, churn signal. Accurate reading, cautious interpretation.</p>
+      <p>Real data, uncertain meaning. PR refs from commit messages, cost at list pricing, churn signal.</p>
     </div>
     <div class="trust-legend-item">
       <h4><span class="trust trust-agent">agent reported</span></h4>
-      <p>The agent&rsquo;s own word: outcome (success/partial), PR numbers it claims to have worked on. Present in ~53% of sessions. Take with appropriate skepticism.</p>
+      <p>The agent&rsquo;s own word. Outcome, PR numbers claimed. ~53% session coverage. Unverified.</p>
     </div>
     <div class="trust-legend-item">
       <h4><span class="trust trust-none">not tracked yet</span></h4>
-      <p>Data that wasn&rsquo;t collected for these sessions -- missing readers (Cursor, Antigravity), sessions before a feature shipped, or gaps in coverage. Always shown as &ldquo;--&rdquo;.</p>
+      <p>Missing readers, pre-feature sessions, or coverage gaps. Always shown as &ldquo;--&rdquo;, never as zero.</p>
     </div>
   </div>
 </div>
@@ -928,17 +919,18 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
   <h2 class="section-title">Coverage for this period</h2>
 </div>
 <div class="card">
-  <div class="card-sub">What data was actually captured for these ${summary.totalSessions} sessions.</div>
+  <div class="card-sub">How much of the data was actually captured. Low coverage means sessions predate the feature or the reader isn&rsquo;t configured &mdash; not a pipeline failure.</div>
   <table style="width:100%;font-size:13px;border-collapse:collapse">
     ${[
-      { label: 'Git diff captured', n: hasGitEvidence, badge: 'engine' },
-      { label: 'Token data captured', n: hasTokenData, badge: 'engine' },
-      { label: 'Outcome reported', n: hasOutcome, badge: 'agent reported' },
-      { label: 'PR refs in commits', n: hasPrRefs, badge: 'interpretive' },
-    ].map(({ label, n, badge }) => {
+      { label: 'Git diff captured', n: hasGitEvidence, badge: 'engine', note: '' },
+      { label: 'Token data captured', n: hasTokenData, badge: 'engine', note: hasTokenData === 0 ? 'requires Claude Code JSONL reader' : '' },
+      { label: 'Outcome reported', n: hasOutcome, badge: 'agent reported', note: '' },
+      { label: 'PR refs in commits', n: hasPrRefs, badge: 'interpretive', note: hasPrRefs > 0 ? `from ${hasGitEvidence} sessions with git data` : '' },
+    ].map(({ label, n, badge, note }) => {
       const pct = summary.totalSessions > 0 ? Math.round(n / summary.totalSessions * 100) : 0;
       const badgeCls = badge === 'engine' ? 'trust-engine' : badge === 'interpretive' ? 'trust-interp' : 'trust-agent';
-      return `<tr><td style="padding:8px 0;border-bottom:1px solid #f2f2f7;width:180px"><span class="trust ${badgeCls}" style="margin-right:8px">${htmlEscape(badge)}</span>${htmlEscape(label)}</td><td style="padding:8px 0 8px 16px;border-bottom:1px solid #f2f2f7"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1;background:#f2f2f7;border-radius:4px;height:8px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${badge === 'engine' ? '#007aff' : badge === 'interpretive' ? '#6366f1' : '#ff9500'};border-radius:4px"></div></div><span style="font-size:12px;color:#6e6e73;width:60px;text-align:right">${n} / ${summary.totalSessions}</span></div></td></tr>`;
+      const noteHtml = note ? `<div style="font-size:11px;color:#aeaeb2;margin-top:2px">${htmlEscape(note)}</div>` : '';
+      return `<tr><td style="padding:8px 0;border-bottom:1px solid #f2f2f7;width:220px;white-space:nowrap"><span class="trust ${badgeCls}" style="margin-right:8px;vertical-align:middle">${htmlEscape(badge)}</span><span style="vertical-align:middle">${htmlEscape(label)}</span>${noteHtml}</td><td style="padding:8px 0 8px 16px;border-bottom:1px solid #f2f2f7"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1;background:#f2f2f7;border-radius:4px;height:8px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${badge === 'engine' ? '#007aff' : badge === 'interpretive' ? '#6366f1' : '#ff9500'};border-radius:4px"></div></div><span style="font-size:12px;color:#6e6e73;width:60px;text-align:right;white-space:nowrap">${n} / ${summary.totalSessions}</span></div></td></tr>`;
     }).join('')}
   </table>
 </div>
@@ -974,7 +966,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 <div class="two-col" style="margin-bottom:18px">
   <div class="card" style="margin-bottom:0">
     <div class="card-title">Runs by workflow</div>
-    <div class="card-sub">Bar = session count &middot; success rate over reported sessions only</div>
+    <div class="card-sub">Bar = session count &middot; % = completion rate &middot; routines listed separately (they don&rsquo;t report outcomes)</div>
     <div id="wf-bars"></div>
   </div>
   <div class="card" style="margin-bottom:0">
@@ -1014,6 +1006,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 <script>
 const SESSIONS = ${safeJson(sessionsJs)};
 const BREAKDOWN = ${safeJson(breakdown)};
+const ROUTINE_BREAKDOWN = ${safeJson(routineBreakdown)};
 const HEATMAP = ${safeJson(heatmap)};
 const ACTIVITY = ${safeJson(activityData)};
 const PAGE_SIZE = 30;
@@ -1047,20 +1040,29 @@ const PAGE_SIZE = 30;
 // ── Workflow bars + donut ─────────────────────────────────────────────────────
 (function(){
   const COLORS=['#007aff','#34c759','#ff9500','#af52de','#ff3b30','#5ac8fa','#ffcc00','#ff6b6b','#00c7be','#30b0c7'];
-  document.getElementById('wf-count').textContent=BREAKDOWN.length+' workflows used';
+  const totalWf=BREAKDOWN.length+(ROUTINE_BREAKDOWN.length>0?1:0);
+  document.getElementById('wf-count').textContent=BREAKDOWN.length+' workflows'+(ROUTINE_BREAKDOWN.length>0?' + '+ROUTINE_BREAKDOWN.length+' routines':'');
   const container=document.getElementById('wf-bars');
-  const maxS=Math.max(...BREAKDOWN.map(r=>r.started),1);
-  BREAKDOWN.forEach((r,i)=>{
+  const maxS=Math.max(...BREAKDOWN.map(r=>r.started),...ROUTINE_BREAKDOWN.map(r=>r.started),1);
+  const renderRow=(r,i,color)=>{
     const ok=r.started>0?Math.round(r.completed/r.started*100):0;
     const div=document.createElement('div');
     div.style.cssText='display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f2f2f7;font-size:12px';
-    div.innerHTML='<div style="width:8px;height:8px;border-radius:50%;background:'+COLORS[i%COLORS.length]+';flex-shrink:0"></div>'+
+    div.innerHTML='<div style="width:8px;height:8px;border-radius:50%;background:'+color+';flex-shrink:0"></div>'+
       '<span style="flex:1;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.label+'</span>'+
-      '<div style="width:100px;background:#f2f2f7;border-radius:4px;height:14px;overflow:hidden;flex-shrink:0"><div style="width:'+Math.round(r.started/maxS*100)+'%;height:100%;background:'+COLORS[i%COLORS.length]+';opacity:.7"></div></div>'+
+      '<div style="width:100px;background:#f2f2f7;border-radius:4px;height:14px;overflow:hidden;flex-shrink:0"><div style="width:'+Math.round(r.started/maxS*100)+'%;height:100%;background:'+color+';opacity:.7"></div></div>'+
       '<span style="color:#6e6e73;width:50px;text-align:right;white-space:nowrap">'+r.started+' &middot; '+ok+'%</span>'+
       '<span style="color:#6e6e73;width:48px;text-align:right">'+r.median+'</span>';
     container.appendChild(div);
-  });
+  };
+  BREAKDOWN.forEach((r,i)=>renderRow(r,i,COLORS[i%COLORS.length]));
+  if(ROUTINE_BREAKDOWN.length>0){
+    const hdr=document.createElement('div');
+    hdr.style.cssText='padding:10px 0 4px;font-size:11px;font-weight:600;color:#aeaeb2;letter-spacing:0.04em;text-transform:uppercase';
+    hdr.textContent='Routines (sub-workflows -- outcome reporting does not apply)';
+    container.appendChild(hdr);
+    ROUTINE_BREAKDOWN.forEach((r,i)=>renderRow(r,i,'#aeaeb2'));
+  }
   // Donut
   const svg=document.getElementById('donut');
   const list=document.getElementById('donut-list');
