@@ -1422,7 +1422,7 @@ program
   .option('--out <file>', 'Write output to this file instead of stdout')
   .addOption(
     new Option('--format <fmt>', 'Output format (default: ndjson)')
-      .choices(['ndjson', 'json', 'summary', 'csv'])
+      .choices(['ndjson', 'json', 'summary', 'csv', 'html'])
       .default('ndjson'),
   )
   .addOption(

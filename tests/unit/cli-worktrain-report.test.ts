@@ -787,12 +787,64 @@ describe('output formats', () => {
   });
 
   describe('changedFilePaths stripping (all formats)', () => {
-    it('changedFilePaths is not present in any of the four formats', async () => {
-      for (const format of ['ndjson', 'json', 'summary', 'csv'] as const) {
+    it('changedFilePaths is not present in any of the five formats', async () => {
+      for (const format of ['ndjson', 'json', 'summary', 'csv', 'html'] as const) {
         const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
         await executeWorktrainReportCommand(deps, { format });
         expect(outputLines[0], `format=${format}`).not.toContain('changedFilePaths');
       }
+    });
+  });
+
+  describe('html format', () => {
+    it('emits a complete HTML document with DOCTYPE and key sections', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'html' });
+
+      const html = outputLines[0]!;
+      expect(html).toContain('<!DOCTYPE html>');
+      expect(html).toContain('<title>WorkRail Report');
+      expect(html).toContain('Sessions');
+      expect(html).toContain('By workflow');
+    });
+
+    it('includes session data in the HTML table', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'html' });
+
+      const html = outputLines[0]!;
+      // HTML table shows workflow, outcome, and project -- not raw sessionId
+      expect(html).toContain('wr.coding-task');
+      expect(html).toContain('success');
+    });
+
+    it('never includes changedFilePaths in html output', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([session]));
+      await executeWorktrainReportCommand(deps, { format: 'html' });
+
+      expect(outputLines[0]).not.toContain('changedFilePaths');
+    });
+
+    it('escapes HTML special characters in goal and session fields', async () => {
+      const xssSession = makeSession({
+        sessionId: 'sess_xss',
+        sessionTitle: '<script>alert(1)</script>',
+        metrics: null,
+      });
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([xssSession]));
+      await executeWorktrainReportCommand(deps, { format: 'html' });
+
+      const html = outputLines[0]!;
+      expect(html).not.toContain('<script>alert(1)</script>');
+      expect(html).toContain('&lt;script&gt;');
+    });
+
+    it('handles empty session list gracefully', async () => {
+      const { deps, outputLines } = makeDeps(makeFakeConsoleService([]));
+      await executeWorktrainReportCommand(deps, { format: 'html' });
+
+      const html = outputLines[0]!;
+      expect(html).toContain('No sessions');
     });
   });
 });

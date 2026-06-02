@@ -131,8 +131,9 @@ export interface WorktrainReportCommandDeps {
  * - json   : single pretty-printed JSON blob (legacy / machine consumers)
  * - summary: aggregates only, no per-session detail
  * - csv    : spreadsheet-friendly, one row per session
+ * - html   : self-contained HTML report with KPIs and session table
  */
-export type ReportFormat = 'ndjson' | 'json' | 'summary' | 'csv';
+export type ReportFormat = 'ndjson' | 'json' | 'summary' | 'csv' | 'html';
 
 export interface WorktrainReportCommandOpts {
   /** Number of days to look back (default: 30). Ignored when `since` is provided. */
@@ -312,6 +313,151 @@ function renderCsv(output: ReportOutput): string {
   return rows.join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// HTML renderer
+// ---------------------------------------------------------------------------
+
+/** Escape a string for safe embedding in HTML. */
+function htmlEscape(s: string | null | undefined): string {
+  if (s == null) return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function fmtDuration(ms: number | undefined): string {
+  if (ms == null) return '--';
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+/**
+ * HTML: self-contained report with KPI cards, workflow breakdown, and session
+ * table. No external dependencies -- all CSS and JS are inlined.
+ * changedFilePaths is excluded (same rule as all other formats).
+ */
+function renderHtml(output: ReportOutput): string {
+  const { summary, sessions, dateRange, generatedAt } = output;
+
+  // KPI cards
+  const totalHours = (summary.totalDurationMs / 3_600_000).toFixed(1);
+  const completionPct = summary.totalSessions > 0
+    ? Math.round((summary.completedSessions / summary.totalSessions) * 100)
+    : 0;
+  const totalTokens = summary.totalInputTokens + summary.totalOutputTokens +
+    summary.totalCacheReadTokens + summary.totalCacheWriteTokens;
+
+  const kpis: Array<{ label: string; value: string; sub?: string }> = [
+    { label: 'Sessions', value: String(summary.totalSessions), sub: `${completionPct}% completed` },
+    { label: 'Runtime', value: totalHours + 'h', sub: 'wall clock' },
+    { label: 'Tokens', value: fmtTokens(totalTokens), sub: 'input + output + cache' },
+    { label: 'Lines added', value: fmtTokens(summary.totalLinesAdded), sub: 'engine-authoritative' },
+  ];
+
+  const kpiHtml = kpis.map(({ label, value, sub }) => `
+    <div class="kpi">
+      <div class="kpi-value">${htmlEscape(value)}</div>
+      <div class="kpi-label">${htmlEscape(label)}</div>
+      ${sub ? `<div class="kpi-sub">${htmlEscape(sub)}</div>` : ''}
+    </div>`).join('');
+
+  // Workflow breakdown table
+  const wfRows = Object.entries(summary.workflowBreakdown)
+    .sort(([, a], [, b]) => b - a)
+    .map(([wf, count]) => `
+      <tr>
+        <td>${htmlEscape(wf)}</td>
+        <td class="num">${count}</td>
+      </tr>`).join('');
+
+  // Session table (most recent first, cap at 500)
+  const sessionRows = sessions.map((s) => {
+    const m = s.metrics;
+    const outcome = m?.outcome ?? '--';
+    const outcomeClass = outcome === 'success' ? 'success' : outcome === 'error' ? 'error' : '';
+    const lines = m?.gitEvidence?.committedDiff?.linesAdded ?? m?.linesAdded ?? '--';
+    const tokens = m?.tokenDelta
+      ? fmtTokens(m.tokenDelta.inputTokens + m.tokenDelta.outputTokens)
+      : '--';
+    return `
+      <tr>
+        <td class="date">${htmlEscape(s.date)}</td>
+        <td>${htmlEscape(s.workflowId ?? '--')}</td>
+        <td>${htmlEscape(s.repoRoot?.split('/').pop() ?? '--')}</td>
+        <td class="goal" title="${htmlEscape(s.goal ?? '')}">${htmlEscape((s.goal ?? '').slice(0, 60))}${(s.goal ?? '').length > 60 ? '…' : ''}</td>
+        <td class="outcome ${outcomeClass}">${htmlEscape(outcome)}</td>
+        <td class="num">${typeof lines === 'number' ? `+${lines}` : lines}</td>
+        <td class="num">${htmlEscape(tokens)}</td>
+        <td class="num">${fmtDuration(m?.durationMs)}</td>
+      </tr>`;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkRail Report -- ${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f5f7;color:#1d1d1f;padding:32px 24px}
+.container{max-width:960px;margin:0 auto}
+h1{font-size:22px;font-weight:700;margin-bottom:4px}
+.meta{font-size:12px;color:#6e6e73;margin-bottom:24px}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+.kpi{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.kpi-value{font-size:28px;font-weight:700;color:#007aff;letter-spacing:-1px}
+.kpi-label{font-size:12px;color:#3a3a3c;font-weight:600;margin-top:2px}
+.kpi-sub{font-size:11px;color:#aeaeb2;margin-top:2px}
+h2{font-size:15px;font-weight:600;margin-bottom:12px;margin-top:28px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:13px}
+th{text-align:left;padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#aeaeb2;border-bottom:1px solid #f2f2f7}
+td{padding:9px 12px;border-bottom:1px solid #f2f2f7}
+tr:last-child td{border-bottom:none}
+.num{text-align:right;font-variant-numeric:tabular-nums;color:#6e6e73}
+.date{color:#aeaeb2;font-size:11px;white-space:nowrap}
+.goal{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.outcome{font-weight:600}
+.success{color:#1a7a3a}
+.error{color:#c0392b}
+footer{margin-top:32px;font-size:11px;color:#aeaeb2;text-align:center}
+@media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>WorkRail Report</h1>
+<div class="meta">${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)} &middot; Generated ${new Date(generatedAt).toLocaleString()}</div>
+
+<div class="kpi-row">${kpiHtml}</div>
+
+<h2>By workflow</h2>
+<table>
+<thead><tr><th>Workflow</th><th class="num">Sessions</th></tr></thead>
+<tbody>${wfRows || '<tr><td colspan="2" style="color:#aeaeb2;text-align:center">No sessions</td></tr>'}</tbody>
+</table>
+
+<h2>Sessions (${sessions.length})</h2>
+<table>
+<thead><tr><th>Date</th><th>Workflow</th><th>Project</th><th>Goal</th><th>Outcome</th><th class="num">+Lines</th><th class="num">Tokens</th><th class="num">Duration</th></tr></thead>
+<tbody>${sessionRows || '<tr><td colspan="8" style="color:#aeaeb2;text-align:center">No sessions in window</td></tr>'}</tbody>
+</table>
+
+<footer>WorkRail session metrics &middot; <a href="https://github.com/EtienneBBeaulac/workrail">github.com/EtienneBBeaulac/workrail</a></footer>
+</div>
+</body>
+</html>`;
+}
+
 /**
  * Dispatch to the correct renderer based on format.
  * Pure function: no I/O.
@@ -322,6 +468,7 @@ function render(output: ReportOutput, format: ReportFormat): string {
     case 'json':    return renderJson(output);
     case 'summary': return renderSummary(output);
     case 'csv':     return renderCsv(output);
+    case 'html':    return renderHtml(output);
   }
 }
 
