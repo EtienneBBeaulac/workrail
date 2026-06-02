@@ -844,7 +844,9 @@ describe('output formats', () => {
       await executeWorktrainReportCommand(deps, { format: 'html' });
 
       const html = outputLines[0]!;
-      expect(html).toContain('No sessions');
+      // Empty state is rendered by JS -- the HTML contains the sessions tab structure
+      expect(html).toContain('sess-list');
+      expect(html).toContain('SESSIONS = []');
     });
   });
 });
