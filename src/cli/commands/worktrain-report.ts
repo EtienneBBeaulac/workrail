@@ -734,8 +734,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 /* HERO */
 .hero{padding:40px 40px 32px;background:var(--hdr);border-bottom:1px solid rgba(255,255,255,.06)}
 .hero-inner{max-width:940px;margin:0 auto}
-.hero-nav{font-size:11px;color:rgba(255,255,255,.35);margin-bottom:20px;font-family:ui-monospace,monospace;letter-spacing:.02em}
-.hero-nav strong{color:rgba(255,255,255,.6)}
+.hero-nav{display:inline-flex;align-items:center;gap:0;margin-bottom:22px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.10);border-radius:8px;padding:10px 16px;font-family:ui-monospace,"SF Mono","Fira Code",monospace;font-size:13px;line-height:1;white-space:nowrap;overflow-x:auto;max-width:100%}
+.nav-prompt{color:#30d158;margin-right:10px;font-weight:700;user-select:none}
+.nav-cmd{color:#fff;font-weight:600}
+.nav-sub{color:rgba(255,255,255,.55)}
+.nav-flag{color:#5ac8fa}
+.nav-val{color:#ffd60a}
+.nav-cursor{display:inline-block;width:8px;height:13px;background:#fff;vertical-align:middle;margin-left:6px;animation:blink 1.1s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 .hero-h1{font-size:36px;font-weight:700;letter-spacing:-1px;color:#fff;line-height:1.15;margin-bottom:12px}
 .hero-h1 span{color:var(--accent)}
 .hero-sub{font-size:14px;color:rgba(255,255,255,.55);line-height:1.6;max-width:640px;margin-bottom:20px}
@@ -843,7 +849,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 <div class="hero">
   <div class="hero-inner">
     <div class="hero-nav">
-      $ <strong>workrail</strong> report <strong>--since</strong> ${htmlEscape(dateRange.since)} <strong>--until</strong> ${htmlEscape(dateRange.until)} <strong>--format</strong> html
+      <span class="nav-prompt">$</span><span class="nav-cmd">workrail</span>&nbsp;<span class="nav-sub">report</span>&nbsp;<span class="nav-flag">--since</span>&nbsp;<span class="nav-val">${htmlEscape(dateRange.since)}</span>&nbsp;<span class="nav-flag">--until</span>&nbsp;<span class="nav-val">${htmlEscape(dateRange.until)}</span>&nbsp;<span class="nav-flag">--format</span>&nbsp;<span class="nav-val">html</span><span class="nav-cursor"></span>
     </div>
     <h1 class="hero-h1">${htmlEscape(heroMain)} &mdash; <span>${htmlEscape(heroAccent)}</span></h1>
     <p class="hero-sub">
