@@ -973,7 +973,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
   <h2 class="section-title">Workflow mix</h2>
   <span class="section-meta" id="wf-count"></span>
 </div>
-<div class="two-col" style="margin-bottom:18px">
+<div class="two-col" style="margin-bottom:18px;align-items:start">
   <div class="card" style="margin-bottom:0">
     <div class="card-title">Runs by workflow</div>
     <div class="card-sub">Bar = session count &middot; % = completion rate &middot; routines listed separately (they don&rsquo;t report outcomes)</div>
