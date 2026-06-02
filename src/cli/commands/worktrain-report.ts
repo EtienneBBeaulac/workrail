@@ -589,10 +589,14 @@ function renderHtml(output: ReportOutput): string {
   const heroLines = summary.totalLinesAdded;
   const totalPRs = sessionsJs.reduce((a, s) => a + s.pr_refs.length, 0);
   const uniquePRs = new Set(sessionsJs.flatMap(s => s.pr_refs)).size;
-  // Scope hero claims to the sessions that actually have the data
-  const heroStatement = heroLines > 0
-    ? `${summary.totalSessions} guided sessions — ${heroLines.toLocaleString()} lines shipped across ${hasGitEvidence} sessions with git data${uniquePRs > 0 ? `, ${uniquePRs} PRs` : ''}.`
-    : `${summary.totalSessions} guided sessions ran over ${Math.ceil(summary.totalDurationMs / 3_600_000)}h.`;
+  // Scope hero claims to the sessions that actually have the data.
+  // heroMain is the primary claim (shown in white); heroAccent is the highlighted suffix (shown in accent color).
+  const heroMain = heroLines > 0
+    ? `${summary.totalSessions} guided sessions`
+    : `${summary.totalSessions} guided sessions`;
+  const heroAccent = heroLines > 0
+    ? `${heroLines.toLocaleString()} lines shipped across ${hasGitEvidence} sessions with git data${uniquePRs > 0 ? `, ${uniquePRs} PRs` : ''}.`
+    : `ran over ${Math.ceil(summary.totalDurationMs / 3_600_000)}h.`;
 
   // ── Main HTML output ─────────────────────────────────────────────────────────
   return `<!DOCTYPE html>
@@ -841,7 +845,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
     <div class="hero-nav">
       $ <strong>workrail</strong> report <strong>--since</strong> ${htmlEscape(dateRange.since)} <strong>--until</strong> ${htmlEscape(dateRange.until)} <strong>--format</strong> html
     </div>
-    <h1 class="hero-h1">${htmlEscape(heroStatement.split(' ').slice(0, -3).join(' '))} <span>${htmlEscape(heroStatement.split(' ').slice(-3).join(' '))}</span></h1>
+    <h1 class="hero-h1">${htmlEscape(heroMain)} &mdash; <span>${htmlEscape(heroAccent)}</span></h1>
     <p class="hero-sub">
       Across ${htmlEscape(dateRange.since)} &ndash; ${htmlEscape(dateRange.until)}, WorkRail steered <strong>${summary.totalSessions} workflow runs</strong> through guided, step-by-step execution.
       Every number below is labeled by <strong>how much it can be trusted</strong> &mdash; git evidence, interpretation, or the agent&rsquo;s own word.
