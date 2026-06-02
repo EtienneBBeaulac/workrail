@@ -345,61 +345,79 @@ function fmtTokens(n: number): string {
  * table. No external dependencies -- all CSS and JS are inlined.
  * changedFilePaths is excluded (same rule as all other formats).
  */
+/**
+ * HTML: self-contained report with KPI cards, breakdown table with progress
+ * bars, daily activity heatmap, and a paginated/filterable session list.
+ *
+ * Ported from the common-ground workrail-report design (stripped of
+ * Zillow-specific MR feed and correlation tabs; enriched with engine
+ * metrics: tokens, git diff, language breakdown, churn, step counts).
+ *
+ * No external deps -- all CSS and JS are inlined. changedFilePaths excluded.
+ */
 function renderHtml(output: ReportOutput): string {
   const { summary, sessions, dateRange, generatedAt } = output;
 
-  // KPI cards
-  const totalHours = (summary.totalDurationMs / 3_600_000).toFixed(1);
-  const completionPct = summary.totalSessions > 0
-    ? Math.round((summary.completedSessions / summary.totalSessions) * 100)
-    : 0;
   const totalTokens = summary.totalInputTokens + summary.totalOutputTokens +
     summary.totalCacheReadTokens + summary.totalCacheWriteTokens;
+  const completionPct = summary.totalSessions > 0
+    ? Math.round((summary.completedSessions / summary.totalSessions) * 100) : 0;
+  const totalHours = (summary.totalDurationMs / 3_600_000).toFixed(1);
 
-  const kpis: Array<{ label: string; value: string; sub?: string }> = [
-    { label: 'Sessions', value: String(summary.totalSessions), sub: `${completionPct}% completed` },
-    { label: 'Runtime', value: totalHours + 'h', sub: 'wall clock' },
-    { label: 'Tokens', value: fmtTokens(totalTokens), sub: 'input + output + cache' },
-    { label: 'Lines added', value: fmtTokens(summary.totalLinesAdded), sub: 'engine-authoritative' },
-  ];
-
-  const kpiHtml = kpis.map(({ label, value, sub }) => `
-    <div class="kpi">
-      <div class="kpi-value">${htmlEscape(value)}</div>
-      <div class="kpi-label">${htmlEscape(label)}</div>
-      ${sub ? `<div class="kpi-sub">${htmlEscape(sub)}</div>` : ''}
-    </div>`).join('');
-
-  // Workflow breakdown table
-  const wfRows = Object.entries(summary.workflowBreakdown)
-    .sort(([, a], [, b]) => b - a)
-    .map(([wf, count]) => `
-      <tr>
-        <td>${htmlEscape(wf)}</td>
-        <td class="num">${count}</td>
-      </tr>`).join('');
-
-  // Session table (most recent first, cap at 500)
-  const sessionRows = sessions.map((s) => {
+  // Build SESSIONS JS array for client-side rendering
+  const sessionsJs = sessions.map((s) => {
     const m = s.metrics;
-    const outcome = m?.outcome ?? '--';
-    const outcomeClass = outcome === 'success' ? 'success' : outcome === 'error' ? 'error' : '';
-    const lines = m?.gitEvidence?.committedDiff?.linesAdded ?? m?.linesAdded ?? '--';
-    const tokens = m?.tokenDelta
-      ? fmtTokens(m.tokenDelta.inputTokens + m.tokenDelta.outputTokens)
-      : '--';
-    return `
-      <tr>
-        <td class="date">${htmlEscape(s.date)}</td>
-        <td>${htmlEscape(s.workflowId ?? '--')}</td>
-        <td>${htmlEscape(s.repoRoot?.split('/').pop() ?? '--')}</td>
-        <td class="goal" title="${htmlEscape(s.goal ?? '')}">${htmlEscape((s.goal ?? '').slice(0, 60))}${(s.goal ?? '').length > 60 ? '…' : ''}</td>
-        <td class="outcome ${outcomeClass}">${htmlEscape(outcome)}</td>
-        <td class="num">${typeof lines === 'number' ? `+${lines}` : lines}</td>
-        <td class="num">${htmlEscape(tokens)}</td>
-        <td class="num">${fmtDuration(m?.durationMs)}</td>
-      </tr>`;
-  }).join('');
+    const ge = m?.gitEvidence ?? null;
+    const td = m?.tokenDelta ?? null;
+    const usage = m?.usageEvents[0] ?? null;
+    const tokens = td
+      ? td.inputTokens + td.outputTokens
+      : (usage ? usage.inputTokens + usage.outputTokens : 0);
+    const linesAdded = ge?.committedDiff?.linesAdded ?? m?.linesAdded ?? 0;
+    const durationMin = m?.durationMs != null ? Math.round(m.durationMs / 60_000 * 10) / 10 : null;
+    const project = s.repoRoot ? s.repoRoot.split('/').pop() ?? '' : '';
+    return {
+      date: s.date,
+      workflow_id: s.workflowId ?? '',
+      workflow_label: s.workflowId?.replace(/^wr\./, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) ?? 'Unknown',
+      project,
+      completed: m?.outcome === 'success' || m?.outcome === 'partial',
+      outcome: m?.outcome ?? null,
+      goal: htmlEscape(s.goal ?? ''),
+      duration_min: durationMin,
+      lines_added: linesAdded,
+      tokens,
+      steps: m?.stepsCompleted ?? 0,
+      retries: m?.retriesCount ?? 0,
+      churn: ge?.churnSignal?.filesRemodified ?? null,
+      language: ge?.committedDiff?.languageBreakdown ?? {},
+      model: usage?.model ?? null,
+    };
+  });
+
+  // BREAKDOWN: per-workflow started/completed/median-duration
+  const wfMap = new Map<string, { started: number; completed: number; durations: number[] }>();
+  for (const s of sessionsJs) {
+    const label = s.workflow_label;
+    if (!wfMap.has(label)) wfMap.set(label, { started: 0, completed: 0, durations: [] });
+    const entry = wfMap.get(label)!;
+    entry.started++;
+    if (s.completed) entry.completed++;
+    if (s.duration_min != null) entry.durations.push(s.duration_min);
+  }
+  const breakdown = Array.from(wfMap.entries()).map(([label, d]) => {
+    const sorted = [...d.durations].sort((a, b) => a - b);
+    const median = sorted.length ? sorted[Math.floor(sorted.length / 2)]!.toFixed(0) + 'm' : '--';
+    return { label, started: d.started, completed: d.completed, median };
+  }).sort((a, b) => b.completed - a.completed);
+
+  // HEATMAP: date -> count
+  const heatmap: Record<string, number> = {};
+  for (const s of sessionsJs) {
+    heatmap[s.date] = (heatmap[s.date] ?? 0) + 1;
+  }
+
+  const safeJson = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -409,51 +427,302 @@ function renderHtml(output: ReportOutput): string {
 <title>WorkRail Report -- ${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f5f7;color:#1d1d1f;padding:32px 24px}
-.container{max-width:960px;margin:0 auto}
-h1{font-size:22px;font-weight:700;margin-bottom:4px}
-.meta{font-size:12px;color:#6e6e73;margin-bottom:24px}
-.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
-.kpi{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
-.kpi-value{font-size:28px;font-weight:700;color:#007aff;letter-spacing:-1px}
-.kpi-label{font-size:12px;color:#3a3a3c;font-weight:600;margin-top:2px}
-.kpi-sub{font-size:11px;color:#aeaeb2;margin-top:2px}
-h2{font-size:15px;font-weight:600;margin-bottom:12px;margin-top:28px}
-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:13px}
-th{text-align:left;padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#aeaeb2;border-bottom:1px solid #f2f2f7}
-td{padding:9px 12px;border-bottom:1px solid #f2f2f7}
-tr:last-child td{border-bottom:none}
-.num{text-align:right;font-variant-numeric:tabular-nums;color:#6e6e73}
-.date{color:#aeaeb2;font-size:11px;white-space:nowrap}
-.goal{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.outcome{font-weight:600}
-.success{color:#1a7a3a}
-.error{color:#c0392b}
-footer{margin-top:32px;font-size:11px;color:#aeaeb2;text-align:center}
-@media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr)}}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f5f7;color:#1d1d1f;padding:40px 24px}
+.container{max-width:940px;margin:0 auto}
+header{margin-bottom:28px}
+header h1{font-size:24px;font-weight:700;letter-spacing:-0.4px;margin-bottom:5px}
+header p{font-size:13px;color:#6e6e73}
+.callout{background:#fff;border-radius:14px;padding:20px 24px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:20px;font-size:14px;line-height:1.65}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.kpi{background:#fff;border-radius:14px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+.kpi .value{font-size:30px;font-weight:700;letter-spacing:-1px;line-height:1;margin-bottom:4px;color:#007aff}
+.kpi .label{font-size:12px;color:#6e6e73;line-height:1.4}
+.tabs{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.tab{padding:7px 16px;border-radius:20px;font-size:13px;font-weight:500;cursor:pointer;border:1.5px solid transparent;background:#fff;color:#3a3a3c;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .15s}
+.tab:hover{border-color:#007aff;color:#007aff}
+.tab.active{background:#007aff;color:#fff;border-color:#007aff}
+.view{display:none}.view.active{display:block}
+.card{background:#fff;border-radius:14px;padding:24px 26px;box-shadow:0 1px 4px rgba(0,0,0,.07);margin-bottom:18px}
+.card h2{font-size:15px;font-weight:600;margin-bottom:3px}
+.card .subtitle{font-size:12px;color:#6e6e73;margin-bottom:18px}
+.breakdown-table{width:100%;border-collapse:collapse;font-size:13px}
+.breakdown-table th{text-align:left;padding:0 10px 10px 0;font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:#aeaeb2;border-bottom:1px solid #f2f2f7}
+.breakdown-table th.right{text-align:right}
+.breakdown-table td{padding:8px 10px 8px 0;border-bottom:1px solid #f2f2f7;vertical-align:middle}
+.breakdown-table td.right{text-align:right;color:#6e6e73}
+.breakdown-table tr:last-child td{border-bottom:none}
+.total-row td{padding-top:12px;font-weight:600;border-top:2px solid #e5e5ea;border-bottom:none!important}
+.bar-outer{background:#f2f2f7;border-radius:4px;height:18px;position:relative;overflow:hidden;min-width:120px}
+.bar-inner{background:#007aff;border-radius:4px;height:100%;position:absolute;top:0;left:0}
+.chart-wrap{position:relative}
+.y-axis{position:absolute;left:0;top:0;bottom:24px;width:32px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+.y-label{font-size:10px;color:#aeaeb2;text-align:right;padding-right:6px}
+.bar-chart-area{margin-left:36px}
+.bar-chart{display:flex;align-items:flex-end;gap:3px;height:140px;border-bottom:1px solid #e5e5ea;padding-bottom:0}
+.bar-chart-bar{flex:1;background:#007aff;border-radius:2px 2px 0 0;min-width:4px;position:relative;cursor:default;transition:opacity .1s}
+.bar-chart-bar:hover{opacity:.7}
+.bar-chart-bar:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1d1d1f;color:#fff;font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;z-index:10;pointer-events:none}
+.bar-chart-axis{display:flex;gap:3px;margin-top:4px}
+.bar-chart-label{flex:1;font-size:9px;color:#aeaeb2;text-align:center;overflow:hidden}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.controls select,.controls input{padding:6px 10px;border:1.5px solid #e5e5ea;border-radius:8px;font-size:12px;background:#fff;color:#1d1d1f;outline:none}
+.controls select:focus,.controls input:focus{border-color:#007aff}
+.stats-bar{display:flex;gap:20px;padding:10px 0 14px;border-bottom:1px solid #f2f2f7;margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+.stat-item .stat-val{font-weight:600;color:#1d1d1f}
+.stat-item .stat-lbl{color:#6e6e73}
+.session-item{display:grid;grid-template-columns:76px 36px 160px 1fr 80px 70px 60px;gap:10px;align-items:start;padding:9px 0;border-bottom:1px solid #f2f2f7;font-size:13px}
+.session-item:last-child{border-bottom:none}
+.session-date{font-size:11px;color:#aeaeb2;padding-top:2px}
+.session-dot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.dot-done{background:#34c759}.dot-partial{background:#e5e5ea;border:1.5px solid #aeaeb2}
+.session-wf{font-size:11px;font-weight:600;color:#6e6e73;padding-top:2px}
+.session-goal{line-height:1.4;color:#1d1d1f}
+.session-goal.no-goal{color:#aeaeb2;font-style:italic}
+.session-metrics{font-size:11px;color:#6e6e73;margin-top:3px}
+.outcome-badge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;white-space:nowrap}
+.outcome-success{background:#e1f8ec;color:#1a7a3a}
+.outcome-partial{background:#fff8e0;color:#9a6000}
+.outcome-abandoned{background:#f5f5f5;color:#999}
+.outcome-error{background:#ffeaea;color:#c0392b}
+.sess-dur{font-size:11px;color:#6e6e73;text-align:right;padding-top:2px}
+.pagination{display:flex;gap:6px;justify-content:center;align-items:center;margin-top:16px;flex-wrap:wrap}
+.page-btn{padding:5px 11px;border:1.5px solid #e5e5ea;border-radius:8px;font-size:12px;cursor:pointer;background:#fff;color:#3a3a3c}
+.page-btn:hover:not(:disabled){border-color:#007aff;color:#007aff}
+.page-btn.active{background:#007aff;color:#fff;border-color:#007aff;cursor:default}
+.page-btn:disabled{opacity:.35;cursor:default}
+footer{text-align:center;font-size:11px;color:#aeaeb2;margin-top:24px}
+@media(max-width:600px){.kpi-row{grid-template-columns:repeat(2,1fr)}.session-item{grid-template-columns:60px 28px 1fr}}
 </style>
 </head>
 <body>
 <div class="container">
-<h1>WorkRail Report</h1>
-<div class="meta">${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)} &middot; Generated ${new Date(generatedAt).toLocaleString()}</div>
+<header>
+  <h1>WorkRail Report</h1>
+  <p>${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)} &middot; Generated ${new Date(generatedAt).toLocaleString()}</p>
+</header>
 
-<div class="kpi-row">${kpiHtml}</div>
+<div class="callout" id="callout">Loading...</div>
 
-<h2>By workflow</h2>
-<table>
-<thead><tr><th>Workflow</th><th class="num">Sessions</th></tr></thead>
-<tbody>${wfRows || '<tr><td colspan="2" style="color:#aeaeb2;text-align:center">No sessions</td></tr>'}</tbody>
-</table>
-
-<h2>Sessions (${sessions.length})</h2>
-<table>
-<thead><tr><th>Date</th><th>Workflow</th><th>Project</th><th>Goal</th><th>Outcome</th><th class="num">+Lines</th><th class="num">Tokens</th><th class="num">Duration</th></tr></thead>
-<tbody>${sessionRows || '<tr><td colspan="8" style="color:#aeaeb2;text-align:center">No sessions in window</td></tr>'}</tbody>
-</table>
-
-<footer>WorkRail session metrics &middot; <a href="https://github.com/EtienneBBeaulac/workrail">github.com/EtienneBBeaulac/workrail</a></footer>
+<div class="kpi-row">
+  <div class="kpi"><div class="value">${summary.totalSessions}</div><div class="label">Workflow runs<br><span style="font-size:10px;color:#aeaeb2">${completionPct}% completed</span></div></div>
+  <div class="kpi"><div class="value">${totalHours}h</div><div class="label">Autonomous runtime<br><span style="font-size:10px;color:#aeaeb2">wall clock</span></div></div>
+  <div class="kpi"><div class="value">${fmtTokens(totalTokens)}</div><div class="label">Tokens used<br><span style="font-size:10px;color:#aeaeb2">input + output + cache</span></div></div>
+  <div class="kpi"><div class="value">${fmtTokens(summary.totalLinesAdded)}</div><div class="label">Lines of code added<br><span style="font-size:10px;color:#aeaeb2">engine-authoritative</span></div></div>
 </div>
+
+<div class="tabs">
+  <button class="tab active" data-view="breakdown">By workflow</button>
+  <button class="tab" data-view="activity">Daily activity</button>
+  <button class="tab" data-view="sessions">Sessions</button>
+</div>
+
+<div class="view active" id="view-breakdown">
+  <div class="card">
+    <h2>Workflow breakdown</h2>
+    <p class="subtitle">Completion rate and median runtime per workflow type.</p>
+    <table class="breakdown-table">
+      <thead><tr><th>Workflow</th><th style="min-width:200px">Completed</th><th class="right">Rate</th><th class="right">Median</th></tr></thead>
+      <tbody id="breakdown-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="view" id="view-activity">
+  <div class="card">
+    <h2>Daily activity</h2>
+    <p class="subtitle">Sessions started per day.</p>
+    <div class="chart-wrap">
+      <div class="y-axis" id="y-axis"></div>
+      <div class="bar-chart-area">
+        <div class="bar-chart" id="barchart"></div>
+        <div class="bar-chart-axis" id="barchart-axis"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="view" id="view-sessions">
+  <div class="card">
+    <h2>Workflow runs</h2>
+    <p class="subtitle">All sessions in the report window. <span id="sess-total"></span></p>
+    <div class="controls">
+      <select id="sess-workflow"><option value="">All workflows</option></select>
+      <select id="sess-status">
+        <option value="">All statuses</option>
+        <option value="done">Completed</option>
+        <option value="partial">Incomplete</option>
+      </select>
+      <input type="text" id="sess-search" placeholder="Search goals..." style="min-width:180px">
+    </div>
+    <div class="stats-bar" id="sess-stats"></div>
+    <div id="sess-list"><div style="padding:20px;text-align:center;color:#aeaeb2" id="sess-empty" ${sessions.length > 0 ? 'style="display:none"' : ''}>No sessions in window</div></div>
+    <div class="pagination" id="sess-pagination"></div>
+  </div>
+</div>
+
+<footer>WorkRail session metrics &middot; <a href="https://github.com/EtienneBBeaulac/workrail" style="color:#aeaeb2">github.com/EtienneBBeaulac/workrail</a></footer>
+</div>
+<script>
+const SESSIONS = ${safeJson(sessionsJs)};
+const BREAKDOWN = ${safeJson(breakdown)};
+const HEATMAP = ${safeJson(heatmap)};
+const PAGE_SIZE = 30;
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-' + btn.dataset.view).classList.add('active');
+  });
+});
+
+// ── Callout ───────────────────────────────────────────────────────────────────
+(function(){
+  const counts = {};
+  for (const s of SESSIONS) { if (s.completed) counts[s.workflow_label] = (counts[s.workflow_label]||0)+1; }
+  const dates = Object.keys(HEATMAP).sort();
+  const totalDays = Math.max(1, dates.length);
+  const avgPerDay = Math.round(SESSIONS.length / totalDays);
+  const top = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,3);
+  const parts = top.map(([l,n]) => '<strong>' + n + ' ' + l.toLowerCase() + (n===1?'':'s') + '</strong>');
+  document.getElementById('callout').innerHTML = parts.length
+    ? 'Over ' + totalDays + ' days, this agent completed ' + parts.join(', ') + ' and more -- running autonomously at an average of <strong>' + avgPerDay + ' sessions per day</strong>.'
+    : 'No completed sessions in this window.';
+})();
+
+// ── Breakdown table ───────────────────────────────────────────────────────────
+(function(){
+  const tbody = document.getElementById('breakdown-body');
+  const max = Math.max(...BREAKDOWN.map(r => r.completed), 1);
+  let totS = 0, totC = 0;
+  for (const row of BREAKDOWN) {
+    const pct = Math.round(row.completed / max * 100);
+    const rate = Math.round(row.completed / row.started * 100);
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + row.label + '</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar-outer" style="flex:1"><div class="bar-inner" style="width:' + pct + '%"></div></div><span style="font-size:13px;font-weight:600;color:#1d1d1f;width:36px;text-align:right">' + row.completed + '</span></div></td><td class="right" style="color:#aeaeb2;font-size:12px">' + rate + '%</td><td class="right">' + row.median + '</td>';
+    tbody.appendChild(tr);
+    totS += row.started; totC += row.completed;
+  }
+  const totalRow = document.createElement('tr');
+  totalRow.className = 'total-row';
+  const totRate = Math.round(totC / Math.max(totS,1) * 100);
+  totalRow.innerHTML = '<td>Total</td><td><div style="display:flex;align-items:center;gap:8px"><div class="bar-outer" style="flex:1"><div class="bar-inner" style="width:100%"></div></div><span style="font-size:13px;font-weight:600;color:#1d1d1f;width:36px;text-align:right">' + totC + '</span></div></td><td class="right" style="color:#aeaeb2;font-size:12px">' + totRate + '%</td><td class="right">--</td>';
+  tbody.appendChild(totalRow);
+})();
+
+// ── Daily activity chart ──────────────────────────────────────────────────────
+(function(){
+  const chart = document.getElementById('barchart');
+  const axis  = document.getElementById('barchart-axis');
+  const yAxis = document.getElementById('y-axis');
+  const entries = [];
+  const start = new Date(Object.keys(HEATMAP).sort()[0]);
+  const end   = new Date(Object.keys(HEATMAP).sort().reverse()[0]);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+    const k = d.toISOString().slice(0,10);
+    entries.push({ date: k, label: d.toLocaleDateString('en-US',{month:'short',day:'numeric'}), count: HEATMAP[k]||0 });
+  }
+  if (!entries.length) return;
+  const max = Math.max(...entries.map(e=>e.count), 1);
+  [max, Math.round(max*.5), 0].forEach(v => {
+    const el = document.createElement('div'); el.className='y-label'; el.textContent=v; yAxis.appendChild(el);
+  });
+  entries.forEach(e => {
+    const isWe = new Date(e.date+'T12:00:00').getDay()===0 || new Date(e.date+'T12:00:00').getDay()===6;
+    const bar = document.createElement('div');
+    bar.className = 'bar-chart-bar';
+    bar.style.height = Math.max(2, Math.round(e.count/max*100))+'%';
+    if (isWe) bar.style.background = '#60a5fa';
+    bar.setAttribute('data-tip', e.label+': '+e.count+' sessions');
+    chart.appendChild(bar);
+    const lbl = document.createElement('div'); lbl.className='bar-chart-label';
+    if ([1,7,14,21,28].includes(new Date(e.date+'T12:00:00').getDate())) lbl.textContent = e.label;
+    axis.appendChild(lbl);
+  });
+})();
+
+// ── Sessions view ─────────────────────────────────────────────────────────────
+let sessPage = 1, sessFiltered = SESSIONS.slice();
+
+(function(){
+  const sel = document.getElementById('sess-workflow');
+  [...new Set(SESSIONS.map(s=>s.workflow_label))].sort().forEach(l => {
+    const o = document.createElement('option'); o.value=l; o.textContent=l; sel.appendChild(o);
+  });
+  document.getElementById('sess-total').textContent = SESSIONS.length+' total.';
+})();
+
+function fmtDur(min) { if (!min) return '--'; return min < 60 ? min.toFixed(0)+'m' : (min/60).toFixed(1)+'h'; }
+function fmtTok(n)  { if (!n) return '--'; if(n>=1e6) return (n/1e6).toFixed(1)+'M'; if(n>=1e3) return Math.round(n/1e3)+'k'; return n; }
+
+function applySessFilters() {
+  const wf     = document.getElementById('sess-workflow').value;
+  const status = document.getElementById('sess-status').value;
+  const search = document.getElementById('sess-search').value.toLowerCase();
+  sessFiltered = SESSIONS.filter(s =>
+    (!wf     || s.workflow_label === wf) &&
+    (!status || (status==='done' ? s.completed : !s.completed)) &&
+    (!search || s.goal.toLowerCase().includes(search) || s.date.includes(search))
+  );
+  sessPage = 1;
+  renderSessions();
+}
+
+function renderSessions() {
+  const list = document.getElementById('sess-list');
+  const total = sessFiltered.length;
+  const start = (sessPage-1)*PAGE_SIZE;
+  const page  = sessFiltered.slice(start, Math.min(start+PAGE_SIZE, total));
+  const completed = sessFiltered.filter(s=>s.completed).length;
+  const avgDur = sessFiltered.filter(s=>s.duration_min).reduce((a,s)=>a+s.duration_min,0) / (sessFiltered.filter(s=>s.duration_min).length||1);
+  document.getElementById('sess-stats').innerHTML =
+    '<div class="stat-item"><span class="stat-val">'+total+'</span> <span class="stat-lbl">sessions</span></div>'+
+    '<div class="stat-item"><span class="stat-val" style="color:#34c759">'+completed+'</span> <span class="stat-lbl">completed</span></div>'+
+    '<div class="stat-item"><span class="stat-val">'+Math.round(completed/Math.max(total,1)*100)+'%</span> <span class="stat-lbl">completion rate</span></div>'+
+    '<div class="stat-item"><span class="stat-val">'+fmtDur(Math.round(avgDur*10)/10)+'</span> <span class="stat-lbl">avg duration</span></div>'+
+    '<div class="stat-item" style="margin-left:auto;font-size:11px;color:#aeaeb2">Showing '+(start+1)+'&#8211;'+Math.min(start+PAGE_SIZE,total)+'</div>';
+  list.innerHTML = '';
+  for (const s of page) {
+    const div = document.createElement('div');
+    div.className = 'session-item';
+    const outcomeHtml = s.outcome ? '<span class="outcome-badge outcome-'+s.outcome+'">'+s.outcome+'</span>' : '';
+    const metaParts = [];
+    if (s.lines_added) metaParts.push('<span style="color:#1a7a1a">+'+s.lines_added+' lines</span>');
+    if (s.tokens) metaParts.push(fmtTok(s.tokens)+' tokens');
+    if (s.steps) metaParts.push(s.steps+' steps');
+    if (s.retries) metaParts.push(s.retries+' retries');
+    const metaHtml = metaParts.length ? '<div class="session-metrics">'+metaParts.join(' &middot; ')+'</div>' : '';
+    div.innerHTML =
+      '<div class="session-date">'+s.date+'</div>'+
+      '<div><div class="session-dot '+(s.completed?'dot-done':'dot-partial')+'"></div></div>'+
+      '<div class="session-wf">'+s.workflow_label+'</div>'+
+      '<div><div class="session-goal'+(s.goal?'':' no-goal')+'">'+(s.goal||'No goal recorded')+'</div>'+metaHtml+'</div>'+
+      '<div>'+outcomeHtml+'</div>'+
+      '<div class="sess-dur">'+fmtTok(s.tokens)+'</div>'+
+      '<div class="sess-dur">'+fmtDur(s.duration_min)+'</div>';
+    list.appendChild(div);
+  }
+  // Pagination
+  const pag = document.getElementById('sess-pagination');
+  pag.innerHTML = '';
+  const pages = Math.ceil(total/PAGE_SIZE);
+  if (pages <= 1) return;
+  const prev = document.createElement('button'); prev.className='page-btn'; prev.textContent='Previous'; prev.disabled=sessPage===1;
+  prev.addEventListener('click',()=>{sessPage--;renderSessions();}); pag.appendChild(prev);
+  for (let p = Math.max(1,sessPage-2); p <= Math.min(pages,sessPage+2); p++) {
+    const btn = document.createElement('button'); btn.className='page-btn'+(p===sessPage?' active':''); btn.textContent=p;
+    btn.addEventListener('click',()=>{sessPage=p;renderSessions();}); pag.appendChild(btn);
+  }
+  const next = document.createElement('button'); next.className='page-btn'; next.textContent='Next'; next.disabled=sessPage===pages;
+  next.addEventListener('click',()=>{sessPage++;renderSessions();}); pag.appendChild(next);
+}
+
+['sess-workflow','sess-status'].forEach(id => document.getElementById(id).addEventListener('change', applySessFilters));
+document.getElementById('sess-search').addEventListener('input', applySessFilters);
+applySessFilters();
+</script>
 </body>
 </html>`;
 }
