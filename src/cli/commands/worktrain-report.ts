@@ -570,13 +570,15 @@ function renderHtml(output: ReportOutput): string {
   }).join('') || '<tr><td colspan="4" style="color:#aeaeb2;text-align:center;padding:12px">No token data (requires Claude Code JSONL)</td></tr>';
 
   // ── Outcome-stacked chart data (activity tab) ───────────────────────────────
-  const activityData: Record<string, { success: number; partial: number; other: number }> = {};
+  const activityData: Record<string, { success: number; partial: number; error: number; abandoned: number; unknown: number }> = {};
   for (const s of sessionsJs) {
     const d = s.date;
-    if (!activityData[d]) activityData[d] = { success: 0, partial: 0, other: 0 };
+    if (!activityData[d]) activityData[d] = { success: 0, partial: 0, error: 0, abandoned: 0, unknown: 0 };
     if (s.outcome === 'success') activityData[d].success++;
     else if (s.outcome === 'partial') activityData[d].partial++;
-    else activityData[d].other++;
+    else if (s.outcome === 'error') activityData[d].error++;
+    else if (s.outcome === 'abandoned') activityData[d].abandoned++;
+    else activityData[d].unknown++;
   }
 
   // ── "What shipped": sessions with actual git evidence, sorted by impact ───────
@@ -824,11 +826,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 .section-title{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--txt)}
 .section-meta{font-size:12px;color:var(--txt3);margin-left:auto}
 /* TRUST LEGEND — 4 individual cards */
-.trust-legend-hdr{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3);margin:24px 0 10px}
 .trust-legend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
-.trust-legend-item{background:var(--surface);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
-.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:6px;display:flex;align-items:center;gap:6px}
-.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.45}
+.trust-legend-item{background:var(--surface);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.5;flex:1}
+.trust-legend-tag{font-size:10px;font-weight:600;color:var(--txt3);margin-top:10px;letter-spacing:.02em}
 /* WHAT SHIPPED — section label style matches Claude Design pattern */
 .shipped-label{display:flex;align-items:center;margin:28px 0 10px;gap:0}
 .shipped-label-text{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3)}
@@ -876,15 +878,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 .bar-outer{background:var(--border);border-radius:var(--radius-sm);height:18px;position:relative;overflow:hidden;min-width:80px}
 .bar-inner{background:var(--accent);border-radius:var(--radius-sm);height:100%;position:absolute;top:0;left:0}
 /* ACTIVITY CHART */
-.chart-wrap{position:relative}
-.y-axis{position:absolute;left:0;top:0;bottom:24px;width:32px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
-.y-label{font-size:10px;color:var(--txt3);text-align:right;padding-right:6px}
-.bar-chart-area{margin-left:36px}
-.bar-chart{display:flex;align-items:flex-end;gap:3px;height:140px;border-bottom:1px solid var(--border2)}
-.bc-bar{flex:1;border-radius:2px 2px 0 0;min-width:4px;position:relative;cursor:default;transition:opacity .1s}
-.bc-bar:hover{opacity:.75}
-.bc-bar:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--hdr);color:#fff;font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);white-space:nowrap;z-index:10;pointer-events:none}
-.bar-chart-axis{display:flex;gap:3px;margin-top:4px}
+.bar-chart{display:flex;align-items:flex-end;gap:2px;height:140px;border-bottom:1px solid var(--border2)}
+.bc-col{flex:1;display:flex;flex-direction:column-reverse;align-items:stretch;gap:1px;min-width:4px}
+.bc-seg{border-radius:2px;min-height:4px;position:relative;cursor:default}
+.bc-seg:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--hdr);color:#fff;font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);white-space:nowrap;z-index:10;pointer-events:none}
+.bar-chart-axis{display:flex;gap:2px;margin-top:4px}
 .bar-chart-label{flex:1;font-size:9px;color:var(--txt3);text-align:center;overflow:hidden}
 /* DONUT */
 .workflow-mix{display:grid;grid-template-columns:1fr 200px;gap:24px;align-items:start}
@@ -1029,23 +1027,31 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 </div>
 
 <!-- HOW TO READ — 4 individual cards -->
-<div class="trust-legend-hdr">How to read this report</div>
+<div class="metric-section-label" style="margin:28px 0 12px">
+  <span class="metric-section-name">How to read this report</span>
+  <div class="metric-section-rule"></div>
+  <span class="metric-section-trust">metric reliability</span>
+</div>
 <div class="trust-legend-grid">
   <div class="trust-legend-item">
     <h4><span class="trust trust-engine">engine</span></h4>
-    <p>Read from git, event logs, or JSONL. Primary evidence &mdash; diff stats, token counts, timestamps.</p>
+    <p>Measured directly from event timestamps, the workflow DAG, and git diff. Duration, steps, retries, lines, files, languages, SHAs &mdash; and tokens, when captured.</p>
+    <div class="trust-legend-tag">trust the number</div>
   </div>
   <div class="trust-legend-item">
     <h4><span class="trust trust-interp">interpretive</span></h4>
-    <p>Real data, uncertain meaning. PR refs from commit messages, cost at list pricing, churn signal.</p>
+    <p>Real data, uncertain meaning. Churn reads git history exactly but can&rsquo;t know why a file changed; PR refs are regex on commit text.</p>
+    <div class="trust-legend-tag">directional, not proof</div>
   </div>
   <div class="trust-legend-item">
     <h4><span class="trust trust-agent">agent reported</span></h4>
-    <p>The agent&rsquo;s own word. Outcome, PR numbers claimed. Unverified.</p>
+    <p>The agent&rsquo;s own claim &mdash; outcome, PR numbers. Unverified and optimistic, with real coverage gaps.</p>
+    <div class="trust-legend-tag">${hasOutcome > 0 ? Math.round(hasOutcome / summary.totalSessions * 100) : 0}% coverage</div>
   </div>
   <div class="trust-legend-item">
     <h4><span class="trust trust-none">not tracked yet</span></h4>
-    <p>Missing readers or pre-feature sessions. Always shown as &ldquo;--&rdquo;, never as zero.</p>
+    <p>The reader for this metric hadn&rsquo;t shipped for these sessions (e.g. Cursor / Antigravity tokens). Shown as &ldquo;&mdash;&rdquo;, never a zero.</p>
+    <div class="trust-legend-tag">absence, not nothing</div>
   </div>
 </div>
 
@@ -1089,20 +1095,26 @@ ${ungroupedShipped.length > 20 ? `  <div class="shipped-more">+${ungroupedShippe
   <h2 class="section-title">Coverage for this period</h2>
 </div>
 <div class="card">
-  <div class="card-sub">How much of the data was actually captured. Low coverage means sessions predate the feature or the reader isn&rsquo;t configured &mdash; not a pipeline failure.</div>
-  <table style="width:100%;font-size:13px;border-collapse:collapse">
+  <div class="card-sub" style="font-family:ui-monospace,monospace;font-size:12px">Several collectors are recent &mdash; gaps here are expected, not errors. They tell you which numbers rest on a full sample.</div>
+  <div style="margin-top:16px">
     ${[
-      { label: 'Git diff captured', n: hasGitEvidence, badge: 'engine', note: '' },
-      { label: 'Token data captured', n: hasTokenData, badge: 'engine', note: hasTokenData === 0 ? 'requires Claude Code JSONL reader' : '' },
-      { label: 'Outcome reported', n: hasOutcome, badge: 'agent reported', note: '' },
-      { label: 'PR refs in commits', n: hasPrRefs, badge: 'interpretive', note: hasPrRefs > 0 ? `from ${hasGitEvidence} sessions with git data` : '' },
-    ].map(({ label, n, badge, note }) => {
+      { label: 'git diff captured',    n: hasGitEvidence, color: 'var(--trust-engine)' },
+      { label: 'token data captured',  n: hasTokenData,   color: 'var(--trust-engine)' },
+      { label: 'outcome self-reported', n: hasOutcome,    color: 'var(--trust-agent)'  },
+    ].map(({ label, n, color }) => {
       const pct = summary.totalSessions > 0 ? Math.round(n / summary.totalSessions * 100) : 0;
-      const badgeCls = badge === 'engine' ? 'trust-engine' : badge === 'interpretive' ? 'trust-interp' : 'trust-agent';
-      const noteHtml = note ? `<div style="font-size:11px;color:#aeaeb2;margin-top:2px">${htmlEscape(note)}</div>` : '';
-      return `<tr><td style="padding:8px 0;border-bottom:1px solid #f2f2f7;width:220px;white-space:nowrap"><span class="trust ${badgeCls}" style="margin-right:8px;vertical-align:middle">${htmlEscape(badge)}</span><span style="vertical-align:middle">${htmlEscape(label)}</span>${noteHtml}</td><td style="padding:8px 0 8px 16px;border-bottom:1px solid #f2f2f7"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1;background:#f2f2f7;border-radius:4px;height:8px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${badge === 'engine' ? '#007aff' : badge === 'interpretive' ? '#6366f1' : '#ff9500'};border-radius:4px"></div></div><span style="font-size:12px;color:#6e6e73;width:60px;text-align:right;white-space:nowrap">${n} / ${summary.totalSessions}</span></div></td></tr>`;
+      return `<div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:var(--txt2);width:190px;flex-shrink:0">${htmlEscape(label)}</span>
+        <div style="flex:1;background:var(--border);border-radius:3px;height:6px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${color};border-radius:3px"></div>
+        </div>
+        <span style="font-size:12px;color:var(--txt2);flex-shrink:0;text-align:right;min-width:110px"><strong style="color:var(--txt)">${pct}%</strong> &middot; ${n} of ${summary.totalSessions}</span>
+      </div>`;
     }).join('')}
-  </table>
+  </div>
+  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border2);font-size:12px;color:var(--txt2);line-height:1.6">
+    Not measurable here at all: whether code <strong>compiled or passed tests</strong>, whether PRs <strong>actually merged</strong>, or whether the output was <strong>actually useful</strong> &mdash; these need CI&nbsp;/&nbsp;GitHub integration and aren&rsquo;t inferred.
+  </div>
 </div>
 
 <!-- ACTIVITY -->
@@ -1112,18 +1124,22 @@ ${ungroupedShipped.length > 20 ? `  <div class="shipped-more">+${ungroupedShippe
   <span class="section-meta">${summary.totalSessions} sessions &middot; daily</span>
 </div>
 <div class="card">
-  <div class="card-sub">Sessions per day, by reported outcome. Stacked bars &mdash; &ldquo;unknown&rdquo; = no outcome reported.</div>
-  <div style="display:flex;gap:16px;margin-bottom:12px;font-size:11px;align-items:center">
-    <div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;border-radius:2px;background:#34c759"></div>success</div>
-    <div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;border-radius:2px;background:#ff9500"></div>partial</div>
-    <div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:10px;border-radius:2px;background:#e5e5ea"></div>unknown</div>
-  </div>
-  <div class="chart-wrap">
-    <div class="y-axis" id="y-axis"></div>
-    <div class="bar-chart-area">
-      <div class="bar-chart" id="barchart"></div>
-      <div class="bar-chart-axis" id="barchart-axis"></div>
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:4px">
+    <div>
+      <div style="font-size:13px;font-weight:600;color:var(--txt);margin-bottom:3px">Sessions per day, by reported outcome</div>
+      <div style="font-size:11px;color:var(--txt3);font-family:ui-monospace,monospace">Stacked bars &middot; &ldquo;unknown&rdquo; = no outcome reported</div>
     </div>
+    <div style="display:flex;gap:12px;font-size:11px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#34c759"></div><span style="color:var(--txt2)">success</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#ff9500"></div><span style="color:var(--txt2)">partial</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#ff3b30"></div><span style="color:var(--txt2)">error</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#8e8e93"></div><span style="color:var(--txt2)">abandoned</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#d1d1d6"></div><span style="color:var(--txt2)">unknown</span></div>
+    </div>
+  </div>
+  <div style="margin-top:16px">
+    <div class="bar-chart" id="barchart"></div>
+    <div class="bar-chart-axis" id="barchart-axis"></div>
   </div>
 </div>
 
@@ -1185,26 +1201,37 @@ const PAGE_SIZE = 30;
 
 // ── Activity chart (stacked by outcome) ──────────────────────────────────────
 (function(){
-  const chart=document.getElementById('barchart'),axis=document.getElementById('barchart-axis'),yAxis=document.getElementById('y-axis');
+  const chart=document.getElementById('barchart'),axis=document.getElementById('barchart-axis');
   const keys=Object.keys(HEATMAP).sort(); if(!keys.length)return;
   const entries=[];
   const start=new Date(keys[0]),end=new Date(keys[keys.length-1]);
   for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){
     const k=d.toISOString().slice(0,10);
-    const a=ACTIVITY[k]||{success:0,partial:0,other:0};
-    entries.push({date:k,label:d.toLocaleDateString('en-US',{month:'short',day:'numeric'}),count:HEATMAP[k]||0,...a});
+    const a=ACTIVITY[k]||{success:0,partial:0,error:0,abandoned:0,unknown:0};
+    const day=new Date(k+'T12:00:00').getDate();
+    entries.push({date:k,day,count:HEATMAP[k]||0,...a});
   }
   const max=Math.max(...entries.map(e=>e.count),1);
-  [max,Math.round(max*.5),0].forEach(v=>{const el=document.createElement('div');el.className='y-label';el.textContent=v;yAxis.appendChild(el);});
+  const SEGS=[
+    {key:'success',color:'#34c759'},
+    {key:'partial',color:'#ff9500'},
+    {key:'error',color:'#ff3b30'},
+    {key:'abandoned',color:'#8e8e93'},
+    {key:'unknown',color:'#d1d1d6'},
+  ];
   entries.forEach(e=>{
-    const col=document.createElement('div');col.style.cssText='flex:1;display:flex;flex-direction:column-reverse;align-items:stretch;min-width:4px;gap:1px;height:'+Math.max(4,Math.round(e.count/max*100))+'%';
-    const mk=(h,c,tip)=>{if(!h)return;const b=document.createElement('div');b.className='bc-bar';b.style.cssText='flex:0 0 '+Math.round(h/e.count*100)+'%;background:'+c+';border-radius:0';b.setAttribute('data-tip',tip);col.appendChild(b);};
-    mk(e.success,'#34c759',e.label+' success: '+e.success);
-    mk(e.partial,'#ff9500',e.label+' partial: '+e.partial);
-    mk(e.other,'#e5e5ea',e.label+' unknown: '+e.other);
+    const col=document.createElement('div');col.className='bc-col';
+    col.style.height=Math.max(4,Math.round(e.count/max*100))+'%';
+    SEGS.forEach(({key,color})=>{
+      const n=e[key]; if(!n)return;
+      const seg=document.createElement('div');seg.className='bc-seg';
+      seg.style.cssText='flex:0 0 '+Math.round(n/e.count*100)+'%;background:'+color;
+      seg.setAttribute('data-tip','day '+e.day+' '+key+': '+n);
+      col.appendChild(seg);
+    });
     chart.appendChild(col);
     const lbl=document.createElement('div');lbl.className='bar-chart-label';
-    if([1,7,14,21,28].includes(new Date(e.date+'T12:00:00').getDate()))lbl.textContent=e.label;
+    if([1,4,7,10,13,16,19,22,25,28,31].includes(e.day))lbl.textContent=e.day;
     axis.appendChild(lbl);
   });
 })();
