@@ -23,7 +23,28 @@ def main():
         print("Error: The results CSV file is empty.")
         sys.exit(1)
 
+    # Parse optional workflow filter
+    workflow_filter = None
+    if "--workflow" in sys.argv:
+        try:
+            idx = sys.argv.index("--workflow")
+            workflow_filter = sys.argv[idx + 1]
+        except IndexError:
+            pass
+
+    if workflow_filter:
+        if "workflow" in df.columns:
+            df = df[df["workflow"] == workflow_filter]
+        else:
+            # Fallback: assume all existing records are wr.coding-task
+            if workflow_filter == "wr.coding-task":
+                pass
+            else:
+                df = df[0:0] # empty dataframe
+
     print("--- Linear Mixed-Effects Model (LMM) Analysis ---")
+    if workflow_filter:
+        print(f"Workflow Filter:                    {workflow_filter}")
     print(f"Loaded {len(df)} observations from results.csv\n")
 
     # Fit LMM model: Score ~ Approach + Model + TaskCategory, Group = TaskInstance (random intercept)

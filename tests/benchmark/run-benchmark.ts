@@ -22,6 +22,7 @@ export type GradingResult =
   | { readonly ok: false; readonly score: number; readonly error: string };
 
 export interface TrialResult {
+  readonly workflow: string;
   readonly approach: string;
   readonly model: string;
   readonly taskCategory: 'favorable' | 'neutral' | 'adversarial';
@@ -575,8 +576,9 @@ async function executeAgentTrial(args: {
   readonly templateDir: string;
   readonly taskInstance: string;
   readonly mock: boolean;
+  readonly workflow: string;
 }): Promise<void> {
-  const { approach, model, seed, sandboxDir, templateDir, taskInstance, mock } = args;
+  const { approach, model, seed, sandboxDir, templateDir, taskInstance, mock, workflow } = args;
 
   // Extract instructions from src/index.ts comments
   const srcFile = path.join(templateDir, 'src/index.ts');
@@ -613,7 +615,7 @@ async function executeAgentTrial(args: {
       }
       const engine = engineRes.value;
       try {
-        const startRes = await engine.startWorkflow('wr.coding-task', taskInstructions);
+        const startRes = await engine.startWorkflow(workflow, taskInstructions);
         if (!startRes.ok) {
           throw new Error(`Failed to start WorkRail session: ${startRes.error.message}`);
         }
@@ -824,7 +826,7 @@ Please complete the task. When you are done, reply with a final message explaini
     const engine = engineRes.value;
 
     try {
-      const startRes = await engine.startWorkflow('wr.coding-task', taskInstructions);
+      const startRes = await engine.startWorkflow(workflow, taskInstructions);
       if (!startRes.ok) {
         throw new Error(`Failed to start WorkRail session: ${startRes.error.message}`);
       }
@@ -949,6 +951,7 @@ export interface RunOptions {
   readonly tasks?: readonly string[];
   readonly seeds?: readonly number[];
   readonly approaches?: readonly string[];
+  readonly workflow?: string;
 }
 
 export async function runBenchmark(options: RunOptions = {}): Promise<readonly TrialResult[]> {
@@ -958,8 +961,14 @@ export async function runBenchmark(options: RunOptions = {}): Promise<readonly T
   const models = options.models ?? ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'];
   const seeds = options.seeds ?? [1, 2, 3];
   const approaches = options.approaches ?? ['workrail', 'skills', 'vanilla'];
+  const workflow = options.workflow ?? 'wr.coding-task';
   
-  const testCorpusRoot = path.join(__dirname, 'corpus');
+  let testCorpusRoot = path.join(__dirname, 'corpus', workflow);
+  if (!fs.existsSync(testCorpusRoot) || !fs.statSync(testCorpusRoot).isDirectory()) {
+    // fallback to base corpus folder for backward compatibility / default structure
+    testCorpusRoot = path.join(__dirname, 'corpus');
+  }
+
   const tasks = options.tasks ?? fs.readdirSync(testCorpusRoot).filter((file) => {
     return fs.statSync(path.join(testCorpusRoot, file)).isDirectory();
   });
@@ -1034,7 +1043,8 @@ export async function runBenchmark(options: RunOptions = {}): Promise<readonly T
         sandboxDir,
         templateDir,
         taskInstance: task,
-        mock
+        mock,
+        workflow
       });
 
       // Grade the workspace
@@ -1058,6 +1068,7 @@ export async function runBenchmark(options: RunOptions = {}): Promise<readonly T
       cleanupSandboxWorkspace(sandboxDir);
 
       const trialResult: TrialResult = {
+        workflow,
         approach,
         model,
         taskCategory,
@@ -1100,7 +1111,13 @@ async function main() {
     limit = parseInt(args[limitIdx + 1]!, 10);
   }
 
-  const results = await runBenchmark({ mock, limit });
+  let workflow: string | undefined;
+  const workflowIdx = args.indexOf('--workflow');
+  if (workflowIdx !== -1 && args[workflowIdx + 1]) {
+    workflow = args[workflowIdx + 1];
+  }
+
+  const results = await runBenchmark({ mock, limit, workflow });
 
   // Save to JSONL and CSV
   const resultsJsonlPath = path.join(__dirname, 'results.jsonl');
@@ -1112,10 +1129,10 @@ async function main() {
   console.log(`Results saved to JSONL: ${resultsJsonlPath}`);
 
   // CSV output
-  const csvHeaders = 'approach,model,taskCategory,taskInstance,seed,score,passed,total,durationMs,error\n';
+  const csvHeaders = 'workflow,approach,model,taskCategory,taskInstance,seed,score,passed,total,durationMs,error\n';
   const csvRows = results.map((r) => {
     const errorMsg = r.error ? `"${r.error.replace(/"/g, '""')}"` : '';
-    return `${r.approach},${r.model},${r.taskCategory},${r.taskInstance},${r.seed},${r.score},${r.passed},${r.total},${r.durationMs},${errorMsg}`;
+    return `${r.workflow},${r.approach},${r.model},${r.taskCategory},${r.taskInstance},${r.seed},${r.score},${r.passed},${r.total},${r.durationMs},${errorMsg}`;
   }).join('\n');
   fs.writeFileSync(resultsCsvPath, csvHeaders + csvRows + '\n');
   console.log(`Results saved to CSV: ${resultsCsvPath}`);

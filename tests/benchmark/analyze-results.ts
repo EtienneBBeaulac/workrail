@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 interface TrialData {
+  readonly workflow?: string;
   readonly approach: string;
   readonly model: string;
   readonly taskCategory: string;
@@ -75,6 +76,14 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
 // ---------------------------------------------------------------------------
 
 function main() {
+  // Parse command line arguments
+  const args = process.argv.slice(2);
+  let workflowFilter: string | undefined;
+  const workflowIdx = args.indexOf('--workflow');
+  if (workflowIdx !== -1 && args[workflowIdx + 1]) {
+    workflowFilter = args[workflowIdx + 1];
+  }
+
   const resultsPath = path.join(__dirname, 'results.jsonl');
   if (!fs.existsSync(resultsPath)) {
     console.warn('results.jsonl not found. Run the benchmark first to generate results.');
@@ -82,7 +91,7 @@ function main() {
   }
 
   const lines = fs.readFileSync(resultsPath, 'utf8').trim().split('\n');
-  const data: TrialData[] = [];
+  let data: TrialData[] = [];
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -98,7 +107,21 @@ function main() {
     process.exit(0);
   }
 
+  if (workflowFilter) {
+    data = data.filter((d) => {
+      const w = d.workflow ?? 'wr.coding-task';
+      return w === workflowFilter;
+    });
+    if (data.length === 0) {
+      console.warn(`No trial data found for workflow: ${workflowFilter}`);
+      process.exit(0);
+    }
+  }
+
   console.log('--- Statistical Analysis of Benchmark Results ---');
+  if (workflowFilter) {
+    console.log(`Workflow Filter:        ${workflowFilter}`);
+  }
   console.log(`Total sample size N = ${data.length}\n`);
 
   // Dynamically extract unique factor levels
