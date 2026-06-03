@@ -579,6 +579,36 @@ function renderHtml(output: ReportOutput): string {
     else activityData[d].other++;
   }
 
+  // ── "What shipped": sessions with actual git evidence, sorted by impact ───────
+  // Group by PR ref where available; ungrouped sessions shown individually.
+  const shippedSessions = sessionsJs
+    .filter(s => (s.confidence === 'high' || s.confidence === 'partial') && s.lines_added > 0)
+    .sort((a, b) => b.lines_added - a.lines_added);
+
+  // Build PR groups: each unique PR ref gets one card with all sessions that mention it.
+  type ShippedSession = (typeof sessionsJs)[number];
+  const prGroupMap = new Map<number, ShippedSession[]>();
+  const ungroupedShipped: ShippedSession[] = [];
+  for (const s of shippedSessions) {
+    if (s.pr_refs.length > 0) {
+      for (const ref of s.pr_refs) {
+        if (!prGroupMap.has(ref)) prGroupMap.set(ref, []);
+        prGroupMap.get(ref)!.push(s);
+      }
+    } else {
+      ungroupedShipped.push(s);
+    }
+  }
+  // Deduplicate PR groups by aggregating lines/files; sort groups by total lines.
+  const prGroups = Array.from(prGroupMap.entries()).map(([ref, sessions]) => ({
+    ref: `#${ref}`,
+    sessions,
+    totalLinesAdded: sessions.reduce((a, s) => a + s.lines_added, 0),
+    totalLinesRemoved: sessions.reduce((a, s) => a + s.lines_removed, 0),
+    totalFilesChanged: sessions.reduce((a, s) => a + s.files_changed, 0),
+    project: sessions[0]?.project ?? '',
+  })).sort((a, b) => b.totalLinesAdded - a.totalLinesAdded);
+
   // ── Coverage summary: per-session data type availability ────────────────────
   const hasGitEvidence = sessionsJs.filter(s => s.confidence === 'high' || s.confidence === 'partial').length;
   const hasTokenData   = sessionsJs.filter(s => s.tok_in + s.tok_out > 0).length;
@@ -770,6 +800,24 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 .trust-legend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
 .trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:3px;display:flex;align-items:center;gap:6px}
 .trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.4}
+/* WHAT SHIPPED */
+.shipped-empty{font-size:13px;color:var(--txt3);padding:12px 0}
+.shipped-pr{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden}
+.shipped-pr-hdr{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border)}
+.shipped-pr-ref{font-size:13px;font-weight:700;color:var(--accent);font-family:ui-monospace,monospace;flex-shrink:0}
+.shipped-pr-project{font-size:11px;color:var(--txt3);flex-shrink:0}
+.shipped-pr-stats{display:flex;gap:14px;margin-left:auto;flex-shrink:0}
+.shipped-stat-add{font-size:12px;font-weight:600;color:#1a7a3a;font-variant-numeric:tabular-nums}
+.shipped-stat-rem{font-size:12px;font-weight:600;color:#c0392b;font-variant-numeric:tabular-nums}
+.shipped-stat-files{font-size:12px;color:var(--txt3);font-variant-numeric:tabular-nums}
+.shipped-sessions{padding:0 20px}
+.shipped-session{display:flex;align-items:baseline;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);font-size:12px}
+.shipped-session:last-child{border-bottom:none}
+.shipped-session-goal{flex:1;color:var(--txt);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.shipped-session-date{color:var(--txt3);flex-shrink:0;font-size:11px}
+.shipped-solo{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:12px;padding:14px 20px;display:flex;align-items:baseline;gap:12px}
+.shipped-solo-goal{flex:1;font-size:13px;color:var(--txt);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.shipped-solo-meta{display:flex;gap:12px;align-items:center;flex-shrink:0}
 /* COVERAGE */
 .coverage-table{width:100%;font-size:13px;margin-bottom:8px}
 .coverage-table td{padding:7px 0;border-bottom:1px solid var(--border)}
@@ -923,6 +971,42 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
   </div>
 </div>
 
+<!-- WHAT SHIPPED -->
+<div class="section-hdr" style="margin-top:8px">
+  <h2 class="section-title">What shipped</h2>
+  <span class="section-meta">${shippedSessions.length} sessions with verified git output</span>
+</div>
+${shippedSessions.length === 0
+  ? `<div class="card"><div class="shipped-empty">No sessions with git evidence in this window. Coverage increases as more sessions run after the git metrics feature was deployed.</div></div>`
+  : `${prGroups.map(g => `<div class="shipped-pr">
+  <div class="shipped-pr-hdr">
+    <span class="shipped-pr-ref">${htmlEscape(g.ref)}</span>
+    ${g.project ? `<span class="shipped-pr-project">${htmlEscape(g.project)}</span>` : ''}
+    <div class="shipped-pr-stats">
+      <span class="shipped-stat-add">+${g.totalLinesAdded.toLocaleString()}</span>
+      <span class="shipped-stat-rem">-${g.totalLinesRemoved.toLocaleString()}</span>
+      ${g.totalFilesChanged > 0 ? `<span class="shipped-stat-files">${g.totalFilesChanged} file${g.totalFilesChanged !== 1 ? 's' : ''}</span>` : ''}
+    </div>
+  </div>
+  <div class="shipped-sessions">
+    ${g.sessions.map(s => `<div class="shipped-session">
+      <span class="shipped-session-goal">${s.goal || '(no goal recorded)'}</span>
+      <span class="shipped-session-date">${s.date}</span>
+    </div>`).join('')}
+  </div>
+</div>`).join('')}
+${ungroupedShipped.slice(0, 20).map(s => `<div class="shipped-solo">
+  <span class="shipped-solo-goal">${s.goal || '(no goal recorded)'}</span>
+  <div class="shipped-solo-meta">
+    ${s.git_branch ? `<span style="font-size:11px;color:var(--txt3);font-family:ui-monospace,monospace">${htmlEscape(s.git_branch)}</span>` : ''}
+    <span class="shipped-stat-add">+${s.lines_added.toLocaleString()}</span>
+    <span class="shipped-stat-rem">-${s.lines_removed.toLocaleString()}</span>
+    ${s.files_changed > 0 ? `<span class="shipped-stat-files">${s.files_changed}f</span>` : ''}
+    <span style="font-size:11px;color:var(--txt3)">${s.date}</span>
+  </div>
+</div>`).join('')}
+${ungroupedShipped.length > 20 ? `<div style="font-size:12px;color:var(--txt3);padding:8px 0">+${ungroupedShipped.length - 20} more sessions in the Sessions list below</div>` : ''}`}
+
 <!-- COVERAGE -->
 <div class="section-hdr">
   <span class="section-num">01</span>
@@ -1015,6 +1099,8 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 
 <script>
 const SESSIONS = ${safeJson(sessionsJs)};
+const PR_GROUPS = ${safeJson(prGroups)};
+const UNGROUPED_SHIPPED = ${safeJson(ungroupedShipped)};
 const BREAKDOWN = ${safeJson(breakdown)};
 const ROUTINE_BREAKDOWN = ${safeJson(routineBreakdown)};
 const HEATMAP = ${safeJson(heatmap)};
