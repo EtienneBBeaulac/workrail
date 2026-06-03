@@ -615,6 +615,17 @@ function renderHtml(output: ReportOutput): string {
   const hasOutcome     = sessionsJs.filter(s => s.outcome !== null).length;
   const hasPrRefs      = sessionsJs.filter(s => s.pr_refs.length > 0).length;
 
+  // ── Quality metrics for "Did it hold up?" row ────────────────────────────────
+  const totalChurnFiles = sessionsJs.reduce((a, s) => a + (s.churn ?? 0), 0);
+  const totalFilesForChurn = sessionsJs.filter(s => s.confidence === 'high' || s.confidence === 'partial').reduce((a, s) => a + s.files_changed, 0);
+  const codeKeptPct = totalFilesForChurn > 0 ? Math.round((1 - totalChurnFiles / totalFilesForChurn) * 100) : null;
+  const retriesPerSession = summary.totalSessions > 0 ? (summary.totalRetriesCount / summary.totalSessions).toFixed(1) : '--';
+  const outcomeSessions = Object.values(summary.outcomeBreakdown).reduce((a, n) => a + n, 0);
+  const abandonedCount = summary.outcomeBreakdown['abandoned'] ?? 0;
+  const completedWithoutAbandonPct = outcomeSessions > 0 ? Math.round((1 - abandonedCount / outcomeSessions) * 100) : null;
+  const successCount = summary.outcomeBreakdown['success'] ?? 0;
+  const agentSuccessPct = outcomeSessions > 0 ? Math.round(successCount / outcomeSessions * 100) : null;
+
   // ── Hero narrative (engine-authoritative only) ──────────────────────────────
   const heroLines = summary.totalLinesAdded;
   const totalPRs = sessionsJs.reduce((a, s) => a + s.pr_refs.length, 0);
@@ -782,24 +793,42 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 .meta-bar-inner{max-width:940px;margin:0 auto;display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.22);font-family:ui-monospace,monospace}
 /* MAIN */
 .main{max-width:940px;margin:0 auto;padding:28px 24px}
-/* KPI GRID */
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
-.kpi{background:var(--surface);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow)}
-.kpi-value{font-size:36px;font-weight:700;letter-spacing:-1.5px;color:var(--txt);line-height:1;margin-bottom:6px}
-.kpi-label{font-size:12px;color:var(--txt2);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.kpi-delta{font-size:11px;color:var(--txt3);margin-top:4px}
+/* METRIC SECTION LABEL (Claude Design pattern: small-caps + horizontal rule + right label) */
+.metric-section{margin:24px 0 12px}
+.metric-section-label{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.metric-section-name{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3);white-space:nowrap}
+.metric-section-rule{flex:1;height:1px;background:var(--border2)}
+.metric-section-trust{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);opacity:.65;white-space:nowrap;font-family:ui-monospace,monospace}
+/* DARK METRIC CARDS */
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px}
+.mc{background:#1c1c1f;border-radius:var(--radius);padding:18px 18px 16px;position:relative;overflow:hidden;display:flex;flex-direction:column}
+.mc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--mc-b)}
+.mc-engine{--mc-b:var(--trust-engine)}
+.mc-interp{--mc-b:var(--trust-interp)}
+.mc-agent{--mc-b:var(--trust-agent)}
+.mc-none{--mc-b:var(--trust-none)}
+.mc-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:8px}
+.mc-label{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.4);font-family:ui-monospace,monospace;line-height:1.35}
+.mc-pill{font-size:8.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:3px 7px;border-radius:20px;flex-shrink:0;white-space:nowrap}
+.mc-pill-engine{background:rgba(0,122,255,.22);color:#5ac8fa}
+.mc-pill-interp{background:rgba(99,102,241,.22);color:#a5b4fc}
+.mc-pill-agent{background:rgba(255,149,0,.22);color:#ffcc00}
+.mc-pill-none{background:rgba(174,174,178,.12);color:rgba(255,255,255,.35)}
+.mc-value{font-size:40px;font-weight:700;letter-spacing:-1.8px;color:#fff;line-height:1;margin-bottom:10px}
+.mc-sub{font-size:11px;color:#30d158;font-family:ui-monospace,monospace;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-sub-neutral{color:rgba(255,255,255,.5)}
+.mc-caveat{font-size:10px;color:rgba(255,255,255,.28);font-family:ui-monospace,monospace;line-height:1.4;margin-top:auto}
 /* SECTION HEADERS */
 .section-hdr{display:flex;align-items:baseline;gap:12px;margin:32px 0 16px}
 .section-num{font-size:11px;font-weight:700;color:var(--txt3);font-variant-numeric:tabular-nums;min-width:16px}
 .section-title{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--txt)}
 .section-meta{font-size:12px;color:var(--txt3);margin-left:auto}
-/* TRUST LEGEND */
-.trust-legend{background:var(--surface);border-radius:var(--radius);padding:20px 24px;box-shadow:var(--shadow);margin-bottom:28px}
-.trust-legend-title{font-size:13px;font-weight:600;color:var(--txt);margin-bottom:4px}
-.trust-legend-sub{font-size:12px;color:var(--txt2);margin-bottom:16px}
-.trust-legend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:3px;display:flex;align-items:center;gap:6px}
-.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.4}
+/* TRUST LEGEND — 4 individual cards */
+.trust-legend-hdr{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3);margin:24px 0 10px}
+.trust-legend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+.trust-legend-item{background:var(--surface);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.45}
 /* WHAT SHIPPED — section label style matches Claude Design pattern */
 .shipped-label{display:flex;align-items:center;margin:28px 0 10px;gap:0}
 .shipped-label-text{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3)}
@@ -894,7 +923,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1
 .pg-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
 .pg-btn:disabled{opacity:.35;cursor:default}
 footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;padding-bottom:24px}
-@media(max-width:700px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.hero-h1{font-size:26px}.trust-legend-grid{grid-template-columns:repeat(2,1fr)}.two-col{grid-template-columns:1fr}.workflow-mix{grid-template-columns:1fr}.sess-item{grid-template-columns:60px 20px 1fr}}
+@media(max-width:700px){.metric-grid{grid-template-columns:repeat(2,1fr)}.hero-h1{font-size:26px}.trust-legend-grid{grid-template-columns:repeat(2,1fr)}.two-col{grid-template-columns:1fr}.workflow-mix{grid-template-columns:1fr}.sess-item{grid-template-columns:60px 20px 1fr}}
 </style>
 </head>
 <body>
@@ -929,51 +958,94 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
 
 <div class="main">
 
-<!-- KPI GRID -->
-<div class="kpi-grid">
-  <div class="kpi">
-    <div class="kpi-value">${summary.totalLinesAdded > 0 ? summary.totalLinesAdded.toLocaleString() : '--'}</div>
-    <div class="kpi-label">Net lines shipped <span class="trust trust-engine">engine</span></div>
-    <div class="kpi-delta">from ${hasGitEvidence} sessions with git data</div>
+<!-- WHAT SHIPPED METRICS -->
+<div class="metric-section">
+  <div class="metric-section-label">
+    <span class="metric-section-name">What shipped</span>
+    <div class="metric-section-rule"></div>
+    <span class="metric-section-trust">git-authoritative</span>
   </div>
-  <div class="kpi">
-    <div class="kpi-value">${uniquePRs > 0 ? uniquePRs : '--'}</div>
-    <div class="kpi-label">PRs attributed <span class="trust ${uniquePRs > 0 ? 'trust-interp' : 'trust-none'}">${uniquePRs > 0 ? 'from commits' : 'not tracked'}</span></div>
-    <div class="kpi-delta">${uniquePRs > 0 ? `across ${hasGitEvidence} sessions with git data` : 'parsed from commit messages'}</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-value">${totalHours}h</div>
-    <div class="kpi-label">Autonomous work <span class="trust trust-engine">engine</span></div>
-    <div class="kpi-delta">${summary.completedSessions} sessions completed</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi-value">${estCostCents > 0 ? htmlEscape(estCostStr) : '--'}</div>
-    <div class="kpi-label">Total spend <span class="trust ${estCostCents > 0 ? 'trust-interp' : 'trust-none'}">${estCostCents > 0 ? 'estimated' : 'not tracked'}</span></div>
-    <div class="kpi-delta">${estCostCents > 0 ? 'Anthropic list pricing' : 'requires Claude Code JSONL'}</div>
+  <div class="metric-grid">
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Net lines shipped</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${summary.totalLinesAdded > 0 ? fmtTokens(summary.totalLinesAdded) : '--'}</div>
+      <div class="mc-sub">${summary.totalLinesAdded > 0 ? `▲ +${summary.totalLinesAdded.toLocaleString()} / −${summary.totalLinesRemoved.toLocaleString()}` : '→ no git evidence yet'}</div>
+      <div class="mc-caveat">git diff captured &middot; ${hasGitEvidence}/${summary.totalSessions} sessions</div>
+    </div>
+    <div class="mc mc-interp">
+      <div class="mc-hdr"><span class="mc-label">PRs attributed</span><span class="mc-pill mc-pill-interp">Interp</span></div>
+      <div class="mc-value">${uniquePRs > 0 ? uniquePRs : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ parsed from commit messages</div>
+      <div class="mc-caveat">regex match &middot; may miss or over-claim</div>
+    </div>
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Autonomous work</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${totalHours}h</div>
+      <div class="mc-sub">→ ${summary.completedSessions} sessions completed</div>
+      <div class="mc-caveat">wall-clock from event timestamps</div>
+    </div>
+    <div class="mc ${estCostCents > 0 ? 'mc-interp' : 'mc-none'}">
+      <div class="mc-hdr"><span class="mc-label">Model spend</span><span class="mc-pill ${estCostCents > 0 ? 'mc-pill-interp' : 'mc-pill-none'}">${estCostCents > 0 ? 'Metered' : 'Not tracked'}</span></div>
+      <div class="mc-value">${estCostCents > 0 ? htmlEscape(estCostStr) : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ ${estCostCents > 0 ? 'at list pricing' : 'no token data yet'}</div>
+      <div class="mc-caveat">token data &middot; ${hasTokenData}/${summary.totalSessions} sessions</div>
+    </div>
   </div>
 </div>
 
-<!-- TRUST LEGEND -->
-<div class="trust-legend">
-  <div class="trust-legend-title">How to read this report</div>
-  <div class="trust-legend-sub">Every metric is labeled by its source. Never present unverified data as fact.</div>
-  <div class="trust-legend-grid">
-    <div class="trust-legend-item">
-      <h4><span class="trust trust-engine">engine</span></h4>
-      <p>Read from git, event logs, or JSONL. Primary evidence -- diff stats, token counts, timestamps.</p>
+<!-- DID IT HOLD UP METRICS -->
+<div class="metric-section">
+  <div class="metric-section-label">
+    <span class="metric-section-name">Did it hold up?</span>
+    <div class="metric-section-rule"></div>
+    <span class="metric-section-trust">lower confidence &mdash; read the tags</span>
+  </div>
+  <div class="metric-grid">
+    <div class="mc mc-interp">
+      <div class="mc-hdr"><span class="mc-label">Code kept &middot; 7 days</span><span class="mc-pill mc-pill-interp">Interp</span></div>
+      <div class="mc-value">${codeKeptPct !== null ? `${codeKeptPct}%` : '--'}</div>
+      <div class="mc-sub ${codeKeptPct !== null && codeKeptPct >= 80 ? '' : 'mc-sub-neutral'}">→ ${totalChurnFiles} of ${totalFilesForChurn} files re-touched</div>
+      <div class="mc-caveat">git history is exact; the cause of a re-touch isn&rsquo;t</div>
     </div>
-    <div class="trust-legend-item">
-      <h4><span class="trust trust-interp">interpretive</span></h4>
-      <p>Real data, uncertain meaning. PR refs from commit messages, cost at list pricing, churn signal.</p>
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Retries / session</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${retriesPerSession}</div>
+      <div class="mc-sub mc-sub-neutral">→ lower = right first try</div>
+      <div class="mc-caveat">blocked-attempt nodes in the DAG</div>
     </div>
-    <div class="trust-legend-item">
-      <h4><span class="trust trust-agent">agent reported</span></h4>
-      <p>The agent&rsquo;s own word. Outcome, PR numbers claimed. ~53% session coverage. Unverified.</p>
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Completed without abandon</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${completedWithoutAbandonPct !== null ? `${completedWithoutAbandonPct}%` : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ ran to the last step</div>
+      <div class="mc-caveat">operational &mdash; not a quality verdict</div>
     </div>
-    <div class="trust-legend-item">
-      <h4><span class="trust trust-none">not tracked yet</span></h4>
-      <p>Missing readers, pre-feature sessions, or coverage gaps. Always shown as &ldquo;--&rdquo;, never as zero.</p>
+    <div class="mc mc-agent">
+      <div class="mc-hdr"><span class="mc-label">Agent-reported success</span><span class="mc-pill mc-pill-agent">Agent</span></div>
+      <div class="mc-value">${agentSuccessPct !== null ? `${agentSuccessPct}%` : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ self-reported &middot; unverified</div>
+      <div class="mc-caveat">only ${hasOutcome}/${summary.totalSessions} sessions reported one</div>
     </div>
+  </div>
+</div>
+
+<!-- HOW TO READ — 4 individual cards -->
+<div class="trust-legend-hdr">How to read this report</div>
+<div class="trust-legend-grid">
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-engine">engine</span></h4>
+    <p>Read from git, event logs, or JSONL. Primary evidence &mdash; diff stats, token counts, timestamps.</p>
+  </div>
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-interp">interpretive</span></h4>
+    <p>Real data, uncertain meaning. PR refs from commit messages, cost at list pricing, churn signal.</p>
+  </div>
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-agent">agent reported</span></h4>
+    <p>The agent&rsquo;s own word. Outcome, PR numbers claimed. Unverified.</p>
+  </div>
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-none">not tracked yet</span></h4>
+    <p>Missing readers or pre-feature sessions. Always shown as &ldquo;--&rdquo;, never as zero.</p>
   </div>
 </div>
 
