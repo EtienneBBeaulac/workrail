@@ -629,6 +629,7 @@ function renderHtml(output: ReportOutput): string {
   const agentSuccessPct = outcomeSessions > 0 ? Math.round(successCount / outcomeSessions * 100) : null;
 
   // ── Hero narrative (engine-authoritative only) ──────────────────────────────
+  const windowDays = Math.round((new Date(dateRange.until).getTime() - new Date(dateRange.since).getTime()) / 86_400_000);
   const heroLines = summary.totalLinesAdded;
   const totalPRs = sessionsJs.reduce((a, s) => a + s.pr_refs.length, 0);
   const uniquePRs = new Set(sessionsJs.flatMap(s => s.pr_refs)).size;
@@ -934,16 +935,16 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
     </div>
     <h1 class="hero-h1">${htmlEscape(heroMain)} &mdash; <span>${htmlEscape(heroAccent)}</span></h1>
     <p class="hero-sub">
-      Across ${htmlEscape(dateRange.since)} &ndash; ${htmlEscape(dateRange.until)}, WorkRail steered <strong>${summary.totalSessions} workflow runs</strong> through guided, step-by-step execution.
+      Across ${htmlEscape(dateRange.since)} &ndash; ${htmlEscape(dateRange.until)}, WorkRail steered <strong>${summary.totalSessions} workflow runs</strong> through guardrailed, step-by-step execution.
       Every number below is labeled by <strong>how much it can be trusted</strong> &mdash; git evidence, interpretation, or the agent&rsquo;s own word.
       Metrics that didn&rsquo;t exist yet read <strong>&ldquo;not tracked&rdquo;</strong>, never a misleading zero.
     </p>
     <div class="hero-pills">
       <span class="hero-pill">${summary.totalSessions} sessions</span>
-      ${summary.totalLinesAdded > 0 ? `<span class="hero-pill">+${summary.totalLinesAdded.toLocaleString()} lines</span>` : ''}
-      ${totalHours !== '0.0' ? `<span class="hero-pill">${totalHours}h autonomous</span>` : ''}
+      ${codeKeptPct !== null ? `<span class="hero-pill">code kept ${windowDays}d ${codeKeptPct}%</span>` : ''}
+      ${totalHours !== '0.0' ? `<span class="hero-pill">autonomous ${totalHours}h</span>` : ''}
       ${estCostCents > 0 ? `<span class="hero-pill">${htmlEscape(estCostStr)} spend</span>` : ''}
-      ${uniquePRs > 0 ? `<span class="hero-pill">${uniquePRs} PRs</span>` : ''}
+      <span class="hero-pill">window ${windowDays} days</span>
     </div>
   </div>
 </div>
@@ -996,7 +997,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
   <div class="metric-section-label">
     <span class="metric-section-name">Did it hold up?</span>
     <div class="metric-section-rule"></div>
-    <span class="metric-section-trust">lower confidence &mdash; read the tags</span>
+    <span class="metric-section-trust">quality &amp; operational signals</span>
   </div>
   <div class="metric-grid">
     <div class="mc mc-interp">
@@ -1014,7 +1015,7 @@ footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;paddin
     <div class="mc mc-engine">
       <div class="mc-hdr"><span class="mc-label">Completed without abandon</span><span class="mc-pill mc-pill-engine">Engine</span></div>
       <div class="mc-value">${completedWithoutAbandonPct !== null ? `${completedWithoutAbandonPct}%` : '--'}</div>
-      <div class="mc-sub mc-sub-neutral">→ ran to the last step</div>
+      <div class="mc-sub mc-sub-neutral">→ ran all steps</div>
       <div class="mc-caveat">operational &mdash; not a quality verdict</div>
     </div>
     <div class="mc mc-agent">
@@ -1126,8 +1127,8 @@ ${ungroupedShipped.length > 20 ? `  <div class="shipped-more">+${ungroupedShippe
 <div class="card">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:4px">
     <div>
-      <div style="font-size:13px;font-weight:600;color:var(--txt);margin-bottom:3px">Sessions per day, by reported outcome</div>
-      <div style="font-size:11px;color:var(--txt3);font-family:ui-monospace,monospace">Stacked bars &middot; &ldquo;unknown&rdquo; = no outcome reported</div>
+      <div style="font-size:13px;font-weight:600;color:var(--txt);margin-bottom:3px">Sessions per day, by outcome</div>
+      <div style="font-size:11px;color:var(--txt3);font-family:ui-monospace,monospace">Stacked bars &middot; hover for detail &middot; &ldquo;unknown&rdquo; = no outcome reported</div>
     </div>
     <div style="display:flex;gap:12px;font-size:11px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
       <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#34c759"></div><span style="color:var(--txt2)">success</span></div>
@@ -1184,6 +1185,152 @@ ${ungroupedShipped.length > 20 ? `  <div class="shipped-more">+${ungroupedShippe
   <div class="stats-bar" id="sess-stats"></div>
   <div id="sess-list"></div>
   <div class="pag" id="sess-pag"></div>
+</div>
+
+<!-- SESSION OUTCOMES -->
+<div class="section-hdr">
+  <span class="section-num">05</span>
+  <h2 class="section-title">Session outcomes</h2>
+  <span class="section-meta">agent-reported &middot; operational</span>
+</div>
+<div class="two-col" style="margin-bottom:18px;align-items:start">
+  <div class="card" style="margin-bottom:0">
+    <div class="card-title">Outcome breakdown</div>
+    <div class="card-sub" style="font-family:ui-monospace,monospace;font-size:11px">Self-reported by the agent &mdash; present for only ${hasOutcome} of ${summary.totalSessions} sessions. It tells you the engine ran, not that the output was correct.</div>
+    <div style="margin-top:12px">
+      ${[
+        { key: 'success', label: 'Success', cls: 'b-success' },
+        { key: 'partial', label: 'Partial', cls: 'b-partial' },
+        { key: 'abandoned', label: 'Abandoned', cls: 'b-abandoned' },
+        { key: 'error', label: 'Error', cls: 'b-error' },
+        { key: 'unknown', label: 'Unknown', cls: '' },
+      ].map(({ key, label, cls }) => {
+        const n = key === 'unknown'
+          ? summary.totalSessions - outcomeSessions
+          : (summary.outcomeBreakdown[key] ?? 0);
+        const pct = summary.totalSessions > 0 ? Math.round(n / summary.totalSessions * 100) : 0;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+          ${cls ? `<span class="badge ${cls}">${htmlEscape(label)}</span>` : `<span style="font-size:12px;color:var(--txt3)">${htmlEscape(label)}</span>`}
+          <span style="font-size:24px;font-weight:700;color:var(--txt);letter-spacing:-0.5px;margin-left:4px">${n}</span>
+          <span style="font-size:12px;color:var(--txt3);margin-left:4px">${pct}%</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Operational signals <span class="trust trust-engine" style="margin-left:6px;vertical-align:middle">engine</span></div>
+      <div class="card-sub">How the engine behaved &mdash; not a quality verdict</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${[
+          { val: (summary.totalStepsCompleted / Math.max(summary.totalSessions, 1)).toFixed(1), label: 'Avg steps walked' },
+          { val: retriesPerSession, label: 'Retries / session' },
+          { val: `${(summary.totalDurationMs / Math.max(summary.totalSessions, 1) / 60_000).toFixed(0)}m`, label: 'Avg session length' },
+          { val: `${sessionsJs.filter(s => s.trigger === 'daemon').length}`, label: 'Autonomous runs' },
+        ].map(({ val, label }) => `<div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px">
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;color:var(--txt)">${htmlEscape(val)}</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">${htmlEscape(label)}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Code retention <span class="trust trust-interp" style="margin-left:6px;vertical-align:middle">interpretive</span></div>
+      <div class="card-sub">The closest thing to a quality signal &mdash; handle with care</div>
+      <div style="font-size:36px;font-weight:700;letter-spacing:-1.5px;color:var(--txt);line-height:1;margin-bottom:8px">${codeKeptPct !== null ? `${codeKeptPct}%` : '--'}</div>
+      <div style="font-size:12px;color:var(--txt2);line-height:1.5">of touched files weren&rsquo;t re-modified within 7 days. A soft signal &mdash; a re-touch could be unrelated active development, not bad output.</div>
+      ${totalFilesForChurn > 0 ? `<div style="font-size:11px;color:var(--txt3);margin-top:8px;font-family:ui-monospace,monospace">${totalChurnFiles} of ${totalFilesForChurn} files re-touched</div>` : ''}
+    </div>
+  </div>
+</div>
+
+<!-- BY PROJECT -->
+<div class="section-hdr">
+  <span class="section-num">06</span>
+  <h2 class="section-title">By project</h2>
+  <span class="section-meta">${projects.length} repositories</span>
+</div>
+<div class="card">
+  <div class="card-sub">Sessions and lines added per repository &mdash; project name derived from the work directory.</div>
+  <table class="tbl">
+    <thead><tr>
+      <th>Project</th><th>Sessions</th><th class="r">Lines added</th><th class="r">Top languages</th>
+    </tr></thead>
+    <tbody>
+      ${projects.slice(0, 15).map((p) => {
+        const barPct = projects[0] && projects[0].sessions > 0 ? Math.round(p.sessions / projects[0].sessions * 100) : 0;
+        const topLang = Object.entries(p.lang).sort(([, a], [, b]) => b - a).slice(0, 3).map(([ext]) => ext).join(' ');
+        return `<tr>
+          <td style="font-weight:600">${htmlEscape(p.name)}</td>
+          <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;background:var(--border);border-radius:var(--radius-sm);height:8px;overflow:hidden;min-width:60px"><div style="height:100%;width:${barPct}%;background:var(--accent)"></div></div><span style="font-size:12px;font-weight:600;color:var(--txt);width:28px;text-align:right">${p.sessions}</span></div></td>
+          <td class="r" style="color:#1a7a3a">+${p.linesAdded.toLocaleString()}</td>
+          <td class="r" style="color:var(--txt3);font-size:11px">${htmlEscape(topLang)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+</div>
+
+<!-- CODE IMPACT -->
+<div class="section-hdr">
+  <span class="section-num">07</span>
+  <h2 class="section-title">Code impact</h2>
+  <span class="section-meta">${summary.totalFilesChanged} files touched</span>
+</div>
+<div class="card">
+  <div class="card-title">What got written <span class="trust trust-engine" style="margin-left:6px;vertical-align:middle">engine</span></div>
+  <div class="card-sub" style="font-family:ui-monospace,monospace;font-size:11px">git diff startSha..HEAD &middot; captured for ${hasGitEvidence} of ${summary.totalSessions} sessions</div>
+  <div class="two-col" style="margin-top:16px;align-items:start">
+    <div>
+      ${[
+        { label: 'Lines added', val: `+${summary.totalLinesAdded.toLocaleString()}`, color: '#1a7a3a' },
+        { label: 'Lines removed', val: `−${summary.totalLinesRemoved.toLocaleString()}`, color: '#c0392b' },
+        { label: 'Net change', val: `${(summary.totalLinesAdded - summary.totalLinesRemoved).toLocaleString()} lines`, color: 'var(--txt)' },
+        { label: 'Files changed', val: summary.totalFilesChanged.toLocaleString(), color: 'var(--txt)' },
+      ].map(({ label, val, color }) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="color:var(--txt2)">${htmlEscape(label)}</span>
+        <span style="font-weight:600;color:${color}">${htmlEscape(val)}</span>
+      </div>`).join('')}
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);margin-bottom:10px">Language breakdown</div>
+      ${langEntries.length > 0 ? langEntries.map(({ ext, cnt, pct }) => `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:var(--txt);width:56px;flex-shrink:0">${htmlEscape(ext)}</span>
+        <div style="flex:1;background:var(--border);border-radius:3px;height:6px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--accent)"></div></div>
+        <span style="font-size:11px;color:var(--txt3);width:64px;text-align:right">${cnt.toLocaleString()} &middot; ${pct}%</span>
+      </div>`).join('') : '<div style="color:var(--txt3);font-size:12px">No language data yet</div>'}
+    </div>
+  </div>
+</div>
+
+<!-- TOKEN ECONOMICS -->
+<div class="section-hdr">
+  <span class="section-num">08</span>
+  <h2 class="section-title">Token economics</h2>
+  <span class="section-meta">${hasTokenData > 0 ? `${Math.round(hasTokenData / summary.totalSessions * 100)}% coverage` : 'not tracked yet'}</span>
+</div>
+<div class="card">
+  ${hasTokenData === 0
+    ? `<div style="font-family:ui-monospace,monospace;font-size:12px;color:var(--txt2);margin-bottom:12px">Token data was captured for 0 of ${summary.totalSessions} sessions. Cursor &amp; Antigravity readers haven&rsquo;t shipped yet, and Claude Code requires the workspace path to be set.</div>
+       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+         ${['Total tokens', 'Avg cost / session', 'Cache hit ratio', 'Tokens / turn'].map(label => `<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px 16px">
+           <div style="font-size:22px;font-weight:700;color:var(--txt3)">--</div>
+           <div style="font-size:11px;color:var(--txt3);margin-top:4px">${htmlEscape(label)}</div>
+         </div>`).join('')}
+       </div>`
+    : `<div class="card-sub" style="font-family:ui-monospace,monospace;font-size:11px">${fmtTokens(totalTokens)} tokens &middot; ${htmlEscape(estCostStr)} at list pricing &middot; ${hasTokenData}/${summary.totalSessions} sessions captured</div>
+       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px">
+         ${[
+           { label: 'Input tokens', val: fmtTokens(inputTok), sub: `$${PRICE_INPUT}/1M &middot; $${(inputTok * PRICE_INPUT / 1_000_000).toFixed(2)}` },
+           { label: 'Output tokens', val: fmtTokens(outputTok), sub: `$${PRICE_OUTPUT}/1M &middot; $${(outputTok * PRICE_OUTPUT / 1_000_000).toFixed(2)}` },
+           { label: 'Cache writes', val: fmtTokens(cacheW), sub: `$${PRICE_CACHE_W}/1M &middot; $${(cacheW * PRICE_CACHE_W / 1_000_000).toFixed(2)}` },
+           { label: 'Cache reads', val: fmtTokens(cacheR), sub: `$${PRICE_CACHE_R}/1M &middot; $${(cacheR * PRICE_CACHE_R / 1_000_000).toFixed(2)} (10x cheaper)` },
+         ].map(({ label, val, sub }) => `<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px 16px">
+           <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;color:var(--txt)">${val}</div>
+           <div style="font-size:11px;color:var(--txt2);margin-top:4px">${htmlEscape(label)}</div>
+           <div style="font-size:10px;color:var(--txt3);margin-top:2px">${sub}</div>
+         </div>`).join('')}
+       </div>`
+  }
 </div>
 
 <footer>workrail &middot; <a href="https://github.com/EtienneBBeaulac/workrail" style="color:var(--txt3)">github.com/EtienneBBeaulac/workrail</a></footer>
@@ -1341,17 +1488,21 @@ function renderS(){
     if(s.pr_refs.length) tags.push('<span class="trust trust-interp" style="font-size:10px">'+s.pr_refs.length+' PR'+(s.pr_refs.length>1?'s':'')+'</span>');
     if(s.retries>0) tags.push('<span class="trust trust-agent" style="font-size:10px;color:#ff9500">'+s.retries+' retr.</span>');
     if(s.outcome) tags.push('<span class="badge b-'+s.outcome+'" style="font-size:10px">'+s.outcome+'</span>');
+    const autoBadge=s.trigger==='daemon'?'<span class="badge" style="background:#e1f0ff;color:#007aff;font-size:9px;margin-left:4px">auto</span>':'';
+    const projBranch=(s.project?s.project:'')+(s.git_branch?' &middot; <span style="font-family:ui-monospace,monospace;font-size:10px;color:#aeaeb2">'+s.git_branch+'</span>':'');
     div.innerHTML=
       '<div class="sess-date">'+s.date+'</div>'+
       '<div><div class="sess-dot '+(s.completed?'dot-done':'dot-skip')+'"></div></div>'+
       '<div class="sess-body">'+
-        '<div class="sess-wf">'+s.workflow_label+(s.project?' &middot; <span style="font-weight:400;color:#aeaeb2">'+s.project+'</span>':'')+'</div>'+
+        '<div class="sess-wf">'+s.workflow_label+autoBadge+'</div>'+
+        (projBranch?'<div style="font-size:11px;color:#aeaeb2;margin-bottom:2px">'+projBranch+'</div>':'')+
         '<div class="'+(s.goal?'sess-goal':'sess-no-goal')+'">'+(s.goal||'No goal recorded')+'</div>'+
         (tags.length?'<div class="sess-tags">'+tags.join('')+'</div>':'')+
       '</div>'+
       '<div class="sess-nums">'+
         '<div class="sess-num-main">'+fD(s.duration_min)+'</div>'+
         (s.steps?'<div class="sess-num-sub">'+s.steps+' steps</div>':'')+
+        (cost?'<div class="sess-num-sub">'+cost+'</div>':'')+
       '</div>';
     list.appendChild(div);
   }
