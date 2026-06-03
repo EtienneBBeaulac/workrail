@@ -41,7 +41,11 @@ export default defineConfig({
           include: ['tests/**/*.test.ts'],
           // Exclude the knowledge-graph test -- it runs in the 'knowledge-graph' project
           // below with pool:forks to avoid DuckDB native binary + worker thread conflicts.
-          exclude: ['tests/unit/knowledge-graph.test.ts'],
+          exclude: [
+            'tests/unit/knowledge-graph.test.ts',
+            'tests/benchmark/corpus/**/*.test.ts',
+            'tests/benchmark/workspaces/**/*.test.ts'
+          ],
           pool: 'threads',
           poolOptions: {
             threads: {

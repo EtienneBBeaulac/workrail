@@ -64,3 +64,9 @@ temp/
 # Memory MCP artifacts
 .memory/
 undefined/ 
+
+# WorkRail Benchmark
+tests/benchmark/workspaces/
+tests/benchmark/results.jsonl
+tests/benchmark/results.csv
+.venv/
