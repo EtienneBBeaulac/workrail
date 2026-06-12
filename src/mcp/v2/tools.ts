@@ -43,6 +43,7 @@ export const V2StartWorkflowInput = z.object({
   workflowId: z.string().min(1).regex(/^([a-z0-9_-]+|[a-z][a-z0-9_-]+\.[a-z][a-z0-9_-]+)$/, 'Workflow ID must be a valid legacy ID (e.g. my-workflow) or namespaced ID (e.g. wr.discovery)').describe('The workflow ID to start'),
   workspacePath: workspacePathField.describe('Required. Absolute path to your current workspace directory (e.g. the "Workspace:" value from your system parameters). WorkRail uses this to resolve the correct project-scoped workflow variant and to anchor the session to the correct repo for future resume_session discovery. Shared MCP servers cannot infer this safely.'),
   goal: z.string().min(1).describe('A short sentence describing what you are trying to accomplish (e.g. "implement OAuth refresh token rotation", "review PR #47 before merge", "investigate why the build fails on CI").'),
+  modelTier: z.enum(['lightweight', 'mid', 'heavy']).optional().describe('Recommended model tier/category for executing this workflow (lightweight, mid, or heavy).'),
 });
 export type V2StartWorkflowInput = z.infer<typeof V2StartWorkflowInput>;
 
@@ -159,6 +160,19 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
           'workspacePath is required for rehydration. Shared WorkRail servers cannot safely infer your current workspace, so pass the absolute "Workspace:" path from your system parameters.',
       });
     }
+    const contextObj = data.context ?? data.contextVariables;
+    if (contextObj && typeof contextObj === 'object') {
+      const reservedKeys = ['eat_token', 'metrics_harness', 'metrics_active_model'];
+      for (const k of reservedKeys) {
+        if (k in contextObj) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [data.context !== undefined ? 'context' : 'contextVariables', k],
+            message: `Reserved system key "${k}" cannot be set in context.`,
+          });
+        }
+      }
+    }
   })
   .transform((data) => {
     const normalized = CONTINUE_WORKFLOW_PROTOCOL.aliasMap
@@ -171,10 +185,16 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
       ...(artifacts !== undefined ? { artifacts } : {}),
     } : undefined;
     const intent = data.intent ?? (output ? 'advance' : 'rehydrate');
+    const cleanContext = normalized.context ? { ...(normalized.context as Record<string, unknown>) } : undefined;
+    if (cleanContext) {
+      delete cleanContext['eat_token'];
+      delete cleanContext['metrics_harness'];
+      delete cleanContext['metrics_active_model'];
+    }
     return {
       intent,
       continueToken: data.continueToken,
-      ...(normalized.context ? { context: normalized.context } : {}),
+      ...(cleanContext ? { context: cleanContext } : {}),
       ...(output ? { output } : {}),
       ...(data.workspacePath !== undefined ? { workspacePath: data.workspacePath } : {}),
     };

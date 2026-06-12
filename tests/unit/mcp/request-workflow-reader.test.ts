@@ -569,7 +569,7 @@ describe('createWorkflowReaderForRequest -- sibling worktree scoping', () => {
     try {
       initGitRepoSync(mainRepo, { silent: true });
       // git worktree add requires at least one commit
-      gitExecSync(mainRepo, ['commit', '--allow-empty', '-m', 'init'], { silent: true });
+      gitExecSync(mainRepo, ['commit', '--no-gpg-sign', '--allow-empty', '-m', 'init'], { silent: true });
       gitExecSync(mainRepo, ['worktree', 'add', siblingWorktree], { silent: true });
 
       // Write a rooted workflow in the main repo
@@ -676,7 +676,7 @@ describe('filterRememberedRootsForWorkspace', () => {
 
     try {
       initGitRepoSync(mainRepo, { silent: true });
-      gitExecSync(mainRepo, ['commit', '--allow-empty', '-m', 'init'], { silent: true });
+      gitExecSync(mainRepo, ['commit', '--no-gpg-sign', '--allow-empty', '-m', 'init'], { silent: true });
       gitExecSync(mainRepo, ['worktree', 'add', siblingWorktree], { silent: true });
 
       // mainRepo is remembered; siblingWorktree is the workspace.

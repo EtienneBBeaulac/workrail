@@ -161,9 +161,10 @@ export function getSchemas(): Record<string, any> {
         agentConfig: {
           type: 'object',
           properties: {
-            model: {
+            modelTier: {
               type: 'string',
-              description: 'Optional custom model ID override for the child session (e.g. "claude-3-5-haiku").'
+              enum: ['lightweight', 'mid', 'heavy'],
+              description: 'Recommended model tier/category for executing the child session (lightweight, mid, or heavy).'
             }
           },
           additionalProperties: false,
@@ -190,9 +191,10 @@ export function getSchemas(): Record<string, any> {
               agentConfig: {
                 type: 'object',
                 properties: {
-                  model: {
+                  modelTier: {
                     type: 'string',
-                    description: 'Optional custom model ID override for the child session (e.g. "claude-3-5-haiku").'
+                    enum: ['lightweight', 'mid', 'heavy'],
+                    description: 'Recommended model tier/category for executing the child session (lightweight, mid, or heavy).'
                   }
                 },
                 additionalProperties: false,

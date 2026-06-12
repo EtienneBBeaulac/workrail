@@ -24,6 +24,15 @@
       "minLength": 1,
       "maxLength": 512
     },
+    "modelTier": {
+      "type": "string",
+      "enum": [
+        "lightweight",
+        "mid",
+        "heavy"
+      ],
+      "description": "Default model tier/category recommended for this workflow (lightweight, mid, or heavy)."
+    },
     "version": {
       "type": "string",
       "description": "Semantic version of the workflow (e.g., 0.0.1, 0.1.0)",
@@ -426,6 +435,15 @@
           "minLength": 10,
           "maxLength": 1024
         },
+        "modelTier": {
+          "type": "string",
+          "enum": [
+            "lightweight",
+            "mid",
+            "heavy"
+          ],
+          "description": "Recommended model tier/category for executing this step (lightweight, mid, or heavy)."
+        },
         "guidance": {
           "type": "array",
           "items": {
@@ -515,6 +533,12 @@
             "$ref": "#/$defs/promptFragment"
           },
           "minItems": 1
+        },
+        "audit": {
+          "$ref": "#/$defs/auditConfig"
+        },
+        "verification": {
+          "$ref": "#/$defs/verificationConfig"
         }
       },
       "required": [
@@ -553,7 +577,14 @@
               "type": "array",
               "description": "Array of inline step definitions to execute in the loop",
               "items": {
-                "$ref": "#/$defs/standardStep"
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/standardStep"
+                  },
+                  {
+                    "$ref": "#/$defs/parallelStep"
+                  }
+                ]
               },
               "minItems": 1
             }
@@ -802,6 +833,10 @@
         "in": {
           "type": "array",
           "description": "Check if variable value is in this array of allowed values"
+        },
+        "contains": {
+          "type": "string",
+          "description": "Check if variable string or array representation contains this value"
         }
       },
       "additionalProperties": false
@@ -1285,6 +1320,63 @@
       ],
       "additionalProperties": false
     },
+    "auditConfig": {
+      "type": "object",
+      "description": "Configuration for an automatically injected virtual self-auditing step.",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Custom prompt instructions to audit the parent step's deliverables.",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "rubric": {
+          "type": "array",
+          "description": "Concrete evaluation dimensions to guide the auditor's judgment.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "synthesisConfig": {
+      "type": "object",
+      "description": "Configuration for an automatically injected virtual fanning-in synthesis step.",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Custom prompt instructions to synthesize and verify parallel subagent deliverables.",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "outputContract": {
+          "$ref": "#/$defs/outputContract",
+          "description": "Expected structured result contract after consolidating child findings."
+        }
+      },
+      "additionalProperties": false
+    },
+    "verificationConfig": {
+      "type": "object",
+      "description": "Configuration for an automatically injected virtual shell command verification step.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The automated shell command to execute for verifying deliverables.",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Custom instructions to guide the verification process.",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "additionalProperties": false
+    },
     "parallelStep": {
       "type": "object",
       "description": "A step that spawns subagents or routines to execute concurrently in isolated cognitive contexts.",
@@ -1321,6 +1413,9 @@
         "notesOptional": {
           "type": "boolean",
           "description": "When true, output.notesMarkdown is not required for this step. Steps with outputContract are automatically exempt."
+        },
+        "synthesis": {
+          "$ref": "#/$defs/synthesisConfig"
         }
       },
       "required": [
@@ -1341,12 +1436,32 @@
           "minLength": 1,
           "maxLength": 128
         },
+        "runCondition": {
+          "$ref": "#/$defs/condition",
+          "description": "Optional condition to determine if this delegation should run."
+        },
         "contextMapping": {
           "type": "object",
           "description": "Mapping from parent context keys to child input keys",
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "args": {
+          "type": "object",
+          "description": "Static key-value overrides passed directly to the child context",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "modelTier": {
+          "type": "string",
+          "enum": [
+            "lightweight",
+            "mid",
+            "heavy"
+          ],
+          "description": "Recommended model tier/category for executing this delegation (lightweight, mid, or heavy)."
         }
       },
       "required": [

@@ -9,8 +9,8 @@
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
-import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
-import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
+import { executeStartWorkflow } from '../../v2/usecases/start-workflow.js';
+import { parseContinueTokenOrFail } from '../../v2/usecases/v2-token-ops.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
 import { asSessionId, type SessionId } from '../../v2/durable-core/ids/index.js';
@@ -34,7 +34,7 @@ interface SingleSpawnSpec {
   readonly workspacePath: string;
   readonly context?: Readonly<Record<string, unknown>>;
   readonly agentConfig?: {
-    readonly model?: string;
+    readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
   };
 }
 
@@ -94,14 +94,14 @@ function parseParams(raw: unknown): ParsedParams {
       if (a['context'] !== undefined && (typeof a['context'] !== 'object' || a['context'] === null || Array.isArray(a['context']))) throw new Error(`spawn_agent: agents[${i}].context must be a plain object if provided`);
       if (a['agentConfig'] !== undefined && (typeof a['agentConfig'] !== 'object' || a['agentConfig'] === null || Array.isArray(a['agentConfig']))) throw new Error(`spawn_agent: agents[${i}].agentConfig must be a plain object if provided`);
       
-      let agentConfig: { model?: string } | undefined;
+      let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy' } | undefined;
       if (a['agentConfig'] !== undefined) {
         const ac = a['agentConfig'] as Record<string, unknown>;
-        if (ac['model'] !== undefined && typeof ac['model'] !== 'string') {
-          throw new Error(`spawn_agent: agents[${i}].agentConfig.model must be a string if provided`);
+        if (ac['modelTier'] !== undefined && ac['modelTier'] !== 'lightweight' && ac['modelTier'] !== 'mid' && ac['modelTier'] !== 'heavy') {
+          throw new Error(`spawn_agent: agents[${i}].agentConfig.modelTier must be 'lightweight', 'mid', or 'heavy' if provided`);
         }
         agentConfig = {
-          ...(ac['model'] !== undefined ? { model: ac['model'] as string } : {}),
+          ...(ac['modelTier'] !== undefined ? { modelTier: ac['modelTier'] as 'lightweight' | 'mid' | 'heavy' } : {}),
         };
       }
 
@@ -122,14 +122,14 @@ function parseParams(raw: unknown): ParsedParams {
   if (typeof p['workspacePath'] !== 'string' || !p['workspacePath']) throw new Error('spawn_agent: workspacePath must be a non-empty string');
   if (p['agentConfig'] !== undefined && (typeof p['agentConfig'] !== 'object' || p['agentConfig'] === null || Array.isArray(p['agentConfig']))) throw new Error('spawn_agent: agentConfig must be a plain object if provided');
 
-  let agentConfig: { model?: string } | undefined;
+  let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy' } | undefined;
   if (p['agentConfig'] !== undefined) {
     const ac = p['agentConfig'] as Record<string, unknown>;
-    if (ac['model'] !== undefined && typeof ac['model'] !== 'string') {
-      throw new Error('spawn_agent: agentConfig.model must be a string if provided');
+    if (ac['modelTier'] !== undefined && ac['modelTier'] !== 'lightweight' && ac['modelTier'] !== 'mid' && ac['modelTier'] !== 'heavy') {
+      throw new Error("spawn_agent: agentConfig.modelTier must be 'lightweight', 'mid', or 'heavy' if provided");
     }
     agentConfig = {
-      ...(ac['model'] !== undefined ? { model: ac['model'] as string } : {}),
+      ...(ac['modelTier'] !== undefined ? { modelTier: ac['modelTier'] as 'lightweight' | 'mid' | 'heavy' } : {}),
     };
   }
 
@@ -233,13 +233,35 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   if (parentEatToken) {
     internalContext['parent_eat_token'] = parentEatToken;
   }
-  if (spec.agentConfig?.model) {
-    internalContext['model'] = spec.agentConfig.model;
+  if (spec.agentConfig?.modelTier) {
+    internalContext['modelTier'] = spec.agentConfig.modelTier;
   }
 
   const startResult = await executeStartWorkflow(
-    { workflowId: spec.workflowId, workspacePath: spec.workspacePath, goal: spec.goal },
-    sc.ctx,
+    {
+      gate: sc.ctx.v2.gate,
+      sessionStore: sc.ctx.v2.sessionStore,
+      snapshotStore: sc.ctx.v2.snapshotStore,
+      pinnedStore: sc.ctx.v2.pinnedStore,
+      crypto: sc.ctx.v2.crypto,
+      tokenCodecPorts: sc.ctx.v2.tokenCodecPorts,
+      idFactory: sc.ctx.v2.idFactory,
+      validationPipelineDeps: sc.ctx.v2.validationPipelineDeps,
+      tokenAliasStore: sc.ctx.v2.tokenAliasStore,
+      entropy: sc.ctx.v2.entropy,
+      resolvedRootUris: sc.ctx.v2.resolvedRootUris,
+      rememberedRootsStore: sc.ctx.v2.rememberedRootsStore,
+      managedSourceStore: sc.ctx.v2.managedSourceStore,
+      workspaceResolver: sc.ctx.v2.workspaceResolver,
+      fallbackWorkflowReader: sc.ctx.workflowService,
+      featureFlags: sc.ctx.featureFlags,
+    },
+    {
+      workflowId: spec.workflowId,
+      workspacePath: spec.workspacePath,
+      goal: spec.goal,
+      modelTier: spec.agentConfig?.modelTier,
+    },
     internalContext,
   );
 
@@ -247,9 +269,7 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     const err = startResult.error;
     const notesMsg = err.kind === 'precondition_failed' || err.kind === 'invariant_violation' || err.kind === 'workflow_compile_failed' || err.kind === 'hash_computation_failed' || err.kind === 'prompt_render_failed'
       ? err.message
-      : err.kind === 'validation_failed'
-        ? err.failure.message
-        : JSON.stringify(err);
+      : JSON.stringify(err);
 
     return {
       kind: 'single',
@@ -259,28 +279,8 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     };
   }
 
-  // ---- Decode childSessionId from continueToken ----
-  // WHY token decode (not return from executeStartWorkflow): adding sessionId to
-  // V2StartWorkflowOutputSchema would be a public API change (GAP-7 territory).
-  // Token decode via the alias store is the correct in-process path.
-  // On decode failure: proceed with childSessionId = null (observable in logs).
-  let childSessionId: SessionId | null = null;
-  const childContinueToken = startResult.value.response.continueToken ?? '';
-  if (childContinueToken) {
-    const decoded = await parseContinueTokenOrFail(
-      childContinueToken,
-      sc.ctx.v2.tokenCodecPorts,
-      sc.ctx.v2.tokenAliasStore,
-    );
-    if (decoded.isOk()) {
-      childSessionId = decoded.value.sessionId;
-    } else {
-      console.warn(
-        `[WorkflowRunner] spawn_agent: could not decode childSessionId from continueToken -- ` +
-        `childSessionId will be null in result. Reason: ${decoded.error.message}`,
-      );
-    }
-  }
+  // Decoupled use case returns sessionId directly.
+  const childSessionId: SessionId = startResult.value.sessionId;
 
   // ---- Run child workflow (blocking until complete) ----
   // WHY direct runWorkflow() call (not dispatch()): dispatch() is fire-and-forget and uses
@@ -300,16 +300,17 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     // WHY parentSessionId: threads the parent link through runWorkflow -> executeStartWorkflow
     // for context_set injection (alongside the session_created.data written above).
     parentSessionId: sc.thisWorkrailSessionId,
+    ...(spec.agentConfig !== undefined ? { agentConfig: spec.agentConfig } : {}),
   };
   // WHY SessionSource: the session is already created above. runWorkflow() MUST NOT
   // call executeStartWorkflow() again (invariant). SessionSource replaces the removed
   // WorkflowTrigger._preAllocatedStartResponse field (A9 migration).
-  const r = startResult.value.response;
+  const r = startResult.value;
   const childAllocatedSession: AllocatedSession = {
-    continueToken: r.continueToken ?? '',
+    continueToken: r.continueToken,
     checkpointToken: r.checkpointToken,
-    firstStepPrompt: r.pending?.prompt ?? '',
-    isComplete: r.isComplete,
+    firstStepPrompt: r.meta.prompt,
+    isComplete: false,
     triggerSource: 'daemon',
   };
   const childSource: SessionSource = { kind: 'pre_allocated', trigger: childTrigger, session: childAllocatedSession };

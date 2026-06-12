@@ -1,79 +1,79 @@
-# Design Review Findings: Hybrid EAT and Subagent Model Routing (#1152)
+# Design Review Findings: Cognitive Benchmark Methodology Redesign
 
-This document contains the detailed findings and reviews of the selected Hybrid EAT (Environment Attestation Token) architecture.
+This document summarizes the design review findings, tradeoff evaluations, failure modes, and philosophy alignment for the selected Hybrid Benchmark architecture.
 
 ---
 
 ## 1. Tradeoff Review
 
-- **Tension 1: Programmatic Sniffing vs. Zero-Overhead Latency**
-  - *Verification:* Probing process ancestry and environmental variables takes <2ms, keeping standard linear workflows completely fast and free of active LLM turns, preserving startup invariants.
-  - *No Longer Acceptable If:* Client platforms strip all custom environment variables from child processes, forcing the engine to run the slow-path lazy handshake on 100% of workflows, which negates all fast-path benefits.
-  - *Hidden Assumptions:* Assumes environments consistently expose standard markers (like `CLAUDE_CODE` or process names) in terminal scopes.
-
-- **Tension 2: Keychain Isolation vs. Backward Compatibility**
-  - *Verification:* Centralizing key directory resolution via `LocalDataDirV2.keysDir()` with `WORKRAIL_KEYS_DIR` config variables and fallback checks for legacy `~/.workrail/data/keys/keyring.json` preserves 100% backward compatibility for all existing developer setups.
-  - *No Longer Acceptable If:* Operators run in extremely locked-down container environments that forbid home-directory write access entirely, causing first-run key creation to fail.
-  - *Hidden Assumptions:* Assumes the host environment allows write access to `~/.workrail/` to bootstrap the keys directory.
-
-- **Tension 3: Context-Embedded EAT vs. Shared File Caching**
-  - *Verification:* Persistent signed EAT context keys avoid flat file locking contention and concurrency races, fully preserving DAG purity and deterministic replay across machine boundaries.
-  - *No Longer Acceptable If:* Extremely recursive spawn chains inflate context payloads to a size that violates the 256KB limit or degrades JCS serialization speed.
-  - *Hidden Assumptions:* Assumes subagent depth is bounded by a hard limits safeguard (max depth 3) to prevent unbounded recursion.
+We evaluated three key tradeoffs accepted in the hybrid design:
+1. **In-Process Virtual Duplex Loopback**: Emulates stdio boundaries in Node memory to run in <10ms. 
+   - *Status*: Valid under standard conditions. 
+   - *Risk*: Bypasses OS-level shebang and argv parsing during core sweeps.
+2. **AST Gating & Write-Protected Overlays**: Restricts imports and copies protected test files to prevent cheating.
+   - *Status*: Valid. Saves container setup times.
+   - *Risk*: Vulnerable if the model executes shell escapes (e.g., `child_process.exec`) that bypass overlay directories.
+3. **Wald's SPRT Sequential Analysis**: Early-stopping to bound API billing.
+   - *Status*: Valid. Saves up to 80% in token cost.
+   - *Risk*: Violates the i.i.d. assumption due to prompt caching and correlated model seeds, which may skew boundary thresholds.
 
 ---
 
 ## 2. Failure Mode Review
 
-- **Failure Mode 1: Distributed Keyring Mismatch (Highest Risk)**
-  - *Trace:* If the local MCP server (running in the user's IDE terminal) and the background system daemon do not share the exact same user-wide keyring directory (`~/.workrail/keys/`), token signatures in spawned subagents will fail validation.
-  - *Mitigation:* Centralize keyring path resolution in `LocalDataDirV2.keysDir()` to default to a user-wide standard (`~/.workrail/keys/`), check for `WORKRAIL_KEYS_DIR` overrides in both MCP and daemon configurations, and support backward-compatible fallbacks for legacy `data/keys` locations.
-  - *Severity:* **Red**
-
-- **Failure Mode 2: Environment Variable Stripping in Virtual/Sandboxed Environments**
-  - *Trace:* Proxies or container gateways may strip custom environment markers (`CLAUDE_CODE`, `CURSOR_APP`).
-  - *Mitigation:* The sniff fast-path falls back cleanly to a conditional, lazy handshake step when variables are absent and advanced delegation features are requested. We also introduce a manual bypass override `WORKRAIL_FORCE_HARNESS` so operators can explicitly declare the environment.
-  - *Severity:* **Orange**
-
-- **Failure Mode 3: Context Size Budget Overflow in Deep Recursion Loops**
-  - *Trace:* Deep spawning cascades could accumulate context weight, violating `MAX_CONTEXT_BYTES = 256KB`.
-  - *Mitigation:* Keep the EAT payload extremely compact (less than 300 bytes) and mathematically short-circuit cascading loops at the token boundary using decrementing depth checks.
-  - *Severity:* **Yellow**
+We audited the four primary failure modes:
+- **Wald's SPRT Non-Convergence (Medium Severity)**: Wald's SPRT sequential analysis might loop indefinitely if distributions are highly non-normal or bimodal.
+- **AST False Negatives (Low-Medium Severity)**: Strict import rules could block valid modern ES module code configurations.
+- **Sandbox Escape via Shell Injection (High Severity - Most Dangerous)**: A model could run arbitrary shell commands to compromise the host process.
+- **Token Budget Exhaustion (Medium Severity)**: Running deep multi-step workflows could lead to token cost spikes during debugging.
 
 ---
 
-## 3. Comparative Selection Review
+## 3. Runner-Up & Simpler Alternative Review
 
-- **Runner-up Strengths Worth Borrowing (Candidate B - Composable Sub-Graph EAT):**
-  - Fuses Candidate B's absolute security boundaries with 100% DAG purity by packing the signed attestation token directly inside the durably persisted session context parameters instead of writing to an out-of-band flat file.
-- **Simpler Alternative Analysis (Pure Offline Sniffing):**
-  - Pure offline detection without conditional lazy handshake fallback is rejected because in sandboxed CI/CD containers, an offline-only engine cannot verify local tool paths or subagent whitelists, leading to runtime failures during subagent spawning. The conditional lazy handshake is the essential safety valve that guarantees execution resilience in sandboxed settings.
+- **Strengths Borrowed from Candidate 1**: The prompt-equalized concatenated control arm and Wald SPRT sequential analysis are layered on top of Candidate 2's secure virtual loopback.
+- **Simpler Alternative (Direct Vitest testing of JS handlers)**: Insufficient because it does not verify transport-level JSON-RPC serialization, EPIPE socket failures, or input/output schema parsing, and cannot prevent model cheating.
 
 ---
 
-## 4. Philosophy & Principles Alignment
+## 4. Philosophy Alignment
 
-- **Durable Execution & Event Log Purity (Core Lock):** Perfect alignment. Storing the signed Environment Attestation Token (EAT) directly inside the durably persisted session `context` state preserves DAG purity and deterministic replay across machine boundaries.
-- **Zero-Overhead Footprint for Lightweight Workflows:** Perfect alignment. Standard linear developer execution loops bypass all active capability handshake turns completely.
-- **Rigorous Subagent Boundaries & Loop Prevention:** Perfect alignment. Mathematical depth bounds checked at the token boundary prevent cascading billing loops.
-
----
-
-## 5. Findings & Recommended Revisions
-
-- **Finding [F-01] (Critical - Red): Distributed Keyring Contention**
-  - *Details:* The default keys directory resolved in `LocalDataDirV2.keysDir()` was hardcoded inside the data directory (`~/.workrail/data/keys/`). If separate processes (MCP and Daemon) do not share keys, token validation will reject otherwise authentic sessions.
-  - *Revision:* Add `WORKRAIL_KEYS_DIR` allowed config key, refactor `LocalDataDirV2.keysDir()` to default to `~/.workrail/keys/`, and fallback to legacy `data/keys` if `keyring.json` already exists.
-- **Finding [F-02] (High - Orange): Sniffing Fragility**
-  - *Details:* Integrated shells and sandbox proxies often strip environment variable markers.
-  - *Revision:* Enforce a robust conditional lazy handshake turn if sniffing indicators are ambiguous and advanced tools are explicitly requested, accompanied by a `WORKRAIL_FORCE_HARNESS` manual override variable.
-- **Finding [F-03] (Medium - Yellow): Recursion Overrun**
-  - *Details:* Unbounded subagent spawning chains could inflate context sizes, violating the 256KB context budget constraint.
-  - *Revision:* Enforce a strict max depth of 3 inside the engine, decrementing the depth at every subagent spawn turn.
+- **Satisfied Principles**:
+  - *Three separate systems -- do not conflate them*: The runner is decoupled from the Console dashboard, logging results to disk.
+  - *Zero LLM turns for routing*: Step transitions and control arms run programmatically via TypeScript coordinator logic.
+  - *Prefer fakes over mocks*: Uses memory duplex stream loopback fakes rather than spy mocks.
+  - *Errors as data*: Graded checkpoints (compile, syntax, tests) are mapped to fractional score components (0.0 to 1.0) rather than exceptions.
+- **Tensions**:
+  - *Environmental Hermeticism vs. YAGNI*: Balanced by using in-process loopbacks with AST gatekeepers and overlays for local runs, reserving containers for CI.
+  - *Task Realism vs. Local Velocity*: Balanced by designing micro-scoped multi-file workspaces that execute in <1s.
 
 ---
 
-## 6. Residual Concerns
+## 5. Audit Findings
 
-- **Upkeep overhead:** The programmatic sniffing logic must be maintained for new integrated IDE terminals or changing shell platforms.
-- **Keyring file permissions:** Keyring files must be created with `600` permissions securely so local non-privileged processes cannot harvest token keys.
+### [ORANGE] Finding 1: Shell Escape vulnerability in bare-metal in-process loopbacks
+- *Description*: Running generated code locally without virtualization exposes the host process to shell injection or file deletion if the agent uses dynamic property access to invoke execution commands.
+- *Severity*: Moderate-High.
+
+### [ORANGE] Finding 2: SPRT i.i.d. assumption violation due to prompt caching
+- *Description*: LLM trials are non-independent due to prompt caching, shared seeds, and correlated error states, which violates Wald SPRT assumptions and can cause boundary decision errors.
+- *Severity*: Moderate.
+
+### [YELLOW] Finding 3: AST parser false negatives on ES module formatting
+- *Description*: TS Compiler API matching may fail on complex re-exports or dynamic imports, causing valid developer solutions to fail grading.
+- *Severity*: Low.
+
+---
+
+## 6. Recommended Revisions
+
+1. **SPRT Safe Termination Safeguard**: Implement a hard maximum trial limit (e.g. `--max-trials=100`) in the runner. If reached, fallback to standard OLS/LMM analysis and log a non-convergence warning.
+2. **AST Execution Hardening**: Hardcheck the AST gatekeeper to scan for dynamic executions (e.g. `eval`, `Function`, `child_process.exec`, `spawn`, `module.constructor`) and restrict modifications to package dependencies.
+3. **Non-Privileged Local Runs**: Enforce that local benchmark runs run as a non-privileged system user, and integrate Docker/gVisor sandboxing in the nightly CI regression pipeline.
+
+---
+
+## 7. Residual Concerns
+
+- We cannot guarantee 100% security against zero-day Node/OS exploits if a rogue agent escapes the AST gatekeeper during bare-metal local execution.
+- Collinearity in regression analysis under Concatenated prompt budgets may introduce modeling noise due to non-linear context degradation in modern LLMs.

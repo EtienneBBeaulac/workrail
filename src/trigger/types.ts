@@ -444,6 +444,7 @@ export interface TriggerDefinition {
      * When absent, env-based model detection applies.
      */
     readonly model?: string;
+    readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
     /**
      * Maximum wall-clock time (in minutes) for a single workflow run.
      * If the agent loop does not complete within this window, the run is
@@ -801,7 +802,11 @@ export type TriggerValidationRule =
   /** agentConfig.model present but not in 'provider/model-id' format */
   | 'invalid-model-format'
   /** reviewerIdentity present AND branchStrategy is not 'read-only' -- reviewer sessions should use read-only worktree */
-  | 'reviewer-identity-without-read-only';
+  | 'reviewer-identity-without-read-only'
+  /** agentConfig.modelTier present but not lightweight, mid, heavy */
+  | 'invalid-model-tier'
+  /** Both agentConfig.model and agentConfig.modelTier are defined */
+  | 'model-and-model-tier-both-defined';
 
 // ---------------------------------------------------------------------------
 // TriggerValidationIssue: a single named validation issue for a trigger.

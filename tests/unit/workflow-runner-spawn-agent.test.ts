@@ -30,7 +30,7 @@ const { mockExecuteStartWorkflow } = vi.hoisted(() => ({
 // ── Module mocks ──────────────────────────────────────────────────────────────
 //
 // Mock executeStartWorkflow so no real session store is needed.
-vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
+vi.mock('../../src/v2/usecases/start-workflow.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 
@@ -91,9 +91,13 @@ function makeFakeStartResult() {
     isErr: () => false,
     isOk: () => true,
     value: {
-      response: {
-        continueToken: undefined,
-        checkpointToken: undefined,
+      sessionId: 'sess_child123',
+      continueToken: '',
+      checkpointToken: '',
+      meta: {
+        stepId: 'step_1',
+        title: 'Step 1',
+        prompt: 'Do the work.',
       },
     },
   };
@@ -140,7 +144,7 @@ describe('makeSpawnAgentTool() result mapping', () => {
 
     expect(parsed.outcome).toBe('success');
     expect(parsed.notes).toBe('Child completed successfully.');
-    expect(parsed.childSessionId).toBeNull();
+    expect(parsed.childSessionId).toBe('sess_child123');
   });
 
   it('uses fallback notes when success has no lastStepNotes', async () => {
@@ -193,7 +197,7 @@ describe('makeSpawnAgentTool() result mapping', () => {
 
     expect(parsed.outcome).toBe('error');
     expect(parsed.notes).toBe('Child workflow failed: tool threw');
-    expect(parsed.childSessionId).toBeNull();
+    expect(parsed.childSessionId).toBe('sess_child123');
   });
 
   it('maps timeout result to outcome: timeout with message', async () => {
@@ -221,7 +225,7 @@ describe('makeSpawnAgentTool() result mapping', () => {
 
     expect(parsed.outcome).toBe('timeout');
     expect(parsed.notes).toBe('Session exceeded 30 minute limit');
-    expect(parsed.childSessionId).toBeNull();
+    expect(parsed.childSessionId).toBe('sess_child123');
   });
 
   it('returns outcome: error when depth limit is exceeded (before runWorkflow is called)', async () => {
@@ -308,7 +312,7 @@ describe('makeSpawnAgentTool() result mapping', () => {
 
     expect(parsed.outcome).toBe('stuck');
     expect(parsed.notes).toBe('Child session stuck: repeated_tool_call after 3 identical Bash calls');
-    expect(parsed.childSessionId).toBeNull();
+    expect(parsed.childSessionId).toBe('sess_child123');
     expect(parsed.issueSummaries).toEqual(['npm run build failed with exit 1', 'Could not find expected file']);
   });
 

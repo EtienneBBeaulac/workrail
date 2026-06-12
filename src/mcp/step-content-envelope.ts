@@ -15,34 +15,8 @@
 import type { StepMetadata } from '../v2/durable-core/domain/prompt-renderer.js';
 import type { FormattedSupplement } from './response-supplements.js';
 
-/**
- * Shared fields for all resolved reference variants.
- *
- * References are workflow-declared (compile-time) or project-attached (future).
- * Content is never inlined — the agent reads the file itself if needed.
- */
-interface ResolvedReferenceBase {
-  readonly id: string;
-  readonly title: string;
-  readonly source: string;
-  readonly purpose: string;
-  readonly authoritative: boolean;
-  /** Resolution context: workspace-relative or package-relative. */
-  readonly resolveFrom: 'workspace' | 'package';
-}
-
-/**
- * A resolved workflow reference — discriminated union over resolution status.
- *
- * - `resolved`: I/O confirmed the path exists; `resolvedPath` is the absolute path.
- * - `unresolved`: I/O confirmed the path does NOT exist at start time.
- * - `pinned`: replayed from a pinned session — no I/O was performed, only the
- *   declaration is available. Used on rehydrate to avoid lying about resolution state.
- */
-export type ResolvedReference =
-  | (ResolvedReferenceBase & { readonly status: 'resolved'; readonly resolvedPath: string })
-  | (ResolvedReferenceBase & { readonly status: 'unresolved' })
-  | (ResolvedReferenceBase & { readonly status: 'pinned' });
+import type { ResolvedReference } from '../v2/usecases/reference-types.js';
+export type { ResolvedReference };
 
 /**
  * Typed content categories for a pending step.
@@ -59,6 +33,7 @@ export interface StepContentEnvelope {
   readonly title: string;
   readonly authoredPrompt: string;
   readonly agentRole?: string;
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
   readonly references: readonly ResolvedReference[];
   readonly supplements: readonly FormattedSupplement[];
 }
@@ -79,6 +54,7 @@ export function buildStepContentEnvelope(args: {
     title: args.meta.title,
     authoredPrompt: args.meta.prompt,
     agentRole: args.meta.agentRole,
+    modelTier: args.meta.modelTier,
     references: Object.freeze(args.references ?? []),
     supplements: Object.freeze(args.supplements ?? []),
   });

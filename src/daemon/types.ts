@@ -82,6 +82,7 @@ export interface WorkflowTrigger {
    */
   readonly agentConfig?: {
     readonly model?: string;
+    readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
     /**
      * Maximum wall-clock time (in minutes) for this workflow run.
      * See TriggerDefinition.agentConfig.maxSessionMinutes for full documentation.

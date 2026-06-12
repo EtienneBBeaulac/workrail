@@ -103,7 +103,7 @@ interface ParsedTriggerRaw {
   // Note: maxSessionMinutes, maxTurns, and maxOutputTokens are stored as raw strings here because
   // the YAML parser returns all scalars as strings. Numeric conversion and
   // validation happen in validateAndResolveTrigger at the boundary.
-  agentConfig?: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string; stallTimeoutSeconds?: string };
+  agentConfig?: { model?: string; modelTier?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string; stallTimeoutSeconds?: string };
   maxQueueDepth?: string;  // numeric string; parsed and validated in validateAndResolveTrigger
   onComplete?: { runOn?: string; workflowId?: string; goal?: string };
   autoCommit?: string;   // 'true' | 'false' scalar
@@ -330,7 +330,7 @@ function parseTriggersYaml(
         // agentConfig is a sub-object block with scalar string values.
         // Baseline indent: lineIndent (indent of the "agentConfig:" key line).
         lineIndex++;
-        const agentConfig: { model?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string; stallTimeoutSeconds?: string } = {};
+        const agentConfig: { model?: string; modelTier?: string; maxSessionMinutes?: string; maxTurns?: string; maxOutputTokens?: string; stuckAbortPolicy?: string; stallTimeoutSeconds?: string } = {};
         while (lineIndex < lines.length) {
           const acLine = lines[lineIndex];
           if (acLine === undefined) break;
@@ -356,6 +356,7 @@ function parseTriggersYaml(
             const acValueResult = parseScalar(acRawValue, lineIndex + 1);
             if (acValueResult.kind === 'err') return acValueResult;
             if (acKey === 'model') agentConfig.model = acValueResult.value;
+            else if (acKey === 'modelTier') agentConfig.modelTier = acValueResult.value;
             else if (acKey === 'maxSessionMinutes') agentConfig.maxSessionMinutes = acValueResult.value;
             else if (acKey === 'maxTurns') agentConfig.maxTurns = acValueResult.value;
             else if (acKey === 'maxOutputTokens') agentConfig.maxOutputTokens = acValueResult.value;
@@ -882,6 +883,19 @@ function validateAndResolveTrigger(
       }
     }
 
+    const modelTierRaw = raw.agentConfig.modelTier?.trim() || undefined;
+    let modelTier: 'lightweight' | 'mid' | 'heavy' | undefined;
+    if (modelTierRaw !== undefined) {
+      if (modelTierRaw !== 'lightweight' && modelTierRaw !== 'mid' && modelTierRaw !== 'heavy') {
+        return err({
+          kind: 'invalid_field_value',
+          field: `agentConfig.modelTier (must be 'lightweight', 'mid', or 'heavy', got: "${modelTierRaw}")`,
+          triggerId: rawId,
+        });
+      }
+      modelTier = modelTierRaw as 'lightweight' | 'mid' | 'heavy';
+    }
+
     let maxSessionMinutes: number | undefined;
     if (raw.agentConfig.maxSessionMinutes !== undefined) {
       // WHY Number.isInteger instead of parseInt: parseInt('1.5', 10) silently returns 1,
@@ -965,9 +979,10 @@ function validateAndResolveTrigger(
       stallTimeoutSeconds = asNumber;
     }
 
-    if (model !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || maxOutputTokens !== undefined || stuckAbortPolicy !== undefined || stallTimeoutSeconds !== undefined) {
+    if (model !== undefined || modelTier !== undefined || maxSessionMinutes !== undefined || maxTurns !== undefined || maxOutputTokens !== undefined || stuckAbortPolicy !== undefined || stallTimeoutSeconds !== undefined) {
       agentConfig = {
         ...(model !== undefined ? { model } : {}),
+        ...(modelTier !== undefined ? { modelTier } : {}),
         ...(maxSessionMinutes !== undefined ? { maxSessionMinutes } : {}),
         ...(maxTurns !== undefined ? { maxTurns } : {}),
         ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
@@ -1665,6 +1680,30 @@ export function validateTriggerStrict(
         suggestedFix: 'model: amazon-bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0',
       });
     }
+  }
+
+  // Rule: invalid-model-tier (error)
+  if (trigger.agentConfig?.modelTier !== undefined) {
+    const tier = trigger.agentConfig.modelTier;
+    if (tier !== 'lightweight' && tier !== 'mid' && tier !== 'heavy') {
+      issues.push({
+        rule: 'invalid-model-tier',
+        severity: 'error',
+        triggerId: id,
+        message: `agentConfig.modelTier "${tier}" is not a valid tier (must be 'lightweight', 'mid', or 'heavy')`,
+        suggestedFix: 'modelTier: mid',
+      });
+    }
+  }
+
+  // Rule: model-and-model-tier-both-defined (warning)
+  if (trigger.agentConfig?.model !== undefined && trigger.agentConfig?.modelTier !== undefined) {
+    issues.push({
+      rule: 'model-and-model-tier-both-defined',
+      severity: 'warning',
+      triggerId: id,
+      message: 'Both agentConfig.model and agentConfig.modelTier are defined. agentConfig.model will take precedence and modelTier will be ignored.',
+    });
   }
 
   // --- Warning-severity rules ---
