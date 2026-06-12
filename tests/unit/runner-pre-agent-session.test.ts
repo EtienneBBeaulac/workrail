@@ -32,11 +32,11 @@ const {
   mockBuildAgentClient: vi.fn(),
 }));
 
-vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
+vi.mock('../../src/v2/usecases/start-workflow.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 
-vi.mock('../../src/mcp/handlers/v2-token-ops.js', () => ({
+vi.mock('../../src/v2/usecases/v2-token-ops.js', () => ({
   parseContinueTokenOrFail: mockParseContinueTokenOrFail,
 }));
 
@@ -72,14 +72,33 @@ function makeTrigger(overrides: Partial<WorkflowTrigger> = {}): WorkflowTrigger 
 function makePendingStart() {
   return {
     isOk: () => true, isErr: () => false,
-    value: { response: { continueToken: FAKE_TOKEN, checkpointToken: null, isComplete: false, pending: { prompt: 'Step 1' } } },
+    value: {
+      sessionId: 'sess_test123',
+      continueToken: FAKE_TOKEN,
+      checkpointToken: null,
+      meta: {
+        stepId: 'step_1',
+        title: 'Step 1',
+        prompt: 'Step 1',
+      },
+    },
   };
 }
 
 function makeCompleteStart() {
   return {
     isOk: () => true, isErr: () => false,
-    value: { response: { continueToken: undefined, checkpointToken: undefined, isComplete: true, pending: null } },
+    value: {
+      sessionId: 'sess_test123',
+      continueToken: '',
+      checkpointToken: null,
+      isComplete: true,
+      meta: {
+        stepId: 'step_1',
+        title: 'Step 1',
+        prompt: '',
+      },
+    },
   };
 }
 

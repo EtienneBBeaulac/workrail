@@ -50,7 +50,21 @@ export function buildAgentClient(
       );
     }
     const provider = trigger.agentConfig.model.slice(0, slashIdx);
-    const modelId = trigger.agentConfig.model.slice(slashIdx + 1);
+    let modelId = trigger.agentConfig.model.slice(slashIdx + 1);
+
+    if (modelId === 'lightweight' || modelId === 'mid' || modelId === 'heavy') {
+      const tier = modelId as 'lightweight' | 'mid' | 'heavy';
+      if (provider === 'amazon-bedrock') {
+        if (tier === 'lightweight') modelId = 'us.anthropic.claude-3-5-haiku-20241022-v1:0';
+        else if (tier === 'mid') modelId = 'us.anthropic.claude-sonnet-4-6';
+        else if (tier === 'heavy') modelId = 'us.anthropic.claude-3-opus-20240229-v1:0';
+      } else {
+        if (tier === 'lightweight') modelId = 'claude-3-5-haiku-latest';
+        else if (tier === 'mid') modelId = 'claude-sonnet-4-6';
+        else if (tier === 'heavy') modelId = 'claude-3-opus-latest';
+      }
+    }
+
     if (provider !== 'amazon-bedrock' && !apiKey) {
       throw new Error(
         `ANTHROPIC_API_KEY is required when not using Bedrock (agentConfig.model="${trigger.agentConfig.model}")`,
@@ -61,9 +75,32 @@ export function buildAgentClient(
     return { agentClient, modelId };
   }
 
+  const resolvedModelTier = trigger.agentConfig?.modelTier;
+  const usesBedrock = !!env['AWS_PROFILE'] || !!env['AWS_ACCESS_KEY_ID'];
+
+  if (resolvedModelTier) {
+    let modelId = 'claude-sonnet-4-6';
+    if (usesBedrock) {
+      if (resolvedModelTier === 'lightweight') modelId = 'us.anthropic.claude-3-5-haiku-20241022-v1:0';
+      else if (resolvedModelTier === 'mid') modelId = 'us.anthropic.claude-sonnet-4-6';
+      else if (resolvedModelTier === 'heavy') modelId = 'us.anthropic.claude-3-opus-20240229-v1:0';
+    } else {
+      if (resolvedModelTier === 'lightweight') modelId = 'claude-3-5-haiku-latest';
+      else if (resolvedModelTier === 'mid') modelId = 'claude-sonnet-4-6';
+      else if (resolvedModelTier === 'heavy') modelId = 'claude-3-opus-latest';
+    }
+
+    if (!usesBedrock && !apiKey) {
+      throw new Error(
+        `ANTHROPIC_API_KEY is required when not using Bedrock (resolvedModelTier="${resolvedModelTier}")`,
+      );
+    }
+    const agentClient = usesBedrock ? new AnthropicBedrock() : new Anthropic({ apiKey: apiKey! });
+    return { agentClient, modelId };
+  }
+
   // Default: use Bedrock when AWS credentials are present, direct API otherwise.
   // WHY: avoids personal API key charges when AWS credentials are available.
-  const usesBedrock = !!env['AWS_PROFILE'] || !!env['AWS_ACCESS_KEY_ID'];
   if (usesBedrock) {
     return {
       agentClient: new AnthropicBedrock(),

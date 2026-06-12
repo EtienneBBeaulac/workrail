@@ -254,4 +254,59 @@ describe('Parallel Step validation — Registry Cross-Reference Checks', () => {
       expect.arrayContaining([expect.stringContaining("circular loop is prohibited")]),
     );
   });
+
+  it('fails registry validation when a transitive cycle is detected (e.g. A -> B -> A)', () => {
+    const wfA = makeWorkflow({
+      id: 'workflow-a',
+      name: 'Workflow A',
+      description: 'Delegator A',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'parallel-step-a',
+          title: 'Spawns B',
+          type: 'parallel',
+          parallelDelegations: [
+            {
+              workflowId: 'workflow-b',
+            },
+          ],
+        },
+      ],
+    });
+
+    const wfB = makeWorkflow({
+      id: 'workflow-b',
+      name: 'Workflow B',
+      description: 'Delegator B',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'parallel-step-b',
+          title: 'Spawns A',
+          type: 'parallel',
+          parallelDelegations: [
+            {
+              workflowId: 'workflow-a',
+            },
+          ],
+        },
+      ],
+    });
+
+    const snapshot = fakeSnapshot([wfA, wfB]);
+    const deps = fakePipelineDeps();
+
+    const report = validateRegistry(snapshot, deps);
+    expect(report.isValid).toBe(false);
+
+    const failedEntry = report.resolvedResults.find(r => r.workflowId === 'workflow-a');
+    expect(failedEntry).toBeDefined();
+    expect(failedEntry!.outcome.kind).toBe('structural_failed');
+
+    const outcome = failedEntry!.outcome as { readonly issues: readonly string[] };
+    expect(outcome.issues).toEqual(
+      expect.arrayContaining([expect.stringContaining("Transitive circular spawning cycle detected: workflow-a -> workflow-b -> workflow-a")]),
+    );
+  });
 });

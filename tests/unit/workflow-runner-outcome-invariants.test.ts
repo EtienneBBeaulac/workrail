@@ -63,7 +63,7 @@ const {
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
+vi.mock('../../src/v2/usecases/start-workflow.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 
@@ -71,7 +71,7 @@ vi.mock('../../src/mcp/handlers/v2-execution/index.js', () => ({
   executeContinueWorkflow: mockExecuteContinueWorkflow,
 }));
 
-vi.mock('../../src/mcp/handlers/v2-token-ops.js', () => ({
+vi.mock('../../src/v2/usecases/v2-token-ops.js', () => ({
   parseContinueTokenOrFail: mockParseContinueTokenOrFail,
 }));
 
@@ -118,15 +118,13 @@ function makePendingStartResponse() {
     isOk: () => true,
     isErr: () => false,
     value: {
-      response: {
-        kind: 'ok' as const,
-        continueToken: FAKE_CONTINUE_TOKEN,
-        checkpointToken: FAKE_CHECKPOINT_TOKEN,
-        isComplete: false,
-        pending: { prompt: 'Step 1: Do the work.' },
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'advance' as const,
-        nextCall: null,
+      sessionId: 'sess_test123',
+      continueToken: FAKE_CONTINUE_TOKEN,
+      checkpointToken: FAKE_CHECKPOINT_TOKEN ?? '',
+      meta: {
+        stepId: 'step_1',
+        title: 'Step 1',
+        prompt: 'Step 1: Do the work.',
       },
     },
   };
@@ -138,15 +136,14 @@ function makeCompleteStartResponse() {
     isOk: () => true,
     isErr: () => false,
     value: {
-      response: {
-        kind: 'ok' as const,
-        continueToken: undefined,
-        checkpointToken: undefined,
-        isComplete: true,
-        pending: null,
-        preferences: { autonomy: 'full_auto_never_stop' as const, riskPolicy: 'balanced' as const },
-        nextIntent: 'complete' as const,
-        nextCall: null,
+      sessionId: 'sess_test123',
+      continueToken: '',
+      checkpointToken: '',
+      isComplete: true,
+      meta: {
+        stepId: 'step_1',
+        title: 'Step 1',
+        prompt: '',
       },
     },
   };

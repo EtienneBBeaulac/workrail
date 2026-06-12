@@ -840,28 +840,30 @@
     {
       "id": "phase-2b-design-review-core",
       "title": "Design Review Core",
-      "promptBlocks": {
-        "goal": "Run parallel design reviews to challenge the design, keeping the main agent's context clean and reducing confirmation bias.",
-        "constraints": [
-          "Ensure each reviewer has a distinct focus lens.",
-          "Have each subagent write its findings to a separate file under `docs/design/` by passing `deliverableName` in context."
-        ],
-        "procedure": [
-          "1. If delegation is available, spawn THREE WorkRail Executors SIMULTANEOUSLY running `wr.routine-design-review` with these configurations:",
-          "   - **Simplicity & Scope**: goal='Audit the selected design focusing on simpler alternatives, unnecessary abstractions, and pruning scope.', context={ \"deliverableName\": \"docs/design/design-review-simplicity.md\" }",
-          "   - **Robustness & Failure-Modes**: goal='Audit the selected design focusing on race conditions, error boundaries, state invalidity, and edge cases.', context={ \"deliverableName\": \"docs/design/design-review-robustness.md\" }",
-          "   - **Philosophy & Conventions**: goal='Audit the selected design focusing on codebase coding philosophies, ESM rules, and type safety constraints.', context={ \"deliverableName\": \"docs/design/design-review-philosophy.md\" }",
-          "2. If delegation is unavailable, perform the design-review routine inline yourself and write findings to `docs/design/design-review-findings.md`.",
-          "3. Collect all reviewer findings and confirm they are written to disk."
-        ],
-        "outputRequired": {
-          "designReviewsCompleted": "Boolean indicating if all parallel design reviews are completed and stored"
+      "type": "parallel",
+      "parallelDelegations": [
+        {
+          "workflowId": "wr.routine-design-review",
+          "modelTier": "lightweight",
+          "args": {
+            "deliverableName": "docs/design/design-review-simplicity.md"
+          }
         },
-        "verify": [
-          "Three parallel design-review WorkRail Executors were spawned (or inline execution was performed if tools were unavailable).",
-          "Review findings were written to their respective markdown files under `docs/design/`."
-        ]
-      },
+        {
+          "workflowId": "wr.routine-design-review",
+          "modelTier": "lightweight",
+          "args": {
+            "deliverableName": "docs/design/design-review-robustness.md"
+          }
+        },
+        {
+          "workflowId": "wr.routine-design-review",
+          "modelTier": "lightweight",
+          "args": {
+            "deliverableName": "docs/design/design-review-philosophy.md"
+          }
+        }
+      ],
       "requireConfirmation": false
     },
         {
@@ -1293,27 +1295,23 @@
         {
           "id": "phase-7a-final-verification-core",
           "title": "Run Final Verification Batch",
-          "promptBlocks": {
-            "goal": "Run parallel verifier subagents to check the implementation against acceptance criteria, invariants, and coding philosophy before PR submission.",
-            "constraints": [
-              "Ensure each verifier has a distinct focus lens.",
-              "Have each verifier write its findings to a separate file under `docs/design/` by passing `deliverableName` in context."
-            ],
-            "procedure": [
-              "1. If delegation is available, spawn TWO WorkRail Executors SIMULTANEOUSLY running `wr.routine-final-verification` with these configurations:",
-              "   - **Invariant & AC Prover**: goal='Proves every acceptance criterion is covered by a test and every invariant holds.', context={ \"deliverableName\": \"docs/design/final-verification-prover.md\" }",
-              "   - **Code Smell & Philosophy Auditor**: goal='Audit codebase smell detection, comment sizes, ESM imports, and code hygiene.', context={ \"deliverableName\": \"docs/design/final-verification-smells.md\" }",
-              "2. If delegation is unavailable, perform the final-verification routine inline yourself and write findings to `docs/design/final-verification-findings.md`.",
-              "3. Collect all verifier findings and confirm they are written to disk."
-            ],
-            "outputRequired": {
-              "finalVerificationCompleted": "Boolean indicating if all parallel verifications are completed and stored"
+          "type": "parallel",
+          "parallelDelegations": [
+            {
+              "workflowId": "wr.routine-final-verification",
+              "modelTier": "mid",
+              "args": {
+                "deliverableName": "docs/design/final-verification-prover.md"
+              }
             },
-            "verify": [
-              "Two parallel verifier WorkRail Executors were spawned (or inline execution was performed if tools were unavailable).",
-              "Verifier findings were written to their respective markdown files under `docs/design/`."
-            ]
-          },
+            {
+              "workflowId": "wr.routine-final-verification",
+              "modelTier": "lightweight",
+              "args": {
+                "deliverableName": "docs/design/final-verification-smells.md"
+              }
+            }
+          ],
           "requireConfirmation": false
         },
         {

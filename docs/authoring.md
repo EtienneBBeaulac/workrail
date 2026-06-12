@@ -447,6 +447,20 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 **Example refs**
 - `workflows/coding-task-workflow-agentic.json` — Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag.
 
+### loop-virtual-step-expansion-limits
+- **Level**: required
+- **Status**: active
+- **Scope**: loop.step
+- **Rule**: Ensure that virtual step expansion within loops has strict iteration limit controls and is bounded in depth.
+- **Why**: Unbounded expansion within loops can lead to runaway recursion, cost bloat, and infinite loop execution.
+- **Enforced by**: advisory
+
+**Checks**
+- Virtual step expansion uses loops with explicit maxIterations limit rules.
+
+**Anti-patterns**
+- Expanding virtual steps dynamically without a hard constraint on maximum loop runs
+
 
 ## Confirmation discipline
 ### confirm-only-for-real-human-decisions
@@ -588,6 +602,38 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 **Example refs**
 - `workflows/coding-task-workflow-agentic.json` — Uses explicit challenge, audit, and verification barriers.
+
+### parallel-step-synthesis-contract
+- **Level**: required
+- **Status**: active
+- **Scope**: step.delegation-checkpoint
+- **Rule**: Ensure that parallel step synthesis consolidation contracts are explicitly defined to merge results from concurrent cognitive branches.
+- **Why**: Without a clear synthesis step/contract, findings from parallel subagents can be lost, fragmented, or poorly consolidated.
+- **Enforced by**: advisory
+
+**Checks**
+- The synthesis config specifies outputContract or merging logic.
+
+**Anti-patterns**
+- Merging parallel results without specifying a structured consolidation format
+
+### workflow-model-tier
+- **Level**: recommended
+- **Status**: active
+- **Scope**: workflow.definition, step.delegation-checkpoint
+- **Rule**: Declare `modelTier` on workflows, steps, or parallel delegations to specify lightweight, mid, or heavy cognitive resource requirements without hardcoding provider model IDs.
+- **Why**: Abstracting resource requirements via `modelTier` keeps workflows model-agnostic and portable across different providers (direct Anthropic vs Bedrock).
+- **Enforced by**: validator
+
+**Checks**
+- The modelTier field is set to 'lightweight', 'mid', or 'heavy' when a step or delegation requires a specific resource tier.
+
+**Anti-patterns**
+- Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition
+
+**Source refs**
+- `src/v2/usecases/start-workflow.ts` (runtime) — Resolves activeModel based on modelTier hierarchy.
+- `src/daemon/core/agent-client.ts` (runtime) — Maps modelTier to provider-specific model IDs.
 
 
 ## Subagent synthesis and claim adoption

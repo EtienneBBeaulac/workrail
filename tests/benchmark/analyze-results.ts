@@ -9,6 +9,12 @@ interface TrialData {
   readonly taskInstance: string;
   readonly seed: number;
   readonly score: number;
+  readonly durationMs: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly costUsd: number;
+  readonly turns: number;
+  readonly commandRuns: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,12 +77,61 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
   return x;
 }
 
+interface RegressionResult {
+  readonly name: string;
+  readonly beta: number[];
+  readonly rSquared: number;
+}
+
+function runRegression(name: string, X: number[][], Y: number[], p: number): RegressionResult {
+  const n = Y.length;
+  const XtX: number[][] = Array.from({ length: p }, () => new Array(p).fill(0));
+  const XtY: number[] = new Array(p).fill(0);
+
+  for (let i = 0; i < p; i++) {
+    for (let j = 0; j < p; j++) {
+      let sum = 0;
+      for (let k = 0; k < n; k++) {
+        sum += X[k]![i]! * X[k]![j]!;
+      }
+      XtX[i]![j] = sum;
+    }
+
+    let sumY = 0;
+    for (let k = 0; k < n; k++) {
+      sumY += X[k]![i]! * Y[k]!;
+    }
+    XtY[i] = sumY;
+  }
+
+  const beta = solveLinearSystem(XtX, XtY);
+
+  // Compute R-squared
+  let sumY = 0;
+  for (const y of Y) sumY += y;
+  const meanY = sumY / n;
+
+  let ssTot = 0;
+  let ssRes = 0;
+  for (let k = 0; k < n; k++) {
+    const yVal = Y[k]!;
+    let pred = 0;
+    for (let j = 0; j < p; j++) {
+      pred += X[k]![j]! * beta[j]!;
+    }
+    ssTot += Math.pow(yVal - meanY, 2);
+    ssRes += Math.pow(yVal - pred, 2);
+  }
+
+  const rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+  return { name, beta, rSquared };
+}
+
 // ---------------------------------------------------------------------------
 // Main Analysis Logic
 // ---------------------------------------------------------------------------
 
 function main() {
-  // Parse command line arguments
   const args = process.argv.slice(2);
   let workflowFilter: string | undefined;
   const workflowIdx = args.indexOf('--workflow');
@@ -161,83 +216,54 @@ function main() {
     featureNames.push(`Task Category: ${c} (vs ${baselineCategory})`);
   }
 
-  const p = featureNames.length; // dynamic size
+  const p = featureNames.length;
 
-  // Construct design matrix X and response vector Y
-  const Y: number[] = [];
+  // Construct design matrix X and response vectors
   const X: number[][] = [];
+  const Y_score: number[] = [];
+  const Y_durationSec: number[] = [];
+  const Y_turns: number[] = [];
+  const Y_costUsd: number[] = [];
+  const Y_commandRuns: number[] = [];
 
   for (const row of data) {
-    Y.push(row.score);
-    const rowX: number[] = [1]; // intercept
+    Y_score.push(row.score);
+    Y_durationSec.push((row.durationMs || 0) / 1000.0);
+    Y_turns.push(row.turns || 0);
+    Y_costUsd.push(row.costUsd || 0.0);
+    Y_commandRuns.push(row.commandRuns || 0);
 
-    // Approach dummies
+    const rowX: number[] = [1]; // intercept
     for (const a of dummyApproaches) {
       rowX.push(row.approach === a ? 1 : 0);
     }
-    // Model dummies
     for (const m of dummyModels) {
       rowX.push(row.model === m ? 1 : 0);
     }
-    // Category dummies
     for (const c of dummyCategories) {
       rowX.push(row.taskCategory === c ? 1 : 0);
     }
-
     X.push(rowX);
   }
 
-  const n = Y.length;
+  // Run regressions
+  const regScore = runRegression('Quality (Score: 0.0 - 1.0)', X, Y_score, p);
+  const regDuration = runRegression('Speed (Duration: Seconds)', X, Y_durationSec, p);
+  const regTurns = runRegression('Speed (Turn Count)', X, Y_turns, p);
+  const regCost = runRegression('Cost (USD)', X, Y_costUsd, p);
+  const regCommands = runRegression('Debugging (Command Runs)', X, Y_commandRuns, p);
 
-  // Compute X^T * X (size p x p) and X^T * Y (size p)
-  const XtX: number[][] = Array.from({ length: p }, () => new Array(p).fill(0));
-  const XtY: number[] = new Array(p).fill(0);
-
-  for (let i = 0; i < p; i++) {
-    for (let j = 0; j < p; j++) {
-      let sum = 0;
-      for (let k = 0; k < n; k++) {
-        sum += X[k]![i]! * X[k]![j]!;
-      }
-      XtX[i]![j] = sum;
-    }
-
-    let sumY = 0;
-    for (let k = 0; k < n; k++) {
-      sumY += X[k]![i]! * Y[k]!;
-    }
-    XtY[i] = sumY;
-  }
-
-  // Solve beta = (X^T * X)^-1 * X^T * Y
-  const beta = solveLinearSystem(XtX, XtY);
-
-  // Compute R-squared
-  let sumY = 0;
-  for (const y of Y) sumY += y;
-  const meanY = sumY / n;
-
-  let ssTot = 0;
-  let ssRes = 0;
-  for (let k = 0; k < n; k++) {
-    const yVal = Y[k]!;
-    let pred = 0;
-    for (let j = 0; j < p; j++) {
-      pred += X[k]![j]! * beta[j]!;
-    }
-    ssTot += Math.pow(yVal - meanY, 2);
-    ssRes += Math.pow(yVal - pred, 2);
-  }
-
-  const rSquared = ssTot > 0 ? 1 - ssRes / ssTot : 0;
+  const regressions = [regScore, regDuration, regTurns, regCost, regCommands];
 
   // Print results
-  console.log('OLS Linear Regression Coefficients:');
-  for (let i = 0; i < p; i++) {
-    console.log(`  ${featureNames[i]!.padEnd(45)}: ${beta[i]!.toFixed(4)}`);
+  for (const reg of regressions) {
+    console.log(`=== Regression Model: ${reg.name} ===`);
+    for (let i = 0; i < p; i++) {
+      console.log(`  ${featureNames[i]!.padEnd(45)}: ${reg.beta[i]!.toFixed(4)}`);
+    }
+    console.log(`  R-squared goodness-of-fit: ${reg.rSquared.toFixed(4)}\n`);
   }
-  console.log('');
-  console.log(`R-squared goodness-of-fit: ${rSquared.toFixed(4)}`);
+
   console.log('------------------------------------------------');
 }
 

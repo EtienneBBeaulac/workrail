@@ -26,8 +26,7 @@ import type { V2ToolContext } from '../../mcp/types.js';
 import { runWorkflow } from '../../daemon/workflow-runner.js';
 import type { SessionSource, AllocatedSession } from '../../daemon/types.js';
 import { assertNever } from '../../runtime/assert-never.js';
-import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
-import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
+import { executeStartWorkflow } from './start-workflow.js';
 
 // ---------------------------------------------------------------------------
 // Workspace SSE broadcast
@@ -910,8 +909,25 @@ export function mountConsoleRoutes(
     // runWorkflow() skips its own executeStartWorkflow() call when source.kind === 'pre_allocated'.
     // ---------------------------------------------------------------------------
     const startResult = await executeStartWorkflow(
+      {
+        gate: v2ToolContext.v2.gate,
+        sessionStore: v2ToolContext.v2.sessionStore,
+        snapshotStore: v2ToolContext.v2.snapshotStore,
+        pinnedStore: v2ToolContext.v2.pinnedStore,
+        crypto: v2ToolContext.v2.crypto,
+        tokenCodecPorts: v2ToolContext.v2.tokenCodecPorts,
+        idFactory: v2ToolContext.v2.idFactory,
+        validationPipelineDeps: v2ToolContext.v2.validationPipelineDeps,
+        tokenAliasStore: v2ToolContext.v2.tokenAliasStore,
+        entropy: v2ToolContext.v2.entropy,
+        resolvedRootUris: v2ToolContext.v2.resolvedRootUris,
+        rememberedRootsStore: v2ToolContext.v2.rememberedRootsStore,
+        managedSourceStore: v2ToolContext.v2.managedSourceStore,
+        workspaceResolver: v2ToolContext.v2.workspaceResolver,
+        fallbackWorkflowReader: v2ToolContext.workflowService,
+        featureFlags: v2ToolContext.featureFlags,
+      },
       { workflowId, workspacePath, goal },
-      v2ToolContext,
       // Mark as autonomous so isAutonomous is derivable from the event log.
       // workspacePath is written into the context_set event so the console can group sessions
       // by workspace even when workspace anchor resolution produces empty observations.
@@ -926,45 +942,18 @@ export function mountConsoleRoutes(
       return;
     }
 
-    const startResponse = startResult.value.response;
-    const startContinueToken = startResponse.continueToken;
-
-    // Decode the session ID from the continueToken so we can return it as the handle.
-    // WHY decode instead of returning sessionId from executeStartWorkflow directly:
-    // The public V2StartWorkflowOutputSchema does not expose sessionId (to avoid a
-    // breaking schema change). parseContinueTokenOrFail() is the established in-process
-    // path used by workflow-runner.ts loadSessionNotes() for the same purpose.
-    let sessionHandle: string;
-    if (startContinueToken) {
-      const tokenResult = await parseContinueTokenOrFail(
-        startContinueToken,
-        v2ToolContext.v2.tokenCodecPorts,
-        v2ToolContext.v2.tokenAliasStore,
-      );
-      if (tokenResult.isErr()) {
-        // This is an internal error -- the session was just created, the token
-        // should always be decodable. Log and return 500 so the caller is informed.
-        console.error(
-          `[ConsoleRoutes] Failed to decode session handle from continueToken: ${tokenResult.error.message}`,
-        );
-        res.status(500).json({ success: false, error: 'Internal error: could not extract session handle.' });
-        return;
-      }
-      sessionHandle = tokenResult.value.sessionId;
-    } else {
-      // isComplete=true on start means the workflow completed immediately (single-step).
-      // No agent loop needed; use workflowId as a fallback handle.
-      sessionHandle = workflowId;
-    }
+    const resVal = startResult.value;
+    const sessionHandle = resVal.sessionId;
 
     // Direct fire-and-forget: no queue serialization in this path.
     const trigger = { workflowId, goal, workspacePath, context };
     const allocatedSession: AllocatedSession = {
-      continueToken: startResponse.continueToken ?? '',
-      checkpointToken: startResponse.checkpointToken,
-      firstStepPrompt: startResponse.pending?.prompt ?? '',
-      isComplete: startResponse.isComplete,
+      continueToken: resVal.continueToken,
+      checkpointToken: resVal.checkpointToken,
+      firstStepPrompt: resVal.meta.prompt,
+      isComplete: false,
       triggerSource: 'mcp',
+      stepId: resVal.meta.stepId,
     };
     const source: SessionSource = { kind: 'pre_allocated', trigger, session: allocatedSession };
     void runWorkflow(

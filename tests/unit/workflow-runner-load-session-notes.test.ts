@@ -52,7 +52,7 @@ const { mockParseContinueToken, mockProjectNodeOutputs } = vi.hoisted(() => ({
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-vi.mock('../../src/mcp/handlers/v2-token-ops.js', () => ({
+vi.mock('../../src/v2/usecases/v2-token-ops.js', () => ({
   parseContinueTokenOrFail: mockParseContinueToken,
 }));
 

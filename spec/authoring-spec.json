@@ -3,7 +3,7 @@
   "version": 3,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
-  "lastReviewed": "2026-05-20",
+  "lastReviewed": "2026-06-12",
   "principles": [
     "Schema defines what is valid. These rules define what is good.",
     "Prefer current authoring rules over design rationale or historical notes.",
@@ -942,6 +942,25 @@
               "note": "Phase 0 uses a context-clarity rubric instead of a vibes-only confidence flag."
             }
           ]
+        },
+        {
+          "id": "loop-virtual-step-expansion-limits",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "loop.step"
+          ],
+          "rule": "Ensure that virtual step expansion within loops has strict iteration limit controls and is bounded in depth.",
+          "why": "Unbounded expansion within loops can lead to runaway recursion, cost bloat, and infinite loop execution.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "Virtual step expansion uses loops with explicit maxIterations limit rules."
+          ],
+          "antiPatterns": [
+            "Expanding virtual steps dynamically without a hard constraint on maximum loop runs"
+          ]
         }
       ]
     },
@@ -1161,6 +1180,57 @@
               "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses explicit challenge, audit, and verification barriers."
             }
+          ]
+        },
+        {
+          "id": "parallel-step-synthesis-contract",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "step.delegation-checkpoint"
+          ],
+          "rule": "Ensure that parallel step synthesis consolidation contracts are explicitly defined to merge results from concurrent cognitive branches.",
+          "why": "Without a clear synthesis step/contract, findings from parallel subagents can be lost, fragmented, or poorly consolidated.",
+          "enforcement": [
+            "advisory"
+          ],
+          "checks": [
+            "The synthesis config specifies outputContract or merging logic."
+          ],
+          "antiPatterns": [
+            "Merging parallel results without specifying a structured consolidation format"
+          ]
+        },
+        {
+          "id": "workflow-model-tier",
+          "status": "active",
+          "level": "recommended",
+          "scope": [
+            "workflow.definition",
+            "step.delegation-checkpoint"
+          ],
+          "rule": "Declare `modelTier` on workflows, steps, or parallel delegations to specify lightweight, mid, or heavy cognitive resource requirements without hardcoding provider model IDs.",
+          "why": "Abstracting resource requirements via `modelTier` keeps workflows model-agnostic and portable across different providers (direct Anthropic vs Bedrock).",
+          "enforcement": [
+            "validator"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/v2/usecases/start-workflow.ts",
+              "note": "Resolves activeModel based on modelTier hierarchy."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/daemon/core/agent-client.ts",
+              "note": "Maps modelTier to provider-specific model IDs."
+            }
+          ],
+          "checks": [
+            "The modelTier field is set to 'lightweight', 'mid', or 'heavy' when a step or delegation requires a specific resource tier."
+          ],
+          "antiPatterns": [
+            "Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition"
           ]
         }
       ]

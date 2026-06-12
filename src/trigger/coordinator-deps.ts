@@ -28,7 +28,7 @@ import type { V2ToolContext } from '../mcp/types.js';
 import type { AdaptiveCoordinatorDeps } from '../coordinators/adaptive-pipeline.js';
 import type { CoordinatorSpawnContext } from '../coordinators/types.js';
 import type { ChildSessionResult } from '../coordinators/types.js';
-import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
+import { executeStartWorkflow } from '../v2/usecases/start-workflow.js';
 import { parseContinueTokenOrFail } from '../mcp/handlers/v2-token-ops.js';
 import { createContextAssembler } from '../context-assembly/index.js';
 import { createListRecentSessions } from '../context-assembly/infra.js';
@@ -391,8 +391,25 @@ class CoordinatorDepsImpl implements AdaptiveCoordinatorDeps {
     }
 
     const startResult = await executeStartWorkflow(
+      {
+        gate: this.ctx.v2.gate,
+        sessionStore: this.ctx.v2.sessionStore,
+        snapshotStore: this.ctx.v2.snapshotStore,
+        pinnedStore: this.ctx.v2.pinnedStore,
+        crypto: this.ctx.v2.crypto,
+        tokenCodecPorts: this.ctx.v2.tokenCodecPorts,
+        idFactory: this.ctx.v2.idFactory,
+        validationPipelineDeps: this.ctx.v2.validationPipelineDeps,
+        tokenAliasStore: this.ctx.v2.tokenAliasStore,
+        entropy: this.ctx.v2.entropy,
+        resolvedRootUris: this.ctx.v2.resolvedRootUris,
+        rememberedRootsStore: this.ctx.v2.rememberedRootsStore,
+        managedSourceStore: this.ctx.v2.managedSourceStore,
+        workspaceResolver: this.ctx.v2.workspaceResolver,
+        fallbackWorkflowReader: this.ctx.workflowService,
+        featureFlags: this.ctx.featureFlags,
+      },
       { workflowId: opts.workflowId, workspacePath: opts.workspace, goal: opts.goal },
-      this.ctx,
       startContext,
     );
     if (startResult.isErr()) {
@@ -400,30 +417,16 @@ class CoordinatorDepsImpl implements AdaptiveCoordinatorDeps {
       return { kind: 'err', error: `Session creation failed: ${detail}` };
     }
 
-    const startContinueToken = startResult.value.response.continueToken;
-    if (!startContinueToken) {
-      return { kind: 'ok', handle: opts.workflowId };
-    }
+    const res = startResult.value;
+    const handle = res.sessionId;
 
-    const tokenResult = await parseContinueTokenOrFail(
-      startContinueToken,
-      this.ctx.v2.tokenCodecPorts,
-      this.ctx.v2.tokenAliasStore,
-    );
-    if (tokenResult.isErr()) {
-      process.stderr.write(`[ERROR coordinator-deps:spawnSessionCore] Failed to decode session handle: ${tokenResult.error.message}\n`);
-      return { kind: 'err', error: 'Internal error: could not extract session handle from new session' };
-    }
-    const handle = tokenResult.value.sessionId;
-
-    const r = startResult.value.response;
     const allocatedSession: AllocatedSession = {
-      continueToken: r.continueToken ?? '',
-      checkpointToken: r.checkpointToken,
-      firstStepPrompt: r.pending?.prompt ?? '',
-      isComplete: r.isComplete,
+      continueToken: res.continueToken,
+      checkpointToken: res.checkpointToken,
+      firstStepPrompt: res.meta.prompt,
+      isComplete: false,
       triggerSource: 'daemon',
-      stepId: r.pending?.stepId,
+      stepId: res.meta.stepId,
     };
     const source: SessionSource = { kind: 'pre_allocated', trigger: opts.trigger, session: allocatedSession };
     this.dispatch(opts.trigger, source);

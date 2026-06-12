@@ -63,7 +63,7 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
     // does not perform a second get() call.
 
     const { loadAndPinWorkflow } = await import(
-      '../../../src/mcp/handlers/v2-execution/start.js'
+      '../../../src/v2/usecases/start-workflow.js'
     );
     const { createTestValidationPipelineDeps } = await import(
       '../../helpers/v2-test-helpers.js'
@@ -146,7 +146,7 @@ describe('loadAndPinWorkflow -- pinnedStore.get call count', () => {
     // get() is needed, avoiding a redundant disk read and Zod re-parse.
 
     const { loadAndPinWorkflow } = await import(
-      '../../../src/mcp/handlers/v2-execution/start.js'
+      '../../../src/v2/usecases/start-workflow.js'
     );
     const { createTestValidationPipelineDeps } = await import(
       '../../helpers/v2-test-helpers.js'

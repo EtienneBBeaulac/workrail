@@ -154,6 +154,7 @@ WorkRail v2 introduces several primitives for expressive workflows:
 - **Contract packs**: WorkRail-owned output schemas for structured artifacts (e.g., `wr.contracts.capability_observation`).
 - **PromptBlocks** (optional): structure step prompts as blocks (goal/constraints/procedure/outputRequired/verify) which compile to deterministic text.
 - **AgentRole**: workflow and/or step-level stance/persona (not system prompt control).
+- **Model Tiers (`modelTier`)**: declare recommended cognitive resource categories (`lightweight`, `mid`, `heavy`) at the top level of the workflow, on specific steps, or on individual parallel delegations. This keeps workflows provider- and model-agnostic.
 - **Extension points**: named slots declared with `extensionPoints` and referenced via `{{wr.bindings.slotId}}` tokens; resolved at compile time from project `.workrail/bindings.json` overrides or workflow defaults. Enables project-overridable delegation seams without forking workflow JSON.
 - **References**: workflow-declared pointers to external documents (schemas, specs, guides). Resolved at start time, delivered as a separate MCP content item. The agent reads the files itself if needed. See "Workflow references" section below.
 - **Assessments**: workflow-declared assessment shapes (`assessments`) that steps can reference with one or more `assessmentRefs` and use for one or more `require_followup` consequences via `assessmentConsequences` (up to 10 per step). Each consequence fires independently when its trigger level matches. Use the optional `forAssessment` field to scope a consequence to a specific named assessment -- essential when multiple assessments on the same step share the same level names.
@@ -674,3 +675,53 @@ Prefer patterns that force the agent to confront uncertainty:
 - derive the next action from the rubric or trigger rules
 
 The workflow should prove to the agent that it may not know enough yet, instead of asking the agent whether it feels confident.
+
+### Model Tiers (`modelTier`)
+
+WorkRail v2 allows declaring recommended resource/model tiers rather than hardcoding concrete model IDs. This keeps workflows portable and provider-agnostic.
+
+#### Tier Categories
+- **`lightweight`**: Fast, cost-efficient models suitable for simple checks, basic validation, and fast loops (e.g. Claude 3.5 Haiku).
+- **`mid`**: Default tier balancing intelligence and cost. Best for general coding, design reasoning, and standard steps (e.g. Claude 3.5 Sonnet).
+- **`heavy`**: High-intelligence, complex reasoning models suitable for difficult audits, synthesis, or high-risk decision points (e.g. Claude 3 Opus).
+
+#### Declaring Tiers in Workflow JSON
+You can specify `modelTier` at three levels:
+1. **Workflow Level**: The default model tier for the entire workflow.
+   ```json
+   {
+     "id": "my-workflow",
+     "name": "My Workflow",
+     "modelTier": "mid",
+     "steps": [...]
+   }
+   ```
+2. **Step Level**: Override the workflow-level default for a specific step.
+   ```json
+   {
+     "id": "deep-audit",
+     "title": "Perform Deep Audit",
+     "modelTier": "heavy",
+     "prompt": "..."
+   }
+   ```
+3. **Parallel Delegation Level**: Specify the tier for fanned-out subagents spawned by a parallel step.
+   ```json
+   {
+     "id": "parallel-spawning",
+     "type": "parallel",
+     "parallelDelegations": [
+       {
+         "workflowId": "child-workflow",
+         "modelTier": "lightweight"
+       }
+     ]
+   }
+   ```
+
+#### Resolution Hierarchy
+When starting a workflow session or spawning a subagent, the active model ID is resolved using the following priority hierarchy:
+1. Explicit tool parameters or environment overrides (`WORKRAIL_FORCE_MODEL`, `WORKRAIL_ACTIVE_MODEL`, `WORKRAIL_MODEL`, or `input.modelTier`).
+2. Step-level `modelTier` defined on the active step (or first step when starting a session).
+3. Workflow-level `modelTier` defined on the workflow.
+4. Default to `mid` tier model ID (`claude-sonnet-4-6` or `us.anthropic.claude-sonnet-4-6` depending on available credentials).
