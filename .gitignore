@@ -69,4 +69,6 @@ undefined/
 tests/benchmark/workspaces/
 tests/benchmark/results.jsonl
 tests/benchmark/results.csv
+tests/benchmark/results-smoke.jsonl
+tests/benchmark/results-smoke.csv
 .venv/

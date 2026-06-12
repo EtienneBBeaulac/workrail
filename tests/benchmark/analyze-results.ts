@@ -139,9 +139,11 @@ function main() {
     workflowFilter = args[workflowIdx + 1];
   }
 
-  const resultsPath = path.join(__dirname, 'results.jsonl');
+  const smoke = args.includes('--smoke');
+  const filename = smoke ? 'results-smoke.jsonl' : 'results.jsonl';
+  const resultsPath = path.join(__dirname, filename);
   if (!fs.existsSync(resultsPath)) {
-    console.warn('results.jsonl not found. Run the benchmark first to generate results.');
+    console.warn(`${filename} not found. Run the benchmark first to generate results.`);
     process.exit(0);
   }
 

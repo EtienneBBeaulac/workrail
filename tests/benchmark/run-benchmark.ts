@@ -711,10 +711,10 @@ async function executeAgentTrial(args: {
   readonly sandboxDir: string;
   readonly templateDir: string;
   readonly taskInstance: string;
-  readonly mock: boolean;
+  readonly smoke: boolean;
   readonly workflow: string;
 }): Promise<TrialMetrics> {
-  const { approach, model, seed, sandboxDir, templateDir, taskInstance, mock, workflow } = args;
+  const { approach, model, seed, sandboxDir, templateDir, taskInstance, smoke, workflow } = args;
 
   // Extract instructions from src/index.ts comments
   const srcFile = path.join(templateDir, 'src/index.ts');
@@ -734,7 +734,7 @@ async function executeAgentTrial(args: {
     taskInstructions = `Implement the entry point in src/index.ts to pass the unit tests.`;
   }
 
-  if (mock) {
+  if (smoke) {
     // Simulated run: write simulated solution based on factors
     let turns = 1;
     let commandRuns = 0;
@@ -1230,7 +1230,7 @@ Please complete the task. When you are done, reply with a final message explaini
 
 export interface RunOptions {
   readonly limit?: number;
-  readonly mock?: boolean;
+  readonly smoke?: boolean;
   readonly models?: readonly string[];
   readonly tasks?: readonly string[];
   readonly seeds?: readonly number[];
@@ -1241,7 +1241,7 @@ export interface RunOptions {
 export async function runBenchmark(options: RunOptions = {}): Promise<readonly TrialResult[]> {
   registerCleanupHandlers();
 
-  const mock = options.mock ?? false;
+  const smoke = options.smoke ?? false;
   const models = options.models ?? ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022'];
   const seeds = options.seeds ?? [1, 2, 3];
   const approaches = options.approaches ?? ['workrail', 'skills', 'vanilla'];
@@ -1338,7 +1338,7 @@ export async function runBenchmark(options: RunOptions = {}): Promise<readonly T
         sandboxDir,
         templateDir,
         taskInstance: task,
-        mock,
+        smoke,
         workflow
       });
 
@@ -1409,7 +1409,7 @@ async function main() {
   
   // Parse command line arguments
   const args = process.argv.slice(2);
-  const mock = args.includes('--mock') || process.env.WORKRAIL_BENCHMARK_MOCK === 'true';
+  const smoke = args.includes('--smoke') || process.env.WORKRAIL_BENCHMARK_SMOKE === 'true';
   
   let limit: number | undefined;
   const limitIdx = args.indexOf('--limit');
@@ -1423,11 +1423,11 @@ async function main() {
     workflow = args[workflowIdx + 1];
   }
 
-  const results = await runBenchmark({ mock, limit, workflow });
+  const results = await runBenchmark({ smoke, limit, workflow });
 
   // Save to JSONL and CSV
-  const resultsJsonlPath = path.join(__dirname, 'results.jsonl');
-  const resultsCsvPath = path.join(__dirname, 'results.csv');
+  const resultsJsonlPath = path.join(__dirname, smoke ? 'results-smoke.jsonl' : 'results.jsonl');
+  const resultsCsvPath = path.join(__dirname, smoke ? 'results-smoke.csv' : 'results.csv');
 
   // JSONL output
   const jsonlLines = results.map((r) => JSON.stringify(r)).join('\n');
