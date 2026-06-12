@@ -15,6 +15,7 @@ interface TrialData {
   readonly costUsd: number;
   readonly turns: number;
   readonly commandRuns: number;
+  readonly eleganceScore?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +228,7 @@ function main() {
   const Y_turns: number[] = [];
   const Y_costUsd: number[] = [];
   const Y_commandRuns: number[] = [];
+  const Y_elegance: number[] = [];
 
   for (const row of data) {
     Y_score.push(row.score);
@@ -234,6 +236,7 @@ function main() {
     Y_turns.push(row.turns || 0);
     Y_costUsd.push(row.costUsd || 0.0);
     Y_commandRuns.push(row.commandRuns || 0);
+    Y_elegance.push(row.eleganceScore || 0.0);
 
     const rowX: number[] = [1]; // intercept
     for (const a of dummyApproaches) {
@@ -250,12 +253,13 @@ function main() {
 
   // Run regressions
   const regScore = runRegression('Quality (Score: 0.0 - 1.0)', X, Y_score, p);
+  const regElegance = runRegression('Elegance (LLM Judge: 0.0 - 1.0)', X, Y_elegance, p);
   const regDuration = runRegression('Speed (Duration: Seconds)', X, Y_durationSec, p);
   const regTurns = runRegression('Speed (Turn Count)', X, Y_turns, p);
   const regCost = runRegression('Cost (USD)', X, Y_costUsd, p);
   const regCommands = runRegression('Debugging (Command Runs)', X, Y_commandRuns, p);
 
-  const regressions = [regScore, regDuration, regTurns, regCost, regCommands];
+  const regressions = [regScore, regElegance, regDuration, regTurns, regCost, regCommands];
 
   // Print results
   for (const reg of regressions) {

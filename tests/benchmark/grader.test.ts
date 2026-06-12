@@ -4,9 +4,11 @@ import * as path from 'path';
 import {
   createSandboxWorkspace,
   cleanupSandboxWorkspace,
-  runCommandWithTimeout,
+  runCommandWithTimeout
+} from './sandbox.js';
+import {
   gradeWorkspace
-} from './run-benchmark';
+} from './grader.js';
 
 describe('progressive grader & sandbox validation', () => {
   const testCorpusRoot = path.join(__dirname, 'corpus');
