@@ -92,8 +92,8 @@
     "prepare": "bash scripts/setup-hooks.sh"
   },
   "dependencies": {
-    "@anthropic-ai/bedrock-sdk": "^0.29.0",
-    "@anthropic-ai/sdk": "^0.100.1",
+    "@anthropic-ai/bedrock-sdk": "^0.30.2",
+    "@anthropic-ai/sdk": "^0.104.2",
     "@modelcontextprotocol/sdk": "^1.24.0",
     "@scure/base": "2.2.0",
     "ajv": "^8.17.1",
