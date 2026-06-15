@@ -349,7 +349,7 @@ describe('Universal Auto-Injected Virtual Steps — Compiler & Validation', () =
     
     // Must return an Err Result, NOT throw
     expect(compileResult.isErr()).toBe(true);
-    expect(compileResult._unsafeUnwrapErr().message).toContain("Duplicate step id 'step-1__audit'");
+    expect(compileResult._unsafeUnwrapErr().message).toMatch(/Duplicate step id 'step-1__audit'|contains a reserved suffix/);
   });
 
   it('inherits the agentRole of the parent step definition on auto-injected virtual steps', () => {
@@ -430,5 +430,118 @@ describe('Universal Auto-Injected Virtual Steps — Compiler & Validation', () =
     expect(valResult.valid).toBe(false);
     expect(valResult.issues[0]).toContain("references sibling step 'sibling-step' with verification/audit blocks");
     expect(valResult.suggestions[0]).toContain("Move the definition of step 'sibling-step' directly inside the body array");
+  });
+
+  it('compiles a verification step with cognitive: true using the cognitive prompt fallback', () => {
+    const wfDef: WorkflowDefinition = {
+      id: 'test-cognitive-verification',
+      name: 'Cognitive Verification Test',
+      description: 'Tests cognitive verification prompt compilation',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Implement feature',
+          prompt: 'Write some code.',
+          verification: {
+            cognitive: true,
+          },
+        },
+      ],
+    };
+
+    const wf = makeWorkflow(wfDef);
+    const compileResult = compiler.compile(wf);
+    expect(compileResult.isOk()).toBe(true);
+
+    const compiled = compileResult._unsafeUnwrap();
+    expect(compiled.steps).toHaveLength(2);
+    expect(compiled.steps[1]!.id).toBe('step-1__verification');
+    expect(compiled.steps[1]!.prompt).toContain('Discover, write, run, and verify the appropriate test suites');
+  });
+
+  it('compiles a verification step with delegate into a ParallelStepDefinition and synthesis step', () => {
+    const wfDef: WorkflowDefinition = {
+      id: 'test-verification-delegate',
+      name: 'Verification Delegate Test',
+      description: 'Tests verification delegate compilation',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Implement logic',
+          prompt: 'Write logic.',
+          verification: {
+            delegate: {
+              workflowId: 'wr.routine-code-reviewer',
+              modelTier: 'heavy',
+            },
+          },
+        },
+      ],
+    };
+
+    const wf = makeWorkflow(wfDef);
+    const compileResult = compiler.compile(wf);
+    expect(compileResult.isOk()).toBe(true);
+
+    const compiled = compileResult._unsafeUnwrap();
+    expect(compiled.steps).toHaveLength(3);
+    expect(compiled.steps[1]!.id).toBe('step-1__verification');
+    expect(compiled.steps[1]!.type).toBe('parallel');
+    expect((compiled.steps[1] as any).parallelDelegations).toHaveLength(1);
+    expect((compiled.steps[1] as any).parallelDelegations[0].workflowId).toBe('wr.routine-code-reviewer');
+
+    expect(compiled.steps[2]!.id).toBe('step-1__verification__synthesis');
+    expect(compiled.steps[2]!.title).toBe('Synthesis: Verify: Implement logic');
+  });
+
+  it('rejects step declaring both verification.command and verification.delegate properties', () => {
+    const wfDef: WorkflowDefinition = {
+      id: 'test-validation-conflict',
+      name: 'Validation Conflict Test',
+      description: 'Tests validation of conflicting verification properties',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Do work',
+          prompt: 'Do work.',
+          verification: {
+            command: 'npm run test',
+            delegate: {
+              workflowId: 'wr.routine-code-reviewer',
+            },
+          },
+        },
+      ],
+    };
+
+    const wf = makeWorkflow(wfDef);
+    const valResult = validationEngine.validateWorkflow(wf);
+    expect(valResult.valid).toBe(false);
+    expect(valResult.issues[0]).toContain("cannot declare both command and delegate properties");
+  });
+
+  it('fails compilation if custom step ID contains a reserved suffix', () => {
+    const wfDef: WorkflowDefinition = {
+      id: 'test-reserved-suffix',
+      name: 'Reserved Suffix Test',
+      description: 'Tests compilation failure when user uses reserved step suffix',
+      version: '1.0.0',
+      steps: [
+        {
+          id: 'step-1__verification',
+          title: 'Manual Verification step',
+          prompt: 'Verification prompt.',
+        },
+      ],
+    };
+
+    const wf = makeWorkflow(wfDef);
+    const compileResult = compiler.compile(wf);
+    
+    expect(compileResult.isErr()).toBe(true);
+    expect(compileResult._unsafeUnwrapErr().message).toContain("contains a reserved suffix");
   });
 });

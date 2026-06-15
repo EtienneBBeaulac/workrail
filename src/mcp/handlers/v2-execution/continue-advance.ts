@@ -31,6 +31,7 @@ import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
 import { verifyEAT, signEAT } from '../../../v2/durable-core/tokens/index.js';
+import { initShadowDirectory, extractShadowArtifacts } from './shadow-lifecycle.js';
 
 /**
  * Handle advance intent: execute next step and record the outcome.
@@ -57,6 +58,49 @@ export function handleAdvanceIntent(args: {
   readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const { input, sessionId, runId, nodeId, attemptId, workflowHashRef, truth, gate, sessionStore, snapshotStore, pinnedStore, tokenCodecPorts, idFactory, sha256, gitSnapshot, aliasStore, entropy, cleanResponseFormat } = args;
+
+  // Slice 1: Initialize shadow directory and git exclude
+  let workspacePath = input.workspacePath;
+  if (!workspacePath) {
+    for (const e of truth.events) {
+      if (e.kind === 'observation_recorded' && e.data.key === 'repo_root') {
+        workspacePath = e.data.value.value;
+        break;
+      }
+    }
+  }
+
+  let virtualOnly = false;
+  let shadowPath = '';
+  if (workspacePath) {
+    const shadowRes = initShadowDirectory(workspacePath, String(sessionId));
+    if (shadowRes.isOk()) {
+      virtualOnly = shadowRes.value.virtualOnly;
+      shadowPath = shadowRes.value.shadowPath;
+    }
+  }
+
+  // Slice 4: Extract shadow artifacts if not in Virtual-Only mode
+  const finalOutput = { ...input.output };
+  if (!virtualOnly && shadowPath) {
+    const extractRes = extractShadowArtifacts(shadowPath, truth.events);
+    if (extractRes.isErr()) {
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: extractRes.error.message,
+        suggestion: 'Ensure all files in the active artifacts directory contain valid JSON.',
+      });
+    }
+    const fileArtifacts = extractRes.value;
+    if (fileArtifacts.length > 0) {
+      finalOutput.artifacts = [
+        ...(finalOutput.artifacts ?? []),
+        ...fileArtifacts,
+      ];
+    }
+  }
+
+
 
   const dedupeKey = `advance_recorded:${sessionId}:${nodeId}:${attemptId}`;
 
@@ -332,7 +376,7 @@ export function handleAdvanceIntent(args: {
                 workflowHash,
                 dedupeKey,
                 inputContext: input.context as JsonValue | undefined,
-                inputOutput: input.output,
+                inputOutput: finalOutput,
                 lock,
                 pinnedWorkflow,
                 snapshotStore,

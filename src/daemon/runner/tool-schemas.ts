@@ -165,6 +165,14 @@ export function getSchemas(): Record<string, any> {
               type: 'string',
               enum: ['lightweight', 'mid', 'heavy'],
               description: 'Recommended model tier/category for executing the child session (lightweight, mid, or heavy).'
+            },
+            enableWriteTools: {
+              type: 'boolean',
+              description: 'Whether the spawned agent is permitted to execute write tools.'
+            },
+            enable_write_tools: {
+              type: 'boolean',
+              description: 'Whether the spawned agent is permitted to execute write tools.'
             }
           },
           additionalProperties: false,
@@ -195,6 +203,14 @@ export function getSchemas(): Record<string, any> {
                     type: 'string',
                     enum: ['lightweight', 'mid', 'heavy'],
                     description: 'Recommended model tier/category for executing the child session (lightweight, mid, or heavy).'
+                  },
+                  enableWriteTools: {
+                    type: 'boolean',
+                    description: 'Whether the spawned agent is permitted to execute write tools.'
+                  },
+                  enable_write_tools: {
+                    type: 'boolean',
+                    description: 'Whether the spawned agent is permitted to execute write tools.'
                   }
                 },
                 additionalProperties: false,

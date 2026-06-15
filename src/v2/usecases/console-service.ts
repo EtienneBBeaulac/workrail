@@ -1387,6 +1387,7 @@ function extractArtifacts(events: readonly DomainEventV1[], nodeId: string): rea
   if (!nodeArtifacts) return [];
 
   return nodeArtifacts.artifacts.map((a) => ({
+    name: a.outputId,
     sha256: a.sha256,
     contentType: a.contentType,
     byteLength: a.byteLength,

@@ -337,6 +337,7 @@ export interface ConsoleNodeGap {
 }
 
 export interface ConsoleArtifact {
+  readonly name: string;
   readonly sha256: string;
   readonly contentType: string;
   readonly byteLength: number;

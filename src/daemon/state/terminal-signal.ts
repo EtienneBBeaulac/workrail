@@ -25,7 +25,7 @@ import type { SessionState } from './session-state.js';
  * simultaneously structurally impossible.
  */
 export type TerminalSignal =
-  | { readonly kind: 'stuck'; readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall' }
+  | { readonly kind: 'stuck'; readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall' | 'edit_limit_exceeded' }
   | { readonly kind: 'timeout'; readonly reason: 'wall_clock' | 'max_turns' }
   /**
    * Session parked at a requireConfirmation gate, awaiting coordinator evaluation.

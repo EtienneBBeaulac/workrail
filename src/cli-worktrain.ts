@@ -1209,6 +1209,18 @@ program.addCommand(
   { hidden: true },
 );
 
+// EXPORT ARTIFACT COMMAND
+// ═══════════════════════════════════════════════════════════════════════════
+
+program
+  .command('export-artifact <sessionId> <artifactName> [destPath]')
+  .description('Copy a shadow artifact to the workspace and stage it in Git.')
+  .action(async (sessionId: string, artifactName: string, destPath: string | undefined) => {
+    const { executeWorktrainExportArtifactCommand } = await import('./cli/commands/worktrain-export-artifact.js');
+    const result = await executeWorktrainExportArtifactCommand({ sessionId, artifactName, destPath });
+    interpretCliResultWithoutDI(result);
+  });
+
 // ═══════════════════════════════════════════════════════════════════════════
 // DISPATCH COMMAND
 // ═══════════════════════════════════════════════════════════════════════════

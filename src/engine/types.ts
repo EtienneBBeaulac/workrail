@@ -265,4 +265,7 @@ export interface WorkRailEngine {
 
   /** Release resources (keyring, file handles, locks). */
   readonly close: () => Promise<void>;
+
+  /** Internal/Testing: exposed context for daemon runner. */
+  readonly _toolContext?: any;
 }

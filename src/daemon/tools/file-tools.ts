@@ -12,6 +12,7 @@ import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import type { ReadFileState } from '../types.js';
 import { READ_SIZE_CAP_BYTES, findActualString, withWorkrailSession } from './_shared.js';
 import type { SessionId } from '../../v2/durable-core/ids/index.js';
+import type { Result } from 'neverthrow';
 
 /**
  * Resolve a (possibly relative) file path against workspacePath and verify it
@@ -94,7 +95,16 @@ export function makeReadTool(workspacePath: string, readFileState: Map<string, R
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeWriteTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
+export function makeWriteTool(
+  workspacePath: string,
+  readFileState: Map<string, ReadFileState>,
+  schemas: Record<string, any>,
+  sessionId?: RunId,
+  emitter?: DaemonEventEmitter,
+  workrailSessionId?: SessionId | null,
+  recordFileEdit?: (filePath: string) => Result<void, Error>,
+  assertWorkspaceLockActive?: () => void,
+): AgentTool {
   return {
     name: 'Write',
     description:
@@ -113,6 +123,17 @@ export function makeWriteTool(workspacePath: string, readFileState: Map<string, 
       if (typeof params.filePath !== 'string' || !params.filePath) throw new Error('Write: filePath must be a non-empty string');
       if (typeof params.content !== 'string') throw new Error('Write: content must be a string');
       const filePath: string = resolveWithinWorkspace(params.filePath, workspacePath, 'Write');
+
+      if (assertWorkspaceLockActive) {
+        assertWorkspaceLockActive();
+      }
+      if (recordFileEdit) {
+        const editRes = recordFileEdit(filePath);
+        if (editRes.isErr()) {
+          throw editRes.error;
+        }
+      }
+
       if (sessionId) emitter?.emit({ kind: 'tool_called', sessionId, toolName: 'Write', summary: filePath.slice(0, 500), ...withWorkrailSession(workrailSessionId) });
 
       // Staleness guard: only for existing files. New files bypass the check entirely.
@@ -156,7 +177,16 @@ export function makeWriteTool(workspacePath: string, readFileState: Map<string, 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function makeEditTool(workspacePath: string, readFileState: Map<string, ReadFileState>, schemas: Record<string, any>, sessionId?: RunId, emitter?: DaemonEventEmitter, workrailSessionId?: SessionId | null): AgentTool {
+export function makeEditTool(
+  workspacePath: string,
+  readFileState: Map<string, ReadFileState>,
+  schemas: Record<string, any>,
+  sessionId?: RunId,
+  emitter?: DaemonEventEmitter,
+  workrailSessionId?: SessionId | null,
+  recordFileEdit?: (filePath: string) => Result<void, Error>,
+  assertWorkspaceLockActive?: () => void,
+): AgentTool {
   return {
     name: 'Edit',
     description:
@@ -177,6 +207,17 @@ export function makeEditTool(workspacePath: string, readFileState: Map<string, R
       if (typeof params.old_string !== 'string') throw new Error('Edit: old_string must be a string');
       if (typeof params.new_string !== 'string') throw new Error('Edit: new_string must be a string');
       const filePath: string = resolveWithinWorkspace(params.file_path, workspacePath, 'Edit');
+
+      if (assertWorkspaceLockActive) {
+        assertWorkspaceLockActive();
+      }
+      if (recordFileEdit) {
+        const editRes = recordFileEdit(filePath);
+        if (editRes.isErr()) {
+          throw editRes.error;
+        }
+      }
+
       const oldString: string = params.old_string;
       const newString: string = params.new_string;
       const replaceAll: boolean = params.replace_all ?? false;

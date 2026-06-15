@@ -79,19 +79,16 @@ const FAKE_PARAMS = {
   workspacePath: os.tmpdir(),
 };
 
-/**
- * Build a fake StartWorkflowResult that makeSpawnAgentTool accepts.
- *
- * WHY continueToken is undefined: makeSpawnAgentTool checks `if (childContinueToken)`
- * before calling parseContinueTokenOrFail. An empty string skips the decode block,
- * so ctx.v2 is never accessed and childSessionId remains null.
- */
-function makeFakeStartResult() {
+function makeFakeStartResult(params?: any) {
+  const workflowId = params?.workflowId ?? '';
+  const sessionId = workflowId.startsWith('workflow-') || workflowId === 'w0' || workflowId === 'w1'
+    ? `sess_child123_${workflowId}`
+    : 'sess_child123';
   return {
     isErr: () => false,
     isOk: () => true,
     value: {
-      sessionId: 'sess_child123',
+      sessionId,
       continueToken: '',
       checkpointToken: '',
       meta: {
@@ -117,7 +114,7 @@ function makeRunWorkflowStub(result: ChildWorkflowRunResult): typeof import('../
 
 describe('makeSpawnAgentTool() result mapping', () => {
   beforeEach(() => {
-    mockExecuteStartWorkflow.mockReturnValue(makeFakeStartResult());
+    mockExecuteStartWorkflow.mockImplementation((deps: any, params: any) => makeFakeStartResult(params));
   });
 
   it('maps success result to outcome: success with lastStepNotes', async () => {
@@ -499,7 +496,7 @@ describe('makeSpawnAgentTool() result mapping', () => {
 
 describe('makeSpawnAgentTool() parallel spawn (agents[])', () => {
   beforeEach(() => {
-    mockExecuteStartWorkflow.mockReturnValue(makeFakeStartResult());
+    mockExecuteStartWorkflow.mockImplementation((deps: any, params: any) => makeFakeStartResult(params));
   });
 
   function makeParallelParams(count: number) {
@@ -517,9 +514,11 @@ describe('makeSpawnAgentTool() parallel spawn (agents[])', () => {
       { _tag: 'success', workflowId: 'workflow-0', stopReason: 'done', lastStepNotes: 'notes-0' },
       { _tag: 'success', workflowId: 'workflow-1', stopReason: 'done', lastStepNotes: 'notes-1' },
     ];
-    let callIndex = 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const runWorkflowStub = async () => results[callIndex++]! as any;
+    const runWorkflowStub = async (trigger: any) => {
+      const idx = trigger.workflowId === 'workflow-1' ? 1 : 0;
+      return results[idx]! as any;
+    };
 
     const tool = makeSpawnAgentTool('sess-1', FAKE_CTX, FAKE_API_KEY, 'parent', 0, 3, runWorkflowStub, FAKE_SCHEMAS);
     const result = await tool.execute('call-1', makeParallelParams(2));
@@ -538,12 +537,19 @@ describe('makeSpawnAgentTool() parallel spawn (agents[])', () => {
       { _tag: 'success', workflowId: 'w0', stopReason: 'done', lastStepNotes: 'ok' },
       { _tag: 'error', workflowId: 'w1', message: 'child failed', stopReason: 'error' },
     ];
-    let callIndex = 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const runWorkflowStub = async () => childResults[callIndex++]! as any;
+    const runWorkflowStub = async (trigger: any) => {
+      const idx = trigger.workflowId === 'w1' ? 1 : 0;
+      return childResults[idx]! as any;
+    };
 
     const tool = makeSpawnAgentTool('sess-1', FAKE_CTX, FAKE_API_KEY, 'parent', 0, 3, runWorkflowStub, FAKE_SCHEMAS);
-    const result = await tool.execute('call-1', makeParallelParams(2));
+    const result = await tool.execute('call-1', {
+      agents: [
+        { workflowId: 'w0', goal: 'g0', workspacePath: os.tmpdir() },
+        { workflowId: 'w1', goal: 'g1', workspacePath: os.tmpdir() },
+      ],
+    });
     const parsed = JSON.parse(result.content[0]!.text as string);
 
     expect(parsed.kind).toBe('parallel');

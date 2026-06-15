@@ -10,6 +10,7 @@ import { defaultPreferences } from '../../../v2/usecases/start-workflow.js';
 import { deriveNextIntent } from '../v2-state-conversion.js';
 import type { StartWorkflowError } from '../v2-execution-helpers.js';
 import * as z from 'zod';
+import { initShadowDirectory } from './shadow-lifecycle.js';
 
 export interface StartWorkflowResult {
   readonly response: z.infer<typeof V2StartWorkflowOutputSchema>;
@@ -44,7 +45,21 @@ export function executeStartWorkflowMCP(
 
   return executeStartWorkflow(deps, input, internalContext)
     .map((res) => {
-      const pending = toPendingStep(res.meta);
+      // Slice 1: Initialize shadow directory and git exclude
+      const shadowRes = initShadowDirectory(input.workspacePath, String(res.sessionId));
+      let virtualOnly = false;
+      if (shadowRes.isOk()) {
+        virtualOnly = shadowRes.value.virtualOnly;
+      }
+
+      const pending = toPendingStep(
+        res.meta
+          ? {
+              ...res.meta,
+              artifactsDirectory: !virtualOnly ? `.workrail/artifacts/${res.sessionId}/` : undefined,
+            }
+          : null
+      );
       const preferences = defaultPreferences;
       const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: res.meta });
 

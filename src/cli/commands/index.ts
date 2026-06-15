@@ -80,3 +80,7 @@ export {
   executeWorktrainTriggerValidateCommand,
   type WorktrainTriggerValidateDeps,
 } from './worktrain-trigger-validate.js';
+export {
+  executeWorktrainExportArtifactCommand,
+  type WorktrainExportArtifactCommandOpts,
+} from './worktrain-export-artifact.js';

@@ -1337,6 +1337,9 @@
             "type": "string"
           },
           "minItems": 1
+        },
+        "delegate": {
+          "$ref": "#/$defs/parallelDelegation"
         }
       },
       "additionalProperties": false
@@ -1373,6 +1376,13 @@
           "description": "Custom instructions to guide the verification process.",
           "minLength": 1,
           "maxLength": 4096
+        },
+        "cognitive": {
+          "type": "boolean",
+          "description": "When true, instructs the main agent to autonomously discover, write, run, and verify tests/builds without hardcoded commands."
+        },
+        "delegate": {
+          "$ref": "#/$defs/parallelDelegation"
         }
       },
       "additionalProperties": false

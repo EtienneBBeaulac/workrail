@@ -635,6 +635,25 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 - `src/v2/usecases/start-workflow.ts` (runtime) — Resolves activeModel based on modelTier hierarchy.
 - `src/daemon/core/agent-client.ts` (runtime) — Maps modelTier to provider-specific model IDs.
 
+### cognitive-verification-and-subagent-auditing
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.definition, step.delegation-checkpoint
+- **Rule**: Declare subagent delegator configs `verification.delegate` or `audit.delegate` to run verification and audits in sandboxed subagent loops rather than hardcoding shell scripts or relying on the main agent session.
+- **Why**: Declarative delegates prevent confirmation bias, avoid environment-specific command lock-in, and keep workflows platform-agnostic.
+- **Enforced by**: validator
+
+**Checks**
+- Use verification.cognitive: true for command-free verification instructions.
+- Use verification.delegate or audit.delegate blocks to declare subagent executors.
+- Ensure a step does not declare both verification.command and verification.delegate properties.
+
+**Anti-patterns**
+- Declaring both verification.command and verification.delegate on the same step definition
+
+**Source refs**
+- `src/application/services/workflow-compiler.ts` (runtime) — Compiles verification/audit delegates into ParallelStepDefinitions.
+
 
 ## Subagent synthesis and claim adoption
 ### subagent-output-is-evidence
@@ -871,6 +890,28 @@ Canonical current rules for authoring good WorkRail workflows. workflow.schema.j
 
 **Example refs**
 - `workflows/coding-task-workflow-agentic.json` — Uses explicit spec vs implementation-plan ownership.
+
+### first-class-artifacts-shadow-directory
+- **Level**: required
+- **Status**: active
+- **Scope**: workflow.definition, step.output-requirements
+- **Rule**: Use the engine-provided `artifactsDirectory` field in the pending step payload to locate the shadow directory at `.workrail/artifacts/<sessionId>/` for writing and editing step artifacts.
+- **Why**: Writing artifacts to the shadow directory prevents workspace pollution, allows validation against Zod schemas on step completion, and enables premium split-pane preview rendering in the Console.
+- **Enforced by**: validator
+
+**Checks**
+- Verify that the agent utilizes standard file tools to read/write files under the path provided in the `artifactsDirectory` field.
+- Ensure the workflow author declares expected outputs in the step definition so the engine can validate them.
+- Verify that artifacts are persisted in the session event log as first-class events.
+
+**Anti-patterns**
+- Hardcoding the shadow directory path instead of dynamically reading `artifactsDirectory`
+- Writing step deliverables directly to the workspace root or tracked folders instead of utilizing shadow paths
+
+**Source refs**
+- `src/mcp/handlers/v2-execution/shadow-lifecycle.ts` (runtime) — Manages shadow directory lifecycles and recursive git excludes.
+- `src/mcp/output-schemas.ts` (runtime) — Declares the artifactsDirectory field in V2PendingStepSchema.
+- `src/mcp/handlers/v2-execution/continue-advance.ts` (runtime) — Extracts shadow artifacts and runs Zod schema validation on step completion.
 
 
 ## Planned guidance

@@ -33,6 +33,7 @@ interface V2PendingStep {
   readonly title: string;
   readonly prompt: string;
   readonly agentRole?: string;
+  readonly artifactsDirectory?: string;
 }
 
 interface V2Preferences {
@@ -338,7 +339,11 @@ function formatRehydrate(data: V2ExecutionResponse): string {
     lines.push(`# ${data.pending.title} (resumed)`);
     lines.push(`<!-- stepId: ${data.pending.stepId} -->`);
     lines.push('');
-    lines.push(data.pending.prompt);
+    let promptText = data.pending.prompt;
+    if (data.pending.artifactsDirectory) {
+      promptText += `\n\nActive Session Artifacts:\n- Directory: ${data.pending.artifactsDirectory}\n(Please read and edit session artifacts inside this folder using standard filesystem tools.)`;
+    }
+    lines.push(promptText);
     lines.push('');
   }
 
@@ -379,7 +384,11 @@ function formatSuccess(data: V2ExecutionResponse): string {
     lines.push(`# ${data.pending.title}`);
     lines.push(`<!-- stepId: ${data.pending.stepId} -->`);
     lines.push('');
-    lines.push(data.pending.prompt);
+    let promptText = data.pending.prompt;
+    if (data.pending.artifactsDirectory) {
+      promptText += `\n\nActive Session Artifacts:\n- Directory: ${data.pending.artifactsDirectory}\n(Please read and edit session artifacts inside this folder using standard filesystem tools.)`;
+    }
+    lines.push(promptText);
     lines.push('');
   }
 
@@ -475,7 +484,11 @@ function formatCleanRehydrate(data: V2ExecutionResponse): string {
   const lines: string[] = [];
 
   if (data.pending) {
-    lines.push(data.pending.prompt);
+    let promptText = data.pending.prompt;
+    if (data.pending.artifactsDirectory) {
+      promptText += `\n\nActive Session Artifacts:\n- Directory: ${data.pending.artifactsDirectory}\n(Please read and edit session artifacts inside this folder using standard filesystem tools.)`;
+    }
+    lines.push(promptText);
     lines.push('');
   }
 
@@ -499,7 +512,11 @@ function formatCleanSuccess(data: V2ExecutionResponse): string {
   const lines: string[] = [];
 
   if (data.pending) {
-    lines.push(data.pending.prompt);
+    let promptText = data.pending.prompt;
+    if (data.pending.artifactsDirectory) {
+      promptText += `\n\nActive Session Artifacts:\n- Directory: ${data.pending.artifactsDirectory}\n(Please read and edit session artifacts inside this folder using standard filesystem tools.)`;
+    }
+    lines.push(promptText);
     lines.push('');
   }
 
@@ -623,10 +640,10 @@ export interface FormattedResponse {
  * @param data - The tool result data to format
  * @param cleanResponseFormat - Whether to use the clean response format (from feature flags)
  */
-export function formatV2ExecutionResponse(data: unknown, cleanResponseFormat: boolean): FormattedResponse | null {
+export function formatV2ExecutionResponse(data: unknown, cleanResponseFormat?: boolean): FormattedResponse | null {
   const renderInput = deriveRenderInput(data);
   if (!renderInput) return null;
-  const cleanFormat = cleanResponseFormat;
+  const cleanFormat = !!cleanResponseFormat;
   const { response, lifecycle, contentEnvelope } = renderInput;
 
   // Render references from content envelope (if present and non-empty)

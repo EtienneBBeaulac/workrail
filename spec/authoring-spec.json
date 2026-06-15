@@ -1,6 +1,6 @@
 {
   "$schema": "./authoring-spec.schema.json",
-  "version": 3,
+  "version": 4,
   "title": "WorkRail Authoring Rules",
   "purpose": "Canonical current rules for authoring good WorkRail workflows. workflow.schema.json remains the source of truth for legal structure.",
   "lastReviewed": "2026-06-12",
@@ -1232,6 +1232,35 @@
           "antiPatterns": [
             "Hardcoding specific Anthropic or Bedrock model IDs in the workflow definition"
           ]
+        },
+        {
+          "id": "cognitive-verification-and-subagent-auditing",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.definition",
+            "step.delegation-checkpoint"
+          ],
+          "rule": "Declare subagent delegator configs `verification.delegate` or `audit.delegate` to run verification and audits in sandboxed subagent loops rather than hardcoding shell scripts or relying on the main agent session.",
+          "why": "Declarative delegates prevent confirmation bias, avoid environment-specific command lock-in, and keep workflows platform-agnostic.",
+          "enforcement": [
+            "validator"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/application/services/workflow-compiler.ts",
+              "note": "Compiles verification/audit delegates into ParallelStepDefinitions."
+            }
+          ],
+          "checks": [
+            "Use verification.cognitive: true for command-free verification instructions.",
+            "Use verification.delegate or audit.delegate blocks to declare subagent executors.",
+            "Ensure a step does not declare both verification.command and verification.delegate properties."
+          ],
+          "antiPatterns": [
+            "Declaring both verification.command and verification.delegate on the same step definition"
+          ]
         }
       ]
     },
@@ -1594,6 +1623,46 @@
             {
               "path": "workflows/coding-task-workflow-agentic.json",
               "note": "Uses explicit spec vs implementation-plan ownership."
+            }
+          ]
+        },
+        {
+          "id": "first-class-artifacts-shadow-directory",
+          "status": "active",
+          "level": "required",
+          "scope": [
+            "workflow.definition",
+            "step.output-requirements"
+          ],
+          "rule": "Use the engine-provided `artifactsDirectory` field in the pending step payload to locate the shadow directory at `.workrail/artifacts/<sessionId>/` for writing and editing step artifacts.",
+          "why": "Writing artifacts to the shadow directory prevents workspace pollution, allows validation against Zod schemas on step completion, and enables premium split-pane preview rendering in the Console.",
+          "enforcement": [
+            "validator"
+          ],
+          "checks": [
+            "Verify that the agent utilizes standard file tools to read/write files under the path provided in the `artifactsDirectory` field.",
+            "Ensure the workflow author declares expected outputs in the step definition so the engine can validate them.",
+            "Verify that artifacts are persisted in the session event log as first-class events."
+          ],
+          "antiPatterns": [
+            "Hardcoding the shadow directory path instead of dynamically reading `artifactsDirectory`",
+            "Writing step deliverables directly to the workspace root or tracked folders instead of utilizing shadow paths"
+          ],
+          "sourceRefs": [
+            {
+              "kind": "runtime",
+              "path": "src/mcp/handlers/v2-execution/shadow-lifecycle.ts",
+              "note": "Manages shadow directory lifecycles and recursive git excludes."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/mcp/output-schemas.ts",
+              "note": "Declares the artifactsDirectory field in V2PendingStepSchema."
+            },
+            {
+              "kind": "runtime",
+              "path": "src/mcp/handlers/v2-execution/continue-advance.ts",
+              "note": "Extracts shadow artifacts and runs Zod schema validation on step completion."
             }
           ]
         }

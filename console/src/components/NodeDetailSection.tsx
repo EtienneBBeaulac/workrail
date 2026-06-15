@@ -3,6 +3,7 @@ import { useNodeDetail } from '../api/hooks';
 import { MarkdownView } from './MarkdownView';
 import { MonoLabel } from './MonoLabel';
 import { TraceBadge } from './TraceBadge';
+import { ArtifactsTab } from './ArtifactsTab';
 import { getNodeRoutingItems, isConditionPassed } from '../views/session-detail-use-cases';
 import type {
   ConsoleNodeDetail,
@@ -10,7 +11,6 @@ import type {
   ConsoleValidationResult,
   ConsoleAdvanceOutcome,
   ConsoleNodeGap,
-  ConsoleArtifact,
   ConsoleExecutionTraceSummary,
   ConsoleExecutionTraceItem,
 } from '../api/types';
@@ -21,6 +21,8 @@ interface Props {
   readonly runStatus?: ConsoleRunStatus;
   readonly currentNodeId?: string | null;
   readonly executionTraceSummary?: ConsoleExecutionTraceSummary | null;
+  readonly activeTab?: 'overview' | 'artifacts';
+  readonly onTabChange?: (tab: 'overview' | 'artifacts') => void;
 }
 
 export function NodeDetailSection({
@@ -29,6 +31,8 @@ export function NodeDetailSection({
   runStatus = 'complete',
   currentNodeId = null,
   executionTraceSummary = null,
+  activeTab = 'overview',
+  onTabChange,
 }: Props) {
   const { data, isLoading, error } = useNodeDetail(sessionId, nodeId);
 
@@ -41,24 +45,64 @@ export function NodeDetailSection({
   }
 
   return (
-    <div>
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       <SectionHeader stepLabel={data?.stepLabel ?? null} nodeId={nodeId} />
-      <div className="p-4 space-y-4">
+
+      {data && data.artifacts.length > 0 && onTabChange && (
+        <div className="flex border-b border-[var(--border)] shrink-0 px-2 h-9 bg-[rgba(27,31,44,0.3)] select-none">
+          <button
+            type="button"
+            onClick={() => onTabChange('overview')}
+            className={`px-4 py-1.5 font-mono text-[9px] uppercase tracking-widest transition-colors relative cursor-pointer ${
+              activeTab === 'overview'
+                ? 'text-[var(--accent)] font-semibold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {activeTab === 'overview' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--accent)]" />
+            )}
+            Overview
+          </button>
+          <button
+            type="button"
+            onClick={() => onTabChange('artifacts')}
+            className={`px-4 py-1.5 font-mono text-[9px] uppercase tracking-widest transition-colors relative cursor-pointer ${
+              activeTab === 'artifacts'
+                ? 'text-[var(--accent)] font-semibold'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {activeTab === 'artifacts' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--accent)]" />
+            )}
+            Artifacts ({data.artifacts.length})
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto min-h-0 flex flex-col">
         {isLoading && (
-          <div className="text-[var(--text-secondary)] text-sm">Loading...</div>
+          <div className="p-4 text-[var(--text-secondary)] text-sm">Loading...</div>
         )}
         {error && (
-          <div className="text-[var(--error)] text-sm bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3">
+          <div className="m-4 text-[var(--error)] text-sm bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3">
             {error.message}
           </div>
         )}
         {data && (
-          <NodeDetailContent
-            detail={data}
-            runStatus={runStatus}
-            currentNodeId={currentNodeId}
-            executionTraceSummary={executionTraceSummary}
-          />
+          activeTab === 'artifacts' && data.artifacts.length > 0 ? (
+            <ArtifactsTab artifacts={data.artifacts} />
+          ) : (
+            <div className="p-4 space-y-4">
+              <NodeDetailContent
+                detail={data}
+                runStatus={runStatus}
+                currentNodeId={currentNodeId}
+                executionTraceSummary={executionTraceSummary}
+              />
+            </div>
+          )
         )}
       </div>
     </div>
@@ -374,10 +418,7 @@ const SECTION_REGISTRY: readonly SectionDef[] = [
   {
     id: 'artifacts',
     column: 'primary',
-    render: ({ detail }) =>
-      detail.artifacts.length > 0
-        ? <ArtifactsSection key="artifacts" artifacts={detail.artifacts} />
-        : null,
+    render: () => null,
   },
   {
     id: 'node-meta',
@@ -628,80 +669,8 @@ function GapsSection({ gaps }: { gaps: readonly ConsoleNodeGap[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Artifact renderer registry
-//
-// Keyed by content-type prefix (e.g. 'text/', 'application/json').
-// A renderer returns a ReactNode for the artifact content.
-// Artifacts over ARTIFACT_SIZE_LIMIT_BYTES are never passed to renderers --
-// a truncation notice is shown instead to avoid serialising large payloads.
+// Gaps
 // ---------------------------------------------------------------------------
-
-const ARTIFACT_SIZE_LIMIT_BYTES = 100_000;
-
-type ArtifactRenderer = (content: unknown) => React.ReactNode;
-
-const ARTIFACT_RENDERERS: ReadonlyArray<{
-  readonly prefix: string;
-  readonly render: ArtifactRenderer;
-}> = [
-  {
-    prefix: 'text/',
-    render: (content) => (
-      <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
-        {typeof content === 'string' ? content : String(content)}
-      </pre>
-    ),
-  },
-  {
-    prefix: 'application/json',
-    render: (content) => (
-      <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
-        {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
-      </pre>
-    ),
-  },
-];
-
-function renderArtifactContent(artifact: ConsoleArtifact): React.ReactNode {
-  if (artifact.byteLength > ARTIFACT_SIZE_LIMIT_BYTES) {
-    return (
-      <div className="text-[var(--text-muted)] italic">
-        Content too large to display ({formatBytes(artifact.byteLength)} -- limit {formatBytes(ARTIFACT_SIZE_LIMIT_BYTES)})
-      </div>
-    );
-  }
-
-  const renderer = ARTIFACT_RENDERERS.find((r) => artifact.contentType.startsWith(r.prefix));
-  if (renderer) return renderer.render(artifact.content);
-
-  // Fallback: render as JSON if content is an object, otherwise as string.
-  return (
-    <pre className="text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono max-h-40 overflow-y-auto">
-      {typeof artifact.content === 'string'
-        ? artifact.content
-        : JSON.stringify(artifact.content, null, 2)}
-    </pre>
-  );
-}
-
-function ArtifactsSection({ artifacts }: { artifacts: readonly ConsoleArtifact[] }) {
-  return (
-    <Section title={`Artifacts (${artifacts.length})`}>
-      <div className="space-y-2">
-        {artifacts.map((artifact) => (
-          <div key={artifact.sha256} className="bg-[var(--bg-primary)] border border-[var(--border)] px-4 py-3 text-xs space-y-2">
-            <div className="flex flex-wrap items-center gap-2 text-[var(--text-muted)]">
-              <span>{artifact.contentType}</span>
-              <span>//</span>
-              <span>{formatBytes(artifact.byteLength)}</span>
-            </div>
-            {renderArtifactContent(artifact)}
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -752,8 +721,4 @@ function KindBadge({ kind }: { kind: ConsoleNodeDetail['nodeKind'] }) {
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+

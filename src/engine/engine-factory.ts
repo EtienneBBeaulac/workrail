@@ -510,6 +510,7 @@ export async function createWorkRailEngine(
       resetContainer();
       engineActive = false;
     },
+    _toolContext: v2Ctx,
   };
 
   return engineOk(engine);

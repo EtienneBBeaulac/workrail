@@ -130,6 +130,7 @@ export interface AssessmentConsequenceDefinition {
 export interface AuditConfig {
   readonly prompt?: string;
   readonly rubric?: readonly string[];
+  readonly delegate?: ParallelDelegation;
 }
 
 export interface SynthesisConfig {
@@ -140,6 +141,8 @@ export interface SynthesisConfig {
 export interface VerificationConfig {
   readonly command?: string;
   readonly prompt?: string;
+  readonly cognitive?: boolean;
+  readonly delegate?: ParallelDelegation;
 }
 
 export interface WorkflowStepDefinition {

@@ -24,6 +24,8 @@ import type { SessionEventLogStoreError, LoadedSessionTruthV2 } from '../../v2/p
 import { deriveWorkflowHashRef } from '../../v2/durable-core/ids/workflow-hash-ref.js';
 import { DomainEventV1Schema, type DomainEventV1 } from '../../v2/durable-core/schemas/session/index.js';
 import { EVENT_KIND } from '../../v2/durable-core/constants.js';
+import { initShadowDirectory, extractShadowArtifacts } from './v2-execution/shadow-lifecycle.js';
+import { buildArtifactOutputs } from './v2-advance-core/event-builders.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -176,9 +178,41 @@ export function executeCheckpoint(
               return replayCheckpoint(truthLocked.events, dedupeKey, originalNodeLocked, sessionId, runId, nodeId, attemptId, tokenCodecPorts, tokenAliasStore, entropy);
             }
 
+            // Slice 4: Extract shadow artifacts on checkpoint
+            let workspacePath: string | undefined;
+            for (const e of truthLocked.events) {
+              if (e.kind === 'observation_recorded' && e.data.key === 'repo_root') {
+                workspacePath = e.data.value.value;
+                break;
+              }
+            }
+
+            let virtualOnly = false;
+            let shadowPath = '';
+            if (workspacePath) {
+              const shadowRes = initShadowDirectory(workspacePath, String(sessionId));
+              if (shadowRes.isOk()) {
+                virtualOnly = shadowRes.value.virtualOnly;
+                shadowPath = shadowRes.value.shadowPath;
+              }
+            }
+
+            let extractedArtifacts: any[] = [];
+            if (!virtualOnly && shadowPath) {
+              const extractRes = extractShadowArtifacts(shadowPath, truthLocked.events);
+              if (extractRes.isErr()) {
+                return errAsync<CheckpointOutput, CheckpointError>({
+                  kind: 'precondition_failed',
+                  message: `Artifact extraction failed: ${extractRes.error.message}`,
+                });
+              }
+              extractedArtifacts = extractRes.value;
+            }
+
             return writeCheckpoint(
               truthLocked, dedupeKey, originalNodeLocked, sessionId, runId, nodeId, attemptId,
               idFactory.mintNodeId(), () => idFactory.mintEventId(), lock, sessionStore, tokenCodecPorts, tokenAliasStore, entropy,
+              ctx.v2.sha256, extractedArtifacts
             );
           });
       }).mapErr((gateErr): CheckpointError => {
@@ -253,13 +287,14 @@ function writeCheckpoint(
   tokenCodecPorts: V2ToolContext['v2']['tokenCodecPorts'],
   aliasStore: V2ToolContext['v2']['tokenAliasStore'],
   entropy: V2ToolContext['v2']['entropy'],
+  sha256: V2ToolContext['v2']['sha256'],
+  extractedArtifacts: readonly unknown[],
 ): RA<CheckpointOutput, CheckpointError> {
 
   // Mint event IDs upfront so edge_created can reference node_created's eventId
   const nodeCreatedEventId = mintEventId();
-  const edgeCreatedEventId = mintEventId();
 
-  const rawEvents = [
+  const rawEvents: any[] = [
     {
       v: 1,
       eventId: nodeCreatedEventId,
@@ -276,26 +311,58 @@ function writeCheckpoint(
         snapshotRef: originalNode.data.snapshotRef,
       },
     },
-    {
+  ];
+
+  const artifactOutputsRes = buildArtifactOutputs(extractedArtifacts, attemptId, sha256);
+  if (artifactOutputsRes.isErr()) {
+    const errObj = artifactOutputsRes.error;
+    const errMsg = typeof errObj === 'object' && errObj !== null && 'message' in errObj ? (errObj as any).message : String(errObj.kind);
+    return errAsync({
+      kind: 'precondition_failed' as const,
+      message: `Artifact processing failed: ${errMsg}`,
+    });
+  }
+
+  for (let idx = 0; idx < artifactOutputsRes.value.length; idx++) {
+    const out = artifactOutputsRes.value[idx]!;
+    const outputEventId = mintEventId();
+    rawEvents.push({
       v: 1,
-      eventId: edgeCreatedEventId,
-      eventIndex: truth.events.length + 1,
+      eventId: outputEventId,
+      eventIndex: truth.events.length + rawEvents.length,
       sessionId: String(sessionId),
       timestampMs: Date.now(),
-      kind: EVENT_KIND.EDGE_CREATED,
-      dedupeKey,
-      scope: { runId: String(runId) },
+      kind: EVENT_KIND.NODE_OUTPUT_APPENDED,
+      dedupeKey: `${dedupeKey}:artifact:${idx}`,
+      scope: { runId: String(runId), nodeId: String(checkpointNodeId) },
       data: {
-        edgeKind: 'checkpoint' as const,
-        fromNodeId: String(nodeId),
-        toNodeId: String(checkpointNodeId),
-        cause: {
-          kind: 'checkpoint_created' as const,
-          eventId: String(nodeCreatedEventId),
-        },
+        outputId: out.outputId,
+        outputChannel: out.outputChannel,
+        payload: out.payload,
+      },
+    });
+  }
+
+  const edgeCreatedEventId = mintEventId();
+  rawEvents.push({
+    v: 1,
+    eventId: edgeCreatedEventId,
+    eventIndex: truth.events.length + rawEvents.length,
+    sessionId: String(sessionId),
+    timestampMs: Date.now(),
+    kind: EVENT_KIND.EDGE_CREATED,
+    dedupeKey,
+    scope: { runId: String(runId) },
+    data: {
+      edgeKind: 'checkpoint' as const,
+      fromNodeId: String(nodeId),
+      toNodeId: String(checkpointNodeId),
+      cause: {
+        kind: 'checkpoint_created' as const,
+        eventId: String(nodeCreatedEventId),
       },
     },
-  ];
+  });
 
   // Validate events against schema before appending (fail fast on schema violations)
   const validated = validateEvents(rawEvents);

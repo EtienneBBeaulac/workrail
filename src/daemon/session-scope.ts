@@ -23,6 +23,7 @@ import type { ReadFileState } from './types.js';
 import type { ActiveSessionSet } from './active-sessions.js';
 import type { DaemonEventEmitter, RunId } from './daemon-events.js';
 import type { SessionId } from '../v2/durable-core/ids/index.js';
+import type { Result } from 'neverthrow';
 
 // ---------------------------------------------------------------------------
 // FileStateTracker
@@ -277,6 +278,9 @@ export interface SessionScope {
    */
   readonly triggerContext?: Readonly<Record<string, unknown>>;
 
+  /** The trigger's agent configuration overrides. */
+  readonly triggerAgentConfig?: import('./types.js').WorkflowTrigger['agentConfig'];
+
   /**
    * Registry mapping workrailSessionId -> abort callback.
    * Used by `spawn_agent` to register/deregister child sessions.
@@ -313,4 +317,15 @@ export interface SessionScope {
    */
   readonly onChildStepAdvance?: () => void;
 
+  /**
+   * Record that a file was edited in the current step.
+   * Increments the step-local edit count for that file and aborts if it exceeds 5.
+   */
+  readonly recordFileEdit: (filePath: string) => Result<void, Error>;
+
+  /**
+   * Assert that this process holds the active workspace lock for this session.
+   * Throws an error if the lock was stolen or is inactive.
+   */
+  readonly assertWorkspaceLockActive: () => void;
 }

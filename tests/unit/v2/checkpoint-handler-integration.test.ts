@@ -10,6 +10,7 @@ import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { okAsync } from 'neverthrow';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -55,7 +56,7 @@ function resolveSessionIdFromToken(token: string, aliasStore: TokenAliasStorePor
   return entry.sessionId;
 }
 
-async function mkV2Deps() {
+async function mkV2Deps(workspaceRoot?: string) {
   const dataDir = new LocalDataDirV2(process.env);
   const fsPort = new NodeFileSystemV2();
   const sha256 = new NodeSha256V2();
@@ -76,7 +77,18 @@ async function mkV2Deps() {
   const keyring = await keyringPort.loadOrCreate().match(v => v, e => { throw new Error(`keyring: ${e.code}`); });
   const tokenCodecPorts = unsafeTokenCodecPorts({ keyring, hmac, base64url, base32, bech32m });
   const tokenAliasStore = new InMemoryTokenAliasStoreV2();
-  return { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, entropy, tokenCodecPorts, tokenAliasStore, validationPipelineDeps: createTestValidationPipelineDeps() };
+  const workspaceResolver = {
+    resolve: () => {
+      if (workspaceRoot) {
+        return okAsync([
+          { key: 'repo_root' as const, value: workspaceRoot },
+          { key: 'repo_root_hash' as const, value: 'test-hash' }
+        ] as const);
+      }
+      return okAsync([] as const);
+    }
+  };
+  return { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, idFactory, entropy, tokenCodecPorts, tokenAliasStore, workspaceResolver, validationPipelineDeps: createTestValidationPipelineDeps() };
 }
 
 describe('handleV2CheckpointWorkflow (integration)', () => {
@@ -128,7 +140,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
   async function buildCtx(): Promise<ToolContext> {
     const workflowService = resolveService<any>(DI.Services.Workflow);
     const featureFlags = resolveService<any>(DI.Infra.FeatureFlags);
-    const v2 = await mkV2Deps();
+    const v2 = await mkV2Deps(root);
     return { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
   }
 
@@ -285,5 +297,95 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
     expect(gateSpy).not.toHaveBeenCalled();
 
     gateSpy.mockRestore();
+  });
+
+  it('checkpoint_workflow extracts, validates, and appends shadow artifacts', async () => {
+    const ctx = await buildCtx();
+    const start = await startWorkflow(ctx);
+    const sessionId = asSessionId(resolveSessionIdFromToken(start.checkpointToken, ctx.v2!.tokenAliasStore!));
+
+    // Create shadow folder
+    const shadowPath = path.join(root, '.workrail', 'artifacts', sessionId);
+    await fs.mkdir(shadowPath, { recursive: true });
+
+    // Write a valid loop control artifact
+    const art = {
+      kind: 'wr.loop_control',
+      decision: 'continue',
+      metadata: { reason: 'test cp integration' }
+    };
+    await fs.writeFile(path.join(shadowPath, 'loop.json'), JSON.stringify(art), 'utf8');
+
+    // Run checkpoint
+    const cp = await handleV2CheckpointWorkflow({ checkpointToken: start.checkpointToken }, ctx);
+    expect(cp.type).toBe('success');
+
+    // Load truth and verify node_output_appended event was written
+    const truthRes = await ctx.v2!.sessionStore.load(sessionId);
+    expect(truthRes.isOk()).toBe(true);
+    const truth = truthRes.value;
+
+    const artifactEvents = truth.events.filter(e => e.kind === 'node_output_appended' && e.data.outputChannel === 'artifact');
+    expect(artifactEvents).toHaveLength(1);
+    expect((artifactEvents[0].data.payload as any).content).toEqual(art);
+  });
+
+  it('checkpoint_workflow rejects invalid shadow artifacts', async () => {
+    const ctx = await buildCtx();
+    const start = await startWorkflow(ctx);
+    const sessionId = asSessionId(resolveSessionIdFromToken(start.checkpointToken, ctx.v2!.tokenAliasStore!));
+
+    // Create shadow folder
+    const shadowPath = path.join(root, '.workrail', 'artifacts', sessionId);
+    await fs.mkdir(shadowPath, { recursive: true });
+
+    // Write an invalid loop control artifact (missing decision)
+    const art = {
+      kind: 'wr.loop_control',
+      metadata: { reason: 'invalid cp integration' }
+    };
+    await fs.writeFile(path.join(shadowPath, 'loop.json'), JSON.stringify(art), 'utf8');
+
+    // Run checkpoint
+    const cp = await handleV2CheckpointWorkflow({ checkpointToken: start.checkpointToken }, ctx);
+    expect(cp.type).toBe('error');
+    expect((cp as any).message).toContain('Artifact extraction failed');
+  });
+
+  it('continue_workflow (advance) extracts, validates, and appends shadow artifacts', async () => {
+    const ctx = await buildCtx();
+    const start = await startWorkflow(ctx);
+    const sessionId = asSessionId(resolveSessionIdFromToken(start.continueToken, ctx.v2!.tokenAliasStore!));
+
+    // Create shadow folder
+    const shadowPath = path.join(root, '.workrail', 'artifacts', sessionId);
+    await fs.mkdir(shadowPath, { recursive: true });
+
+    // Write a valid loop control artifact
+    const art = {
+      kind: 'wr.loop_control',
+      decision: 'continue',
+      metadata: { reason: 'test continue integration' }
+    };
+    await fs.writeFile(path.join(shadowPath, 'loop.json'), JSON.stringify(art), 'utf8');
+
+    // Run continue (advance)
+    const result = await handleV2ContinueWorkflow({
+      continueToken: start.continueToken,
+      intent: 'advance',
+      workspacePath: root,
+      output: { notesMarkdown: 'Step 1 complete' }
+    } as any, ctx);
+
+    expect(result.type).toBe('success');
+
+    // Load truth and verify node_output_appended event was written
+    const truthRes = await ctx.v2!.sessionStore.load(sessionId);
+    expect(truthRes.isOk()).toBe(true);
+    const truth = truthRes.value;
+
+    const artifactEvents = truth.events.filter(e => e.kind === 'node_output_appended' && e.data.outputChannel === 'artifact');
+    expect(artifactEvents).toHaveLength(1);
+    expect((artifactEvents[0].data.payload as any).content).toEqual(art);
   });
 });

@@ -1248,7 +1248,10 @@ export class ValidationEngine {
         suggestions.push('Remove the verification property or change the step type');
       } else {
         const v = typedStep.verification;
-        if (v.command !== undefined && (typeof v.command !== 'string' || v.command.trim() === '')) {
+        if (v.command !== undefined && v.delegate !== undefined) {
+          issues.push(`${contextLabel}: verification configuration cannot declare both command and delegate properties`);
+          suggestions.push('Use either command for shell verification or delegate for subagent delegation, not both');
+        } else if (v.command !== undefined && (typeof v.command !== 'string' || v.command.trim() === '')) {
           issues.push(`${contextLabel}: verification command must be a non-empty string when provided`);
         }
       }
@@ -1261,9 +1264,10 @@ export class ValidationEngine {
       } else {
         const a = typedStep.audit;
         if ((!a.prompt || typeof a.prompt !== 'string' || a.prompt.trim() === '') &&
-            (!a.rubric || !Array.isArray(a.rubric) || a.rubric.length === 0)) {
-          issues.push(`${contextLabel}: audit configuration must declare a prompt or at least one rubric item`);
-          suggestions.push('Add a prompt string or rubric array to the audit configuration');
+            (!a.rubric || !Array.isArray(a.rubric) || a.rubric.length === 0) &&
+            !a.delegate) {
+          issues.push(`${contextLabel}: audit configuration must declare a prompt, a delegate, or at least one rubric item`);
+          suggestions.push('Add a prompt string, a delegate config, or rubric array to the audit configuration');
         }
         if (a.rubric && Array.isArray(a.rubric)) {
           for (let i = 0; i < a.rubric.length; i++) {

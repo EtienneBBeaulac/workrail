@@ -218,6 +218,23 @@ Important implementation detail:
 - The default durable output is a short recap in `output.notesMarkdown` (recorded by the agent when advancing or checkpointing).
 - Structured artifacts are **optional** and must never be required for a workflow to be usable.
 
+### First-Class Artifacts & Workspace Shadowing
+
+Workflows can declare and require structured artifacts to be produced during execution. WorkRail provides a secure **Workspace Shadow Directory** system that decouples artifact files from the git repository while allowing the agent to read and write them using standard filesystem tools.
+
+#### How it works:
+1. **Shadow Directory Setup**: During session startup, the engine creates a secure, local, gitignored shadow directory under `.workrail/artifacts/<sessionId>/`. It updates `.git/info/exclude` to ensure the `.workrail/` directory is never tracked by git.
+2. **Path Injection**: The engine injects the path of this shadow directory into the `artifactsDirectory` parameter of the pending step payload (e.g., `".workrail/artifacts/sess_123/"`) and appends a footer reminder to the step prompt.
+3. **Agent Writing**: The agent discovers the path and writes artifacts (e.g., JSON, Markdown, HTML) directly to that directory.
+4. **Extraction & Validation**: Upon calling `continue_workflow` or `checkpoint_workflow` to advance/checkpoint the step, the engine automatically extracts the newly written or modified files from the shadow directory, validates them against Zod schemas, and commits them to the durable session event log as first-class events.
+5. **Rehydration Protection**: When a session is resumed or rehydrated, the engine restores the shadow directory from the event log state. To prevent overwriting uncommitted developer edits, it compares the SHA-256 hashes of local shadow files first and prints warning alerts if drift is detected.
+
+#### Authoring Guidelines:
+- Do not hardcode the shadow path. Always dynamically read the `artifactsDirectory` field provided in the pending step payload.
+- Designate the expected artifact kinds under the step's output contracts.
+- Use `worktrain export-artifact` CLI command (or Console downloads) to promote artifacts to Git when they are ready for PR review.
+
+
 ### Session analytics context keys (`metrics_*`)
 
 The engine reads `metrics_*` context keys from the final `continue_workflow` call to build session attribution data for the `run_completed` event. These keys feed `captureConfidence`, `agentCommitShas`, and related fields.
@@ -653,6 +670,35 @@ WorkRail v2 treats debugging/auditing as first-class:
 - WorkRail should record a bounded “decision trace” (why a step was selected/skipped, loop decisions, fork detection) as durable data.
 - Dashboards and exports can surface this trace for post-mortems without requiring the agent to carry debugging internals in chat.
 - “Cognitive audits” (subagent auditor model) are supported via built-in templates/features, not bespoke author boilerplate.
+
+### Cognitive Verification & Subagent Audits
+
+WorkRail v2 supports declarative, platform-agnostic verification and auditing via:
+
+1. **Cognitive Verification** (`verification.cognitive`): Command-free verification. When set to `true`, the engine generates a prompt instructing the agent to autonomously discover, write, run, and verify tests or build checks for the active workspace rather than relying on hardcoded shell commands.
+2. **Subagent Delegation** (`verification.delegate` and `audit.delegate`): Suspends the parent session and programmatically delegates verification or auditing to a sandboxed subagent loop.
+
+```json
+"verification": {
+  "cognitive": true
+}
+```
+
+Or delegating to a subagent:
+
+```json
+"verification": {
+  "delegate": {
+    "workflowId": "wr.routine-code-reviewer",
+    "modelTier": "heavy",
+    "contextMapping": {
+      "reframedProblem": "targetGoal"
+    }
+  }
+}
+```
+
+*Note: A single step definition cannot declare both `verification.command` and `verification.delegate` properties. They are mutually exclusive validation modes.*
 
 ### Forced self-audit over self-reported confidence
 

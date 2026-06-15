@@ -553,3 +553,65 @@ describe('formatV2ExecutionResponse — persona headers', () => {
     }
   });
 });
+
+describe('formatV2ExecutionResponse — artifacts reminder footnote', () => {
+  it('appends footnote to classic success prompt when artifactsDirectory is set', () => {
+    const response = startResponse({
+      pending: {
+        stepId: 'step-1',
+        title: 'Step 1',
+        prompt: 'Original prompt text.',
+        artifactsDirectory: '.workrail/artifacts/s_123/',
+      },
+    });
+    const result = formatV2ExecutionResponse(response, false)!;
+    expect(result.primary).toContain('Original prompt text.');
+    expect(result.primary).toContain('Active Session Artifacts:\n- Directory: .workrail/artifacts/s_123/');
+    expect(result.primary).toContain('(Please read and edit session artifacts inside this folder using standard filesystem tools.)');
+  });
+
+  it('appends footnote to classic rehydrate prompt when artifactsDirectory is set', () => {
+    const response = continueOkResponse({
+      nextIntent: 'rehydrate_only',
+      pending: {
+        stepId: 'step-1',
+        title: 'Step 1',
+        prompt: 'Original prompt text.',
+        artifactsDirectory: '.workrail/artifacts/s_123/',
+      },
+    });
+    const result = formatV2ExecutionResponse(response, false)!;
+    expect(result.primary).toContain('Original prompt text.');
+    expect(result.primary).toContain('Active Session Artifacts:\n- Directory: .workrail/artifacts/s_123/');
+  });
+
+  it('appends footnote to clean success prompt when artifactsDirectory is set', () => {
+    const response = startResponse({
+      pending: {
+        stepId: 'step-1',
+        title: 'Step 1',
+        prompt: 'Original prompt text.',
+        artifactsDirectory: '.workrail/artifacts/s_123/',
+      },
+    });
+    const result = formatV2ExecutionResponse(response, true)!; // cleanResponseFormat: true
+    expect(result.primary).toContain('Original prompt text.');
+    expect(result.primary).toContain('Active Session Artifacts:\n- Directory: .workrail/artifacts/s_123/');
+  });
+
+  it('appends footnote to clean rehydrate prompt when artifactsDirectory is set', () => {
+    const response = continueOkResponse({
+      nextIntent: 'rehydrate_only',
+      pending: {
+        stepId: 'step-1',
+        title: 'Step 1',
+        prompt: 'Original prompt text.',
+        artifactsDirectory: '.workrail/artifacts/s_123/',
+      },
+    });
+    const result = formatV2ExecutionResponse(response, true)!; // cleanResponseFormat: true
+    expect(result.primary).toContain('Original prompt text.');
+    expect(result.primary).toContain('Active Session Artifacts:\n- Directory: .workrail/artifacts/s_123/');
+  });
+});
+

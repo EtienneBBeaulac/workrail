@@ -1,5 +1,7 @@
 import type { V2ContinueWorkflowInput } from '../../v2/tools.js';
 import type { V2ContinueWorkflowOutputSchema } from '../../output-schemas.js';
+import * as fs from 'fs';
+import * as path from 'path';
 import { toPendingStep } from '../../output-schemas.js';
 import { detectBindingDrift, type BindingDriftWarning } from '../../../v2/durable-core/domain/binding-drift.js';
 // Use the uncached loader for drift detection — we want the current on-disk state,
@@ -36,6 +38,7 @@ import { EVENT_KIND } from '../../../v2/durable-core/constants.js';
 import { buildNextCall } from './index.js';
 import { buildStepContentEnvelope, type StepContentEnvelope, type ResolvedReference } from '../../step-content-envelope.js';
 import { assertOutput, assertContinueTokenPresence } from '../../assert-output.js';
+import { initShadowDirectory, rehydrateShadowFiles } from './shadow-lifecycle.js';
 
 /** Result wrapper for rehydrate — envelope is present only when a pending step exists. */
 export interface RehydrateResult {
@@ -65,6 +68,25 @@ export function handleRehydrateIntent(args: {
   readonly cleanResponseFormat?: boolean;
 }): RA<RehydrateResult, ContinueWorkflowError> {
   const { input, sessionId, runId, nodeId, workflowHashRef, truth, tokenCodecPorts, pinnedStore, snapshotStore, idFactory, aliasStore, entropy, resolvedRootUris, cleanResponseFormat } = args;
+
+  // Slice 1: Initialize shadow directory and git exclude
+  let workspacePath = input.workspacePath;
+  if (!workspacePath) {
+    for (const e of truth.events) {
+      if (e.kind === 'observation_recorded' && e.data.key === 'repo_root') {
+        workspacePath = e.data.value.value;
+        break;
+      }
+    }
+  }
+
+  let virtualOnly = false;
+  if (workspacePath) {
+    const shadowRes = initShadowDirectory(workspacePath, String(sessionId));
+    if (shadowRes.isOk()) {
+      virtualOnly = shadowRes.value.virtualOnly;
+    }
+  }
 
   const runStarted = truth.events.find(
     (e): e is Extract<DomainEventV1, { kind: 'run_started' }> => e.kind === EVENT_KIND.RUN_STARTED && e.scope.runId === String(runId)
@@ -187,6 +209,22 @@ export function handleRehydrateIntent(args: {
             workflowHashRef: String(workflowHashRef),
           };
 
+          // Slice 2: Rehydrate shadow files
+          const forceReset = input.context?.forceReset === true ||
+                             input.context?.forceReset === 'true' ||
+                             input.context?.resetShadow === true ||
+                             input.context?.force === true;
+
+          const rehydrateWarnings: string[] = [];
+          if (workspacePath && !virtualOnly) {
+            const shadowParent = path.join(fs.realpathSync(workspacePath), '.workrail');
+            const shadowPath = path.join(shadowParent, 'artifacts', String(sessionId));
+            const rehydrateResult = rehydrateShadowFiles(truth.events, shadowPath, forceReset);
+            if (rehydrateResult.isOk()) {
+              rehydrateWarnings.push(...rehydrateResult.value);
+            }
+          }
+
           return mintContinueAndCheckpointTokens({ entry: entryBase, ports: tokenCodecPorts, aliasStore, entropy })
             .mapErr((failure) => ({ kind: 'token_signing_failed' as const, cause: failure as never }))
             .andThen(({ continueToken: continueTokenValue, checkpointToken: checkpointTokenValue }) => {
@@ -212,13 +250,32 @@ export function handleRehydrateIntent(args: {
               }
 
               const meta = metaRes.value;
+              
+              // Slice 2: Inject rehydration warnings into step prompt
+              let updatedPrompt = meta.prompt;
+              if (rehydrateWarnings.length > 0) {
+                const warningBlock = '\n\n' + 
+                  '> [!WARNING]\n' +
+                  '> **Rehydration Skip Alert**:\n' +
+                  rehydrateWarnings.map(w => `> - ${w}`).join('\n') + '\n';
+                updatedPrompt += warningBlock;
+              }
+
+              const updatedMeta = {
+                ...meta,
+                prompt: updatedPrompt,
+                artifactsDirectory: !virtualOnly ? `.workrail/artifacts/${sessionId}/` : undefined,
+              };
+
               const preferences = derivePreferencesOrDefault({ truth, runId, nodeId });
-              const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: meta });
+              const nextIntent = deriveNextIntent({ rehydrateOnly: true, isComplete, pending: updatedMeta });
 
               const contentEnvelope = buildStepContentEnvelope({
-                meta,
+                meta: updatedMeta,
                 references: pinned.resolvedReferences ?? buildPinnedReferencesFallback((pinned.definition as WorkflowDefinition).references ?? []),
               });
+
+              const allWarnings = [...driftWarnings, ...rehydrateWarnings];
 
               const parsed = assertOutput(
                 {
@@ -226,11 +283,11 @@ export function handleRehydrateIntent(args: {
                   continueToken: continueTokenValue,
                   checkpointToken: checkpointTokenValue,
                   isComplete,
-                  pending: toPendingStep(meta),
+                  pending: toPendingStep(updatedMeta),
                   preferences,
                   nextIntent,
-                  nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: meta }),
-                  ...(driftWarnings.length > 0 ? { warnings: [...driftWarnings] } : {}),
+                  nextCall: buildNextCall({ continueToken: continueTokenValue, isComplete, pending: updatedMeta }),
+                  ...(allWarnings.length > 0 ? { warnings: allWarnings } : {}),
                 },
                 assertContinueTokenPresence,
               ) as z.infer<typeof V2ContinueWorkflowOutputSchema>;

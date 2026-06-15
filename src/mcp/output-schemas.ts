@@ -229,6 +229,7 @@ export const V2PendingStepSchema = z.object({
   prompt: z.string().min(1),
   agentRole: z.string().min(1).optional(),
   modelTier: z.enum(['lightweight', 'mid', 'heavy']).optional(),
+  artifactsDirectory: z.string().optional(),
 });
 
 export type V2PendingStep = z.infer<typeof V2PendingStepSchema>;
@@ -243,6 +244,7 @@ export function toPendingStep(meta: {
   readonly prompt: string;
   readonly agentRole?: string;
   readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly artifactsDirectory?: string;
 } | null): V2PendingStep | null {
   if (!meta) return null;
   return {
@@ -251,6 +253,7 @@ export function toPendingStep(meta: {
     prompt: meta.prompt,
     ...(meta.agentRole ? { agentRole: meta.agentRole } : {}),
     ...(meta.modelTier ? { modelTier: meta.modelTier } : {}),
+    ...(meta.artifactsDirectory ? { artifactsDirectory: meta.artifactsDirectory } : {}),
   };
 }
 

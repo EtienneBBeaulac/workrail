@@ -6,6 +6,9 @@
  * via Promise.all and blocks until all complete.
  */
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
@@ -14,6 +17,10 @@ import { parseContinueTokenOrFail } from '../../v2/usecases/v2-token-ops.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
 import { asSessionId, type SessionId } from '../../v2/durable-core/ids/index.js';
+import { WorkspaceLockManager } from '../workspace-lock.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
 // WHY import type: runWorkflow is passed as a parameter (runWorkflowFn), not called
 // directly. The type reference is erased at compile time -- no runtime circular dep.
 import type { runWorkflow } from '../workflow-runner.js';
@@ -35,6 +42,8 @@ interface SingleSpawnSpec {
   readonly context?: Readonly<Record<string, unknown>>;
   readonly agentConfig?: {
     readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+    readonly enableWriteTools?: boolean;
+    readonly enable_write_tools?: boolean;
   };
 }
 
@@ -94,14 +103,22 @@ function parseParams(raw: unknown): ParsedParams {
       if (a['context'] !== undefined && (typeof a['context'] !== 'object' || a['context'] === null || Array.isArray(a['context']))) throw new Error(`spawn_agent: agents[${i}].context must be a plain object if provided`);
       if (a['agentConfig'] !== undefined && (typeof a['agentConfig'] !== 'object' || a['agentConfig'] === null || Array.isArray(a['agentConfig']))) throw new Error(`spawn_agent: agents[${i}].agentConfig must be a plain object if provided`);
       
-      let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy' } | undefined;
+      let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy'; enableWriteTools?: boolean; enable_write_tools?: boolean } | undefined;
       if (a['agentConfig'] !== undefined) {
         const ac = a['agentConfig'] as Record<string, unknown>;
         if (ac['modelTier'] !== undefined && ac['modelTier'] !== 'lightweight' && ac['modelTier'] !== 'mid' && ac['modelTier'] !== 'heavy') {
           throw new Error(`spawn_agent: agents[${i}].agentConfig.modelTier must be 'lightweight', 'mid', or 'heavy' if provided`);
         }
+        if (ac['enableWriteTools'] !== undefined && typeof ac['enableWriteTools'] !== 'boolean') {
+          throw new Error(`spawn_agent: agents[${i}].agentConfig.enableWriteTools must be a boolean if provided`);
+        }
+        if (ac['enable_write_tools'] !== undefined && typeof ac['enable_write_tools'] !== 'boolean') {
+          throw new Error(`spawn_agent: agents[${i}].agentConfig.enable_write_tools must be a boolean if provided`);
+        }
         agentConfig = {
           ...(ac['modelTier'] !== undefined ? { modelTier: ac['modelTier'] as 'lightweight' | 'mid' | 'heavy' } : {}),
+          ...(ac['enableWriteTools'] !== undefined ? { enableWriteTools: ac['enableWriteTools'] as boolean } : {}),
+          ...(ac['enable_write_tools'] !== undefined ? { enable_write_tools: ac['enable_write_tools'] as boolean } : {}),
         };
       }
 
@@ -122,14 +139,22 @@ function parseParams(raw: unknown): ParsedParams {
   if (typeof p['workspacePath'] !== 'string' || !p['workspacePath']) throw new Error('spawn_agent: workspacePath must be a non-empty string');
   if (p['agentConfig'] !== undefined && (typeof p['agentConfig'] !== 'object' || p['agentConfig'] === null || Array.isArray(p['agentConfig']))) throw new Error('spawn_agent: agentConfig must be a plain object if provided');
 
-  let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy' } | undefined;
+  let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy'; enableWriteTools?: boolean; enable_write_tools?: boolean } | undefined;
   if (p['agentConfig'] !== undefined) {
     const ac = p['agentConfig'] as Record<string, unknown>;
     if (ac['modelTier'] !== undefined && ac['modelTier'] !== 'lightweight' && ac['modelTier'] !== 'mid' && ac['modelTier'] !== 'heavy') {
       throw new Error("spawn_agent: agentConfig.modelTier must be 'lightweight', 'mid', or 'heavy' if provided");
     }
+    if (ac['enableWriteTools'] !== undefined && typeof ac['enableWriteTools'] !== 'boolean') {
+      throw new Error("spawn_agent: agentConfig.enableWriteTools must be a boolean if provided");
+    }
+    if (ac['enable_write_tools'] !== undefined && typeof ac['enable_write_tools'] !== 'boolean') {
+      throw new Error("spawn_agent: agentConfig.enable_write_tools must be a boolean if provided");
+    }
     agentConfig = {
       ...(ac['modelTier'] !== undefined ? { modelTier: ac['modelTier'] as 'lightweight' | 'mid' | 'heavy' } : {}),
+      ...(ac['enableWriteTools'] !== undefined ? { enableWriteTools: ac['enableWriteTools'] as boolean } : {}),
+      ...(ac['enable_write_tools'] !== undefined ? { enable_write_tools: ac['enable_write_tools'] as boolean } : {}),
     };
   }
 
@@ -174,6 +199,197 @@ interface SpawnContext {
    * When present, resets the parent's stall detection timer (C2 path).
    */
   readonly onChildStepAdvance?: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox helper functions
+// ---------------------------------------------------------------------------
+
+export async function findGitRoot(startPath: string): Promise<string | null> {
+  let current = path.resolve(startPath);
+  while (true) {
+    try {
+      const stat = await fs.stat(path.join(current, '.git'));
+      if (stat.isDirectory()) {
+        return current;
+      }
+    } catch {
+      // not found
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return null;
+}
+
+export async function copyWorkspace(src: string, dest: string): Promise<void> {
+  await fs.mkdir(dest, { recursive: true });
+  await fs.cp(src, dest, {
+    recursive: true,
+    filter: (filePath) => {
+      const relative = path.relative(src, filePath);
+      if (relative) {
+        const parts = relative.split(path.sep);
+        if (parts.some(p => p === '.git' || p === 'node_modules' || p === 'dist' || p === '.next' || p === '.turbo' || p === 'build')) {
+          return false;
+        }
+      }
+      return true;
+    }
+  });
+}
+
+export async function linkAllNodeModules(srcRoot: string, destRoot: string): Promise<void> {
+  async function traverse(currentSrc: string) {
+    const relative = path.relative(srcRoot, currentSrc);
+    if (relative) {
+      const parts = relative.split(path.sep);
+      if (parts.some(p => p === '.git' || p === 'node_modules' || p === 'dist' || p === '.next' || p === '.turbo' || p === 'build')) {
+        return;
+      }
+    }
+    const entries = await fs.readdir(currentSrc, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(currentSrc, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') {
+          const destPath = path.join(destRoot, path.relative(srcRoot, entryPath));
+          await fs.mkdir(path.dirname(destPath), { recursive: true });
+          try {
+            await fs.symlink(entryPath, destPath, 'dir');
+          } catch {
+            await fs.symlink(entryPath, destPath, 'junction');
+          }
+        } else if (entry.name !== '.git' && entry.name !== 'dist' && entry.name !== '.next' && entry.name !== '.turbo' && entry.name !== 'build') {
+          await traverse(entryPath);
+        }
+      }
+    }
+  }
+  await traverse(srcRoot);
+}
+
+export async function copyBackChanges(sandboxWorkspacePath: string, parentWorkspacePath: string): Promise<void> {
+  await fs.cp(sandboxWorkspacePath, parentWorkspacePath, {
+    recursive: true,
+    filter: (src) => {
+      const relative = path.relative(sandboxWorkspacePath, src);
+      if (relative) {
+        const parts = relative.split(path.sep);
+        if (parts.some(p => p === '.git' || p === 'node_modules' || p === 'dist' || p === '.next' || p === '.turbo' || p === 'build')) {
+          return false;
+        }
+      }
+      return true;
+    }
+  });
+}
+
+export async function cleanupSandbox(sandboxPath: string): Promise<void> {
+  async function removeLinks(current: string) {
+    let stat;
+    try {
+      stat = await fs.lstat(current);
+    } catch {
+      return;
+    }
+
+    if (stat.isSymbolicLink()) {
+      await fs.unlink(current);
+      return;
+    }
+
+    if (stat.isDirectory()) {
+      let isJunction = false;
+      try {
+        await fs.unlink(current);
+        isJunction = true;
+      } catch {
+        // real directory
+      }
+      if (!isJunction) {
+        const entries = await fs.readdir(current, { withFileTypes: true });
+        for (const entry of entries) {
+          const entryPath = path.join(current, entry.name);
+          if (entry.isSymbolicLink()) {
+            try {
+              await fs.unlink(entryPath);
+            } catch {
+              // best effort
+            }
+          } else if (entry.isDirectory()) {
+            let entryIsJunction = false;
+            try {
+              await fs.unlink(entryPath);
+              entryIsJunction = true;
+            } catch {
+              // real directory
+            }
+            if (!entryIsJunction) {
+              await removeLinks(entryPath);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    await removeLinks(sandboxPath);
+    await fs.rm(sandboxPath, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`[Sandbox Cleanup] Error cleaning up sandbox at ${sandboxPath}:`, err);
+  }
+}
+
+interface GitSnapshot {
+  readonly tracked: Map<string, string>;
+  readonly untracked: Set<string>;
+}
+
+async function getGitStatus(cwd: string): Promise<GitSnapshot> {
+  const tracked = new Map<string, string>();
+  const untracked = new Set<string>();
+  try {
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd });
+    const lines = stdout.split('\n');
+    for (const line of lines) {
+      if (!line) continue;
+      const code = line.slice(0, 2);
+      const filePath = line.slice(3).trim();
+      if (code === '??') {
+        untracked.add(filePath);
+      } else {
+        tracked.set(filePath, code);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { tracked, untracked };
+}
+
+async function restoreGitSnapshot(cwd: string, pre: GitSnapshot): Promise<void> {
+  try {
+    const post = await getGitStatus(cwd);
+    // 1. Delete untracked files created by the subagent
+    for (const file of post.untracked) {
+      if (!pre.untracked.has(file)) {
+        await fs.rm(path.join(cwd, file), { force: true, recursive: true }).catch(() => {});
+      }
+    }
+    // 2. Restore tracked files modified by the subagent
+    for (const [file] of post.tracked.entries()) {
+      if (!pre.tracked.has(file)) {
+        await execFileAsync('git', ['restore', file], { cwd }).catch(() => {});
+      }
+    }
+  } catch {
+    // best effort
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +498,33 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   // Decoupled use case returns sessionId directly.
   const childSessionId: SessionId = startResult.value.sessionId;
 
+  // ---- Setup Copy Sandbox ----
+  let sandboxWorkspacePath = spec.workspacePath;
+  let isSandboxed = false;
+  const childSessionIdStr = String(childSessionId);
+  const sandboxRoot = path.join(os.homedir(), '.workrail', 'sandbox', childSessionIdStr);
+
+  let gitSnapshot: GitSnapshot | undefined;
+  try {
+    const gitRoot = await findGitRoot(spec.workspacePath);
+    if (gitRoot && gitRoot !== spec.workspacePath) {
+      await copyWorkspace(gitRoot, sandboxRoot);
+      await linkAllNodeModules(gitRoot, sandboxRoot);
+      sandboxWorkspacePath = path.join(sandboxRoot, path.relative(gitRoot, spec.workspacePath));
+    } else {
+      await copyWorkspace(spec.workspacePath, sandboxRoot);
+      await linkAllNodeModules(spec.workspacePath, sandboxRoot);
+      sandboxWorkspacePath = sandboxRoot;
+    }
+    isSandboxed = true;
+    console.log(`[Spawn Sandbox] Successfully sandboxed child session ${childSessionId} at ${sandboxWorkspacePath}`);
+  } catch (err: any) {
+    console.warn(`[Spawn Sandbox] Sandboxing failed (falling back to parent workspace): ${err.message}`);
+    sandboxWorkspacePath = spec.workspacePath;
+    isSandboxed = false;
+    gitSnapshot = await getGitStatus(spec.workspacePath);
+  }
+
   // ---- Run child workflow (blocking until complete) ----
   // WHY direct runWorkflow() call (not dispatch()): dispatch() is fire-and-forget and uses
   // a global Semaphore. Calling it from inside a running session would deadlock.
@@ -292,7 +535,7 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   const childTrigger = {
     workflowId: spec.workflowId,
     goal: spec.goal,
-    workspacePath: spec.workspacePath,
+    workspacePath: sandboxWorkspacePath,
     context: spec.context,
     // WHY spawnDepth: child session constructs its own spawn_agent tool at depth+1.
     // This is the mechanism by which depth limits propagate through the tree.
@@ -312,6 +555,7 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     firstStepPrompt: r.meta.prompt,
     isComplete: false,
     triggerSource: 'daemon',
+    sessionWorkspacePath: sandboxWorkspacePath,
   };
   const childSource: SessionSource = { kind: 'pre_allocated', trigger: childTrigger, session: childAllocatedSession };
   const childResult = await sc.runWorkflowFn(
@@ -332,6 +576,31 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   // delivery_failed is produced by TriggerRouter after a callbackUrl POST fails -- a
   // trigger-layer concern that does not apply (child sessions have no callbackUrl).
   // The cast documents this invariant; assertNever below catches future violations.
+
+  try {
+    if (isSandboxed) {
+      if (childResult._tag === 'success') {
+        const enableWrite = spec.agentConfig?.enableWriteTools !== false && 
+                            spec.agentConfig?.enable_write_tools !== false;
+        if (enableWrite) {
+          console.log(`[Spawn Sandbox] Copying back changes from ${sandboxWorkspacePath} to ${spec.workspacePath}`);
+          await copyBackChanges(sandboxWorkspacePath, spec.workspacePath);
+        }
+      }
+    } else {
+      if (childResult._tag !== 'success' && gitSnapshot) {
+        console.log(`[Spawn Fallback] Subagent failed (outcome: ${childResult._tag}). Reverting subagent modifications to parent workspace.`);
+        await restoreGitSnapshot(spec.workspacePath, gitSnapshot);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Spawn Sandbox] Error copying back changes/restoring: ${err.message}`);
+  } finally {
+    if (isSandboxed) {
+      console.log(`[Spawn Sandbox] Cleaning up sandbox at ${sandboxRoot}`);
+      await cleanupSandbox(sandboxRoot);
+    }
+  }
 
   // ---- Map ChildWorkflowRunResult to SingleSpawnResult ----
   // WHY ChildWorkflowRunResult: exhaustive over the 4 real variants; assertNever guards additions.

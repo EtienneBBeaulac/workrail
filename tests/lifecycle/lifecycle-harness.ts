@@ -174,6 +174,13 @@ export function executeWorkflowLifecycle(
     return { kind: 'compilation_failed', error: compiledResult.error };
   }
   const compiled = compiledResult.value;
+  const compiledWorkflow = createWorkflow(
+    {
+      ...fixture.definition,
+      steps: compiled.steps as any,
+    },
+    workflow.source
+  );
 
   // Step 2: Init state
   let state: ExecutionState = { kind: 'init' };
@@ -229,7 +236,7 @@ export function executeWorkflowLifecycle(
     if (checkPromptRendering) {
       const v2LoopPath = toV2LoopPath(loopPath);
       const renderResult = renderPendingPrompt({
-        workflow,
+        workflow: compiledWorkflow,
         stepId,
         loopPath: v2LoopPath,
         truth: EMPTY_TRUTH,

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { RunLineageDag } from '../components/RunLineageDag';
 import { RunNarrativeView } from '../components/RunNarrativeView';
 import { StatusBadge } from '../components/StatusBadge';
@@ -349,6 +349,11 @@ function HintBanner({ runs }: { runs: readonly ConsoleDagRun[] }) {
 
 export function SessionDetail({ viewModel }: Props) {
   const { state, onSelectNode, onCloseNode } = viewModel;
+  const [nodeTab, setNodeTab] = useState<'overview' | 'artifacts'>('overview');
+
+  useEffect(() => {
+    setNodeTab('overview');
+  }, [state.kind === 'ready' ? state.selectedNode?.nodeId : null]);
 
   if (state.kind === 'loading') {
     return <div className="text-[var(--text-secondary)]">Loading session...</div>;
@@ -410,10 +415,11 @@ export function SessionDetail({ viewModel }: Props) {
         background="rgba(27, 31, 44, 0.78)"
         dropShadow="drop-shadow(0 16px 48px rgba(0,0,0,0.9)) drop-shadow(0 2px 12px rgba(244,196,48,0.15))"
         backdropFilter="blur(16px)"
-        className="fixed top-3 right-3 bottom-3 w-[560px] max-w-[calc(92vw-12px)] transition-transform duration-200 ease-out"
+        className="fixed top-3 right-3 bottom-3 max-w-[calc(92vw-12px)] transition-all duration-200 ease-out"
         style={{
           zIndex: 40,
           transform: selectedNode ? 'translateX(0)' : 'translateX(calc(100% + 12px))',
+          width: selectedNode && nodeTab === 'artifacts' ? '920px' : '560px',
         }}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0 console-blueprint-grid">
@@ -428,13 +434,15 @@ export function SessionDetail({ viewModel }: Props) {
             ×
           </button>
         </div>
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto flex flex-col">
           <NodeDetailSection
             sessionId={sessionId}
             nodeId={selectedNode?.nodeId ?? null}
             runStatus={selectedRun?.status ?? 'complete'}
             currentNodeId={selectedRun?.preferredTipNodeId ?? null}
             executionTraceSummary={selectedRun?.executionTraceSummary ?? null}
+            activeTab={nodeTab}
+            onTabChange={setNodeTab}
           />
         </div>
       </CutCornerBox>

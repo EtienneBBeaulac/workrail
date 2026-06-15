@@ -837,35 +837,35 @@
           },
           "requireConfirmation": false
         },
-    {
-      "id": "phase-2b-design-review-core",
-      "title": "Design Review Core",
-      "type": "parallel",
-      "parallelDelegations": [
         {
-          "workflowId": "wr.routine-design-review",
-          "modelTier": "lightweight",
-          "args": {
-            "deliverableName": "docs/design/design-review-simplicity.md"
-          }
+          "id": "phase-2b-design-review-core",
+          "title": "Design Review Core",
+          "type": "parallel",
+          "parallelDelegations": [
+            {
+              "workflowId": "wr.routine-design-review",
+              "modelTier": "lightweight",
+              "args": {
+                "deliverableName": "docs/design/design-review-simplicity.md"
+              }
+            },
+            {
+              "workflowId": "wr.routine-design-review",
+              "modelTier": "lightweight",
+              "args": {
+                "deliverableName": "docs/design/design-review-robustness.md"
+              }
+            },
+            {
+              "workflowId": "wr.routine-design-review",
+              "modelTier": "lightweight",
+              "args": {
+                "deliverableName": "docs/design/design-review-philosophy.md"
+              }
+            }
+          ],
+          "requireConfirmation": false
         },
-        {
-          "workflowId": "wr.routine-design-review",
-          "modelTier": "lightweight",
-          "args": {
-            "deliverableName": "docs/design/design-review-robustness.md"
-          }
-        },
-        {
-          "workflowId": "wr.routine-design-review",
-          "modelTier": "lightweight",
-          "args": {
-            "deliverableName": "docs/design/design-review-philosophy.md"
-          }
-        }
-      ],
-      "requireConfirmation": false
-    },
         {
           "id": "phase-2c-synthesize-design-review",
           "title": "Synthesize Design Review Findings",
@@ -1054,10 +1054,9 @@
             ],
             "procedure": [
               "1. Audit the plan for: missing work, weak assumptions, invariant gaps, bad slice boundaries, philosophy violations/tensions, regressions, and plan-spec mismatches.",
-              "2. Before you delegate to any subagent auditors, declare what looks weakest in the plan and what you trust least.",
-              "3. After the audit runs, synthesize the feedback: what did auditors agree on, what did only one raise, what do you reject and why, and what changed in the plan.",
-              "4. Classify each finding as: `Confirmed` (verified against code, artifacts, build/tests), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence).",
-              "5. Update `implementation_plan.md` and `spec.md` as needed. If any acceptance criterion is added, removed, or changed: record it as an explicit requirements-change delta with rationale -- do not overwrite silently. Each changed AC must still trace to a Phase 0-7 root ID or be flagged as a discovered requirement. Adjust `slices` if needed, track up to 10 `resolvedFindings`, and file out-of-scope work under `followUpTickets`."
+              "2. Declare what looks weakest in the plan and what you trust least.",
+              "3. Classify each finding as: `Confirmed` (verified against code, artifacts, build/tests), `Plausible` (interesting but unverified), or `Rejected` (contradicted by evidence).",
+              "4. Update `implementation_plan.md` and `spec.md` as needed. If any acceptance criterion is added, removed, or changed: record it as an explicit requirements-change delta with rationale -- do not overwrite silently. Each changed AC must still trace to a Phase 0-7 root ID or be flagged as a discovered requirement. Adjust `slices` if needed, track up to 10 `resolvedFindings`, and file out-of-scope work under `followUpTickets`."
             ],
             "outputRequired": {
               "planFindings": "Summary of findings and classifications",
@@ -1100,7 +1099,16 @@
               "text": "Run `routine-plan-analysis`, `routine-hypothesis-challenge`, `routine-execution-simulation`, and `routine-philosophy-alignment` in parallel before you decide whether the plan is good enough."
             }
           ],
-          "requireConfirmation": false
+          "requireConfirmation": false,
+          "audit": {
+            "delegate": {
+              "workflowId": "wr.routine-plan-analysis",
+              "modelTier": "mid",
+              "args": {
+                "deliverableName": "docs/design/plan-analysis-findings.md"
+              }
+            }
+          }
         },
         {
           "id": "phase-4b-loop-decision",
@@ -1216,9 +1224,7 @@
             "procedure": [
               "1. Evaluate whether the changes match the plan's intent, preserve invariants, and satisfy the user's coding philosophy.",
               "2. Check if the drift or scope changes were harmless integration work or plan drift.",
-              "3. If any tracking metric is true or build/tests are shaky, run the verification batch before completing this step.",
-              "4. After the verification runs, synthesize the feedback explicitly: what did reviewers agree on, what did only one raise, what do you reject and why, and classify findings as `Confirmed`, `Plausible`, or `Rejected`.",
-              "5. Say where you are least confident."
+              "3. Say where you are least confident."
             ],
             "outputRequired": {
               "verificationFindings": "Summary of findings and classifications",
@@ -1270,6 +1276,9 @@
                 "equals": "MultiPR"
               }
             ]
+          },
+          "verification": {
+            "cognitive": true
           }
         }
       ]
@@ -1325,11 +1334,11 @@
               "Subagent agreement alone is not enough for `Confirmed` status; verify against primary evidence."
             ],
             "procedure": [
-              "1. Read the final verification findings from the two files (`docs/design/final-verification-prover.md` and `docs/design/final-verification-smells.md`) if parallel reviewers were spawned, or `docs/design/final-verification-findings.md` if run inline.",
-              "2. Decide what actually requires fixing, apply fixes immediately, and rerun affected verification.",
-              "3. Synthesize the findings explicitly, identifying what each verifier found, what you agree with, what you reject and why, and what changed because of fixes.",
-              "4. Classify findings that affect final acceptance as: `Confirmed`, `Plausible`, or `Rejected`.",
-              "5. Update `implementation_plan.md` (if execution shape changed) and `spec.md` (if spec/contracts changed)."
+              "1. Review findings from verification artifacts.",
+              "2. Determine and apply necessary fixes.",
+              "3. Synthesize findings and justify decisions.",
+              "4. Classify findings (Confirmed, Plausible, Rejected).",
+              "5. Update implementation artifacts."
             ],
             "outputRequired": {
               "integrationFindings": "Summary of findings and classifications",
@@ -1353,7 +1362,10 @@
               }
             }
           ],
-          "requireConfirmation": false
+          "requireConfirmation": false,
+          "verification": {
+            "cognitive": true
+          }
         },
         {
           "id": "phase-7c-loop-decision",
@@ -1410,5 +1422,5 @@
       }
     }
   ],
-  "validatedAgainstSpecVersion": 3
+  "validatedAgainstSpecVersion": 4
 }

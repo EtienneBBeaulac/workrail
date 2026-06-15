@@ -56,7 +56,7 @@ export function constructTools(
     getCurrentToken, sessionWorkspacePath, spawnCurrentDepth, spawnMaxDepth,
     emitter, activeSessionSet, workflowId: scopeWorkflowId,
     triggerWorkspacePath, triggerGoal, triggerBranchStrategy, triggerContext,
-    onChildStepAdvance,
+    onChildStepAdvance, triggerAgentConfig, recordFileEdit, assertWorkspaceLockActive,
   } = scope;
   const sid = scope.sessionId;
   const workrailSid = scope.workrailSessionId;
@@ -66,7 +66,7 @@ export function constructTools(
   // tracker uses internally, so read-before-write checks remain valid.
   const readFileStateMap = fileTracker.toMap();
 
-  return [
+  const allTools = [
     makeCompleteStepTool(
       sid,
       ctx,
@@ -86,10 +86,10 @@ export function constructTools(
     // must target the isolated worktree, not the main checkout.
     makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeReadTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
-    makeWriteTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
+    makeWriteTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid, recordFileEdit, assertWorkspaceLockActive),
     makeGlobTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
     makeGrepTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeEditTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
+    makeEditTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid, recordFileEdit, assertWorkspaceLockActive),
     makeReportIssueTool(sid, emitter, workrailSid, undefined, onIssueReported),
     makeSpawnAgentTool(
       sid,
@@ -106,4 +106,12 @@ export function constructTools(
     ),
     makeSignalCoordinatorTool(sid, emitter, workrailSid),
   ];
+
+  const enableWrite = triggerAgentConfig?.enableWriteTools !== false &&
+                      (triggerAgentConfig as any)?.enable_write_tools !== false;
+
+  if (!enableWrite) {
+    return allTools.filter(t => t.name !== 'Bash' && t.name !== 'Write' && t.name !== 'Edit');
+  }
+  return allTools;
 }

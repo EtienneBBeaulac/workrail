@@ -14,6 +14,7 @@
 import type { AgentLoop, AgentEvent, AgentLoopCallbacks } from '../agent-loop.js';
 import { AgentLoop as AgentLoopClass } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
+import * as path from 'node:path';
 import type { DaemonRegistry } from '../../v2/infra/in-memory/daemon-registry/index.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
 import type { SessionState } from '../state/session-state.js';
@@ -36,6 +37,8 @@ import { DefaultContextLoader } from '../context-loader.js';
 import { type SessionScope, DefaultFileStateTracker } from '../session-scope.js';
 import { ActiveSessionSet } from '../active-sessions.js';
 import { withWorkrailSession } from '../tools/_shared.js';
+import { WorkspaceLockManager } from '../workspace-lock.js';
+import { Result, ok, err } from 'neverthrow';
 import { injectPendingSteps } from '../turn-end/step-injector.js';
 import { flushConversation } from '../turn-end/conversation-flusher.js';
 import { SessionCortex } from '../cortex/session-cortex.js';
@@ -288,7 +291,11 @@ export async function buildAgentReadySession(
   // resets the parent AgentLoop's stall timer to prevent false-positive stall aborts.
   const notifyParentActivity: (() => void) | undefined = onChildStepAdvance;
 
+  const fileEditCounts = new Map<string, number>();
+  const agentRef: { current: any } = { current: null };
+
   const onAdvance = (stepText: string, continueToken: string, stepId?: string): void => {
+    fileEditCounts.clear(); // Reset edit counts on step advance!
     advanceStep(state, stepText, continueToken, stepId);
     if (state.workrailSessionId !== null) daemonRegistry?.heartbeat(state.workrailSessionId);
     emitter?.emit({
@@ -335,11 +342,28 @@ export async function buildAgentReadySession(
     triggerGoal: trigger.goal ?? '',
     triggerBranchStrategy: trigger.branchStrategy,
     triggerContext: trigger.context,
+    triggerAgentConfig: trigger.agentConfig,
     activeSessionSet,
     // C2: pass the parent activity notifier through scope so constructTools can
     // forward it to makeSpawnAgentTool. When a grandchild spawns further children,
     // the callback propagates recursively through the spawn chain.
     onChildStepAdvance: notifyParentActivity,
+    recordFileEdit: (filePath: string): Result<void, Error> => {
+      const canonical = path.resolve(filePath);
+      const count = (fileEditCounts.get(canonical) ?? 0) + 1;
+      fileEditCounts.set(canonical, count);
+      if (count > 5) {
+        setTerminalSignal(state, { kind: 'stuck', reason: 'edit_limit_exceeded' });
+        if (agentRef.current) {
+          agentRef.current.abort();
+        }
+        return err(new Error(`FileEditLimitExceeded: File ${filePath} has been edited more than 5 times in the current step.`));
+      }
+      return ok(undefined);
+    },
+    assertWorkspaceLockActive: (): void => {
+      WorkspaceLockManager.assertLockActive(sessionWorkspacePath, String(sessionId));
+    },
   };
   const tools = constructTools(ctx, apiKey, schemas, scope, runWorkflowFn);
 
@@ -375,6 +399,8 @@ export async function buildAgentReadySession(
     stallTimeoutMs: sessionCtx.stallTimeoutMs,
     llmCallTimeoutMs: sessionCtx.llmCallTimeoutMs,
   });
+
+  agentRef.current = agent;
 
   handle?.setAgent(agent);
 

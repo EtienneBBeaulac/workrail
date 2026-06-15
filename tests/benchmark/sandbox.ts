@@ -51,6 +51,8 @@ export function createSandboxWorkspace(
     fs.cpSync(templateDir, sandboxDir, { recursive: true });
     activeSandboxes.add(sandboxDir);
 
+
+
     return { ok: true, dir: sandboxDir };
   } catch (err: any) {
     return { ok: false, error: `Failed to create sandbox: ${err.message}` };

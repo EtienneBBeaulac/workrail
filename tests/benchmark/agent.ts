@@ -4,6 +4,9 @@ import Anthropic from '@anthropic-ai/sdk';
 import { createWorkRailEngine } from '../../src/engine/index.js';
 import type { EngineError } from '../../src/engine/types.js';
 import { runCommandWithTimeout } from './sandbox.js';
+import { runWorkflow } from '../../src/daemon/workflow-runner.js';
+import { DaemonEventEmitter } from '../../src/daemon/daemon-events.js';
+import type { WorkflowTrigger } from '../../src/daemon/types.js';
 
 export interface TrialMetrics {
   readonly inputTokens: number;
@@ -435,6 +438,26 @@ export function updateAge(user: ImmutableUser, age: number): ImmutableUser {
   return '';
 }
 
+class TokenTrackingEmitter extends DaemonEventEmitter {
+  public inputTokens = 0;
+  public outputTokens = 0;
+  public turns = 0;
+  public commandRuns = 0;
+
+  override emit(event: any): void {
+    if (event.kind === 'llm_turn_completed') {
+      this.inputTokens += event.inputTokens ?? 0;
+      this.outputTokens += event.outputTokens ?? 0;
+      this.turns++;
+    } else if (event.kind === 'tool_called') {
+      if (event.toolName === 'Bash') {
+        this.commandRuns++;
+      }
+    }
+    super.emit(event);
+  }
+}
+
 export async function executeAgentTrial(args: {
   readonly approach: string;
   readonly model: string;
@@ -737,149 +760,47 @@ Please complete the task. When you are done, reply with a final message explaini
       throw new Error(`Failed to initialize WorkRail engine: ${getEngineErrorMessage(engineRes.error)}`);
     }
     const engine = engineRes.value;
+    const v2Ctx = (engine as any)._toolContext;
+    if (!v2Ctx) {
+      throw new Error('Internal Error: V2ToolContext not exposed on WorkRailEngine.');
+    }
 
     try {
-      const startRes = await engine.startWorkflow(workflow, taskInstructions);
-      if (!startRes.ok) {
-        throw new Error(`Failed to start WorkRail session: ${getEngineErrorMessage(startRes.error)}`);
+      const statsDir = path.join(sandboxDir, '.workrail-data', 'stats');
+      const sessionsDir = path.join(sandboxDir, '.workrail-data', 'sessions');
+      const emitter = new TokenTrackingEmitter(statsDir);
+
+      const trigger: WorkflowTrigger = {
+        workflowId: workflow,
+        goal: taskInstructions,
+        workspacePath: sandboxDir,
+        branchStrategy: 'none',
+        agentConfig: {
+          model: model.includes('/') ? model : `anthropic/${model}`,
+          maxTurns: 80,
+          maxSessionMinutes: 10,
+        },
+      };
+
+      const result = await runWorkflow(
+        trigger,
+        v2Ctx,
+        apiKey,
+        undefined,
+        emitter,
+        undefined,
+        statsDir,
+        sessionsDir
+      );
+
+      if (result._tag !== 'success') {
+        console.warn(`[Trial WorkRail] Workflow completed with non-success outcome: ${result._tag}. Details: ${result._tag === 'error' ? result.message : 'timeout/stuck'}`);
       }
 
-      let currentRes = startRes.value;
-      const messages: Anthropic.MessageParam[] = [];
-
-      messages.push({
-        role: 'user',
-        content: `WorkRail session started. First Step Instructions:\n\n${currentRes.pending?.prompt}`
-      });
-
-      let stepLimit = 0;
-      let finished = false;
-
-      while (stepLimit++ < 15 && !finished) {
-        let turnLimit = 0;
-        let completeStepCalled = false;
-        let lastOutput = '';
-
-        while (turnLimit++ < 10) {
-          const response = await callAnthropic({
-            model,
-            max_tokens: 1500,
-            system: systemPrompt,
-            messages,
-            tools: [
-              ...fileTools,
-              {
-                name: 'completeStep',
-                description: 'Call this tool when you have completed the current step instructions and are ready to advance.',
-                input_schema: {
-                  type: 'object',
-                  properties: {
-                    notes: { type: 'string', description: 'Detailed markdown notes of what was accomplished in this step.' }
-                  },
-                  required: ['notes']
-                }
-              }
-            ]
-          });
-
-          const assistantText = response.content
-            .filter(c => c.type === 'text')
-            .map(c => (c as any).text)
-            .join('\n');
-
-          const toolCalls = response.content.filter(c => c.type === 'tool_use');
-
-          if (toolCalls.length === 0) {
-            messages.push({
-              role: 'assistant',
-              content: assistantText || 'I am working on the task.'
-            });
-            break;
-          }
-
-          messages.push({
-            role: 'assistant',
-            content: response.content
-          });
-
-          const toolResults: Anthropic.ToolResultBlockParam[] = [];
-          for (const tc of toolCalls) {
-            const toolCall = tc as any;
-            const tName = toolCall.name;
-            const tInput = toolCall.input;
-            let result = '';
-
-            if (tName === 'readFile') {
-              result = runReadFile(tInput.path);
-            } else if (tName === 'writeFile') {
-              result = runWriteFile(tInput.path, tInput.content);
-            } else if (tName === 'runCommand') {
-              result = await runCommand(tInput.command);
-            } else if (tName === 'completeStep') {
-              completeStepCalled = true;
-              lastOutput = tInput.notes || 'Completed step.';
-              result = 'Step completion submitted to WorkRail engine.';
-            } else {
-              result = `Error: Unknown tool: ${tName}`;
-            }
-
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolCall.id,
-              content: result
-            });
-          }
-
-          messages.push({
-            role: 'user',
-            content: toolResults
-          });
-
-          if (completeStepCalled) {
-            break;
-          }
-        }
-
-        if (completeStepCalled) {
-          const ackToken = currentRes.ackToken;
-          if (!ackToken) {
-            break;
-          }
-          const nextRes = await engine.continueWorkflow(
-            currentRes.stateToken,
-            ackToken,
-            { notesMarkdown: lastOutput }
-          );
-
-          if (!nextRes.ok) {
-            messages.push({
-              role: 'user',
-              content: `WorkRail validation failed:\n\n${getEngineErrorMessage(nextRes.error)}\n\nPlease correct the errors and re-submit completeStep.`
-            });
-            continue;
-          }
-
-          currentRes = nextRes.value;
-          if (currentRes.kind === 'gate_checkpoint') {
-            messages.push({
-              role: 'user',
-              content: `Step gated. Gate Kind: ${currentRes.gateKind}. Please address gate requirements.`
-            });
-            break;
-          }
-          if (currentRes.isComplete) {
-            finished = true;
-            break;
-          } else {
-            messages.push({
-              role: 'user',
-              content: `Step advanced. Next Step Instructions:\n\n${currentRes.pending?.prompt}`
-            });
-          }
-        } else {
-          break;
-        }
-      }
+      inputTokens = emitter.inputTokens;
+      outputTokens = emitter.outputTokens;
+      turns = emitter.turns;
+      commandRuns = emitter.commandRuns;
     } finally {
       await engine.close();
     }

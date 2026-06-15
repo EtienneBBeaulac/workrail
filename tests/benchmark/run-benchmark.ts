@@ -271,7 +271,25 @@ async function main() {
     workflow = args[workflowIdx + 1];
   }
 
-  const results = await runBenchmark({ smoke, limit, workflow });
+  let models: string[] | undefined;
+  const modelsIdx = args.indexOf('--models');
+  if (modelsIdx !== -1 && args[modelsIdx + 1]) {
+    models = args[modelsIdx + 1]!.split(',');
+  }
+
+  let approaches: string[] | undefined;
+  const approachesIdx = args.indexOf('--approaches');
+  if (approachesIdx !== -1 && args[approachesIdx + 1]) {
+    approaches = args[approachesIdx + 1]!.split(',');
+  }
+
+  let tasks: string[] | undefined;
+  const tasksIdx = args.indexOf('--tasks');
+  if (tasksIdx !== -1 && args[tasksIdx + 1]) {
+    tasks = args[tasksIdx + 1]!.split(',');
+  }
+
+  const results = await runBenchmark({ smoke, limit, workflow, models, approaches, tasks });
 
   // Save to JSONL and CSV
   const resultsJsonlPath = path.join(__dirname, smoke ? 'results-smoke.jsonl' : 'results.jsonl');

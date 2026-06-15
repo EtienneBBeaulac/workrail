@@ -533,6 +533,9 @@ export class WorkflowCompiler {
     const seenIds = new Set<string>();
 
     for (const step of steps) {
+      if (step.id.endsWith('__verification') || step.id.endsWith('__audit') || step.id.endsWith('__synthesis')) {
+        return err(Err.invalidState(`Step id '${step.id}' in workflow '${workflowId}' contains a reserved suffix (__verification, __audit, or __synthesis)`));
+      }
       if (seenIds.has(step.id)) {
         return err(Err.invalidState(`Duplicate step id '${step.id}' in workflow '${workflowId}'`));
       }
@@ -563,19 +566,51 @@ export class WorkflowCompiler {
           }
           seenIds.add(verificationStepId);
 
-          const verificationPrompt = typedStep.verification.prompt ??
-            (typedStep.verification.command
-              ? `Run the following verification command to assert correctness:\n\n\`\`\`bash\n${typedStep.verification.command}\n\`\`\`\n\nEnsure that the command succeeds and report any failures.`
-              : `Run the appropriate verification commands, test suites, or build checks for this workspace to assert that your changes are complete and correct. Verify that all tests pass and report any failures.`);
+          if (typedStep.verification.delegate) {
+            const verificationStep: ParallelStepDefinition = {
+              id: verificationStepId,
+              title: `Verify: ${step.title}`,
+              type: 'parallel',
+              parallelDelegations: [typedStep.verification.delegate],
+              runCondition: step.runCondition,
+              notesOptional: true,
+              synthesis: {
+                prompt: `Synthesize the results of the verification subagent loop for step '${step.title}'. Confirm if it passed.`,
+              },
+            };
+            result.push(verificationStep);
 
-          const verificationStep: WorkflowStepDefinition = {
-            id: verificationStepId,
-            title: `Verify: ${step.title}`,
-            prompt: verificationPrompt,
-            runCondition: step.runCondition,
-            notesOptional: true,
-          };
-          result.push(verificationStep);
+            const synthesisStepId = `${verificationStepId}__synthesis`;
+            if (seenIds.has(synthesisStepId)) {
+              return err(Err.invalidState(`Duplicate step id '${synthesisStepId}' generated from auto-injected verification synthesis in workflow '${workflowId}'`));
+            }
+            seenIds.add(synthesisStepId);
+
+            const synthesisStep: WorkflowStepDefinition = {
+              id: synthesisStepId,
+              title: `Synthesis: Verify: ${step.title}`,
+              prompt: `Synthesize the results of the verification subagent loop for step '${step.title}'. Confirm if it passed.`,
+              runCondition: step.runCondition,
+              notesOptional: true,
+            };
+            result.push(synthesisStep);
+          } else {
+            const verificationPrompt = typedStep.verification.prompt ??
+              (typedStep.verification.cognitive
+                ? `Discover, write, run, and verify the appropriate test suites, build checks, or correctness assertions for this workspace to prove that your changes are complete and correct. Do not ask for or rely on hardcoded verification commands. Verify that everything passes and report the final outcome.`
+                : (typedStep.verification.command
+                  ? `Run the following verification command to assert correctness:\n\n\`\`\`bash\n${typedStep.verification.command}\n\`\`\`\n\nEnsure that the command succeeds and report any failures.`
+                  : `Run the appropriate verification commands, test suites, or build checks for this workspace to assert that your changes are complete and correct. Verify that all tests pass and report any failures.`));
+
+            const verificationStep: WorkflowStepDefinition = {
+              id: verificationStepId,
+              title: `Verify: ${step.title}`,
+              prompt: verificationPrompt,
+              runCondition: step.runCondition,
+              notesOptional: true,
+            };
+            result.push(verificationStep);
+          }
         }
 
         if ('audit' in typedStep && typedStep.audit) {
@@ -585,20 +620,50 @@ export class WorkflowCompiler {
           }
           seenIds.add(auditStepId);
 
-          const rubricPrompt = typedStep.audit.rubric && typedStep.audit.rubric.length > 0
-            ? `\n\nAssert the output against the following rubric:\n${typedStep.audit.rubric.map((r: string) => `- ${r}`).join('\n')}`
-            : '';
-          const auditPrompt = typedStep.audit.prompt ??
-            `Audit the results of step '${step.title}'. Ensure all work is complete, correct, and meets high-quality standards.${rubricPrompt}\n\nConfirm if the audit passed or if changes/corrections are required.`;
+          if (typedStep.audit.delegate) {
+            const auditStep: ParallelStepDefinition = {
+              id: auditStepId,
+              title: `Audit: ${step.title}`,
+              type: 'parallel',
+              parallelDelegations: [typedStep.audit.delegate],
+              runCondition: step.runCondition,
+              notesOptional: true,
+              synthesis: {
+                prompt: `Synthesize the results of the audit subagent review for step '${step.title}'. Confirm if it passed.`,
+              },
+            };
+            result.push(auditStep);
 
-          const auditStep: WorkflowStepDefinition = {
-            id: auditStepId,
-            title: `Audit: ${step.title}`,
-            prompt: auditPrompt,
-            runCondition: step.runCondition,
-            notesOptional: true,
-          };
-          result.push(auditStep);
+            const synthesisStepId = `${auditStepId}__synthesis`;
+            if (seenIds.has(synthesisStepId)) {
+              return err(Err.invalidState(`Duplicate step id '${synthesisStepId}' generated from auto-injected audit synthesis in workflow '${workflowId}'`));
+            }
+            seenIds.add(synthesisStepId);
+
+            const synthesisStep: WorkflowStepDefinition = {
+              id: synthesisStepId,
+              title: `Synthesis: Audit: ${step.title}`,
+              prompt: `Synthesize the results of the audit subagent review for step '${step.title}'. Confirm if it passed.`,
+              runCondition: step.runCondition,
+              notesOptional: true,
+            };
+            result.push(synthesisStep);
+          } else {
+            const rubricPrompt = typedStep.audit.rubric && typedStep.audit.rubric.length > 0
+              ? `\n\nAssert the output against the following rubric:\n${typedStep.audit.rubric.map((r: string) => `- ${r}`).join('\n')}`
+              : '';
+            const auditPrompt = typedStep.audit.prompt ??
+              `Audit the results of step '${step.title}'. Ensure all work is complete, correct, and meets high-quality standards.${rubricPrompt}\n\nConfirm if the audit passed or if changes/corrections are required.`;
+
+            const auditStep: WorkflowStepDefinition = {
+              id: auditStepId,
+              title: `Audit: ${step.title}`,
+              prompt: auditPrompt,
+              runCondition: step.runCondition,
+              notesOptional: true,
+            };
+            result.push(auditStep);
+          }
         }
 
         const parallelStep = step as ParallelStepDefinition;

@@ -36,6 +36,7 @@ import { projectAssessmentsV2 } from '../../../v2/projections/assessments.js';
 import { assertOutput, assertContinueTokenPresence, assertGateCheckpointInvariants } from '../../assert-output.js';
 import type { V2ContinueWorkflowGateCheckpointOutput } from '../../output-schemas.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
+import { initShadowDirectory } from './shadow-lifecycle.js';
 
 
 
@@ -60,6 +61,24 @@ export function buildAdvancedReplayResponse(args: {
   readonly cleanResponseFormat?: boolean;
 }): RA<z.infer<typeof V2ContinueWorkflowOutputSchema>, ContinueWorkflowError> {
   const { sessionId, runId, fromNodeId, toNodeId, attemptId, toSnapshot, workflow, truth, workflowHash, ports, sha256, aliasStore, entropy } = args;
+
+  let workspacePath: string | undefined;
+  for (const e of truth.events) {
+    if (e.kind === 'observation_recorded' && e.data.key === 'repo_root') {
+      workspacePath = e.data.value.value;
+      break;
+    }
+  }
+
+  let virtualOnly = true;
+  if (workspacePath) {
+    const shadowRes = initShadowDirectory(workspacePath, String(sessionId));
+    if (shadowRes.isOk()) {
+      virtualOnly = shadowRes.value.virtualOnly;
+    }
+  }
+
+  const artifactsDir = !virtualOnly ? `.workrail/artifacts/${sessionId}/` : undefined;
   
   const toNodeIdBranded = asNodeId(String(toNodeId));
   const pending = derivePendingStep(toSnapshot.enginePayload.engineState);
@@ -159,7 +178,7 @@ export function buildAdvancedReplayResponse(args: {
             continueToken: pending ? nextTokens.continueToken : undefined,
             checkpointToken: pending ? nextTokens.checkpointToken : undefined,
             isComplete,
-            pending: toPendingStep(blockedMeta),
+            pending: toPendingStep(blockedMeta ? { ...blockedMeta, artifactsDirectory: artifactsDir } : null),
             preferences,
             nextIntent,
             nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: blockedMeta, retryContinueToken }),
@@ -210,7 +229,7 @@ export function buildAdvancedReplayResponse(args: {
         continueToken: pending ? nextTokens.continueToken : undefined,
         checkpointToken: pending ? nextTokens.checkpointToken : undefined,
         isComplete,
-        pending: toPendingStep(okMeta),
+        pending: toPendingStep(okMeta ? { ...okMeta, artifactsDirectory: artifactsDir } : null),
         preferences,
         nextIntent,
         nextCall: buildNextCall({ continueToken: pending ? nextTokens.continueToken : undefined, isComplete, pending: okMeta }),

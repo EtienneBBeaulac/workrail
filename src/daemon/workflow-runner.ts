@@ -38,6 +38,7 @@ import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import type { DaemonRegistry } from '../v2/infra/in-memory/daemon-registry/index.js';
 import type { V2StartWorkflowOutputSchema } from '../mcp/output-schemas.js';
 import { parseContinueTokenOrFail } from '../v2/usecases/v2-token-ops.js';
+import { WorkspaceLockManager } from './workspace-lock.js';
 import type { ContinueTokenResolved } from '../v2/usecases/v2-token-ops.js';
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import type { SessionEventLogReadonlyStorePortV2, LoadedValidatedPrefixV2, SessionEventLogStoreError } from '../v2/ports/session-event-log-store.port.js';
@@ -433,42 +434,74 @@ export async function runWorkflow(
     return preResult.result;
   }
 
-  // ---- Agent-ready phase: context loading + tool construction + AgentLoop setup ----
-  const readySession = await buildAgentReadySession(
-    preResult.session, trigger, ctx, apiKey, sessionId,
-    emitter, daemonRegistry, activeSessionSet, runWorkflow,
-    enricherResult,
-    onChildStepAdvance,
-  );
+  // ---- Workspace Lock Acquisition ----
+  const lockRes = await WorkspaceLockManager.acquire(preResult.session.sessionWorkspacePath, String(sessionId));
+  if (lockRes.isErr()) {
+    const errResult: WorkflowRunResult = {
+      _tag: 'error',
+      workflowId: trigger.workflowId,
+      message: `Failed to acquire workspace lock: ${lockRes.error.message}`,
+      stopReason: 'aborted',
+    };
+    const earlyCtx: FinalizationContext = {
+      sessionId,
+      workrailSessionId: preResult.session.state.workrailSessionId,
+      startMs,
+      stepAdvanceCount: 0,
+      branchStrategy: trigger.branchStrategy,
+      statsDir,
+      sessionsDir,
+      conversationPath: path.join(sessionsDir, `${sessionId}-conversation.jsonl`),
+      emitter,
+      daemonRegistry,
+      workflowId: trigger.workflowId,
+    };
+    preResult.session.handle?.dispose();
+    await finalizeSession(errResult, earlyCtx);
+    return errResult;
+  }
+  const workspaceLock = lockRes.value;
 
-  // ---- Agent loop phase: run prompt loop to completion ----
-  const sessionPaths = buildSessionPaths(sessionsDir, String(sessionId));
-  const outcome = await runAgentLoop(readySession, trigger, sessionPaths);
+  try {
+    // ---- Agent-ready phase: context loading + tool construction + AgentLoop setup ----
+    const readySession = await buildAgentReadySession(
+      preResult.session, trigger, ctx, apiKey, sessionId,
+      emitter, daemonRegistry, activeSessionSet, runWorkflow,
+      enricherResult,
+      onChildStepAdvance,
+    );
 
-  // Map SessionOutcome back to the raw stopReason/errorMessage that buildSessionResult expects.
-  const stopReason = outcome.kind === 'aborted' ? 'error' : outcome.stopReason;
-  const errorMessage = outcome.errorMessage;
+    // ---- Agent loop phase: run prompt loop to completion ----
+    const sessionPaths = buildSessionPaths(sessionsDir, String(sessionId));
+    const outcome = await runAgentLoop(readySession, trigger, sessionPaths);
 
-  // ---- Build finalization context (shared across all result paths) ----
-  const { state, sessionWorktreePath } = readySession.preAgentSession;
-  const finalizationCtx: FinalizationContext = {
-    sessionId,
-    workrailSessionId: state.workrailSessionId,
-    startMs,
-    stepAdvanceCount: state.stepAdvanceCount,
-    branchStrategy: trigger.branchStrategy,
-    statsDir,
-    sessionsDir,
-    conversationPath: sessionPaths.conversationPath,
-    emitter,
-    daemonRegistry,
-    workflowId: trigger.workflowId,
-  };
+    // Map SessionOutcome back to the raw stopReason/errorMessage that buildSessionResult expects.
+    const stopReason = outcome.kind === 'aborted' ? 'error' : outcome.stopReason;
+    const errorMessage = outcome.errorMessage;
 
-  // ---- Build and finalize result ----
-  // buildSessionResult() is pure -- it reads state and trigger config, produces the result.
-  // finalizeSession() handles all I/O: event emission, registry cleanup, stats, sidecar deletion.
-  const result = buildSessionResult(state, stopReason, errorMessage, trigger, sessionId, sessionWorktreePath);
-  await finalizeSession(result, finalizationCtx);
-  return result;
+    // ---- Build finalization context (shared across all result paths) ----
+    const { state, sessionWorktreePath } = readySession.preAgentSession;
+    const finalizationCtx: FinalizationContext = {
+      sessionId,
+      workrailSessionId: state.workrailSessionId,
+      startMs,
+      stepAdvanceCount: state.stepAdvanceCount,
+      branchStrategy: trigger.branchStrategy,
+      statsDir,
+      sessionsDir,
+      conversationPath: sessionPaths.conversationPath,
+      emitter,
+      daemonRegistry,
+      workflowId: trigger.workflowId,
+    };
+
+    // ---- Build and finalize result ----
+    // buildSessionResult() is pure -- it reads state and trigger config, produces the result.
+    // finalizeSession() handles all I/O: event emission, registry cleanup, stats, sidecar deletion.
+    const result = buildSessionResult(state, stopReason, errorMessage, trigger, sessionId, sessionWorktreePath);
+    await finalizeSession(result, finalizationCtx);
+    return result;
+  } finally {
+    await workspaceLock.release();
+  }
 }

@@ -108,6 +108,8 @@ export interface WorkflowTrigger {
      * Default: 3. Configurable per-trigger for workflows that intentionally delegate deeply.
      */
     readonly maxSubagentDepth?: number;
+    readonly enableWriteTools?: boolean;
+    readonly enable_write_tools?: boolean;
     /**
      * Abort policy when stuck detection fires.
      * - 'abort' (default): call agent.abort() and return _tag: 'stuck'.
@@ -408,8 +410,9 @@ export interface WorkflowRunStuck {
    * - 'repeated_tool_call': same tool + same args called STUCK_REPEAT_THRESHOLD (3) times in a row.
    * - 'no_progress': 80%+ of turns used with 0 step advances. Only fires when noProgressAbortEnabled: true.
    * - 'stall': no LLM API call started within stallTimeoutSeconds (default 120).
+   * - 'edit_limit_exceeded': a single file was edited/written > 5 times in a single step.
    */
-  readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall';
+  readonly reason: 'repeated_tool_call' | 'no_progress' | 'stall' | 'edit_limit_exceeded';
   readonly message: string;
   /** Always 'aborted' -- the agent loop was stopped via agent.abort(). */
   readonly stopReason: string;
