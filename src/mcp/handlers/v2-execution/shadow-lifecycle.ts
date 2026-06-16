@@ -105,7 +105,12 @@ export function resolveGitDir(workspacePath: string): Result<string, Error> {
         if (!path.isAbsolute(gitDir)) {
           gitDir = path.resolve(workspacePath, gitDir);
         }
-        return ok(fs.realpathSync(gitDir));
+        const resolvedGitDir = fs.realpathSync(gitDir);
+        const headPath = path.join(resolvedGitDir, 'HEAD');
+        if (!fs.existsSync(headPath)) {
+          return err(new Error(`Security violation: resolved git directory does not contain a valid Git HEAD file: ${resolvedGitDir}`));
+        }
+        return ok(resolvedGitDir);
       }
       return err(new Error(`Invalid .git worktree file format: ${dotGitPath}`));
     }
@@ -114,6 +119,50 @@ export function resolveGitDir(workspacePath: string): Result<string, Error> {
   }
 
   return err(new Error(`Unknown .git file type at ${dotGitPath}`));
+}
+
+/**
+ * Helper to validate path containment and symlink segment verification for shadow rehydration.
+ */
+export function validateShadowPathContainment(targetPath: string, shadowPath: string): boolean {
+  try {
+    const resolvedShadow = fs.realpathSync(shadowPath);
+    const resolvedTarget = path.resolve(resolvedShadow, targetPath);
+
+    // Verify containment using relative check
+    const relative = path.relative(resolvedShadow, resolvedTarget);
+    const isContained = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    if (!isContained) {
+      return false;
+    }
+
+    // Verify no segment is a symbolic link
+    let current = resolvedTarget;
+    const isCaseInsensitive = process.platform === 'win32' || process.platform === 'darwin';
+    const resolvedShadowNormalized = isCaseInsensitive
+      ? resolvedShadow.toLowerCase()
+      : resolvedShadow;
+
+    while (
+      (isCaseInsensitive ? current.toLowerCase() : current) !== resolvedShadowNormalized &&
+      current !== path.dirname(current)
+    ) {
+      try {
+        if (fs.existsSync(current)) {
+          const stat = fs.lstatSync(current);
+          if (stat.isSymbolicLink()) {
+            return false;
+          }
+        }
+      } catch {
+        // Segment doesn't exist yet, which is fine
+      }
+      current = path.dirname(current);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -150,13 +199,10 @@ export function rehydrateShadowFiles(
     // 2. Hydrate each artifact
     const resolvedShadowPath = path.resolve(shadowPath);
     for (const [filename, art] of latestArtifacts.entries()) {
-      const filePath = path.resolve(resolvedShadowPath, filename);
-
-      const relative = path.relative(resolvedShadowPath, filePath);
-      const isContained = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-      if (!isContained) {
-        return err(new Error(`WorkspaceLockViolation: Path traversal detected in shadow rehydration for file: ${filename}`));
+      if (!validateShadowPathContainment(filename, resolvedShadowPath)) {
+        return err(new Error(`WorkspaceLockViolation: Path traversal detected or symbolic link segment detected in shadow rehydration for file: ${filename}`));
       }
+      const filePath = path.resolve(resolvedShadowPath, filename);
 
       const isText = typeof art.content === 'string' && 
                      (art.contentType.startsWith('text/') || 

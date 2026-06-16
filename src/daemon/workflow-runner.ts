@@ -435,7 +435,11 @@ export async function runWorkflow(
   }
 
   // ---- Workspace Lock Acquisition ----
-  const lockRes = await WorkspaceLockManager.acquire(preResult.session.sessionWorkspacePath, String(sessionId));
+  const lockRes = await WorkspaceLockManager.acquire(
+    preResult.session.sessionWorkspacePath,
+    String(sessionId),
+    trigger.parentSessionId ? String(trigger.parentSessionId) : undefined
+  );
   if (lockRes.isErr()) {
     const errResult: WorkflowRunResult = {
       _tag: 'error',

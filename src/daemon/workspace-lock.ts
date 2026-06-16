@@ -72,6 +72,7 @@ interface LockStackEntry {
 
 export class WorkspaceLockManager {
   private static activeLocks = new Map<string, LockStackEntry[]>();
+  private static acquireQueues = new Map<string, Promise<any>>();
 
   public static isLockedLocally(workspacePath: string): boolean {
     const canonical = path.resolve(workspacePath);
@@ -104,77 +105,75 @@ export class WorkspaceLockManager {
     }
   }
 
-  public static acquire(workspacePath: string, uuid: string): ResultAsync<WorkspaceLock, Error> {
+  public static acquire(
+    workspacePath: string,
+    uuid: string,
+    parentUuid?: string
+  ): ResultAsync<WorkspaceLock, Error> {
+    const canonical = path.resolve(workspacePath);
+    const existingPromise = this.acquireQueues.get(canonical) || Promise.resolve();
+
+    const nextPromise = existingPromise.then(async () => {
+      return this.acquireInternal(canonical, uuid, parentUuid);
+    });
+
+    this.acquireQueues.set(canonical, nextPromise.then(() => {}).catch(() => {}));
+
     return ResultAsync.fromPromise(
-      (async () => {
-        const canonical = path.resolve(workspacePath);
-        const lockFile = path.join(canonical, '.workrail.lock');
+      nextPromise,
+      (e: any) => e instanceof Error ? e : new Error(String(e))
+    ).andThen((res) => res);
+  }
 
-        let existingLock: WorkspaceLockData | null = null;
-        try {
-          const content = await fs.readFile(lockFile, 'utf8');
-          existingLock = JSON.parse(content);
-        } catch {
-          // File does not exist or is invalid JSON
+  private static async acquireInternal(
+    canonical: string,
+    uuid: string,
+    parentUuid?: string
+  ): Promise<Result<WorkspaceLock, Error>> {
+    const lockFile = path.join(canonical, '.workrail.lock');
+
+    let existingLock: WorkspaceLockData | null = null;
+    try {
+      const content = await fs.readFile(lockFile, 'utf8');
+      existingLock = JSON.parse(content);
+    } catch {
+      // File does not exist or is invalid JSON
+    }
+
+    const now = Date.now();
+    if (existingLock) {
+      const pid = existingLock.pid;
+      const heartbeat = existingLock.heartbeat;
+      const lockUuid = existingLock.uuid;
+
+      // Nested lock acquisition check:
+      const stack = this.activeLocks.get(canonical);
+      let isNested = false;
+      if (stack && stack.length > 0) {
+        const top = stack[stack.length - 1];
+        isNested = parentUuid !== undefined && top.uuid === parentUuid;
+      } else {
+        isNested = parentUuid !== undefined && lockUuid === parentUuid;
+      }
+
+      if (isNested) {
+        let stack = this.activeLocks.get(canonical);
+        if (!stack) {
+          stack = [];
+          this.activeLocks.set(canonical, stack);
         }
 
-        const now = Date.now();
-        if (existingLock) {
-          const pid = existingLock.pid;
-          const heartbeat = existingLock.heartbeat;
-          const lockUuid = existingLock.uuid;
-
-          // Nested lock acquisition in the same process
-          if (pid === process.pid) {
-            let stack = this.activeLocks.get(canonical);
-            if (!stack) {
-              stack = [];
-              this.activeLocks.set(canonical, stack);
-            }
-
-            // Pause outer lock heartbeat
-            if (stack.length > 0) {
-              const top = stack[stack.length - 1];
-              top.lock.stopHeartbeat();
-            }
-
-            const newLock = new WorkspaceLock(canonical, uuid, process.pid);
-            const entry: LockStackEntry = { uuid, lock: newLock };
-            stack.push(entry);
-
-            // Update the lock file
-            const data: WorkspaceLockData = {
-              pid: process.pid,
-              uuid,
-              heartbeat: now,
-            };
-            await fs.mkdir(canonical, { recursive: true });
-            await safeWriteJson(lockFile, data);
-
-            await newLock.startHeartbeat();
-            return newLock;
-          }
-
-          // Check external process liveness
-          let isAlive = false;
-          try {
-            process.kill(pid, 0);
-            isAlive = true;
-          } catch (e: any) {
-            isAlive = e.code === 'EPERM'; // alive but no permission
-          }
-
-          const isStarved = now - heartbeat > 90000; // 90s heartbeat starvation lease buffer
-
-          if (isAlive && !isStarved) {
-            throw new Error(`Workspace is locked by another process (PID: ${pid}, UUID: ${lockUuid}, last heartbeat: ${new Date(heartbeat).toISOString()})`);
-          }
-          console.warn(`[WorkspaceLock] Evicting dead/starved lock file at ${lockFile}`);
-          // Clear stack on eviction
-          this.activeLocks.delete(canonical);
+        // Pause outer lock heartbeat
+        if (stack.length > 0) {
+          const top = stack[stack.length - 1];
+          top.lock.stopHeartbeat();
         }
 
-        // Write new lock
+        const newLock = new WorkspaceLock(canonical, uuid, process.pid);
+        const entry: LockStackEntry = { uuid, lock: newLock };
+        stack.push(entry);
+
+        // Update the lock file
         const data: WorkspaceLockData = {
           pid: process.pid,
           uuid,
@@ -183,19 +182,59 @@ export class WorkspaceLockManager {
         await fs.mkdir(canonical, { recursive: true });
         await safeWriteJson(lockFile, data);
 
-        const newLock = new WorkspaceLock(canonical, uuid, process.pid);
-        const stack: LockStackEntry[] = [{ uuid, lock: newLock }];
-        this.activeLocks.set(canonical, stack);
-
         await newLock.startHeartbeat();
-        return newLock;
-      })(),
-      (e: any) => e instanceof Error ? e : new Error(String(e))
-    );
+        return ok(newLock);
+      }
+
+      // Check external process liveness
+      let isAlive = false;
+      try {
+        process.kill(pid, 0);
+        isAlive = true;
+      } catch (e: any) {
+        isAlive = e.code === 'EPERM'; // alive but no permission
+      }
+
+      const isStarved = now - heartbeat > 90000; // 90s heartbeat starvation lease buffer
+
+      if (isAlive && !isStarved) {
+        return err(new Error(`Workspace is locked by another process (PID: ${pid}, UUID: ${lockUuid}, last heartbeat: ${new Date(heartbeat).toISOString()})`));
+      }
+      console.warn(`[WorkspaceLock] Evicting dead/starved lock file at ${lockFile}`);
+      // Clear stack on eviction
+      this.activeLocks.delete(canonical);
+    }
+
+    // Write new lock
+    const data: WorkspaceLockData = {
+      pid: process.pid,
+      uuid,
+      heartbeat: now,
+    };
+    await fs.mkdir(canonical, { recursive: true });
+    await safeWriteJson(lockFile, data);
+
+    const newLock = new WorkspaceLock(canonical, uuid, process.pid);
+    const stack: LockStackEntry[] = [{ uuid, lock: newLock }];
+    this.activeLocks.set(canonical, stack);
+
+    await newLock.startHeartbeat();
+    return ok(newLock);
   }
 
   public static async release(workspacePath: string, uuid: string): Promise<void> {
     const canonical = path.resolve(workspacePath);
+    const existingPromise = this.acquireQueues.get(canonical) || Promise.resolve();
+
+    const nextPromise = existingPromise.then(async () => {
+      await this.releaseInternal(canonical, uuid);
+    });
+
+    this.acquireQueues.set(canonical, nextPromise.then(() => {}).catch(() => {}));
+    await nextPromise;
+  }
+
+  private static async releaseInternal(canonical: string, uuid: string): Promise<void> {
     const stack = this.activeLocks.get(canonical);
     if (!stack) return;
 

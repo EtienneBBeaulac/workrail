@@ -47,8 +47,13 @@ function validatePathContainment(targetPath: string, rootPath: string): Result<s
     const nearestParent = getNearestExistingParent(targetPath);
     const resolvedNearestParent = fs.realpathSync(nearestParent);
 
-    const normalizedRoot = path.normalize(resolvedRoot).toLowerCase();
-    const normalizedNearestParent = path.normalize(resolvedNearestParent).toLowerCase();
+    const isCaseInsensitive = process.platform === 'win32' || process.platform === 'darwin';
+    const normalizedRoot = isCaseInsensitive
+      ? path.normalize(resolvedRoot).toLowerCase()
+      : path.normalize(resolvedRoot);
+    const normalizedNearestParent = isCaseInsensitive
+      ? path.normalize(resolvedNearestParent).toLowerCase()
+      : path.normalize(resolvedNearestParent);
 
     // Verify containment using relative path check (avoids suffix-based startsWith bypass)
     const relative = path.relative(normalizedRoot, normalizedNearestParent);
@@ -59,8 +64,10 @@ function validatePathContainment(targetPath: string, rootPath: string): Result<s
 
     // Verify no segment is a symlink (using case-normalized comparison for case-insensitive filesystems)
     let current = path.resolve(targetPath);
-    const resolvedRootNormalized = path.resolve(resolvedRoot).toLowerCase();
-    while (current.toLowerCase() !== resolvedRootNormalized && current !== path.dirname(current)) {
+    const resolvedRootNormalized = isCaseInsensitive
+      ? path.resolve(resolvedRoot).toLowerCase()
+      : path.resolve(resolvedRoot);
+    while ((isCaseInsensitive ? current.toLowerCase() : current) !== resolvedRootNormalized && current !== path.dirname(current)) {
       try {
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink()) {

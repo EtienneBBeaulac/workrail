@@ -44,6 +44,7 @@ describe('shadow-lifecycle tests', () => {
     it('resolves .git worktree file with relative path', () => {
       const realGitDir = path.join(tempWorkspace, 'real-git-dir');
       fs.mkdirSync(realGitDir);
+      fs.writeFileSync(path.join(realGitDir, 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
 
       const dotGit = path.join(tempWorkspace, '.git');
       fs.writeFileSync(dotGit, `gitdir: ./real-git-dir\n`, 'utf8');
@@ -56,6 +57,7 @@ describe('shadow-lifecycle tests', () => {
     it('resolves .git worktree file with absolute path', () => {
       const realGitDir = path.join(tempWorkspace, 'real-git-dir-abs');
       fs.mkdirSync(realGitDir);
+      fs.writeFileSync(path.join(realGitDir, 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
 
       const dotGit = path.join(tempWorkspace, '.git');
       fs.writeFileSync(dotGit, `gitdir: ${realGitDir}\n`, 'utf8');
@@ -63,6 +65,18 @@ describe('shadow-lifecycle tests', () => {
       const res = resolveGitDir(tempWorkspace);
       expect(res.isOk()).toBe(true);
       expect(res._unsafeUnwrap()).toBe(realGitDir);
+    });
+
+    it('returns error if resolved git worktree directory does not contain HEAD file', () => {
+      const realGitDir = path.join(tempWorkspace, 'real-git-dir-no-head');
+      fs.mkdirSync(realGitDir);
+
+      const dotGit = path.join(tempWorkspace, '.git');
+      fs.writeFileSync(dotGit, `gitdir: ./real-git-dir-no-head\n`, 'utf8');
+
+      const res = resolveGitDir(tempWorkspace);
+      expect(res.isErr()).toBe(true);
+      expect(res._unsafeUnwrapErr().message).toContain('Security violation: resolved git directory does not contain a valid Git HEAD file');
     });
   });
 
@@ -235,6 +249,41 @@ describe('shadow-lifecycle tests', () => {
 
       const targetOutsideFile = path.join(tempWorkspace, '.workrail', 'traversal.md');
       expect(fs.existsSync(targetOutsideFile)).toBe(false);
+    });
+
+    it('returns error if path to be rehydrated contains a symbolic link segment (prevent symlink write-through)', () => {
+      const shadowPath = path.join(tempWorkspace, '.workrail', 'artifacts', 'session_123');
+      fs.mkdirSync(shadowPath, { recursive: true });
+
+      const externalDir = path.join(tempWorkspace, 'external-dir');
+      fs.mkdirSync(externalDir, { recursive: true });
+      const targetFile = path.join(externalDir, 'secret.md');
+      fs.writeFileSync(targetFile, 'original content', 'utf8');
+
+      const linkPath = path.join(shadowPath, 'symlink_dir');
+      fs.symlinkSync(externalDir, linkPath);
+
+      const events = [
+        {
+          kind: 'node_output_appended',
+          data: {
+            outputId: 'symlink_dir/secret.md',
+            outputChannel: 'artifact',
+            payload: {
+              payloadKind: 'artifact_ref',
+              sha256: 'sha256:abc',
+              contentType: 'text/markdown',
+              content: 'evil content overwrite',
+            }
+          }
+        }
+      ];
+
+      const res = rehydrateShadowFiles(events, shadowPath, false);
+      expect(res.isErr()).toBe(true);
+      expect(res._unsafeUnwrapErr().message).toContain('symbolic link segment');
+
+      expect(fs.readFileSync(targetFile, 'utf8')).toBe('original content');
     });
   });
 

@@ -182,7 +182,7 @@ export function ArtifactsTab({ artifacts }: Props) {
             <div className="w-full h-full bg-white rounded overflow-hidden">
               <iframe
                 srcDoc={String(active.content)}
-                sandbox="allow-scripts"
+                sandbox=""
                 className="w-full h-full border-0"
                 title={active.name}
               />

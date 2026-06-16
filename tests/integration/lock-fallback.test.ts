@@ -71,7 +71,7 @@ describe('WorkspaceLockManager & EditLimiter Integration Tests', () => {
     const lock1 = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-parent');
     expect(lock1.isOk()).toBe(true);
 
-    const lock2 = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-child');
+    const lock2 = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-child', 'uuid-parent');
     expect(lock2.isOk()).toBe(true);
 
     // Lock file should now reflect the top of the stack (uuid-child)
@@ -224,7 +224,7 @@ describe('WorkspaceLockManager & EditLimiter Integration Tests', () => {
     const outerLock = outerRes._unsafeUnwrap();
     expect((outerLock as any).heartbeatInterval).not.toBeNull();
 
-    const innerRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-inner');
+    const innerRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-inner', 'uuid-outer');
     expect(innerRes.isOk()).toBe(true);
     const innerLock = innerRes._unsafeUnwrap();
 
@@ -236,6 +236,17 @@ describe('WorkspaceLockManager & EditLimiter Integration Tests', () => {
     expect((outerLock as any).heartbeatInterval).not.toBeNull();
 
     await outerLock.release();
+  });
+
+  it('should reject concurrent same-PID lock acquisition if not parent-child nested relation (prevent hijacking)', async () => {
+    const lock1 = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-session-a');
+    expect(lock1.isOk()).toBe(true);
+
+    const lock2 = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-session-b');
+    expect(lock2.isErr()).toBe(true);
+    expect(lock2._unsafeUnwrapErr().message).toContain('locked by another process');
+
+    await WorkspaceLockManager.release(tempTestDir, 'uuid-session-a');
   });
 
   it('should reject lock acquisition when .workrail.lock is a symlink (symlink overwrite vulnerability check)', async () => {
