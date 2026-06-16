@@ -50,15 +50,17 @@ function validatePathContainment(targetPath: string, rootPath: string): Result<s
     const normalizedRoot = path.normalize(resolvedRoot).toLowerCase();
     const normalizedNearestParent = path.normalize(resolvedNearestParent).toLowerCase();
 
-    // Verify containment
-    if (!normalizedNearestParent.startsWith(normalizedRoot)) {
+    // Verify containment using relative path check (avoids suffix-based startsWith bypass)
+    const relative = path.relative(normalizedRoot, normalizedNearestParent);
+    const isContained = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    if (!isContained) {
       return err(new Error(`Path is outside root: ${targetPath}`));
     }
 
-    // Verify no segment is a symlink
+    // Verify no segment is a symlink (using case-normalized comparison for case-insensitive filesystems)
     let current = path.resolve(targetPath);
-    const resolvedRootNormalized = path.resolve(resolvedRoot);
-    while (current !== resolvedRootNormalized && current !== path.dirname(current)) {
+    const resolvedRootNormalized = path.resolve(resolvedRoot).toLowerCase();
+    while (current.toLowerCase() !== resolvedRootNormalized && current !== path.dirname(current)) {
       try {
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink()) {

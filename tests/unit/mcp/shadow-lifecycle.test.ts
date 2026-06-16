@@ -208,6 +208,34 @@ describe('shadow-lifecycle tests', () => {
       expect(res.isOk()).toBe(true);
       expect(res._unsafeUnwrap()).toEqual([]); // No warnings! Line endings normalized.
     });
+
+    it('returns error if artifact outputId tries path traversal', () => {
+      const events = [
+        {
+          kind: 'node_output_appended',
+          data: {
+            outputId: '../../traversal.md',
+            outputChannel: 'artifact',
+            payload: {
+              payloadKind: 'artifact_ref',
+              sha256: 'sha256:123',
+              contentType: 'text/markdown',
+              content: 'should not write',
+            }
+          }
+        }
+      ];
+
+      const shadowPath = path.join(tempWorkspace, '.workrail', 'artifacts', 'session_123');
+      fs.mkdirSync(shadowPath, { recursive: true });
+
+      const res = rehydrateShadowFiles(events, shadowPath, false);
+      expect(res.isErr()).toBe(true);
+      expect(res._unsafeUnwrapErr().message).toContain('Path traversal detected');
+
+      const targetOutsideFile = path.join(tempWorkspace, '.workrail', 'traversal.md');
+      expect(fs.existsSync(targetOutsideFile)).toBe(false);
+    });
   });
 
   describe('validateArtifactSchema', () => {

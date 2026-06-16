@@ -9,6 +9,20 @@ export interface WorkspaceLockData {
   readonly heartbeat: number;
 }
 
+async function safeWriteJson(filePath: string, data: any): Promise<void> {
+  try {
+    const stats = await fs.lstat(filePath);
+    if (stats.isSymbolicLink()) {
+      throw new Error(`WorkspaceLockViolation: Symbolic link detected at path: ${filePath}`);
+    }
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') {
+      throw e;
+    }
+  }
+  await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
 export class WorkspaceLock {
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
@@ -28,7 +42,7 @@ export class WorkspaceLock {
           uuid: this.uuid,
           heartbeat: Date.now(),
         };
-        await fs.writeFile(lockFile, JSON.stringify(data, null, 2), 'utf8');
+        await safeWriteJson(lockFile, data);
       } catch (e) {
         console.error(`[WorkspaceLock] Failed to write heartbeat:`, e);
       }
@@ -38,18 +52,22 @@ export class WorkspaceLock {
     }
   }
 
-  public async release(): Promise<void> {
+  public stopHeartbeat(): void {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
+  }
+
+  public async release(): Promise<void> {
+    this.stopHeartbeat();
     await WorkspaceLockManager.release(this.workspacePath, this.uuid);
   }
 }
 
 interface LockStackEntry {
   readonly uuid: string;
-  heartbeatInterval: NodeJS.Timeout | null;
+  readonly lock: WorkspaceLock;
 }
 
 export class WorkspaceLockManager {
@@ -113,7 +131,15 @@ export class WorkspaceLockManager {
               stack = [];
               this.activeLocks.set(canonical, stack);
             }
-            const entry: LockStackEntry = { uuid, heartbeatInterval: null };
+
+            // Pause outer lock heartbeat
+            if (stack.length > 0) {
+              const top = stack[stack.length - 1];
+              top.lock.stopHeartbeat();
+            }
+
+            const newLock = new WorkspaceLock(canonical, uuid, process.pid);
+            const entry: LockStackEntry = { uuid, lock: newLock };
             stack.push(entry);
 
             // Update the lock file
@@ -123,9 +149,8 @@ export class WorkspaceLockManager {
               heartbeat: now,
             };
             await fs.mkdir(canonical, { recursive: true });
-            await fs.writeFile(lockFile, JSON.stringify(data, null, 2), 'utf8');
+            await safeWriteJson(lockFile, data);
 
-            const newLock = new WorkspaceLock(canonical, uuid, process.pid);
             await newLock.startHeartbeat();
             return newLock;
           }
@@ -156,12 +181,12 @@ export class WorkspaceLockManager {
           heartbeat: now,
         };
         await fs.mkdir(canonical, { recursive: true });
-        await fs.writeFile(lockFile, JSON.stringify(data, null, 2), 'utf8');
-
-        const stack: LockStackEntry[] = [{ uuid, heartbeatInterval: null }];
-        this.activeLocks.set(canonical, stack);
+        await safeWriteJson(lockFile, data);
 
         const newLock = new WorkspaceLock(canonical, uuid, process.pid);
+        const stack: LockStackEntry[] = [{ uuid, lock: newLock }];
+        this.activeLocks.set(canonical, stack);
+
         await newLock.startHeartbeat();
         return newLock;
       })(),
@@ -176,6 +201,9 @@ export class WorkspaceLockManager {
 
     const idx = stack.findIndex(entry => entry.uuid === uuid);
     if (idx === -1) return;
+
+    const entry = stack[idx];
+    entry.lock.stopHeartbeat();
 
     stack.splice(idx, 1);
 
@@ -202,7 +230,8 @@ export class WorkspaceLockManager {
           uuid: top.uuid,
           heartbeat: Date.now(),
         };
-        await fs.writeFile(lockFile, JSON.stringify(data, null, 2), 'utf8');
+        await safeWriteJson(lockFile, data);
+        await top.lock.startHeartbeat();
       } catch (e) {
         console.error(`[WorkspaceLock] Failed to restore lock stack top:`, e);
       }

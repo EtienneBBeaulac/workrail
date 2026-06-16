@@ -216,9 +216,19 @@ export function handleRehydrateIntent(args: {
                              input.context?.force === true;
 
           const rehydrateWarnings: string[] = [];
+          let shadowPath: string | null = null;
           if (workspacePath && !virtualOnly) {
-            const shadowParent = path.join(fs.realpathSync(workspacePath), '.workrail');
-            const shadowPath = path.join(shadowParent, 'artifacts', String(sessionId));
+            try {
+              const resolvedWorkspace = fs.realpathSync(workspacePath);
+              const shadowParent = path.join(resolvedWorkspace, '.workrail');
+              shadowPath = path.join(shadowParent, 'artifacts', String(sessionId));
+            } catch (e) {
+              console.warn(`[workrail:rehydrate] Failed to resolve workspacePath realpath: ${e}. Falling back to Virtual-Only mode.`);
+              virtualOnly = true;
+            }
+          }
+
+          if (shadowPath && !virtualOnly) {
             const rehydrateResult = rehydrateShadowFiles(truth.events, shadowPath, forceReset);
             if (rehydrateResult.isOk()) {
               rehydrateWarnings.push(...rehydrateResult.value);

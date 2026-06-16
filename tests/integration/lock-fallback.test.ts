@@ -217,4 +217,41 @@ describe('WorkspaceLockManager & EditLimiter Integration Tests', () => {
 
     expect(state.terminalSignal?.reason).toBe('edit_limit_exceeded');
   });
+
+  it('should pause outer heartbeat when inner is acquired, and resume on pop', async () => {
+    const outerRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-outer');
+    expect(outerRes.isOk()).toBe(true);
+    const outerLock = outerRes._unsafeUnwrap();
+    expect((outerLock as any).heartbeatInterval).not.toBeNull();
+
+    const innerRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-inner');
+    expect(innerRes.isOk()).toBe(true);
+    const innerLock = innerRes._unsafeUnwrap();
+
+    expect((outerLock as any).heartbeatInterval).toBeNull();
+    expect((innerLock as any).heartbeatInterval).not.toBeNull();
+
+    await innerLock.release();
+
+    expect((outerLock as any).heartbeatInterval).not.toBeNull();
+
+    await outerLock.release();
+  });
+
+  it('should reject lock acquisition when .workrail.lock is a symlink (symlink overwrite vulnerability check)', async () => {
+    const targetFile = path.join(tempTestDir, 'external.txt');
+    await fs.writeFile(targetFile, 'original content', 'utf8');
+
+    const lockFile = path.join(tempTestDir, '.workrail.lock');
+    await fs.symlink(targetFile, lockFile);
+
+    const acquireRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-symlink');
+    expect(acquireRes.isErr()).toBe(true);
+    expect(acquireRes._unsafeUnwrapErr().message).toContain('Symbolic link detected');
+
+    const content = await fs.readFile(targetFile, 'utf8');
+    expect(content).toBe('original content');
+
+    await fs.unlink(lockFile);
+  });
 });

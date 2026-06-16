@@ -148,8 +148,16 @@ export function rehydrateShadowFiles(
     const warnings: string[] = [];
 
     // 2. Hydrate each artifact
+    const resolvedShadowPath = path.resolve(shadowPath);
     for (const [filename, art] of latestArtifacts.entries()) {
-      const filePath = path.join(shadowPath, filename);
+      const filePath = path.resolve(resolvedShadowPath, filename);
+
+      const relative = path.relative(resolvedShadowPath, filePath);
+      const isContained = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+      if (!isContained) {
+        return err(new Error(`WorkspaceLockViolation: Path traversal detected in shadow rehydration for file: ${filename}`));
+      }
+
       const isText = typeof art.content === 'string' && 
                      (art.contentType.startsWith('text/') || 
                       art.contentType === 'application/json' || 

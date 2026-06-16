@@ -230,4 +230,45 @@ describe('worktrain export-artifact CLI command', () => {
     expect(res.kind).toBe('success');
     expect(callCount).toBe(4);
   });
+
+  it('rejects sibling directories that share a prefix with the root (prefix startsWith bypass check)', async () => {
+    const parentDir = path.dirname(root);
+    const siblingDir = path.join(parentDir, path.basename(root) + '_malicious');
+    fs.mkdirSync(siblingDir, { recursive: true });
+
+    const targetFileOutside = path.join(siblingDir, 'hack.md');
+
+    const shadowDir = path.join(root, '.workrail', 'artifacts', sessionId);
+    fs.mkdirSync(shadowDir, { recursive: true });
+    fs.writeFileSync(path.join(shadowDir, 'doc.md'), 'hello world', 'utf8');
+
+    const res = await executeWorktrainExportArtifactCommand({
+      sessionId,
+      artifactName: 'doc.md',
+      destPath: targetFileOutside,
+    });
+
+    expect(res.kind).toBe('failure');
+    expect(res.output.message).toContain('Security violation: destination path validation failed');
+
+    fs.rmSync(siblingDir, { recursive: true, force: true });
+  });
+
+  it('handles case-insensitive root matching correctly without walking past root', async () => {
+    const rootCased = root.toLowerCase() === root ? root.toUpperCase() : root.toLowerCase();
+    
+    const shadowDir = path.join(root, '.workrail', 'artifacts', sessionId);
+    fs.mkdirSync(shadowDir, { recursive: true });
+    fs.writeFileSync(path.join(shadowDir, 'doc.md'), 'hello world', 'utf8');
+
+    const destWithCasing = path.join(rootCased, 'doc.md');
+
+    const res = await executeWorktrainExportArtifactCommand({
+      sessionId,
+      artifactName: 'doc.md',
+      destPath: destWithCasing,
+    });
+
+    expect(res.kind).toBe('success');
+  });
 });
