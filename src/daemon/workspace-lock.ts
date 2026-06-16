@@ -32,20 +32,57 @@ export class WorkspaceLock {
     public readonly pid: number
   ) {}
 
+  public async pulseHeartbeat(): Promise<void> {
+    try {
+      const lockFile = path.join(this.workspacePath, '.workrail.lock');
+      let fileContent: string | null = null;
+      try {
+        fileContent = await fs.readFile(lockFile, 'utf8');
+      } catch (e: any) {
+        if (e.code === 'ENOENT') {
+          console.warn(`[WorkspaceLock] Heartbeat aborting: Lock file for ${this.workspacePath} was deleted`);
+          this.stopHeartbeat();
+          return;
+        }
+        console.error(`[WorkspaceLock] Heartbeat read error (skipping this tick):`, e);
+        return;
+      }
+
+      if (fileContent) {
+        try {
+          const currentLock: WorkspaceLockData = JSON.parse(fileContent);
+          if (currentLock.uuid !== this.uuid) {
+            console.warn(
+              `[WorkspaceLock] Heartbeat aborting: Lock for ${this.workspacePath} was claimed by another UUID: ${currentLock.uuid}`
+            );
+            this.stopHeartbeat();
+            return;
+          }
+        } catch (e) {
+          console.warn(`[WorkspaceLock] Heartbeat JSON parse error (skipping this tick):`, e);
+          return;
+        }
+      } else {
+        console.warn(`[WorkspaceLock] Heartbeat aborting: Lock file for ${this.workspacePath} is empty`);
+        this.stopHeartbeat();
+        return;
+      }
+
+      const data: WorkspaceLockData = {
+        pid: this.pid,
+        uuid: this.uuid,
+        heartbeat: Date.now(),
+      };
+      await safeWriteJson(lockFile, data);
+    } catch (e) {
+      console.error(`[WorkspaceLock] Failed to write heartbeat:`, e);
+    }
+  }
+
   public async startHeartbeat(): Promise<void> {
     if (this.heartbeatInterval) return;
     this.heartbeatInterval = setInterval(async () => {
-      try {
-        const lockFile = path.join(this.workspacePath, '.workrail.lock');
-        const data: WorkspaceLockData = {
-          pid: this.pid,
-          uuid: this.uuid,
-          heartbeat: Date.now(),
-        };
-        await safeWriteJson(lockFile, data);
-      } catch (e) {
-        console.error(`[WorkspaceLock] Failed to write heartbeat:`, e);
-      }
+      await this.pulseHeartbeat();
     }, 30000); // 30s interval
     if (this.heartbeatInterval.unref) {
       this.heartbeatInterval.unref();

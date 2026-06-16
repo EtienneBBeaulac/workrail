@@ -435,9 +435,13 @@ export async function runWorkflow(
   }
 
   // ---- Workspace Lock Acquisition ----
+  const lockUuid = preResult.session.state.workrailSessionId
+    ? String(preResult.session.state.workrailSessionId)
+    : String(sessionId);
+
   const lockRes = await WorkspaceLockManager.acquire(
     preResult.session.sessionWorkspacePath,
-    String(sessionId),
+    lockUuid,
     trigger.parentSessionId ? String(trigger.parentSessionId) : undefined
   );
   if (lockRes.isErr()) {

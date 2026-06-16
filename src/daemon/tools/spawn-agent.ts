@@ -254,7 +254,16 @@ export async function linkAllNodeModules(srcRoot: string, destRoot: string): Pro
     const entries = await fs.readdir(currentSrc, { withFileTypes: true });
     for (const entry of entries) {
       const entryPath = path.join(currentSrc, entry.name);
-      if (entry.isDirectory()) {
+      let isDir = entry.isDirectory();
+      if (!isDir && entry.isSymbolicLink()) {
+        try {
+          const stat = await fs.stat(entryPath);
+          isDir = stat.isDirectory();
+        } catch {
+          // Ignore dangling symlinks
+        }
+      }
+      if (isDir) {
         if (entry.name === 'node_modules') {
           const destPath = path.join(destRoot, path.relative(srcRoot, entryPath));
           await fs.mkdir(path.dirname(destPath), { recursive: true });

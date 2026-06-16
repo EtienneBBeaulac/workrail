@@ -285,6 +285,34 @@ describe('shadow-lifecycle tests', () => {
 
       expect(fs.readFileSync(targetFile, 'utf8')).toBe('original content');
     });
+
+    it('hydrates nested artifact paths successfully creating parent subfolders', () => {
+      const shadowPath = path.join(tempWorkspace, '.workrail', 'artifacts', 'session_123');
+      fs.mkdirSync(shadowPath, { recursive: true });
+
+      const nestedEvents = [
+        {
+          kind: 'node_output_appended',
+          data: {
+            outputId: 'docs/subfolder/artifact.json',
+            outputChannel: 'artifact',
+            payload: {
+              payloadKind: 'artifact_ref',
+              sha256: 'sha256:nesteddummy',
+              contentType: 'application/json',
+              content: '{"nested": true}',
+            },
+          },
+        },
+      ];
+
+      const res = rehydrateShadowFiles(nestedEvents, shadowPath, false);
+      expect(res.isOk()).toBe(true);
+
+      const nestedFilePath = path.join(shadowPath, 'docs', 'subfolder', 'artifact.json');
+      expect(fs.existsSync(nestedFilePath)).toBe(true);
+      expect(fs.readFileSync(nestedFilePath, 'utf8')).toBe('{"nested": true}');
+    });
   });
 
   describe('validateArtifactSchema', () => {
@@ -414,6 +442,26 @@ describe('shadow-lifecycle tests', () => {
       const res = extractShadowArtifacts(shadowPath, events);
       expect(res.isOk()).toBe(true);
       expect(res._unsafeUnwrap()).toEqual([artNew]);
+    });
+
+    it('extracts artifacts recursively from nested subdirectories', () => {
+      const shadowPath = path.join(tempWorkspace, '.workrail', 'artifacts', 'session_123');
+      fs.mkdirSync(shadowPath, { recursive: true });
+
+      const nestedDir = path.join(shadowPath, 'docs', 'subfolder');
+      fs.mkdirSync(nestedDir, { recursive: true });
+
+      const artFile = path.join(nestedDir, 'nested_loop.json');
+      const art = {
+        kind: 'wr.loop_control',
+        decision: 'continue',
+        metadata: { reason: 'Nested Extraction' }
+      };
+      fs.writeFileSync(artFile, JSON.stringify(art), 'utf8');
+
+      const res = extractShadowArtifacts(shadowPath, []);
+      expect(res.isOk()).toBe(true);
+      expect(res._unsafeUnwrap()).toEqual([art]);
     });
   });
 });

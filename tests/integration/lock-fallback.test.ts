@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -264,5 +264,47 @@ describe('WorkspaceLockManager & EditLimiter Integration Tests', () => {
     expect(content).toBe('original content');
 
     await fs.unlink(lockFile);
+  });
+
+  it('should stop heartbeat immediately if the lock is claimed by another UUID', async () => {
+    const lockRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-owner');
+    expect(lockRes.isOk()).toBe(true);
+    const lock = lockRes._unsafeUnwrap();
+    expect((lock as any).heartbeatInterval).not.toBeNull();
+
+    // Now manually overwrite the lock file with a different UUID
+    const lockFile = path.join(tempTestDir, '.workrail.lock');
+    const hijackedData = {
+      pid: process.pid,
+      uuid: 'uuid-hijacker',
+      heartbeat: Date.now(),
+    };
+    await fs.writeFile(lockFile, JSON.stringify(hijackedData), 'utf8');
+
+    // Trigger the heartbeat check directly
+    await lock.pulseHeartbeat();
+
+    // Heartbeat should have stopped (heartbeatInterval set to null)
+    expect((lock as any).heartbeatInterval).toBeNull();
+
+    // Cleanup
+    await WorkspaceLockManager.release(tempTestDir, 'uuid-hijacker');
+  });
+
+  it('should stop heartbeat immediately if the lock file is deleted', async () => {
+    const lockRes = await WorkspaceLockManager.acquire(tempTestDir, 'uuid-owner-2');
+    expect(lockRes.isOk()).toBe(true);
+    const lock = lockRes._unsafeUnwrap();
+    expect((lock as any).heartbeatInterval).not.toBeNull();
+
+    // Manually delete the lock file
+    const lockFile = path.join(tempTestDir, '.workrail.lock');
+    await fs.rm(lockFile, { force: true });
+
+    // Trigger the heartbeat check directly
+    await lock.pulseHeartbeat();
+
+    // Heartbeat should have stopped
+    expect((lock as any).heartbeatInterval).toBeNull();
   });
 });

@@ -221,6 +221,7 @@ export function rehydrateShadowFiles(
 
         if (localSha !== eventSha) {
           if (forceReset) {
+            fs.mkdirSync(path.dirname(filePath), { recursive: true });
             fs.writeFileSync(filePath, art.content, 'utf8');
           } else {
             warnings.push(
@@ -231,10 +232,12 @@ export function rehydrateShadowFiles(
           }
         } else {
           // Contents match, but let's re-write to ensure line endings and mtime are correct.
+          fs.mkdirSync(path.dirname(filePath), { recursive: true });
           fs.writeFileSync(filePath, art.content, 'utf8');
         }
       } else {
         // File does not exist locally, write it.
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, art.content, 'utf8');
       }
     }
@@ -295,6 +298,24 @@ export function validateArtifactSchema(artifact: any): Result<unknown, Error> {
   return ok(parseResult.data);
 }
 
+function getAllFilesRecursively(dir: string, baseDir: string = dir): string[] {
+  const results: string[] = [];
+  if (!fs.existsSync(dir)) {
+    return results;
+  }
+  const list = fs.readdirSync(dir);
+  for (const file of list) {
+    const filePath = path.join(dir, file);
+    const stat = fs.lstatSync(filePath);
+    if (stat.isDirectory()) {
+      results.push(...getAllFilesRecursively(filePath, baseDir));
+    } else if (stat.isFile()) {
+      results.push(path.relative(baseDir, filePath));
+    }
+  }
+  return results;
+}
+
 /**
  * Scans the shadow directory for new or modified artifact files.
  * Compares them against the latest committed state in the event log.
@@ -328,7 +349,7 @@ export function extractShadowArtifacts(
       }
     }
 
-    const files = fs.readdirSync(shadowPath);
+    const files = getAllFilesRecursively(shadowPath);
     const extracted: unknown[] = [];
 
     for (const file of files) {
@@ -351,7 +372,8 @@ export function extractShadowArtifacts(
       }
 
       // Try parsing as JSON
-      const isJsonExt = file.endsWith('.json') || file.startsWith('out_artifact_');
+      const filename = path.basename(file);
+      const isJsonExt = file.endsWith('.json') || filename.startsWith('out_artifact_');
       try {
         const parsed = JSON.parse(content);
         if (parsed && typeof parsed === 'object') {
