@@ -170,6 +170,11 @@ export function getSchemas(): Record<string, any> {
           additionalProperties: false,
           description: "Optional custom agent configuration for the child session (single-spawn form only). Note: the 'model' string field is no longer supported; use 'modelTier' ('lightweight', 'mid', or 'heavy') instead."
         },
+        allowedTools: {
+          type: 'array',
+          description: 'Tool names the child session is restricted to. Absent = inherit default tool set.',
+          items: { type: 'string' },
+        },
         agents: {
           type: 'array',
           // NOTE: top-level required[] is absent because the schema accepts two forms
@@ -199,6 +204,11 @@ export function getSchemas(): Record<string, any> {
                 },
                 additionalProperties: false,
                 description: 'Optional custom agent configuration for the child session.'
+              },
+              allowedTools: {
+                type: 'array',
+                description: 'Tool names the child session is restricted to. Absent = inherit default tool set.',
+                items: { type: 'string' },
               },
             },
             required: ['workflowId', 'goal', 'workspacePath'],

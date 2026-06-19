@@ -36,6 +36,8 @@ interface SingleSpawnSpec {
   readonly agentConfig?: {
     readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
   };
+  // TODO: wire to child session tool-restriction param when the session layer supports it.
+  readonly allowedTools?: readonly string[];
 }
 
 /**
@@ -111,6 +113,7 @@ function parseParams(raw: unknown): ParsedParams {
         workspacePath: a['workspacePath'],
         ...(a['context'] !== undefined ? { context: a['context'] as Readonly<Record<string, unknown>> } : {}),
         ...(agentConfig !== undefined ? { agentConfig } : {}),
+        ...(Array.isArray(a['allowedTools']) ? { allowedTools: a['allowedTools'] as readonly string[] } : {}),
       };
     });
     return { kind: 'parallel', agents };
@@ -141,6 +144,7 @@ function parseParams(raw: unknown): ParsedParams {
       workspacePath: p['workspacePath'],
       ...(p['context'] !== undefined ? { context: p['context'] as Readonly<Record<string, unknown>> } : {}), // object type validated by JSON Schema at call boundary
       ...(agentConfig !== undefined ? { agentConfig } : {}),
+      ...(Array.isArray(p['allowedTools']) ? { allowedTools: p['allowedTools'] as readonly string[] } : {}),
     },
   };
 }
