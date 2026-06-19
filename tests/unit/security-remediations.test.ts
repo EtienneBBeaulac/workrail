@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
-import { verifyEAT, signEAT } from '../../src/v2/durable-core/tokens/index.js';
+import { verifyEAT, signEAT, parseEAT } from '../../src/v2/durable-core/tokens/index.js';
 import { unsafeTokenCodecPorts } from '../../src/v2/durable-core/tokens/index.js';
 import { NodeHmacSha256V2 } from '../../src/v2/infra/local/hmac-sha256/index.js';
 import { NodeBase64UrlV2 } from '../../src/v2/infra/local/base64url/index.js';
@@ -96,32 +96,91 @@ describe('Security Remediations', () => {
     };
 
     it('signs and verifies a session-bound EAT payload successfully', () => {
-      const signature = signEAT(eatPayload, ports);
-      expect(signature).not.toBeNull();
-      if (!signature) return;
+      const signResult = signEAT(eatPayload, ports);
+      expect(signResult.ok).toBe(true);
+      if (!signResult.ok) return;
 
       // Verification with expected session ID must pass
-      const isValid = verifyEAT(eatPayload, signature, ports, 'sess_current456');
+      const isValid = verifyEAT(eatPayload, signResult.value, ports, 'sess_current456');
       expect(isValid).toBe(true);
     });
 
     it('rejects EAT verification if expected sessionId does not match', () => {
-      const signature = signEAT(eatPayload, ports);
-      expect(signature).not.toBeNull();
-      if (!signature) return;
+      const signResult = signEAT(eatPayload, ports);
+      expect(signResult.ok).toBe(true);
+      if (!signResult.ok) return;
 
       // Verification with a mismatched expected session ID must fail (mitigating replay)
-      const isValid = verifyEAT(eatPayload, signature, ports, 'sess_mismatched789');
+      const isValid = verifyEAT(eatPayload, signResult.value, ports, 'sess_mismatched789');
       expect(isValid).toBe(false);
     });
 
     it('retains backward compatibility if no expectedSessionId is passed', () => {
-      const signature = signEAT(eatPayload, ports);
-      expect(signature).not.toBeNull();
-      if (!signature) return;
+      const signResult = signEAT(eatPayload, ports);
+      expect(signResult.ok).toBe(true);
+      if (!signResult.ok) return;
 
-      const isValid = verifyEAT(eatPayload, signature, ports);
+      const isValid = verifyEAT(eatPayload, signResult.value, ports);
       expect(isValid).toBe(true);
+    });
+
+    // ---- F9: Additional security test cases ----
+
+    it('rejects a parent_eat_token where payload is null (null-payload malformed EAT)', () => {
+      // A token that parses as valid JSON but has payload: null
+      const malformedToken = JSON.stringify({ payload: null, signature: 'anything' });
+      const result = parseEAT(malformedToken, ports);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // Must be classified as malformed, not missing or signature_mismatch
+      expect(result.error.kind).toBe('malformed');
+    });
+
+    it('rejects a parent_eat_token where the payload is missing the spawnDepth field', () => {
+      // A token where the payload lacks the required spawnDepth field
+      const incompletePayload = {
+        harness: 'claude_code',
+        activeModel: 'claude-3-5-sonnet',
+        sessionId: 'sess_incomplete',
+        // spawnDepth intentionally missing
+      };
+      const malformedToken = JSON.stringify({ payload: incompletePayload, signature: 'anything' });
+      const result = parseEAT(malformedToken, ports);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // spawnDepth is not a string field so the type guard catches its absence
+      expect(result.error.kind).toBe('malformed');
+    });
+
+    it('rejects verification when keyring has rotated away from the signing key (signature_mismatch)', () => {
+      // Sign with key N
+      const signResult = signEAT(eatPayload, ports);
+      expect(signResult.ok).toBe(true);
+      if (!signResult.ok) return;
+
+      const signedToken = JSON.stringify({ payload: eatPayload, signature: signResult.value });
+
+      // Verify with a different keyring (key N+1, key N absent) — simulates key rotation
+      const rotatedKeyring = {
+        current: {
+          keyId: 'k2',
+          // Completely different key — key N is gone
+          keyBase64Url: 'Z9Y8X7W6V5U4T3S2R1Q0P9O8N7M6L5K4J3I2H1G0F9E8D7C6B5A4',
+        },
+      };
+      const rotatedPorts = unsafeTokenCodecPorts({
+        keyring: rotatedKeyring,
+        hmac,
+        base64url,
+        base32,
+        bech32m,
+      });
+
+      const result = parseEAT(signedToken, rotatedPorts);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // Token structure is valid, but HMAC fails against the new key
+      expect(result.error.kind).toBe('signature_mismatch');
     });
   });
 });

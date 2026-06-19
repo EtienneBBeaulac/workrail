@@ -266,10 +266,43 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   );
 
   if (startResult.isErr()) {
-    const err = startResult.error;
-    const notesMsg = err.kind === 'precondition_failed' || err.kind === 'invariant_violation' || err.kind === 'workflow_compile_failed' || err.kind === 'hash_computation_failed' || err.kind === 'prompt_render_failed'
-      ? err.message
-      : JSON.stringify(err);
+    const startErr = startResult.error;
+
+    // WHY exhaustive switch: StartWorkflowError is a discriminated union with 11 variants.
+    // An if-chain (5 of 11) silently falls through for unrecognised variants and hides
+    // future additions. assertNever at the default makes new variants compile errors.
+    const notesMsg = ((): string => {
+      switch (startErr.kind) {
+        case 'precondition_failed':
+          return startErr.message;
+        case 'invariant_violation':
+          return startErr.message;
+        case 'workflow_not_found':
+          return `Workflow not found: ${startErr.workflowId}`;
+        case 'workflow_has_no_steps':
+          return `Workflow has no steps: ${startErr.workflowId}`;
+        case 'workflow_compile_failed':
+          return startErr.message;
+        case 'keyring_load_failed':
+          return `Keyring load failed: ${JSON.stringify(startErr.cause)}`;
+        case 'hash_computation_failed':
+          return startErr.message;
+        case 'pinned_workflow_store_failed':
+          return `Pinned workflow store error: ${JSON.stringify(startErr.cause)}`;
+        case 'snapshot_creation_failed':
+          return `Snapshot creation failed: ${JSON.stringify(startErr.cause)}`;
+        case 'session_append_failed':
+          return `Session append failed: ${JSON.stringify(startErr.cause)}`;
+        case 'token_signing_failed':
+          return `Token signing failed: ${JSON.stringify(startErr.cause)}`;
+        case 'prompt_render_failed':
+          return startErr.message;
+        case 'reference_resolution_failed':
+          return 'Reference resolution failed (timeout or error)';
+        default:
+          return assertNever(startErr);
+      }
+    })();
 
     return {
       kind: 'single',

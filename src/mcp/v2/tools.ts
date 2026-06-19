@@ -162,7 +162,7 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
     }
     const contextObj = data.context ?? data.contextVariables;
     if (contextObj && typeof contextObj === 'object') {
-      const reservedKeys = ['eat_token', 'metrics_harness', 'metrics_active_model'];
+      const reservedKeys = ['eat_token', 'parent_eat_token', 'metrics_harness', 'metrics_active_model'];
       for (const k of reservedKeys) {
         if (k in contextObj) {
           ctx.addIssue({
@@ -188,6 +188,7 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
     const cleanContext = normalized.context ? { ...(normalized.context as Record<string, unknown>) } : undefined;
     if (cleanContext) {
       delete cleanContext['eat_token'];
+      delete cleanContext['parent_eat_token'];
       delete cleanContext['metrics_harness'];
       delete cleanContext['metrics_active_model'];
     }

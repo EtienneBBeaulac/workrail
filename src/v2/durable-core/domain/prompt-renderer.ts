@@ -613,14 +613,23 @@ export function renderPendingPrompt(args: {
           .map(([k, v]) => `    *   \`${k}\`: \`${v}\``)
           .join('\n');
 
+        // Derive a goal for spawn_agent (required by daemon path).
+        // Prefer an explicit goal from the workflow definition; fall back to
+        // a generated description based on args.familyName or workflowId.
+        const delegationGoal: string = delegation.goal
+          ?? (delegation.args?.['familyName']
+              ? `Run ${delegation.args['familyName']} review family for workflow ${delegation.workflowId}`
+              : `Run ${delegation.workflowId}`);
+
         return `#### Subagent ${idx + 1}: ${delegation.workflowId}\n` +
           `*   **Workflow ID to Spawn**: \`${delegation.workflowId}\`\n` +
+          `*   **Goal**: ${delegationGoal}\n` +
           `*   **Target Input Parameters (Context)**:\n` +
           (inputLines ? inputLines : `    *   *(No input parameters)*`);
       }).join('\n\n');
 
       finalPrompt = `# Parallel Subagent Spawning Phase\n\n` +
-        `You are initiating a parallel execution phase. Please spawn the following subagents simultaneously using your native client-side subagent tools (e.g. \`invoke_subagent\` starting a fresh \`start_workflow\` session for each).\n\n` +
+        `You are initiating a parallel execution phase. Please spawn the following subagents simultaneously using your native client-side subagent tools (e.g. \`spawn_agent\` starting a fresh \`start_workflow\` session for each).\n\n` +
         `### Active Delegations\n\n` +
         `${activeBlocks}\n\n` +
         `---\n\n` +
