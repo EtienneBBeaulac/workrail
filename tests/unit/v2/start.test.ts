@@ -175,12 +175,13 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
         sessionId: 'sess_parent123',
       };
 
-      const parentEatSignature = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
-      expect(parentEatSignature).not.toBeNull();
+      const parentEatSignResult = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
+      expect(parentEatSignResult.ok).toBe(true);
+      if (!parentEatSignResult.ok) return;
 
       const parentEatTokenJson = JSON.stringify({
         payload: parentEatPayload,
-        signature: parentEatSignature,
+        signature: parentEatSignResult.value,
       });
 
       const startRes = await executeStartWorkflow(
@@ -219,10 +220,12 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
         spawnDepth: 3, // depth + 1 = 4, which exceeds 3!
       };
 
-      const parentEatSignature = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
+      const parentEatSignResult = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
+      expect(parentEatSignResult.ok).toBe(true);
+      if (!parentEatSignResult.ok) return;
       const parentEatTokenJson = JSON.stringify({
         payload: parentEatPayload,
-        signature: parentEatSignature,
+        signature: parentEatSignResult.value,
       });
 
       const startRes = await executeStartWorkflow(

@@ -243,6 +243,7 @@ export interface LoopStepDefinition extends WorkflowStepDefinition {
 
 export interface ParallelDelegation {
   readonly workflowId: string;
+  readonly goal?: string;
   readonly runCondition?: Condition;
   readonly contextMapping?: Readonly<Record<string, string>>;
   readonly args?: Readonly<Record<string, string>>;

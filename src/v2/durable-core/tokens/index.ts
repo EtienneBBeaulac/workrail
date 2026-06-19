@@ -40,8 +40,8 @@ export type { TokenCodecPorts, TokenCodecPortsError } from './token-codec-ports.
 export type { TokenParsePorts, TokenVerifyPorts, TokenSignPorts } from './token-codec-capabilities.js';
 
 // EAT capabilities
-export type { EATPayload } from './eat.js';
-export { signEAT, verifyEAT } from './eat.js';
+export type { EATPayload, EATSignError, EATParseError, EATResult } from './eat.js';
+export { signEAT, verifyEAT, parseEAT, eatOk, eatErr } from './eat.js';
 
 // Re-export branded id types for convenient access
 export type { AttemptId, OutputId } from '../ids/index.js';

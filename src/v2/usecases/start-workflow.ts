@@ -13,7 +13,7 @@ import {
 import { deriveWorkflowHashRef } from '../durable-core/ids/workflow-hash-ref.js';
 import type { Sha256PortV2 } from '../ports/sha256.port.js';
 import type { TokenCodecPorts } from '../durable-core/tokens/token-codec-ports.js';
-import { signEAT, verifyEAT } from '../durable-core/tokens/index.js';
+import { signEAT, parseEAT } from '../durable-core/tokens/index.js';
 import { validateWorkflowPhase1a, type ValidationPipelineDepsPhase1a } from '../../application/services/workflow-validation-pipeline.js';
 import { workflowHashForCompiledSnapshot } from '../durable-core/canonical/hashing.js';
 import type { JsonValue } from '../durable-core/canonical/json-types.js';
@@ -386,39 +386,39 @@ export function executeStartWorkflow(
   let spawnDepth = 0;
   let parentSessionId: string | undefined = internalContext?.['parentSessionId'];
 
-  if (internalContext?.['parent_eat_token']) {
-    try {
-      const parentEat = JSON.parse(internalContext['parent_eat_token']) as {
-        payload: {
-          harness: string;
-          activeModel: string;
-          parentSessionId?: string;
-          spawnDepth: number;
-        };
-        signature: string;
-      };
-      const parentEatPayload = parentEat.payload;
-      const parentSignature = parentEat.signature;
-      if (parentEatPayload && parentSignature) {
-        const isValid = verifyEAT(parentEatPayload, parentSignature, tokenCodecPorts, parentSessionId);
-        if (!isValid) {
-          return neErrorAsync({
-            kind: 'precondition_failed' as const,
-            message: 'Parent Environment Attestation Token signature verification failed.',
-          });
-        }
-        spawnDepth = (parentEatPayload.spawnDepth ?? 0) + 1;
-        if (spawnDepth > 3) {
-          return neErrorAsync({
-            kind: 'precondition_failed' as const,
-            message: `Spawn depth limit exceeded. Maximum allowable depth is 3, requested depth is ${spawnDepth}.`,
-          });
-        }
-      }
-    } catch (e) {
+  const eatParseResult = parseEAT(internalContext?.['parent_eat_token'], tokenCodecPorts, parentSessionId);
+  if (eatParseResult.ok) {
+    // Token present, signature valid -- enforce depth
+    const parentEatPayload = eatParseResult.value.payload;
+    spawnDepth = (parentEatPayload.spawnDepth ?? 0) + 1;
+    if (spawnDepth > 3) {
       return neErrorAsync({
         kind: 'precondition_failed' as const,
-        message: `Failed to parse parent Environment Attestation Token: ${e instanceof Error ? e.message : String(e)}`,
+        message: `Spawn depth limit exceeded. Maximum allowable depth is 3, requested depth is ${spawnDepth}.`,
+      });
+    }
+  } else {
+    const eatError = eatParseResult.error;
+    if (eatError.kind === 'missing') {
+      // No parent token -- first-level call, spawnDepth stays 0
+    } else if (eatError.kind === 'malformed') {
+      // Token present but unparseable -- hard stop; never silently skip depth enforcement
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: `Parent Environment Attestation Token is malformed: ${eatError.reason}`,
+      });
+    } else if (eatError.kind === 'signature_mismatch') {
+      // Token parsed but signature invalid -- reject
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: 'Parent Environment Attestation Token signature verification failed.',
+      });
+    } else {
+      // Exhaustiveness guard -- eatError satisfies never here
+      const _exhaustive: never = eatError;
+      return neErrorAsync({
+        kind: 'precondition_failed' as const,
+        message: `Unhandled EAT parse error: ${JSON.stringify(_exhaustive)}`,
       });
     }
   }
@@ -569,8 +569,13 @@ export function executeStartWorkflow(
               spawnDepth,
               sessionId: String(sessionId),
             };
-            const childEatSignature = signEAT(childEatPayload, tokenCodecPorts);
-            const childEat = childEatSignature ? { payload: childEatPayload, signature: childEatSignature } : null;
+            const childEatSignResult = signEAT(childEatPayload, tokenCodecPorts);
+            const childEat = childEatSignResult.ok
+              ? { payload: childEatPayload, signature: childEatSignResult.value }
+              : null;
+            if (!childEatSignResult.ok) {
+              console.warn(`[workrail:eat] Failed to sign child EAT (session ${String(sessionId)}): ${childEatSignResult.error.reason}. Session will work but children won't have a parent EAT.`);
+            }
 
             const enrichedContext: Record<string, string> = {
               ...internalContext,

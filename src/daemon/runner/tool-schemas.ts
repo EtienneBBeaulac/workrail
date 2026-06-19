@@ -168,7 +168,7 @@ export function getSchemas(): Record<string, any> {
             }
           },
           additionalProperties: false,
-          description: 'Optional custom agent configuration for the child session (single-spawn form only).'
+          description: "Optional custom agent configuration for the child session (single-spawn form only). Note: the 'model' string field is no longer supported; use 'modelTier' ('lightweight', 'mid', or 'heavy') instead."
         },
         agents: {
           type: 'array',

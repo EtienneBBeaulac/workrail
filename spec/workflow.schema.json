@@ -1436,6 +1436,10 @@
           "minLength": 1,
           "maxLength": 128
         },
+        "goal": {
+          "type": "string",
+          "description": "Goal description for this delegation, used by spawn_agent."
+        },
         "runCondition": {
           "$ref": "#/$defs/condition",
           "description": "Optional condition to determine if this delegation should run."
