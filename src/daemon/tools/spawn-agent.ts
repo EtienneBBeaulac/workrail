@@ -466,9 +466,9 @@ export function makeSpawnAgentTool(
     name: 'spawn_agent',
     description:
       'Spawn one or more child WorkRail sessions to handle delegated sub-tasks. ' +
-      '\n\nSINGLE form: { workflowId, goal, workspacePath, context? }' +
+      '\n\nSINGLE form: { workflowId, goal, workspacePath, context?, agentConfig?: { modelTier?, allowedTools? } }' +
       '\n  Returns: { kind: "single", childSessionId, outcome: "success"|"error"|"timeout"|"stuck", notes, artifacts? }' +
-      '\n\nPARALLEL form: { agents: [{ workflowId, goal, workspacePath, context? }, ...] }' +
+      '\n\nPARALLEL form: { agents: [{ workflowId, goal, workspacePath, context?, agentConfig?: { modelTier?, allowedTools? } }, ...] }' +
       '\n  Runs all agents simultaneously. Returns: { kind: "parallel", results: [...] } in input order.' +
       '\n  Budget: maxSessionMinutes must cover max(child duration), NOT sum(child durations).' +
       '\n\nAlways check .kind before reading .outcome (single) or .results (parallel). ' +
