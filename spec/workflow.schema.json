@@ -1466,6 +1466,12 @@
             "heavy"
           ],
           "description": "Recommended model tier/category for executing this delegation (lightweight, mid, or heavy)."
+        },
+        "allowedTools": {
+          "type": "array",
+          "description": "Tool names the spawned agent is permitted to use. When absent the agent inherits the default tool set. Must be non-empty when present.",
+          "items": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_:\\-]*$" },
+          "minItems": 1
         }
       },
       "required": [

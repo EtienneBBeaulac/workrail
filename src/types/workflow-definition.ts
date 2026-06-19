@@ -248,6 +248,7 @@ export interface ParallelDelegation {
   readonly contextMapping?: Readonly<Record<string, string>>;
   readonly args?: Readonly<Record<string, string>>;
   readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly allowedTools?: readonly string[];
 }
 
 export interface ParallelStepDefinition extends WorkflowStepDefinition {

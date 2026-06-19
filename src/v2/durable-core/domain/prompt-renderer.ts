@@ -624,6 +624,9 @@ export function renderPendingPrompt(args: {
         return `#### Subagent ${idx + 1}: ${delegation.workflowId}\n` +
           `*   **Workflow ID to Spawn**: \`${delegation.workflowId}\`\n` +
           `*   **Goal**: ${delegationGoal}\n` +
+          (delegation.allowedTools && delegation.allowedTools.length > 0
+            ? `*   **Allowed Tools**: ${delegation.allowedTools.join(', ')}\n`
+            : '') +
           `*   **Target Input Parameters (Context)**:\n` +
           (inputLines ? inputLines : `    *   *(No input parameters)*`);
       }).join('\n\n');
