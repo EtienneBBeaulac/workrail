@@ -43,7 +43,7 @@ vi.mock('../../src/daemon/pi-mono-loader.js', () => ({
 // Mock start.js so we can assert executeStartWorkflow is NOT called.
 // The mock never resolves since it must not be called on the
 // pre_allocated SessionSource path.
-vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
+vi.mock('../../src/v2/usecases/start-workflow.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 

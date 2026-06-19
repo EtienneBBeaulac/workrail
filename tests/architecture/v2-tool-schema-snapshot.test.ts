@@ -75,6 +75,7 @@ describe('v2 tool schema field snapshots (anti-drift)', () => {
   it('start_workflow: exact field set', () => {
     expect(extractFieldNames(V2StartWorkflowInput)).toEqual([
       'goal',
+      'modelTier',
       'workflowId',
       'workspacePath',
     ]);

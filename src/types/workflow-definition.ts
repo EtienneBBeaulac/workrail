@@ -127,6 +127,21 @@ export interface AssessmentConsequenceDefinition {
   readonly effect: AssessmentFollowupRequiredEffectDefinition;
 }
 
+export interface AuditConfig {
+  readonly prompt?: string;
+  readonly rubric?: readonly string[];
+}
+
+export interface SynthesisConfig {
+  readonly prompt?: string;
+  readonly outputContract?: OutputContract;
+}
+
+export interface VerificationConfig {
+  readonly command?: string;
+  readonly prompt?: string;
+}
+
 export interface WorkflowStepDefinition {
   readonly id: string;
   readonly title: string;
@@ -143,6 +158,7 @@ export interface WorkflowStepDefinition {
    */
   readonly promptBlocks?: PromptBlocks;
   readonly agentRole?: string;
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
   readonly guidance?: readonly string[];
   readonly askForFiles?: boolean;
   readonly requireConfirmation?: boolean | Condition;
@@ -207,6 +223,8 @@ export interface WorkflowStepDefinition {
   readonly functionDefinitions?: readonly FunctionDefinition[];
   readonly functionCalls?: readonly FunctionCall[];
   readonly functionReferences?: readonly string[];
+  readonly audit?: AuditConfig;
+  readonly verification?: VerificationConfig;
 }
 
 /** A compile-time template invocation. */
@@ -220,17 +238,23 @@ export interface TemplateCall {
 export interface LoopStepDefinition extends WorkflowStepDefinition {
   readonly type: 'loop';
   readonly loop: LoopConfigDefinition;
-  readonly body: string | readonly WorkflowStepDefinition[];
+  readonly body: string | readonly (WorkflowStepDefinition | ParallelStepDefinition)[];
 }
 
 export interface ParallelDelegation {
   readonly workflowId: string;
+  readonly goal?: string;
+  readonly runCondition?: Condition;
   readonly contextMapping?: Readonly<Record<string, string>>;
+  readonly args?: Readonly<Record<string, string>>;
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly allowedTools?: readonly string[];
 }
 
 export interface ParallelStepDefinition extends WorkflowStepDefinition {
   readonly type: 'parallel';
   readonly parallelDelegations: readonly ParallelDelegation[];
+  readonly synthesis?: SynthesisConfig;
 }
 
 /**
@@ -406,7 +430,8 @@ export interface WorkflowDefinition {
   readonly name: string;
   readonly description: string;
   readonly version: string;
-  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition)[];
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+  readonly steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[];
   readonly preconditions?: readonly string[];
   readonly clarificationPrompts?: readonly string[];
   /**
@@ -510,6 +535,10 @@ export interface WorkflowDefinition {
 // TYPE GUARDS
 // =============================================================================
 
+export interface StandardStepDefinition extends WorkflowStepDefinition {
+  readonly type?: undefined;
+}
+
 export function isLoopStepDefinition(
   step: WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition
 ): step is LoopStepDefinition {
@@ -522,9 +551,9 @@ export function isParallelStepDefinition(
   return 'type' in step && step.type === 'parallel';
 }
 
-export function isWorkflowStepDefinition(
+export function isStandardStepDefinition(
   step: WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition
-): step is WorkflowStepDefinition {
+): step is StandardStepDefinition {
   return !isLoopStepDefinition(step) && !isParallelStepDefinition(step);
 }
 

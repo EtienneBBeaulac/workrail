@@ -30,7 +30,7 @@ import type { ExecutionSessionGateErrorV2 } from '../../../v2/usecases/execution
 import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-log-store.port.js';
 import { asSortedEventLog } from '../../../v2/durable-core/sorted-event-log.js';
 import { buildSessionIndex } from '../../../v2/durable-core/session-index.js';
-import { verifyEAT, signEAT } from './start.js';
+import { verifyEAT, signEAT } from '../../../v2/durable-core/tokens/index.js';
 
 /**
  * Handle advance intent: execute next step and record the outcome.
@@ -238,7 +238,7 @@ export function handleAdvanceIntent(args: {
                 const parsedEat = JSON.parse(latestEatToken);
                 if (parsedEat && parsedEat.payload) {
                   parsedEatPayload = parsedEat.payload;
-                  const isValid = verifyEAT(parsedEatPayload, parsedEat.signature, tokenCodecPorts);
+                  const isValid = verifyEAT(parsedEatPayload, parsedEat.signature, tokenCodecPorts, String(sessionId));
                   if (isValid) {
                     if (parsedEatPayload.harness !== currentHarness || parsedEatPayload.activeModel !== currentActiveModel) {
                       shouldRefreshEat = true;
@@ -265,6 +265,7 @@ export function handleAdvanceIntent(args: {
                 activeModel: currentActiveModel,
                 parentSessionId: newParentSessionId,
                 spawnDepth: newDepth,
+                sessionId: String(sessionId),
               };
               const newSignature = signEAT(newEatPayload, tokenCodecPorts);
               if (newSignature) {

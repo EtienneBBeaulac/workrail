@@ -4,12 +4,13 @@ import Ajv from 'ajv';
 import { err, ok, type Result } from 'neverthrow';
 import type {
   WorkflowStepDefinition,
+  StandardStepDefinition,
   LoopStepDefinition,
   FunctionDefinition,
   FunctionParameter,
   ParallelStepDefinition,
 } from '../../types/workflow-definition';
-import { isLoopStepDefinition, isParallelStepDefinition, stepHasPromptSource } from '../../types/workflow-definition';
+import { isLoopStepDefinition, isParallelStepDefinition, isStandardStepDefinition, stepHasPromptSource } from '../../types/workflow-definition';
 import type { Workflow } from '../../types/workflow';
 import { BINDING_TOKEN_RE } from './compiler/resolve-bindings';
 import { 
@@ -560,9 +561,17 @@ export class ValidationEngine {
         if (!bodyStep) {
           issues.push(`Loop body references non-existent step '${step.body}'`);
           suggestions.push(`Create a step with ID '${step.body}' or update the body reference`);
-        } else if (isLoopStepDefinition(bodyStep as any)) {
+        } else if (isLoopStepDefinition(bodyStep)) {
           issues.push(`Nested loops are not currently supported. Step '${step.body}' is a loop`);
           suggestions.push('Refactor to avoid nested loops or use sequential loops');
+        } else if (isParallelStepDefinition(bodyStep)) {
+          // Parallel sibling steps don't support verification/audit directly
+        } else {
+          // bodyStep is StandardStepDefinition
+          if (bodyStep.verification || bodyStep.audit) {
+            issues.push(`Loop step '${step.id}' references sibling step '${step.body}' with verification/audit blocks. Sibling references are unsupported for virtual step expansion. Declare the step inline in the body array instead.`);
+            suggestions.push(`Move the definition of step '${step.body}' directly inside the body array of loop step '${step.id}'.`);
+          }
         }
       } else if (Array.isArray(step.body)) {
         // Validate inline step array
@@ -574,6 +583,8 @@ export class ValidationEngine {
         // Validate each inline step
         const stepIds = new Set<string>();
         for (const inlineStep of step.body) {
+          this.validateStepConfigs(inlineStep, `Inline step '${inlineStep.id || 'unknown'}'`, issues, suggestions);
+
           if (!inlineStep.id) {
             issues.push(`Inline step in loop body must have an ID`);
             suggestions.push('Add an ID to all inline steps');
@@ -589,13 +600,13 @@ export class ValidationEngine {
             suggestions.push('Add a title to all inline steps');
           }
           
-          if (!isParallelStepDefinition(inlineStep as any) && !stepHasPromptSource(inlineStep as WorkflowStepDefinition)) {
+          if (!isParallelStepDefinition(inlineStep) && !stepHasPromptSource(inlineStep)) {
             issues.push(`Inline step '${inlineStep.id || 'unknown'}' must have prompt, promptBlocks, or templateCall`);
             suggestions.push('Add a prompt string, structured promptBlocks, or a templateCall to all inline steps');
           }
           
           // Check for nested loops
-          if (isLoopStepDefinition(inlineStep as any)) {
+          if (isLoopStepDefinition(inlineStep)) {
             issues.push(`Nested loops are not currently supported. Inline step '${inlineStep.id}' is a loop`);
             suggestions.push('Refactor to avoid nested loops');
           }
@@ -975,7 +986,7 @@ export class ValidationEngine {
         }
 
         // Lint loop body inline steps + loop-scoped validationCriteria (if present in body steps)
-        this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
+        this.collectQuotedJsonValidationMessageWarnings(step, `Step '${step.id}'`, warnings);
         if (Array.isArray(step.body)) {
           for (const inlineStep of step.body) {
             validateAssessmentRefsForStep(inlineStep, `Loop body step '${inlineStep.id}' in loop '${step.id}'`);
@@ -984,6 +995,7 @@ export class ValidationEngine {
         }
       } else {
         // Basic step validation
+        this.validateStepConfigs(step, `Step '${step.id}'`, issues, suggestions);
         const typedStep = step as WorkflowStepDefinition;
         if (!step.id) {
           issues.push('Step missing required ID');
@@ -1000,14 +1012,14 @@ export class ValidationEngine {
           // Enforce prompt-source XOR: exactly one of prompt, promptBlocks, templateCall
           const promptSourceCount =
             (typedStep.prompt ? 1 : 0) +
-            ((typedStep as any).promptBlocks ? 1 : 0) +
-            ((typedStep as any).templateCall ? 1 : 0);
+            (typedStep.promptBlocks ? 1 : 0) +
+            (typedStep.templateCall ? 1 : 0);
           if (promptSourceCount > 1) {
             issues.push(`Step '${step.id}' declares multiple prompt sources (prompt, promptBlocks, templateCall) — use exactly one`);
           }
         }
 
-        this.collectQuotedJsonValidationMessageWarnings(step as any, `Step '${step.id}'`, warnings);
+        this.collectQuotedJsonValidationMessageWarnings(step, `Step '${step.id}'`, warnings);
 
         // Validate promptFragments (structural)
         const typedStepForFragments = step as WorkflowStepDefinition;
@@ -1218,6 +1230,66 @@ export class ValidationEngine {
       case 'array': return Array.isArray(value);
       case 'object': return value !== null && typeof value === 'object' && !Array.isArray(value);
       default: return true;
+    }
+  }
+
+  private validateStepConfigs(
+    step: WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition,
+    contextLabel: string,
+    issues: string[],
+    suggestions: string[]
+  ): void {
+    const typedStep = step as WorkflowStepDefinition;
+
+    // Check standard step features
+    if ('verification' in typedStep && typedStep.verification) {
+      if (isParallelStepDefinition(step)) {
+        issues.push(`${contextLabel}: verification configuration is not allowed on parallel steps`);
+        suggestions.push('Remove the verification property or change the step type');
+      } else {
+        const v = typedStep.verification;
+        if (v.command !== undefined && (typeof v.command !== 'string' || v.command.trim() === '')) {
+          issues.push(`${contextLabel}: verification command must be a non-empty string when provided`);
+        }
+      }
+    }
+
+    if ('audit' in typedStep && typedStep.audit) {
+      if (isParallelStepDefinition(step)) {
+        issues.push(`${contextLabel}: audit configuration is not allowed on parallel steps`);
+        suggestions.push('Remove the audit property or change the step type');
+      } else {
+        const a = typedStep.audit;
+        if ((!a.prompt || typeof a.prompt !== 'string' || a.prompt.trim() === '') &&
+            (!a.rubric || !Array.isArray(a.rubric) || a.rubric.length === 0)) {
+          issues.push(`${contextLabel}: audit configuration must declare a prompt or at least one rubric item`);
+          suggestions.push('Add a prompt string or rubric array to the audit configuration');
+        }
+        if (a.rubric && Array.isArray(a.rubric)) {
+          for (let i = 0; i < a.rubric.length; i++) {
+            if (typeof a.rubric[i] !== 'string' || a.rubric[i].trim() === '') {
+              issues.push(`${contextLabel}: audit rubric item at index ${i} must be a non-empty string`);
+            }
+          }
+        }
+      }
+    }
+
+    // Check parallel step features
+    const parallelStep = step as ParallelStepDefinition;
+    if (isParallelStepDefinition(step)) {
+      if (parallelStep.synthesis) {
+        const s = parallelStep.synthesis;
+        if ((!s.prompt || typeof s.prompt !== 'string' || s.prompt.trim() === '') && !s.outputContract) {
+          issues.push(`${contextLabel}: synthesis configuration must declare a prompt or an outputContract`);
+          suggestions.push('Add a prompt string or outputContract to the synthesis configuration');
+        }
+      }
+    } else {
+      if ('synthesis' in step && (step as { readonly synthesis?: unknown }).synthesis) {
+        issues.push(`${contextLabel}: synthesis configuration is only allowed on parallel steps`);
+        suggestions.push('Remove the synthesis property or change the step type to parallel');
+      }
     }
   }
 } 

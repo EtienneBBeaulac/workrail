@@ -40,7 +40,7 @@ const SUBAGENT_GUIDANCE = [
   '- **Spawning Routines / Executors**: If a step instructs you to "spawn a WorkRail Executor" or execute a parallel routine (e.g. `wr.routine-philosophy-alignment`), you should delegate it to a subagent using your native client capabilities (e.g. `invoke_subagent` to start a child agent running the routine with `start_workflow`) or execute it inline if client-side subagent tools are unavailable.',
 ].join('\n');
 
-export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance';
+export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance' | 'executor_directive';
 
 export interface FormattedSupplement {
   readonly kind: SupplementKind;
@@ -85,7 +85,23 @@ function shouldEmitSupplement(
   return spec.delivery.emitOn === lifecycle;
 }
 
+const EXECUTOR_DIRECTIVE_TEXT = [
+  'WorkRail Executor Behavioral Rules:',
+  '- Token types: ct_ = continueToken (advance); st_/cp_ = resumeToken (rehydrate only). Never mix.',
+  '- Advance only when the step\'s work is fully complete. Call continue_workflow with intent "advance".',
+  '- Rehydrate is read-only: if resuming with intent "rehydrate", do NOT re-do the step\'s work.',
+  '- Autonomous confirmation gates: make the best default decision from available context, record it in notesMarkdown as "AUTONOMOUS GATE DECISION: [gate] -- selected [option] because [reason]", then advance immediately.',
+  '- If any mcp__workrail__* tool fails with a connection or tool-not-found error: stop immediately, do not improvise, retry the failed call until it succeeds, and hold any tokens you have.',
+].join('\n');
+
 const CLEAN_RESPONSE_SUPPLEMENTS: readonly ResponseSupplementSpec[] = [
+  defineResponseSupplement({
+    kind: 'executor_directive',
+    order: 4,
+    lifecycles: ['start', 'rehydrate'],
+    delivery: { mode: 'per_lifecycle' },
+    renderText: () => EXECUTOR_DIRECTIVE_TEXT,
+  }),
   defineResponseSupplement({
     kind: 'authority_context',
     order: 10,

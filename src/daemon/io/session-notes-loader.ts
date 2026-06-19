@@ -12,7 +12,7 @@
  */
 
 import type { V2ToolContext } from '../../mcp/types.js';
-import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
+import { parseContinueTokenOrFail } from '../../v2/usecases/v2-token-ops.js';
 import { asSessionId } from '../../v2/durable-core/ids/index.js';
 import { projectNodeOutputsV2 } from '../../v2/projections/node-outputs.js';
 

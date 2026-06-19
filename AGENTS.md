@@ -460,6 +460,33 @@ These principles guide all code decisions in this project. When writing, reviewi
 - **YAGNI with discipline** -- avoid speculative abstractions, but design clear seams and invariants
 - **Prefer fakes over mocks** -- tests should validate behavior with realistic substitutes
 - **Document "why", not "what"** -- comments explain intent, invariants, and tradeoffs; code explains mechanics
+## Subagent Spawning Assumptions and Guidelines (MCP Context)
+
+When designing or executing workflows that spawn subagents under the MCP server runtime (e.g., in interactive developer environments like Claude Code or Firebender), the following cognitive and operational assumptions must be strictly followed:
+
+1. **Tier-3 Capabilities & Nesting Limits:**
+   - Most modern client harnesses support Tier-3 delegation (where subagents have access to WorkRail MCP tools).
+   - However, harnesses **may not support nested spawning** (subagents spawning their own subagents). Therefore, any subagent spawned to run a workflow/routine must be self-sufficient and must not rely on launching child subagents.
+   - *Static Nesting Verification:* The registry validator recursively analyzes transition graphs to detect and flag multi-level parallel nesting configurations based on the harness depth limit.
+
+2. **Availability & Subagent Dispatching:**
+   - Before requesting any specialized subagent, the system or main agent **must verify its availability** (e.g., via diagnostic environment checks).
+   - *Explicit Routine Wrapping:* To maintain compile-time type safety and DAG determinism, we strictly prohibit loose, untyped ad-hoc spawns. Any general/vanilla cognitive subtask must be explicitly wrapped in a lightweight, single-step Routine in the workflow registry, executing through the universal `workrail-executor`.
+
+3. **Cognitive Handoff & Anti-Bias Discipline:**
+   - Subagents do not automatically inherit conversation history or project context from the parent session. 
+   - Handoff instructions must be highly thorough, complete, and self-contained (using explicit **Context Packets**).
+   - **Zero Injected Bias:** Instructions must strictly avoid passing leading prompts, pre-emptive conclusions, or confirmation bias. Subagents must remain objective cognitive units.
+   - *Enforcement:* This is structurally enforced by restricting transferred keys to declared `contextMapping` boundaries, and cognitively enforced by systematic feature-level instructions (via `wr.features.subagent_guidance`) instructing the parent to only map raw, objective requirements, codebase slices, and target specs.
+
+4. **Claim Handoff & Non-Negotiable Verification:**
+   - Treat all subagent outputs strictly as *evidence*, not as truth or authority.
+   - Every claim, outcome, or recommendation returned by a subagent must be explicitly verified and categorized as `Confirmed`, `Plausible`, or `Rejected` by the parent agent before advancing.
+   - *Auto-Injected Synthesis Steps:* To ensure authors do not have to manually repeat verification steps, the compiler automatically injects a virtual `SynthesisStep` immediately following any parallel step in the Compiled DAG. Authors can customize the synthesis prompt/rubric directly inside the parallel step schema, while the engine guarantees the structured claim-adoption pattern is applied.
+
+5. **Executor Polymorphism & Model Selection:**
+   - *Polymorphic Handoff Strategy:* The engine supports both: (a) passing dynamic model selection parameters if the harness allows it, and (b) falling back to model-specific subagent variants (e.g., `workrail-executor-sonnet`) registered during the setup phase if the harness doesn't support model selection.
+   - *Setup Optimization:* The initial setup workflow diagnoses harness capabilities once and caches them in `.workrail/config.json`. For subsequent sessions, if the required executor version/model configuration is already cached, the engine bypasses the setup steps entirely to optimize the developer loop.
 
 ## Things to avoid
 

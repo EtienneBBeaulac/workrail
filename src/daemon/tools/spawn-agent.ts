@@ -9,8 +9,8 @@
 import type { AgentTool, AgentToolResult } from '../agent-loop.js';
 import type { V2ToolContext } from '../../mcp/types.js';
 import type { DaemonEventEmitter, RunId } from '../daemon-events.js';
-import { executeStartWorkflow } from '../../mcp/handlers/v2-execution/start.js';
-import { parseContinueTokenOrFail } from '../../mcp/handlers/v2-token-ops.js';
+import { executeStartWorkflow } from '../../v2/usecases/start-workflow.js';
+import { parseContinueTokenOrFail } from '../../v2/usecases/v2-token-ops.js';
 import { assertNever } from '../../runtime/assert-never.js';
 import { withWorkrailSession } from './_shared.js';
 import { asSessionId, type SessionId } from '../../v2/durable-core/ids/index.js';
@@ -34,8 +34,10 @@ interface SingleSpawnSpec {
   readonly workspacePath: string;
   readonly context?: Readonly<Record<string, unknown>>;
   readonly agentConfig?: {
-    readonly model?: string;
+    readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
   };
+  // TODO: wire to child session tool-restriction param when the session layer supports it.
+  readonly allowedTools?: readonly string[];
 }
 
 /**
@@ -94,14 +96,14 @@ function parseParams(raw: unknown): ParsedParams {
       if (a['context'] !== undefined && (typeof a['context'] !== 'object' || a['context'] === null || Array.isArray(a['context']))) throw new Error(`spawn_agent: agents[${i}].context must be a plain object if provided`);
       if (a['agentConfig'] !== undefined && (typeof a['agentConfig'] !== 'object' || a['agentConfig'] === null || Array.isArray(a['agentConfig']))) throw new Error(`spawn_agent: agents[${i}].agentConfig must be a plain object if provided`);
       
-      let agentConfig: { model?: string } | undefined;
+      let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy' } | undefined;
       if (a['agentConfig'] !== undefined) {
         const ac = a['agentConfig'] as Record<string, unknown>;
-        if (ac['model'] !== undefined && typeof ac['model'] !== 'string') {
-          throw new Error(`spawn_agent: agents[${i}].agentConfig.model must be a string if provided`);
+        if (ac['modelTier'] !== undefined && ac['modelTier'] !== 'lightweight' && ac['modelTier'] !== 'mid' && ac['modelTier'] !== 'heavy') {
+          throw new Error(`spawn_agent: agents[${i}].agentConfig.modelTier must be 'lightweight', 'mid', or 'heavy' if provided`);
         }
         agentConfig = {
-          ...(ac['model'] !== undefined ? { model: ac['model'] as string } : {}),
+          ...(ac['modelTier'] !== undefined ? { modelTier: ac['modelTier'] as 'lightweight' | 'mid' | 'heavy' } : {}),
         };
       }
 
@@ -111,6 +113,7 @@ function parseParams(raw: unknown): ParsedParams {
         workspacePath: a['workspacePath'],
         ...(a['context'] !== undefined ? { context: a['context'] as Readonly<Record<string, unknown>> } : {}),
         ...(agentConfig !== undefined ? { agentConfig } : {}),
+        ...(Array.isArray(a['allowedTools']) ? { allowedTools: a['allowedTools'] as readonly string[] } : {}),
       };
     });
     return { kind: 'parallel', agents };
@@ -122,14 +125,14 @@ function parseParams(raw: unknown): ParsedParams {
   if (typeof p['workspacePath'] !== 'string' || !p['workspacePath']) throw new Error('spawn_agent: workspacePath must be a non-empty string');
   if (p['agentConfig'] !== undefined && (typeof p['agentConfig'] !== 'object' || p['agentConfig'] === null || Array.isArray(p['agentConfig']))) throw new Error('spawn_agent: agentConfig must be a plain object if provided');
 
-  let agentConfig: { model?: string } | undefined;
+  let agentConfig: { modelTier?: 'lightweight' | 'mid' | 'heavy' } | undefined;
   if (p['agentConfig'] !== undefined) {
     const ac = p['agentConfig'] as Record<string, unknown>;
-    if (ac['model'] !== undefined && typeof ac['model'] !== 'string') {
-      throw new Error('spawn_agent: agentConfig.model must be a string if provided');
+    if (ac['modelTier'] !== undefined && ac['modelTier'] !== 'lightweight' && ac['modelTier'] !== 'mid' && ac['modelTier'] !== 'heavy') {
+      throw new Error("spawn_agent: agentConfig.modelTier must be 'lightweight', 'mid', or 'heavy' if provided");
     }
     agentConfig = {
-      ...(ac['model'] !== undefined ? { model: ac['model'] as string } : {}),
+      ...(ac['modelTier'] !== undefined ? { modelTier: ac['modelTier'] as 'lightweight' | 'mid' | 'heavy' } : {}),
     };
   }
 
@@ -141,6 +144,7 @@ function parseParams(raw: unknown): ParsedParams {
       workspacePath: p['workspacePath'],
       ...(p['context'] !== undefined ? { context: p['context'] as Readonly<Record<string, unknown>> } : {}), // object type validated by JSON Schema at call boundary
       ...(agentConfig !== undefined ? { agentConfig } : {}),
+      ...(Array.isArray(p['allowedTools']) ? { allowedTools: p['allowedTools'] as readonly string[] } : {}),
     },
   };
 }
@@ -233,23 +237,76 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
   if (parentEatToken) {
     internalContext['parent_eat_token'] = parentEatToken;
   }
-  if (spec.agentConfig?.model) {
-    internalContext['model'] = spec.agentConfig.model;
+  if (spec.agentConfig?.modelTier) {
+    internalContext['modelTier'] = spec.agentConfig.modelTier;
   }
 
   const startResult = await executeStartWorkflow(
-    { workflowId: spec.workflowId, workspacePath: spec.workspacePath, goal: spec.goal },
-    sc.ctx,
+    {
+      gate: sc.ctx.v2.gate,
+      sessionStore: sc.ctx.v2.sessionStore,
+      snapshotStore: sc.ctx.v2.snapshotStore,
+      pinnedStore: sc.ctx.v2.pinnedStore,
+      crypto: sc.ctx.v2.crypto,
+      tokenCodecPorts: sc.ctx.v2.tokenCodecPorts,
+      idFactory: sc.ctx.v2.idFactory,
+      validationPipelineDeps: sc.ctx.v2.validationPipelineDeps,
+      tokenAliasStore: sc.ctx.v2.tokenAliasStore,
+      entropy: sc.ctx.v2.entropy,
+      resolvedRootUris: sc.ctx.v2.resolvedRootUris,
+      rememberedRootsStore: sc.ctx.v2.rememberedRootsStore,
+      managedSourceStore: sc.ctx.v2.managedSourceStore,
+      workspaceResolver: sc.ctx.v2.workspaceResolver,
+      fallbackWorkflowReader: sc.ctx.workflowService,
+      featureFlags: sc.ctx.featureFlags,
+    },
+    {
+      workflowId: spec.workflowId,
+      workspacePath: spec.workspacePath,
+      goal: spec.goal,
+      modelTier: spec.agentConfig?.modelTier,
+    },
     internalContext,
   );
 
   if (startResult.isErr()) {
-    const err = startResult.error;
-    const notesMsg = err.kind === 'precondition_failed' || err.kind === 'invariant_violation' || err.kind === 'workflow_compile_failed' || err.kind === 'hash_computation_failed' || err.kind === 'prompt_render_failed'
-      ? err.message
-      : err.kind === 'validation_failed'
-        ? err.failure.message
-        : JSON.stringify(err);
+    const startErr = startResult.error;
+
+    // WHY exhaustive switch: StartWorkflowError is a discriminated union with 11 variants.
+    // An if-chain (5 of 11) silently falls through for unrecognised variants and hides
+    // future additions. assertNever at the default makes new variants compile errors.
+    const notesMsg = ((): string => {
+      switch (startErr.kind) {
+        case 'precondition_failed':
+          return startErr.message;
+        case 'invariant_violation':
+          return startErr.message;
+        case 'workflow_not_found':
+          return `Workflow not found: ${startErr.workflowId}`;
+        case 'workflow_has_no_steps':
+          return `Workflow has no steps: ${startErr.workflowId}`;
+        case 'workflow_compile_failed':
+          return startErr.message;
+        case 'keyring_load_failed':
+          return `Keyring load failed: ${JSON.stringify(startErr.cause)}`;
+        case 'hash_computation_failed':
+          return startErr.message;
+        case 'pinned_workflow_store_failed':
+          return `Pinned workflow store error: ${JSON.stringify(startErr.cause)}`;
+        case 'snapshot_creation_failed':
+          return `Snapshot creation failed: ${JSON.stringify(startErr.cause)}`;
+        case 'session_append_failed':
+          return `Session append failed: ${JSON.stringify(startErr.cause)}`;
+        case 'token_signing_failed':
+          return `Token signing failed: ${JSON.stringify(startErr.cause)}`;
+        case 'prompt_render_failed':
+          return startErr.message;
+        case 'reference_resolution_failed':
+          return 'Reference resolution failed (timeout or error)';
+        default:
+          return assertNever(startErr);
+      }
+    })();
 
     return {
       kind: 'single',
@@ -259,28 +316,8 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     };
   }
 
-  // ---- Decode childSessionId from continueToken ----
-  // WHY token decode (not return from executeStartWorkflow): adding sessionId to
-  // V2StartWorkflowOutputSchema would be a public API change (GAP-7 territory).
-  // Token decode via the alias store is the correct in-process path.
-  // On decode failure: proceed with childSessionId = null (observable in logs).
-  let childSessionId: SessionId | null = null;
-  const childContinueToken = startResult.value.response.continueToken ?? '';
-  if (childContinueToken) {
-    const decoded = await parseContinueTokenOrFail(
-      childContinueToken,
-      sc.ctx.v2.tokenCodecPorts,
-      sc.ctx.v2.tokenAliasStore,
-    );
-    if (decoded.isOk()) {
-      childSessionId = decoded.value.sessionId;
-    } else {
-      console.warn(
-        `[WorkflowRunner] spawn_agent: could not decode childSessionId from continueToken -- ` +
-        `childSessionId will be null in result. Reason: ${decoded.error.message}`,
-      );
-    }
-  }
+  // Decoupled use case returns sessionId directly.
+  const childSessionId: SessionId = startResult.value.sessionId;
 
   // ---- Run child workflow (blocking until complete) ----
   // WHY direct runWorkflow() call (not dispatch()): dispatch() is fire-and-forget and uses
@@ -300,16 +337,17 @@ async function spawnOne(spec: SingleSpawnSpec, sc: SpawnContext): Promise<Single
     // WHY parentSessionId: threads the parent link through runWorkflow -> executeStartWorkflow
     // for context_set injection (alongside the session_created.data written above).
     parentSessionId: sc.thisWorkrailSessionId,
+    ...(spec.agentConfig !== undefined ? { agentConfig: spec.agentConfig } : {}),
   };
   // WHY SessionSource: the session is already created above. runWorkflow() MUST NOT
   // call executeStartWorkflow() again (invariant). SessionSource replaces the removed
   // WorkflowTrigger._preAllocatedStartResponse field (A9 migration).
-  const r = startResult.value.response;
+  const r = startResult.value;
   const childAllocatedSession: AllocatedSession = {
-    continueToken: r.continueToken ?? '',
+    continueToken: r.continueToken,
     checkpointToken: r.checkpointToken,
-    firstStepPrompt: r.pending?.prompt ?? '',
-    isComplete: r.isComplete,
+    firstStepPrompt: r.meta.prompt,
+    isComplete: false,
     triggerSource: 'daemon',
   };
   const childSource: SessionSource = { kind: 'pre_allocated', trigger: childTrigger, session: childAllocatedSession };
@@ -428,9 +466,9 @@ export function makeSpawnAgentTool(
     name: 'spawn_agent',
     description:
       'Spawn one or more child WorkRail sessions to handle delegated sub-tasks. ' +
-      '\n\nSINGLE form: { workflowId, goal, workspacePath, context? }' +
+      '\n\nSINGLE form: { workflowId, goal, workspacePath, context?, agentConfig?: { modelTier?, allowedTools? } }' +
       '\n  Returns: { kind: "single", childSessionId, outcome: "success"|"error"|"timeout"|"stuck", notes, artifacts? }' +
-      '\n\nPARALLEL form: { agents: [{ workflowId, goal, workspacePath, context? }, ...] }' +
+      '\n\nPARALLEL form: { agents: [{ workflowId, goal, workspacePath, context?, agentConfig?: { modelTier?, allowedTools? } }, ...] }' +
       '\n  Runs all agents simultaneously. Returns: { kind: "parallel", results: [...] } in input order.' +
       '\n  Budget: maxSessionMinutes must cover max(child duration), NOT sum(child durations).' +
       '\n\nAlways check .kind before reading .outcome (single) or .results (parallel). ' +

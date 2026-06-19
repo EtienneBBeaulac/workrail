@@ -121,6 +121,47 @@ export function validateRegistry(
     resolvedWinnerIds.add(workflow.definition.id);
   }
 
+  // Build delegation graph for transitive cycle checking
+  const delegationGraph = new Map<string, Set<string>>();
+  for (const { workflow } of snapshot.resolved) {
+    const targets = new Set<string>();
+    for (const step of workflow.stepById.values()) {
+      if (isParallelStepDefinition(step)) {
+        for (const delegation of step.parallelDelegations) {
+          targets.add(delegation.workflowId);
+        }
+      }
+    }
+    delegationGraph.set(workflow.definition.id, targets);
+  }
+
+  function checkCycle(
+    currentId: string,
+    visited: Set<string>,
+    recStack: Set<string>,
+    path: string[]
+  ): string[] | null {
+    visited.add(currentId);
+    recStack.add(currentId);
+    path.push(currentId);
+
+    const neighbors = delegationGraph.get(currentId);
+    if (neighbors) {
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          const cyclePath = checkCycle(neighbor, visited, recStack, path);
+          if (cyclePath) return cyclePath;
+        } else if (recStack.has(neighbor)) {
+          return [...path, neighbor];
+        }
+      }
+    }
+
+    recStack.delete(currentId);
+    path.pop();
+    return null;
+  }
+
   // Step 1: Validate all resolved workflows (full Phase 1a pipeline)
   const resolvedResults: ResolvedValidationEntry[] = [];
 
@@ -151,6 +192,17 @@ export function validateRegistry(
       }
     }
 
+    // 3. Detect transitive spawning cycles starting from this workflow
+    const visited = new Set<string>();
+    const recStack = new Set<string>();
+    const path: string[] = [];
+    const cycle = checkCycle(workflow.definition.id, visited, recStack, path);
+    if (cycle) {
+      crossRefIssues.push(
+        `Transitive circular spawning cycle detected: ${cycle.join(' -> ')}`
+      );
+    }
+
     if (crossRefIssues.length > 0) {
       if (outcome.kind === 'phase1a_valid') {
         outcome = {
@@ -163,6 +215,22 @@ export function validateRegistry(
           kind: 'structural_failed',
           workflowId: workflow.definition.id,
           issues: [...outcome.issues, ...crossRefIssues],
+        };
+      } else {
+        const underlyingMessage = outcome.kind === 'schema_failed'
+          ? `Schema validation failed: ${outcome.errors.map(e => e.message ?? e.instancePath).join('; ')}`
+          : outcome.kind === 'v1_compilation_failed'
+            ? `Compilation failed: ${outcome.cause.message}`
+            : outcome.kind === 'normalization_failed'
+              ? `Normalization failed: ${outcome.cause.message}`
+              : outcome.kind === 'executable_compilation_failed'
+                ? `Executable compilation failed: ${outcome.cause.message}`
+                : 'Unknown pipeline failure';
+
+        outcome = {
+          kind: 'structural_failed',
+          workflowId: workflow.definition.id,
+          issues: [underlyingMessage, ...crossRefIssues],
         };
       }
     }

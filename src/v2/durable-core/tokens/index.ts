@@ -39,6 +39,10 @@ export type { TokenCodecPorts, TokenCodecPortsError } from './token-codec-ports.
 // Token codec capabilities (minimal surfaces)
 export type { TokenParsePorts, TokenVerifyPorts, TokenSignPorts } from './token-codec-capabilities.js';
 
+// EAT capabilities
+export type { EATPayload, EATSignError, EATParseError, EATResult } from './eat.js';
+export { signEAT, verifyEAT, parseEAT, eatOk, eatErr } from './eat.js';
+
 // Re-export branded id types for convenient access
 export type { AttemptId, OutputId } from '../ids/index.js';
 export { asAttemptId, asOutputId } from '../ids/index.js';

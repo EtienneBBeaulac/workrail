@@ -16,7 +16,7 @@
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { loadTriggerConfig } from '../../src/trigger/trigger-store.js';
+import { loadTriggerConfig, validateAllTriggers } from '../../src/trigger/trigger-store.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2073,5 +2073,68 @@ triggers:
     if (result.kind !== 'ok') return;
     // git_commit via delivery: block is rejected -- trigger is skipped
     expect(result.value.triggers).toHaveLength(0);
+  });
+});
+
+describe('modelTier validation in triggers', () => {
+  it('successfully parses valid modelTier', () => {
+    const yaml = `
+triggers:
+  - id: valid-tier-trigger
+    provider: generic
+    workflowId: wr.discovery
+    workspacePath: /workspace
+    goal: Find files
+    agentConfig:
+      modelTier: lightweight
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(1);
+    expect(result.value.triggers[0]?.agentConfig?.modelTier).toBe('lightweight');
+    
+    const issues = validateAllTriggers(result.value);
+    expect(issues.filter(i => i.severity === 'error')).toHaveLength(0);
+  });
+
+  it('rejects invalid modelTier', () => {
+    const yaml = `
+triggers:
+  - id: invalid-tier-trigger
+    provider: generic
+    workflowId: wr.discovery
+    workspacePath: /workspace
+    goal: Find files
+    agentConfig:
+      modelTier: super-heavy
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    // Invalid modelTier makes the trigger validation fail, so it is skipped during loadTriggerConfig
+    expect(result.value.triggers).toHaveLength(0);
+  });
+
+  it('emits warning when both model and modelTier are defined', () => {
+    const yaml = `
+triggers:
+  - id: both-defined-trigger
+    provider: generic
+    workflowId: wr.discovery
+    workspacePath: /workspace
+    goal: Find files
+    agentConfig:
+      model: anthropic/claude-3-5-sonnet
+      modelTier: heavy
+`;
+    const result = loadTriggerConfig(yaml, {});
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.value.triggers).toHaveLength(1);
+    const issues = validateAllTriggers(result.value);
+    const warning = issues.find(i => i.rule === 'model-and-model-tier-both-defined');
+    expect(warning).toBeDefined();
+    expect(warning?.severity).toBe('warning');
   });
 });

@@ -139,6 +139,41 @@ describe('buildAgentClient', () => {
     const { modelId } = buildAgentClient(trigger, 'sk-test', process.env);
     expect(modelId).toBe('us.anthropic.claude-sonnet-4-6');
   });
+
+  it('resolves modelTier: lightweight with Bedrock credentials', () => {
+    const trigger = makeTrigger({ agentConfig: { modelTier: 'lightweight' } });
+    vi.stubEnv('AWS_PROFILE', 'my-profile');
+    const { agentClient, modelId } = buildAgentClient(trigger, 'sk-test', process.env);
+    expect(agentClient.constructor.name).toBe('AnthropicBedrock');
+    expect(modelId).toBe('us.anthropic.claude-3-5-haiku-20241022-v1:0');
+  });
+
+  it('resolves modelTier: heavy with direct Anthropic credentials', () => {
+    const trigger = makeTrigger({ agentConfig: { modelTier: 'heavy' } });
+    vi.stubEnv('AWS_PROFILE', '');
+    vi.stubEnv('AWS_ACCESS_KEY_ID', '');
+    const { agentClient, modelId } = buildAgentClient(trigger, 'sk-test', process.env);
+    expect(agentClient.constructor.name).toBe('Anthropic');
+    expect(modelId).toBe('claude-3-opus-latest');
+  });
+
+  it('resolves encoded provider/tier fallback "amazon-bedrock/lightweight"', () => {
+    const trigger = makeTrigger({ agentConfig: { model: 'amazon-bedrock/lightweight' } });
+    vi.stubEnv('AWS_PROFILE', '');
+    vi.stubEnv('AWS_ACCESS_KEY_ID', '');
+    const { agentClient, modelId } = buildAgentClient(trigger, 'sk-test', process.env);
+    expect(agentClient.constructor.name).toBe('AnthropicBedrock');
+    expect(modelId).toBe('us.anthropic.claude-3-5-haiku-20241022-v1:0');
+  });
+
+  it('resolves encoded provider/tier fallback "anthropic/heavy"', () => {
+    const trigger = makeTrigger({ agentConfig: { model: 'anthropic/heavy' } });
+    vi.stubEnv('AWS_PROFILE', '');
+    vi.stubEnv('AWS_ACCESS_KEY_ID', '');
+    const { agentClient, modelId } = buildAgentClient(trigger, 'sk-test', process.env);
+    expect(agentClient.constructor.name).toBe('Anthropic');
+    expect(modelId).toBe('claude-3-opus-latest');
+  });
 });
 
 // ── createSessionState ────────────────────────────────────────────────────────

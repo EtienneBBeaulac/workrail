@@ -5,7 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { executeStartWorkflow, signEAT } from '../../../src/mcp/handlers/v2-execution/start.js';
+import { executeStartWorkflow } from '../../../src/mcp/handlers/v2-execution/start.js';
+import { signEAT } from '../../../src/v2/durable-core/tokens/index.js';
 import { parseContinueTokenOrFail } from '../../../src/mcp/handlers/v2-token-ops.js';
 import { NullGitSnapshotV2 } from '../../../src/v2/ports/git-snapshot.port.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
@@ -171,14 +172,16 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
         activeModel: 'claude-3-5-sonnet',
         parentSessionId: 'sess_parent123',
         spawnDepth: 1,
+        sessionId: 'sess_parent123',
       };
 
-      const parentEatSignature = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
-      expect(parentEatSignature).not.toBeNull();
+      const parentEatSignResult = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
+      expect(parentEatSignResult.ok).toBe(true);
+      if (!parentEatSignResult.ok) return;
 
       const parentEatTokenJson = JSON.stringify({
         payload: parentEatPayload,
-        signature: parentEatSignature,
+        signature: parentEatSignResult.value,
       });
 
       const startRes = await executeStartWorkflow(
@@ -217,10 +220,12 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
         spawnDepth: 3, // depth + 1 = 4, which exceeds 3!
       };
 
-      const parentEatSignature = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
+      const parentEatSignResult = signEAT(parentEatPayload, ctx.v2.tokenCodecPorts);
+      expect(parentEatSignResult.ok).toBe(true);
+      if (!parentEatSignResult.ok) return;
       const parentEatTokenJson = JSON.stringify({
         payload: parentEatPayload,
-        signature: parentEatSignature,
+        signature: parentEatSignResult.value,
       });
 
       const startRes = await executeStartWorkflow(
@@ -456,6 +461,72 @@ describe('v2 startup sniffing & Environment Attestation Tokens', () => {
       const details = result.details as any;
       expect(details.outcome).toBe('error');
       expect(details.notes).toContain('Max spawn depth exceeded');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves activeModel based on modelTier hierarchy', async () => {
+    const root = await mkTempDataDir();
+    process.env.WORKRAIL_DATA_DIR = root;
+
+    const tierWorkflowDef = {
+      ...workflowDef,
+      modelTier: 'heavy',
+    };
+
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, tierWorkflowDef);
+
+      // Start workflow without passing modelTier override
+      const startRes = await executeStartWorkflow(
+        { workflowId, workspacePath: root, goal: 'test goal' } as V2StartWorkflowInput,
+        ctx
+      );
+      expect(startRes.isOk()).toBe(true);
+      const sessionId = startRes.value.sessionId;
+
+      const loaded = await ctx.v2.sessionStore.load(sessionId);
+      expect(loaded.isOk()).toBe(true);
+      const events = loaded._unsafeUnwrap().events;
+      const contextSet = events.find(e => e.kind === 'context_set');
+      expect(contextSet).toBeDefined();
+
+      const context = (contextSet as any).data.context;
+      expect(context.metrics_active_model).toBe('claude-3-opus-latest');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('allows modelTier override in start input', async () => {
+    const root = await mkTempDataDir();
+    process.env.WORKRAIL_DATA_DIR = root;
+
+    const tierWorkflowDef = {
+      ...workflowDef,
+      modelTier: 'heavy',
+    };
+
+    try {
+      const ctx = await mkCtxWithWorkflow(workflowId, tierWorkflowDef);
+
+      // Start workflow passing lightweight override
+      const startRes = await executeStartWorkflow(
+        { workflowId, workspacePath: root, goal: 'test goal', modelTier: 'lightweight' } as V2StartWorkflowInput,
+        ctx
+      );
+      expect(startRes.isOk()).toBe(true);
+      const sessionId = startRes.value.sessionId;
+
+      const loaded = await ctx.v2.sessionStore.load(sessionId);
+      expect(loaded.isOk()).toBe(true);
+      const events = loaded._unsafeUnwrap().events;
+      const contextSet = events.find(e => e.kind === 'context_set');
+      expect(contextSet).toBeDefined();
+
+      const context = (contextSet as any).data.context;
+      expect(context.metrics_active_model).toBe('claude-3-5-haiku-latest');
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

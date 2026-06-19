@@ -1019,4 +1019,160 @@ describe('buildMetricsSection', () => {
       }
     });
   });
+
+  describe('parallel step rendering', () => {
+    const parallelWorkflow = createWorkflow(
+      {
+        id: 'parallel-test',
+        name: 'Parallel Test',
+        description: 'Test parallel spawning guides',
+        version: '1.0.0',
+        steps: [
+          {
+            id: 'parallel-step',
+            title: 'Parallel Spawning Gates',
+            type: 'parallel',
+            parallelDelegations: [
+              {
+                workflowId: 'child-workflow-1',
+                contextMapping: {
+                  taskComplexity: 'childComplexity',
+                },
+                args: {
+                  deliverableName: 'deliverable1.md',
+                },
+              },
+              {
+                workflowId: 'child-workflow-2',
+                runCondition: {
+                  var: 'runOptionalChild',
+                  equals: 'true',
+                },
+                contextMapping: {
+                  taskComplexity: 'childComplexity',
+                },
+                args: {
+                  deliverableName: 'deliverable2.md',
+                },
+              },
+            ],
+          },
+        ],
+      } as any,
+      createBundledSource()
+    );
+
+    it('renders parallel spawning prompt with active delegations, context mapping, and static args', () => {
+      const indexWithArgs = {
+        runContextByRunId: new Map([
+          ['run_1', { taskComplexity: 'Large', runOptionalChild: 'true' }],
+        ]),
+      } as any;
+
+      const result = renderPendingPrompt({
+        workflow: parallelWorkflow,
+        stepId: 'parallel-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+        precomputedIndex: indexWithArgs,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        const prompt = result.value.prompt;
+        expect(prompt).toContain('# Parallel Subagent Spawning Phase');
+        expect(prompt).toContain('#### Subagent 1: child-workflow-1');
+        expect(prompt).toContain('*   **Workflow ID to Spawn**: `child-workflow-1`');
+        expect(prompt).toContain('*   **Target Input Parameters (Context)**:');
+        expect(prompt).toContain('*   `childComplexity`: `Large`');
+        expect(prompt).toContain('*   `deliverableName`: `deliverable1.md`');
+
+        expect(prompt).toContain('#### Subagent 2: child-workflow-2');
+        expect(prompt).toContain('*   **Workflow ID to Spawn**: `child-workflow-2`');
+        expect(prompt).toContain('*   `deliverableName`: `deliverable2.md`');
+      }
+    });
+
+    it('excludes inactive delegations based on condition evaluation', () => {
+      const indexWithArgs = {
+        runContextByRunId: new Map([
+          ['run_1', { taskComplexity: 'Large', runOptionalChild: 'false' }],
+        ]),
+      } as any;
+
+      const result = renderPendingPrompt({
+        workflow: parallelWorkflow,
+        stepId: 'parallel-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+        precomputedIndex: indexWithArgs,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        const prompt = result.value.prompt;
+        expect(prompt).toContain('#### Subagent 1: child-workflow-1');
+        expect(prompt).not.toContain('#### Subagent 2: child-workflow-2');
+      }
+    });
+
+    it('renders a bypass prompt when all delegations evaluate to false', () => {
+      const inactiveWorkflow = createWorkflow(
+        {
+          id: 'parallel-inactive',
+          name: 'Inactive Spawner',
+          description: 'No active children',
+          version: '1.0.0',
+          steps: [
+            {
+              id: 'parallel-step',
+              title: 'Parallel Inactive Gates',
+              type: 'parallel',
+              parallelDelegations: [
+                {
+                  workflowId: 'child-workflow-2',
+                  runCondition: {
+                    var: 'runOptionalChild',
+                    equals: 'true',
+                  },
+                },
+              ],
+            },
+          ],
+        } as any,
+        createBundledSource()
+      );
+
+      const indexWithArgs = {
+        runContextByRunId: new Map([
+          ['run_1', { runOptionalChild: 'false' }],
+        ]),
+      } as any;
+
+      const result = renderPendingPrompt({
+        workflow: inactiveWorkflow,
+        stepId: 'parallel-step',
+        loopPath: [],
+        truth: { events: [], manifest: [] },
+        runId: 'run_1',
+        nodeId: 'node_1',
+        rehydrateOnly: false,
+        precomputedIndex: indexWithArgs,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        const prompt = result.value.prompt;
+        expect(prompt).toContain('# Parallel Subagent Spawning Phase (Bypassed)');
+        expect(prompt).toContain('All parallel delegations for this step evaluated their conditions to false');
+        expect(prompt).toContain('immediately call `continue_workflow` to advance');
+      }
+    });
+  });
 });

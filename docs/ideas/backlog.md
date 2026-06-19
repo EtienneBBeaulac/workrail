@@ -2202,6 +2202,23 @@ The `worktrain run pipeline` CLI command dispatches sessions via HTTP to the dae
 
 The durable session store, v2 engine, and workflow authoring features shared by all three systems.
 
+### Cognitive Verification & Subagent-Driven Auditing (June 1, 2026)
+
+**Status: idea** | Priority: high
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Currently, verification step configurations require hardcoded shell commands or specific commands in the workflow definition. This compromises platform-agnosticism across bundled workflows, and treats the agent as a passive script-runner instead of an autonomous problem-solver. Furthermore, auditing a step's output is performed by the same agent session, which suffers from confirmation bias and self-justification.
+
+The system needs to shift towards cognitive/agentic verification instructions and parallel subagent auditing:
+1. **Cognitive Verification**: Allow verification configurations to be completely command-free, instructing the main agent to autonomously identify, run, write, and establish test/build verification systems to prove correctness in their workspace.
+2. **Subagent-Driven Auditing**: Enable the `verification` and `audit` configuration blocks to specify a subagent spawning directive. When hit, the engine suspends the main parent session, programmatically spawns an independent, sandboxed subagent QA auditor to inspect the parent's work, code diffs, and artifacts, and returns an objective Pass/Fail verdict with remediation guidance.
+
+**Things to hash out:**
+- How does the parent agent pass the precise context and target code changes to the subagent QA auditor?
+- Should the subagent QA auditor run in the exact same workspace worktree, or in a branched worktree to prevent hot-path mutations during parallel checks?
+- What standardized response schema (e.g. `Pass/Fail` plus `remediationNotes`) should the spawned auditing subagent return to the parent workflow to resume execution?
+
 ### Parallel tool execution in AgentLoop (May 11, 2026)
 
 **Status: idea** | Priority: high
@@ -6607,3 +6624,20 @@ This is the foundation for the console Live tab and replaces the need to run `wo
 The clean fix: add an optional `exitCode?: number` field to `CliResult.failure` (or add a new `CliResult.timeout` variant). Then `interpretCliResultWithoutDI` reads it and calls `process.exit(exitCode ?? 1)`. All existing callers are unaffected (no `exitCode` = default 1).
 
 Low priority because the sentinel works correctly today and `dispatch --wait` is the only caller that needs exit code 2.
+
+---
+
+### Subagent Spawning in Auto-Injected Auditing and Verification Steps (May 31, 2026)
+
+**Status: idea** | Priority: medium
+
+**Score: 12** | Cor:2 Cap:3 Eff:2 Lev:2 Con:3 | Blocked: no
+
+Currently, auto-injected virtual steps (audit, verification) run in-line in the main agent session. This means the main agent must execute the verification commands or perform the audit, which can introduce bias and waste parent tokens on complex verification environments.
+
+If auto-injected steps support delegating to subagents, the compiler can dynamically compile the virtual step as a `ParallelStepDefinition` instead of a standard `WorkflowStepDefinition`, spawning a specialized subagent (e.g. wr.routine-code-reviewer) to review or verify the parent step's output in an isolated, unbiased workspace.
+
+**Things to hash out:**
+- How is the parallel step's synthesis step generated? When a subagent audit completes, a dynamic synthesis step must auto-adopt the subagent's claims/findings.
+- What context variables are mapped into the child audit session from the parent?
+- Supporting custom model selection for the delegated audit subagent.

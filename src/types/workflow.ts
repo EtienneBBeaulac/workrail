@@ -8,7 +8,7 @@
  * Add new runtime metadata fields here as needed.
  */
 
-import { WorkflowDefinition, WorkflowStepDefinition, LoopStepDefinition, ParallelStepDefinition } from './workflow-definition';
+import { WorkflowDefinition, WorkflowStepDefinition, LoopStepDefinition, ParallelStepDefinition, StandardStepDefinition } from './workflow-definition';
 import { WorkflowSource, getSourceDisplayName } from './workflow-source';
 
 // =============================================================================
@@ -258,6 +258,7 @@ export function isWorkflowDefinition(obj: unknown): obj is WorkflowDefinition {
 export type {
   WorkflowDefinition,
   WorkflowStepDefinition,
+  StandardStepDefinition,
   LoopStepDefinition,
   ParallelStepDefinition,
   ParallelDelegation,
@@ -269,7 +270,7 @@ export type {
 
 export {
   isLoopStepDefinition,
-  isWorkflowStepDefinition,
+  isStandardStepDefinition,
   isParallelStepDefinition,
   hasWorkflowDefinitionShape
 } from './workflow-definition';

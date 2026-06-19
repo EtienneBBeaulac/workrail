@@ -24,11 +24,11 @@ import type { ToolContext } from '../mcp/types.js';
 import { StaticFeatureFlagProvider } from '../config/feature-flags.js';
 import { LocalDataDirV2 } from '../v2/infra/local/data-dir/index.js';
 
-import { executeStartWorkflow } from '../mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../mcp/handlers/v2-execution/index.js';
 import { executeCheckpoint, type CheckpointError } from '../mcp/handlers/v2-checkpoint.js';
 
-import type { StartWorkflowError, ContinueWorkflowError } from '../mcp/handlers/v2-execution-helpers.js';
+import { executeStartWorkflow, type StartWorkflowError } from '../v2/usecases/start-workflow.js';
+import type { ContinueWorkflowError } from '../mcp/handlers/v2-execution-helpers.js';
 
 import type { z } from 'zod';
 import type { V2StartWorkflowOutputSchema, V2ContinueWorkflowOutputSchema } from '../mcp/output-schemas.js';
@@ -96,8 +96,6 @@ function mapStartError(e: StartWorkflowError): EngineError {
       return { kind: 'precondition_failed', message: e.message };
     case 'invariant_violation':
       return { kind: 'internal_error', message: e.message };
-    case 'validation_failed':
-      return { kind: 'validation_failed', message: e.failure.message };
     case 'keyring_load_failed':
       return { kind: 'internal_error', message: e.cause.message, code: e.cause.code };
     case 'hash_computation_failed':
@@ -395,11 +393,48 @@ export async function createWorkRailEngine(
   const engine: WorkRailEngine = {
     async startWorkflow(workflowId: string, goal: string): Promise<EngineResult<StepResponse>> {
       const workspacePath = process.cwd();
-      const result = await executeStartWorkflow({ workflowId, workspacePath, goal }, v2Ctx);
+      const result = await executeStartWorkflow(
+        {
+          gate: v2Ctx.v2.gate,
+          sessionStore: v2Ctx.v2.sessionStore,
+          snapshotStore: v2Ctx.v2.snapshotStore,
+          pinnedStore: v2Ctx.v2.pinnedStore,
+          crypto: v2Ctx.v2.crypto,
+          tokenCodecPorts: v2Ctx.v2.tokenCodecPorts,
+          idFactory: v2Ctx.v2.idFactory,
+          validationPipelineDeps: v2Ctx.v2.validationPipelineDeps,
+          tokenAliasStore: v2Ctx.v2.tokenAliasStore,
+          entropy: v2Ctx.v2.entropy,
+          resolvedRootUris: v2Ctx.v2.resolvedRootUris,
+          rememberedRootsStore: v2Ctx.v2.rememberedRootsStore,
+          managedSourceStore: v2Ctx.v2.managedSourceStore,
+          workspaceResolver: v2Ctx.v2.workspaceResolver,
+          fallbackWorkflowReader: v2Ctx.workflowService,
+          featureFlags: v2Ctx.featureFlags,
+        },
+        { workflowId, workspacePath, goal }
+      );
       if (result.isErr()) {
         return engineErr(mapStartError(result.error));
       }
-      return engineOk(mapStartOutput(result.value.response));
+      const res = result.value;
+      const mappedOutput = {
+        continueToken: res.continueToken,
+        checkpointToken: res.checkpointToken,
+        isComplete: false,
+        pending: {
+          stepId: res.meta.stepId,
+          title: res.meta.title,
+          prompt: res.meta.prompt,
+          agentRole: res.meta.agentRole,
+        },
+        preferences: {
+          autonomy: 'guided',
+          riskPolicy: 'conservative',
+        },
+        nextIntent: 'perform_pending_then_continue',
+      };
+      return engineOk(mapStartOutput(mappedOutput as any));
     },
 
     async continueWorkflow(

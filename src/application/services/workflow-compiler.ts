@@ -265,7 +265,11 @@ export class WorkflowCompiler {
       baseDir,
     );
     if (resolvedResult.isErr()) return err(resolvedResult.error);
-    const { steps, resolvedBindings, resolvedOverrides } = resolvedResult.value;
+    const { steps: resolvedSteps, resolvedBindings, resolvedOverrides } = resolvedResult.value;
+
+    const expandResult = this.expandVirtualSteps(resolvedSteps, workflow.definition.id);
+    if (expandResult.isErr()) return err(expandResult.error);
+    const steps = expandResult.value;
 
     const stepById = new Map<string, WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition>();
     for (const step of steps) {
@@ -519,5 +523,108 @@ export class WorkflowCompiler {
     }
 
     return ok([referenced]);
+  }
+
+  private expandVirtualSteps(
+    steps: readonly (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[],
+    workflowId: string,
+  ): Result<(WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[], DomainError> {
+    const result: (WorkflowStepDefinition | LoopStepDefinition | ParallelStepDefinition)[] = [];
+    const seenIds = new Set<string>();
+
+    for (const step of steps) {
+      if (seenIds.has(step.id)) {
+        return err(Err.invalidState(`Duplicate step id '${step.id}' in workflow '${workflowId}'`));
+      }
+      seenIds.add(step.id);
+
+      if (isLoopStepDefinition(step)) {
+        if (Array.isArray(step.body)) {
+          const bodyResult = this.expandVirtualSteps(step.body, workflowId);
+          if (bodyResult.isErr()) return err(bodyResult.error);
+          
+          const expandedLoop: LoopStepDefinition = {
+            ...step,
+            body: bodyResult.value as readonly WorkflowStepDefinition[],
+          };
+          result.push(expandedLoop);
+        } else {
+          result.push(step);
+        }
+      } else {
+        result.push(step);
+
+        const typedStep = step as WorkflowStepDefinition;
+
+        if ('verification' in typedStep && typedStep.verification) {
+          const verificationStepId = `${step.id}__verification`;
+          if (seenIds.has(verificationStepId)) {
+            return err(Err.invalidState(`Duplicate step id '${verificationStepId}' generated from auto-injected verification in workflow '${workflowId}'`));
+          }
+          seenIds.add(verificationStepId);
+
+          const verificationPrompt = typedStep.verification.prompt ??
+            (typedStep.verification.command
+              ? `Run the following verification command to assert correctness:\n\n\`\`\`bash\n${typedStep.verification.command}\n\`\`\`\n\nEnsure that the command succeeds and report any failures.`
+              : `Run the appropriate verification commands, test suites, or build checks for this workspace to assert that your changes are complete and correct. Verify that all tests pass and report any failures.`);
+
+          const verificationStep: WorkflowStepDefinition = {
+            id: verificationStepId,
+            title: `Verify: ${step.title}`,
+            prompt: verificationPrompt,
+            runCondition: step.runCondition,
+            notesOptional: true,
+          };
+          result.push(verificationStep);
+        }
+
+        if ('audit' in typedStep && typedStep.audit) {
+          const auditStepId = `${step.id}__audit`;
+          if (seenIds.has(auditStepId)) {
+            return err(Err.invalidState(`Duplicate step id '${auditStepId}' generated from auto-injected audit in workflow '${workflowId}'`));
+          }
+          seenIds.add(auditStepId);
+
+          const rubricPrompt = typedStep.audit.rubric && typedStep.audit.rubric.length > 0
+            ? `\n\nAssert the output against the following rubric:\n${typedStep.audit.rubric.map((r: string) => `- ${r}`).join('\n')}`
+            : '';
+          const auditPrompt = typedStep.audit.prompt ??
+            `Audit the results of step '${step.title}'. Ensure all work is complete, correct, and meets high-quality standards.${rubricPrompt}\n\nConfirm if the audit passed or if changes/corrections are required.`;
+
+          const auditStep: WorkflowStepDefinition = {
+            id: auditStepId,
+            title: `Audit: ${step.title}`,
+            prompt: auditPrompt,
+            runCondition: step.runCondition,
+            notesOptional: true,
+          };
+          result.push(auditStep);
+        }
+
+        const parallelStep = step as ParallelStepDefinition;
+        if (isParallelStepDefinition(step) && parallelStep.synthesis) {
+          const synthesisStepId = `${step.id}__synthesis`;
+          if (seenIds.has(synthesisStepId)) {
+            return err(Err.invalidState(`Duplicate step id '${synthesisStepId}' generated from auto-injected synthesis in workflow '${workflowId}'`));
+          }
+          seenIds.add(synthesisStepId);
+
+          const synthesisPrompt = parallelStep.synthesis.prompt ??
+            `Synthesize and merge the parallel execution outputs from the subagent sessions. Resolve any contradictions and produce a unified report.`;
+
+          const synthesisStep: WorkflowStepDefinition = {
+            id: synthesisStepId,
+            title: `Synthesis: ${step.title}`,
+            prompt: synthesisPrompt,
+            runCondition: step.runCondition,
+            notesOptional: true,
+            outputContract: parallelStep.synthesis.outputContract,
+          };
+          result.push(synthesisStep);
+        }
+      }
+    }
+
+    return ok(result);
   }
 }

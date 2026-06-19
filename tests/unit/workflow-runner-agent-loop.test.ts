@@ -228,7 +228,7 @@ vi.mock('../../src/daemon/agent-loop.js', () => ({
   AgentLoop: MockAgentLoop,
 }));
 
-vi.mock('../../src/mcp/handlers/v2-execution/start.js', () => ({
+vi.mock('../../src/v2/usecases/start-workflow.js', () => ({
   executeStartWorkflow: mockExecuteStartWorkflow,
 }));
 
@@ -236,7 +236,7 @@ vi.mock('../../src/mcp/handlers/v2-execution/index.js', () => ({
   executeContinueWorkflow: mockExecuteContinueWorkflow,
 }));
 
-vi.mock('../../src/mcp/handlers/v2-token-ops.js', () => ({
+vi.mock('../../src/v2/usecases/v2-token-ops.js', () => ({
   parseContinueTokenOrFail: mockParseContinueTokenOrFail,
 }));
 
@@ -298,25 +298,14 @@ function makeStartResponse(overrides: {
     isOk: () => true,
     isErr: () => false,
     value: {
-      response: {
-        kind: 'ok' as const,
-        continueToken: overrides.continueToken ?? FAKE_CONTINUE_TOKEN,
-        checkpointToken: undefined,
-        isComplete: overrides.isComplete ?? false,
-        pending: overrides.isComplete ? null : {
-          stepId: 'step-1',
-          title: 'Step 1',
-          prompt: 'Do the first step.',
-        },
-        preferences: {
-          autonomy: 'full_auto_never_stop' as const,
-          riskPolicy: 'balanced' as const,
-        },
-        nextIntent: 'perform_pending_then_continue' as const,
-        nextCall: {
-          tool: 'complete_step' as const,
-          params: { continueToken: overrides.continueToken ?? FAKE_CONTINUE_TOKEN },
-        },
+      sessionId: 'sess_test123',
+      continueToken: overrides.continueToken ?? FAKE_CONTINUE_TOKEN,
+      checkpointToken: '',
+      isComplete: overrides.isComplete ?? false,
+      meta: {
+        stepId: 'step-1',
+        title: 'Step 1',
+        prompt: 'Do the first step.',
       },
     },
   };

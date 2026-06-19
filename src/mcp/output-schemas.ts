@@ -228,6 +228,7 @@ export const V2PendingStepSchema = z.object({
   title: z.string().min(1),
   prompt: z.string().min(1),
   agentRole: z.string().min(1).optional(),
+  modelTier: z.enum(['lightweight', 'mid', 'heavy']).optional(),
 });
 
 export type V2PendingStep = z.infer<typeof V2PendingStepSchema>;
@@ -241,6 +242,7 @@ export function toPendingStep(meta: {
   readonly title: string;
   readonly prompt: string;
   readonly agentRole?: string;
+  readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
 } | null): V2PendingStep | null {
   if (!meta) return null;
   return {
@@ -248,6 +250,7 @@ export function toPendingStep(meta: {
     title: meta.title,
     prompt: meta.prompt,
     ...(meta.agentRole ? { agentRole: meta.agentRole } : {}),
+    ...(meta.modelTier ? { modelTier: meta.modelTier } : {}),
   };
 }
 
