@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
 
 function assertCompatible(oldSchema: any, newSchema: any, path: string): void {
@@ -211,19 +211,19 @@ describe('Workflow JSON Schema Backward Compatibility', () => {
     // 2. Read base schema from origin/main using git
     let baseSchemaStr = '';
     try {
-      baseSchemaStr = execSync('git show origin/main:spec/workflow.schema.json', {
+      baseSchemaStr = execFileSync('git', ['show', 'origin/main:spec/workflow.schema.json'], {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore'],
       });
     } catch (e) {
       try {
-        baseSchemaStr = execSync('git show main:spec/workflow.schema.json', {
+        baseSchemaStr = execFileSync('git', ['show', 'main:spec/workflow.schema.json'], {
           encoding: 'utf8',
           stdio: ['pipe', 'pipe', 'ignore'],
         });
       } catch (e2) {
         try {
-          baseSchemaStr = execSync('git show HEAD~1:spec/workflow.schema.json', {
+          baseSchemaStr = execFileSync('git', ['show', 'HEAD~1:spec/workflow.schema.json'], {
             encoding: 'utf8',
             stdio: ['pipe', 'pipe', 'ignore'],
           });
