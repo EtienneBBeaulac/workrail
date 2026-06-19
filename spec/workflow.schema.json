@@ -1469,7 +1469,7 @@
         },
         "allowedTools": {
           "type": "array",
-          "description": "Tool names the spawned agent is permitted to use. When absent the agent inherits the default tool set. Must be non-empty when present.",
+          "description": "Tool names surfaced to the spawned agent as a hint. When absent the agent inherits the default tool set. Not yet structurally enforced: the child session tool set is not restricted by this field; wiring to the session layer is a follow-up. Must be non-empty when present.",
           "items": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9_:\\-]*$" },
           "minItems": 1
         }

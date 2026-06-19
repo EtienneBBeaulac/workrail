@@ -172,8 +172,8 @@ export function getSchemas(): Record<string, any> {
         },
         allowedTools: {
           type: 'array',
-          description: 'Tool names the child session is restricted to. Absent = inherit default tool set.',
-          items: { type: 'string' },
+          description: 'Tool names surfaced as a hint. Not yet structurally enforced at the session layer. Absent = inherit default tool set.',
+          items: { type: 'string' }, minItems: 1,
         },
         agents: {
           type: 'array',
@@ -207,8 +207,8 @@ export function getSchemas(): Record<string, any> {
               },
               allowedTools: {
                 type: 'array',
-                description: 'Tool names the child session is restricted to. Absent = inherit default tool set.',
-                items: { type: 'string' },
+                description: 'Tool names surfaced as a hint. Not yet structurally enforced at the session layer. Absent = inherit default tool set.',
+                items: { type: 'string' }, minItems: 1,
               },
             },
             required: ['workflowId', 'goal', 'workspacePath'],
