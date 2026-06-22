@@ -13,8 +13,8 @@
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",
     "@tanstack/react-query": "^5.101.0",
-    "@tanstack/react-router": "^1.170.15",
-    "@xyflow/react": "^12.11.0",
+    "@tanstack/react-router": "^1.170.16",
+    "@xyflow/react": "^12.11.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0"
