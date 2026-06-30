@@ -40,7 +40,14 @@ const SUBAGENT_GUIDANCE = [
   '- **Spawning Routines / Executors**: If a step instructs you to "spawn a WorkRail Executor" or execute a parallel routine (e.g. `wr.routine-philosophy-alignment`), you should delegate it to a subagent using your native client capabilities (e.g. `invoke_subagent` to start a child agent running the routine with `start_workflow`) or execute it inline if client-side subagent tools are unavailable.',
 ].join('\n');
 
-export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance';
+const ONBOARDING_PROTOCOL = [
+  'Rules of Engagement:',
+  '1. NO PREEMPTIVE WORK: Do not attempt to solve the overarching task right now. You must wait for explicit workflow steps.',
+  '2. ADHERE TO THE DAG: You will be fed prompts one step at a time. Complete only the step requested.',
+  '3. OUTPUT CONTRACTS: Use the `continue_workflow` tool to submit your work when a step is done.',
+].join('\n');
+
+export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance' | 'onboarding_protocol';
 
 export interface FormattedSupplement {
   readonly kind: SupplementKind;
@@ -92,6 +99,13 @@ const CLEAN_RESPONSE_SUPPLEMENTS: readonly ResponseSupplementSpec[] = [
     lifecycles: ['start', 'rehydrate'],
     delivery: { mode: 'per_lifecycle' },
     renderText: () => AUTHORITY_CONTEXT,
+  }),
+  defineResponseSupplement({
+    kind: 'onboarding_protocol',
+    order: 15,
+    lifecycles: ['start', 'rehydrate'],
+    delivery: { mode: 'per_lifecycle' },
+    renderText: () => ONBOARDING_PROTOCOL,
   }),
   defineResponseSupplement({
     kind: 'notes_guidance',

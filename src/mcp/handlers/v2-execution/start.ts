@@ -46,16 +46,6 @@ import { resolveWorkflowReferences } from '../v2-reference-resolver.js';
 import { withTimeout } from '../shared/with-timeout.js';
 import type { ResolveFrom } from '../../../types/workflow-definition.js';
 
-const PROTOCOL_INSTRUCTIONS = `This repository is managed by WorkRail, an advanced workflow automation engine.
-You are currently executing within a guided workflow. Your actions are constrained and monitored by the engine.
-
-Rules of Engagement:
-1. NO PREEMPTIVE WORK: Do not attempt to solve the overarching task right now. You must wait for explicit workflow steps.
-2. ADHERE TO THE DAG: You will be fed prompts one step at a time. Complete only the step requested.
-3. OUTPUT CONTRACTS: Use the \`continue_workflow\` tool to submit your work when a step is done.
-
-If you understand these constraints, call \`continue_workflow\` with no output to receive your first actual assignment.`;
-
 // Cap reference I/O time so a slow or hung filesystem cannot block start_workflow indefinitely.
 // On timeout, all references are marked unresolved and the workflow still starts (graceful degradation).
 const REFERENCE_RESOLUTION_TIMEOUT_MS = 5_000;
@@ -82,7 +72,6 @@ export function loadAndPinWorkflow(args: {
   readonly validationPipelineDeps: ValidationPipelineDepsPhase1a;
   readonly workspacePath?: string;
   readonly resolvedRootUris?: readonly string[];
-  readonly injectOnboarding?: boolean;
 }): RA<{
   readonly workflow: import('../../../types/workflow.js').Workflow;
   readonly workflowHash: WorkflowHash;
@@ -90,7 +79,7 @@ export function loadAndPinWorkflow(args: {
   readonly firstStep: { readonly id: string };
   readonly resolvedReferences: readonly ResolvedReference[];
 }, StartWorkflowError> {
-  const { workflowId, workflowReader, crypto, pinnedStore, validationPipelineDeps, workspacePath, resolvedRootUris, injectOnboarding } = args;
+  const { workflowId, workflowReader, crypto, pinnedStore, validationPipelineDeps, workspacePath, resolvedRootUris } = args;
 
   return RA.fromPromise(workflowReader.getWorkflowById(workflowId), (e) => ({
     kind: 'precondition_failed' as const,
@@ -107,32 +96,10 @@ export function loadAndPinWorkflow(args: {
       return okAsync({ workflow });
     })
     .andThen(({ workflow }) => {
-      let injectedWorkflow = workflow;
-
-      if (injectOnboarding) {
-        // INJECT VIRTUAL ONBOARDING STEP
-        // This injects the protocol instructions into the DAG as the very first step,
-        // guaranteeing local models process the rules before receiving real tasks.
-        const injectedStep = {
-          id: 'wr-system-onboarding',
-          title: 'WorkRail Protocol Instructions',
-          prompt: PROTOCOL_INSTRUCTIONS + '\n\n**Action Required**: Acknowledge these instructions by calling `continue_workflow` (with an empty `output` or simple `notes`). Do NOT attempt the actual task yet.',
-          notesOptional: true
-        };
-
-        injectedWorkflow = {
-          ...workflow,
-          definition: {
-            ...workflow.definition,
-            steps: [injectedStep, ...workflow.definition.steps]
-          }
-        };
-      }
-
       // Run the Phase 1a validation pipeline before creating any durable state.
       // Phases: schema → structural → v1 compilation → normalization.
       // This replaces the previous normalize-only call with full validation.
-      const pipelineOutcome = validateWorkflowPhase1a(injectedWorkflow, validationPipelineDeps);
+      const pipelineOutcome = validateWorkflowPhase1a(workflow, validationPipelineDeps);
       if (pipelineOutcome.kind !== 'phase1a_valid') {
         // Map pipeline failure variants to StartWorkflowError
         const message = pipelineOutcome.kind === 'schema_failed'
@@ -487,7 +454,6 @@ export function executeStartWorkflow(
       validationPipelineDeps,
       workspacePath: input.workspacePath,
       resolvedRootUris: ctx.v2.resolvedRootUris,
-      injectOnboarding: internalContext?.['triggerSource'] === 'mcp' && !process.env['VITEST'],
     });
 
     // 2. Combine workflow loading and anchor resolution -- both started before this point.
