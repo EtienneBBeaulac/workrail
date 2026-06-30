@@ -83,7 +83,7 @@ export const V2ContinueWorkflowInputShape = z.object({
         'Use markdown: headings, bullet lists, bold for emphasis. Be specific — names, paths, numbers, not vague summaries. ' +
         'Good length: 10–30 lines. Too short is worse than too long.'
       ),
-      artifacts: z.array(z.unknown()).optional().describe('Optional structured artifacts (schema is workflow/contract-defined)'),
+      artifacts: z.union([z.array(z.unknown()), z.string()]).optional().describe('Optional structured artifacts (schema is workflow/contract-defined). Note: If providing a string, it must be a valid JSON array.'),
     })
     .optional()
     .describe('Durable output to attach to the current node. Only valid when intent is "advance".'),
@@ -97,7 +97,7 @@ const continueWorkflowNotesAliasField = z.string().optional().describe(
   'Compatibility alias for output.notesMarkdown. Provide your step notes here directly.'
 );
 
-const continueWorkflowArtifactsAliasField = z.array(z.unknown()).optional().describe(
+const continueWorkflowArtifactsAliasField = z.union([z.array(z.unknown()), z.string()]).optional().describe(
   'Compatibility alias for output.artifacts. Provide structured step artifacts here directly.'
 );
 
@@ -165,7 +165,23 @@ export const V2ContinueWorkflowInput = V2ContinueWorkflowInputShape
       ? normalizeAliasedFields(data as Readonly<Record<string, unknown>>, CONTINUE_WORKFLOW_PROTOCOL.aliasMap)
       : (data as Record<string, unknown>);
     const notesMarkdown = data.notes ?? data.output?.notesMarkdown;
-    const artifacts = data.artifacts ?? data.output?.artifacts;
+    const rawArtifacts = data.artifacts ?? data.output?.artifacts;
+    let artifacts: unknown[] | undefined = undefined;
+    if (rawArtifacts !== undefined) {
+      if (typeof rawArtifacts === 'string') {
+        try {
+          const parsed = JSON.parse(rawArtifacts);
+          if (Array.isArray(parsed)) {
+            artifacts = parsed;
+          }
+        } catch (e) {
+          // Set to empty array so downstream schema validation fails gracefully
+          artifacts = [];
+        }
+      } else if (Array.isArray(rawArtifacts)) {
+        artifacts = rawArtifacts;
+      }
+    }
     const output = (notesMarkdown !== undefined || artifacts !== undefined) ? {
       ...(notesMarkdown !== undefined ? { notesMarkdown } : {}),
       ...(artifacts !== undefined ? { artifacts } : {}),
