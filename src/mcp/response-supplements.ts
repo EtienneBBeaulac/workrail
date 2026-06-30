@@ -41,10 +41,13 @@ const SUBAGENT_GUIDANCE = [
 ].join('\n');
 
 const ONBOARDING_PROTOCOL = [
-  'Rules of Engagement:',
-  '1. NO PREEMPTIVE WORK: Do not attempt to solve the overarching task right now. You must wait for explicit workflow steps.',
-  '2. ADHERE TO THE DAG: You will be fed prompts one step at a time. Complete only the step requested.',
-  '3. OUTPUT CONTRACTS: Use the `continue_workflow` tool to submit your work when a step is done.',
+  'Rules of Engagement (Local LLM Protocol):',
+  '1. NO PREEMPTIVE WORK: Do not attempt to solve the overarching task right now. You must wait for explicit workflow steps. Do not jump ahead.',
+  '2. ADHERE TO THE DAG: You will be fed prompts one step at a time. Complete only the step requested. The engine handles all branching, routing, and loops—you just provide the facts.',
+  '3. OUTPUT CONTRACTS: Use the `continue_workflow` tool to submit your work when a step is done. Do not just print your final answer in chat; it must be submitted through the tool.',
+  '4. DURABLE OUTPUTS: Your findings must be recorded in `output.notesMarkdown` (for human-readable summaries) or `output.artifacts` (for structured data/arrays).',
+  '5. CONFIDENCE & DISCLOSURE: Do not invent facts to bypass steps. If you lack context or tools, degrade your confidence and explicitly disclose what is missing. The workflow is designed to handle missing information safely.',
+  '6. TOKEN PROTOCOL: Always pass the exact `continueToken` provided in the current prompt when calling `continue_workflow`.',
 ].join('\n');
 
 export type SupplementKind = 'authority_context' | 'notes_guidance' | 'subagent_guidance' | 'onboarding_protocol';
