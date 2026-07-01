@@ -120,7 +120,7 @@ describe('toMcpResult — clean response supplements', () => {
     expect(result.content).toHaveLength(5);
     expect((result.content[0] as { text: string }).text).toContain('Execute the first task.');
     expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
-    expect((result.content[2] as { text: string }).text).toContain('Rules of Engagement');
+    expect((result.content[2] as { text: string }).text).toContain('WorkRail Protocol');
     expect((result.content[3] as { text: string }).text).toContain('How to write good notes');
     expect((result.content[4] as { text: string }).text).toContain('Interactive Session Advancement');
   });
@@ -140,7 +140,7 @@ describe('toMcpResult — clean response supplements', () => {
 
     expect(result.content).toHaveLength(4);
     expect((result.content[1] as { text: string }).text).toContain('WorkRail is a separate live system');
-    expect((result.content[2] as { text: string }).text).toContain('Rules of Engagement');
+    expect((result.content[2] as { text: string }).text).toContain('WorkRail Protocol');
     expect((result.content[3] as { text: string }).text).toContain('Interactive Session Advancement');
   });
 

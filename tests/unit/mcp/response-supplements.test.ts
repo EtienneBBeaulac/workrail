@@ -16,7 +16,7 @@ describe('buildResponseSupplements', () => {
     ]);
     expect(supplements.map((supplement) => supplement.order)).toEqual([10, 15, 20, 30]);
     expect(supplements[0]!.text).toContain('WorkRail is a separate live system');
-    expect(supplements[1]!.text).toContain('Rules of Engagement');
+    expect(supplements[1]!.text).toContain('WorkRail Protocol');
     expect(supplements[2]!.text).toContain('How to write good notes');
     expect(supplements[3]!.text).toContain('Interactive Session Advancement');
   });
@@ -33,7 +33,7 @@ describe('buildResponseSupplements', () => {
       'subagent_guidance',
     ]);
     expect(supplements[0]!.text).not.toContain('How to write good notes');
-    expect(supplements[1]!.text).toContain('Rules of Engagement');
+    expect(supplements[1]!.text).toContain('WorkRail Protocol');
     expect(supplements[2]!.text).toContain('Interactive Session Advancement');
   });
 
