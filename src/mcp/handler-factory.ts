@@ -58,12 +58,13 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
         const formatted: FormattedResponse | null =
           formatV2ExecutionResponse(result.data, cleanResponseFormat) ?? formatV2ResumeResponse(result.data);
         if (formatted !== null) {
-          const content: { type: 'text'; text: string }[] = [{ type: 'text', text: formatted.primary }];
-          if (formatted.references != null) {
-            content.push({ type: 'text', text: formatted.references.text });
-          }
+          const content: { type: 'text'; text: string }[] = [];
           for (const supplement of formatted.supplements ?? []) {
             content.push({ type: 'text', text: supplement.text });
+          }
+          content.push({ type: 'text', text: formatted.primary });
+          if (formatted.references != null) {
+            content.push({ type: 'text', text: formatted.references.text });
           }
           return { content };
         }
