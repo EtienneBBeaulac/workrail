@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 
 import { createWorkflow } from '../../src/types/workflow.js';

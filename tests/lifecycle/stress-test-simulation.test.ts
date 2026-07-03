@@ -1,4 +1,5 @@
 import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -6,7 +7,6 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 
-import { executeStartWorkflow } from '../../src/mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../../src/mcp/handlers/v2-execution/index.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 import type { V2StartWorkflowInput, V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
@@ -138,7 +138,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // 1. Start autonomous session
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'stress context rehydration' } as V2StartWorkflowInput,
         ctx,
         { is_autonomous: 'true', triggerSource: 'daemon' }
@@ -271,7 +271,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // Start workflow
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'empty artifacts payload test' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' }
@@ -320,7 +320,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // Start workflow
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'rapid advancement test' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' }
@@ -357,7 +357,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       // 2. Sequential rapid calls (sequential idempotency check).
       // If we call executeContinueWorkflow sequentially (waiting for the first to complete),
       // the second call should return a cached idempotent replay of the first response instead of failing!
-      const freshStartRes = await executeStartWorkflow(
+      const freshStartRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'sequential idempotency check' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' }

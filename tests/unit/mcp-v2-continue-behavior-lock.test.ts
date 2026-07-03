@@ -14,6 +14,7 @@ import { createTestValidationPipelineDeps, mintTestContinueToken } from "../help
  */
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -22,7 +23,7 @@ import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '.
 import { DI } from '../../src/di/tokens.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
 
@@ -125,7 +126,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Start
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -166,7 +167,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -202,7 +203,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -237,7 +238,7 @@ describe('v2 continue_workflow behavioral locks (pre-refactor baseline)', () => 
     const v2 = await mkV2Deps();
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
-    const start = await handleV2StartWorkflow({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'behavior-lock-wf', workspacePath: root, goal: 'test behavior lock' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
