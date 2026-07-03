@@ -180,3 +180,37 @@ export function coerceJsonStringObjectFields(
 
   return result ?? args;
 }
+
+/**
+ * Apply forgiving aliases by mapping known hallucinated keys to their canonical
+ * counterparts and deleting the hallucinated key. This runs before Zod validation
+ * so the schema can remain strict without bloat.
+ * 
+ * @param args - The raw input arguments
+ * @param forgivingAliasMap - Map of alias -> canonical field names
+ * @returns A new object with the aliases mapped and removed, or the original args if no changes.
+ */
+export function applyForgivingAliases(
+  args: unknown,
+  forgivingAliasMap?: Readonly<Record<string, string>>,
+): unknown {
+  if (!forgivingAliasMap || typeof args !== 'object' || args === null) {
+    return args;
+  }
+
+  const input = args as Record<string, unknown>;
+  let result: Record<string, unknown> | null = null;
+
+  for (const [alias, canonical] of Object.entries(forgivingAliasMap)) {
+    if (input[alias] !== undefined) {
+      if (result === null) result = { ...input };
+      // Only map if canonical is not already provided
+      if (result[canonical] === undefined) {
+        result[canonical] = result[alias];
+      }
+      delete result[alias];
+    }
+  }
+
+  return result ?? args;
+}

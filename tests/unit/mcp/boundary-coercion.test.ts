@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { coerceJsonStringObjectFields } from '../../../src/mcp/boundary-coercion.js';
+import { applyForgivingAliases, coerceJsonStringObjectFields } from '../../../src/mcp/boundary-coercion.js';
 
 // -----------------------------------------------------------------------------
 // Test schema fixtures
@@ -169,5 +169,75 @@ describe('coerceJsonStringObjectFields', () => {
     const result = coerceJsonStringObjectFields(frozen, schema) as Record<string, unknown>;
     expect(result.context).toEqual({ x: 1 });
     expect(frozen.context).toBe('{"x":1}'); // original unchanged
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Forgiving Aliases
+// -----------------------------------------------------------------------------
+
+describe('applyForgivingAliases', () => {
+  const forgivingMap = {
+    token: 'continueToken',
+    message: 'notes',
+  };
+
+  it('passes through args unchanged if forgivingAliasMap is empty or undefined', () => {
+    const args = { token: 'ct_123' };
+    expect(applyForgivingAliases(args, undefined)).toBe(args);
+    expect(applyForgivingAliases(args, {})).toBe(args);
+  });
+
+  it('passes through args unchanged if args is not an object', () => {
+    expect(applyForgivingAliases(null, forgivingMap)).toBeNull();
+    expect(applyForgivingAliases('hello', forgivingMap)).toBe('hello');
+  });
+
+  it('passes through args unchanged if no forgiving aliases match', () => {
+    const args = { continueToken: 'ct_123', someOtherField: 'abc' };
+    expect(applyForgivingAliases(args, forgivingMap)).toBe(args);
+  });
+
+  it('maps a forgiving alias to its canonical field and deletes the alias', () => {
+    const args = { token: 'ct_123', intent: 'advance' };
+    const result = applyForgivingAliases(args, forgivingMap) as Record<string, unknown>;
+    
+    expect(result).not.toBe(args);
+    expect(result.continueToken).toBe('ct_123');
+    expect(result.token).toBeUndefined();
+    expect(result.intent).toBe('advance');
+  });
+
+  it('does not overwrite canonical field if it is already present', () => {
+    // If the LLM provides both, we don't clobber the canonical field.
+    // We do still delete the alias, so that it doesn't cause an unrecognized_keys error,
+    // or if the canonical and alias are both in the schema, Zod can handle it.
+    // Wait, if we delete the alias, Zod won't see it to throw a "provide either or" conflict!
+    // But forgiving aliases are specifically undocumented mistakes, so we don't care
+    // if the LLM provided both, we just favor the canonical one.
+    const args = { token: 'ct_bad', continueToken: 'ct_good' };
+    const result = applyForgivingAliases(args, forgivingMap) as Record<string, unknown>;
+    
+    expect(result.continueToken).toBe('ct_good'); // canonical preserved
+    expect(result.token).toBeUndefined(); // alias deleted
+  });
+
+  it('handles multiple forgiving aliases in the same object', () => {
+    const args = { token: 'ct_123', message: 'done!' };
+    const result = applyForgivingAliases(args, forgivingMap) as Record<string, unknown>;
+    
+    expect(result.continueToken).toBe('ct_123');
+    expect(result.token).toBeUndefined();
+    expect(result.notes).toBe('done!');
+    expect(result.message).toBeUndefined();
+  });
+
+  it('does not mutate the original args object', () => {
+    const args = { token: 'ct_123' };
+    const frozen = Object.freeze({ ...args });
+    const result = applyForgivingAliases(frozen, forgivingMap) as Record<string, unknown>;
+    
+    expect(result.continueToken).toBe('ct_123');
+    expect(frozen.token).toBe('ct_123'); // original unchanged
   });
 });
