@@ -37,6 +37,16 @@ import { resolveFirstStep } from '../durable-core/domain/start-construction.js';
 import type { ResolveFrom } from '../../types/workflow-definition.js';
 import type { IdFactoryV2 } from '../infra/local/id-factory/index.js';
 
+const PROTOCOL_INSTRUCTIONS = `This repository is managed by WorkRail, an advanced workflow automation engine.
+You are currently executing within a guided workflow. Your actions are constrained and monitored by the engine.
+
+Rules of Engagement:
+1. NO PREEMPTIVE WORK: Do not attempt to solve the overarching task right now. You must wait for explicit workflow steps.
+2. ADHERE TO THE DAG: You will be fed prompts one step at a time. Complete only the step requested.
+3. OUTPUT CONTRACTS: Use the \`continue_workflow\` tool to submit your work when a step is done.
+
+If you understand these constraints, call \`continue_workflow\` with no output to receive your first actual assignment.`;
+
 const REFERENCE_RESOLUTION_TIMEOUT_MS = 5_000;
 
 export const defaultPreferences = {
@@ -99,6 +109,7 @@ export function loadAndPinWorkflow(args: {
   readonly validationPipelineDeps: ValidationPipelineDepsPhase1a;
   readonly workspacePath?: string;
   readonly resolvedRootUris?: readonly string[];
+  readonly injectOnboarding?: boolean;
 }): RA<{
   readonly workflow: import('../../types/workflow.js').Workflow;
   readonly workflowHash: WorkflowHash;
@@ -122,7 +133,29 @@ export function loadAndPinWorkflow(args: {
       return okAsync({ workflow });
     })
     .andThen(({ workflow }) => {
-      const pipelineOutcome = validateWorkflowPhase1a(workflow, validationPipelineDeps);
+      let injectedWorkflow = workflow;
+
+      if (args.injectOnboarding) {
+        // INJECT VIRTUAL ONBOARDING STEP
+        // This injects the protocol instructions into the DAG as the very first step,
+        // guaranteeing local models process the rules before receiving real tasks.
+        const injectedStep = {
+          id: 'wr-system-onboarding',
+          title: 'WorkRail Protocol Instructions',
+          prompt: PROTOCOL_INSTRUCTIONS + '\n\n**Action Required**: Acknowledge these instructions by calling `continue_workflow` (with an empty `output` or simple `notes`). Do NOT attempt the actual task yet.',
+          notesOptional: true
+        };
+
+        injectedWorkflow = {
+          ...workflow,
+          definition: {
+            ...workflow.definition,
+            steps: [injectedStep, ...workflow.definition.steps]
+          }
+        };
+      }
+
+      const pipelineOutcome = validateWorkflowPhase1a(injectedWorkflow, validationPipelineDeps);
       if (pipelineOutcome.kind !== 'phase1a_valid') {
         const message = pipelineOutcome.kind === 'schema_failed'
           ? `Schema validation failed: ${pipelineOutcome.errors.map(e => e.message ?? e.instancePath).join('; ')}`
@@ -170,7 +203,7 @@ export function loadAndPinWorkflow(args: {
               }
               const pinnedWorkflow = getCachedWorkflow(workflowHash, pinned.definition as WorkflowDefinition);
 
-              const resolution = resolveFirstStep(workflow, pinned);
+              const resolution = resolveFirstStep(injectedWorkflow, pinned);
               if (resolution.isErr()) {
                 const error: StartWorkflowError = resolution.error.reason === 'no_steps'
                   ? { kind: 'workflow_has_no_steps' as const, workflowId: asWorkflowId(resolution.error.detail) }
@@ -180,7 +213,7 @@ export function loadAndPinWorkflow(args: {
 
               const firstStep = resolution.value;
               return okAsync({
-                workflow,
+                workflow: injectedWorkflow,
                 firstStep,
                 workflowHash,
                 pinnedWorkflow,
@@ -378,6 +411,7 @@ export function executeStartWorkflow(
     readonly workspacePath: string;
     readonly goal: string;
     readonly modelTier?: 'lightweight' | 'mid' | 'heavy';
+    readonly injectOnboarding?: boolean;
   },
   internalContext?: Readonly<Record<string, string>>,
 ): RA<StartWorkflowUsecaseResult, StartWorkflowError> {
@@ -483,6 +517,7 @@ export function executeStartWorkflow(
       validationPipelineDeps,
       workspacePath: input.workspacePath,
       resolvedRootUris: deps.resolvedRootUris,
+      injectOnboarding: input.injectOnboarding,
     });
 
     return RA.combine([pinnedRA, anchorsRA] as const)

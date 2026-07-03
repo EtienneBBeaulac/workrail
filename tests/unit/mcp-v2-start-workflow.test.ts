@@ -229,6 +229,46 @@ async function mkCtxWithInvalidWorkflow(workflowId: string): Promise<ToolContext
 }
 
 describe('v2 start_workflow (Slice 3.5)', () => {
+  it('injects virtual onboarding step when injectOnboarding is true', async () => {
+    const root = await mkTempDataDir();
+    const prev = process.env.WORKRAIL_DATA_DIR;
+    process.env.WORKRAIL_DATA_DIR = root;
+    try {
+      const workflowId = 'test-workflow';
+      const { ctx } = await mkCtxWithWorkflow(workflowId);
+
+      const { loadAndPinWorkflow } = await import('../../src/v2/usecases/start-workflow.js');
+      const result = await loadAndPinWorkflow({
+        workflowId,
+        workflowReader: ctx.workflowService,
+        crypto: ctx.v2.crypto,
+        pinnedStore: ctx.v2.pinnedStore,
+        validationPipelineDeps: ctx.v2.validationPipelineDeps,
+        workspacePath: root,
+        injectOnboarding: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        const { pinnedWorkflow, firstStep } = result.value;
+        
+        // The first step must be the virtual onboarding step
+        expect(firstStep.id).toBe('wr-system-onboarding');
+        
+        // The pinned workflow must have the injected step at the start
+        expect(pinnedWorkflow.definition.steps[0]?.id).toBe('wr-system-onboarding');
+        expect(pinnedWorkflow.definition.steps[0]?.prompt).toContain('Rules of Engagement:');
+        expect(pinnedWorkflow.definition.steps[0]?.prompt).toContain('continue_workflow');
+        expect(pinnedWorkflow.definition.steps[0]?.notesOptional).toBe(true);
+        
+        // The original workflow step must be the second step
+        expect(pinnedWorkflow.definition.steps[1]?.id).toBe('triage');
+      }
+    } finally {
+      process.env.WORKRAIL_DATA_DIR = prev;
+    }
+  });
+
   it('returns VALIDATION_ERROR for oversized context on continue_workflow (rehydrate-only path)', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;

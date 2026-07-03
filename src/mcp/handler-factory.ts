@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import type { ToolContext, ToolResult, ToolError } from './types.js';
 import { errNotRetryable } from './types.js';
-import { buildCoercionFn } from './boundary-coercion.js';
+import { buildCoercionFn, applyForgivingAliases } from './boundary-coercion.js';
 import {
   generateSuggestions,
   formatSuggestionDetails,
@@ -58,12 +58,13 @@ export function toMcpResult<T>(result: ToolResult<T>, ctx?: ToolContext): McpCal
         const formatted: FormattedResponse | null =
           formatV2ExecutionResponse(result.data, cleanResponseFormat) ?? formatV2ResumeResponse(result.data);
         if (formatted !== null) {
-          const content: { type: 'text'; text: string }[] = [{ type: 'text', text: formatted.primary }];
-          if (formatted.references != null) {
-            content.push({ type: 'text', text: formatted.references.text });
-          }
+          const content: { type: 'text'; text: string }[] = [];
           for (const supplement of formatted.supplements ?? []) {
             content.push({ type: 'text', text: supplement.text });
+          }
+          content.push({ type: 'text', text: formatted.primary });
+          if (formatted.references != null) {
+            content.push({ type: 'text', text: formatted.references.text });
           }
           return { content };
         }
@@ -122,6 +123,7 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
   handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>,
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
+  forgivingAliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
   // Pre-compute the coercion function once at registration time.
   // Avoids per-call schema traversal (building objectFields Set) on the hot path.
@@ -130,10 +132,13 @@ export function createHandler<TInput extends z.ZodType, TOutput>(
     : null;
 
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
+    // Apply forgiving aliases first (maps known hallucinated keys and deletes them)
+    const aliasedArgs = applyForgivingAliases(args, forgivingAliasMap);
+
     // Normalize JSON-encoded string values to objects before Zod validation.
     // Some MCP clients serialize complex parameters as JSON strings rather than
     // inline objects. The shape schema identifies which fields expect objects.
-    const normalizedArgs = coerce !== null ? coerce(args) : args;
+    const normalizedArgs = coerce !== null ? coerce(aliasedArgs) : aliasedArgs;
     const parseResult = schema.safeParse(normalizedArgs);
     if (!parseResult.success) {
       // Use shape schema for introspection (interface segregation), validation schema as fallback
@@ -206,6 +211,7 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   handler: (input: z.infer<TInput>, ctx: ToolContext) => Promise<ToolResult<TOutput>>,
   shapeSchema?: z.ZodObject<z.ZodRawShape>,
   aliasMap?: Readonly<Record<string, string>>,
+  forgivingAliasMap?: Readonly<Record<string, string>>,
 ): WrappedToolHandler {
   // Pre-compute the coercion function once at registration time.
   const coerce = shapeSchema !== undefined
@@ -219,8 +225,11 @@ export function createValidatingHandler<TInput extends z.ZodType, TOutput>(
   const innerHandler = createHandler(schema, handler, shapeSchema);
 
   return async (args: unknown, ctx: ToolContext): Promise<McpCallToolResult> => {
+    // Apply forgiving aliases first
+    const aliasedArgs = applyForgivingAliases(args, forgivingAliasMap);
+
     // Normalize JSON-encoded string fields before pre-validation and Zod parsing.
-    const normalizedArgs = coerce !== null ? coerce(args) : args;
+    const normalizedArgs = coerce !== null ? coerce(aliasedArgs) : aliasedArgs;
     const pre = preValidate(normalizedArgs);
     if (!pre.ok) {
       const error = pre.error;
