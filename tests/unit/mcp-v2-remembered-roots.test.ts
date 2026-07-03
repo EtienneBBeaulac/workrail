@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { okAsync } from 'neverthrow';
 import { handleV2ListWorkflows } from '../../src/mcp/handlers/v2-workflow.js';
 import { handleV2InspectWorkflow } from '../../src/mcp/handlers/v2-workflow.js';
-
+import { handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { handleV2ResumeSession } from '../../src/mcp/handlers/v2-resume.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 import { EnvironmentFeatureFlagProvider } from '../../src/config/feature-flags.js';
@@ -227,7 +226,7 @@ describe('stale remembered roots in tool responses', () => {
     // Delete the workspace to make the remembered root stale
     await fs.rm(workspaceRoot, { recursive: true, force: true });
 
-    const result = await startWorkflowForTest(
+    const result = await handleV2StartWorkflow(
       // Use a bundled workflow that is always available regardless of project files
       { workflowId: 'wr.coding-task', workspacePath: workspaceRoot, goal: 'test workflow execution' },
       ctx,
@@ -265,7 +264,7 @@ describe('v2 remembered roots integration', () => {
     await writeWorkspaceWorkflow(workspaceRoot);
 
     const { ctx } = await buildCtx(dataRoot);
-    const result = await startWorkflowForTest(
+    const result = await handleV2StartWorkflow(
       { workflowId: 'test-workflow', workspacePath: workspaceRoot, goal: 'test workflow execution' },
       ctx,
     );

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
-import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 
 function ctxWithV2(v2: ToolContext['v2']): ToolContext {
@@ -23,7 +22,7 @@ function ctxWithV2(v2: ToolContext['v2']): ToolContext {
 describe('v2 execution preconditions (v2 context gate)', () => {
   it('fails fast when ctx.v2 is null (start_workflow)', async () => {
     const ctx = ctxWithV2(null);
-    const res = await startWorkflowForTest({ workflowId: 'any', goal: 'test', workspacePath: '/tmp' } as any, ctx);
+    const res = await handleV2StartWorkflow({ workflowId: 'any', goal: 'test', workspacePath: '/tmp' } as any, ctx);
 
     expect(res.type).toBe('error');
     if (res.type !== 'error') return;

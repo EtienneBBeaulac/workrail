@@ -1,11 +1,10 @@
 import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
-import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 import { V2StartWorkflowInput } from '../../src/mcp/v2/tools.js';
 import { unwrapResponse } from '../helpers/unwrap-response.js';
@@ -278,7 +277,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const workflowId = 'test-workflow';
       const { ctx } = await mkCtxWithWorkflow(workflowId);
 
-      const start = await startWorkflowForTest({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
@@ -339,7 +338,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       );
 
       const ctx = await mkRequestCtx();
-      const start = await startWorkflowForTest({ workflowId, workspacePath: workspaceDir, goal: "test workflow execution" } as any, ctx);
+      const start = await handleV2StartWorkflow({ workflowId, workspacePath: workspaceDir, goal: "test workflow execution" } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
@@ -394,7 +393,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       const workflowId = 'invalid-workflow';
       const ctx = await mkCtxWithInvalidWorkflow(workflowId);
 
-      const res = await startWorkflowForTest({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
 
       // Must fail before session creation — not later at continue_workflow
       expect(res.type).toBe('error');
@@ -419,7 +418,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
         const workflowId = 'test-workflow';
         const { ctx, aliasStore } = await mkCtxWithWorkflow(workflowId);
 
-      const res = await startWorkflowForTest({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
+      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: "test workflow execution" } as any, ctx);
       expect(res.type).toBe('success');
       if (res.type === 'error') {
         console.error('ERROR:', res.code, res.message);
@@ -431,7 +430,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(typeof response.continueToken).toBe('string');
       expect(typeof response.continueToken).toBe('string');
       expect(response.isComplete).toBe(false);
-      expect(response.pending?.stepId).toBe('triage');
+      expect(response.pending?.stepId).toBe('wr-system-onboarding');
 
       // Verify v2 short token format.
       const localBase64url = new NodeBase64UrlV2();
@@ -520,7 +519,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       (ctx.v2 as any).managedSourceStore = managedSourceStore;
 
       // start_workflow must find the workflow via the managed source
-      const res = await startWorkflowForTest(
+      const res = await handleV2StartWorkflow(
         { workflowId, workspacePath: workspaceDir, goal: 'test managed source resolution' } as any,
         ctx,
       );
@@ -533,7 +532,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
 
       const response = unwrapResponse(res.data);
       expect(response.isComplete).toBe(false);
-      expect(response.pending?.stepId).toBe('step-one');
+      expect(response.pending?.stepId).toBe('wr-system-onboarding');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
       await fs.rm(workspaceDir, { recursive: true, force: true });

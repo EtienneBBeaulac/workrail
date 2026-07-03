@@ -1,5 +1,6 @@
 import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
 import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -139,13 +140,10 @@ describe('MCP Attempt Circuit Breaker & Blocker UI Adaptations', () => {
         ctx,
         { is_autonomous: 'true', triggerSource: 'daemon' }
       );
-      if (startRes.isErr()) {
-        console.error("executeStartWorkflow failed:", startRes.error);
-      }
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      let { continueToken } = startRes.value.response;
+      let continueToken = unwrapResponse(startRes.data).continueToken;
 
       // First failed attempt
       let res = await executeContinueWorkflow(
@@ -213,13 +211,10 @@ describe('MCP Attempt Circuit Breaker & Blocker UI Adaptations', () => {
         ctx,
         { triggerSource: 'mcp' } // triggerSource = mcp triggers isAutonomous = false
       );
-      if (startRes.isErr()) {
-        console.error("executeStartWorkflow failed:", startRes.error);
-      }
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      let currentToken = startRes.value.response.continueToken;
+      let currentToken = unwrapResponse(startRes.data).continueToken;
       let retryToken = '';
 
       // Run 10 blocked attempts

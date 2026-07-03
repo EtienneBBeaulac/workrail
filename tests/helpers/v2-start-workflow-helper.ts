@@ -1,9 +1,11 @@
-import { executeStartWorkflow } from '../../src/v2/usecases/start-workflow.js';
+import { executeStartWorkflow, defaultPreferences } from '../../src/v2/usecases/start-workflow.js';
 import type { V2StartWorkflowInput } from '../../src/mcp/v2/tools.js';
 import type { ToolContext } from '../../src/mcp/types.js';
-import { toPendingStep, deriveNextIntent } from '../../src/v2/durable-core/prompts/index.js';
-import { defaultPreferences } from '../../src/v2/durable-core/tokens/preferences.js';
-import { buildNextCall } from '../../src/mcp/handlers/v2-execution/build-next-call.js';
+import { toPendingStep } from '../../src/mcp/output-schemas.js';
+import { deriveNextIntent } from '../../src/mcp/handlers/v2-state-conversion.js';
+import { buildNextCall } from '../../src/mcp/handlers/v2-execution/index.js';
+import { buildStepContentEnvelope } from '../../src/mcp/step-content-envelope.js';
+import { attachV2ExecutionRenderMetadata } from '../../src/mcp/render-envelope.js';
 
 /**
  * A test-only helper that bypasses the MCP boundary (and its onboarding injection)
@@ -12,20 +14,21 @@ import { buildNextCall } from '../../src/mcp/handlers/v2-execution/build-next-ca
  */
 export async function startWorkflowForTest(
   input: V2StartWorkflowInput,
-  ctx: Pick<ToolContext, 'v2' | 'featureFlags'>,
+  ctx: Pick<ToolContext, 'v2' | 'featureFlags' | 'workflowService'>,
   internalContext?: Readonly<Record<string, string>>
 ) {
   const deps = {
-    workflowReader: ctx.v2.workflowService,
+    workflowReader: ctx.workflowService,
     crypto: ctx.v2.crypto,
     idFactory: ctx.v2.idFactory,
     tokenCodecPorts: ctx.v2.tokenCodecPorts,
     tokenAliasStore: ctx.v2.tokenAliasStore,
     entropy: ctx.v2.entropy,
     snapshotStore: ctx.v2.snapshotStore,
-    sessionStore: ctx.v2.sessionEventLogStore,
+    fallbackWorkflowReader: ctx.workflowService,
+    sessionStore: ctx.v2.sessionStore,
     pinnedStore: ctx.v2.pinnedStore,
-    gate: ctx.v2.executionGate,
+    gate: ctx.v2.gate,
     validationPipelineDeps: ctx.v2.validationPipelineDeps,
     featureFlags: ctx.featureFlags,
   };
@@ -40,20 +43,27 @@ export async function startWorkflowForTest(
   const preferences = defaultPreferences;
   const nextIntent = deriveNextIntent({ rehydrateOnly: false, isComplete: false, pending: res.value.meta });
 
+  const contentEnvelope = buildStepContentEnvelope({
+    meta: res.value.meta,
+    references: res.value.resolvedReferences,
+  });
+
+  const parsed = {
+    continueToken: res.value.continueToken,
+    checkpointToken: res.value.checkpointToken,
+    isComplete: false,
+    pending,
+    preferences,
+    nextIntent,
+    nextCall: buildNextCall({ continueToken: res.value.continueToken, isComplete: false, pending }),
+  };
+
   return {
     type: 'success' as const,
-    data: {
-      response: {
-        continueToken: res.value.response.continueToken,
-        checkpointToken: res.value.response.checkpointToken,
-        isComplete: false,
-        pending,
-        preferences,
-        nextIntent,
-        nextCall: buildNextCall({ continueToken: res.value.response.continueToken, isComplete: false, pending }),
-      },
-      contentEnvelope: res.value.contentEnvelope,
-      sessionId: res.value.sessionId,
-    },
+    data: attachV2ExecutionRenderMetadata({
+      response: parsed,
+      lifecycle: 'start',
+      contentEnvelope,
+    }),
   };
 }
