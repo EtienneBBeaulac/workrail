@@ -1,11 +1,12 @@
 import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { executeStartWorkflow } from '../../src/mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../../src/mcp/handlers/v2-execution/index.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 import type { V2StartWorkflowInput, V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
@@ -134,18 +135,15 @@ describe('MCP Attempt Circuit Breaker & Blocker UI Adaptations', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // Start workflow as autonomous daemon
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'daemon run' } as V2StartWorkflowInput,
         ctx,
         { is_autonomous: 'true', triggerSource: 'daemon' }
       );
-      if (startRes.isErr()) {
-        console.error("executeStartWorkflow failed:", startRes.error);
-      }
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      let { continueToken } = startRes.value.response;
+      let continueToken = unwrapResponse(startRes.data).continueToken;
 
       // First failed attempt
       let res = await executeContinueWorkflow(
@@ -208,18 +206,15 @@ describe('MCP Attempt Circuit Breaker & Blocker UI Adaptations', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // Start workflow as MCP (non-autonomous)
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'mcp run' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' } // triggerSource = mcp triggers isAutonomous = false
       );
-      if (startRes.isErr()) {
-        console.error("executeStartWorkflow failed:", startRes.error);
-      }
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      let currentToken = startRes.value.response.continueToken;
+      let currentToken = unwrapResponse(startRes.data).continueToken;
       let retryToken = '';
 
       // Run 10 blocked attempts

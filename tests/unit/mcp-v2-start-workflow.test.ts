@@ -430,7 +430,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
       expect(typeof response.continueToken).toBe('string');
       expect(typeof response.continueToken).toBe('string');
       expect(response.isComplete).toBe(false);
-      expect(response.pending?.stepId).toBe('triage');
+      expect(response.pending?.stepId).toBe('wr-system-onboarding');
 
       // Verify v2 short token format.
       const localBase64url = new NodeBase64UrlV2();
@@ -532,7 +532,7 @@ describe('v2 start_workflow (Slice 3.5)', () => {
 
       const response = unwrapResponse(res.data);
       expect(response.isComplete).toBe(false);
-      expect(response.pending?.stepId).toBe('step-one');
+      expect(response.pending?.stepId).toBe('wr-system-onboarding');
     } finally {
       process.env.WORKRAIL_DATA_DIR = prev;
       await fs.rm(workspaceDir, { recursive: true, force: true });

@@ -1,11 +1,12 @@
 import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
+import { startWorkflowForTest } from '../../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
 import type { V2StartWorkflowInput, V2ContinueWorkflowInput } from '../../../src/mcp/v2/tools.js';
 
@@ -132,7 +133,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
         ],
       });
 
-      const startRes = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
+      const startRes = await startWorkflowForTest({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
@@ -209,7 +210,7 @@ describe('Blocked node projection consistency (status transitions)', () => {
         ],
       });
 
-      const startRes = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
+      const startRes = await startWorkflowForTest({ workflowId, workspacePath: root, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 

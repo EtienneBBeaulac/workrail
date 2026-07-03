@@ -1,11 +1,12 @@
 import { createTestValidationPipelineDeps } from '../../helpers/v2-test-helpers.js';
+import { startWorkflowForTest } from '../../helpers/v2-start-workflow-helper.js';
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
 import type { V2StartWorkflowInput, V2ContinueWorkflowInput } from '../../../src/mcp/v2/tools.js';
 
@@ -136,7 +137,7 @@ describe('stepContext on continue_workflow ok response', () => {
       const workflowId = 'step-context-test';
       const ctx = await mkCtxWithWorkflow(workflowId, { id: workflowId, name: 'Step context test', description: 'Tests stepContext on ok response.', version: '1.0.0', ...BASE_WORKFLOW });
 
-      const startRes = await handleV2StartWorkflow({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
+      const startRes = await startWorkflowForTest({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
@@ -181,7 +182,7 @@ describe('stepContext on continue_workflow ok response', () => {
       const workflowId = 'step-context-normalization';
       const ctx = await mkCtxWithWorkflow(workflowId, { id: workflowId, name: 'Step context normalization test', description: 'Tests normalizationNotes when level is normalized.', version: '1.0.0', ...BASE_WORKFLOW });
 
-      const startRes = await handleV2StartWorkflow({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
+      const startRes = await startWorkflowForTest({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
@@ -222,7 +223,7 @@ describe('stepContext on continue_workflow ok response', () => {
       const workflowId = 'step-context-exact-match';
       const ctx = await mkCtxWithWorkflow(workflowId, { id: workflowId, name: 'Step context exact match test', description: 'Tests normalizationNotes empty when level matches exactly.', version: '1.0.0', ...BASE_WORKFLOW });
 
-      const startRes = await handleV2StartWorkflow({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
+      const startRes = await startWorkflowForTest({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 
@@ -270,7 +271,7 @@ describe('stepContext on continue_workflow ok response', () => {
         ],
       });
 
-      const startRes = await handleV2StartWorkflow({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
+      const startRes = await startWorkflowForTest({ workflowId, goal: 'test workflow execution' } as V2StartWorkflowInput, ctx);
       expect(startRes.type).toBe('success');
       if (startRes.type !== 'success') return;
 

@@ -1,11 +1,12 @@
 import { unwrapResponse } from '../helpers/unwrap-response.js';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+
 import type { ToolContext } from '../../src/mcp/types.js';
 
 import { createWorkflow } from '../../src/types/workflow.js';
@@ -102,7 +103,7 @@ describe('v2 start_workflow emits baseline preferences_changed', () => {
       const workflowId = 'test-workflow';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const res = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
+      const res = await startWorkflowForTest({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(res.type).toBe('success');
       if (res.type !== 'success') return;
 

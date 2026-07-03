@@ -1,5 +1,6 @@
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -8,7 +9,7 @@ import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '.
 import { DI } from '../../src/di/tokens.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
@@ -113,7 +114,7 @@ describe('MCP contract: v2 start_workflow / continue_workflow (Slice 3)', () => 
   it('start -> rehydrate -> ack replay is deterministic and idempotent', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'v2-exec-contract', workspacePath: root, goal: 'test contract' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'v2-exec-contract', workspacePath: root, goal: 'test contract' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 

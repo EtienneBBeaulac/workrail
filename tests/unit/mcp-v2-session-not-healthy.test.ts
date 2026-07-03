@@ -1,11 +1,12 @@
 import { unwrapResponse } from '../helpers/unwrap-response.js';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2ContinueWorkflow, handleV2StartWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 import type { SessionHealthDetails } from '../../src/mcp/types.js';
 
@@ -101,7 +102,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       const ctx = await mkCtxWithWorkflow(workflowId);
 
       // Create a healthy session initially
-      const started = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
+      const started = await startWorkflowForTest({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 
@@ -170,7 +171,7 @@ describe('v2 execution: SESSION_NOT_HEALTHY error response', () => {
       const ctx = await mkCtxWithWorkflow(workflowId);
 
       // Create and corrupt session
-      const started = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
+      const started = await startWorkflowForTest({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(started.type).toBe('success');
       if (started.type !== 'success') return;
 

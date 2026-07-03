@@ -1,4 +1,5 @@
 import { unwrapResponse } from '../helpers/unwrap-response.js';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 /**
  * Tests that replaying an advance via continueToken is idempotent.
  * Uses the actual start_workflow → advance → replay flow.
@@ -9,7 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext, V2Dependencies } from '../../src/mcp/types.js';
 import type { V2StartWorkflowInput, V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
 import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '../di/integration-container.js';
@@ -109,7 +110,7 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // 1. Start workflow
-    const startRes = await handleV2StartWorkflow(
+    const startRes = await startWorkflowForTest(
       { workflowId: 'blocked-test-wf', goal: 'test blocked outcome' } as V2StartWorkflowInput,
       ctx
     );
@@ -155,7 +156,7 @@ describe('v2 continue_workflow: advance replay idempotency', () => {
     const ctx: ToolContext = { workflowService, featureFlags, sessionManager: null, httpServer: null, v2 };
 
     // Start + advance
-    const startRes = await handleV2StartWorkflow(
+    const startRes = await startWorkflowForTest(
       { workflowId: 'blocked-test-wf', goal: 'test blocked outcome' } as V2StartWorkflowInput,
       ctx
     );

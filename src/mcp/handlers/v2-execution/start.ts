@@ -42,10 +42,7 @@ export function executeStartWorkflowMCP(
     featureFlags: ctx.featureFlags,
   };
 
-  // Disable onboarding injection during tests to avoid breaking the entire test suite which expects standard steps
-  const injectOnboarding = !process.env['VITEST'];
-
-  return executeStartWorkflow(deps, { ...input, injectOnboarding }, internalContext)
+  return executeStartWorkflow(deps, { ...input, injectOnboarding: true }, internalContext)
     .map((res) => {
       const pending = toPendingStep(res.meta);
       const preferences = defaultPreferences;

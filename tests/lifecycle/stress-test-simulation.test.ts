@@ -1,4 +1,6 @@
 import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
+import { unwrapResponse } from '../helpers/unwrap-response.js';
 import 'reflect-metadata';
 import { describe, it, expect, afterEach } from 'vitest';
 import * as os from 'os';
@@ -6,7 +8,6 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { createHash } from 'crypto';
 
-import { executeStartWorkflow } from '../../src/mcp/handlers/v2-execution/start.js';
 import { executeContinueWorkflow } from '../../src/mcp/handlers/v2-execution/index.js';
 import type { ToolContext } from '../../src/mcp/types.js';
 import type { V2StartWorkflowInput, V2ContinueWorkflowInput } from '../../src/mcp/v2/tools.js';
@@ -138,15 +139,15 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // 1. Start autonomous session
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'stress context rehydration' } as V2StartWorkflowInput,
         ctx,
         { is_autonomous: 'true', triggerSource: 'daemon' }
       );
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      const continueToken = startRes.value.response.continueToken;
+      const continueToken = unwrapResponse(startRes.data).continueToken;
 
       // Extract sessionId using the public parser API
       const parsedTokenRes = await parseContinueTokenOrFail(
@@ -271,15 +272,15 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // Start workflow
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'empty artifacts payload test' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' }
       );
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      const continueToken = startRes.value.response.continueToken;
+      const continueToken = unwrapResponse(startRes.data).continueToken;
 
       // 1. Test artifacts: [] (empty array)
       const resEmptyArray = await executeContinueWorkflow(
@@ -320,15 +321,15 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       const ctx = await mkCtxWithWorkflow(workflowId, workflowDef);
 
       // Start workflow
-      const startRes = await executeStartWorkflow(
+      const startRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'rapid advancement test' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' }
       );
-      expect(startRes.isOk()).toBe(true);
-      if (!startRes.isOk()) return;
+      expect(startRes.type).toBe('success');
+      if (startRes.type !== 'success') return;
 
-      const continueToken = startRes.value.response.continueToken;
+      const continueToken = unwrapResponse(startRes.data).continueToken;
 
       // 1. In-process concurrent overlap check.
       // Making concurrent identical advance calls with the exact same continueToken.
@@ -357,25 +358,25 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
       // 2. Sequential rapid calls (sequential idempotency check).
       // If we call executeContinueWorkflow sequentially (waiting for the first to complete),
       // the second call should return a cached idempotent replay of the first response instead of failing!
-      const freshStartRes = await executeStartWorkflow(
+      const freshStartRes = await startWorkflowForTest(
         { workflowId, workspacePath: root, goal: 'sequential idempotency check' } as V2StartWorkflowInput,
         ctx,
         { triggerSource: 'mcp' }
       );
-      expect(freshStartRes.isOk()).toBe(true);
-      if (!freshStartRes.isOk()) return;
+      expect(freshStartRes.type).toBe('success');
+      if (freshStartRes.type !== 'success') return;
 
-      const freshToken = freshStartRes.value.response.continueToken;
+      const freshContinueToken = unwrapResponse(freshStartRes.data).continueToken;
 
       const seqRes1 = await executeContinueWorkflow(
-        { continueToken: freshToken, output: { notesMarkdown: 'sequential check', artifacts: [] } } as V2ContinueWorkflowInput,
+        { continueToken: freshContinueToken, output: { notesMarkdown: 'sequential check', artifacts: [] } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(seqRes1.isOk()).toBe(true);
       if (!seqRes1.isOk()) return;
 
       const seqRes2 = await executeContinueWorkflow(
-        { continueToken: freshToken, output: { notesMarkdown: 'sequential check', artifacts: [] } } as V2ContinueWorkflowInput,
+        { continueToken: freshContinueToken, output: { notesMarkdown: 'sequential check', artifacts: [] } } as V2ContinueWorkflowInput,
         ctx
       );
       expect(seqRes2.isOk()).toBe(true);

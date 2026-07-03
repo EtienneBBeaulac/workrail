@@ -1,10 +1,11 @@
 import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.js";
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { startWorkflowForTest } from '../../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
 import { unwrapResponse } from '../../helpers/unwrap-response.js';
 import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '../../di/integration-container.js';
@@ -145,7 +146,7 @@ describe('v2 fork harness (branching stress test)', () => {
   it('creates N distinct branches from same node with different attemptIds', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -237,7 +238,7 @@ describe('v2 fork harness (branching stress test)', () => {
   it('stress test: 10 forks from same node', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
@@ -282,7 +283,7 @@ describe('v2 fork harness (branching stress test)', () => {
   it('fork detection: first child is intentional_fork, later are non_tip_advance', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);
@@ -322,7 +323,7 @@ describe('v2 fork harness (branching stress test)', () => {
   it('forks are isolated: 2 branches from same parent have different child nodes', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
 
@@ -369,7 +370,7 @@ describe('v2 fork harness (branching stress test)', () => {
   it('ackToken replay: same ackToken twice is idempotent (same branch)', async () => {
     const ctx = await createV2Context();
 
-    const start = await handleV2StartWorkflow({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'fork-test', workspacePath: root, goal: 'test fork' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startR = unwrapResponse(start.data);

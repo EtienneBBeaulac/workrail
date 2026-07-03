@@ -10,6 +10,7 @@ import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js"
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
 import { buildNextCall } from '../../src/mcp/handlers/v2-execution.js';
 import { V2NextCallSchema } from '../../src/mcp/output-schemas.js';
 import { formatV2ExecutionResponse } from '../../src/mcp/v2-response-formatter.js';
@@ -132,7 +133,7 @@ import * as fs from 'fs/promises';
 import { setupIntegrationTest, teardownIntegrationTest, resolveService } from '../di/integration-container.js';
 import { DI } from '../../src/di/tokens.js';
 import type { ToolContext } from '../../src/mcp/types.js';
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../src/mcp/handlers/v2-execution.js';
 import { InMemoryWorkflowStorage } from '../../src/infrastructure/storage/in-memory-storage.js';
 import { LocalDataDirV2 } from '../../src/v2/infra/local/data-dir/index.js';
 import { NodeFileSystemV2 } from '../../src/v2/infra/local/fs/index.js';
@@ -218,7 +219,7 @@ describe('nextCall in live execution responses', () => {
 
   it('start_workflow returns nextCall with continue template', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
     expect(start.type).toBe('success');
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
@@ -231,7 +232,7 @@ describe('nextCall in live execution responses', () => {
 
   it('rehydrate returns nextCall with continue template (for when agent finishes the step)', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -249,7 +250,7 @@ describe('nextCall in live execution responses', () => {
 
   it('advance to next step returns nextCall for the next advance', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -268,7 +269,7 @@ describe('nextCall in live execution responses', () => {
 
   it('advance past last step returns nextCall: null (workflow complete)', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -294,7 +295,7 @@ describe('nextCall in live execution responses', () => {
 
   it('nextCall params can be used directly as continue_workflow input', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 
@@ -311,7 +312,7 @@ describe('nextCall in live execution responses', () => {
 
   it('formatted nextToken block can be used directly as continue_workflow input', async () => {
     const ctx = await mkCtx();
-    const start = await handleV2StartWorkflow({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
+    const start = await startWorkflowForTest({ workflowId: 'two-step', workspacePath: process.env.WORKRAIL_DATA_DIR, goal: 'test workflow execution' } as any, ctx);
     if (start.type !== 'success') return;
     const startResponse = unwrapResponse(start.data);
 

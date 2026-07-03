@@ -10,6 +10,7 @@ import { createTestValidationPipelineDeps } from "../../helpers/v2-test-helpers.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { startWorkflowForTest } from '../../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -19,7 +20,7 @@ import { DI } from '../../../src/di/tokens.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
 import { unwrapResponse } from '../../helpers/unwrap-response.js';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import { handleV2CheckpointWorkflow } from '../../../src/mcp/handlers/v2-checkpoint.js';
 import { InMemoryWorkflowStorage } from '../../../src/infrastructure/storage/in-memory-storage.js';
 
@@ -134,7 +135,7 @@ describe('handleV2CheckpointWorkflow (integration)', () => {
 
   /** Start a workflow, assert success, return data */
   async function startWorkflow(ctx: ToolContext) {
-    const result = await handleV2StartWorkflow({ workflowId: 'checkpoint-test', workspacePath: root, goal: 'test checkpoint' } as any, ctx);
+    const result = await startWorkflowForTest({ workflowId: 'checkpoint-test', workspacePath: root, goal: 'test checkpoint' } as any, ctx);
     expect(result.type).toBe('success');
     if (result.type !== 'success') throw new Error('start_workflow failed');
     const data = result.data;

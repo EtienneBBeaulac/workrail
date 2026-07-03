@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { startWorkflowForTest } from '../../helpers/v2-start-workflow-helper.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
-import { handleV2StartWorkflow, handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
+import { handleV2ContinueWorkflow } from '../../../src/mcp/handlers/v2-execution.js';
 import { handleV2ResumeSession } from '../../../src/mcp/handlers/v2-resume.js';
 import type { ToolContext } from '../../../src/mcp/types.js';
 import { unwrapResponse } from '../../helpers/unwrap-response.js';
@@ -132,7 +133,7 @@ describe('resume → rehydrate end-to-end', () => {
       const workflowId = 'resume-e2e-workflow';
       const ctx = await mkCtxWithWorkflow(workflowId);
 
-      const start = await handleV2StartWorkflow({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
+      const start = await startWorkflowForTest({ workflowId, workspacePath: root, goal: 'test workflow execution' } as any, ctx);
       expect(start.type).toBe('success');
       if (start.type !== 'success') return;
 
