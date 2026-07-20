@@ -93,7 +93,7 @@
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.32.0",
-    "@anthropic-ai/sdk": "^0.111.0",
+    "@anthropic-ai/sdk": "^0.112.3",
     "@modelcontextprotocol/sdk": "^1.24.0",
     "@scure/base": "2.2.0",
     "ajv": "^8.17.1",
