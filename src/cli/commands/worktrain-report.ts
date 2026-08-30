@@ -124,6 +124,17 @@ export interface WorktrainReportCommandDeps {
   readonly getDataDirEnv: () => string | undefined;
 }
 
+/**
+ * Output format for the report command.
+ *
+ * - ndjson  (default): one JSON object per line -- streamable, jq-friendly
+ * - json   : single pretty-printed JSON blob (legacy / machine consumers)
+ * - summary: aggregates only, no per-session detail
+ * - csv    : spreadsheet-friendly, one row per session
+ * - html   : self-contained HTML report with KPIs and session table
+ */
+export type ReportFormat = 'ndjson' | 'json' | 'summary' | 'csv' | 'html';
+
 export interface WorktrainReportCommandOpts {
   /** Number of days to look back (default: 30). Ignored when `since` is provided. */
   readonly days?: number;
@@ -131,8 +142,10 @@ export interface WorktrainReportCommandOpts {
   readonly since?: string;
   /** Override end date (YYYY-MM-DD, default: today). */
   readonly until?: string;
-  /** Write JSON to this file path instead of stdout. */
+  /** Write output to this file path instead of stdout. */
   readonly out?: string;
+  /** Output format (default: ndjson). */
+  readonly format?: ReportFormat;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +167,1376 @@ function parseDateToMs(dateStr: string): number | null {
  */
 function formatDate(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Remove internal-only fields before any renderer emits the session.
+ *
+ * WHY strip changedFilePaths: it is an implementation detail of churn
+ * detection (used to correlate post-session git activity). Emitting it
+ * inflates output by thousands of strings for large coding sessions and
+ * is not useful to report consumers. languageBreakdown already conveys
+ * the language composition without the raw path list.
+ */
+function sanitizeSession(s: ReportSession): Record<string, unknown> {
+  const { metrics, ...rest } = s;
+  if (metrics === null) return { ...rest, metrics: null };
+
+  const { gitEvidence, ...otherMetrics } = metrics;
+  const sanitizedGitEvidence = gitEvidence === null ? null : (() => {
+    const { committedDiff, ...otherGit } = gitEvidence;
+    const sanitizedCommittedDiff = committedDiff === null ? null : (() => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { changedFilePaths: _dropped, ...diffRest } = committedDiff;
+      return diffRest;
+    })();
+    return { ...otherGit, committedDiff: sanitizedCommittedDiff };
+  })();
+
+  return { ...rest, metrics: { ...otherMetrics, gitEvidence: sanitizedGitEvidence } };
+}
+
+// ---------------------------------------------------------------------------
+// Format renderers -- pure functions, no I/O
+// ---------------------------------------------------------------------------
+
+/**
+ * NDJSON (default): one JSON object per line -- streamable and jq-friendly.
+ * Sessions are emitted individually; the final line is the summary object.
+ */
+function renderNdjson(output: ReportOutput): string {
+  const lines: string[] = [];
+  for (const s of output.sessions) {
+    lines.push(JSON.stringify(sanitizeSession(s)));
+  }
+  lines.push(JSON.stringify({ _summary: true, ...output.summary }));
+  return lines.join('\n');
+}
+
+/** JSON (legacy): single pretty-printed blob. Strips changedFilePaths. */
+function renderJson(output: ReportOutput): string {
+  const sanitized = { ...output, sessions: output.sessions.map(sanitizeSession) };
+  return JSON.stringify(sanitized, null, 2);
+}
+
+/** Summary: aggregates only -- no per-session detail. */
+function renderSummary(output: ReportOutput): string {
+  return JSON.stringify({
+    version: output.version,
+    generatedAt: output.generatedAt,
+    dateRange: output.dateRange,
+    summary: output.summary,
+  }, null, 2);
+}
+
+/** A scalar value safe to embed in a CSV cell. */
+type CsvCellValue = string | number | boolean | null | undefined;
+
+/** Escape a scalar value for CSV (RFC 4180). */
+function csvEscape(value: CsvCellValue): string {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+const CSV_HEADERS = [
+  'sessionId', 'date', 'workflowId', 'repoRoot', 'triggerSource',
+  'outcome', 'stepsCompleted', 'retriesCount', 'durationMs',
+  'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens',
+  'linesAdded', 'linesRemoved', 'filesChanged', 'commitCount',
+  'captureConfidence', 'filesRemodified', 'goal',
+] as const;
+
+/** Typed row for a single CSV session. One field per CSV_HEADERS entry. */
+type CsvRow = {
+  readonly sessionId: string;
+  readonly date: string;
+  readonly workflowId: CsvCellValue;
+  readonly repoRoot: CsvCellValue;
+  readonly triggerSource: string;
+  readonly outcome: CsvCellValue;
+  readonly stepsCompleted: number;
+  readonly retriesCount: number;
+  readonly durationMs: CsvCellValue;
+  readonly inputTokens: CsvCellValue;
+  readonly outputTokens: CsvCellValue;
+  readonly cacheReadTokens: CsvCellValue;
+  readonly cacheWriteTokens: CsvCellValue;
+  readonly linesAdded: CsvCellValue;
+  readonly linesRemoved: CsvCellValue;
+  readonly filesChanged: CsvCellValue;
+  readonly commitCount: number;
+  readonly captureConfidence: CsvCellValue;
+  readonly filesRemodified: CsvCellValue;
+  readonly goal: CsvCellValue;
+};
+
+function buildCsvRow(s: ReportSession): CsvRow {
+  const m = s.metrics;
+  const ge = m?.gitEvidence ?? null;
+  const td = m?.tokenDelta ?? null;
+  const usage = m?.usageEvents[0] ?? null;
+  return {
+    sessionId:         s.sessionId,
+    date:              s.date,
+    workflowId:        s.workflowId,
+    repoRoot:          s.repoRoot,
+    triggerSource:     s.triggerSource,
+    outcome:           m?.outcome ?? null,
+    stepsCompleted:    m?.stepsCompleted ?? 0,
+    retriesCount:      m?.retriesCount ?? 0,
+    durationMs:        m?.durationMs ?? null,
+    inputTokens:       td?.inputTokens ?? usage?.inputTokens ?? null,
+    outputTokens:      td?.outputTokens ?? usage?.outputTokens ?? null,
+    cacheReadTokens:   td?.cacheReadTokens ?? usage?.cacheReadTokens ?? null,
+    cacheWriteTokens:  td?.cacheWriteTokens ?? usage?.cacheWriteTokens ?? null,
+    linesAdded:        ge?.committedDiff?.linesAdded ?? m?.linesAdded ?? null,
+    linesRemoved:      ge?.committedDiff?.linesRemoved ?? m?.linesRemoved ?? null,
+    filesChanged:      ge?.committedDiff?.filesChanged ?? m?.filesChanged ?? null,
+    commitCount:       ge?.commitShas.length ?? 0,
+    captureConfidence: ge?.captureConfidence ?? m?.captureConfidence ?? null,
+    filesRemodified:   ge?.churnSignal?.filesRemodified ?? null,
+    goal:              s.goal,
+  };
+}
+
+/** CSV: header row + one row per session. Goal is last (may contain commas). */
+function renderCsv(output: ReportOutput): string {
+  const rows: string[] = [CSV_HEADERS.join(',')];
+  for (const s of output.sessions) {
+    const row = buildCsvRow(s);
+    rows.push(CSV_HEADERS.map((h) => csvEscape(row[h])).join(','));
+  }
+  return rows.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// HTML renderer
+// ---------------------------------------------------------------------------
+
+/** Escape a string for safe embedding in HTML. */
+function htmlEscape(s: string | null | undefined): string {
+  if (s == null) return '';
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function fmtDuration(ms: number | undefined): string {
+  if (ms == null) return '--';
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+/**
+ * HTML: self-contained report surfacing all 18 metric categories.
+ *
+ * Design: dark header with estimated cost dominant, 4 KPI cards, 5 tabs
+ * (Overview / Tokens & Cost / Activity / Quality / Sessions).
+ *
+ * No external deps -- all CSS and JS inlined. changedFilePaths excluded.
+ * Goals are HTML-escaped before embedding to prevent XSS.
+ */
+function renderHtml(output: ReportOutput): string {
+  const { summary, sessions, dateRange, generatedAt } = output;
+
+  // ── Aggregate helpers ────────────────────────────────────────────────────────
+  const inputTok  = summary.totalInputTokens;
+  const outputTok = summary.totalOutputTokens;
+  const cacheR    = summary.totalCacheReadTokens;
+  const cacheW    = summary.totalCacheWriteTokens;
+  const totalTokens = inputTok + outputTok + cacheR + cacheW;
+
+  // Estimated cost at Anthropic Sonnet 4.6 list prices (no actual model lookup --
+  // directional only). Displayed with disclaimer.
+  const PRICE_INPUT   = 3.00;   // $/1M
+  const PRICE_OUTPUT  = 15.00;
+  const PRICE_CACHE_R = 0.30;
+  const PRICE_CACHE_W = 3.75;
+  const estCostCents = Math.round(
+    (inputTok * PRICE_INPUT + outputTok * PRICE_OUTPUT +
+     cacheR * PRICE_CACHE_R + cacheW * PRICE_CACHE_W) / 1_000_000 * 100,
+  );
+  const estCostStr = estCostCents >= 100
+    ? `$${(estCostCents / 100).toFixed(0)}`
+    : `$${(estCostCents / 100).toFixed(2)}`;
+
+  const completionPct = summary.totalSessions > 0
+    ? Math.round((summary.completedSessions / summary.totalSessions) * 100) : 0;
+  const totalHours = (summary.totalDurationMs / 3_600_000).toFixed(1);
+
+  // ── Per-session JS data ──────────────────────────────────────────────────────
+  const sessionsJs = sessions.map((s) => {
+    const m   = s.metrics;
+    const ge  = m?.gitEvidence ?? null;
+    const td  = m?.tokenDelta ?? null;
+    const u0  = m?.usageEvents[0] ?? null;
+    const tokIn  = td?.inputTokens  ?? u0?.inputTokens  ?? 0;
+    const tokOut = td?.outputTokens ?? u0?.outputTokens ?? 0;
+    const tokCR  = td?.cacheReadTokens  ?? u0?.cacheReadTokens  ?? 0;
+    const tokCW  = td?.cacheWriteTokens ?? u0?.cacheWriteTokens ?? 0;
+    const linesAdded   = ge?.committedDiff?.linesAdded   ?? m?.linesAdded   ?? 0;
+    const linesRemoved = ge?.committedDiff?.linesRemoved ?? m?.linesRemoved ?? 0;
+    const filesChanged = ge?.committedDiff?.filesChanged ?? m?.filesChanged ?? 0;
+    const durationMin  = m?.durationMs != null ? Math.round(m.durationMs / 60_000 * 10) / 10 : null;
+    const project = s.repoRoot ? (s.repoRoot.split('/').pop() ?? '') : '';
+    const wfLabel = (s.workflowId ?? '')
+      .replace(/^wr\./, '')
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase()) || 'Unknown';
+    // Estimated session cost at list pricing
+    const sessEstCost = Math.round(
+      (tokIn * PRICE_INPUT + tokOut * PRICE_OUTPUT +
+       tokCR * PRICE_CACHE_R + tokCW * PRICE_CACHE_W) / 1_000_000 * 100,
+    );
+    return {
+      date:          s.date,
+      workflow_id:   s.workflowId ?? '',
+      workflow_label: wfLabel,
+      project,
+      repoRoot:      s.repoRoot ?? '',
+      completed:     m?.outcome === 'success' || m?.outcome === 'partial',
+      outcome:       m?.outcome ?? null,
+      goal:          htmlEscape(s.goal ?? ''),
+      trigger:       s.triggerSource,
+      duration_min:  durationMin,
+      lines_added:   linesAdded,
+      lines_removed: linesRemoved,
+      files_changed: filesChanged,
+      tok_in:        tokIn,
+      tok_out:       tokOut,
+      tok_cache_r:   tokCR,
+      tok_cache_w:   tokCW,
+      est_cost_cents: sessEstCost,
+      steps:         m?.stepsCompleted ?? 0,
+      retries:       m?.retriesCount ?? 0,
+      git_branch:    m?.gitBranch ?? null,
+      commit_count:  ge?.commitShas.length ?? 0,
+      pr_refs:       ge?.prRefs ?? [],
+      churn:         ge?.churnSignal?.filesRemodified ?? null,
+      lang:          ge?.committedDiff?.languageBreakdown ?? {},
+      model:         u0?.model ?? null,
+      confidence:    ge?.captureConfidence ?? m?.captureConfidence ?? null,
+      staged_start:  null as null,   // git_start_recorded not in SessionMetricsV2 projection yet
+    };
+  });
+
+  // ── Breakdown: per-workflow (routines separated -- they never report outcomes) ──
+  const wfMap = new Map<string, { started: number; completed: number; durations: number[]; linesAdded: number; isRoutine: boolean }>();
+  for (const s of sessionsJs) {
+    const label = s.workflow_label;
+    const isRoutine = s.workflow_id.startsWith('wr.routine-');
+    if (!wfMap.has(label)) wfMap.set(label, { started: 0, completed: 0, durations: [], linesAdded: 0, isRoutine });
+    const e = wfMap.get(label)!;
+    e.started++;
+    if (s.completed) e.completed++;
+    if (s.duration_min != null) e.durations.push(s.duration_min);
+    e.linesAdded += s.lines_added;
+  }
+  const allBreakdown = Array.from(wfMap.entries()).map(([label, d]) => {
+    const sorted = [...d.durations].sort((a, b) => a - b);
+    const median = sorted.length ? sorted[Math.floor(sorted.length / 2)]!.toFixed(0) + 'm' : '--';
+    return { label, started: d.started, completed: d.completed, median, linesAdded: d.linesAdded, isRoutine: d.isRoutine };
+  }).sort((a, b) => b.completed - a.completed);
+  // Main workflows shown in chart; routines shown separately with a note
+  const breakdown = allBreakdown.filter(r => !r.isRoutine);
+  const routineBreakdown = allBreakdown.filter(r => r.isRoutine);
+
+  // ── Per-project breakdown ────────────────────────────────────────────────────
+  const projMap = new Map<string, { sessions: number; linesAdded: number; lang: Record<string, number> }>();
+  for (const s of sessionsJs) {
+    const p = s.project || '(unknown)';
+    if (!projMap.has(p)) projMap.set(p, { sessions: 0, linesAdded: 0, lang: {} });
+    const e = projMap.get(p)!;
+    e.sessions++;
+    e.linesAdded += s.lines_added;
+    for (const [ext, cnt] of Object.entries(s.lang)) {
+      e.lang[ext] = (e.lang[ext] ?? 0) + (cnt as number);
+    }
+  }
+  const projects = Array.from(projMap.entries())
+    .map(([name, d]) => ({ name, sessions: d.sessions, linesAdded: d.linesAdded, lang: d.lang }))
+    .sort((a, b) => b.sessions - a.sessions);
+
+  // ── Heatmap: date → count ───────────────────────────────────────────────────
+  const heatmap: Record<string, number> = {};
+  for (const s of sessionsJs) { heatmap[s.date] = (heatmap[s.date] ?? 0) + 1; }
+
+  // ── Language breakdown (aggregate) ──────────────────────────────────────────
+  const langAgg: Record<string, number> = { ...summary.languageBreakdown };
+  const langTotal = Object.values(langAgg).reduce((a, n) => a + n, 0);
+
+  // Blue-family palette for language bars (single-hue, varying opacity) --
+  // avoids multi-hue competition with the header accent per blind review finding.
+  const langOpacities = [1, 0.75, 0.55, 0.38, 0.24, 0.14];
+  const langEntries = Object.entries(langAgg)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 6)
+    .map(([ext, cnt], i) => ({
+      ext: ext || '(none)',
+      cnt,
+      pct: langTotal > 0 ? Math.round(cnt / langTotal * 100) : 0,
+      opacity: langOpacities[i] ?? 0.1,
+    }));
+
+  // ── Quality signals ──────────────────────────────────────────────────────────
+  const sessWithRetries = sessionsJs.filter(s => s.steps > 0);
+  const avgRetryRate = sessWithRetries.length > 0
+    ? (sessWithRetries.reduce((a, s) => a + s.retries / Math.max(s.steps, 1), 0) / sessWithRetries.length * 100).toFixed(1)
+    : '0';
+  const sessWithChurn = sessionsJs.filter(s => s.churn != null);
+  const avgChurn = sessWithChurn.length > 0
+    ? (sessWithChurn.reduce((a, s) => a + (s.churn ?? 0), 0) / sessWithChurn.length).toFixed(1)
+    : null;
+  const confHigh    = sessionsJs.filter(s => s.confidence === 'high').length;
+  const confPartial = sessionsJs.filter(s => s.confidence === 'partial').length;
+  const confNone    = sessionsJs.filter(s => s.confidence === 'none').length;
+
+  // ── Token cost data for Tokens tab ──────────────────────────────────────────
+  const modelMap = new Map<string, { inp: number; out: number; cr: number; cw: number; count: number }>();
+  for (const s of sessionsJs) {
+    const key = s.model ?? '(unknown)';
+    if (!modelMap.has(key)) modelMap.set(key, { inp: 0, out: 0, cr: 0, cw: 0, count: 0 });
+    const e = modelMap.get(key)!;
+    e.inp += s.tok_in; e.out += s.tok_out; e.cr += s.tok_cache_r; e.cw += s.tok_cache_w; e.count++;
+  }
+  const modelBreakdown = Array.from(modelMap.entries())
+    .map(([model, d]) => ({ model, ...d }))
+    .sort((a, b) => (b.inp + b.out) - (a.inp + a.out));
+
+  const safeJson = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/');
+
+  // ── Language bar HTML (single blue family, varying opacity) ─────────────────
+  const langBarsHtml = langEntries.map(({ ext, cnt, pct, opacity }) =>
+    `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f2f2f7">
+      <span style="font-size:13px;flex:1;color:#1d1d1f">${htmlEscape(ext)}</span>
+      <div style="flex:2;background:#f2f2f7;border-radius:var(--radius-sm);height:14px;overflow:hidden">
+        <div style="width:${pct}%;height:100%;background:rgba(0,122,255,${opacity});border-radius:var(--radius-sm)"></div>
+      </div>
+      <span style="font-size:11px;color:#6e6e73;width:40px;text-align:right;font-variant-numeric:tabular-nums">${cnt.toLocaleString()}</span>
+    </div>`,
+  ).join('') || '<p style="color:#aeaeb2;font-size:13px">No language data available</p>';
+
+  // ── Per-project rows HTML ────────────────────────────────────────────────────
+  const maxProjSessions = Math.max(...projects.map(p => p.sessions), 1);
+  const projRowsHtml = projects.slice(0, 10).map((p) => {
+    const barPct = Math.round(p.sessions / maxProjSessions * 100);
+    const topLang = Object.entries(p.lang).sort(([, a], [, b]) => b - a).slice(0, 3)
+      .map(([ext]) => ext).join(' ');
+    return `<tr>
+      <td style="font-weight:600">${htmlEscape(p.name)}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;background:#f2f2f7;border-radius:var(--radius-sm);height:18px;position:relative;overflow:hidden;min-width:80px"><div style="position:absolute;left:0;top:0;height:100%;width:${barPct}%;background:#007aff;border-radius:var(--radius-sm)"></div></div><span style="font-size:13px;font-weight:600;color:#1d1d1f;width:32px;text-align:right">${p.sessions}</span></div></td>
+      <td style="text-align:right;color:#1a7a3a;font-variant-numeric:tabular-nums">+${p.linesAdded.toLocaleString()}</td>
+      <td style="text-align:right;font-size:11px;color:#aeaeb2">${htmlEscape(topLang)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" style="color:#aeaeb2;text-align:center;padding:12px">No project data</td></tr>';
+
+  // ── Token split rows ─────────────────────────────────────────────────────────
+  const tokCards = [
+    { label: 'Input tokens',      val: inputTok,  price: PRICE_INPUT,   note: `$${PRICE_INPUT}/1M` },
+    { label: 'Output tokens',     val: outputTok, price: PRICE_OUTPUT,  note: `$${PRICE_OUTPUT}/1M` },
+    { label: 'Cache reads',       val: cacheR,    price: PRICE_CACHE_R, note: `$${PRICE_CACHE_R}/1M (10x cheaper)` },
+    { label: 'Cache writes',      val: cacheW,    price: PRICE_CACHE_W, note: `$${PRICE_CACHE_W}/1M` },
+  ].map(({ label, val, price, note }) => {
+    const cost = (val * price / 1_000_000);
+    return `<div style="background:#f5f5f7;border-radius:var(--radius-sm);padding:16px 20px">
+      <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;color:#1d1d1f">${fmtTokens(val)}</div>
+      <div style="font-size:12px;color:#6e6e73;margin-top:2px">${htmlEscape(label)}</div>
+      <div style="font-size:11px;color:#aeaeb2;margin-top:4px">${note} &middot; ~$${cost.toFixed(2)}</div>
+    </div>`;
+  }).join('');
+
+  const modelRowsHtml = modelBreakdown.map((m) => {
+    const totalTok = m.inp + m.out + m.cr + m.cw;
+    const cost = (m.inp * PRICE_INPUT + m.out * PRICE_OUTPUT + m.cr * PRICE_CACHE_R + m.cw * PRICE_CACHE_W) / 1_000_000;
+    return `<tr>
+      <td style="font-weight:600">${htmlEscape(m.model)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${fmtTokens(totalTok)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${m.count}</td>
+      <td style="text-align:right;color:#6e6e73">~$${cost.toFixed(2)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" style="color:#aeaeb2;text-align:center;padding:12px">No token data (requires Claude Code JSONL)</td></tr>';
+
+  // ── Outcome-stacked chart data (activity tab) ───────────────────────────────
+  const activityData: Record<string, { success: number; partial: number; error: number; abandoned: number; unknown: number }> = {};
+  for (const s of sessionsJs) {
+    const d = s.date;
+    if (!activityData[d]) activityData[d] = { success: 0, partial: 0, error: 0, abandoned: 0, unknown: 0 };
+    if (s.outcome === 'success') activityData[d].success++;
+    else if (s.outcome === 'partial') activityData[d].partial++;
+    else if (s.outcome === 'error') activityData[d].error++;
+    else if (s.outcome === 'abandoned') activityData[d].abandoned++;
+    else activityData[d].unknown++;
+  }
+
+  // ── "What shipped": sessions with actual git evidence, sorted by impact ───────
+  // Group by PR ref where available; ungrouped sessions shown individually.
+  const shippedSessions = sessionsJs
+    .filter(s => (s.confidence === 'high' || s.confidence === 'partial') && s.lines_added > 0)
+    .sort((a, b) => b.lines_added - a.lines_added);
+
+  // Build PR groups: each unique PR ref gets one card with all sessions that mention it.
+  type ShippedSession = (typeof sessionsJs)[number];
+  const prGroupMap = new Map<number, ShippedSession[]>();
+  const ungroupedShipped: ShippedSession[] = [];
+  for (const s of shippedSessions) {
+    if (s.pr_refs.length > 0) {
+      for (const ref of s.pr_refs) {
+        if (!prGroupMap.has(ref)) prGroupMap.set(ref, []);
+        prGroupMap.get(ref)!.push(s);
+      }
+    } else {
+      ungroupedShipped.push(s);
+    }
+  }
+  // Deduplicate PR groups by aggregating lines/files; sort groups by total lines.
+  const prGroups = Array.from(prGroupMap.entries()).map(([ref, sessions]) => ({
+    ref: `#${ref}`,
+    sessions,
+    totalLinesAdded: sessions.reduce((a, s) => a + s.lines_added, 0),
+    totalLinesRemoved: sessions.reduce((a, s) => a + s.lines_removed, 0),
+    totalFilesChanged: sessions.reduce((a, s) => a + s.files_changed, 0),
+    project: sessions[0]?.project ?? '',
+  })).sort((a, b) => b.totalLinesAdded - a.totalLinesAdded);
+
+  // ── Coverage summary: per-session data type availability ────────────────────
+  const hasGitEvidence = sessionsJs.filter(s => s.confidence === 'high' || s.confidence === 'partial').length;
+  const hasTokenData   = sessionsJs.filter(s => s.tok_in + s.tok_out > 0).length;
+  const hasOutcome     = sessionsJs.filter(s => s.outcome !== null).length;
+  const hasPrRefs      = sessionsJs.filter(s => s.pr_refs.length > 0).length;
+
+  // ── Quality metrics for "Did it hold up?" row ────────────────────────────────
+  const totalChurnFiles = sessionsJs.reduce((a, s) => a + (s.churn ?? 0), 0);
+  const totalFilesForChurn = sessionsJs.filter(s => s.confidence === 'high' || s.confidence === 'partial').reduce((a, s) => a + s.files_changed, 0);
+  const codeKeptPct = totalFilesForChurn > 0 ? Math.round((1 - totalChurnFiles / totalFilesForChurn) * 100) : null;
+  const retriesPerSession = summary.totalSessions > 0 ? (summary.totalRetriesCount / summary.totalSessions).toFixed(1) : '--';
+  const outcomeSessions = Object.values(summary.outcomeBreakdown).reduce((a, n) => a + n, 0);
+  const abandonedCount = summary.outcomeBreakdown['abandoned'] ?? 0;
+  const completedWithoutAbandonPct = outcomeSessions > 0 ? Math.round((1 - abandonedCount / outcomeSessions) * 100) : null;
+  const successCount = summary.outcomeBreakdown['success'] ?? 0;
+  const agentSuccessPct = outcomeSessions > 0 ? Math.round(successCount / outcomeSessions * 100) : null;
+
+  // ── Hero narrative (engine-authoritative only) ──────────────────────────────
+  const windowDays = Math.round((new Date(dateRange.until).getTime() - new Date(dateRange.since).getTime()) / 86_400_000);
+  const heroLines = summary.totalLinesAdded;
+  const totalPRs = sessionsJs.reduce((a, s) => a + s.pr_refs.length, 0);
+  const uniquePRs = new Set(sessionsJs.flatMap(s => s.pr_refs)).size;
+  // Scope hero claims to the sessions that actually have the data.
+  // heroMain is the primary claim (shown in white); heroAccent is the highlighted suffix (shown in accent color).
+  const heroMain = heroLines > 0
+    ? `${summary.totalSessions} guided sessions`
+    : `${summary.totalSessions} guided sessions`;
+  const heroAccent = heroLines > 0
+    ? `${heroLines.toLocaleString()} lines shipped across ${hasGitEvidence} sessions with git data${uniquePRs > 0 ? `, ${uniquePRs} PRs` : ''}.`
+    : `ran over ${Math.ceil(summary.totalDurationMs / 3_600_000)}h.`;
+
+  // ── Main HTML output ─────────────────────────────────────────────────────────
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkRail Report -- ${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)}</title>
+<style>
+:root{
+  /* WorkRail report token system */
+  --bg:#f5f5f7;--surface:#fff;--hdr:#1d1d1f;
+  --accent:#007aff;--txt:#1d1d1f;--txt2:#6e6e73;--txt3:#aeaeb2;
+  --border:#f2f2f7;--border2:#e5e5ea;
+  --success:#34c759;--error:#ff3b30;--warn:#ff9500;
+  --radius:14px;--radius-sm:6px;--radius-pill:20px;
+  --shadow:0 1px 4px rgba(0,0,0,.07);
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --space-micro:2px;--space-half:4px;
+  /* Trust badge colors */
+  --trust-engine:#007aff;--trust-engine-bg:#e1f0ff;
+  --trust-interp:#6366f1;--trust-interp-bg:#eef2ff;
+  --trust-agent:#ff9500;--trust-agent-bg:#fff3e0;
+  --trust-none:#aeaeb2;--trust-none-bg:#f5f5f5;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--txt);line-height:1.5;min-height:100vh}
+
+/* DARK HEADER */
+.site-header{background:var(--hdr);padding:28px 40px 20px}
+.hdr-inner{max-width:940px;margin:0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:40px}
+.hdr-cost-value{font-size:64px;font-weight:700;letter-spacing:-2.5px;color:#fff;line-height:1}
+.hdr-cost-label{font-size:12px;color:rgba(255,255,255,.55);margin-top:var(--space-half)}
+.hdr-cost-disclaimer{font-size:10px;color:rgba(255,255,255,.28);margin-top:var(--space-micro)}
+.hdr-stats{display:flex;gap:40px;align-items:flex-start;padding-top:10px;border-left:1px solid rgba(255,255,255,.1);padding-left:40px}
+.hdr-stat-value{font-size:32px;font-weight:700;letter-spacing:-1px;color:rgba(255,255,255,.8);line-height:1}
+.hdr-stat-label{font-size:11px;color:rgba(255,255,255,.4);margin-top:var(--space-half)}
+.hdr-meta{background:var(--hdr);border-top:1px solid rgba(255,255,255,.06);padding:8px 40px}
+.hdr-meta-inner{max-width:940px;margin:0 auto;display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.25)}
+
+/* MAIN */
+.main{max-width:940px;margin:0 auto;padding:28px 24px}
+
+/* CALLOUT */
+.callout{background:var(--surface);border-radius:var(--radius);padding:20px 24px;box-shadow:var(--shadow);margin-bottom:20px;font-size:14px;line-height:1.65}
+
+/* KPI ROW */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.kpi{background:var(--surface);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow)}
+.kpi-value{font-size:30px;font-weight:700;letter-spacing:-1px;line-height:1;margin-bottom:var(--space-half);color:var(--accent)}
+.kpi-label{font-size:12px;color:var(--txt2);line-height:1.4}
+.kpi-sub{font-size:10px;color:var(--txt3);margin-top:var(--space-micro)}
+
+/* TABS */
+.tabs{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.tab{padding:7px 16px;border-radius:var(--radius-pill);font-size:13px;font-weight:500;cursor:pointer;border:1.5px solid transparent;background:var(--surface);color:#3a3a3c;box-shadow:0 1px 3px rgba(0,0,0,.08);transition:all .15s;font-family:var(--font)}
+.tab:hover{border-color:var(--accent);color:var(--accent)}
+.tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.view{display:none}.view.active{display:block}
+
+/* CARDS */
+.card{background:var(--surface);border-radius:var(--radius);padding:24px 26px;box-shadow:var(--shadow);margin-bottom:18px}
+.card h2{font-size:17px;font-weight:600;margin-bottom:var(--space-micro)}
+.card-sub{font-size:12px;color:var(--txt2);margin-bottom:18px}
+
+/* TWO-COL GRID */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+
+/* TABLES */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;padding:0 10px 10px 0;font-size:11px;font-weight:600;letter-spacing:.4px;color:var(--txt3);border-bottom:1px solid var(--border)}
+.tbl th.r{text-align:right}
+.tbl td{padding:9px 10px 9px 0;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl td.r{text-align:right;color:var(--txt2);font-variant-numeric:tabular-nums}
+.tbl tr:last-child td{border-bottom:none}
+.total-row td{padding-top:12px;font-weight:600;border-top:2px solid var(--border2);border-bottom:none!important}
+
+/* BARS */
+.bar-outer{background:var(--border);border-radius:var(--radius-sm);height:18px;position:relative;overflow:hidden;min-width:80px}
+.bar-inner{background:var(--accent);border-radius:var(--radius-sm);height:100%;position:absolute;top:0;left:0}
+
+/* ACTIVITY CHART */
+.chart-wrap{position:relative}
+.y-axis{position:absolute;left:0;top:0;bottom:24px;width:32px;display:flex;flex-direction:column;justify-content:space-between;pointer-events:none}
+.y-label{font-size:10px;color:var(--txt3);text-align:right;padding-right:6px}
+.bar-chart-area{margin-left:36px}
+.bar-chart{display:flex;align-items:flex-end;gap:3px;height:140px;border-bottom:1px solid var(--border2)}
+.bc-bar{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-width:4px;position:relative;cursor:default;transition:opacity .1s}
+.bc-bar:hover{opacity:.7}
+.bc-bar:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--hdr);color:#fff;font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);white-space:nowrap;z-index:10;pointer-events:none}
+.bar-chart-axis{display:flex;gap:3px;margin-top:4px}
+.bar-chart-label{flex:1;font-size:9px;color:var(--txt3);text-align:center;overflow:hidden}
+
+/* SESSION LIST */
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.controls select,.controls input{padding:6px 10px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:12px;background:var(--surface);color:var(--txt);outline:none;font-family:var(--font)}
+.controls select:focus,.controls input:focus{border-color:var(--accent)}
+.stats-bar{display:flex;gap:20px;padding:10px 0 14px;border-bottom:1px solid var(--border);margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+.stat-val{font-weight:600;color:var(--txt)}
+.stat-lbl{color:var(--txt2)}
+.sess-item{display:grid;grid-template-columns:76px 28px 150px 1fr 80px 70px;gap:10px;align-items:start;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px}
+.sess-item:last-child{border-bottom:none}
+.sess-date{font-size:11px;color:var(--txt3);padding-top:2px}
+.sess-dot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.dot-done{background:var(--success)}.dot-skip{background:var(--border2);border:1.5px solid var(--txt3)}
+.sess-wf{font-size:11px;font-weight:600;color:var(--txt2);padding-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess-goal{line-height:1.4;color:var(--txt)}
+.sess-no-goal{color:var(--txt3);font-style:italic}
+.sess-meta{font-size:11px;color:var(--txt2);margin-top:var(--space-micro)}
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:var(--radius-sm);white-space:nowrap}
+.b-success{background:#e1f8ec;color:#1a7a3a}
+.b-partial{background:#fff8e0;color:#9a6000}
+.b-abandoned{background:#f5f5f5;color:#999}
+.b-error{background:#ffeaea;color:var(--error)}
+.sess-num{font-size:11px;color:var(--txt2);text-align:right;padding-top:2px;font-variant-numeric:tabular-nums}
+.pag{display:flex;gap:6px;justify-content:center;align-items:center;margin-top:16px;flex-wrap:wrap}
+.pg-btn{padding:5px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;background:var(--surface);color:#3a3a3c;font-family:var(--font)}
+.pg-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.pg-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
+.pg-btn:disabled{opacity:.35;cursor:default}
+
+/* QUALITY */
+.qual-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.qual-card{background:var(--bg);border-radius:var(--radius-sm);padding:20px;text-align:center}
+.qual-value{font-size:28px;font-weight:700;letter-spacing:-1px}
+.qual-label{font-size:11px;color:var(--txt2);margin-top:var(--space-half)}
+.qual-note{font-size:10px;color:var(--txt3);margin-top:var(--space-micro)}
+
+/* TRUST BADGES */
+.trust{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:var(--radius-pill);white-space:nowrap}
+.trust-engine{background:var(--trust-engine-bg);color:var(--trust-engine)}
+.trust-interp{background:var(--trust-interp-bg);color:var(--trust-interp)}
+.trust-agent{background:var(--trust-agent-bg);color:var(--trust-agent)}
+.trust-none{background:var(--trust-none-bg);color:var(--trust-none)}
+/* HERO */
+.hero{padding:40px 40px 32px;background:var(--hdr);border-bottom:1px solid rgba(255,255,255,.06)}
+.hero-inner{max-width:940px;margin:0 auto}
+.hero-nav{display:inline-flex;align-items:center;gap:0;margin-bottom:22px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.10);border-radius:8px;padding:10px 16px;font-family:ui-monospace,"SF Mono","Fira Code",monospace;font-size:13px;line-height:1;white-space:nowrap;overflow-x:auto;max-width:100%}
+.nav-prompt{color:#30d158;margin-right:10px;font-weight:700;user-select:none}
+.nav-cmd{color:#fff;font-weight:600}
+.nav-sub{color:rgba(255,255,255,.55)}
+.nav-flag{color:#5ac8fa}
+.nav-val{color:#ffd60a}
+.nav-cursor{display:inline-block;width:8px;height:13px;background:#fff;vertical-align:middle;margin-left:6px;animation:blink 1.1s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.hero-h1{font-size:36px;font-weight:700;letter-spacing:-1px;color:#fff;line-height:1.15;margin-bottom:12px}
+.hero-h1 span{color:var(--accent)}
+.hero-sub{font-size:14px;color:rgba(255,255,255,.55);line-height:1.6;max-width:640px;margin-bottom:20px}
+.hero-pills{display:flex;gap:8px;flex-wrap:wrap}
+.hero-pill{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:var(--radius-pill);padding:4px 12px;font-size:12px;color:rgba(255,255,255,.6);cursor:default}
+/* META BAR */
+.meta-bar{background:var(--hdr);border-top:1px solid rgba(255,255,255,.06);padding:8px 40px}
+.meta-bar-inner{max-width:940px;margin:0 auto;display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.22);font-family:ui-monospace,monospace}
+/* MAIN */
+.main{max-width:940px;margin:0 auto;padding:28px 24px}
+/* METRIC SECTION LABEL (Claude Design pattern: small-caps + horizontal rule + right label) */
+.metric-section{margin:24px 0 12px}
+.metric-section-label{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.metric-section-name{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3);white-space:nowrap}
+.metric-section-rule{flex:1;height:1px;background:var(--border2)}
+.metric-section-trust{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);opacity:.65;white-space:nowrap;font-family:ui-monospace,monospace}
+/* METRIC CARDS */
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:4px}
+.mc{background:var(--surface);border-radius:var(--radius);padding:18px 18px 16px;position:relative;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+.mc::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--mc-b)}
+.mc-engine{--mc-b:var(--trust-engine)}
+.mc-interp{--mc-b:var(--trust-interp)}
+.mc-agent{--mc-b:var(--trust-agent)}
+.mc-none{--mc-b:var(--trust-none)}
+.mc-hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:8px}
+.mc-label{font-size:9.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--txt3);font-family:ui-monospace,monospace;line-height:1.35}
+.mc-pill{font-size:8.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:3px 7px;border-radius:20px;flex-shrink:0;white-space:nowrap}
+.mc-pill-engine{background:var(--trust-engine-bg);color:var(--trust-engine)}
+.mc-pill-interp{background:var(--trust-interp-bg);color:var(--trust-interp)}
+.mc-pill-agent{background:var(--trust-agent-bg);color:var(--trust-agent)}
+.mc-pill-none{background:var(--trust-none-bg);color:var(--trust-none)}
+.mc-value{font-size:40px;font-weight:700;letter-spacing:-1.8px;color:var(--txt);line-height:1;margin-bottom:10px}
+.mc-sub{font-size:11px;color:#1a7a3a;font-family:ui-monospace,monospace;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mc-sub-neutral{color:var(--txt2)}
+.mc-caveat{font-size:10px;color:var(--txt3);font-family:ui-monospace,monospace;line-height:1.4;margin-top:auto}
+/* SECTION HEADERS */
+.section-hdr{display:flex;align-items:baseline;gap:12px;margin:32px 0 16px}
+.section-num{font-size:11px;font-weight:700;color:var(--txt3);font-variant-numeric:tabular-nums;min-width:16px}
+.section-title{font-size:18px;font-weight:700;letter-spacing:-0.3px;color:var(--txt)}
+.section-meta{font-size:12px;color:var(--txt3);margin-left:auto}
+/* TRUST LEGEND — 4 individual cards */
+.trust-legend-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+.trust-legend-item{background:var(--surface);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.trust-legend-item h4{font-size:12px;font-weight:600;color:var(--txt);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.trust-legend-item p{font-size:11px;color:var(--txt2);line-height:1.5;flex:1}
+.trust-legend-tag{font-size:10px;font-weight:600;color:var(--txt3);margin-top:10px;letter-spacing:.02em}
+/* WHAT SHIPPED — section label style matches Claude Design pattern */
+.shipped-label{display:flex;align-items:center;margin:28px 0 10px;gap:0}
+.shipped-label-text{font-size:10px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt3)}
+.shipped-label-trust{margin-left:auto;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);opacity:.7}
+/* Single container card — dense list, no per-item cards */
+.shipped-card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:28px}
+.shipped-empty{font-size:13px;color:var(--txt3);padding:20px 24px}
+/* PR group row */
+.shipped-pr-row{display:flex;align-items:center;gap:10px;padding:11px 20px;background:#f5f5f7;border-bottom:1px solid var(--border);position:sticky;top:0}
+.shipped-pr-ref{font-size:12px;font-weight:700;color:var(--accent);font-family:ui-monospace,monospace;flex-shrink:0;text-decoration:none}
+.shipped-pr-project{font-size:11px;color:var(--txt3);flex-shrink:0}
+.shipped-pr-stats{display:flex;gap:10px;margin-left:auto;flex-shrink:0;align-items:center}
+.shipped-stat-add{font-size:11px;font-weight:600;color:#1a7a3a;font-variant-numeric:tabular-nums}
+.shipped-stat-rem{font-size:11px;font-weight:600;color:#c0392b;font-variant-numeric:tabular-nums}
+.shipped-stat-files{font-size:11px;color:var(--txt3);font-variant-numeric:tabular-nums}
+/* Session row inside a PR group or standalone */
+.shipped-row{display:flex;align-items:baseline;gap:14px;padding:9px 20px 9px 32px;border-bottom:1px solid var(--border)}
+.shipped-row-solo{padding-left:20px;background:transparent}
+.shipped-row:last-child{border-bottom:none}
+.shipped-row-goal{flex:1;font-size:12px;color:var(--txt);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical}
+.shipped-row-branch{font-size:11px;color:var(--txt3);font-family:ui-monospace,monospace;flex-shrink:0;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shipped-row-stats{display:flex;gap:8px;flex-shrink:0;align-items:center}
+.shipped-row-date{font-size:11px;color:var(--txt3);flex-shrink:0;font-variant-numeric:tabular-nums}
+.shipped-more{font-size:11px;color:var(--txt3);padding:10px 20px;border-top:1px solid var(--border);text-align:center}
+/* COVERAGE */
+.coverage-table{width:100%;font-size:13px;margin-bottom:8px}
+.coverage-table td{padding:7px 0;border-bottom:1px solid var(--border)}
+.coverage-table tr:last-child td{border-bottom:none}
+.coverage-bar-outer{background:var(--border);border-radius:var(--radius-sm);height:8px;flex:1;overflow:hidden}
+.coverage-bar-inner{height:100%;border-radius:var(--radius-sm)}
+/* CARDS */
+.card{background:var(--surface);border-radius:var(--radius);padding:24px 26px;box-shadow:var(--shadow);margin-bottom:18px}
+.card-title{font-size:15px;font-weight:600;margin-bottom:4px;color:var(--txt)}
+.card-sub{font-size:12px;color:var(--txt2);margin-bottom:16px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+/* TABLES */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;padding:0 10px 10px 0;font-size:11px;font-weight:600;letter-spacing:.4px;color:var(--txt3);border-bottom:1px solid var(--border)}
+.tbl th.r{text-align:right}
+.tbl td{padding:9px 10px 9px 0;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl td.r{text-align:right;color:var(--txt2);font-variant-numeric:tabular-nums}
+.tbl tr:last-child td{border-bottom:none}
+.total-row td{padding-top:12px;font-weight:600;border-top:2px solid var(--border2);border-bottom:none!important}
+/* BARS */
+.bar-outer{background:var(--border);border-radius:var(--radius-sm);height:18px;position:relative;overflow:hidden;min-width:80px}
+.bar-inner{background:var(--accent);border-radius:var(--radius-sm);height:100%;position:absolute;top:0;left:0}
+/* ACTIVITY CHART */
+.bar-chart{display:flex;align-items:flex-end;gap:2px;height:140px;border-bottom:1px solid var(--border2)}
+.bc-col{flex:1;display:flex;flex-direction:column-reverse;align-items:stretch;gap:1px;min-width:4px}
+.bc-seg{border-radius:2px;min-height:4px;position:relative;cursor:default}
+.bc-seg:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--hdr);color:#fff;font-size:11px;padding:4px 8px;border-radius:var(--radius-sm);white-space:nowrap;z-index:10;pointer-events:none}
+.bar-chart-axis{display:flex;gap:2px;margin-top:4px}
+.bar-chart-label{flex:1;font-size:9px;color:var(--txt3);text-align:center;overflow:hidden}
+/* DONUT */
+.workflow-mix{display:grid;grid-template-columns:1fr 200px;gap:24px;align-items:start}
+.donut-wrap{display:flex;flex-direction:column;align-items:center}
+.donut-list{font-size:12px}
+.donut-list-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+.donut-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+/* SESSIONS */
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.controls select,.controls input{padding:6px 10px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:12px;background:var(--surface);color:var(--txt);outline:none;font-family:var(--font)}
+.controls select:focus,.controls input:focus{border-color:var(--accent)}
+.stats-bar{display:flex;gap:20px;padding:10px 0 14px;border-bottom:1px solid var(--border);margin-bottom:14px;font-size:12px;flex-wrap:wrap}
+.stat-val{font-weight:600;color:var(--txt)}
+.stat-lbl{color:var(--txt2)}
+.sess-item{display:grid;grid-template-columns:70px 24px 1fr auto;gap:10px;align-items:start;padding:11px 0;border-bottom:1px solid var(--border);font-size:13px}
+.sess-item:last-child{border-bottom:none}
+.sess-date{font-size:11px;color:var(--txt3);padding-top:2px;font-variant-numeric:tabular-nums}
+.sess-dot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.dot-done{background:var(--success)}.dot-skip{background:var(--border2);border:1.5px solid var(--txt3)}
+.sess-body{}
+.sess-wf{font-size:11px;font-weight:600;color:var(--txt2);margin-bottom:2px}
+.sess-goal{line-height:1.4;color:var(--txt);margin-bottom:4px}
+.sess-no-goal{color:var(--txt3);font-style:italic}
+.sess-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:var(--radius-sm);white-space:nowrap}
+.b-success{background:#e1f8ec;color:#1a7a3a}
+.b-partial{background:#fff8e0;color:#9a6000}
+.b-abandoned{background:#f5f5f5;color:#999}
+.b-error{background:#ffeaea;color:var(--error)}
+.sess-nums{display:flex;flex-direction:column;align-items:flex-end;gap:4px;padding-top:2px;flex-shrink:0;min-width:80px}
+.sess-num-main{font-size:13px;font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums}
+.sess-num-sub{font-size:11px;color:var(--txt3);font-variant-numeric:tabular-nums}
+.pag{display:flex;gap:6px;justify-content:center;align-items:center;margin-top:16px;flex-wrap:wrap}
+.pg-btn{padding:5px 11px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:12px;cursor:pointer;background:var(--surface);color:#3a3a3c;font-family:var(--font)}
+.pg-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.pg-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
+.pg-btn:disabled{opacity:.35;cursor:default}
+footer{text-align:center;font-size:11px;color:var(--txt3);margin-top:32px;padding-bottom:24px}
+@media(max-width:700px){.metric-grid{grid-template-columns:repeat(2,1fr)}.hero-h1{font-size:26px}.trust-legend-grid{grid-template-columns:repeat(2,1fr)}.two-col{grid-template-columns:1fr}.workflow-mix{grid-template-columns:1fr}.sess-item{grid-template-columns:60px 20px 1fr}}
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-inner">
+    <div class="hero-nav">
+      <span class="nav-prompt">$</span><span class="nav-cmd">workrail</span>&nbsp;<span class="nav-sub">report</span>&nbsp;<span class="nav-flag">--since</span>&nbsp;<span class="nav-val">${htmlEscape(dateRange.since)}</span>&nbsp;<span class="nav-flag">--until</span>&nbsp;<span class="nav-val">${htmlEscape(dateRange.until)}</span>&nbsp;<span class="nav-flag">--format</span>&nbsp;<span class="nav-val">html</span><span class="nav-cursor"></span>
+    </div>
+    <h1 class="hero-h1">${htmlEscape(heroMain)} &mdash; <span>${htmlEscape(heroAccent)}</span></h1>
+    <p class="hero-sub">
+      Across ${htmlEscape(dateRange.since)} &ndash; ${htmlEscape(dateRange.until)}, WorkRail steered <strong>${summary.totalSessions} workflow runs</strong> through guardrailed, step-by-step execution.
+      Every number below is labeled by <strong>how much it can be trusted</strong> &mdash; git evidence, interpretation, or the agent&rsquo;s own word.
+      Metrics that didn&rsquo;t exist yet read <strong>&ldquo;not tracked&rdquo;</strong>, never a misleading zero.
+    </p>
+    <div class="hero-pills">
+      <span class="hero-pill">${summary.totalSessions} sessions</span>
+      ${codeKeptPct !== null ? `<span class="hero-pill">code kept ${windowDays}d ${codeKeptPct}%</span>` : ''}
+      ${totalHours !== '0.0' ? `<span class="hero-pill">autonomous ${totalHours}h</span>` : ''}
+      ${estCostCents > 0 ? `<span class="hero-pill">${htmlEscape(estCostStr)} spend</span>` : ''}
+      <span class="hero-pill">window ${windowDays} days</span>
+    </div>
+  </div>
+</div>
+<div class="meta-bar">
+  <div class="meta-bar-inner">
+    <span>May 2026 usage report &middot; generated ${new Date(generatedAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
+    <span>workrail ${htmlEscape(dateRange.since)} to ${htmlEscape(dateRange.until)}</span>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- WHAT SHIPPED METRICS -->
+<div class="metric-section">
+  <div class="metric-section-label">
+    <span class="metric-section-name">What shipped</span>
+    <div class="metric-section-rule"></div>
+    <span class="metric-section-trust">git-authoritative</span>
+  </div>
+  <div class="metric-grid">
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Net lines shipped</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${summary.totalLinesAdded > 0 ? fmtTokens(summary.totalLinesAdded) : '--'}</div>
+      <div class="mc-sub">${summary.totalLinesAdded > 0 ? `▲ +${summary.totalLinesAdded.toLocaleString()} / −${summary.totalLinesRemoved.toLocaleString()}` : '→ no git evidence yet'}</div>
+      <div class="mc-caveat">git diff captured &middot; ${hasGitEvidence}/${summary.totalSessions} sessions</div>
+    </div>
+    <div class="mc mc-interp">
+      <div class="mc-hdr"><span class="mc-label">PRs attributed</span><span class="mc-pill mc-pill-interp">Interp</span></div>
+      <div class="mc-value">${uniquePRs > 0 ? uniquePRs : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ parsed from commit messages</div>
+      <div class="mc-caveat">regex match &middot; may miss or over-claim</div>
+    </div>
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Autonomous work</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${totalHours}h</div>
+      <div class="mc-sub">→ ${summary.completedSessions} sessions completed</div>
+      <div class="mc-caveat">wall-clock from event timestamps</div>
+    </div>
+    <div class="mc ${estCostCents > 0 ? 'mc-interp' : 'mc-none'}">
+      <div class="mc-hdr"><span class="mc-label">Model spend</span><span class="mc-pill ${estCostCents > 0 ? 'mc-pill-interp' : 'mc-pill-none'}">${estCostCents > 0 ? 'Metered' : 'Not tracked'}</span></div>
+      <div class="mc-value">${estCostCents > 0 ? htmlEscape(estCostStr) : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ ${estCostCents > 0 ? 'at list pricing' : 'no token data yet'}</div>
+      <div class="mc-caveat">token data &middot; ${hasTokenData}/${summary.totalSessions} sessions</div>
+    </div>
+  </div>
+</div>
+
+<!-- DID IT HOLD UP METRICS -->
+<div class="metric-section">
+  <div class="metric-section-label">
+    <span class="metric-section-name">Did it hold up?</span>
+    <div class="metric-section-rule"></div>
+    <span class="metric-section-trust">quality &amp; operational signals</span>
+  </div>
+  <div class="metric-grid">
+    <div class="mc mc-interp">
+      <div class="mc-hdr"><span class="mc-label">Code kept &middot; 7 days</span><span class="mc-pill mc-pill-interp">Interp</span></div>
+      <div class="mc-value">${codeKeptPct !== null ? `${codeKeptPct}%` : '--'}</div>
+      <div class="mc-sub ${codeKeptPct !== null && codeKeptPct >= 80 ? '' : 'mc-sub-neutral'}">→ ${totalChurnFiles} of ${totalFilesForChurn} files re-touched</div>
+      <div class="mc-caveat">git history is exact; the cause of a re-touch isn&rsquo;t</div>
+    </div>
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Retries / session</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${retriesPerSession}</div>
+      <div class="mc-sub mc-sub-neutral">→ lower = right first try</div>
+      <div class="mc-caveat">blocked-attempt nodes in the DAG</div>
+    </div>
+    <div class="mc mc-engine">
+      <div class="mc-hdr"><span class="mc-label">Completed without abandon</span><span class="mc-pill mc-pill-engine">Engine</span></div>
+      <div class="mc-value">${completedWithoutAbandonPct !== null ? `${completedWithoutAbandonPct}%` : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ ran all steps</div>
+      <div class="mc-caveat">operational &mdash; not a quality verdict</div>
+    </div>
+    <div class="mc mc-agent">
+      <div class="mc-hdr"><span class="mc-label">Agent-reported success</span><span class="mc-pill mc-pill-agent">Agent</span></div>
+      <div class="mc-value">${agentSuccessPct !== null ? `${agentSuccessPct}%` : '--'}</div>
+      <div class="mc-sub mc-sub-neutral">→ self-reported &middot; unverified</div>
+      <div class="mc-caveat">only ${hasOutcome}/${summary.totalSessions} sessions reported one</div>
+    </div>
+  </div>
+</div>
+
+<!-- HOW TO READ — 4 individual cards -->
+<div class="metric-section-label" style="margin:28px 0 12px">
+  <span class="metric-section-name">How to read this report</span>
+  <div class="metric-section-rule"></div>
+  <span class="metric-section-trust">metric reliability</span>
+</div>
+<div class="trust-legend-grid">
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-engine">engine</span></h4>
+    <p>Measured directly from event timestamps, the workflow DAG, and git diff. Duration, steps, retries, lines, files, languages, SHAs &mdash; and tokens, when captured.</p>
+    <div class="trust-legend-tag">trust the number</div>
+  </div>
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-interp">interpretive</span></h4>
+    <p>Real data, uncertain meaning. Churn reads git history exactly but can&rsquo;t know why a file changed; PR refs are regex on commit text.</p>
+    <div class="trust-legend-tag">directional, not proof</div>
+  </div>
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-agent">agent reported</span></h4>
+    <p>The agent&rsquo;s own claim &mdash; outcome, PR numbers. Unverified and optimistic, with real coverage gaps.</p>
+    <div class="trust-legend-tag">${hasOutcome > 0 ? Math.round(hasOutcome / summary.totalSessions * 100) : 0}% coverage</div>
+  </div>
+  <div class="trust-legend-item">
+    <h4><span class="trust trust-none">not tracked yet</span></h4>
+    <p>The reader for this metric hadn&rsquo;t shipped for these sessions (e.g. Cursor / Antigravity tokens). Shown as &ldquo;&mdash;&rdquo;, never a zero.</p>
+    <div class="trust-legend-tag">absence, not nothing</div>
+  </div>
+</div>
+
+<!-- WHAT SHIPPED -->
+<div class="shipped-label">
+  <span class="shipped-label-text">What shipped</span>
+  <span class="shipped-label-trust">engine &middot; git-authoritative &middot; ${shippedSessions.length} sessions</span>
+</div>
+${shippedSessions.length === 0
+  ? `<div class="shipped-card"><div class="shipped-empty">No sessions with git evidence in this window. Coverage increases as more sessions run after the git metrics feature was deployed.</div></div>`
+  : `<div class="shipped-card">
+${prGroups.map(g => `  <div class="shipped-pr-row">
+    <span class="shipped-pr-ref">${htmlEscape(g.ref)}</span>
+    ${g.project ? `<span class="shipped-pr-project">${htmlEscape(g.project)}</span>` : ''}
+    <div class="shipped-pr-stats">
+      <span class="shipped-stat-add">+${g.totalLinesAdded.toLocaleString()}</span>
+      <span class="shipped-stat-rem">-${g.totalLinesRemoved.toLocaleString()}</span>
+      ${g.totalFilesChanged > 0 ? `<span class="shipped-stat-files">${g.totalFilesChanged} files</span>` : ''}
+    </div>
+  </div>
+  ${g.sessions.map(s => `<div class="shipped-row">
+    <span class="shipped-row-goal">${s.goal || '(no goal recorded)'}</span>
+    <span class="shipped-row-date">${s.date}</span>
+  </div>`).join('')}`).join('')}
+${ungroupedShipped.length > 0 && prGroups.length > 0 ? `  <div style="padding:8px 20px 4px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--txt3);border-top:1px solid var(--border2)">Without PR refs</div>` : ''}
+${ungroupedShipped.slice(0, 20).map(s => `  <div class="shipped-row shipped-row-solo">
+    <span class="shipped-row-goal">${s.goal || '(no goal recorded)'}</span>
+    <div class="shipped-row-stats">
+      ${s.git_branch ? `<span class="shipped-row-branch">${htmlEscape(s.git_branch)}</span>` : ''}
+      <span class="shipped-stat-add">+${s.lines_added.toLocaleString()}</span>
+      <span class="shipped-stat-rem">-${s.lines_removed.toLocaleString()}</span>
+    </div>
+    <span class="shipped-row-date">${s.date}</span>
+  </div>`).join('')}
+${ungroupedShipped.length > 20 ? `  <div class="shipped-more">+${ungroupedShipped.length - 20} more &mdash; see Sessions below</div>` : ''}
+</div>`}
+
+<!-- COVERAGE -->
+<div class="section-hdr">
+  <span class="section-num">01</span>
+  <h2 class="section-title">Coverage for this period</h2>
+</div>
+<div class="card">
+  <div class="card-sub" style="font-family:ui-monospace,monospace;font-size:12px">Several collectors are recent &mdash; gaps here are expected, not errors. They tell you which numbers rest on a full sample.</div>
+  <div style="margin-top:16px">
+    ${[
+      { label: 'git diff captured',    n: hasGitEvidence, color: 'var(--trust-engine)' },
+      { label: 'token data captured',  n: hasTokenData,   color: 'var(--trust-engine)' },
+      { label: 'outcome self-reported', n: hasOutcome,    color: 'var(--trust-agent)'  },
+    ].map(({ label, n, color }) => {
+      const pct = summary.totalSessions > 0 ? Math.round(n / summary.totalSessions * 100) : 0;
+      return `<div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:var(--txt2);width:190px;flex-shrink:0">${htmlEscape(label)}</span>
+        <div style="flex:1;background:var(--border);border-radius:3px;height:6px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${color};border-radius:3px"></div>
+        </div>
+        <span style="font-size:12px;color:var(--txt2);flex-shrink:0;text-align:right;min-width:110px"><strong style="color:var(--txt)">${pct}%</strong> &middot; ${n} of ${summary.totalSessions}</span>
+      </div>`;
+    }).join('')}
+  </div>
+  <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border2);font-size:12px;color:var(--txt2);line-height:1.6">
+    Not measurable here at all: whether code <strong>compiled or passed tests</strong>, whether PRs <strong>actually merged</strong>, or whether the output was <strong>actually useful</strong> &mdash; these need CI&nbsp;/&nbsp;GitHub integration and aren&rsquo;t inferred.
+  </div>
+</div>
+
+<!-- ACTIVITY -->
+<div class="section-hdr">
+  <span class="section-num">02</span>
+  <h2 class="section-title">Activity over time</h2>
+  <span class="section-meta">${summary.totalSessions} sessions &middot; daily</span>
+</div>
+<div class="card">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:4px">
+    <div>
+      <div style="font-size:13px;font-weight:600;color:var(--txt);margin-bottom:3px">Sessions per day, by outcome</div>
+      <div style="font-size:11px;color:var(--txt3);font-family:ui-monospace,monospace">Stacked bars &middot; hover for detail &middot; &ldquo;unknown&rdquo; = no outcome reported</div>
+    </div>
+    <div style="display:flex;gap:12px;font-size:11px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#34c759"></div><span style="color:var(--txt2)">success</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#ff9500"></div><span style="color:var(--txt2)">partial</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#ff3b30"></div><span style="color:var(--txt2)">error</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#8e8e93"></div><span style="color:var(--txt2)">abandoned</span></div>
+      <div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:2px;background:#d1d1d6"></div><span style="color:var(--txt2)">unknown</span></div>
+    </div>
+  </div>
+  <div style="margin-top:16px">
+    <div class="bar-chart" id="barchart"></div>
+    <div class="bar-chart-axis" id="barchart-axis"></div>
+  </div>
+</div>
+
+<!-- WORKFLOW MIX -->
+<div class="section-hdr">
+  <span class="section-num">03</span>
+  <h2 class="section-title">Workflow mix</h2>
+  <span class="section-meta" id="wf-count"></span>
+</div>
+<div class="two-col" style="margin-bottom:18px;align-items:start">
+  <div class="card" style="margin-bottom:0">
+    <div class="card-title">Runs by workflow</div>
+    <div class="card-sub">Bar = session count &middot; % = completion rate &middot; routines listed separately (they don&rsquo;t report outcomes)</div>
+    <div id="wf-bars"></div>
+  </div>
+  <div class="card" style="margin-bottom:0">
+    <div class="card-title">Share of sessions</div>
+    <div class="card-sub">By workflow type</div>
+    <div class="workflow-mix">
+      <svg id="donut" width="120" height="120" viewBox="0 0 120 120" style="flex-shrink:0"></svg>
+      <div class="donut-list" id="donut-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SESSIONS -->
+<div class="section-hdr">
+  <span class="section-num">04</span>
+  <h2 class="section-title">Sessions</h2>
+  <span class="section-meta" id="sess-count-hdr"></span>
+</div>
+<div class="card">
+  <div class="controls">
+    <select id="sess-workflow"><option value="">All workflows</option></select>
+    <select id="sess-status">
+      <option value="">All statuses</option>
+      <option value="done">Completed</option>
+      <option value="partial">Incomplete</option>
+    </select>
+    <input type="text" id="sess-search" placeholder="Search goals, projects..." style="min-width:200px">
+  </div>
+  <div class="stats-bar" id="sess-stats"></div>
+  <div id="sess-list"></div>
+  <div class="pag" id="sess-pag"></div>
+</div>
+
+<!-- SESSION OUTCOMES -->
+<div class="section-hdr">
+  <span class="section-num">05</span>
+  <h2 class="section-title">Session outcomes</h2>
+  <span class="section-meta">agent-reported &middot; operational</span>
+</div>
+<div class="two-col" style="margin-bottom:18px;align-items:start">
+  <div class="card" style="margin-bottom:0">
+    <div class="card-title">Outcome breakdown</div>
+    <div class="card-sub" style="font-family:ui-monospace,monospace;font-size:11px">Self-reported by the agent &mdash; present for only ${hasOutcome} of ${summary.totalSessions} sessions. It tells you the engine ran, not that the output was correct.</div>
+    <div style="margin-top:12px">
+      ${[
+        { key: 'success', label: 'Success', cls: 'b-success' },
+        { key: 'partial', label: 'Partial', cls: 'b-partial' },
+        { key: 'abandoned', label: 'Abandoned', cls: 'b-abandoned' },
+        { key: 'error', label: 'Error', cls: 'b-error' },
+        { key: 'unknown', label: 'Unknown', cls: '' },
+      ].map(({ key, label, cls }) => {
+        const n = key === 'unknown'
+          ? summary.totalSessions - outcomeSessions
+          : (summary.outcomeBreakdown[key] ?? 0);
+        const pct = summary.totalSessions > 0 ? Math.round(n / summary.totalSessions * 100) : 0;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+          ${cls ? `<span class="badge ${cls}">${htmlEscape(label)}</span>` : `<span style="font-size:12px;color:var(--txt3)">${htmlEscape(label)}</span>`}
+          <span style="font-size:24px;font-weight:700;color:var(--txt);letter-spacing:-0.5px;margin-left:4px">${n}</span>
+          <span style="font-size:12px;color:var(--txt3);margin-left:4px">${pct}%</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Operational signals <span class="trust trust-engine" style="margin-left:6px;vertical-align:middle">engine</span></div>
+      <div class="card-sub">How the engine behaved &mdash; not a quality verdict</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${[
+          { val: (summary.totalStepsCompleted / Math.max(summary.totalSessions, 1)).toFixed(1), label: 'Avg steps walked' },
+          { val: retriesPerSession, label: 'Retries / session' },
+          { val: `${(summary.totalDurationMs / Math.max(summary.totalSessions, 1) / 60_000).toFixed(0)}m`, label: 'Avg session length' },
+          { val: `${sessionsJs.filter(s => s.trigger === 'daemon').length}`, label: 'Autonomous runs' },
+        ].map(({ val, label }) => `<div style="background:var(--bg);border-radius:var(--radius-sm);padding:10px 12px">
+          <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;color:var(--txt)">${htmlEscape(val)}</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">${htmlEscape(label)}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title">Code retention <span class="trust trust-interp" style="margin-left:6px;vertical-align:middle">interpretive</span></div>
+      <div class="card-sub">The closest thing to a quality signal &mdash; handle with care</div>
+      <div style="font-size:36px;font-weight:700;letter-spacing:-1.5px;color:var(--txt);line-height:1;margin-bottom:8px">${codeKeptPct !== null ? `${codeKeptPct}%` : '--'}</div>
+      <div style="font-size:12px;color:var(--txt2);line-height:1.5">of touched files weren&rsquo;t re-modified within 7 days. A soft signal &mdash; a re-touch could be unrelated active development, not bad output.</div>
+      ${totalFilesForChurn > 0 ? `<div style="font-size:11px;color:var(--txt3);margin-top:8px;font-family:ui-monospace,monospace">${totalChurnFiles} of ${totalFilesForChurn} files re-touched</div>` : ''}
+    </div>
+  </div>
+</div>
+
+<!-- BY PROJECT -->
+<div class="section-hdr">
+  <span class="section-num">06</span>
+  <h2 class="section-title">By project</h2>
+  <span class="section-meta">${projects.length} repositories</span>
+</div>
+<div class="card">
+  <div class="card-sub">Sessions and lines added per repository &mdash; project name derived from the work directory.</div>
+  <table class="tbl">
+    <thead><tr>
+      <th>Project</th><th>Sessions</th><th class="r">Lines added</th><th class="r">Top languages</th>
+    </tr></thead>
+    <tbody>
+      ${projects.slice(0, 15).map((p) => {
+        const barPct = projects[0] && projects[0].sessions > 0 ? Math.round(p.sessions / projects[0].sessions * 100) : 0;
+        const topLang = Object.entries(p.lang).sort(([, a], [, b]) => b - a).slice(0, 3).map(([ext]) => ext).join(' ');
+        return `<tr>
+          <td style="font-weight:600">${htmlEscape(p.name)}</td>
+          <td><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;background:var(--border);border-radius:var(--radius-sm);height:8px;overflow:hidden;min-width:60px"><div style="height:100%;width:${barPct}%;background:var(--accent)"></div></div><span style="font-size:12px;font-weight:600;color:var(--txt);width:28px;text-align:right">${p.sessions}</span></div></td>
+          <td class="r" style="color:#1a7a3a">+${p.linesAdded.toLocaleString()}</td>
+          <td class="r" style="color:var(--txt3);font-size:11px">${htmlEscape(topLang)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+</div>
+
+<!-- CODE IMPACT -->
+<div class="section-hdr">
+  <span class="section-num">07</span>
+  <h2 class="section-title">Code impact</h2>
+  <span class="section-meta">${summary.totalFilesChanged} files touched</span>
+</div>
+<div class="card">
+  <div class="card-title">What got written <span class="trust trust-engine" style="margin-left:6px;vertical-align:middle">engine</span></div>
+  <div class="card-sub" style="font-family:ui-monospace,monospace;font-size:11px">git diff startSha..HEAD &middot; captured for ${hasGitEvidence} of ${summary.totalSessions} sessions</div>
+  <div class="two-col" style="margin-top:16px;align-items:start">
+    <div>
+      ${[
+        { label: 'Lines added', val: `+${summary.totalLinesAdded.toLocaleString()}`, color: '#1a7a3a' },
+        { label: 'Lines removed', val: `−${summary.totalLinesRemoved.toLocaleString()}`, color: '#c0392b' },
+        { label: 'Net change', val: `${(summary.totalLinesAdded - summary.totalLinesRemoved).toLocaleString()} lines`, color: 'var(--txt)' },
+        { label: 'Files changed', val: summary.totalFilesChanged.toLocaleString(), color: 'var(--txt)' },
+      ].map(({ label, val, color }) => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span style="color:var(--txt2)">${htmlEscape(label)}</span>
+        <span style="font-weight:600;color:${color}">${htmlEscape(val)}</span>
+      </div>`).join('')}
+    </div>
+    <div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--txt3);margin-bottom:10px">Language breakdown</div>
+      ${langEntries.length > 0 ? langEntries.map(({ ext, cnt, pct }) => `<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+        <span style="font-family:ui-monospace,monospace;font-size:12px;color:var(--txt);width:56px;flex-shrink:0">${htmlEscape(ext)}</span>
+        <div style="flex:1;background:var(--border);border-radius:3px;height:6px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--accent)"></div></div>
+        <span style="font-size:11px;color:var(--txt3);width:64px;text-align:right">${cnt.toLocaleString()} &middot; ${pct}%</span>
+      </div>`).join('') : '<div style="color:var(--txt3);font-size:12px">No language data yet</div>'}
+    </div>
+  </div>
+</div>
+
+<!-- TOKEN ECONOMICS -->
+<div class="section-hdr">
+  <span class="section-num">08</span>
+  <h2 class="section-title">Token economics</h2>
+  <span class="section-meta">${hasTokenData > 0 ? `${Math.round(hasTokenData / summary.totalSessions * 100)}% coverage` : 'not tracked yet'}</span>
+</div>
+<div class="card">
+  ${hasTokenData === 0
+    ? `<div style="font-family:ui-monospace,monospace;font-size:12px;color:var(--txt2);margin-bottom:12px">Token data was captured for 0 of ${summary.totalSessions} sessions. Cursor &amp; Antigravity readers haven&rsquo;t shipped yet, and Claude Code requires the workspace path to be set.</div>
+       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+         ${['Total tokens', 'Avg cost / session', 'Cache hit ratio', 'Tokens / turn'].map(label => `<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px 16px">
+           <div style="font-size:22px;font-weight:700;color:var(--txt3)">--</div>
+           <div style="font-size:11px;color:var(--txt3);margin-top:4px">${htmlEscape(label)}</div>
+         </div>`).join('')}
+       </div>`
+    : `<div class="card-sub" style="font-family:ui-monospace,monospace;font-size:11px">${fmtTokens(totalTokens)} tokens &middot; ${htmlEscape(estCostStr)} at list pricing &middot; ${hasTokenData}/${summary.totalSessions} sessions captured</div>
+       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px">
+         ${[
+           { label: 'Input tokens', val: fmtTokens(inputTok), sub: `$${PRICE_INPUT}/1M &middot; $${(inputTok * PRICE_INPUT / 1_000_000).toFixed(2)}` },
+           { label: 'Output tokens', val: fmtTokens(outputTok), sub: `$${PRICE_OUTPUT}/1M &middot; $${(outputTok * PRICE_OUTPUT / 1_000_000).toFixed(2)}` },
+           { label: 'Cache writes', val: fmtTokens(cacheW), sub: `$${PRICE_CACHE_W}/1M &middot; $${(cacheW * PRICE_CACHE_W / 1_000_000).toFixed(2)}` },
+           { label: 'Cache reads', val: fmtTokens(cacheR), sub: `$${PRICE_CACHE_R}/1M &middot; $${(cacheR * PRICE_CACHE_R / 1_000_000).toFixed(2)} (10x cheaper)` },
+         ].map(({ label, val, sub }) => `<div style="background:var(--bg);border-radius:var(--radius-sm);padding:14px 16px">
+           <div style="font-size:22px;font-weight:700;letter-spacing:-0.5px;color:var(--txt)">${val}</div>
+           <div style="font-size:11px;color:var(--txt2);margin-top:4px">${htmlEscape(label)}</div>
+           <div style="font-size:10px;color:var(--txt3);margin-top:2px">${sub}</div>
+         </div>`).join('')}
+       </div>`
+  }
+</div>
+
+<footer>workrail &middot; <a href="https://github.com/EtienneBBeaulac/workrail" style="color:var(--txt3)">github.com/EtienneBBeaulac/workrail</a></footer>
+</div>
+
+<script>
+const SESSIONS = ${safeJson(sessionsJs)};
+const PR_GROUPS = ${safeJson(prGroups)};
+const UNGROUPED_SHIPPED = ${safeJson(ungroupedShipped)};
+const BREAKDOWN = ${safeJson(breakdown)};
+const ROUTINE_BREAKDOWN = ${safeJson(routineBreakdown)};
+const HEATMAP = ${safeJson(heatmap)};
+const ACTIVITY = ${safeJson(activityData)};
+const PAGE_SIZE = 30;
+
+// ── Activity chart (stacked by outcome) ──────────────────────────────────────
+(function(){
+  const chart=document.getElementById('barchart'),axis=document.getElementById('barchart-axis');
+  const keys=Object.keys(HEATMAP).sort(); if(!keys.length)return;
+  const entries=[];
+  const start=new Date(keys[0]),end=new Date(keys[keys.length-1]);
+  for(let d=new Date(start);d<=end;d.setDate(d.getDate()+1)){
+    const k=d.toISOString().slice(0,10);
+    const a=ACTIVITY[k]||{success:0,partial:0,error:0,abandoned:0,unknown:0};
+    const day=new Date(k+'T12:00:00').getDate();
+    entries.push({date:k,day,count:HEATMAP[k]||0,...a});
+  }
+  const max=Math.max(...entries.map(e=>e.count),1);
+  const SEGS=[
+    {key:'success',color:'#34c759'},
+    {key:'partial',color:'#ff9500'},
+    {key:'error',color:'#ff3b30'},
+    {key:'abandoned',color:'#8e8e93'},
+    {key:'unknown',color:'#d1d1d6'},
+  ];
+  entries.forEach(e=>{
+    const col=document.createElement('div');col.className='bc-col';
+    col.style.height=Math.max(4,Math.round(e.count/max*100))+'%';
+    SEGS.forEach(({key,color})=>{
+      const n=e[key]; if(!n)return;
+      const seg=document.createElement('div');seg.className='bc-seg';
+      seg.style.cssText='flex:0 0 '+Math.round(n/e.count*100)+'%;background:'+color;
+      seg.setAttribute('data-tip','day '+e.day+' '+key+': '+n);
+      col.appendChild(seg);
+    });
+    chart.appendChild(col);
+    const lbl=document.createElement('div');lbl.className='bar-chart-label';
+    if([1,4,7,10,13,16,19,22,25,28,31].includes(e.day))lbl.textContent=e.day;
+    axis.appendChild(lbl);
+  });
+})();
+
+// ── Workflow bars + donut ─────────────────────────────────────────────────────
+(function(){
+  const COLORS=['#007aff','#34c759','#ff9500','#af52de','#ff3b30','#5ac8fa','#ffcc00','#ff6b6b','#00c7be','#30b0c7'];
+  const totalWf=BREAKDOWN.length+(ROUTINE_BREAKDOWN.length>0?1:0);
+  document.getElementById('wf-count').textContent=BREAKDOWN.length+' workflows'+(ROUTINE_BREAKDOWN.length>0?' + '+ROUTINE_BREAKDOWN.length+' routines':'');
+  const container=document.getElementById('wf-bars');
+  const maxS=Math.max(...BREAKDOWN.map(r=>r.started),...ROUTINE_BREAKDOWN.map(r=>r.started),1);
+  const renderRow=(r,i,color)=>{
+    const ok=r.started>0?Math.round(r.completed/r.started*100):0;
+    const div=document.createElement('div');
+    div.style.cssText='display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f2f2f7;font-size:12px';
+    div.innerHTML='<div style="width:8px;height:8px;border-radius:50%;background:'+color+';flex-shrink:0"></div>'+
+      '<span style="flex:1;color:#1d1d1f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+r.label+'</span>'+
+      '<div style="width:100px;background:#f2f2f7;border-radius:4px;height:14px;overflow:hidden;flex-shrink:0"><div style="width:'+Math.round(r.started/maxS*100)+'%;height:100%;background:'+color+';opacity:.7"></div></div>'+
+      '<span style="color:#6e6e73;width:50px;text-align:right;white-space:nowrap">'+r.started+' &middot; '+ok+'%</span>'+
+      '<span style="color:#6e6e73;width:48px;text-align:right">'+r.median+'</span>';
+    container.appendChild(div);
+  };
+  BREAKDOWN.forEach((r,i)=>renderRow(r,i,COLORS[i%COLORS.length]));
+  if(ROUTINE_BREAKDOWN.length>0){
+    const hdr=document.createElement('div');
+    hdr.style.cssText='padding:10px 0 4px;font-size:11px;font-weight:600;color:#aeaeb2;letter-spacing:0.04em;text-transform:uppercase';
+    hdr.textContent='Routines (sub-workflows -- outcome reporting does not apply)';
+    container.appendChild(hdr);
+    ROUTINE_BREAKDOWN.forEach((r,i)=>renderRow(r,i,'#aeaeb2'));
+  }
+  // Donut
+  const svg=document.getElementById('donut');
+  const list=document.getElementById('donut-list');
+  const total=BREAKDOWN.reduce((a,r)=>a+r.started,0);
+  let ang=-Math.PI/2;
+  BREAKDOWN.slice(0,8).forEach((r,i)=>{
+    const frac=r.started/Math.max(total,1);
+    const a2=ang+frac*2*Math.PI;
+    const x1=60+50*Math.cos(ang),y1=60+50*Math.sin(ang);
+    const x2=60+50*Math.cos(a2),y2=60+50*Math.sin(a2);
+    const large=frac>.5?1:0;
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d','M 60 60 L '+x1+' '+y1+' A 50 50 0 '+large+' 1 '+x2+' '+y2+' Z');
+    path.setAttribute('fill',COLORS[i%COLORS.length]);
+    svg.appendChild(path);
+    // Center hole
+    const hole=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    hole.setAttribute('cx','60');hole.setAttribute('cy','60');hole.setAttribute('r','30');hole.setAttribute('fill','white');
+    svg.appendChild(hole);
+    // Center label
+    const ct=document.createElementNS('http://www.w3.org/2000/svg','text');
+    ct.setAttribute('x','60');ct.setAttribute('y','57');ct.setAttribute('text-anchor','middle');ct.setAttribute('font-size','16');ct.setAttribute('font-weight','700');ct.setAttribute('fill','#1d1d1f');ct.textContent=total;
+    svg.appendChild(ct);
+    const cl=document.createElementNS('http://www.w3.org/2000/svg','text');
+    cl.setAttribute('x','60');cl.setAttribute('y','70');cl.setAttribute('text-anchor','middle');cl.setAttribute('font-size','9');cl.setAttribute('fill','#6e6e73');cl.textContent='sessions';
+    svg.appendChild(cl);
+    // List
+    const row=document.createElement('div');row.className='donut-list-row';
+    row.innerHTML='<div class="donut-dot" style="background:'+COLORS[i%COLORS.length]+'"></div>'+
+      '<span style="flex:1;color:#1d1d1f">'+r.label+'</span>'+
+      '<span style="color:#6e6e73;margin-left:8px">'+r.started+'</span>'+
+      '<span style="color:#aeaeb2;margin-left:6px;width:30px;text-align:right">'+Math.round(frac*100)+'%</span>';
+    list.appendChild(row);
+    ang=a2;
+  });
+})();
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+let sp=1,sf=SESSIONS.slice();
+(function(){
+  const sel=document.getElementById('sess-workflow');
+  [...new Set(SESSIONS.map(s=>s.workflow_label))].sort().forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o);});
+  document.getElementById('sess-count-hdr').textContent=SESSIONS.length.toLocaleString()+' total';
+})();
+function fD(m){if(!m)return'--';return m<60?Math.round(m)+'m':(m/60).toFixed(1)+'h';}
+function fT(n){if(!n)return'--';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return Math.round(n/1e3)+'k';return String(n);}
+function fC(c){if(!c)return null;return c>=100?'$'+(c/100).toFixed(0):'$'+(c/100).toFixed(2);}
+function applyF(){
+  const wf=document.getElementById('sess-workflow').value;
+  const st=document.getElementById('sess-status').value;
+  const q=document.getElementById('sess-search').value.toLowerCase();
+  sf=SESSIONS.filter(s=>(!wf||s.workflow_label===wf)&&(!st||(st==='done'?s.completed:!s.completed))&&(!q||s.goal.toLowerCase().includes(q)||s.project.toLowerCase().includes(q)||s.date.includes(q)));
+  sp=1;renderS();
+}
+function renderS(){
+  const list=document.getElementById('sess-list');
+  const total=sf.length,start=(sp-1)*PAGE_SIZE,page=sf.slice(start,Math.min(start+PAGE_SIZE,total));
+  const comp=sf.filter(s=>s.completed).length;
+  const tLines=sf.reduce((a,s)=>a+s.lines_added,0);
+  const avgD=sf.filter(s=>s.duration_min).reduce((a,s)=>a+s.duration_min,0)/(sf.filter(s=>s.duration_min).length||1);
+  document.getElementById('sess-stats').innerHTML=
+    '<div><span class="stat-val">'+total+'</span> <span class="stat-lbl">sessions</span></div>'+
+    '<div><span class="stat-val" style="color:#34c759">'+comp+'</span> <span class="stat-lbl">completed</span></div>'+
+    '<div><span class="stat-val">'+Math.round(comp/Math.max(total,1)*100)+'%</span> <span class="stat-lbl">rate</span></div>'+
+    (tLines?'<div><span class="stat-val trust trust-engine" style="font-size:12px">+'+tLines.toLocaleString()+' lines</span></div>':'')+
+    '<div><span class="stat-val">'+fD(Math.round(avgD*10)/10)+'</span> <span class="stat-lbl">avg duration</span></div>'+
+    '<div style="margin-left:auto;font-size:11px;color:#aeaeb2">'+( start+1)+'&#8211;'+Math.min(start+PAGE_SIZE,total)+'</div>';
+  list.innerHTML='';
+  for(const s of page){
+    const div=document.createElement('div');div.className='sess-item';
+    // Tags row
+    const tags=[];
+    if(s.lines_added>0) tags.push('<span class="trust trust-engine" style="font-size:10px">+'+s.lines_added+' lines</span>');
+    if(s.tok_in+s.tok_out>0) tags.push('<span class="trust trust-engine" style="font-size:10px">'+fT(s.tok_in+s.tok_out)+' tok</span>');
+    const cost=fC(s.est_cost_cents);
+    if(cost) tags.push('<span class="trust trust-interp" style="font-size:10px">'+cost+'</span>');
+    if(s.pr_refs.length) tags.push('<span class="trust trust-interp" style="font-size:10px">'+s.pr_refs.length+' PR'+(s.pr_refs.length>1?'s':'')+'</span>');
+    if(s.retries>0) tags.push('<span class="trust trust-agent" style="font-size:10px;color:#ff9500">'+s.retries+' retr.</span>');
+    if(s.outcome) tags.push('<span class="badge b-'+s.outcome+'" style="font-size:10px">'+s.outcome+'</span>');
+    const autoBadge=s.trigger==='daemon'?'<span class="badge" style="background:#e1f0ff;color:#007aff;font-size:9px;margin-left:4px">auto</span>':'';
+    const projBranch=(s.project?s.project:'')+(s.git_branch?' &middot; <span style="font-family:ui-monospace,monospace;font-size:10px;color:#aeaeb2">'+s.git_branch+'</span>':'');
+    div.innerHTML=
+      '<div class="sess-date">'+s.date+'</div>'+
+      '<div><div class="sess-dot '+(s.completed?'dot-done':'dot-skip')+'"></div></div>'+
+      '<div class="sess-body">'+
+        '<div class="sess-wf">'+s.workflow_label+autoBadge+'</div>'+
+        (projBranch?'<div style="font-size:11px;color:#aeaeb2;margin-bottom:2px">'+projBranch+'</div>':'')+
+        '<div class="'+(s.goal?'sess-goal':'sess-no-goal')+'">'+(s.goal||'No goal recorded')+'</div>'+
+        (tags.length?'<div class="sess-tags">'+tags.join('')+'</div>':'')+
+      '</div>'+
+      '<div class="sess-nums">'+
+        '<div class="sess-num-main">'+fD(s.duration_min)+'</div>'+
+        (s.steps?'<div class="sess-num-sub">'+s.steps+' steps</div>':'')+
+        (cost?'<div class="sess-num-sub">'+cost+'</div>':'')+
+      '</div>';
+    list.appendChild(div);
+  }
+  const pag=document.getElementById('sess-pag');pag.innerHTML='';
+  const pages=Math.ceil(total/PAGE_SIZE);if(pages<=1)return;
+  const prev=document.createElement('button');prev.className='pg-btn';prev.textContent='Prev';prev.disabled=sp===1;
+  prev.addEventListener('click',()=>{sp--;renderS();});pag.appendChild(prev);
+  for(let p=Math.max(1,sp-2);p<=Math.min(pages,sp+2);p++){
+    const b=document.createElement('button');b.className='pg-btn'+(p===sp?' active':'');b.textContent=p;
+    b.addEventListener('click',()=>{sp=p;renderS();});pag.appendChild(b);
+  }
+  const next=document.createElement('button');next.className='pg-btn';next.textContent='Next';next.disabled=sp===pages;
+  next.addEventListener('click',()=>{sp++;renderS();});pag.appendChild(next);
+}
+['sess-workflow','sess-status'].forEach(id=>document.getElementById(id).addEventListener('change',applyF));
+document.getElementById('sess-search').addEventListener('input',applyF);
+applyF();
+</script>
+</body>
+</html>`;
+}
+
+/**
+ * Dispatch to the correct renderer based on format.
+ * Pure function: no I/O.
+ */
+function render(output: ReportOutput, format: ReportFormat): string {
+  switch (format) {
+    case 'ndjson':  return renderNdjson(output);
+    case 'json':    return renderJson(output);
+    case 'summary': return renderSummary(output);
+    case 'csv':     return renderCsv(output);
+    case 'html':    return renderHtml(output);
+  }
 }
 
 /**
@@ -371,18 +1754,19 @@ export async function executeWorktrainReportCommand(
     summary,
   };
 
-  const json = JSON.stringify(output, null, 2);
+  const format: ReportFormat = opts.format ?? 'ndjson';
+  const rendered = render(output, format);
 
   if (opts.out !== undefined) {
     try {
-      await deps.writeFile(opts.out, json);
+      await deps.writeFile(opts.out, rendered);
       deps.writeStderr(`[report] Report written to ${opts.out}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       deps.writeStderr(`[report] Error writing to ${opts.out}: ${msg}`);
     }
   } else {
-    deps.writeOutput(json);
+    deps.writeOutput(rendered);
   }
 }
 

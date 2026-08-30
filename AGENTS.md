@@ -284,6 +284,25 @@ Source: `src/cli/commands/worktrain-diagnose.ts`.
 
 ---
 
+## Session metrics and reporting
+
+`workrail report` (also aliased as `worktrain report`) exports all session metrics as structured data.
+
+```bash
+workrail report --days 30 --format html --out report.html  # human-readable HTML
+workrail report --days 30 --format csv                     # spreadsheet
+workrail report --days 30 | jq '.summary'                  # pipe NDJSON to jq
+workrail report --schedule daily                           # auto-generate nightly
+```
+
+Formats: `ndjson` (default, streaming), `json`, `summary`, `csv`, `html`.
+
+Per-session data includes: token delta, git diff (lines/files/language breakdown), commit SHAs,
+code churn, step count, retry count, outcome, and duration. Full schema:
+`docs/reference/session-metrics-reference.md`.
+
+---
+
 ## Building and reloading
 
 ```bash
