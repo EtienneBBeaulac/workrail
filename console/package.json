@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.10.0",
-    "@tanstack/react-query": "^5.102.8",
-    "@tanstack/react-router": "^1.170.35",
+    "@tanstack/react-query": "^5.103.1",
+    "@tanstack/react-router": "^1.170.38",
     "@xyflow/react": "^12.11.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -25,10 +25,10 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "jsdom": "^30.0.1",
+    "jsdom": "^30.1.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.1"
   }
 }
