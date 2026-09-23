@@ -8,7 +8,6 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import Anthropic from '@anthropic-ai/sdk';
@@ -23,7 +22,8 @@ import { buildAgentClient } from '../core/index.js';
 import { persistTokens } from '../tools/_shared.js';
 import { ActiveSessionSet } from '../active-sessions.js';
 import type { WorkflowTrigger, SessionSource, ReadFileState } from '../types.js';
-import { extractContextSlots } from '../types.js';
+import { prepareSessionWorkspace, rollbackPreparedWorkspace, type WorkspacePreparationEffects } from './workspace-preparation.js';
+import { planSessionWorkspace } from './legacy-workspace-plan.js';
 import type { PreAgentSessionResult } from './runner-types.js';
 import { WORKTREES_DIR } from './runner-types.js';
 
@@ -177,126 +177,46 @@ export async function buildPreAgentSession(
     }
   }
 
-  // ---- Worktree isolation ----
-  let sessionWorkspacePath = trigger.workspacePath;
-  let sessionWorktreePath: string | undefined;
-
-  if (effectiveSource.kind === 'pre_allocated' && effectiveSource.session.sessionWorkspacePath !== undefined) {
-    sessionWorkspacePath = effectiveSource.session.sessionWorkspacePath;
-    sessionWorktreePath = effectiveSource.session.sessionWorkspacePath;
+  // Workspace preparation does not allocate sessions or persist engine authority.
+  // The legacy adapter keeps its original ordering and owns sidecar writes.
+  const workspaceFailure = (message: string): PreAgentSessionResult => ({
+    kind: 'complete', result: { _tag: 'error', workflowId: trigger.workflowId, message, stopReason: 'error' },
+    workrailSessionId: state.workrailSessionId, handle: undefined,
+  });
+  const plan = planSessionWorkspace(trigger, sessionId, WORKTREES_DIR,
+    effectiveSource.kind === 'pre_allocated' ? effectiveSource.session.sessionWorkspacePath : undefined);
+  if (plan.kind === 'failed') {
+    console.error(`[WorkflowRunner] Read-only worktree creation failed: sessionId=${sessionId} -- ${plan.message}`);
+    return workspaceFailure(plan.message);
   }
-
-  if (trigger.branchStrategy === 'worktree') {
-    const branchPrefix = trigger.branchPrefix ?? 'worktrain/';
-    const baseBranch = trigger.baseBranch ?? 'main';
-    sessionWorkspacePath = path.join(WORKTREES_DIR, sessionId);
-    sessionWorktreePath = sessionWorkspacePath;
-
-    try {
-      await fs.mkdir(WORKTREES_DIR, { recursive: true });
-      await execFileAsync('git', ['-C', trigger.workspacePath, 'fetch', 'origin', baseBranch]);
-      await execFileAsync('git', [
-        '-C', trigger.workspacePath,
-        'worktree', 'add',
-        sessionWorkspacePath,
-        '-b', `${branchPrefix}${sessionId}`,
-        `origin/${baseBranch}`,
-      ]);
-
-      const worktreePersistResult = await persistTokens(
-        sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
-        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, context: trigger.context },
-      );
-      if (worktreePersistResult.kind === 'err') {
-        console.error(`[WorkflowRunner] Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
-        try { await execFileAsync('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', sessionWorkspacePath]); } catch { /* best effort */ }
-        return {
-          kind: 'complete',
-          result: {
-            _tag: 'error',
-            workflowId: trigger.workflowId,
-            message: `Worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`,
-            stopReason: 'error',
-          },
-          workrailSessionId: state.workrailSessionId,
-          handle: undefined,
-        };
+  const effects: WorkspacePreparationEffects = {
+    ensureDirectory: async directory => { await fs.mkdir(directory, { recursive: true }); },
+    git: async (repository, args) => { await execFileAsync('git', ['-C', repository, ...args]); },
+  };
+  const workspace = await prepareSessionWorkspace(plan.plan, effects);
+  const prefix = trigger.branchStrategy === 'read-only' ? 'Read-only worktree' : 'Worktree';
+  if (workspace.kind === 'failed') {
+    console.error(`[WorkflowRunner] ${prefix} creation failed: sessionId=${sessionId} error=${workspace.message}`);
+    return workspaceFailure(`${prefix} creation failed: ${workspace.message}`);
+  }
+  const sessionWorkspacePath = workspace.workspacePath;
+  const sessionWorktreePath = workspace.worktreePath;
+  if (workspace.kind === 'created') {
+    const persisted = await persistTokens(sessionId, continueToken ?? state.currentContinueToken, checkpointToken, workspace.worktreePath, {
+      workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, context: trigger.context,
+      ...(workspace.plan.checkout.kind === 'detached' ? { branchStrategy: 'read-only' as const } : {}),
+    });
+    if (persisted.kind === 'err') {
+      console.error(`[WorkflowRunner] ${prefix} sidecar persist failed: ${persisted.error.code} -- ${persisted.error.message}`);
+      if (await rollbackPreparedWorkspace(workspace, effects) === 'failed') {
+        console.error(`[WorkflowRunner] ${prefix} rollback failed: sessionId=${sessionId} path=${workspace.worktreePath}`);
       }
-
-      console.log(`[WorkflowRunner] Worktree created: sessionId=${sessionId} branch=${branchPrefix}${sessionId} path=${sessionWorkspacePath}`);
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      console.error(`[WorkflowRunner] Worktree creation failed: sessionId=${sessionId} error=${errMsg}`);
-      return {
-        kind: 'complete',
-        result: { _tag: 'error', workflowId: trigger.workflowId, message: `Worktree creation failed: ${errMsg}`, stopReason: 'error' },
-        workrailSessionId: state.workrailSessionId,
-        handle: undefined,
-      };
+      const detail = workspace.plan.checkout.kind === 'detached' ? persisted.error.code : `${persisted.error.code} -- ${persisted.error.message}`;
+      return workspaceFailure(`${prefix} sidecar persist failed: ${detail}`);
     }
-  } else if (trigger.branchStrategy === 'read-only') {
-    // 'read-only': checkout the PR's existing branch in an isolated worktree (--detach).
-    // No new branch is created; no push occurs after the session.
-    // The PR branch name must be in trigger.context.prBranch (injected by buildGitHubWorkflowTrigger).
-    const { prBranch } = extractContextSlots(trigger.context);
-    if (typeof prBranch !== 'string' || !prBranch) {
-      const msg = 'branchStrategy:read-only requires context.prBranch (the PR head branch). ' +
-        'Ensure the trigger uses github_prs_poll with a reviewerLogin so prBranch is injected.';
-      console.error(`[WorkflowRunner] Read-only worktree creation failed: sessionId=${sessionId} -- ${msg}`);
-      return {
-        kind: 'complete',
-        result: { _tag: 'error', workflowId: trigger.workflowId, message: msg, stopReason: 'error' },
-        workrailSessionId: state.workrailSessionId,
-        handle: undefined,
-      };
-    }
-
-    sessionWorkspacePath = path.join(WORKTREES_DIR, sessionId);
-    sessionWorktreePath = sessionWorkspacePath;
-
-    try {
-      await fs.mkdir(WORKTREES_DIR, { recursive: true });
-      // Fetch the PR branch so it's available locally before creating the worktree.
-      await execFileAsync('git', ['-C', trigger.workspacePath, 'fetch', 'origin', prBranch]);
-      await execFileAsync('git', [
-        '-C', trigger.workspacePath,
-        'worktree', 'add',
-        sessionWorkspacePath,
-        '--detach',
-        `origin/${prBranch}`,
-      ]);
-
-      const worktreePersistResult = await persistTokens(
-        sessionId, continueToken ?? state.currentContinueToken, checkpointToken, sessionWorktreePath,
-        { workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath, branchStrategy: 'read-only', context: trigger.context },
-      );
-      if (worktreePersistResult.kind === 'err') {
-        console.error(`[WorkflowRunner] Read-only worktree sidecar persist failed: ${worktreePersistResult.error.code} -- ${worktreePersistResult.error.message}`);
-        try { await execFileAsync('git', ['-C', trigger.workspacePath, 'worktree', 'remove', '--force', sessionWorkspacePath]); } catch { /* best effort */ }
-        return {
-          kind: 'complete',
-          result: {
-            _tag: 'error',
-            workflowId: trigger.workflowId,
-            message: `Read-only worktree sidecar persist failed: ${worktreePersistResult.error.code}`,
-            stopReason: 'error',
-          },
-          workrailSessionId: state.workrailSessionId,
-          handle: undefined,
-        };
-      }
-
-      console.log(`[WorkflowRunner] Read-only worktree created: sessionId=${sessionId} prBranch=${prBranch} path=${sessionWorkspacePath}`);
-    } catch (e: unknown) {
-      const errMsg = e instanceof Error ? e.message : String(e);
-      console.error(`[WorkflowRunner] Read-only worktree creation failed: sessionId=${sessionId} prBranch=${prBranch} error=${errMsg}`);
-      return {
-        kind: 'complete',
-        result: { _tag: 'error', workflowId: trigger.workflowId, message: `Read-only worktree creation failed: ${errMsg}`, stopReason: 'error' },
-        workrailSessionId: state.workrailSessionId,
-        handle: undefined,
-      };
-    }
+    const checkout = workspace.plan.checkout;
+    const label = checkout.kind === 'branch' ? `branch=${checkout.name}` : `prBranch=${checkout.ref}`;
+    console.log(`[WorkflowRunner] ${prefix} created: sessionId=${sessionId} ${label} path=${workspace.workspacePath}`);
   }
 
   // ---- Registry setup (AFTER all potentially-failing I/O -- FM1 invariant) ----

@@ -41,7 +41,7 @@ export default defineConfig({
           include: ['tests/**/*.test.ts'],
           // Exclude the knowledge-graph test -- it runs in the 'knowledge-graph' project
           // below with pool:forks to avoid DuckDB native binary + worker thread conflicts.
-          exclude: ['tests/unit/knowledge-graph.test.ts'],
+          exclude: ['tests/unit/knowledge-graph.test.ts', 'tests/performance/**'],
           pool: 'threads',
           poolOptions: {
             threads: {
@@ -65,6 +65,19 @@ export default defineConfig({
             },
           },
           ...shared,
+        },
+      },
+      // Measure latency after the functional workload has drained. Budgets stay
+      // unchanged; concurrent fixture I/O must not determine benchmark results.
+      {
+        test: {
+          name: 'performance',
+          environment: 'node',
+          include: ['tests/performance/**/*.test.ts'],
+          pool: 'threads',
+          poolOptions: { threads: { minThreads: 1, maxThreads: 1 } },
+          ...shared,
+          sequence: { groupOrder: 1 },
         },
       },
       // Knowledge graph tests use pool:forks because @duckdb/node-api is a native
