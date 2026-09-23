@@ -198,3 +198,32 @@ it.each(['missing','foreign','stale','released','stopped'] as const)('legacy eng
   expect((await readHostState(engine,enrolled.enrollment))).toEqual(loaded);
   await scheduler.close(signal());
 }));
+
+it('discovery does not authorize takeover, including after the prior runtime closes', () => fixture(async config => {
+  const { scheduler, enrolled } = await enroll(config);
+  const replacement = await createAnswerHost(config, signal());
+  const discovery = await createHostDiscovery(config, signal());
+  if (replacement.kind !== 'created' || discovery.kind !== 'created') throw new Error('composition failed');
+  try {
+    const scan = await discovery.scanner.scan(undefined, signal());
+    if (scan.kind !== 'page') throw new Error(scan.kind);
+    const entry = scan.page.entries.find(e => e.kind === 'host');
+    if (entry?.kind !== 'host') throw new Error('missing canonical host');
+    expect(await replacement.scheduler.automaticRecovery.claimUnowned(entry.pointer, signal()))
+      .toMatchObject({ kind: 'busy' });
+    expect(await scheduler.close(signal())).toEqual({ kind: 'closed' });
+    expect(await replacement.scheduler.automaticRecovery.claimUnowned(entry.pointer, signal()))
+      .toMatchObject({ kind: 'busy' });
+    // Only an explicit trusted replacement may supersede a retained owner.
+    const recovered = await replacement.scheduler.recover(entry.pointer, signal());
+    expect(recovered.kind).toBe('ready');
+    if (recovered.kind !== 'ready') throw new Error(recovered.kind);
+    expect(recovered.owner.epoch).toBeGreaterThan(enrolled.owner.epoch);
+    expect(await replacement.scheduler.releaseOwnership(enrolled.enrollment, enrolled.owner, signal()))
+      .toEqual({ kind: 'stale_owner' });
+  } finally {
+    await discovery.scanner.close(signal());
+    await replacement.scheduler.close(signal());
+    await scheduler.close(signal());
+  }
+}));
