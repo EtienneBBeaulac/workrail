@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * ReviewApprovalAdapter: interface and GitHub implementation for creating
  * PENDING draft reviews and polling for submission.
@@ -11,6 +13,19 @@
  *   between the GET check and the POST to close the race window when
  *   two sessions finish concurrently for the same PR.
  */
+
+// Unknown HTTP bodies become publication evidence only at this boundary.
+const ReviewIdentitySchema = z.object({
+  id: z.number().int().positive(),
+  user: z.object({ login: z.string().min(1) }),
+});
+const ReviewObservationSchema = z.union([
+  ReviewIdentitySchema.extend({ state: z.literal('PENDING') }),
+  ReviewIdentitySchema.extend({
+    state: z.enum(['APPROVED', 'COMMENTED', 'CHANGES_REQUESTED']),
+    submitted_at: z.string().datetime({ offset: true }),
+  }),
+]);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,11 +134,11 @@ export interface ReviewApprovalAdapter {
    *
    * Called by PendingDraftReviewPoller on each polling tick. Returns:
    * - { kind: 'pending' }: review still exists in draft/pending state
-   * - { kind: 'submitted', submittedAt }: operator published it (any non-pending state)
+   * - { kind: 'submitted', submittedAt }: validated publication by the expected reviewer
    * - { kind: 'err', error }: network/API failure (poller should log and retry)
    *
    * WHY on the adapter (not the poller): submission detection is platform-specific.
-   * GitHub polls GET /reviews and checks state !== 'PENDING'. GitLab will check
+   * GitHub validates review identity, publication state and timestamp. GitLab will check
    * a different signal (note published, branch merged, etc.). The poller is dumb.
    */
   checkSubmission(opts: CheckSubmissionOpts): Promise<CheckSubmissionResult>;
@@ -339,10 +354,6 @@ export class GitHubReviewApprovalAdapter implements ReviewApprovalAdapter {
       return { kind: 'err', error: { kind: 'network_error', message: `GET review failed: ${e instanceof Error ? e.message : String(e)}` } };
     }
 
-    // 404 means the review was deleted -- treat as submitted/gone.
-    if (response.status === 404) {
-      return { kind: 'submitted', submittedAt: new Date().toISOString() };
-    }
     if (!response.ok) {
       return { kind: 'err', error: { kind: 'api_error', message: `GET review returned HTTP ${response.status}`, status: response.status } };
     }
@@ -352,16 +363,17 @@ export class GitHubReviewApprovalAdapter implements ReviewApprovalAdapter {
       return { kind: 'err', error: { kind: 'parse_error', message: 'Failed to parse GET review response' } };
     }
 
-    const obj = body as Record<string, unknown>;
-    const state = obj['state'];
-    // Any state other than PENDING means the operator acted on the review.
-    if (state !== 'PENDING') {
-      const submittedAt = typeof obj['submitted_at'] === 'string'
-        ? obj['submitted_at']
-        : new Date().toISOString();
-      return { kind: 'submitted', submittedAt };
+    const observation = ReviewObservationSchema.safeParse(body);
+    if (!observation.success) {
+      return { kind: 'err', error: { kind: 'parse_error', message: 'Review response lacks valid publication evidence' } };
     }
-    return { kind: 'pending' };
+    const review = observation.data;
+    if (review.id !== reviewId || review.user.login.toLowerCase() !== opts.login.toLowerCase()) {
+      return { kind: 'err', error: { kind: 'parse_error', message: 'Review response identity does not match the requested review and actor' } };
+    }
+    return review.state === 'PENDING'
+      ? { kind: 'pending' }
+      : { kind: 'submitted', submittedAt: review.submitted_at };
   }
 }
 

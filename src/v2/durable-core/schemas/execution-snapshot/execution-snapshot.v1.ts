@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { JsonObject } from '../../canonical/json-types.js';
+import { JsonValueSchema } from '../../canonical/json-zod.js';
 import type { Result } from 'neverthrow';
 import { err, ok } from 'neverthrow';
 import type { Brand } from '../../../../runtime/brand.js';
@@ -166,6 +168,8 @@ export type EnginePayloadV1 = z.infer<typeof EnginePayloadV1Schema>;
  */
 const GateCheckpointPayloadV1Schema = z.object({
   stepId: z.string().min(1),
+  /** Accepted context is bound to this occurrence, including an explicitly empty context. */
+  acceptedContext: z.record(JsonValueSchema).transform(value => value as JsonObject).optional(),
   // 'confirmation_required' is a legacy value from before GateKind was a discriminated union.
   // It maps to 'coordinator_eval' at read time. New sessions write 'coordinator_eval' or 'human_approval'.
   gateKind: z.enum(['coordinator_eval', 'human_approval', 'confirmation_required']),

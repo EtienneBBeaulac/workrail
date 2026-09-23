@@ -286,9 +286,10 @@ export function buildInitialEvents(args: {
         workflowHash,
         workflowSourceKind,
         workflowSourceRef,
-        ...(extraContext?.['triggerSource'] === 'daemon' || extraContext?.['triggerSource'] === 'mcp'
-          ? { triggerSource: extraContext['triggerSource'] as 'daemon' | 'mcp' }
-          : {}),
+        // Host provenance is fixed at run creation, never re-read from worker context.
+        triggerSource: extraContext?.['triggerSource'] === 'daemon'
+          || (extraContext?.['triggerSource'] === undefined && extraContext?.['is_autonomous'] === 'true')
+          ? 'daemon' : 'mcp',
       },
     },
     {

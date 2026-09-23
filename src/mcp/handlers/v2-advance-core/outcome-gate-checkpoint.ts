@@ -1,11 +1,13 @@
 /**
  * Gate checkpoint outcome builder.
  * Handles the path when an autonomous advance reaches a step with requireConfirmation.
- * Mirrors outcome-blocked.ts in structure but is much simpler: no validation events,
- * no assessment events, no artifact outputs -- just snapshot + plan append.
+ * Accepted work and context are retained atomically with the parked gate.
  */
 
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+import { buildContextSetEvent } from '../v2-advance-events.js';
+import type { JsonObject } from '../../../v2/durable-core/canonical/json-types.js';
+import type { ValidatedAdvanceInputs } from './input-validation.js';
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionEventLogStoreError } from '../../../v2/ports/session-event-log-store.port.js';
@@ -14,10 +16,11 @@ import type { WithHealthySessionLock } from '../../../v2/durable-core/ids/with-h
 
 import { buildGateCheckpointSnapshot } from '../../../v2/durable-core/domain/gate-checkpoint-builder.js';
 import type { InternalError } from '../v2-error-mapping.js';
-import { buildAndAppendPlan } from './event-builders.js';
+import { buildAndAppendPlan, buildNotesOutputs, buildArtifactOutputs } from './event-builders.js';
 import type { AdvanceContext, AdvanceCorePorts } from './index.js';
 
 export function buildGateCheckpointOutcome(args: {
+  readonly validated: ValidatedAdvanceInputs;
   readonly snap: ExecutionSnapshotFileV1;
   readonly ctx: AdvanceContext;
   readonly stepId: string;
@@ -33,12 +36,19 @@ export function buildGateCheckpointOutcome(args: {
 
   const gateSnapshotRes = buildGateCheckpointSnapshot({
     priorSnapshot: snap,
+    acceptedContext: args.validated.mergedContext as JsonObject,
     stepId: args.stepId,
     gateKind: args.gateKind,
   });
   if (gateSnapshotRes.isErr()) {
     return neErrorAsync({ kind: 'invariant_violation' as const, message: gateSnapshotRes.error.message });
   }
+
+  const notes = buildNotesOutputs(Boolean(args.ctx.inputOutput?.notesMarkdown), attemptId, args.ctx.inputOutput);
+  const artifacts = buildArtifactOutputs(args.ctx.inputOutput?.artifacts ?? [], attemptId, ports.sha256);
+  if (artifacts.isErr()) return neErrorAsync(artifacts.error);
+
+  const contextEvent = args.validated.inputContextObj ? buildContextSetEvent({ mergedContext: args.validated.mergedContext as JsonObject, sessionId, runId, idFactory }) : null;
 
   return snapshotStore.putExecutionSnapshotV1(gateSnapshotRes.value).andThen((gateSnapshotRef) => {
     return buildAndAppendPlan({
@@ -51,9 +61,9 @@ export function buildGateCheckpointOutcome(args: {
       currentNodeId,
       attemptId,
       workflowHash,
-      extraEventsToAppend: [],
+      extraEventsToAppend: contextEvent ? [contextEvent] : [],
       snapshotRef: gateSnapshotRef,
-      outputsToAppend: [],
+      outputsToAppend: [...notes, ...artifacts.value],
       sessionStore,
       idFactory,
       lock,

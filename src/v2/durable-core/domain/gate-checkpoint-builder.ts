@@ -30,11 +30,11 @@ export type GateCheckpointPayload = NonNullable<EnginePayloadV1['gateCheckpoint'
  * gate by finding a gate_checkpoint_recorded event in the session log (Slice 3+).
  * The full paused_awaiting_gate EngineStateV1 variant is deferred to a follow-up PR.
  *
- * Invariant: gate_checkpoint nodes can only be created from 'running' state.
- * A gate cannot fire on a retry advance (blocked state) -- enforced by the
- * mode.kind === 'fresh' guard in executeAdvanceCore.
+ * Both direct submissions and corrected blocked work must visit the declared gate.
+ * A corrected blocked state is normalized to running while retaining its pending step.
  */
 export function buildGateCheckpointSnapshot(args: {
+  readonly acceptedContext?: import('../canonical/json-types.js').JsonObject;
   readonly priorSnapshot: ExecutionSnapshotFileV1;
   readonly stepId: string;
   /** The kind of gate -- 'coordinator_eval' or 'human_approval'. Stored in snapshot for coordinator routing. */
@@ -42,10 +42,10 @@ export function buildGateCheckpointSnapshot(args: {
 }): Result<ExecutionSnapshotFileV1, GateCheckpointBuildError> {
   const state = args.priorSnapshot.enginePayload.engineState as EngineStateV1;
 
-  if (state.kind !== 'running') {
+  if (state.kind !== 'running' && state.kind !== 'blocked') {
     return err({
       code: 'GATE_CHECKPOINT_UNSUPPORTED_STATE',
-      message: `Gate checkpoint nodes can only be created from running state (got: ${state.kind})`,
+      message: `Gate checkpoint nodes require running or corrected blocked state (got: ${state.kind})`,
     });
   }
 
@@ -67,6 +67,7 @@ export function buildGateCheckpointSnapshot(args: {
       // Survives snapshot serialization and round-trips correctly through the store.
       gateCheckpoint: {
         stepId: args.stepId,
+        ...(args.acceptedContext !== undefined ? { acceptedContext: args.acceptedContext } : {}),
         gateKind: args.gateKind,
       },
     },

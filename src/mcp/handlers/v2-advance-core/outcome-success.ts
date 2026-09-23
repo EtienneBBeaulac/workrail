@@ -4,6 +4,8 @@
  */
 
 import { ResultAsync as RA, errAsync as neErrorAsync } from 'neverthrow';
+import { ok } from 'neverthrow';
+import type { OutputToAppend } from '../../../v2/durable-core/domain/outputs.js';
 import type { SessionIndex } from '../../../v2/durable-core/session-index.js';
 import type { ExecutionSnapshotFileV1 } from '../../../v2/durable-core/schemas/execution-snapshot/index.js';
 import type { SessionId, RunId, NodeId, WorkflowHash } from '../../../v2/durable-core/ids/index.js';
@@ -63,6 +65,8 @@ function successNodeKind(mode: AdvanceMode): 'step' | undefined {
 }
 
 export function buildSuccessOutcome(args: {
+  /** Gate resolution consumes work already durably stored on its source node. */
+  readonly retainedWork?: { readonly outputs: readonly OutputToAppend[]; readonly sourceNodeId: NodeId };
   readonly mode: AdvanceMode;
   readonly ctx: AdvanceContext;
   readonly computed: ComputedAdvanceResults;
@@ -211,7 +215,9 @@ export function buildSuccessOutcome(args: {
       : Boolean(v.notesMarkdown);
 
     const notesOutputs = buildNotesOutputs(allowNotesAppend, attemptId, inputOutput);
-    const artifactOutputsRes = buildArtifactOutputs(inputOutput?.artifacts ?? [], attemptId, sha256);
+    const artifactOutputsRes = args.retainedWork
+      ? ok(args.retainedWork.outputs.filter(o => o.outputChannel === 'artifact'))
+      : buildArtifactOutputs(inputOutput?.artifacts ?? [], attemptId, sha256);
     if (artifactOutputsRes.isErr()) {
       return errAsync(artifactOutputsRes.error);
     }
@@ -236,7 +242,7 @@ export function buildSuccessOutcome(args: {
         sessionId: String(sessionId),
         attemptId: String(attemptId),
         artifactOutputId: String(assessmentOutput.outputId),
-        scope: { runId: String(runId), nodeId: String(currentNodeId) },
+        scope: { runId: String(runId), nodeId: String(args.retainedWork?.sourceNodeId ?? currentNodeId) },
         assessment: recordedAssessment,
         minted: { eventId: idFactory.mintEventId() },
       });
@@ -246,7 +252,7 @@ export function buildSuccessOutcome(args: {
       extraEventsToAppend.push(assessmentEventRes.value);
     }
 
-    const outputsToAppend = [...notesOutputs, ...artifactOutputsRes.value];
+    const outputsToAppend = args.retainedWork ? [] : [...notesOutputs, ...artifactOutputsRes.value];
 
     // Emit run_completed when the session finishes successfully.
     // WHY here (inside andThen): newEngineState is available, and async git I/O is

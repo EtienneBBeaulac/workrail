@@ -276,6 +276,7 @@ export const EVENT_KIND = {
   RUN_COMPLETED: 'run_completed',
   DELIVERY_RECORDED: 'delivery_recorded',
   REVIEW_DRAFT_SUBMITTED: 'review_draft_submitted',
+  GATE_RESOLUTION_RECORDED: 'gate_resolution_recorded',
   USAGE_RECORDED: 'usage_recorded',
   TOKEN_CHECKPOINT: 'token_checkpoint',
   GIT_START_RECORDED: 'git_start_recorded',
