@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
 import { setImmediate } from 'node:timers';
 import { okAsync, ok, err, ResultAsync, type Result } from 'neverthrow';
 import { PendingDraftReviewPoller } from '../../src/trigger/pending-draft-review-poller.js';
@@ -88,7 +89,7 @@ describe('publication acceptance waits for journal commitment', () => {
         expect(committed[0]!.dedupeKey).toBe('review_draft_submitted:9001');
         expect(committed[0]!.data).toEqual({ reviewId: 9001, prUrl: 'https://github.com/fixture/repo/pull/42', submittedAt: '2026-09-21T18:00:00.000Z' });
         expect(trace).toEqual(['observed', 'append-attempt', 'committed', 'submitted-callback', 'resume-callback']);
-        expect(fs.unlink).toHaveBeenCalledExactlyOnceWith('/fake/sidecars/pending-draft-daemon-run.json');
+        expect(fs.unlink).toHaveBeenCalledExactlyOnceWith(join('/fake/sidecars', 'pending-draft-daemon-run.json'));
         expect(submitted).toHaveBeenCalledExactlyOnceWith('2026-09-21T18:00:00.000Z');
         expect(resumed).toHaveBeenCalledExactlyOnceWith('daemon-run');
         if (outcome === 'overlapping-observations') {
