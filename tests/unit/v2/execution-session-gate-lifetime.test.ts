@@ -53,3 +53,23 @@ it.each(['load','callback','release'] as const)('releases exactly once after %s 
   expect(result.isErr()).toBe(true);expect(releases).toBe(1);
   if(witness)expect(witness()).toBe(false);
 });
+
+it('revokes the callback witness before asynchronous physical release completes', async () => {
+  const releasing = latch(), finishRelease = latch();
+  let witness: (() => boolean) | undefined;
+  const gate = new ExecutionSessionGateV2({
+    acquire: sessionId => okAsync({ kind: 'v2_session_lock_handle', sessionId }),
+    release: () => ResultAsync.fromSafePromise((async () => {
+      releasing.release();
+      await finishRelease.promise;
+    })()),
+  }, store);
+  const operation = gate.withHealthySessionLock(asSessionId('sess_release_window'), held => {
+    witness = () => held.assertHeld();
+    expect(witness()).toBe(true);
+    return okAsync('completed');
+  });
+  await releasing.promise;
+  try { expect(witness?.()).toBe(false); }
+  finally { finishRelease.release(); await operation; }
+});

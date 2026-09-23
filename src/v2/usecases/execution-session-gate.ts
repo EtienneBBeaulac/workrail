@@ -210,6 +210,9 @@ export class ExecutionSessionGateV2 {
       let outcome: Result<T, ExecutionSessionGateErrorV2 | E>;
       try { outcome = await doWork(); }
       catch (error) { outcome = err({ code: 'GATE_CALLBACK_FAILED', message: String(error), sessionId }); }
+      // Callback authority ends before physical cleanup, which may await I/O.
+      // A retained witness must not authorize writes during the release window.
+      this.activeWitnessTokens.delete(witnessToken);
       if (acquiredHandle) {
         const releaseFailure = (): Result<T, ExecutionSessionGateErrorV2> => err({
           code: 'LOCK_RELEASE_FAILED', message: 'Failed to release session lock', sessionId,
