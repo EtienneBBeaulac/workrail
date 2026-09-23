@@ -16,9 +16,7 @@ import type { V2ToolContext } from '../../mcp/types.js';
 import { executeContinueWorkflow } from '../../mcp/handlers/v2-execution/index.js';
 import type { SessionScope } from '../session-scope.js';
 import { makeContinueWorkflowTool, makeCompleteStepTool } from '../tools/continue-workflow.js';
-import { makeBashTool } from '../tools/bash.js';
-import { makeReadTool, makeWriteTool, makeEditTool } from '../tools/file-tools.js';
-import { makeGlobTool, makeGrepTool } from '../tools/glob-grep.js';
+import { constructWorkspaceTools } from './workspace-tools.js';
 import { makeSpawnAgentTool } from '../tools/spawn-agent.js';
 import { makeReportIssueTool } from '../tools/report-issue.js';
 import { makeSignalCoordinatorTool } from '../tools/signal-coordinator.js';
@@ -84,12 +82,12 @@ export function constructTools(
     makeContinueWorkflowTool(sid, ctx, onAdvance, onComplete, schemas, executeContinueWorkflow, emitter, workrailSid, onGateParked, { workflowId: scopeWorkflowId, goal: triggerGoal, workspacePath: triggerWorkspacePath, branchStrategy: triggerBranchStrategy, context: triggerContext }),
     // WHY sessionWorkspacePath: when branchStrategy === 'worktree', all agent file operations
     // must target the isolated worktree, not the main checkout.
-    makeBashTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeReadTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
-    makeWriteTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
-    makeGlobTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeGrepTool(sessionWorkspacePath, schemas, sid, emitter, workrailSid),
-    makeEditTool(sessionWorkspacePath, readFileStateMap, schemas, sid, emitter, workrailSid),
+    ...constructWorkspaceTools({ workspacePath: sessionWorkspacePath, readFileState: readFileStateMap,
+      runId: sid, sessionId: workrailSid, emitter }, {
+      BashParams: schemas['BashParams'], ReadParams: schemas['ReadParams'],
+      WriteParams: schemas['WriteParams'], GlobParams: schemas['GlobParams'],
+      GrepParams: schemas['GrepParams'], EditParams: schemas['EditParams'],
+    }),
     makeReportIssueTool(sid, emitter, workrailSid, undefined, onIssueReported),
     makeSpawnAgentTool(
       sid,
