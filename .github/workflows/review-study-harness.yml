@@ -1,0 +1,38 @@
+name: Review Study Harness
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Review Study Harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js (toolchain)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.14.0
+          cache: 'npm'
+
+      - name: Activate npm (corepack reads packageManager from package.json)
+        run: corepack enable npm && corepack prepare --activate
+
+      - name: Install dependencies (clean, no scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run review study harness verification
+        run: ./scripts/verify-review-study-harness
