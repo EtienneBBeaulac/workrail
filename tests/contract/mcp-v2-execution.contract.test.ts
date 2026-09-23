@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import { createTestValidationPipelineDeps } from "../helpers/v2-test-helpers.js";
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { startWorkflowForTest } from '../helpers/v2-start-workflow-helper.js';
@@ -65,6 +66,7 @@ async function createV2Context(): Promise<ToolContext> {
   return {
     workflowService,
     featureFlags,
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     v2: {

@@ -1,3 +1,4 @@
+import { RequestLifetime } from './request-lifetime.js';
 /**
  * MCP Server Composition Root
  *
@@ -12,6 +13,7 @@
  */
 
 import { z } from 'zod';
+import { BackgroundWork } from './background-work.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { zodToJsonSchema } from './zod-to-json-schema.js';
@@ -194,6 +196,7 @@ export async function createToolContext(options: {readonly initializeV2?: boolea
   }
 
   return {
+    backgroundWork: new BackgroundWork(error => console.error('[BackgroundWork]', error)),
     workflowService,
     featureFlags,
     sessionManager,
@@ -236,6 +239,7 @@ function toMcpTool<TInput extends z.ZodType>(tool: ToolDefinition<TInput>): Tool
  * internal ComposedServerInternal type instead.
  */
 export interface ComposedServer {
+  readonly closeRequests: () => Promise<void>;
   readonly server: import('@modelcontextprotocol/sdk/server/index.js').Server;
   readonly ctx: ToolContext;
   readonly rootsReader: RootsReader;
@@ -426,7 +430,8 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
   // createHandler()) is caught here and returned as an INTERNAL_ERROR response
   // rather than becoming an unhandled promise rejection that kills the process.
   // "Errors are data" / "validate at boundaries" — this is the outermost seam.
-  server.setRequestHandler(CallToolRequestSchema, async (request: any): Promise<any> => {
+  const requests = new RequestLifetime();
+  server.setRequestHandler(CallToolRequestSchema, requests.wrap( async (request: any): Promise<any> => {
     try {
       const { name, arguments: args } = request.params;
       // Capture start time at the very top so unknown-tool elapsed time is accurate.
@@ -477,7 +482,7 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
         isError: true,
       };
     }
-  });
+  }));
 
   // Register ListResources handler — exposes the workrail://tags catalog resource.
   // Agents can read tag definitions without calling list_workflows at all (~500 tokens
@@ -531,6 +536,6 @@ export async function composeServer(options?: import('../answer-v1/contracts/hos
     }
   });
 
-  return { server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
+  return { closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }
 

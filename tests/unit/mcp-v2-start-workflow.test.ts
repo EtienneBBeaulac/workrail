@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import { createTestValidationPipelineDeps } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
 import * as os from 'os';
@@ -93,6 +94,7 @@ async function mkCtxWithWorkflow(workflowId: string): Promise<{ ctx: ToolContext
       validateStepOutput: async () => ({ valid: true, issues: [], suggestions: [] }),
     } as any,
     featureFlags: null as any,
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     v2: {
@@ -152,6 +154,7 @@ async function mkRequestCtx(): Promise<ToolContext> {
       validateStepOutput: async () => ({ valid: true, issues: [], suggestions: [] }),
     } as any,
     featureFlags: EnvironmentFeatureFlagProvider.withEnv({}),
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     v2: {
@@ -222,6 +225,7 @@ async function mkCtxWithInvalidWorkflow(workflowId: string): Promise<ToolContext
       validateStepOutput: async () => ({ valid: true, issues: [], suggestions: [] }),
     } as any,
     featureFlags: null as any,
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     v2: { gate, sessionStore, snapshotStore, pinnedStore, sha256, crypto, entropy, idFactory, tokenCodecPorts, tokenAliasStore: new InMemoryTokenAliasStoreV2(), validationPipelineDeps: createTestValidationPipelineDeps() },

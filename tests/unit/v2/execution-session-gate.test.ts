@@ -154,3 +154,34 @@ describe('ExecutionSessionGateV2', () => {
     expect(res.error.health.reason.code).toBe('missing_attested_segment');
   });
 });
+
+describe('independent local gate callers', () => {
+  it('orders foreground and telemetry operations without reporting false re-entrancy', async () => {
+    const sid = asSessionId('sess_order');
+    const calls: string[] = [];
+    let release!: () => void, entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const lock: SessionLockPortV2 = {
+      acquire: sessionId => { calls.push('acquire'); return okAsync(okHandle(sessionId)); },
+      release: () => { calls.push('release'); return okAsync(undefined); },
+    };
+    const store: SessionEventLogReadonlyStorePortV2 = {
+      loadValidatedPrefix: () => okAsync({ truth: { manifest: [], events: [] }, isComplete: true, tailReason: null }),
+      load: () => okAsync({ manifest: [], events: [] }),
+    };
+    const gate = new ExecutionSessionGateV2(lock, store);
+    const { ResultAsync } = await import('neverthrow');
+    const foreground = gate.withHealthySessionLock(sid, () => ResultAsync.fromSafePromise((async () => {
+      calls.push('foreground'); entered(); await held; return 'advanced';
+    })()));
+    await started;
+    const telemetry = gate.withHealthySessionLock(sid, () => { calls.push('telemetry'); return okAsync('retained'); });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(calls).toEqual(['acquire', 'foreground']);
+    release();
+    expect((await foreground)._unsafeUnwrap()).toBe('advanced');
+    expect((await telemetry)._unsafeUnwrap()).toBe('retained');
+    expect(calls).toEqual(['acquire','foreground','release','acquire','telemetry','release']);
+  });
+});

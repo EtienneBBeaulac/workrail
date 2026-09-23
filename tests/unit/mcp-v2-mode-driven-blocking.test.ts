@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import { unwrapResponse } from '../helpers/unwrap-response.js';
 import { createTestValidationPipelineDeps, mintTestContinueToken } from '../helpers/v2-test-helpers.js';
 import { describe, expect, it } from 'vitest';
@@ -81,6 +82,7 @@ function dummyCtx(v2?: any): ToolContext {
   return {
     workflowService: null as any,
     featureFlags: null as any,
+    backgroundWork: new BackgroundWork(() => {}),
     sessionManager: null,
     httpServer: null,
     ...(v2 && { v2 }),

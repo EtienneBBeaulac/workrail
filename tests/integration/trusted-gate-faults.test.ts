@@ -64,7 +64,7 @@ describe('trusted gate durable failure boundaries', () => {
     } finally { await f.data.cleanup(); }
   });
 
-  it('refuses concurrent lock contention and replays after the single durable transition', async () => {
+  it('serializes local callers and replays after the single durable transition', async () => {
     const f = await fixture();
     try {
       const a = await createTrustedGateResolver({ toolContext: f.ctx }, signal());
@@ -72,8 +72,7 @@ describe('trusted gate durable failure boundaries', () => {
       const pending = await a.inspectPending(f.token, signal());
       if (pending.kind !== 'inspected') throw new Error(JSON.stringify(pending));
       const results = await Promise.all([a, b].map(r => r.resolveGate(pending.authority, pending.subject, approved, signal())));
-      expect(results.map(r => r.kind).sort()).toEqual(['accepted', 'refused']);
-      expect(results.find(r => r.kind === 'refused')).toMatchObject({ reason: 'session_busy' });
+      expect(results.map(r => r.kind).sort()).toEqual(['accepted', 'replay']);
       expect((await b.resolveGate(pending.authority, pending.subject, approved, signal())).kind).toBe('replay');
       const truth = (await f.ctx.v2.sessionStore.load(pending.subject.sessionId))._unsafeUnwrap();
       expect(truth.events.filter(e => e.kind === 'gate_resolution_recorded')).toHaveLength(1);

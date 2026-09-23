@@ -108,7 +108,7 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
     delete process.env.WORKRAIL_DATA_DIR;
   });
 
-  it('parallel retries with same retryContinueToken → one advances, one gets TOKEN_SESSION_LOCKED', async () => {
+  it('parallel local retries with same retryContinueToken advance once and replay', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -161,30 +161,12 @@ describe('Blocked node concurrent retries (idempotency + race safety)', () => {
         ),
       ]);
 
-      // One succeeds, one gets lock busy error (order non-deterministic)
-      const results = [retry1Res, retry2Res];
-      console.log('DEBUG results:', JSON.stringify(results.map(r => ({ type: r.type, code: r.type === 'error' ? (r as any).code : undefined, kind: r.type === 'success' ? (r as any).data?.kind : undefined }))));
-      const successResults = results.filter((r) => r.type === 'success');
-      const errorResults = results.filter((r) => r.type === 'error');
-
-      expect(successResults.length).toBe(1);
-      expect(errorResults.length).toBe(1);
-
-      const successRes = successResults[0]!;
-      const errorRes = errorResults[0]!;
-
-      // Success result should be 'ok' (advanced)
-      expect(successRes.type).toBe('success');
-      if (successRes.type === 'success') {
-        expect(successRes.data.kind).toBe('ok');
-      }
-
-      // Error result should be TOKEN_SESSION_LOCKED (retryable)
-      expect(errorRes.type).toBe('error');
-      if (errorRes.type === 'error') {
-        expect(errorRes.code).toBe('TOKEN_SESSION_LOCKED');
-        expect(errorRes.retry.kind).toBe('retryable_after_ms');
-      }
+      // The gate orders local callers; both receive the same durable transition.
+      expect(retry1Res.type).toBe('success');
+      expect(retry2Res.type).toBe('success');
+      if (retry1Res.type !== 'success' || retry2Res.type !== 'success') return;
+      expect(retry1Res.data.kind).toBe('ok');
+      expect(retry2Res.data).toEqual(retry1Res.data);
 
       // Verify: only ONE step node created (winner advances, loser didn't)
       const sessionStore = ctx.v2!.sessionEventLogStore as any;

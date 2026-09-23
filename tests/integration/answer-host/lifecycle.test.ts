@@ -147,6 +147,19 @@ it('MCP exposes only answer tools and preserves host isolation through the trans
     const viewed=await call('inspect_work',{read:first.view.read});
     expect(viewed).not.toHaveProperty('reply');
     expect(await call('answer_work',{reply:first.view.reply,answer:{notes:'last'}})).toMatchObject({kind:'recorded',view:{kind:'finished'}});
+    let enter!:()=>void, release!:()=>void;
+    const entered=new Promise<void>(resolve=>{enter=resolve;});
+    const blocked=new Promise<void>(resolve=>{release=resolve;});
+    composed.handlers.inspect_work=async()=>{enter();await blocked;return {content:[{type:'text',text:'retained'}]};};
+    const pending=client.callTool({name:'inspect_work',arguments:{read:first.view.read}});
+    await entered;
+    let drained=false;
+    const closing=composed.closeRequests().then(()=>{drained=true;});
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    expect(drained).toBe(false);
+    expect((await client.callTool({name:'inspect_work',arguments:{read:first.view.read}})).isError).toBe(true);
+    release();await pending;await closing;
+
   }finally{
     await client.close();await composed.server.close();await scheduler.close(signal());
     if(oldProfile===undefined)delete process.env.WORKRAIL_AGENT_PROFILE;else process.env.WORKRAIL_AGENT_PROFILE=oldProfile;

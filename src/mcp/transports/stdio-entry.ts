@@ -5,6 +5,7 @@
  * over stdin/stdout. Supports workspace roots via MCP roots/list protocol.
  */
 
+import { createTransportClose, drainBeforeTerminate } from './transport-lifetime.js';
 import { composeServer } from '../server.js';
 import { wireShutdownHooks, wireStdinShutdown, wireStdoutShutdown } from './shutdown-hooks.js';
 import { registerFatalHandlers, logStartup, registerGracefulShutdown } from './fatal-exit.js';
@@ -33,11 +34,18 @@ export async function startStdioServer(): Promise<void> {
   registerFatalHandlers('stdio');
   logStartup('stdio');
 
-  const { server, ctx, rootsManager } = await composeServer();
+  const { server, ctx, rootsManager, closeRequests } = await composeServer();
 
-  // Register graceful shutdown callback. The MCP stdio server owns no HTTP
-  // infrastructure, so there is nothing to stop on fatal exit.
-  registerGracefulShutdown(async () => {});
+  const close = createTransportClose({
+    closeRequests,
+    stopListener: async () => { process.stdin.pause(); },
+    closeProtocol: () => server.close(),
+    drainBackground: () => ctx.backgroundWork.close(new AbortController().signal),
+  });
+  const shutdown = () => drainBeforeTerminate(close, AbortSignal.timeout(3000));
+  registerGracefulShutdown(shutdown);
+  wireShutdownHooks({ onBeforeTerminate: shutdown });
+  wireStdinShutdown();
 
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const {
@@ -93,19 +101,4 @@ export async function startStdioServer(): Promise<void> {
       try { process.stderr.write('[Roots] Client does not support roots/list; workspace context will use server CWD fallback\n'); } catch { /* ignore */ }
     });
 
-  // -------------------------------------------------------------------------
-  // Shutdown hooks -- canonical pattern shared with http-entry.ts
-  // -------------------------------------------------------------------------
-
-  // stdio-specific: shut down when stdin closes (IDE disconnect).
-  // The MCP SDK's StdioServerTransport does not listen for stdin 'end',
-  // so server.onclose never fires on disconnect. Without this, the HTTP
-  // server keeps the process alive after stdin EOF, blocking client restart.
-  wireStdinShutdown();
-
-  wireShutdownHooks({
-    onBeforeTerminate: async () => {
-      // The MCP stdio server owns no HTTP infrastructure; nothing to stop here.
-    },
-  });
 }

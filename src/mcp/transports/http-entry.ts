@@ -11,6 +11,7 @@
  * - Validate at boundaries: HTTP and stdio use same composeServer()
  */
 
+import { createTransportClose, drainBeforeTerminate } from './transport-lifetime.js';
 import { composeServer } from '../server.js';
 import { bindWithPortFallback } from './http-listener.js';
 import { wireShutdownHooks } from './shutdown-hooks.js';
@@ -21,12 +22,16 @@ import express from 'express';
 /** Inclusive upper bound for the HTTP port scan range. Scan starts at the requested port. */
 const HTTP_PORT_SCAN_END = 3199;
 
-export async function startHttpServer(port: number): Promise<void> {
+export interface HttpServerHandle {
+  close(signal: AbortSignal): Promise<'closed' | 'incomplete' | 'failed'>;
+}
+
+export async function startHttpServer(port: number): Promise<HttpServerHandle> {
   // Register early — before composeServer() — so startup failures exit cleanly.
   registerFatalHandlers('http');
   logStartup('http', { port });
 
-  const { server, ctx } = await composeServer();
+  const { server, ctx, closeRequests } = await composeServer();
 
   // Scan from the requested port up to HTTP_PORT_SCAN_END so a second
   // concurrent WorkRail instance can bind to a different port rather than
@@ -37,9 +42,15 @@ export async function startHttpServer(port: number): Promise<void> {
 
   // Register graceful shutdown so that fatalExit() stops the MCP HTTP listener
   // cleanly before calling process.exit(1). The 3s timeout guarantees exit within a bounded window.
-  registerGracefulShutdown(async () => {
-    await listener.stop();
+  const close = createTransportClose({
+    closeRequests,
+    stopListener: () => listener.stop(),
+    closeProtocol: () => server.close(),
+    drainBackground: () => ctx.backgroundWork.close(new AbortController().signal),
   });
+  const shutdown = () => drainBeforeTerminate(close, AbortSignal.timeout(3000));
+  registerGracefulShutdown(shutdown);
+  wireShutdownHooks({ onBeforeTerminate: shutdown });
 
   const { StreamableHTTPServerTransport } = await import(
     '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -82,12 +93,5 @@ export async function startHttpServer(port: number): Promise<void> {
   // handles this correctly.
   // -------------------------------------------------------------------------
 
-  // -------------------------------------------------------------------------
-  // Shutdown hooks (shared)
-  // -------------------------------------------------------------------------
-  wireShutdownHooks({
-    onBeforeTerminate: async () => {
-      await listener.stop();
-    },
-  });
+  return { close };
 }

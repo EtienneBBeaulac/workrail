@@ -1,10 +1,10 @@
-import type { ResultAsync } from 'neverthrow';
-import { errAsync, okAsync } from 'neverthrow';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { type Result, ResultAsync, err, errAsync, okAsync } from 'neverthrow';
 import type { SessionId } from '../durable-core/ids/index.js';
 import type { WithHealthySessionLock } from '../durable-core/ids/with-healthy-session-lock.js';
 import { SESSION_LOCK_RETRY_AFTER_MS } from '../durable-core/constants.js';
 import type { SessionHealthV2 } from '../durable-core/schemas/session/session-health.js';
-import type { SessionLockPortV2 } from '../ports/session-lock.port.js';
+import type { SessionLockHandleV2, SessionLockPortV2 } from '../ports/session-lock.port.js';
 import type {
   SessionEventLogReadonlyStorePortV2,
   SessionEventLogStoreError,
@@ -30,7 +30,8 @@ export type ExecutionSessionGateErrorV2 =
  * Refactored to use ResultAsync (errors-as-data) instead of throwing GateFailure exceptions.
  */
 export class ExecutionSessionGateV2 {
-  private readonly activeSessions = new Set<SessionId>();
+  private readonly pending = new Map<SessionId, Promise<void>>();
+  private readonly ancestry = new AsyncLocalStorage<readonly { readonly sessionId: SessionId; readonly token: symbol }[]>();
   private readonly activeWitnessTokens = new Set<symbol>();
 
   constructor(
@@ -42,14 +43,39 @@ export class ExecutionSessionGateV2 {
     sessionId: SessionId,
     fn: (lock: WithHealthySessionLock) => ResultAsync<T, E>
   ): ResultAsync<T, ExecutionSessionGateErrorV2 | E> {
-    if (this.activeSessions.has(sessionId)) {
+    const ancestors = (this.ancestry.getStore() ?? []).filter(frame => this.activeWitnessTokens.has(frame.token));
+    if (ancestors.some(frame => frame.sessionId === sessionId)) {
       return errAsync({ code: 'SESSION_LOCK_REENTRANT', message: `Re-entrant gate call for session: ${sessionId}`, sessionId });
     }
+    // A nested caller must not wait while holding another session: opposite lock
+    // acquisition orders would deadlock. Independent callers can safely queue.
+    if (ancestors.length && this.pending.has(sessionId)) {
+      return errAsync({ code: 'SESSION_LOCKED', message: 'Nested session acquisition would wait while holding another session', sessionId,
+        retry: { kind: 'retryable_after_ms', afterMs: SESSION_LOCK_RETRY_AFTER_MS } });
+    }
+    const previous = this.pending.get(sessionId) ?? Promise.resolve();
+    const operation = previous.then(async () => {
+      const token = Symbol(`withHealthySessionLock:${sessionId}`);
+      this.activeWitnessTokens.add(token);
+      return this.ancestry.run([...ancestors, { sessionId, token }], async () => {
+        try { return await this.executeLocked(sessionId, fn, token); }
+        catch (error) {
+          return err<T, ExecutionSessionGateErrorV2>({ code: 'GATE_CALLBACK_FAILED', message: String(error), sessionId });
+        } finally { this.activeWitnessTokens.delete(token); }
+      });
+    });
+    const settled = operation.then(() => {}, () => {});
+    this.pending.set(sessionId, settled);
+    void settled.then(() => { if (this.pending.get(sessionId) === settled) this.pending.delete(sessionId); });
+    return new ResultAsync(operation);
+  }
 
-    this.activeSessions.add(sessionId);
-    const witnessToken = Symbol(`withHealthySessionLock:${sessionId}`);
-    this.activeWitnessTokens.add(witnessToken);
-
+  private executeLocked<T, E>(
+    sessionId: SessionId,
+    fn: (lock: WithHealthySessionLock) => ResultAsync<T, E>,
+    witnessToken: symbol,
+  ): ResultAsync<T, ExecutionSessionGateErrorV2 | E> {
+    let acquiredHandle: SessionLockHandleV2 | undefined;
     const doWork = (): ResultAsync<T, ExecutionSessionGateErrorV2 | E> => {
       return this.store
         .loadValidatedPrefix(sessionId)
@@ -116,6 +142,7 @@ export class ExecutionSessionGateV2 {
               return { code: 'LOCK_ACQUIRE_FAILED' as const, message: e.message, sessionId };
             })
         )
+        .map(handle => { acquiredHandle = handle; return handle; })
         .andThen((handle) =>
           this.store.load(sessionId)
             .mapErr((e) => {
@@ -175,44 +202,23 @@ export class ExecutionSessionGateV2 {
             });
           }
 
-          return callback
-            .andThen((result) =>
-              this.lock.release(handle)
-                .mapErr(() => ({
-                  code: 'LOCK_RELEASE_FAILED' as const,
-                  message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
-                  sessionId,
-                  retry: { kind: 'retryable_after_ms' as const, afterMs: SESSION_LOCK_RETRY_AFTER_MS },
-                }))
-                .map(() => result)
-            )
-            .orElse((callbackErr) =>
-              this.lock.release(handle)
-                .map(() => callbackErr)
-                .mapErr(() => ({
-                  code: 'LOCK_RELEASE_FAILED' as const,
-                  message: 'Failed to release session lock; retry in 1–3 seconds; if this persists >10s, ensure no other WorkRail process is running for this session.',
-                  sessionId,
-                  retry: { kind: 'retryable_after_ms' as const, afterMs: SESSION_LOCK_RETRY_AFTER_MS },
-                }))
-                .andThen((err) => errAsync(err))
-            );
+          return callback;
         });
     };
 
-    return doWork()
-      .map((result) => {
-        this.cleanupWitness(sessionId, witnessToken);
-        return result;
-      })
-      .mapErr((e) => {
-        this.cleanupWitness(sessionId, witnessToken);
-        return e;
-      });
-  }
-
-  private cleanupWitness(sessionId: SessionId, token: symbol): void {
-    this.activeSessions.delete(sessionId);
-    this.activeWitnessTokens.delete(token);
+    return new ResultAsync((async () => {
+      let outcome: Result<T, ExecutionSessionGateErrorV2 | E>;
+      try { outcome = await doWork(); }
+      catch (error) { outcome = err({ code: 'GATE_CALLBACK_FAILED', message: String(error), sessionId }); }
+      if (acquiredHandle) {
+        const releaseFailure = (): Result<T, ExecutionSessionGateErrorV2> => err({
+          code: 'LOCK_RELEASE_FAILED', message: 'Failed to release session lock', sessionId,
+          retry: { kind: 'retryable_after_ms', afterMs: SESSION_LOCK_RETRY_AFTER_MS },
+        });
+        try { if ((await this.lock.release(acquiredHandle)).isErr()) return releaseFailure(); }
+        catch { return releaseFailure(); }
+      }
+      return outcome;
+    })());
   }
 }

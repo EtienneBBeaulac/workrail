@@ -1,3 +1,4 @@
+import { BackgroundWork } from '../../src/mcp/background-work.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -89,6 +90,7 @@ export async function withTestTimeout<T>(
  */
 export function dummyToolContext(): ToolContext {
   return {
+    backgroundWork: new BackgroundWork(() => {}),
     workflowService: null as any,
     featureFlags: null as any,
     sessionManager: null,
@@ -244,6 +246,7 @@ export async function createV2ToolContext(dataDir?: LocalDataDirV2): Promise<Too
   const v2 = await createV2Dependencies(dir);
   
   return {
+    backgroundWork: new BackgroundWork(() => {}),
     workflowService: null as any,
     featureFlags: null as any,
     sessionManager: null,

@@ -1,3 +1,4 @@
+import { RequestLifetime } from './request-lifetime.js';
 import { z } from 'zod';
 import { createAnswerWorker } from '../answer-v1/worker.js';
 import type { SharedAuthorityConfig } from '../answer-v1/contracts/host-composition.js';
@@ -41,7 +42,8 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
     };
     const tools = (Object.keys(schemas) as (keyof typeof schemas)[]).map(name => ({ name, description: descriptions[name], inputSchema: zodToJsonSchema(schemas[name]) }));
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const requests = new RequestLifetime();
+    server.setRequestHandler(CallToolRequestSchema, requests.wrap( async (request, extra) => {
         const name = request.params.name;
         if (!Object.prototype.hasOwnProperty.call(handlers, name))
             return { isError: true, content: [{ type: 'text', text: 'Unknown tool: ' + name }] };
@@ -53,8 +55,8 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
         catch (error) {
             return { isError: true, content: [{ type: 'text', text: JSON.stringify({ kind: 'unavailable', detail: String(error) }) }] };
         }
-    });
-    server.onclose = () => { lifetime.abort(); void runtime.close(new AbortController().signal); };
+    }));
+    server.onclose = () => { void requests.close(); lifetime.abort(); void runtime.close(new AbortController().signal); };
     const rootsManager = new WorkspaceRootsManager();
-    return { server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
+    return { closeRequests: () => requests.close(), server, ctx, rootsManager, rootsReader: rootsManager, tools, handlers };
 }

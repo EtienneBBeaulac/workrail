@@ -312,7 +312,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
     }
   });
 
-  it('Scenario 3: Rapid Successive Advancing checks both in-process re-entrancy and sequential idempotency', async () => {
+  it('Scenario 3: Rapid Successive Advancing preserves concurrent and sequential idempotency', async () => {
     const root = await mkTempDataDir();
     const prev = process.env.WORKRAIL_DATA_DIR;
     process.env.WORKRAIL_DATA_DIR = root;
@@ -333,7 +333,7 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
 
       // 1. In-process concurrent overlap check.
       // Making concurrent identical advance calls with the exact same continueToken.
-      // The in-process ExecutionSessionGateV2 should reject the concurrent re-entrant call with SESSION_LOCK_REENTRANT.
+      // Independent local callers serialize; the second reads the first durable result.
       const [res1, res2] = await Promise.all([
         executeContinueWorkflow(
           { continueToken, output: { notesMarkdown: 'concurrent check', artifacts: [] } } as V2ContinueWorkflowInput,
@@ -345,15 +345,10 @@ describe('WorkRail Engine Stress Test & Simulation', () => {
         ),
       ]);
 
-      // Exactly one must succeed, and the other must fail with SESSION_LOCK_REENTRANT
-      const successCount = (res1.isOk() ? 1 : 0) + (res2.isOk() ? 1 : 0);
-      expect(successCount).toBe(1);
-
-      const failedRes = res1.isErr() ? res1 : res2;
-      const errorDetail = failedRes.error as any;
-      expect(errorDetail.kind).toBe('advance_execution_failed');
-      expect(errorDetail.cause.code).toBe('SESSION_LOCK_REENTRANT');
-      expect(errorDetail.cause.message).toContain('Re-entrant gate call for session:');
+      expect(res1.isOk()).toBe(true);
+      expect(res2.isOk()).toBe(true);
+      if (!res1.isOk() || !res2.isOk()) return;
+      expect(res1.value.response).toEqual(res2.value.response);
 
       // 2. Sequential rapid calls (sequential idempotency check).
       // If we call executeContinueWorkflow sequentially (waiting for the first to complete),

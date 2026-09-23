@@ -94,18 +94,16 @@ export async function handleV2StartWorkflow(
 
   return executeStartWorkflow(input, guard.ctx, { triggerSource: 'mcp' }).match(
     (result) => {
-      // Fire-and-forget: snapshot conversation tokens at workflow start.
-      void recordTokenCheckpoint(
-        result.sessionId, 'start', input.workspacePath,
-        guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
-      );
-      // Fire-and-forget: capture baseline working-tree dirty state at session start.
-      // WHY fire-and-forget (not await): must never block the MCP response.
-      // WHY here (not inside executeStartWorkflow): git I/O belongs outside the session lock.
-      void recordGitStart(
-        result.sessionId, input.workspacePath,
-        guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
-      );
+      guard.ctx.backgroundWork.submit(String(result.sessionId), async () => {
+        await recordTokenCheckpoint(
+          result.sessionId, 'start', input.workspacePath,
+          guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
+        );
+        await recordGitStart(
+          result.sessionId, input.workspacePath,
+          guard.ctx.v2.sessionStore, guard.ctx.v2.gate, guard.ctx.v2.idFactory,
+        );
+      });
       return success(attachV2ExecutionRenderMetadata({
         response: result.response,
         lifecycle: 'start',
@@ -470,22 +468,18 @@ export function executeContinueWorkflow(
               cleanResponseFormat: ctx.featureFlags?.isEnabled('cleanResponseFormat') ?? false,
             }))
             .map((response) => {
-              // Fire-and-forget: collect MCP client usage after session completion.
-              // WHY void (no await): usage collection must never block the session response.
+              // Owned background collection keeps telemetry off the response path.
               // WHY kind check + isComplete: gate_checkpoint has no isComplete field;
               // only ok/blocked variants with isComplete=true represent a finished session.
               if (response.kind !== 'gate_checkpoint' && response.isComplete) {
-                // WHY sequential (not concurrent): both functions acquire the same
-                // session gate lock. Concurrent void calls would cause the second
-                // to hit SESSION_LOCK_REENTRANT and silently fail. The lock is
-                // released after each operation, so sequential is correct and safe.
-                void (async () => {
+                // Preserve metric ordering; shutdown drains this work before storage closes.
+                ctx.backgroundWork.submit(String(sessionId), async () => {
                   await collectAndRecordUsage(sessionId, sessionStore, gate, idFactory);
                   await recordTokenCheckpoint(sessionId, 'end', undefined, sessionStore, gate, idFactory);
                   // WHY sequential (not concurrent): acquires the same session gate lock.
                   // WHY here (not inside outcome-success.ts): git diff runs outside the session lock.
                   await recordGitMetrics(sessionId, sessionStore, gate, idFactory);
-                })();
+                });
               }
               return { response };
             });
