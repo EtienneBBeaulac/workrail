@@ -21,6 +21,7 @@ import { type ToolFailure, internalSuggestion } from './v2-execution-helpers.js'
  * Every variant is handled exhaustively in the advance core.
  */
 export type InternalError =
+  | {readonly kind:'answer_owner_required'}
   | { readonly kind: 'invariant_violation'; readonly message: string }
   | { readonly kind: 'advance_apply_failed'; readonly message: string }
   | { readonly kind: 'advance_next_failed'; readonly message: string }
@@ -168,6 +169,8 @@ export function pinnedWorkflowStoreErrorToToolError(_e: PinnedWorkflowStoreError
 /** Map InternalError to ToolFailure. Exhaustive switch. */
 export function mapInternalErrorToToolError(e: InternalError): ToolFailure {
   switch (e.kind) {
+    case 'answer_owner_required':
+      return errNotRetryable('PRECONDITION_FAILED','This execution requires its answer owner. Continue through the answer host or worker.') as ToolFailure;
     case 'missing_node_or_run':
       return errNotRetryable(
         'PRECONDITION_FAILED',

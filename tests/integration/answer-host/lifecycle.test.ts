@@ -152,3 +152,36 @@ it('MCP exposes only answer tools and preserves host isolation through the trans
     if(oldProfile===undefined)delete process.env.WORKRAIL_AGENT_PROFILE;else process.env.WORKRAIL_AGENT_PROFILE=oldProfile;
   }
 }));
+
+it.each(['missing','foreign','stale','released','stopped'] as const)('legacy engine advancement cannot bypass %s answer ownership',mode=>fixture(async config=>{
+  const {scheduler,enrolled}=await enroll(config);
+  if(mode==='released')await scheduler.releaseOwnership(enrolled.enrollment,enrolled.owner,signal());
+  if(mode==='stopped')await scheduler.bindDiagnosticPorts(enrolled.enrollment).journal.commitStop(enrolled.owner,'cancelled','test stop',signal());
+  const answerOwner=mode==='missing'?undefined:mode==='foreign'?{...enrolled.owner,execution:'sess_foreign' as typeof enrolled.owner.execution}:mode==='stale'?{...enrolled.owner,epoch:enrolled.owner.epoch+1n}:enrolled.owner;
+  const {composeAnswerEngine}=await import('../../../src/answer-v1/engine-composition.js');
+  const {readHostState}=await import('../../../src/answer-v1/host-state.js');
+  const {executeAdvanceCore}=await import('../../../src/mcp/handlers/v2-advance-core/index.js');
+  const {asSessionId,asRunId,asNodeId}=await import('../../../src/v2/durable-core/ids/index.js');
+  const {asSortedEventLog}=await import('../../../src/v2/durable-core/sorted-event-log.js');
+  const {buildSessionIndex}=await import('../../../src/v2/durable-core/session-index.js');
+  const {getCachedWorkflow}=await import('../../../src/v2/usecases/workflow-object-cache.js');
+  const {hasWorkflowDefinitionShape}=await import('../../../src/types/workflow-definition.js');
+  const engine=await composeAnswerEngine(config);
+  if(engine.kind!=='ready')throw new Error(engine.kind);
+  const loaded=await readHostState(engine,enrolled.enrollment);
+  if(loaded.kind!=='loaded')throw new Error(loaded.kind);
+  const state=loaded.state;
+  const node=state.truth.events.find(e=>e.kind==='node_created'&&e.scope.nodeId===state.node);
+  if(node?.kind!=='node_created')throw new Error('missing node');
+  const snapshot=await engine.snapshotStore.getExecutionSnapshotV1(node.data.snapshotRef);
+  const pinned=await engine.pinnedStore.get(state.run.data.workflowHash);
+  const sorted=asSortedEventLog(state.truth.events);
+  if(snapshot.isErr()||!snapshot.value||pinned.isErr()||pinned.value?.sourceKind!=='v1_pinned'||!hasWorkflowDefinitionShape(pinned.value.definition)||sorted.isErr())throw new Error('missing engine input');
+  const snapshotValue=snapshot.value,workflow=getCachedWorkflow(state.run.data.workflowHash,pinned.value.definition),lockedIndex=buildSessionIndex(sorted.value);
+  const result=await engine.gate.withHealthySessionLock(asSessionId(enrolled.enrollment.execution),lock=>executeAdvanceCore({
+    answerOwner,mode:{kind:'fresh',sourceNodeId:asNodeId(state.node),snapshot:snapshotValue},truth:state.truth,sessionId:asSessionId(enrolled.enrollment.execution),runId:asRunId(state.run.scope.runId),attemptId:engine.idFactory.mintAttemptId(),workflowHash:state.run.data.workflowHash,dedupeKey:'legacy-bypass-test',inputContext:undefined,inputOutput:{notesMarkdown:'unauthorized legacy answer'},lock,pinnedWorkflow:workflow,ports:engine,lockedIndex,
+  }));
+  expect(result.isErr()).toBe(true);
+  expect((await readHostState(engine,enrolled.enrollment))).toEqual(loaded);
+  await scheduler.close(signal());
+}));

@@ -50,7 +50,7 @@ export class AnswerCommitter implements FencedAnswerCommitter {
                 return { kind: 'not_retained', reason: 'unavailable_storage' };
             const receipt = j.engine.idFactory.mintEventId() as ReceiptRef;
             let attempted = false;
-            const advanced = await executeAdvanceCore({ mode: { kind: 'fresh', sourceNodeId: asNodeId(state.node), snapshot: snapshot.value },
+            const advanced = await executeAdvanceCore({ answerOwner:owner, mode: { kind: 'fresh', sourceNodeId: asNodeId(state.node), snapshot: snapshot.value },
                 truth: state.truth, sessionId: asSessionId(state.enrollment.execution), runId: asRunId(state.run.scope.runId),
                 attemptId: j.engine.idFactory.mintAttemptId(), workflowHash: state.run.data.workflowHash, dedupeKey: `answer:${answer.invocation}`, inputContext: undefined,
                 inputOutput: { notesMarkdown: prepared.notes }, lock, pinnedWorkflow: getCachedWorkflow(state.run.data.workflowHash, pinned.value.definition),

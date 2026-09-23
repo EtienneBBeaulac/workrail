@@ -138,7 +138,7 @@ export async function createAnswerWorker(config: AnswerWorkerConfig, lifetime: A
         },
         recovery: {
             recover: (ref, signal) => track((async () => { if (!ref.startsWith('wr1.'))
-                return { kind: 'unavailable' as const, reason: 'invalid_reference' }; const result = await reconcile(ref, signal); return result.kind === 'opened' ? result.view : { kind: 'unavailable' as const, reason: result.kind }; })()),
+                return { kind: 'unavailable' as const, reason: 'invalid_reference' }; const result = await reconcile(ref, signal); return result.kind === 'opened' ? result.view : { kind: 'unavailable' as const, reason: 'reason' in result ? result.reason : result.kind }; })()),
             reconcileOpen: (attempt, signal) => track((async () => {
                 if (!attempt.startsWith('wa1.'))
                     return { kind: 'invalid_attempt' as const };
