@@ -1,19 +1,18 @@
 import { z } from 'zod';
-
 const id = z.string().min(1);
 const epoch = z.string().regex(/^[1-9][0-9]*$/);
 const raw = z.object({ providerResponseId: z.string().optional(), responseText: z.string(),
-  calls: z.array(z.object({ id: z.string(), name: z.string(), argumentsJson: z.string() }).strict().readonly()).readonly() }).strict().readonly();
+    calls: z.array(z.object({ id: z.string(), name: z.string(), argumentsJson: z.string() }).strict().readonly()).readonly() }).strict().readonly();
 /** Host lifecycle records live in the same atomic event stream as engine transitions. */
 export const AnswerHostRecordSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('enrolled'), recovery: id, initialNode: id }).strict(),
-  z.object({ kind: z.literal('owner_acquired'), epoch }).strict(),
-  z.object({ kind: z.literal('owner_released'), epoch }).strict(),
-  z.object({ kind: z.literal('delivered'), delivery: id, node: id, reply: id, epoch }).strict(),
-  z.object({ kind: z.literal('captured'), delivery: id, response: id, payload: raw }).strict(),
-  z.object({ kind: z.literal('prepared'), delivery: id, response: id, invocation: id, toolCallId: z.string(), notes: z.string() }).strict(),
-  z.object({ kind: z.literal('rejected'), delivery: id, response: id, receipt: id, reason: z.string(), encoding: z.enum(['canonical_json','raw_utf8']), rawAnswer: z.string() }).strict(),
-  z.object({ kind: z.literal('committed'), invocation: id, receipt: id, successorNode: id, notes: z.string() }).strict(),
-  z.object({ kind: z.literal('stopped'), reason: z.enum(['cancelled','gate_rejected','timeout','failed']), detail: z.string() }).strict(),
+    z.object({ kind: z.literal('enrolled'), mode: z.enum(['host_bound','unbound']), recovery: id, initialNode: id }).strict(),
+    z.object({ kind: z.literal('owner_acquired'), epoch }).strict(),
+    z.object({ kind: z.literal('owner_released'), epoch }).strict(),
+    z.object({ kind: z.literal('delivered'), delivery: id, node: id, reply: id, epoch }).strict(),
+    z.object({ kind: z.literal('captured'), delivery: id, response: id, payload: raw }).strict(),
+    z.object({ kind: z.literal('prepared'), delivery: id, response: id, invocation: id, toolCallId: z.string(), notes: z.string() }).strict(),
+    z.object({ kind: z.literal('rejected'), delivery: id, response: id, receipt: id, reason: z.string(), encoding: z.enum(['canonical_json', 'raw_utf8']), rawAnswer: z.string() }).strict(),
+    z.object({ kind: z.literal('committed'), invocation: id, receipt: id, successorNode: id, notes: z.string() }).strict(),
+    z.object({ kind: z.literal('stopped'), reason: z.enum(['cancelled', 'gate_rejected', 'timeout', 'failed']), detail: z.string() }).strict(),
 ]);
 export type AnswerHostRecord = z.infer<typeof AnswerHostRecordSchema>;

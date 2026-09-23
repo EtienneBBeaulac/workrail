@@ -1,6 +1,6 @@
 import type { ConditionalRecoveryPort } from './conditional-recovery-contract.js';
 import type { AutomaticRecoveryPort } from './automatic-recovery-contract.js';
-/** Design-only host composition ports. Brands prevent caller confusion, not runtime forgery. */
+/** Host composition ports. Brands prevent caller confusion, not runtime forgery. */
 import type {
   EvidenceSummary, HostInspectorPort, InspectorPort, OpenAttemptRef, OpenResult,
   QuestionIssue, ReceiptRef, RecoveryPort, RecoveryRef, ReplyRef, ReadRef,
@@ -203,10 +203,6 @@ export type CreateAnswerHostResult =
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 /** Proposed entrypoint at 'src/answer-v1/host.ts'. Test runner detects absence as runtime_unavailable. */
-export declare function createAnswerHost(
-  config: AnswerHostConfig,
-  signal: AbortSignal
-): Promise<CreateAnswerHostResult>;
 
 export type CreateAnswerWorkerResult =
   | Readonly<{
@@ -221,10 +217,6 @@ export type CreateAnswerWorkerResult =
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 /** Proposed entrypoint at 'src/answer-v1/worker.ts'. Test runner detects absence as runtime_unavailable. */
-export declare function createAnswerWorker(
-  config: AnswerWorkerConfig,
-  signal: AbortSignal
-): Promise<CreateAnswerWorkerResult>;
 
 /** Proposed options for the existing production composeServer entrypoint.
  * Required when WORKRAIL_AGENT_PROFILE=answers; rejected for other profiles.

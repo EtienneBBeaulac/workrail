@@ -134,10 +134,6 @@ export type CreateHostDiscoveryResult =
  * one. Root enumeration is deferred until scan, so a transient root failure is
  * retryable through that scanner rather than mistaken for an empty population.
  */
-export declare function createHostDiscovery(
-  config: HostDiscoveryConfig,
-  signal: AbortSignal
-): Promise<CreateHostDiscoveryResult>;
 
 export type {
   HostJournalStorageConfig,

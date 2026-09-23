@@ -1,4 +1,4 @@
-/** Design-only contract. No runtime implementation or behavior proof. */
+/** Agent-facing values and capabilities shared by host and worker boundaries. */
 declare const replyBrand: unique symbol;
 declare const readBrand: unique symbol;
 declare const recoveryBrand: unique symbol;
@@ -110,9 +110,12 @@ type EvidenceReadPayload =
   | Readonly<{ kind: 'refused'; reason: 'invalid_scope' | 'corrupt' | 'storage_unavailable' | 'bound_session_required' }>;
 export type EvidenceReadResult = EvidenceReadPayload & NoWorkerAuthority;
 
+/** A lost acknowledgement may follow a durable write; retry uses the original reply. */
+export type WorkerSubmissionResult = AnswerResult | Readonly<{kind:'unconfirmed';reason:'commit_uncertain'}>;
+
 /** Unbound MCP sessions only. Calls on host-bound sessions return not_retained with reason 'bound_session_required'. */
 export interface WorkerPort {
-  answer(reply: ReplyRef, answer: DomainAnswer, signal: AbortSignal): Promise<AnswerResult>;
+  answer(reply: ReplyRef, answer: DomainAnswer, signal: AbortSignal): Promise<WorkerSubmissionResult>;
 }
 
 /** Unbound MCP inspector only. Bound enrollments refuse here. */

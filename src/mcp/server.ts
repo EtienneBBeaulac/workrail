@@ -84,7 +84,7 @@ interface Tool {
  * Create the tool context from DI container.
  * This provides dependencies to all handlers.
  */
-export async function createToolContext(): Promise<ToolContext> {
+export async function createToolContext(options: {readonly initializeV2?: boolean} = {}): Promise<ToolContext> {
   const workflowService = container.resolve<WorkflowService>(DI.Services.Workflow);
   const featureFlags = container.resolve<IFeatureFlagProvider>(DI.Infra.FeatureFlags);
 
@@ -99,7 +99,7 @@ export async function createToolContext(): Promise<ToolContext> {
 
   let v2: V2Dependencies | null = null;
 
-  if (featureFlags.isEnabled('v2Tools')) {
+  if (options.initializeV2 !== false && featureFlags.isEnabled('v2Tools')) {
     const gate = container.resolve<any>(DI.V2.ExecutionGate);
     const sessionStore = container.resolve<any>(DI.V2.SessionStore);
     const snapshotStore = container.resolve<any>(DI.V2.SnapshotStore);
@@ -261,7 +261,10 @@ export interface ComposedServerInternal extends ComposedServer {
  * No transport-specific behavior (stdin watchers, roots fetching, etc).
  * Those belong in the transport-specific entry points.
  */
-export async function composeServer(): Promise<ComposedServerInternal> {
+export async function composeServer(options?: import('../answer-v1/contracts/host-composition.js').AnswerMcpCompositionOptions): Promise<ComposedServerInternal> {
+  const answers = process.env.WORKRAIL_AGENT_PROFILE === 'answers';
+  if (answers && !options?.answerAuthority) throw new Error('Answer profile requires explicit shared authority');
+  if (!answers && options) throw new Error('Answer authority is only valid for the answers profile');
   // Bootstrap DI container. No runtimeMode override -- detectRuntimeMode() in
   // container.ts is the single source of truth (reads VITEST / NODE_ENV=test).
   // Hardcoding 'production' here bypassed test isolation, causing NodeProcessSignals
@@ -269,7 +272,11 @@ export async function composeServer(): Promise<ComposedServerInternal> {
   await bootstrap();
 
   // Create tool context with all dependencies
-  const ctx = await createToolContext();
+  const ctx = await createToolContext({initializeV2: !answers});
+  if (answers && options) {
+    const {composeAnswerProfile} = await import('./answer-profile.js');
+    return composeAnswerProfile(options.answerAuthority,ctx);
+  }
 
   // Upfront console background auto-boot hook (capability-based)
   if (ctx.featureFlags.isEnabled('sessionTools')) {
