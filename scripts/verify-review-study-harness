@@ -1,0 +1,48 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+cd "$REPO_ROOT"
+
+echo "==> Running review study harness probes with Vitest..."
+"$REPO_ROOT/node_modules/.bin/vitest" run \
+  -c "$REPO_ROOT/experiments/answer-driven-execution/vitest.config.js" \
+  experiments/answer-driven-execution/stage-b-scorer-regression.probe.ts \
+  experiments/answer-driven-execution/stage-b-scorer.probe.ts \
+  experiments/answer-driven-execution/study-manifest-failure.probe.ts \
+  experiments/answer-driven-execution/study-manifest-limits.probe.ts \
+  experiments/answer-driven-execution/study-runner-boundaries.probe.ts \
+  experiments/answer-driven-execution/study-runner-fixture.probe.ts \
+  experiments/answer-driven-execution/study-runner.probe.ts \
+  experiments/answer-driven-execution/trial-deadline.probe.ts \
+  experiments/answer-driven-execution/trial-executor-regression.probe.ts \
+  experiments/answer-driven-execution/trial-executor.probe.ts \
+  experiments/answer-driven-execution/trial-preflight-boundaries.probe.ts \
+  experiments/answer-driven-execution/trial-preflight.probe.ts
+
+echo "==> Running strict TypeScript checks..."
+"$REPO_ROOT/node_modules/.bin/tsc" \
+  --ignoreConfig \
+  --noEmit \
+  --strict \
+  --skipLibCheck \
+  --target es2022 \
+  --module nodenext \
+  --moduleResolution nodenext \
+  --types node \
+  experiments/answer-driven-execution/stage-b-scorer.mts \
+  experiments/answer-driven-execution/state-constraints.check.ts \
+  experiments/answer-driven-execution/study-domain-schemas.mts \
+  experiments/answer-driven-execution/study-journal-schema.mts \
+  experiments/answer-driven-execution/study-manifest-failure.check.ts \
+  experiments/answer-driven-execution/study-manifest.mts \
+  experiments/answer-driven-execution/study-runner-normalization.mts \
+  experiments/answer-driven-execution/study-runner-stage-types.check.ts \
+  experiments/answer-driven-execution/study-runner.mts \
+  experiments/answer-driven-execution/trial-executor.mts \
+  experiments/answer-driven-execution/trial-preflight.mts \
+  experiments/answer-driven-execution/usability-scorer.mts
+
+echo "==> Review study harness verification completed successfully."
