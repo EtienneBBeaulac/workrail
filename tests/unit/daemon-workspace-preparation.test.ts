@@ -2,12 +2,10 @@ import { it, expect } from 'vitest';
 import { mkdtemp, mkdir, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { gitExec as git } from '../helpers/git-test-utils.js';
 import { prepareSessionWorkspace, rollbackPreparedWorkspace, type WorkspacePreparationEffects } from '../../src/daemon/runner/workspace-preparation.js';
 import { planSessionWorkspace } from '../../src/daemon/runner/legacy-workspace-plan.js';
 import { asRunId } from '../../src/daemon/daemon-events.js';
-const exec = promisify(execFile);
 
 it('borrows an inherited workspace without invoking effects, while explicit strategies retain precedence', async () => {
   const trigger = { workspacePath: '/repository' };
@@ -38,7 +36,6 @@ it('stops before creation when fetching fails, without claiming workspace owners
 it.each(['branch', 'detached'] as const)('creates and rolls back a real %s worktree without allocating an engine session', async kind => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'workrail-preparation-')));
   const repository = join(root, 'repo'), origin = join(root, 'origin.git'), hooks = join(root, 'hooks');
-  const git = async (cwd: string, args: readonly string[]) => exec('git', ['-C', cwd, ...args]);
   try {
     await mkdir(repository); await mkdir(hooks);
     await git(repository, ['init', '-b', 'main']);
@@ -46,7 +43,7 @@ it.each(['branch', 'detached'] as const)('creates and rolls back a real %s workt
     await git(repository, ['config', 'user.name', 'Test']);
     await git(repository, ['config', 'core.hooksPath', hooks]);
     await git(repository, ['-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Fixture']);
-    await exec('git', ['clone', '--bare', repository, origin]);
+    await git(root, ['clone', '--bare', repository, origin]);
     await git(repository, ['remote', 'add', 'origin', origin]);
     const effects: WorkspacePreparationEffects = {
       ensureDirectory: async directory => { await mkdir(directory, { recursive: true }); },
