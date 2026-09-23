@@ -1,0 +1,136 @@
+import 'reflect-metadata';
+import type Anthropic from '@anthropic-ai/sdk';
+import { it, expect } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createAnswerHost } from '../../../src/answer-v1/host.js';
+import { createDaemonAnswerModel } from '../../../src/daemon/runner/answer-model.js';
+import type { AgentTool, AgentClientInterface } from '../../../src/daemon/agent-loop.js';
+
+const answer = (id: string, notes: string): Anthropic.ToolUseBlock => ({ type: 'tool_use', id, name: 'answer_work', input: { answer: { notes } } });
+const message = (content: Anthropic.ContentBlock[]): Anthropic.Message => ({
+  id: 'provider-response', type: 'message', role: 'assistant', model: 'fake', stop_sequence: null,
+  stop_reason: content.some(b => b.type === 'tool_use') ? 'tool_use' : 'end_turn', content,
+  usage: { input_tokens: 1, output_tokens: 1 },
+});
+const prompt = { instruction: 'First task', issues: [], retainedSummaries: [] };
+const signal = () => AbortSignal.timeout(15000);
+const options = (client: AgentClientInterface, workspaceTools: readonly AgentTool[] = []) => ({
+  client, workspaceTools, modelId: 'fake', systemPrompt: 'Use workspace tools then answer_work.',
+});
+const tool = (name: string, execute: AgentTool['execute']): AgentTool => ({ name, execute,
+  label: name, description: name, inputSchema: { type: 'object', properties: {} } });
+
+it('hands the whole answer response to the host before executing any of its tools', async () => {
+  let executions = 0, requests = 0;
+  const created = createDaemonAnswerModel(options({ messages: { async create() {
+    if (++requests > 1) return message([{ type: 'text', text: 'End' }]);
+    return message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }, answer('one', 'first'), answer('two', 'second')]);
+  } } }, [tool('Read', async () => { executions++; return { content: [], details: null }; })]));
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toMatchObject({ kind: 'completed', response: {
+    providerResponseId: 'provider-response', calls: [{ id: 'read' }, { id: 'one' }, { id: 'two' }],
+  } });
+  expect(executions).toBe(0);
+});
+
+it('executes workspace-only responses before handing off an answer', async () => {
+  let executions = 0, requests = 0;
+  const created = createDaemonAnswerModel(options({ messages: { async create(params) {
+    requests++;
+    if (requests === 1) return message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]);
+    expect(JSON.stringify(params.messages)).toContain('workspace evidence');
+    return message([answer('done', 'supported answer')]);
+  } } }, [tool('Read', async () => { executions++; return { content: [{ type: 'text', text: 'workspace evidence' }], details: null }; })]));
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toMatchObject({ kind: 'completed' });
+  expect([requests, executions]).toEqual([2, 1]);
+});
+
+it.each(['complete_step', 'continue_workflow', 'new_execution_tool'])('refuses %s at composition', name => {
+  expect(createDaemonAnswerModel(options({ messages: { async create() { throw new Error('must not infer'); } } },
+    [tool(name, async () => ({ content: [], details: null }))]))).toEqual({ kind: 'refused', reason: 'unsupported_workspace_tool' });
+});
+
+it('propagates cancellation and distinguishes a model ending without an answer', async () => {
+  const created = createDaemonAnswerModel(options({ messages: { async create() { return message([{ type: 'text', text: 'No answer.' }]); } } }));
+  if (created.kind !== 'created') throw new Error(created.kind);
+  const aborted = new AbortController(); aborted.abort();
+  expect(await created.model.generate(prompt, aborted.signal)).toEqual({ kind: 'cancelled' });
+  expect(await created.model.generate(prompt, signal())).toMatchObject({ kind: 'unavailable' });
+});
+
+it('uses real host capture and recovery so a batch advances once and restart needs no inference', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'daemon-answer-host-'));
+  let requests = 0;
+  const seen: string[] = [];
+  const model = createDaemonAnswerModel(options({ messages: { async create(params) {
+    requests++; seen.push(JSON.stringify(params));
+    return message([answer('first', 'evidence one'), answer('pre-generated-successor', 'must not consume second')]);
+  } } }));
+  if (model.kind !== 'created') throw new Error(model.kind);
+  const authority = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },
+    keyringPath: join(root, 'keys', 'keyring.json'), workflowStoragePath: join(root, 'workflows') };
+  try {
+    await mkdir(authority.workflowStoragePath);
+    await writeFile(join(authority.workflowStoragePath, 'daemon-answer.json'), JSON.stringify({
+      id: 'daemon-answer', name: 'Daemon answer', description: 'Two tasks', version: '1.0.0',
+      steps: [{ id: 'one', title: 'First', prompt: 'FIRST_ONLY' }, { id: 'two', title: 'Second', prompt: 'SUCCESSOR_ONLY' }],
+    }));
+    let suppressCaptureAck = true;
+    const host = await createAnswerHost({ ...authority, model: model.model, faultSeam: { async intercept(boundary) {
+      if (boundary === 'after_capture_append' && suppressCaptureAck) {
+        suppressCaptureAck = false; return { kind: 'simulate_uncertain', message: 'Lost capture acknowledgment' };
+      }
+      return { kind: 'proceed' };
+    } } }, signal());
+    if (host.kind !== 'created') throw new Error(host.kind);
+    const enrolled = await host.scheduler.enroll({ workflowId: 'daemon-answer', goal: 'test', workspacePath: root }, signal());
+    if (enrolled.kind !== 'enrolled') throw new Error(JSON.stringify(enrolled));
+    const pointer = host.scheduler.hydrator.dehydrate(enrolled.enrollment);
+    expect(await enrolled.runner.runTurn(signal())).toMatchObject({ kind: 'unconfirmed', uncertainty: { stage: 'capture' } });
+    await host.scheduler.close(signal());
+    const reopened = await createAnswerHost({ ...authority, model: model.model }, signal());
+    if (reopened.kind !== 'created') throw new Error(reopened.kind);
+    const recovered = await reopened.scheduler.recover(pointer, signal());
+    if (recovered.kind !== 'ready') throw new Error(JSON.stringify(recovered));
+    expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'question', instruction: 'SUCCESSOR_ONLY' } });
+    expect(requests).toBe(1);
+    expect(seen[0]).not.toContain('SUCCESSOR_ONLY');
+    expect(seen[0]).not.toContain('continueToken');
+    expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'finished' } });
+    expect(requests).toBe(2);
+    expect(seen[1]).toContain('SUCCESSOR_ONLY');
+    await reopened.scheduler.close(signal());
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+it('cancels an in-flight provider request without accepting its late answer', async () => {
+  const control = new AbortController();
+  let entered!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  let providerSignal: AbortSignal | undefined;
+  const created = createDaemonAnswerModel(options({ messages: { async create(_params, transport) {
+    providerSignal = transport?.signal;
+    entered();
+    await new Promise<void>(resolve => transport?.signal?.addEventListener('abort', () => resolve(), { once: true }));
+    return message([answer('late', 'late answer')]);
+  } } }));
+  if (created.kind !== 'created') throw new Error(created.kind);
+  const result = created.model.generate(prompt, control.signal);
+  await waiting;
+  control.abort();
+  expect(await result).toEqual({ kind: 'cancelled' });
+  expect(providerSignal?.aborted).toBe(true);
+});
+
+it('returns provider failure as data and refuses duplicate workspace names', async () => {
+  const client: AgentClientInterface = { messages: { async create() { throw new Error('provider unavailable'); } } };
+  const created = createDaemonAnswerModel(options(client));
+  if (created.kind !== 'created') throw new Error(created.kind);
+  expect(await created.model.generate(prompt, signal())).toMatchObject({ kind: 'unavailable', detail: 'provider unavailable' });
+  const read = tool('Read', async () => ({ content: [], details: null }));
+  expect(createDaemonAnswerModel(options(client, [read, read]))).toEqual({ kind: 'refused', reason: 'duplicate_tool_name' });
+});

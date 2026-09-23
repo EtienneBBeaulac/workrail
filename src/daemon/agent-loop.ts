@@ -202,6 +202,12 @@ export interface AgentLoopCallbacks {
 
 /** Options for constructing an AgentLoop. */
 export interface AgentLoopOptions {
+  /** A host-owned answer ends this model turn before any tool in its response runs.
+   * The host captures the whole response durably before selecting or committing it. */
+  readonly responseHandoff?: {
+    readonly toolName: string;
+    readonly accept: (response: Anthropic.Message) => void;
+  };
   /** System prompt sent with every LLM request. */
   readonly systemPrompt: string;
   /** Tools available to the LLM. */
@@ -590,6 +596,13 @@ export class AgentLoop {
       const toolUseBlocks = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
       );
+
+      const handoff = this._options.responseHandoff;
+      if (handoff && toolUseBlocks.some(block => block.name === handoff.toolName)) {
+        handoff.accept(response);
+        await this._emitEvent({ type: 'agent_end' });
+        return;
+      }
 
       if (stopReason === 'tool_use' || toolUseBlocks.length > 0) {
         const toolResults = await this._executeTools(toolUseBlocks);
