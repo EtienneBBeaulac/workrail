@@ -62,6 +62,20 @@ describe('LocalSessionLockV2 stale lock detection', () => {
     vi.restoreAllMocks();
   });
 
+  it('preserves a live lock across same-worker instance recomposition', async () => {
+    const fs = new InMemoryFileSystem();
+    const clock = new FakeTimeClockV2();
+    const first = new LocalSessionLockV2(fakeDataDir, fs, clock);
+    const second = new LocalSessionLockV2(fakeDataDir, fs, clock);
+    const acquired = await first.acquire(SESSION_ID);
+    expect(acquired.isOk()).toBe(true);
+    const before = await fs.readFileUtf8(LOCK_PATH);
+    await acquireExpectBusy(second);
+    expect(await fs.readFileUtf8(LOCK_PATH)).toEqual(before);
+    if (acquired.isOk()) expect((await first.release(acquired.value)).isOk()).toBe(true);
+    await acquireExpectSuccess(second);
+  });
+
   it('clears a stale lock (dead PID) and acquires successfully', async () => {
     const fs = new InMemoryFileSystem();
     const clock = new FakeTimeClockV2();

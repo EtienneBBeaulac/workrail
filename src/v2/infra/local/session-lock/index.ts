@@ -20,11 +20,7 @@ import type { SessionLockHandleV2, SessionLockError, SessionLockPortV2 } from '.
  *   worker's lock from being incorrectly cleared by the other worker.
  */
 export class LocalSessionLockV2 implements SessionLockPortV2 {
-  /**
-   * Unique ID for this specific instance lifetime. Written into lock files and compared
-   * during staleness detection to distinguish "my own live lock" (same instanceId = BUSY)
-   * from "my previous crashed run" (different instanceId = stale, safe to clear).
-   */
+  /** Identifies the acquiring instance for diagnostics, never proof of process death. */
   private readonly instanceId = randomUUID();
 
   constructor(
@@ -37,17 +33,9 @@ export class LocalSessionLockV2 implements SessionLockPortV2 {
   /**
    * Remove the lock file if it is stale (no longer owned by a live caller).
    *
-   * Staleness rules (5 cases):
-   *   1. Same PID + same workerId + different instanceId: own lock from a previous crash --
-   *      treat as stale so we can re-acquire cleanly on restart (self-eviction is
-   *      intentional here; each construction of LocalSessionLockV2 gets a fresh instanceId).
-   *   2. Same PID + same workerId + same instanceId: this instance's own live lock --
-   *      NOT stale (would be a double-acquire; caller should release before re-acquiring).
-   *   3. Same PID + different workerId: a live sibling worker in this process holds the
-   *      lock -- NOT stale, leave it alone (SESSION_LOCK_BUSY via openExclusive).
-   *   4. Different PID, process dead (ESRCH): genuinely stale -- clear it.
-   *   5. Different PID, process alive: another process holds the lock -- NOT stale.
-   *   Backward compat: No workerId in file (old format): fall back to PID-only logic.
+   * A different instance or worker in the same process can still hold a live lock.
+   * Only a confirmed dead process permits stale-lock recovery. Recomposition does
+   * not establish that the previous instance has finished its critical section.
    *
    * Uses `process.kill(pid, 0)` -- signal 0 checks process existence without
    * sending a signal. Throws ESRCH when the PID does not exist.
@@ -67,26 +55,8 @@ export class LocalSessionLockV2 implements SessionLockPortV2 {
           if (pid === null) return false;
 
           const myPid = this.clock.getPid();
-          const lockWorkerId = typeof data.workerId === 'string' ? data.workerId : undefined;
+          if (pid === myPid) return false;
 
-          if (pid === myPid && lockWorkerId !== undefined) {
-            if (lockWorkerId !== this.workerId) {
-              // Case 3: different worker, same process -- live sibling holds this lock.
-              // Do NOT check process.kill: the process is alive (it's this very process).
-              return false; // not stale
-            }
-            // Same PID + same workerId: distinguish live lock from previous-crash lock via instanceId.
-            const lockInstanceId = typeof data.instanceId === 'string' ? data.instanceId : undefined;
-            if (lockInstanceId === this.instanceId) {
-              // Case 2: this instance's own live lock -- NOT stale (double-acquire attempt).
-              return false; // not stale -- caller should release before re-acquiring
-            }
-            // Case 1: different instanceId means previous crash -- self-evict for restart recovery.
-            return true; // stale -- clear it
-          }
-
-          // Backward compat + Cases 4/5: different PID, or same PID with no workerId (old format).
-          // Fall back to PID-only logic: check if the owning process is still alive.
           try {
             process.kill(pid, 0); // throws ESRCH if dead, EPERM if alive but no permission
             return false; // process alive -- not stale
