@@ -179,6 +179,25 @@ export const DomainEventV1Schema = z.discriminatedUnion('kind', [
     }),
   }),
   DomainEventEnvelopeV1Schema.extend({
+    kind: z.literal('gate_resolution_recorded'),
+    scope: z.object({ runId: z.string().min(1), nodeId: z.string().min(1) }),
+    data: z.union([
+      z.object({
+        workRevision: z.string().min(1), receipt: z.string().min(1),
+        decision: z.object({ kind: z.literal('approved'), rationale: z.string(), evidenceRef: z.string().optional() }).strict(),
+        continuation: z.object({ kind: z.literal('available'), token: z.string().min(1) }).strict(),
+      }).strict(),
+      z.object({
+        workRevision: z.string().min(1), receipt: z.string().min(1),
+        decision: z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('rejected'), rationale: z.string() }).strict(),
+          z.object({ kind: z.literal('uncertain'), rationale: z.string() }).strict(),
+        ]),
+        continuation: z.object({ kind: z.literal('held') }).strict(),
+      }).strict(),
+    ]),
+  }),
+  DomainEventEnvelopeV1Schema.extend({
     kind: z.literal('run_started'),
     scope: z.object({ runId: z.string().min(1) }),
     data: RunStartedDataV1Schema,

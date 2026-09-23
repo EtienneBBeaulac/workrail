@@ -4,6 +4,23 @@
 
 WorkRail v2 authoring is **JSON-first** and is designed for **determinism**, **rewind-safety**, and **resumability**.
 
+## Confirmation gates in autonomous execution
+
+Declare `requireConfirmation` on the step whose completed work needs review. WorkRail
+validates direct and corrected submissions before parking at that gate. The accepted
+notes, artifacts and context remain durable while the gate is held. Conditions use
+merged submission context; artifact fields do not automatically become context keys.
+
+Gate policy uses the run's host provenance, so changing `is_autonomous` in worker
+context cannot turn confirmation off. Legacy runs without provenance are held at
+declared gates. Interactive MCP runs retain their existing confirmation behavior.
+
+The host-only trusted resolver binds its decision to the session, run, gate occurrence
+and retained work revision. Approval records the successor and replay receipt together.
+Uncertainty keeps work pending; rejection keeps the revision held. Worker tools do not
+expose this authority. Publication of a GitHub review is separate evidence: approved,
+commented and changes-requested reviews can all be published without approving the PR.
+
 ## Canonical references (v2)
 
 - **Authoring model + JSON examples:** `docs/design/workflow-authoring-v2.md`

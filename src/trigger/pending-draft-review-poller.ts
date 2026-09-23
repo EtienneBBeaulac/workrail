@@ -25,7 +25,7 @@ import type { ExecutionSessionGateV2 } from '../v2/usecases/execution-session-ga
 import { asSessionId } from '../v2/durable-core/ids/index.js';
 import { buildSessionIndex } from '../v2/durable-core/session-index.js';
 import { asSortedEventLog } from '../v2/durable-core/sorted-event-log.js';
-import { okAsync } from 'neverthrow';
+import { okAsync, errAsync } from 'neverthrow';
 import { EVENT_KIND } from '../v2/durable-core/constants.js';
 import { DAEMON_SESSIONS_DIR } from '../daemon/tools/_shared.js';
 
@@ -86,7 +86,9 @@ const DEFAULT_POLL_INTERVAL_MS = 45_000;
 
 export class PendingDraftReviewPoller {
   private _intervalHandle: ReturnType<typeof setInterval> | undefined = undefined;
-  private _stopped = false;
+  private _phase: 'idle' | 'checking' | 'committing' | 'stopped' = 'idle';
+
+  private isStopped(): boolean { return this._phase === 'stopped'; }
 
   constructor(
     private readonly adapter: ReviewApprovalAdapter,
@@ -98,7 +100,7 @@ export class PendingDraftReviewPoller {
    * Safe to call only once; subsequent calls are no-ops.
    */
   start(): void {
-    if (this._stopped || this._intervalHandle !== undefined) return;
+    if (this.isStopped() || this._intervalHandle !== undefined) return;
     const intervalMs = this.opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this._intervalHandle = setInterval(() => {
       void this._tick().catch((e: unknown) => {
@@ -115,7 +117,7 @@ export class PendingDraftReviewPoller {
    * Stop polling. Safe to call before start() or after already stopped.
    */
   stop(): void {
-    this._stopped = true;
+    this._phase = 'stopped';
     if (this._intervalHandle !== undefined) {
       clearInterval(this._intervalHandle);
       this._intervalHandle = undefined;
@@ -123,7 +125,13 @@ export class PendingDraftReviewPoller {
   }
 
   private async _tick(): Promise<void> {
-    if (this._stopped) return;
+    if (this._phase !== 'idle') return;
+    this._phase = 'checking';
+    try { await this.observeAndCommit(); }
+    finally { if (!this.isStopped()) this._phase = 'idle'; }
+  }
+
+  private async observeAndCommit(): Promise<void> {
 
     const checkOpts: CheckSubmissionOpts = {
       prNumber: this.opts.prNumber,
@@ -134,6 +142,7 @@ export class PendingDraftReviewPoller {
     };
 
     const result = await this.adapter.checkSubmission(checkOpts);
+    if (this.isStopped()) return;
 
     if (result.kind === 'err') {
       console.warn(
@@ -149,8 +158,8 @@ export class PendingDraftReviewPoller {
       return; // Still waiting.
     }
 
-    // Submitted. Stop polling before doing I/O to avoid double-fire.
-    this.stop();
+    // The phase excludes overlapping ticks while publication is uncommitted.
+    this._phase = 'committing';
 
     const { submittedAt } = result;
     console.log(
@@ -162,14 +171,20 @@ export class PendingDraftReviewPoller {
 
     // Append review_draft_submitted event to session log (same gate-lock pattern
     // as recordCommitShasStage in delivery-pipeline.ts).
-    if (this.opts.workrailSessionId) {
+    if (!this.opts.workrailSessionId) return;
+    {
       const sid = asSessionId(this.opts.workrailSessionId);
-      await this.opts.gate.withHealthySessionLock(sid, (lock) =>
+      const committed = await this.opts.gate.withHealthySessionLock(sid, (lock) =>
         this.opts.sessionStore.load(sid).andThen((truth) => {
           const sortedResult = asSortedEventLog(truth.events);
-          if (sortedResult.isErr()) return okAsync(undefined as void);
+          if (sortedResult.isErr()) return errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: sortedResult.error.message });
+          if (this.isStopped()) return okAsync(false);
           const index = buildSessionIndex(sortedResult.value);
-          const runId = this.opts.daemonSessionId;
+          // Legacy sidecars carry a session, not an engine run. Resolve only an
+          // unambiguous persisted run; a daemon UUID is never an engine identity.
+          const runs = [...index.runStartedByRunId.keys()];
+          if (runs.length !== 1) return errAsync({ code: 'SESSION_STORE_IO_ERROR' as const, message: 'Publication requires an unambiguous engine run' });
+          const runId = runs[0]!;
           const event = {
             v: 1 as const,
             eventId: this.opts.mintEventId(),
@@ -185,19 +200,22 @@ export class PendingDraftReviewPoller {
             },
             timestampMs: Date.now(),
           };
-          return this.opts.sessionStore.append(lock, { events: [event], snapshotPins: [] });
+          return this.opts.sessionStore.append(lock, { events: [event], snapshotPins: [] }).map(() => true);
         })
       ).match(
-        () => { /* success -- no-op */ },
+        (accepted) => accepted,
         (err) => {
           console.warn(
             `[PendingDraftReviewPoller] Failed to append review_draft_submitted event: ` +
             `daemonSessionId=${this.opts.daemonSessionId} err=${JSON.stringify(err)}`,
           );
+          return false;
         },
       );
+      if (!committed || this.isStopped()) return;
     }
 
+    this.stop();
     // Delete pending-draft sidecar.
     const sessionsDir = this.opts.sessionsDir ?? DAEMON_SESSIONS_DIR;
     const sidecarPath = path.join(sessionsDir, `pending-draft-${this.opts.daemonSessionId}.json`);
@@ -211,7 +229,7 @@ export class PendingDraftReviewPoller {
     // Notify caller that submission was detected.
     try { this.opts.onSubmitted?.(submittedAt); } catch { /* fire-and-forget */ }
 
-    // Resume a gate-parked session now that the operator has approved via review submission.
+    // Resume a gate-parked session after publication was durably recorded. Publication is not PR approval.
     // Fire-and-forget -- gate resume is best-effort; failure does not undo the review posting.
     try { this.opts.onGateResume?.(this.opts.daemonSessionId); } catch { /* fire-and-forget */ }
   }

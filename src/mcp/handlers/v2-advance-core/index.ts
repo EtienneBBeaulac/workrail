@@ -306,16 +306,11 @@ export function executeAdvanceCore(args: {
     // ── 5b. Gate checkpoint path ────────────────────────────────────────
     //
     // WHY after blocked: gate fires only on valid output (no blocking reasons).
-    // WHY mode.kind === 'fresh' guard: retries must not re-trigger the gate. A
-    // session retrying after a prior block gets a normal success advance here.
-    // WHY is_autonomous context key (not autonomy preference): daemon sessions always
-    // start with 'guided' autonomy (defaultPreferences) -- using the preference would
-    // make this guard permanently false. The daemon injects is_autonomous: 'true' as
-    // a context key at session start; MCP sessions never set it. This is the correct
-    // way to detect daemon vs MCP sessions at advance time.
-
-    if (mode.kind === 'fresh' && v.mergedContext['is_autonomous'] === 'true' && isGateRequired(v.requireConfirmation, v.mergedContext as ConditionContext)) {
-      return buildGateCheckpointOutcome({ snap, ctx, stepId: v.pendingStep.stepId, lock, ports, lockedIndex: args.lockedIndex, gateKind: v.gateKind ?? 'coordinator_eval' });
+    // Run provenance is immutable host evidence. Correcting rejected work must
+    // still visit the same gate, and worker context cannot disable that policy.
+    const host = args.lockedIndex.runStartedByRunId.get(String(runId))?.data.triggerSource;
+    if (host !== 'mcp' && isGateRequired(v.requireConfirmation, v.mergedContext as ConditionContext)) {
+      return buildGateCheckpointOutcome({ validated: v, snap, ctx, stepId: v.pendingStep.stepId, lock, ports, lockedIndex: args.lockedIndex, gateKind: v.gateKind ?? 'coordinator_eval' });
     }
 
     // ── 6. Success path ─────────────────────────────────────────────────

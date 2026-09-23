@@ -1006,8 +1006,8 @@
             "step.confirmation",
             "workflow.authoring"
           ],
-          "rule": "The context variable referenced in a requireConfirmation condition must be set by a prior step, not by the gated step itself.",
-          "why": "requireConfirmation is evaluated when the engine advances INTO the step, before the step runs. A variable set by the gated step is not yet in context when the condition fires -- it will be undefined and the condition will silently produce the wrong result.",
+          "rule": "Declare requireConfirmation on the work that needs review. Autonomous execution evaluates its condition after validating that work against the merged submission context.",
+          "why": "A valid direct or corrected submission parks at the declared gate before advancing. WorkRail retains the accepted notes, artifacts and context; only the trusted host resolver can authorize the successor.",
           "enforcement": [
             "advisory"
           ],
@@ -1015,15 +1015,15 @@
             {
               "kind": "runtime",
               "path": "src/mcp/handlers/v2-advance-core/index.ts",
-              "note": "isGateRequired() is called at advance time, before the step executes."
+              "note": "isGateRequired() runs after submission validation and before successful advancement. Host admission comes from immutable run provenance."
             }
           ],
           "checks": [
-            "The condition var must reference a context key set by a previous step via inputContext.",
-            "Do not reference output artifact fields produced by the current step -- those are not yet in context at gate evaluation time."
+            "Reference an explicit context key from a prior step or the current submission; artifact fields are not automatically context keys.",
+            "Do not use worker-provided is_autonomous context as gate authority. A submitted approval claim is work, not permission to advance."
           ],
           "antiPatterns": [
-            "Conditioning on verdict (set by the current step's outputContract) instead of recommendation (set by a prior synthesis step)"
+            "Assuming an approval-shaped artifact or a corrected submission bypasses the host confirmation gate"
           ]
         }
       ]
