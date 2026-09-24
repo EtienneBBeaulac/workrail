@@ -1,3 +1,7 @@
+import { SessionJournal } from '../../../src/answer-v1/journal.js';
+import { readHostState, workView } from '../../../src/answer-v1/host-state.js';
+import { bindBudgetedProvider, reserveModelCall } from '../../../src/answer-v1/model-call-budget.js';
+import type { OwnerFence } from '../../../src/answer-v1/contracts/invocation-contract.js';
 import { decodeDaemonExecutionPolicy } from '../../../src/answer-v1/daemon-policy.js';
 import { errAsync } from 'neverthrow';
 import { it, expect } from 'vitest';
@@ -265,6 +269,69 @@ it.skipIf(process.platform === 'win32')('binds retained policy and refuses every
       expect(calls).toBe(0);
       const legacyTruth = await engine.sessionStore.load(prepared.sessionId);
       expect(legacyTruth.isOk()).toBe(true);
+    } finally { await host.scheduler.close(signal); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32').each(['reservation', 'provider'])('charges calls durably and retains %s uncertainty across recomposition', async failure => {
+  const root = await mkdtemp(join(tmpdir(), 'budget-admission-'));
+  const signal = new AbortController().signal;
+  try {
+    const { engine, prepared, expected, config } = await setup(root);
+    const decoded = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1',
+      model: { provider: 'anthropic', modelId: 'original-model' }, systemPrompt: 'original',
+      limits: { expiresAtMs: 100000, maxModelCalls: 2, maxOutputTokens: 100, stallTimeoutMs: 100, callTimeoutMs: 50 },
+      workspace: { kind: 'existing', workspacePath: root }, delivery: { kind: 'none' },
+      restart: { kind: 'requires_explicit_reconciliation' } });
+    if (decoded.kind !== 'validated') throw new Error('invalid fixture');
+    const request = { ...expected.request, daemonPolicy: decoded.policy };
+    const candidate = buildHostAdmissionCandidate(prepared, request, expected.operationId, engine, () => 1);
+    if (candidate.kind !== 'candidate') throw new Error(candidate.kind);
+    const admitted = await publishAndReconcileHostAdmission(engine, root, { ...expected, request }, candidate.bytes, signal);
+    if (admitted.kind !== 'admitted') throw new Error(admitted.kind);
+    let calls = 0;
+    const hostConfig = { ...config, model: { async generate() { return { kind: 'unavailable' as const, detail: 'unused' }; } } };
+    const host = await createAnswerHost(hostConfig, signal);
+    if (host.kind !== 'created') throw new Error(host.kind);
+    try {
+      const hydrated = await host.scheduler.hydrator.hydrate(admitted.pointer, signal);
+      if (hydrated.kind !== 'hydrated') throw new Error(hydrated.kind);
+      const journal = new SessionJournal(engine, hydrated.enrollment, hostConfig, s => !s.aborted);
+      // Trusted test fixture seeds canonical ownership. Production scheduler still refuses policy.
+      const owner = { execution: hydrated.enrollment.execution, epoch: 1n } as OwnerFence;
+      expect(await journal.locked(signal, false, (state, lock) => journal.append(state, lock,
+        { kind: 'owner_acquired', epoch: '1' }, signal))).toBe(true);
+      const state = await readHostState(engine, hydrated.enrollment);
+      if (state.kind !== 'loaded') throw new Error(state.kind);
+      const view = await workView(engine, state.state);
+      if (view.kind !== 'question') throw new Error(view.kind);
+      const delivery = await journal.appendDelivery(view.reply, owner, signal);
+      if (delivery.kind !== 'delivered') throw new Error(delivery.kind);
+      const provider = bindBudgetedProvider(journal, delivery.delivery, owner, async (input: string) => {
+        const truth = await engine.sessionStore.load(prepared.sessionId);
+        if (truth.isErr()) throw new Error(truth.error.code);
+        expect(truth.value.events.filter(e => e.kind === 'answer_host_recorded' && e.data.kind === 'model_call_reserved')).toHaveLength(calls + 1);
+        calls++; return input;
+      });
+      const firstCall = provider.invoke('one', signal);
+      expect(await provider.invoke('concurrent', signal)).toEqual({ kind: 'refused', reason: 'busy' });
+      expect(await firstCall).toEqual({ kind: 'completed', value: 'one' });
+      const ambiguous = new SessionJournal(engine, hydrated.enrollment, { ...hostConfig,
+        faultSeam: { async intercept(boundary) { return failure === 'reservation' && boundary === 'after_model_call_append'
+          ? { kind: 'simulate_uncertain' as const, message: 'lost acknowledgement' } : { kind: 'proceed' as const }; } } }, s => !s.aborted);
+      const uncertainProvider = bindBudgetedProvider(ambiguous, delivery.delivery, owner, async () => { calls++; throw new Error('provider response lost'); });
+      expect(await uncertainProvider.invoke(undefined, signal)).toEqual({ kind: 'unconfirmed', reason: failure === 'reservation' ? 'commit_uncertain' : 'provider_outcome_unknown' });
+      expect(await uncertainProvider.invoke(undefined, signal)).toEqual({ kind: 'refused', reason: 'reconciliation_required' });
+      const reopened = await composeAnswerEngine(config);
+      if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+      const coldJournal = new SessionJournal(reopened, hydrated.enrollment, hostConfig, s => !s.aborted);
+      expect(await reserveModelCall(coldJournal, delivery.delivery, owner, signal)).toEqual({ kind: 'refused', reason: 'budget_exhausted' });
+      expect(await provider.invoke('excess', signal)).toEqual({ kind: 'refused', reason: 'budget_exhausted' });
+      expect(calls).toBe(failure === 'reservation' ? 1 : 2);
+      const successorDelivery = await coldJournal.redeliver(delivery.delivery, view.reply, owner, signal);
+      if (successorDelivery.kind !== 'delivered') throw new Error(successorDelivery.kind);
+      expect(await reserveModelCall(coldJournal, successorDelivery.delivery, owner, signal)).toEqual({ kind: 'refused', reason: 'budget_exhausted' });
+      expect(await reserveModelCall(coldJournal, delivery.delivery, { ...owner, epoch: 2n }, signal)).toEqual({ kind: 'refused', reason: 'stale_owner' });
     } finally { await host.scheduler.close(signal); }
   } finally { await rm(root, { recursive: true, force: true }); }
 });

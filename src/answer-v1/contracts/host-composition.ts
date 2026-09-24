@@ -96,6 +96,7 @@ export interface ModelInferenceBoundary {
 }
 
 export type JournalFaultBoundary =
+  | 'before_model_call_append' | 'after_model_call_append'
   | 'before_delivery_append' | 'after_delivery_append'
   | 'before_capture_append' | 'after_capture_append'
   | 'before_prepare_commit' | 'after_prepare_commit'
