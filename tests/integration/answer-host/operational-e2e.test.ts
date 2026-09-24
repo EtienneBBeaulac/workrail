@@ -114,14 +114,19 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
     expect(output.stdout).toBe('RETAINED RESULT');
     const competitor = await boot();
     const raced = await Promise.all([cold.client, competitor.client].map(client => call(client, 'answer_work', { reply: resumed.reply, answer: { notes: output.stdout } })));
-    // A competing process may be refused while the session lock is held.
-    // It must never create a second commit; retrying after settlement is replay.
+    // Lock contention before delivery can refuse the answer; contention after
+    // delivery/capture can leave its outcome unconfirmed. Neither is success.
+    // Settlement must still produce one commit and the same replay for both clients.
     const results = raced.map(value => z.union([
       z.object({ kind: z.enum(['recorded', 'replay']), receipt: z.string() }).passthrough(),
       z.object({ kind: z.literal('not_retained'), reason: z.literal('unavailable_storage') }).strict(),
+      z.object({ kind: z.literal('unconfirmed'), reason: z.literal('commit_uncertain') }).strict(),
     ]).parse(value));
     expect(results.filter(result => result.kind === 'recorded')).toHaveLength(1);
     const finished = recorded.parse(raced[results.findIndex(result => result.kind === 'recorded')]);
+    for (const result of results) {
+      if (result.kind === 'replay') expect(result.receipt).toBe(finished.receipt);
+    }
     for (const client of [cold.client, competitor.client]) {
       expect(await call(client, 'answer_work', { reply: resumed.reply, answer: { notes: output.stdout } }))
         .toMatchObject({ kind: 'replay', receipt: finished.receipt });

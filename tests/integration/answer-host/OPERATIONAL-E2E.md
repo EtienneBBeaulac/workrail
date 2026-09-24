@@ -16,8 +16,9 @@ an invalid verdict, accepts its correction, and drops the accepted JSON-RPC resp
 it reaches the client. A transport bridge kills the real server only after observing that
 response; it never edits application state. The reconnected client recovers the original
 receipt and finishes the successor. Two independent MCP server processes compete on the
-same reply: exactly one commits, lock contention may explicitly refuse the other, and both
-must subsequently replay the same receipt. The persisted review artifact is checked exactly.
+same reply: exactly one commits. Lock contention may refuse the other before retention or
+report an unconfirmed outcome after an intermediate stage. Both clients must subsequently
+replay the same receipt. The persisted review artifact is checked exactly.
 
 The test replaces model judgment with a fixed script. It uses no provider credentials,
 live model, installed runtime, user workspace or WorkTrain daemon. It does not establish
