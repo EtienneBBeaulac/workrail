@@ -16,7 +16,8 @@ const recorded = z.object({ kind: z.literal('recorded'), receipt: z.string(), vi
 
 // WorkRail is the MCP engine, not the agent's tool runner. This deterministic agent
 // substitutes only model judgment; file/command effects, MCP and HTTP remain real.
-it('runs tools, survives process death and replay, and exposes completed receipts over HTTP', async () => {
+it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s through tools, process death, replay and HTTP receipts', async scenario => {
+  const review = scenario === 'lost_ack_review';
   const root = await mkdtemp(join(tmpdir(), 'answer-operational-'));
   const data = join(root, 'data'), workspace = join(root, 'workspace'), workflows = join(root, 'workflows');
   const clients: Client[] = [];
@@ -26,7 +27,8 @@ it('runs tools, survives process death and replay, and exposes completed receipt
     await writeFile(join(workspace, 'input.txt'), 'retained result');
     await writeFile(join(workspace, 'produce.cjs'), "const fs=require('node:fs');fs.writeFileSync('result.txt',fs.readFileSync('input.txt','utf8').toUpperCase());process.stdout.write(fs.readFileSync('result.txt','utf8'));\n");
     await writeFile(join(workflows, 'fixture.json'), JSON.stringify({ id: 'fixture', name: 'Fixture', description: 'Operational proof', version: '1.0.0', steps: [
-      { id: 'read', title: 'Read input', prompt: 'Read input.txt and report its exact content.' },
+      { id: 'read', title: 'Read input', prompt: 'Read input.txt and report its exact content.',
+        ...(review ? { outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } } : {}) },
       { id: 'produce', title: 'Produce result', prompt: 'Run produce.cjs and report its exact output.' },
     ] }));
     const authority = join(root, 'authority.json');
@@ -37,9 +39,9 @@ it('runs tools, survives process death and replay, and exposes completed receipt
     const viewer = await startStandaloneConsole({ port: 0, dataDir: data, lockFilePath: join(root, 'console.lock') });
     if (viewer.kind !== 'ok') throw new Error(viewer.kind);
     stopViewer = viewer.stop;
-    const boot = async () => {
+    const boot = async (dropAck = false) => {
       const client = new Client({ name: 'deterministic-operational-agent', version: '1' }); clients.push(client);
-      const transport = new StdioClientTransport({ command: process.execPath, args: [resolve('dist/mcp-server.js')],
+      const transport = new StdioClientTransport({ command: process.execPath, args: dropAck ? [resolve('tests/integration/answer-host/fixtures/drop-answer-ack.cjs'), resolve('dist/mcp-server.js'), join(root, 'lost-ack.json')] : [resolve('dist/mcp-server.js')],
         env: { ...getDefaultEnvironment(), WORKRAIL_AGENT_PROFILE: 'answers', WORKRAIL_ANSWER_AUTHORITY_FILE: authority,
           WORKRAIL_DATA_DIR: data, WORKRAIL_ENABLE_SESSION_TOOLS: 'false', WORKRAIL_TRANSPORT: 'stdio' }, stderr: 'pipe' });
       await client.connect(transport, { timeout: 5000 });
@@ -58,40 +60,82 @@ it('runs tools, survives process death and replay, and exposes completed receipt
       expect(JSON.stringify(body)).not.toContain('"reply"');
       return body;
     };
-    const first = await boot();
+    const first = await boot(review);
     const work = opened.parse(await call(first.client, 'open_work', { workflowId: 'fixture', goal: 'Produce a retained result', workspacePath: workspace }));
     expect(work.view.instruction).toContain('Read input.txt');
     const notes = await readFile(join(workspace, 'input.txt'), 'utf8');
-    const accepted = recorded.parse(await call(first.client, 'answer_work', { reply: work.view.reply, answer: { notes } }));
-    const next = question.parse(accepted.view);
+    let reply = work.view.reply;
+    if (review) {
+      const partial = recorded.parse(await call(first.client, 'answer_work', { reply, answer: { notes } }));
+      expect(partial).toMatchObject({ disposition: 'partial' });
+      reply = question.parse(partial.view).reply;
+      const invalid = recorded.parse(await call(first.client, 'answer_work', { reply, answer: { verdict: 'invalid' } }));
+      expect(invalid).toMatchObject({ disposition: 'rejected' });
+      reply = question.parse(invalid.view).reply;
+      expect(question.parse(invalid.view).instruction).toContain('Read input.txt');
+    }
+    const answer = review ? { notes, verdict: 'clean', confidence: 'high', findings: [], summary: 'Fixture reviewed' } : { notes };
+    let expectedReceipt: string;
+    let nextReply: string | undefined;
+    if (review) {
+      // The bridge waits for the actual accepted server response, drops it, and
+      // kills that server. Rejection here must be disconnection, not a deadline.
+      await expect(call(first.client, 'answer_work', { reply, answer })).rejects.toThrow(/closed/i);
+      const fault = JSON.parse(await readFile(join(root, 'lost-ack.json'), 'utf8'));
+      expect(fault.dropped).toBe(true);
+      expectedReceipt = z.string().parse(fault.receipt);
+    } else {
+      const accepted = recorded.parse(await call(first.client, 'answer_work', { reply, answer }));
+      expectedReceipt = accepted.receipt;
+      nextReply = question.parse(accepted.view).reply;
+      const pid = first.transport.pid;
+      if (!pid) throw new Error('Missing server PID');
+      const disconnected = new Promise<void>(resolve => { first.client.onclose = resolve; });
+      process.kill(pid, 'SIGKILL');
+      await disconnected;
+    }
     const sessions = (await readdir(join(data, 'sessions'), { withFileTypes: true })).filter(entry => entry.isDirectory());
     expect(sessions).toHaveLength(1);
     const session = sessions[0]!.name;
     expect((await get(`/api/v2/sessions/${session}/answer`)).data.view.kind).not.toBe('finished');
 
-    // Abruptly terminate the actual built server after the acknowledged commit.
-    const pid = first.transport.pid;
-    if (!pid) throw new Error('Missing server PID');
-    const disconnected = new Promise<void>(resolve => { first.client.onclose = resolve; });
-    process.kill(pid, 'SIGKILL');
-    await disconnected;
     const cold = await boot();
     const replay = z.object({ kind: z.literal('replay'), receipt: z.string() }).passthrough().parse(
-      await call(cold.client, 'answer_work', { reply: work.view.reply, answer: { notes } }));
-    expect(replay.receipt).toBe(accepted.receipt);
+      await call(cold.client, 'answer_work', { reply, answer }));
+    expect(replay.receipt).toBe(expectedReceipt);
     expect(JSON.stringify(replay)).not.toContain('"reply"');
     const resumed = question.parse(await call(cold.client, 'recover_work', { recovery: work.recovery }));
-    expect(resumed.reply).toBe(next.reply);
+    if (nextReply) expect(resumed.reply).toBe(nextReply);
     expect(resumed.instruction).toContain('Run produce.cjs');
     const output = await promisify(execFile)(process.execPath, ['produce.cjs'], { cwd: workspace, timeout: 5000 });
     expect(output.stdout).toBe('RETAINED RESULT');
-    const finished = recorded.parse(await call(cold.client, 'answer_work', { reply: resumed.reply, answer: { notes: output.stdout } }));
+    const competitor = await boot();
+    const raced = await Promise.all([cold.client, competitor.client].map(client => call(client, 'answer_work', { reply: resumed.reply, answer: { notes: output.stdout } })));
+    // A competing process may be refused while the session lock is held.
+    // It must never create a second commit; retrying after settlement is replay.
+    const results = raced.map(value => z.union([
+      z.object({ kind: z.enum(['recorded', 'replay']), receipt: z.string() }).passthrough(),
+      z.object({ kind: z.literal('not_retained'), reason: z.literal('unavailable_storage') }).strict(),
+    ]).parse(value));
+    expect(results.filter(result => result.kind === 'recorded')).toHaveLength(1);
+    const finished = recorded.parse(raced[results.findIndex(result => result.kind === 'recorded')]);
+    for (const client of [cold.client, competitor.client]) {
+      expect(await call(client, 'answer_work', { reply: resumed.reply, answer: { notes: output.stdout } }))
+        .toMatchObject({ kind: 'replay', receipt: finished.receipt });
+    }
     expect(finished.view.kind).toBe('finished');
-    expect(finished.receipt).not.toBe(accepted.receipt);
+    expect(finished.receipt).not.toBe(expectedReceipt);
     expect(await readFile(join(workspace, 'result.txt'), 'utf8')).toBe('RETAINED RESULT');
     expect((await get(`/api/v2/sessions/${session}/answer`)).data.view.kind).toBe('finished');
-    for (const [receipt, text] of [[accepted.receipt, notes], [finished.receipt, output.stdout]]) {
+    for (const [receipt, text] of [[expectedReceipt, notes], [finished.receipt, output.stdout]]) {
       expect(JSON.stringify(await get(`/api/v2/sessions/${session}/answer/receipts/${encodeURIComponent(receipt!)}`))).toContain(text);
+    }
+    if (review) {
+      const files = await readdir(join(data, 'sessions', session), { recursive: true });
+      const logs = await Promise.all(files.filter(file => file.endsWith('.jsonl')).map(file => readFile(join(data, 'sessions', session, file), 'utf8')));
+      const events = logs.flatMap(log => log.split('\n').filter(Boolean).map(line => JSON.parse(line)));
+      const artifacts = events.filter(event => event.kind === 'node_output_appended' && event.data.payload.payloadKind === 'artifact_ref');
+      expect(artifacts.map(event => event.data.payload.content)).toEqual([{ kind: 'wr.review_verdict', verdict: 'clean', confidence: 'high', findings: [], summary: 'Fixture reviewed' }]);
     }
   } finally {
     for (const client of clients) await client.close();
