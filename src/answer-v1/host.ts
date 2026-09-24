@@ -5,7 +5,7 @@ import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { AnswerHostRequestSchema } from '../v2/durable-core/schemas/session/answer-host.js';
 import { errAsync } from 'neverthrow';
-import type { AnswerHostConfig, CreateAnswerHostResult, TrustedAnswerScheduler, RuntimeCapabilityDescriptor, RecoverHostSessionResult, BoundTurnRunner, ReleaseOwnershipResult } from './contracts/host-composition.js';
+import type { AnswerHostConfig, CreateAnswerHostResult, TrustedAnswerScheduler, SupportedAnswerOutput, RuntimeCapabilityDescriptor, RecoverHostSessionResult, BoundTurnRunner, ReleaseOwnershipResult } from './contracts/host-composition.js';
 import type { ClaimUnownedResult } from './contracts/automatic-recovery-contract.js';
 import type { ConditionalRecoveryResult } from './contracts/conditional-recovery-contract.js';
 import type { HostEnrollment, ExecutionRef, OwnerFence, HostExecutorPorts } from './contracts/invocation-contract.js';
@@ -17,6 +17,10 @@ import { executeStartWorkflow } from '../v2/usecases/start-workflow.js';
 import type { Workflow } from '../types/workflow.js';
 import { hasWorkflowDefinitionShape } from '../types/workflow-definition.js';
 export const runtimeCapabilities: RuntimeCapabilityDescriptor = Object.freeze({ enrollmentFormatVersion: 1, journalFormatVersion: 1, supportedOutputs: Object.freeze(['notes' as const, 'wr.contracts.review_verdict' as const]) });
+function missingRuntimeOutput(output: 'notes' | 'review'): SupportedAnswerOutput | undefined {
+    const required: readonly SupportedAnswerOutput[] = output === 'review' ? ['notes', 'wr.contracts.review_verdict'] : ['notes'];
+    return required.find(candidate => !runtimeCapabilities.supportedOutputs.includes(candidate));
+}
 const Pointer = z.object({ formatVersion: z.literal(1), executionId: z.string().regex(/^sess_[a-z0-9]+$/), recoveryLocator: z.string().min(1) }).strict();
 const Request = AnswerHostRequestSchema.refine(request => isAbsolute(request.workspacePath));
 export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: AbortSignal, mode: 'host_bound' | 'unbound'): Promise<CreateAnswerHostResult> {
@@ -88,6 +92,16 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                 const last = [...state.records].reverse().find(r => r.kind === 'committed' || r.kind === 'review_committed');
                 return (last?.kind === 'committed' || last?.kind === 'review_committed') ? { kind: 'settled', receipt: last.receipt as ReceiptRef, view } : { kind: 'refused', reason: 'corrupt', detail: 'Missing completion receipt' };
             }
+            // Check the retained workflow, not just its current step, before granting ownership.
+            const pinned = await engine.pinnedStore.get(state.run.data.workflowHash);
+            if (pinned.isErr() || pinned.value?.sourceKind !== 'v1_pinned' || !hasWorkflowDefinitionShape(pinned.value.definition))
+                return { kind: 'refused', reason: 'storage_unavailable', detail: 'Cannot read retained workflow capabilities' };
+            const output = classifyAnswerWorkflow(pinned.value.definition);
+            if (output === 'unsupported')
+                return { kind: 'refused', reason: 'corrupt', detail: 'Retained workflow is outside the answer protocol' };
+            const missingOutput = missingRuntimeOutput(output);
+            if (missingOutput)
+                return { kind: 'refused', reason: 'unsupported_capability', missingOutput, detail: `This build cannot execute ${missingOutput}` };
             if (mode.kind === 'conditional' && !owns(state, mode.expected))
                 return { kind: 'refused', reason: 'ownership_changed', detail: 'Expected owner is no longer current' };
             if (mode.kind === 'unowned' && state.ownership.kind !== 'unowned')
@@ -125,9 +139,12 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'Cannot load requested workflow' };
             }
             const raw = workflow?.definition;
-            if (!workflow || !hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || classifyAnswerWorkflow(raw) === 'unsupported')
+            const output = hasWorkflowDefinitionShape(raw) ? classifyAnswerWorkflow(raw) : 'unsupported';
+            if (!workflow || !hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || output === 'unsupported')
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build enrolls linear notes and review workflows without gates' };
-            const requiredOutput = classifyAnswerWorkflow(raw) === 'review'
+            if (missingRuntimeOutput(output))
+                return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build does not support the requested output contract' };
+            const requiredOutput = output === 'review'
                 ? { requiredOutput: 'wr.contracts.review_verdict' as const } : {};
             const recovery = engine.idFactory.mintEventId() as RecoveryRef;
             let enrollment: HostEnrollment | undefined;
