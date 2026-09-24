@@ -470,6 +470,9 @@ it('host read scope: bound inspector refuses foreign task read, receipt, mixed p
 // ---------------------------------------------------------------------------
 
 it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences with stale_owner at capture, prepare, and dispatch, while rightful execution succeeds', () => hostIsolationFixture(async f => {
+  const startedAt = performance.now();
+  const stage = (name: string) => console.info(`[host-isolation] ${name} at ${Math.round(performance.now() - startedAt)}ms`);
+  stage('load factory');
   const createAnswerHost = await f.loadFactory();
 
   const fakeModel = new FakeTestModelBoundary();
@@ -480,6 +483,7 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   };
 
   const signal = new AbortController().signal;
+  stage('compose host');
   const hostResult = await createAnswerHost(config, signal);
   expect(hostResult.kind).toBe('created');
   if (hostResult.kind !== 'created') return;
@@ -487,6 +491,7 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   const scheduler = hostResult.scheduler;
 
   // 1. Enroll Task A
+  stage('enroll A');
   const enrollA = await scheduler.enroll({
     workflowId: 'two-step-test',
     goal: 'Task A mixed execution boundary test',
@@ -497,6 +502,7 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   const { enrollment: enrollmentA, initialView: initialViewA, owner: ownerA } = enrollA;
 
   // 2. Enroll Task B
+  stage('enroll B');
   const enrollB = await scheduler.enroll({
     workflowId: 'two-step-test',
     goal: 'Task B mixed execution boundary test',
@@ -517,6 +523,7 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   const portsA = scheduler.bindDiagnosticPorts(enrollmentA);
 
   // 3. Task A rightful delivery append under ownerA
+  stage('deliver A');
   const delResultA = await portsA.journal.appendDelivery(initialViewA.reply, ownerA, signal);
   expect(delResultA.kind).toBe('delivered');
   if (delResultA.kind !== 'delivered') return;
@@ -533,24 +540,29 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   };
 
   // 4. Snapshot authoritative storage before cross-owner operations
+  stage('snapshot initial');
   const snapshotBeforeCross = await f.snapshotFiles();
   expect(Object.keys(snapshotBeforeCross).length).toBeGreaterThan(0);
 
   // 5. capture A delivery using B owner -> stale_owner
+  stage('reject foreign capture');
   const captureWithWrongOwner = await portsA.journal.captureResponse(deliveryA, rawPayloadA, ownerB, signal);
   expect(captureWithWrongOwner.kind).toBe('stale_owner');
   // Authoritative files strictly unchanged after refused write
   expect(await f.snapshotFiles()).toEqual(snapshotBeforeCross);
 
   // 6. Rightful capture of A delivery using rightful ownerA
+  stage('capture A');
   const captureWithRightOwner = await portsA.journal.captureResponse(deliveryA, rawPayloadA, ownerA, signal);
   expect(captureWithRightOwner.kind).toBe('captured');
   if (captureWithRightOwner.kind !== 'captured') return;
   const capturedA = captureWithRightOwner.response;
 
+  stage('snapshot capture');
   const snapshotAfterRightfulCapture = await f.snapshotFiles();
 
   // 7. prepare A captured response using B owner -> refused stale_owner
+  stage('reject foreign prepare');
   const prepareWithWrongOwner = await portsA.journal.prepare(capturedA, ownerB, signal);
   expect(prepareWithWrongOwner.kind).toBe('refused');
   if (prepareWithWrongOwner.kind === 'refused') {
@@ -560,6 +572,7 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   expect(await f.snapshotFiles()).toEqual(snapshotAfterRightfulCapture);
 
   // 8. Rightful prepare of A captured response using rightful ownerA
+  stage('prepare A');
   const prepareWithRightOwner = await portsA.journal.prepare(capturedA, ownerA, signal);
   expect(prepareWithRightOwner.kind).toBe('prepared');
   if (prepareWithRightOwner.kind !== 'prepared') return;
@@ -570,15 +583,18 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
     notes: 'Authoritative Task A observation',
   });
 
+  stage('snapshot prepare');
   const snapshotAfterRightfulPrepare = await f.snapshotFiles();
 
   // 9. dispatch A prepared answer using B owner -> stale_owner
+  stage('reject foreign dispatch');
   const dispatchWithWrongOwner = await portsA.dispatcher.dispatch(preparedA, ownerB, signal);
   expect(dispatchWithWrongOwner.kind).toBe('stale_owner');
   // Authoritative files strictly unchanged after refused dispatch
   expect(await f.snapshotFiles()).toEqual(snapshotAfterRightfulPrepare);
 
   // 10. Rightful A dispatch under ownerA still succeeds
+  stage('dispatch A');
   const dispatchWithRightOwner = await portsA.dispatcher.dispatch(preparedA, ownerA, signal);
   expect(dispatchWithRightOwner.kind).toBe('recorded');
   if (dispatchWithRightOwner.kind !== 'recorded') return;
@@ -591,6 +607,7 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
   expect(successorViewA.retained[0]!.receipt).toBe(dispatchWithRightOwner.receipt);
 
   // 11. Verify authoritative receipt payload through inspector
+  stage('read A');
   const receiptReadA = await portsA.inspector.inspectReceipt(successorViewA.read, dispatchWithRightOwner.receipt, signal);
   expect(receiptReadA.kind).toBe('complete');
   if (receiptReadA.kind === 'complete') {
@@ -600,23 +617,28 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
     expect(parsed).toEqual({ notes: 'Authoritative Task A observation' });
   }
   const portsB = scheduler.bindDiagnosticPorts(enrollmentB);
+  stage('deliver B');
   const deliveryB = await portsB.journal.appendDelivery(initialViewB.reply, ownerB, signal);
   expect(deliveryB.kind).toBe('delivered');
   if (deliveryB.kind !== 'delivered') return;
+  stage('capture B');
   const capturedB = await portsB.journal.captureResponse(deliveryB.delivery, {
     responseText: 'Task B valid', calls: [{ id: 'call_b', name: 'answer_work',
       argumentsJson: JSON.stringify({ answer: { notes: 'Authoritative Task B observation' } }) }],
   }, ownerB, signal);
   expect(capturedB.kind).toBe('captured');
   if (capturedB.kind !== 'captured') return;
+  stage('prepare B');
   const preparedB = await portsB.journal.prepare(capturedB.response, ownerB, signal);
   expect(preparedB.kind).toBe('prepared');
   if (preparedB.kind !== 'prepared') return;
+  stage('dispatch B');
   const committedB = await portsB.dispatcher.dispatch(preparedB.answer, ownerB, signal);
   expect(committedB.kind).toBe('recorded');
   if (committedB.kind !== 'recorded') return;
   expect(committedB.disposition).toBe('accepted');
   expect(committedB.view.retained).toHaveLength(1);
+  stage('read B');
   const evidenceB = await portsB.inspector.inspectReceipt(committedB.view.read, committedB.receipt, signal);
   expect(evidenceB.kind).toBe('complete');
   if (evidenceB.kind === 'complete') {
@@ -625,4 +647,5 @@ it('mixed execution IDs: journal and dispatcher refuse cross-task owner fences w
     expect(JSON.parse(evidenceB.chunk)).toEqual({ notes: 'Authoritative Task B observation' });
   }
 
+  stage('complete');
 }));
