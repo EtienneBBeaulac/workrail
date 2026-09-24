@@ -394,3 +394,19 @@ it('preserves workspace uncertainty without attempting answer capture', () => fi
     expect(captures).toBe(0);
   } finally {await scheduler.close(signal());}
 }));
+
+it('refuses rebuilding a model for uncaptured work after workspace uncertainty', () => fixture(async config => {
+  const {model:_model,...authority}=config;
+  let bindings=0;
+  const {scheduler,enrolled}=await enroll({...authority,modelFactory:{async create({journal,delivery,owner},s){
+    bindings++;
+    await journal.locked(s,false,(state,lock)=>journal.append(state,lock,
+      {kind:'model_call_reserved',delivery,call:'fixture-model',epoch:owner.epoch.toString(),ordinal:1},s));
+    return {kind:'created',model:{async generate(){return {kind:'workspace_failed',failure:{reason:'outcome_unacknowledged',effect:'fixture-effect'}};}}};
+  }}});
+  try {
+    expect(await enrolled.runner.runTurn(signal())).toMatchObject({kind:'unconfirmed',uncertainty:{stage:'workspace_effect'}});
+    expect(await enrolled.runner.runTurn(signal())).toMatchObject({kind:'refused',reason:'reconciliation_required'});
+    expect(bindings).toBe(1);
+  } finally {await scheduler.close(signal());}
+}));

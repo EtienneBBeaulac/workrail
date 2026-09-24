@@ -334,8 +334,8 @@ it.skipIf(process.platform === 'win32').each(['reservation', 'provider'])('charg
       expect(await provider.invoke('excess', signal)).toEqual({ kind: 'refused', reason: 'budget_exhausted' });
       expect(calls).toBe(failure === 'reservation' ? 1 : 2);
       const successorDelivery = await coldJournal.redeliver(delivery.delivery, view.reply, owner, signal);
-      if (successorDelivery.kind !== 'delivered') throw new Error(successorDelivery.kind);
-      expect(await reserveModelCall(coldJournal, successorDelivery.delivery, owner, signal)).toEqual({ kind: 'refused', reason: 'budget_exhausted' });
+      expect(successorDelivery).toEqual({kind:'refused',reason:'reconciliation_required'});
+      expect(await coldJournal.recover(hydrated.enrollment,owner,signal)).toEqual({kind:'refused',reason:'reconciliation_required'});
       expect(await reserveModelCall(coldJournal, delivery.delivery, { ...owner, epoch: 2n }, signal)).toEqual({ kind: 'refused', reason: 'stale_owner' });
     } finally { await host.scheduler.close(signal); }
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -828,6 +828,16 @@ it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack'
         const result=await created.model.generate({instruction:'work',issues:[],retainedSummaries:[]},signal);
         expect(result.kind).toBe(mode==='success'?'completed':'workspace_failed');
         expect([requests,invocations]).toEqual(mode==='success'?[2,2]:mode==='duplicate'||mode==='intent_ack'?[1,0]:[1,1]);
+        expect(await journal.recover(hydrated.enrollment,owner,signal)).toMatchObject({kind:'refused',reason:mode==='owner_change'?'stale_owner':'reconciliation_required'});
+        if(mode==='success') {
+          // Simulate a preexisting newer delivery with a captured answer. Older unfinished work must still block.
+          await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'delivered',delivery:'newer',node:s.node,reply:view.reply,epoch:'1'},signal));
+          await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'captured',delivery:'newer',response:'newer-answer',payload:{responseText:'done',calls:[]}},signal));
+          expect(await journal.recover(hydrated.enrollment,owner,signal)).toMatchObject({kind:'refused',reason:'reconciliation_required'});
+          expect(await journal.appendDelivery(view.reply,owner,signal)).toMatchObject({kind:'refused',reason:'reconciliation_required'});
+          await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'stopped',reason:'cancelled',detail:'explicit stop'},signal));
+          expect(await journal.recover(hydrated.enrollment,owner,signal)).toMatchObject({kind:'refused',reason:'stopped'});
+        }
         if(mode!=='success') {
           const again=await created.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal);
           expect(again.kind).toBe('workspace_failed');

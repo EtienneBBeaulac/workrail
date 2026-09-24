@@ -143,7 +143,7 @@ export type TurnOutcome =
   | Readonly<{ kind: 'unconfirmed'; uncertainty: TurnUncertainty }>
   | Readonly<{ kind: 'stale_owner' }>
   | Readonly<{ kind: 'cancelled' }>
-  | Readonly<{ kind: 'refused'; reason: 'delivery_refused' | 'capture_refused' | 'prepare_refused' | 'model_unavailable' | 'dispatch_refused' | 'storage_unavailable'; detail: string }>;
+  | Readonly<{ kind: 'refused'; reason: 'reconciliation_required' | 'delivery_refused' | 'capture_refused' | 'prepare_refused' | 'model_unavailable' | 'dispatch_refused' | 'storage_unavailable'; detail: string }>;
 
 /** Execution-bound runner bound to validated enrollment, owner fence, and immutable dependencies. */
 export interface BoundTurnRunner {

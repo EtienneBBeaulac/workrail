@@ -58,6 +58,8 @@ export function createExecutionRunner(engine: AnswerEngine, config: AnswerHostCo
                 if (stop?.kind === 'stopped')
                     return { kind: 'stopped', execution: enrollment.execution, reason: stop.reason, detail: stop.detail };
             }
+            if (recovered.kind === 'refused' && recovered.reason === 'reconciliation_required')
+                return {kind:'refused',reason:'reconciliation_required',detail:'Uncaptured delivery has prior model work'};
             if (recovered.kind === 'refused')
                 return recovered.reason === 'stale_owner' ? { kind: 'stale_owner' } : { kind: 'refused', reason: 'storage_unavailable', detail: recovered.reason };
             if (recovered.kind === 'settled') {
@@ -83,7 +85,7 @@ export function createExecutionRunner(engine: AnswerEngine, config: AnswerHostCo
                 if (delivery.kind === 'unconfirmed')
                     return { kind: 'unconfirmed', uncertainty: { stage: 'delivery', execution: enrollment.execution, reply: recovered.view.reply } };
                 if (delivery.kind === 'refused')
-                    return { kind: 'refused', reason: 'delivery_refused', detail: delivery.reason };
+                    return { kind: 'refused', reason: delivery.reason === 'reconciliation_required' ? 'reconciliation_required' : 'delivery_refused', detail: delivery.reason };
                 if (!available(signal))
                     return { kind: 'cancelled' };
                 let completion: ModelCompletionResult;

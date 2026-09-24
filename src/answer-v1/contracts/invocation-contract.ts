@@ -45,13 +45,13 @@ export interface ExecutionOwnerPort {
 export type AppendDeliveryResult =
   | Readonly<{ kind: 'delivered'; delivery: DeliveryRef }>
   | Readonly<{ kind: 'stale_owner' }>
-  | Readonly<{ kind: 'refused'; reason: 'stopped' | 'stale_reply' | 'storage_unavailable' }>
+  | Readonly<{ kind: 'refused'; reason: 'reconciliation_required' | 'stopped' | 'stale_reply' | 'storage_unavailable' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 export type RedeliverResult =
   | Readonly<{ kind: 'delivered'; delivery: DeliveryRef }>
   | Readonly<{ kind: 'stale_owner' }>
-  | Readonly<{ kind: 'refused'; reason: 'already_captured' | 'stopped' | 'stale_reply' | 'storage_unavailable' }>
+  | Readonly<{ kind: 'refused'; reason: 'reconciliation_required' | 'already_captured' | 'stopped' | 'stale_reply' | 'storage_unavailable' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 /** Model tool call at the raw capture boundary before validation or selection. */
@@ -95,7 +95,7 @@ export type RecoveryResult =
   | Readonly<{ kind: 'deliver'; view: Extract<WorkView, { kind: 'question' }> }>
   | Readonly<{ kind: 'redeliver'; oldDelivery: DeliveryRef; view: Extract<WorkView, { kind: 'question' }> }>
   | Readonly<{ kind: 'settled'; result: AnswerResult; view: WorkView }>
-  | Readonly<{ kind: 'refused'; reason: 'missing' | 'corrupt' | 'unsupported_version' | 'storage_unavailable' | 'stale_owner' | 'stopped' }>;
+  | Readonly<{ kind: 'refused'; reason: 'reconciliation_required' | 'missing' | 'corrupt' | 'unsupported_version' | 'storage_unavailable' | 'stale_owner' | 'stopped' }>;
 
 export interface InvocationJournal {
   appendDelivery(reply: ReplyRef, owner: OwnerFence, signal: AbortSignal): Promise<AppendDeliveryResult>;

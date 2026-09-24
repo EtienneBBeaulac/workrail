@@ -15,6 +15,12 @@ import type { ReplyRef, ReceiptRef } from './contracts/answer-contract.js';
 import { CapturePolicy, decodeResponse, decideCapture } from './response-capture.js';
 const policy = CapturePolicy.parse({ maxBytes: 1024 * 1024 });
 const NotesAnswer = z.object({ answer: z.object({ notes: z.string().min(1) }).strict() }).strict();
+/** Any uncaptured model work requires explicit reconciliation, even if a newer
+ * delivery exists. A completed effect does not make the missing answer replayable. */
+function hasUncapturedModelWork(records: readonly AnswerHostRecord[]): boolean {
+    const captured = new Set(records.flatMap(r => r.kind === 'captured' ? [r.delivery] : []));
+    return records.some(r => r.kind === 'model_call_reserved' && !captured.has(r.delivery));
+}
 export type PreparedRecord = Extract<AnswerHostRecord, {
     kind: 'prepared';
 }>;
@@ -57,6 +63,8 @@ export class SessionJournal implements InvocationJournal {
                 return { kind: 'stale_owner' };
             if (state.records.some(r => r.kind === 'stopped'))
                 return { kind: 'refused', reason: 'stopped' };
+            if (hasUncapturedModelWork(state.records))
+                return {kind:'refused',reason:'reconciliation_required'};
             const view = await workView(this.engine, state);
             if (view.kind !== 'question' || view.reply !== reply)
                 return { kind: 'refused', reason: 'stale_reply' };
@@ -75,6 +83,8 @@ export class SessionJournal implements InvocationJournal {
                 return { kind: 'stale_owner' };
             if (state.records.some(r => r.kind === 'stopped'))
                 return { kind: 'refused', reason: 'stopped' };
+            if (hasUncapturedModelWork(state.records))
+                return {kind:'refused',reason:'reconciliation_required'};
             if (state.records.some(r => r.kind === 'captured' && r.delivery === oldDelivery))
                 return { kind: 'refused', reason: 'already_captured' };
             const old = [...state.records].reverse().find(r => r.kind === 'delivered');
@@ -193,6 +203,8 @@ export class SessionJournal implements InvocationJournal {
                 return { kind: 'refused', reason: 'stale_owner' };
             if (state.records.some(r => r.kind === 'stopped'))
                 return { kind: 'refused', reason: 'stopped' };
+            if (hasUncapturedModelWork(state.records))
+                return {kind:'refused',reason:'reconciliation_required'};
             const view = await workView(this.engine, state);
             if (view.kind === 'unavailable')
                 return { kind: 'refused', reason: 'storage_unavailable' };
