@@ -6,6 +6,7 @@ import type { SessionJournal } from '../../../answer-v1/journal.js';
 import type { OwnerFence } from '../../../answer-v1/contracts/invocation-contract.js';
 import type { ExecutionDeadline } from '../../../answer-v1/execution-deadline.js';
 import { owns } from '../../../answer-v1/host-state.js';
+import { beginSupervisorCleanup } from '../../../answer-v1/supervisor-cleanup.js';
 import { reserveSupervisor, retainSupervisorTransition } from '../../../answer-v1/supervisor-journal.js';
 import { CommandSchema, ScratchPathSchema, decodeLinuxScratchProfile, type ScratchOutcome } from './contract.js';
 import { DockerCli } from './docker-cli.js';
@@ -121,12 +122,16 @@ export async function createLinuxScratchWorkspace(options:Readonly<{
       }catch {stop();return {kind:'unknown'};}
       finally{callSignal.removeEventListener('abort',abort);}
     },
-    finish(cleanupSignal){
+    finish(requestedCleanupSignal){
       if(finished)return finished;
       const wasReady=state==='ready';state='finishing';channel.close();signal.removeEventListener('abort',stop);
       finished=(async():Promise<ScratchFinish>=>{
         let inspection:ScratchFinish['inspection']={kind:'unavailable'};
         const uncertain=():ScratchFinish=>({inspection,cleanup:'unconfirmed'});
+        const cleanup=beginSupervisorCleanup(journal,owner,supervisor,binding,requestedCleanupSignal);
+        if(!cleanup)return uncertain();
+        const cleanupSignal=cleanup.signal;
+        try {
         const fresh=await docker.run(['info','--format','{{json .}}'],cleanupSignal);
         const daemon=fresh.kind==='completed'?parse(fresh.bytes,Info):undefined;
         const inspected=await docker.run(['inspect',cid],cleanupSignal);
@@ -149,14 +154,15 @@ export async function createLinuxScratchWorkspace(options:Readonly<{
             }catch {/* Explicit unavailable result; never successful export text. */}
           }
         }
-        if((await retain('supervisor_stop_intended',cleanupSignal)).kind!=='retained')return uncertain();
+        if((await cleanup.retainStopIntent()).kind!=='retained')return uncertain();
         if(env.State.Running && (await docker.run(['stop','--time','1',cid],cleanupSignal)).kind!=='completed')return uncertain();
         const after=await docker.run(['inspect',cid],cleanupSignal);
         const stopped=after.kind==='completed'?parse(after.bytes,Environment)?.[0]:undefined;
         if(!stopped||stopped.Id!==cid||stopped.State.Running||stopped.Config.Labels?.[LABEL]!==supervisor)return uncertain();
-        if((await retain('supervisor_process_stopped',cleanupSignal)).kind!=='retained')return uncertain();
+        if((await cleanup.retainProcessStopped()).kind!=='retained')return uncertain();
         if((await docker.run(['rm',cid],cleanupSignal)).kind!=='completed')return uncertain();
         state='finished';return {inspection,cleanup:'removed'};
+        } catch { return uncertain(); } finally { cleanup.close(); }
       })();
       return finished;
     },

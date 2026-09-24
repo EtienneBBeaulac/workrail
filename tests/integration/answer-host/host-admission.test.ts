@@ -965,6 +965,21 @@ it.skipIf(process.platform === 'win32').each(['normal','intent_ack','transition_
             expect(await retainSupervisorTransition(journal,owner,{...start,binding:{daemon:'d',environment:'replacement'}},signal)).toEqual({kind:'refused',reason:'invalid_transition'});
             expect(await retainSupervisorTransition(journal,{...owner,epoch:2n},start,signal)).toEqual({kind:'refused',reason:'stale_owner'});
             expect((await Promise.all([1,2].map(()=>retainSupervisorTransition(journal,owner,start,signal)))).map(r=>r.kind).sort()).toEqual(['refused','retained']);
+            const {beginSupervisorCleanup}=await import('../../../src/answer-v1/supervisor-cleanup.js');
+            let elapsed=0;
+            const clock={read:()=>({kind:'reading' as const,wallMs:1000+elapsed,monotonicMs:elapsed}),
+              schedule:()=>({kind:'scheduled' as const,cancel(){}})};
+            const bounded=beginSupervisorCleanup(journal,owner,reserved.supervisor,created.binding,signal,clock);
+            expect(bounded).toBeDefined();
+            const beforeExpiry=await engine.sessionStore.load(prepared.sessionId);
+            elapsed=30000;
+            expect(await bounded!.retainStopIntent()).toEqual({kind:'unconfirmed',reason:'commit_uncertain'});
+            expect(bounded!.signal.aborted).toBe(true);
+            expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(beforeExpiry);
+            bounded!.close();
+            const cancelled=new AbortController();cancelled.abort();
+            expect(beginSupervisorCleanup(journal,owner,reserved.supervisor,created.binding,cancelled.signal,clock)).toBeUndefined();
+
           }
         }
         const reopened=await composeAnswerEngine(config);
@@ -987,7 +1002,7 @@ it.skipIf(process.platform === 'win32').each(['normal','intent_ack','transition_
 // Explicit local backend proof. Ordinary CI exercises the deterministic controller/channel
 // suites without starting Docker or pulling an image. No provider credentials are involved.
 it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
-  'success','cancel_after_effect','cancel_running','lost_reply','stale_owner','bootstrap_ack','create_reply_loss','deadline','symlink',
+  'success','cancel_after_effect','cancel_running','lost_reply','stale_owner','bootstrap_ack','create_reply_loss','deadline','expired_journal','symlink',
 ] as const)('composes canonical effects with an isolated Linux scratch backend: %s', async mode=>{
   const {DockerCli}=await import('../../../src/daemon/runner/linux-scratch/docker-cli.js');
   const {createLinuxScratchWorkspace}=await import('../../../src/daemon/runner/linux-scratch/workspace.js');
@@ -1020,7 +1035,7 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
       if(hydrated.kind!=='hydrated')throw new Error(hydrated.kind);
       const journal=new SessionJournal(engine,hydrated.enrollment,{...hostConfig,faultSeam:{async intercept(b){
         return mode==='bootstrap_ack'&&b==='after_supervisor_intent_append'?{kind:'simulate_uncertain',message:'lost bootstrap ack'}:{kind:'proceed'};
-      }}},s=>!s.aborted);
+      }}},s=>!s.aborted && (mode!=='expired_journal'||started.deadline.check().kind==='active'));
       const owner={execution:hydrated.enrollment.execution,epoch:1n} as OwnerFence;
       await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_acquired',epoch:'1'},signal));
       const profile={kind:'linux_scratch',image:'python@sha256:eb5be8e5b4d0a159c237946bbdd06356dda5d19c30fc4f7843e8046d3a590333',platform:'linux/arm64',
@@ -1047,7 +1062,7 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
       const wrapped={...workspace,async execute(...args:Parameters<typeof workspace.execute>){
         toolCalls++;
         if(mode==='stale_owner')await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_released',epoch:'1'},signal));
-        if(mode==='deadline')started.deadline.close();
+        if(mode==='deadline'||mode==='expired_journal')started.deadline.close();
         const pending=workspace.execute(...args);
         if(mode==='cancel_running'){
           const end=Date.now()+5000;let observed=false;
@@ -1089,6 +1104,7 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
         const marker=await docker.run(['exec',createdIds[0]!,'cat','/workspace/marker.txt'],signal);
         expect(marker.kind==='completed'&&marker.bytes.toString()).toBe('effect happened');
       }
+      if(mode==='expired_journal')expect(await journal.locked(signal,'unavailable',async()=> 'available')).toBe('unavailable');
       const final=await workspace.finish(signal);
       expect(final.cleanup).toBe(mode==='stale_owner'?'unconfirmed':'removed');
       if(mode==='success'){

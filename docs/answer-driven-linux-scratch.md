@@ -40,7 +40,10 @@ while the environment exists, not an atomic snapshot, successful export, or proo
 Unknown or interrupted work may have unavailable inspection; that outcome is explicit.
 
 Cleanup checks the observed daemon ID, exact container ID and canonical supervisor label,
-retains stop intent, observes process exit and removes only that exact stopped container. A
+retains stop intent, observes process exit and removes only that exact stopped container.
+A stop-only capability uses a separate 30-second teardown deadline, so expiry of the inference
+journal cannot prevent cleanup records. It exposes no creation, start, model or tool operations.
+The trusted caller supplies a cleanup signal independent of inference cancellation. A
 changed owner, uncertain acknowledgment, identity mismatch or failed command returns unconfirmed.
 It never uses force removal, shared pruning, retries of effects, or a second cleanup registry.
 Unknown bootstrap/cleanup requires operator reconciliation using canonical evidence. A Docker
