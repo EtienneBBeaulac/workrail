@@ -715,3 +715,15 @@ describe('formatFleetSummary', () => {
     expect(out).toContain('14 days');
   });
 });
+
+it('classifies suspension as recovery pending instead of an orphaned or completed run', () => {
+  const readFile = makeReadFile({ [`${EVENTS_DIR}/${TODAY}.jsonl`]: [
+    sessionStarted('sess_pending'),
+    JSON.stringify({ kind: 'session_suspended', sessionId: 'sess_pending', ts: 2000,
+      operationId: 'operation', reason: 'execution_unconfirmed' }),
+  ].join('\n') });
+  const result = parseDaemonEvents('sess_pending', EVENTS_DIR, 7, readFile);
+  expect(result.kind).toBe('RECOVERY_PENDING');
+  expect(resultCategory(result)).toBe('recovery_pending');
+  expect(formatDiagnosticCard(result, { ascii: true })).toContain('Evidence retained');
+});

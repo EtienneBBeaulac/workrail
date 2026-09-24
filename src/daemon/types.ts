@@ -478,8 +478,18 @@ export interface WorkflowRunGateParked {
   readonly workrailSessionId?: SessionId;
 }
 
+/** The invocation ended without proving canonical execution completion. The operation
+ * identity locates retained admission evidence; it is not permission to claim an owner. */
+export interface WorkflowRunRecoveryPending {
+  readonly _tag: 'recovery_pending';
+  readonly workflowId: string;
+  readonly stopReason: 'recovery_pending';
+  readonly operationId: string;
+  readonly reason: 'admission_unconfirmed' | 'execution_unconfirmed' | 'owner_busy' | 'storage_unavailable';
+}
+
 /** Result of a runWorkflow() call. Never throws. */
-export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed | WorkflowRunGateParked;
+export type WorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowDeliveryFailed | WorkflowRunGateParked | WorkflowRunRecoveryPending;
 
 // ---------------------------------------------------------------------------
 // WorkflowContextSlots
@@ -530,7 +540,7 @@ export function extractContextSlots(context: Readonly<Record<string, unknown>> |
  * suppresses any compile-time error from a missing update -- only the assertNever guard
  * catches the omission at runtime. Keep these two unions in sync atomically.
  */
-export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowRunGateParked;
+export type ChildWorkflowRunResult = WorkflowRunSuccess | WorkflowRunError | WorkflowRunTimeout | WorkflowRunStuck | WorkflowRunGateParked | WorkflowRunRecoveryPending;
 
 // ---------------------------------------------------------------------------
 // OrphanedSession (crash recovery)
@@ -596,3 +606,5 @@ export interface OrphanedSession {
 }
 
 
+
+export type KnownWorkflowRunResult = Exclude<WorkflowRunResult, WorkflowRunRecoveryPending>;

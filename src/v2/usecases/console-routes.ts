@@ -276,6 +276,7 @@ export function mountConsoleRoutes(
     'tool_error',
     'step_advanced',
     'session_completed',
+    'session_suspended',
     'issue_reported',
     'agent_stuck',
     'llm_turn_started',
@@ -370,7 +371,7 @@ export function mountConsoleRoutes(
         }
 
         // Close the stream after forwarding the terminal event.
-        if (kind === 'session_completed') {
+        if (kind === 'session_completed' || kind === 'session_suspended') {
           cleanup();
           return;
         }
@@ -983,6 +984,8 @@ export function mountConsoleRoutes(
         console.log(`[ConsoleRoutes] Auto dispatch failed: workflowId=${workflowId} error=${result.message}`);
       } else if (result._tag === 'stuck') {
         console.log(`[ConsoleRoutes] Auto dispatch stuck: workflowId=${workflowId} reason=${result.reason} message=${result.message}`);
+      } else if (result._tag === 'recovery_pending') {
+        console.warn(`[ConsoleRoutes] Recovery pending: operationId=${result.operationId} reason=${result.reason}`);
       } else if (result._tag === 'gate_parked') {
         console.log(`[ConsoleRoutes] Auto dispatch parked at gate: workflowId=${workflowId} stepId=${result.stepId}`);
       } else {

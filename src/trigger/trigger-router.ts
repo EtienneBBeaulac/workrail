@@ -836,7 +836,7 @@ export class TriggerRouter {
       // delivery systems and must not affect each other.
       const originalTag = result._tag;
       const originalResult = result;
-      if (trigger.callbackUrl) {
+      if (trigger.callbackUrl && result._tag !== 'recovery_pending') {
         result = await runCallbackUrlDelivery(trigger.id, trigger.workflowId, trigger.callbackUrl, result, this.emitter);
       }
 
@@ -871,6 +871,9 @@ export class TriggerRouter {
           `workflowId=${trigger.workflowId} reason=${result.reason} message=${result.message}`,
           // TODO(follow-up): add onStuck: trigger hook support here
         );
+      } else if (result._tag === 'recovery_pending') {
+        console.warn(`[TriggerRouter] Recovery pending: operationId=${result.operationId} reason=${result.reason}`);
+        return;
       } else if (result._tag === 'gate_parked') {
         // Session parked at a requireConfirmation gate. Route based on gateKind:
         // - coordinator_eval: spawn wr.gate-eval-generic (existing autonomous path)
@@ -1126,6 +1129,9 @@ export class TriggerRouter {
           `reason=${result.reason} message=${result.message}`,
           // TODO(follow-up): add onStuck: trigger hook support here
         );
+      } else if (result._tag === 'recovery_pending') {
+        console.warn(`[TriggerRouter] Recovery pending: operationId=${result.operationId} reason=${result.reason}`);
+        return;
       } else if (result._tag === 'gate_parked') {
         const sessionId = result.sessionId;
         const stepId = result.stepId;

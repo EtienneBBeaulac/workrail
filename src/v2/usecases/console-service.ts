@@ -184,7 +184,7 @@ async function isSessionLiveFromEventLog(workrailSessionId: string): Promise<boo
         const event = JSON.parse(line) as Record<string, unknown>;
         if (event['workrailSessionId'] !== workrailSessionId) continue;
         hasSeen = true;
-        if (event['kind'] === 'session_completed') hasCompleted = true;
+        if (event['kind'] === 'session_completed' || event['kind'] === 'session_suspended') hasCompleted = true;
       } catch {
         // Malformed line -- skip it
       }

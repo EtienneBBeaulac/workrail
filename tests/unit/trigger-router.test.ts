@@ -2287,3 +2287,24 @@ describe('TriggerRouter: explicit github_draft_review delivery', () => {
     expect(warned).toBe(false);
   });
 });
+
+it.each(['route', 'dispatch'] as const)('%s retains pending work without completion side effects', async entry => {
+  const calls: string[] = [];
+  vi.stubGlobal('fetch', async () => { calls.push('callback'); return { ok: true, text: async () => '' }; });
+  try {
+    const trigger = makeTrigger({ callbackUrl: 'https://example.com/callback', autoCommit: true });
+    const run: RunWorkflowFn = async () => {
+      calls.push('run');
+      return { _tag: 'recovery_pending', workflowId: trigger.workflowId, stopReason: 'recovery_pending',
+        operationId: 'operation', reason: 'execution_unconfirmed' };
+    };
+    const router = new TriggerRouter(makeIndex(trigger), FAKE_CTX, FAKE_API_KEY, run, {
+      notificationService: { notify: () => { calls.push('notification'); } } as unknown as NotificationService,
+      execFn: async () => { calls.push('delivery'); return { stdout: '', stderr: '' }; },
+    });
+    if (entry === 'route') router.route(makeEvent());
+    else router.dispatch({ workflowId: trigger.workflowId, goal: trigger.goal, workspacePath: trigger.workspacePath });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(calls).toEqual(['run']);
+  } finally { vi.unstubAllGlobals(); }
+});

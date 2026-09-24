@@ -209,3 +209,12 @@ describe('executeWorktrainDispatchCommand', () => {
     });
   });
 });
+
+it('stops waiting with an explicit unconfirmed outcome on suspension', async () => {
+  const deps = buildFakeDeps();
+  deps.files.set('/fake/home/.workrail/events/daemon/' + new Date().toISOString().slice(0, 10) + '.jsonl',
+    JSON.stringify({ kind: 'session_suspended', sessionId: 'sess_test_abc123' }));
+  const result = await executeWorktrainDispatchCommand(deps, { ...BASE_OPTS, wait: true, json: true });
+  expect(result.kind).toBe('failure');
+  expect(deps.stdoutLines).toEqual([JSON.stringify({ sessionId: 'sess_test_abc123', outcome: 'recovery_pending' })]);
+});

@@ -36,6 +36,14 @@ export async function finalizeSession(
   result: WorkflowRunResult,
   ctx: FinalizationContext,
 ): Promise<void> {
+  if (result._tag === 'recovery_pending') {
+    ctx.emitter?.emit({ kind: 'session_suspended', sessionId: ctx.sessionId,
+      workflowId: ctx.workflowId, operationId: result.operationId, reason: result.reason,
+      ...withWorkrailSession(ctx.workrailSessionId) });
+    if (ctx.workrailSessionId !== null) ctx.daemonRegistry?.detach(ctx.workrailSessionId);
+    // No completion stats, sidecar deletion, conversation deletion or delivery transfer.
+    return;
+  }
   const outcome = tagToStatsOutcome(result._tag);
   const detail = result._tag === 'stuck' ? result.reason
     : result._tag === 'timeout' ? result.reason
@@ -67,6 +75,7 @@ export async function finalizeSession(
       break;
     case 'retain_for_delivery':
     case 'retain_for_gate':
+    case 'retain_for_recovery':
       // Sidecar is owned by the delivery pipeline or startup recovery respectively.
       break;
     default:

@@ -114,7 +114,7 @@ async function discoverDaemonPort(
 // Outcome polling for --wait (reads daemon event log files)
 // ---------------------------------------------------------------------------
 
-type SessionOutcome = 'success' | 'failure' | 'timeout_waiting';
+type SessionOutcome = 'success' | 'failure' | 'recovery_pending' | 'timeout_waiting';
 
 async function pollForOutcome(
   deps: Pick<WorktrainDispatchCommandDeps, 'readFile' | 'homedir' | 'joinPath' | 'sleep' | 'stderr' | 'now'>,
@@ -144,7 +144,7 @@ async function checkOutcome(
   deps: Pick<WorktrainDispatchCommandDeps, 'readFile' | 'joinPath'>,
   eventsDir: string,
   sessionId: string,
-): Promise<'success' | 'failure' | null> {
+): Promise<'success' | 'failure' | 'recovery_pending' | null> {
   // Scan last 2 days (session spanning midnight is unlikely for --wait use case).
   const now = Date.now(); // WHY not deps.now: we need the real date for file paths, not the injected test clock
   for (let i = 0; i < 2; i++) {
@@ -159,6 +159,7 @@ async function checkOutcome(
       let event: Record<string, unknown>;
       try { event = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
       if (event['sessionId'] !== sessionId) continue;
+      if (event['kind'] === 'session_suspended') return 'recovery_pending';
       if (event['kind'] !== 'session_completed' && event['kind'] !== 'session_aborted') continue;
 
       const outcome = event['outcome'];
@@ -283,6 +284,11 @@ export async function executeWorktrainDispatchCommand(
   deps.stderr(`Waiting for session ${sessionId} to complete...`);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const outcome = await pollForOutcome(deps, sessionId, timeoutMs);
+
+  if (outcome === 'recovery_pending') {
+    if (opts.json) deps.stdout(JSON.stringify({ sessionId, outcome }));
+    return failure(`Execution outcome is unconfirmed; recovery evidence retained for ${sessionId}.`);
+  }
 
   if (opts.json) {
     const jsonOutcome = outcome === 'timeout_waiting' ? 'timeout' : outcome;
