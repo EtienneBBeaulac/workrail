@@ -6,6 +6,9 @@ const { writeFileSync } = require('node:fs');
 const [server, evidence] = process.argv.slice(2);
 const child = spawn(process.execPath, [server], { env: process.env, stdio: ['pipe', 'pipe', 'inherit'] });
 let dropped = false;
+// Parent shutdown must reap this bridge's server even before the fault fires.
+process.on('SIGTERM', () => child.kill('SIGKILL'));
+process.on('SIGINT', () => child.kill('SIGKILL'));
 process.stdin.pipe(child.stdin);
 child.stdin.on('error', () => {});
 child.on('error', error => { process.stderr.write(String(error)); process.exitCode = 1; });

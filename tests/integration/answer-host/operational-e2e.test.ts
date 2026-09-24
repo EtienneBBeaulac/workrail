@@ -20,7 +20,7 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
   const review = scenario === 'lost_ack_review';
   const root = await mkdtemp(join(tmpdir(), 'answer-operational-'));
   const data = join(root, 'data'), workspace = join(root, 'workspace'), workflows = join(root, 'workflows');
-  const clients: Client[] = [];
+  const clients: Array<{ client: Client; transport: StdioClientTransport; closed: Promise<void> }> = [];
   let stopViewer: (() => Promise<void>) | undefined;
   try {
     await mkdir(workspace); await mkdir(workflows);
@@ -40,13 +40,17 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
     if (viewer.kind !== 'ok') throw new Error(viewer.kind);
     stopViewer = viewer.stop;
     const boot = async (dropAck = false) => {
-      const client = new Client({ name: 'deterministic-operational-agent', version: '1' }); clients.push(client);
+      const client = new Client({ name: 'deterministic-operational-agent', version: '1' });
+      const closed = new Promise<void>(resolve => { client.onclose = resolve; });
       const transport = new StdioClientTransport({ command: process.execPath, args: dropAck ? [resolve('tests/integration/answer-host/fixtures/drop-answer-ack.cjs'), resolve('dist/mcp-server.js'), join(root, 'lost-ack.json')] : [resolve('dist/mcp-server.js')],
         env: { ...getDefaultEnvironment(), WORKRAIL_AGENT_PROFILE: 'answers', WORKRAIL_ANSWER_AUTHORITY_FILE: authority,
           WORKRAIL_DATA_DIR: data, WORKRAIL_ENABLE_SESSION_TOOLS: 'false', WORKRAIL_TRANSPORT: 'stdio' }, stderr: 'pipe' });
+      clients.push({ client, transport, closed });
+      transport.stderr?.resume();
       await client.connect(transport, { timeout: 5000 });
+      transport.stderr?.resume();
       expect((await client.listTools()).tools.map(t => t.name).sort()).toEqual(['answer_work', 'inspect_work', 'open_work', 'recover_work']);
-      return { client, transport };
+      return { client, transport, closed };
     };
     const call = async (client: Client, name: string, args: Record<string, unknown>) => {
       const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 5000 });
@@ -90,9 +94,8 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
       nextReply = question.parse(accepted.view).reply;
       const pid = first.transport.pid;
       if (!pid) throw new Error('Missing server PID');
-      const disconnected = new Promise<void>(resolve => { first.client.onclose = resolve; });
       process.kill(pid, 'SIGKILL');
-      await disconnected;
+      await first.closed;
     }
     const sessions = (await readdir(join(data, 'sessions'), { withFileTypes: true })).filter(entry => entry.isDirectory());
     expect(sessions).toHaveLength(1);
@@ -138,7 +141,11 @@ it.each(['acknowledged_notes', 'lost_ack_review'] as const)('completes %s throug
       expect(artifacts.map(event => event.data.payload.content)).toEqual([{ kind: 'wr.review_verdict', verdict: 'clean', confidence: 'high', findings: [], summary: 'Fixture reviewed' }]);
     }
   } finally {
-    for (const client of clients) await client.close();
+    for (const { client, transport, closed } of clients) {
+      const running = transport.pid !== null;
+      await client.close();
+      if (running) await closed;
+    }
     await stopViewer?.();
     await rm(root, { recursive: true, force: true });
   }
