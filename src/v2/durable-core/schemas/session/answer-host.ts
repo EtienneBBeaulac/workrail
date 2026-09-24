@@ -11,7 +11,7 @@ const completeReviewJson = z.string().refine(raw => {
 }, 'Invalid prepared review');
 /** Immutable admission input, retained with enrollment rather than mutable context. */
 export const AnswerHostRequestSchema = z.object({
-    workflowId: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+    workflowId: z.string().regex(/^[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)?$/),
     goal: z.string(),
     workspacePath: z.string().min(1),
     daemonPolicy: DaemonExecutionPolicySchema.optional(),

@@ -58,7 +58,7 @@ export async function buildPreAgentSession(
   emitter: DaemonEventEmitter | undefined,
   daemonRegistry: DaemonRegistry | undefined,
   activeSessionSet: ActiveSessionSet | undefined,
-  source?: SessionSource,
+  source?: Exclude<SessionSource, { kind: 'supervised' }>,
 ): Promise<PreAgentSessionResult> {
   const persistTokens = createTokenPersister(sessionsDir);
   // ---- Model setup ----

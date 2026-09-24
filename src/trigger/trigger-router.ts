@@ -1061,11 +1061,10 @@ export class TriggerRouter {
    * @returns The workflowId that was dispatched.
    */
   dispatch(workflowTrigger: WorkflowTrigger, source?: SessionSource): string {
-    // Pre-allocated session: executeStartWorkflow already created the session in the store.
-    // Deduplication must not apply here -- dropping this dispatch would zombie the session.
-    // A pre_allocated SessionSource is authoritative evidence that the caller explicitly
-    // intends to start this session. Skip the dedup block entirely.
-    if (source?.kind !== 'pre_allocated') {
+    // Explicit sources already carry session or admission identity. Goal-based
+    // deduplication would lose an allocated session or a distinct retained operation.
+    // Supervised duplicate operations are resolved by canonical admission instead.
+    if (!source || source.kind === 'allocate') {
       // Deduplicate: if the same goal+workspace was dispatched within 30s, skip.
       // WHY shared deduplicator: prevents duplicate dispatches within the same 30s window.
       // Key format differs by path: route/dispatch use workflowId::goal::workspace;
@@ -1077,7 +1076,7 @@ export class TriggerRouter {
         return workflowTrigger.workflowId;
       }
     } else {
-      console.log(`[TriggerRouter] Pre-allocated session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
+      console.log(`[TriggerRouter] Explicit ${source.kind} session dispatched: workflowId=${workflowTrigger.workflowId} goal="${workflowTrigger.goal.slice(0, 60)}"`);
     }
 
     void this.queue.enqueue(workflowTrigger.workflowId, async () => {

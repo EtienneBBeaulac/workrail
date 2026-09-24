@@ -1,7 +1,7 @@
 import { classifyAnswerWorkflow } from './workflow-support.js';
 import { createExecutionRunner, createExecutorPorts } from './execution-runner.js';
-import { readFile } from 'node:fs/promises';
-import { join, isAbsolute } from 'node:path';
+import { createAnswerWorkflowReader } from './workflow-reader.js';
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { AnswerHostRequestSchema } from '../v2/durable-core/schemas/session/answer-host.js';
 import { errAsync } from 'neverthrow';
@@ -14,8 +14,7 @@ import { composeAnswerEngine } from './engine-composition.js';
 import { hostEvent, readHostState, workView, owns, type HostState } from './host-state.js';
 import { SessionJournal } from './journal.js';
 import { executeStartWorkflow } from '../v2/usecases/start-workflow.js';
-import { createWorkflow } from '../types/workflow.js';
-import { createUserDirectorySource } from '../types/workflow-source.js';
+import type { Workflow } from '../types/workflow.js';
 import { hasWorkflowDefinitionShape } from '../types/workflow-definition.js';
 export const runtimeCapabilities: RuntimeCapabilityDescriptor = Object.freeze({ enrollmentFormatVersion: 1, journalFormatVersion: 1, supportedOutputs: Object.freeze(['notes' as const, 'wr.contracts.review_verdict' as const]) });
 const Pointer = z.object({ formatVersion: z.literal(1), executionId: z.string().regex(/^sess_[a-z0-9]+$/), recoveryLocator: z.string().min(1) }).strict();
@@ -117,18 +116,18 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'Invalid host work request' };
             if (parsed.data.daemonPolicy)
                 return { kind: 'refused', reason: 'unsupported_execution_policy', detail: 'This runtime cannot enforce retained daemon policy' };
-            let raw: unknown;
+            let workflow: Workflow | null;
             try {
-                raw = JSON.parse(await readFile(join(config.workflowStoragePath, parsed.data.workflowId + '.json'), 'utf8'));
+                workflow = await createAnswerWorkflowReader(config.workflowStoragePath).getWorkflowById(parsed.data.workflowId);
             }
             catch {
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'Cannot load requested workflow' };
             }
-            if (!hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || classifyAnswerWorkflow(raw) === 'unsupported')
+            const raw = workflow?.definition;
+            if (!workflow || !hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || classifyAnswerWorkflow(raw) === 'unsupported')
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build enrolls linear notes and review workflows without gates' };
             const requiredOutput = classifyAnswerWorkflow(raw) === 'review'
                 ? { requiredOutput: 'wr.contracts.review_verdict' as const } : {};
-            const workflow = createWorkflow(raw, createUserDirectorySource(config.workflowStoragePath));
             const recovery = engine.idFactory.mintEventId() as RecoveryRef;
             let enrollment: HostEnrollment | undefined;
             const started = await executeStartWorkflow({ ...engine, fallbackWorkflowReader: { getWorkflowById: async (id) => id === workflow.definition.id ? workflow : null }, sessionStore: { load: id => engine.sessionStore.load(id), loadValidatedPrefix: id => engine.sessionStore.loadValidatedPrefix(id), append: (lock, plan) => {

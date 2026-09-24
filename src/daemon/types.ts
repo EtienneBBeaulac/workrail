@@ -283,7 +283,10 @@ export interface AllocatedSession {
  */
 export type SessionSource =
   | { readonly kind: 'allocate'; readonly trigger: WorkflowTrigger }
-  | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession };
+  | { readonly kind: 'pre_allocated'; readonly trigger: WorkflowTrigger; readonly session: AllocatedSession }
+  | Readonly<{ kind: 'supervised'; operation: import('./runner/supervised-answer-host.js').SupervisedOperation;
+      scheduler: Pick<Extract<Awaited<ReturnType<typeof import('./runner/supervised-answer-host.js').createSupervisedAnswerHost>>, { kind: 'created' }>['scheduler'], 'enroll'>;
+      signal: AbortSignal }>;
 
 // ---------------------------------------------------------------------------
 // WorkflowRunResult discriminated union
@@ -291,6 +294,8 @@ export type SessionSource =
 
 /** Successful completion of a workflow run. */
 export interface WorkflowRunSuccess {
+  /** Execution completion does not prove the task's real-world outcome. */
+  readonly taskOutcome?: 'success' | 'failure' | 'partial' | 'unknown';
   readonly _tag: 'success';
   readonly workflowId: string;
   readonly stopReason: string;

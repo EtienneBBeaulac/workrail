@@ -1,3 +1,4 @@
+import type { CompletedAnswerOutput } from '../../answer-v1/completed-output.js';
 import type { TurnOutcome } from '../../answer-v1/contracts/host-composition.js';
 import type { WorkView } from '../../answer-v1/contracts/answer-contract.js';
 import type { createSupervisedAnswerHost, SupervisedOperation } from './supervised-answer-host.js';
@@ -10,9 +11,10 @@ type Release = Awaited<ReturnType<Ready['execution']['release']>>;
 type CompletedView = Omit<Extract<WorkView, { kind: 'finished' }>, 'execution'> & Readonly<{ execution: Readonly<{ kind: 'completed' }> }>;
 
 export type SupervisedWorkflowResult =
-  | Readonly<{ kind: 'completed'; operation: SupervisedOperation; execution: Ready['enrollment']['execution']; view: CompletedView; outcome: TurnOutcome }>
+  | Readonly<{ kind: 'completed'; operation: SupervisedOperation; execution: Ready['enrollment']['execution']; view: CompletedView; output: CompletedAnswerOutput; outcome: TurnOutcome }>
   | Readonly<{ kind: 'not_started'; operation: SupervisedOperation; enrollment: Exclude<Enrollment, { kind: 'preparation_result'; result: Ready }> }>
   | Readonly<{ kind: 'suspended'; operation: SupervisedOperation; execution: Ready['enrollment']['execution']; outcome: TurnOutcome; release?: Release }>
+  | Readonly<{ kind: 'output_unavailable'; operation: SupervisedOperation; execution: Ready['enrollment']['execution']; outcome: TurnOutcome }>
   | Readonly<{ kind: 'unconfirmed'; operation: SupervisedOperation }>;
 
 /** The host advances deliveries; a model only answers its current question. This driver
@@ -30,9 +32,11 @@ export async function runSupervisedWorkflow(scheduler: Pick<Scheduler, 'enroll'>
       if (view?.kind === 'question' && (outcome.kind === 'advanced' || outcome.kind === 'partial' || outcome.kind === 'rejected')) continue;
       if (view?.kind === 'finished' && view.execution.kind === 'completed') {
         // A committed final answer is preserved even when cleanup prevents release.
+        const output = await ready.execution.output(signal);
+        if (output.kind !== 'available') return { kind: 'output_unavailable', operation, execution: ready.enrollment.execution, outcome };
         const release = await ready.execution.release(signal);
         return release.kind === 'released'
-          ? { kind: 'completed', operation, execution: ready.enrollment.execution, view: { ...view, execution: view.execution }, outcome }
+          ? { kind: 'completed', operation, execution: ready.enrollment.execution, view: { ...view, execution: view.execution }, output: output.output, outcome }
           : { kind: 'suspended', operation, execution: ready.enrollment.execution, outcome, release };
       }
       return { kind: 'suspended', operation, execution: ready.enrollment.execution, outcome };

@@ -1,18 +1,18 @@
-import { readFile } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { createAnswerWorkflowReader } from '../../answer-v1/workflow-reader.js';
+import { isAbsolute } from 'node:path';
 import type { ClientOptions } from '@anthropic-ai/sdk/client';
 import type { SharedAuthorityConfig, HostWorkRequest, RuntimeCloseResult, ReleaseOwnershipResult, DurableJournalFaultSeam } from '../../answer-v1/contracts/host-composition.js';
 import type { DeadlineClock } from '../../answer-v1/execution-deadline.js';
 import { SessionJournal } from '../../answer-v1/journal.js';
-import { owns } from '../../answer-v1/host-state.js';
+import { completedAnswerOutput } from '../../answer-v1/completed-output.js';
+import { owns, readHostState, inspectionView } from '../../answer-v1/host-state.js';
 import { composeAnswerEngine } from '../../answer-v1/engine-composition.js';
 import { prepareAdmissionDirectory } from '../../answer-v1/admission-directory.js';
 import { admissionFileName } from '../../answer-v1/immutable-admission-file.js';
 import { buildHostAdmissionCandidate, createFreshAdmissionAuthority, recoverHostAdmission } from '../../answer-v1/host-admission.js';
 import { classifyAnswerWorkflow } from '../../answer-v1/workflow-support.js';
 import { hasWorkflowDefinitionShape } from '../../types/workflow-definition.js';
-import { createWorkflow } from '../../types/workflow.js';
-import { createUserDirectorySource } from '../../types/workflow-source.js';
+import type { Workflow } from '../../types/workflow.js';
 import { prepareStartWorkflow } from '../../v2/usecases/start-workflow.js';
 import { AnswerHostRequestSchema } from '../../v2/durable-core/schemas/session/answer-host.js';
 import { prepareLinuxScratchExecution } from './linux-scratch/execution.js';
@@ -72,13 +72,13 @@ export async function createSupervisedAnswerHost(config: SharedAuthorityConfig &
           if (checked.request.daemonPolicy?.workspace.kind !== 'linux_scratch')
             return { kind: 'refused', reason: 'unsupported_execution_policy', operation: expected } as const;
           const combined = AbortSignal.any([parent, signal]);
-          let raw: unknown;
-          try { raw = JSON.parse(await readFile(join(config.workflowStoragePath, checked.request.workflowId + '.json'), 'utf8')); }
+          let workflow: Workflow | null;
+          try { workflow = await createAnswerWorkflowReader(config.workflowStoragePath).getWorkflowById(checked.request.workflowId); }
           catch { return { kind: 'refused', reason: 'unsupported_workflow', operation: expected } as const; }
           try {
-            if (!hasWorkflowDefinitionShape(raw) || raw.id !== checked.request.workflowId || classifyAnswerWorkflow(raw) === 'unsupported')
+            const raw = workflow?.definition;
+            if (!workflow || !hasWorkflowDefinitionShape(raw) || raw.id !== checked.request.workflowId || classifyAnswerWorkflow(raw) === 'unsupported')
               return { kind: 'refused', reason: 'unsupported_workflow', operation: expected } as const;
-            const workflow = createWorkflow(raw, createUserDirectorySource(config.workflowStoragePath));
             const prepared = await prepareStartWorkflow({ ...engine, fallbackWorkflowReader: {
               getWorkflowById: async id => id === workflow.definition.id ? workflow : null,
             } }, { ...checked.request, injectOnboarding: false }, { triggerSource: 'daemon' });
@@ -101,7 +101,16 @@ export async function createSupervisedAnswerHost(config: SharedAuthorityConfig &
                 { kind: 'refused', reason: 'storage_unavailable' },
                 async state => owns(state, preparedExecution.owner) ? { kind: 'current' } : { kind: 'stale_owner' });
               return { kind: 'preparation_result', operation: expected, result: { ...preparedExecution,
-                execution: { ...execution, async release(releaseSignal: AbortSignal): Promise<ReleaseOwnershipResult | RuntimeCloseResult> {
+                execution: { ...execution,
+                  async output(outputSignal: AbortSignal): Promise<ReturnType<typeof completedAnswerOutput>> {
+                    if (outputSignal.aborted) return { kind: 'unavailable' };
+                    const loaded = await readHostState(engine, preparedExecution.enrollment);
+                    if (loaded.kind !== 'loaded' || outputSignal.aborted) return { kind: 'unavailable' };
+                    const view = await inspectionView(engine, loaded.state);
+                    return view.kind === 'finished' && view.execution.kind === 'completed'
+                      ? completedAnswerOutput(loaded.state.records) : { kind: 'unavailable' };
+                  },
+                  async release(releaseSignal: AbortSignal): Promise<ReleaseOwnershipResult | RuntimeCloseResult> {
                   const ownership = await verifyOwner(releaseSignal);
                   if (ownership.kind !== 'current') return ownership;
                   const closed = await execution.close();

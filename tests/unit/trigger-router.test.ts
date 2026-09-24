@@ -2005,6 +2005,18 @@ describe('TriggerRouter.dispatch pre_allocated SessionSource bypass', () => {
     vi.useRealTimers();
   });
 
+  it('dispatch() preserves distinct supervised operation identities with the same goal', async () => {
+    const { fn, calls } = makeFakeRunWorkflow();
+    const configured = makeTrigger();
+    const router = new TriggerRouter(makeIndex(configured), FAKE_CTX, FAKE_API_KEY, fn);
+    const trigger = { workflowId: configured.workflowId, goal: configured.goal, workspacePath: configured.workspacePath };
+    router.dispatch(trigger);
+    router.dispatch(trigger, { kind: 'supervised',
+      operation: { operationId: '11111111-1111-4111-8111-111111111111', request: trigger },
+      scheduler: { enroll: async () => ({ kind: 'refused', reason: 'invalid_request' }) }, signal: new AbortController().signal });
+    await vi.waitFor(() => expect(calls).toHaveLength(2));
+  });
+
   it('dispatch() with pre_allocated SessionSource bypasses dedup and calls runWorkflowFn', async () => {
     // WHY: proves the fix for the zombie-session bug. The dedup map contains goal::workspace
     // from a prior dispatch. dispatch() with a pre_allocated SessionSource must bypass the dedup

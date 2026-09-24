@@ -76,6 +76,7 @@ it.skipIf(process.platform === 'win32').each(['unsupported', 'preflight_unknown'
 it.skipIf(process.platform === 'win32').each([
   { cleanup: 'removed', driving: 'manual' }, { cleanup: 'unknown', driving: 'manual' },
   { cleanup: 'removed', driving: 'automatic' }, { cleanup: 'unknown', driving: 'automatic' },
+  { cleanup: 'removed', driving: 'daemon' }, { cleanup: 'unknown', driving: 'daemon' },
   { cleanup: 'create_unknown', driving: 'automatic' }, { cleanup: 'cancel_create', driving: 'automatic' },
 ] as const)('public host retains mixed review receipts with $cleanup cleanup via $driving driving', async ({ cleanup, driving }) => {
   const { spawn } = await import('node:child_process');
@@ -91,7 +92,7 @@ it.skipIf(process.platform === 'win32').each([
     const config = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },
       keyringPath: join(root, 'keys', 'keyring.json'), workflowStoragePath: join(root, 'workflows') };
     await mkdir(config.workflowStoragePath);
-    await writeFile(join(config.workflowStoragePath, 'fixture.json'), JSON.stringify({ id: 'fixture', name: 'Fixture', description: 'Fixture', version: '1.0.0', steps: [
+    await writeFile(join(config.workflowStoragePath, 'fixture.json'), JSON.stringify({ id: 'team.fixture', name: 'Fixture', description: 'Fixture', version: '1.0.0', steps: [
       { id: 'review', title: 'Review', prompt: 'Review fixture', outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } },
       { id: 'notes', title: 'Notes', prompt: 'Summarize fixture' },
     ] }));
@@ -138,7 +139,23 @@ it.skipIf(process.platform === 'win32').each([
       workspace: { kind: 'linux_scratch', image: 'python@sha256:' + 'a'.repeat(64), platform: 'linux/arm64', snapshot: { kind: 'explicit_files', description: 'Empty fixture', files: [] } },
       delivery: { kind: 'none' }, restart: { kind: 'requires_explicit_reconciliation' } });
     if (decoded.kind !== 'validated') throw new Error(decoded.kind);
-    const operation = { operationId: randomUUID(), request: { workflowId: 'fixture', goal: 'Review', workspacePath: root, daemonPolicy: decoded.policy } };
+    const operation = { operationId: randomUUID(), request: { workflowId: 'team.fixture', goal: 'Review', workspacePath: root, daemonPolicy: decoded.policy } };
+    if (driving === 'daemon') {
+      const { runWorkflow } = await import('../../../src/daemon/workflow-runner.js');
+      const trigger = { workflowId: 'team.fixture', goal: 'Review', workspacePath: root };
+      const legacy = new Proxy({} as import('../../../src/mcp/types.js').V2ToolContext, {
+        get() { throw new Error('Supervised execution must never read legacy engine context'); },
+      });
+      const result = await runWorkflow(trigger, legacy, undefined, undefined, undefined, undefined, undefined, undefined,
+        { kind: 'supervised', scheduler: host.scheduler, operation, signal: new AbortController().signal });
+      expect(result).toMatchObject(cleanup === 'removed' ? { _tag: 'success', taskOutcome: 'unknown', lastStepNotes: 'Fixture completed', lastStepArtifacts: [] }
+        : { _tag: 'recovery_pending', operationId: operation.operationId });
+      expect(calls).toBe(2);
+      expect(commands.filter(command => command === 'create')).toHaveLength(1);
+      expect(commands.filter(command => command === 'rm')).toHaveLength(1);
+      await host.scheduler.close(new AbortController().signal);
+      return;
+    }
     if (driving === 'automatic') {
       const result = await runSupervisedWorkflow(host.scheduler, operation, new AbortController().signal);
       if (cleanup === 'create_unknown' || cleanup === 'cancel_create') {
@@ -149,7 +166,7 @@ it.skipIf(process.platform === 'win32').each([
         expect(await host.scheduler.close(new AbortController().signal)).toMatchObject({ kind: 'incomplete' });
         return;
       }
-      expect(result).toMatchObject(cleanup === 'removed' ? { kind: 'completed', view: { kind: 'finished' } }
+      expect(result).toMatchObject(cleanup === 'removed' ? { kind: 'completed', view: { kind: 'finished' }, output: { kind: 'notes', notesMarkdown: 'Fixture completed', artifacts: [] } }
         : { kind: 'suspended', outcome: { kind: 'advanced', nextView: { kind: 'finished' } }, release: { kind: 'incomplete' } });
       expect(calls).toBe(2);
       expect(commands.filter(command => command === 'create')).toHaveLength(1);
