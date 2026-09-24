@@ -27,6 +27,8 @@ describe.skipIf(process.platform === 'win32')('immutable admission publication',
       const id = randomUUID();
       const values = Array.from({ length: 8 }, (_, i) => JSON.stringify({ candidate: i }));
       const results = await Promise.all(values.map(value => publishAdmissionFile(root, id, bytes(value), signal())));
+      expect(results.filter(result => result.kind === 'durable' && result.publication === 'published_by_this_call')).toHaveLength(1);
+      expect(results.filter(result => result.kind === 'durable' && result.publication === 'existing_winner')).toHaveLength(7);
       const winner = await readFile(join(root, `${id}.json`), 'utf8');
       expect(values).toContain(winner);
       for (const result of results) {
@@ -34,7 +36,7 @@ describe.skipIf(process.platform === 'win32')('immutable admission publication',
         if (result.kind === 'durable') expect(Buffer.from(result.bytes).toString()).toBe(winner);
       }
       const replay = await publishAdmissionFile(root, id, bytes('changed request'), signal());
-      expect(replay.kind).toBe('durable');
+      expect(replay).toMatchObject({ kind: 'durable', publication: 'existing_winner' });
       if (replay.kind === 'durable') expect(Buffer.from(replay.bytes).toString()).toBe(winner);
       expect(await readdir(root)).toEqual([`${id}.json`]);
       const other = randomUUID();
@@ -118,5 +120,20 @@ it.skipIf(process.platform === 'win32')('cold reads distinguish absence, invalid
     await symlink(join(root, 'absent'), target);
     expect(await readAdmissionFile(root, id, signal())).toEqual({ kind: 'refused', reason: 'invalid_file' });
     expect(await readdir(root)).toEqual([`${id}.json`]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+it.skipIf(process.platform === 'win32')('identical bytes and cold reads cannot claim fresh publication', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'admission-provenance-'));
+  try {
+    const id = randomUUID(), candidate = bytes('same candidate');
+    const results = await Promise.all(Array.from({ length: 8 }, () => publishAdmissionFile(root, id, candidate, signal())));
+    expect(results.filter(r => r.kind === 'durable' && r.publication === 'published_by_this_call')).toHaveLength(1);
+    expect(results.filter(r => r.kind === 'durable' && r.publication === 'existing_winner')).toHaveLength(7);
+    expect(await publishAdmissionFile(root, id, candidate, signal())).toMatchObject({ kind: 'durable', publication: 'existing_winner' });
+    const read = await readAdmissionFile(root, id, signal());
+    expect(read).toEqual({ kind: 'durable', bytes: candidate });
+    expect(read).not.toHaveProperty('publication');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

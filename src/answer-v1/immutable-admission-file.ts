@@ -12,6 +12,12 @@ export type AdmissionFileResult =
   | Readonly<{ kind: 'refused'; reason: 'invalid_input' | 'unsupported_platform' | 'invalid_file' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'cancelled' | 'storage_unavailable' }>;
 
+/** Publication provenance is not an execution grant. Only an acknowledged link from
+ * this invocation can report published_by_this_call; reads cannot supply provenance. */
+export type AdmissionPublicationResult =
+  | Readonly<{ kind: 'durable'; bytes: Uint8Array; publication: 'published_by_this_call' | 'existing_winner' }>
+  | Exclude<AdmissionFileResult, { kind: 'durable' }>;
+
 export const MAX_ADMISSION_BYTES = 4 * 1024 * 1024;
 
 function hasCode(error: unknown, code: string): boolean {
@@ -32,7 +38,7 @@ export function admissionFileName(operationId: string): string | undefined {
  */
 export async function publishAdmissionFile(
   root: string, operationId: string, candidate: Uint8Array, signal: AbortSignal,
-): Promise<AdmissionFileResult> {
+): Promise<AdmissionPublicationResult> {
   const name = admissionFileName(operationId);
   if (!isAbsolute(root) || !name || candidate.length === 0 || candidate.length > MAX_ADMISSION_BYTES)
     return { kind: 'refused', reason: 'invalid_input' };
@@ -52,14 +58,17 @@ export async function publishAdmissionFile(
       await writer.sync();
     } finally { await writer.close(); }
     if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
-    try { await link(temporary, target); }
-    catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
+    const publication = await (async (): Promise<'published_by_this_call' | 'existing_winner'> => {
+      try { await link(temporary, target); return 'published_by_this_call'; }
+      catch (error) { if (hasCode(error, 'EEXIST')) return 'existing_winner'; throw error; }
+    })();
 
     const retained = await readAdmissionFile(root, operationId, signal);
     // Publication succeeded or found a winner. Disappearance is uncertainty, not
     // permission to allocate another execution.
     return retained.kind === 'missing'
-      ? { kind: 'unconfirmed', reason: 'storage_unavailable' } : retained;
+      ? { kind: 'unconfirmed', reason: 'storage_unavailable' }
+      : retained.kind === 'durable' ? { ...retained, publication } : retained;
   } catch (error) {
     if (hasCode(error, 'ELOOP')) return { kind: 'refused', reason: 'invalid_file' };
     return { kind: 'unconfirmed', reason: signal.aborted ? 'cancelled' : 'storage_unavailable' };
