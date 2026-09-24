@@ -1,3 +1,4 @@
+import { classifyAnswerWorkflow } from './workflow-support.js';
 import { createExecutionRunner, createExecutorPorts } from './execution-runner.js';
 import { readFile } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
@@ -15,7 +16,7 @@ import { SessionJournal } from './journal.js';
 import { executeStartWorkflow } from '../v2/usecases/start-workflow.js';
 import { createWorkflow } from '../types/workflow.js';
 import { createUserDirectorySource } from '../types/workflow-source.js';
-import { hasWorkflowDefinitionShape, isStandardStepDefinition } from '../types/workflow-definition.js';
+import { hasWorkflowDefinitionShape } from '../types/workflow-definition.js';
 export const runtimeCapabilities: RuntimeCapabilityDescriptor = Object.freeze({ enrollmentFormatVersion: 1, journalFormatVersion: 1, supportedOutputs: Object.freeze(['notes' as const, 'wr.contracts.review_verdict' as const]) });
 const Pointer = z.object({ formatVersion: z.literal(1), executionId: z.string().regex(/^sess_[a-z0-9]+$/), recoveryLocator: z.string().min(1) }).strict();
 const Request = AnswerHostRequestSchema.refine(request => isAbsolute(request.workspacePath));
@@ -123,9 +124,9 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
             catch {
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'Cannot load requested workflow' };
             }
-            if (!hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || !raw.steps.every(s => isStandardStepDefinition(s) && !s.requireConfirmation && (!s.outputContract || s.outputContract.contractRef === 'wr.contracts.review_verdict') && !s.validationCriteria && !s.assessmentRefs && !s.runCondition))
+            if (!hasWorkflowDefinitionShape(raw) || raw.id !== input.workflowId || classifyAnswerWorkflow(raw) === 'unsupported')
                 return { kind: 'refused', reason: 'unsupported_workflow', detail: 'This build enrolls linear notes and review workflows without gates' };
-            const requiredOutput = raw.steps.some(s => isStandardStepDefinition(s) && s.outputContract?.contractRef === 'wr.contracts.review_verdict')
+            const requiredOutput = classifyAnswerWorkflow(raw) === 'review'
                 ? { requiredOutput: 'wr.contracts.review_verdict' as const } : {};
             const workflow = createWorkflow(raw, createUserDirectorySource(config.workflowStoragePath));
             const recovery = engine.idFactory.mintEventId() as RecoveryRef;

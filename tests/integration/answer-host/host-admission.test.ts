@@ -24,13 +24,13 @@ import { publishAdmissionFile } from '../../../src/answer-v1/immutable-admission
 import { decodeAdmissionReservation } from '../../../src/answer-v1/admission-reservation.js';
 import { asSessionId, asSnapshotRef, asSha256Digest } from '../../../src/v2/durable-core/ids/index.js';
 
-async function setup(root: string, stepCount = 1) {
+async function setup(root: string, stepCount = 1, output: 'notes' | 'review' = 'notes') {
   const config = { storage: { journalRootDir: join(root, 'sessions'), hostIndexRootDir: join(root, 'index') },
     keyringPath: join(root, 'keys', 'keyring.json'), workflowStoragePath: join(root, 'workflow-source') };
   const engine = await composeAnswerEngine(config);
   if (engine.kind !== 'ready') throw new Error(engine.kind);
   const workflow = createWorkflow({ id: 'admission', name: 'Admission', description: 'Admission fixture', version: '1.0.0',
-    steps: Array.from({ length: stepCount }, (_, i) => ({ id: i === 0 ? 'first' : 'second', title: 'Step', prompt: 'Original' })) }, createUserDirectorySource(config.workflowStoragePath));
+    steps: Array.from({ length: stepCount }, (_, i) => ({ id: i === 0 ? 'first' : 'second', title: 'Step', prompt: 'Original', ...(output === 'review' ? { outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } } : {}) })) }, createUserDirectorySource(config.workflowStoragePath));
   const request = { workflowId: 'admission', goal: 'original goal', workspacePath: root };
   const prepare = async () => {
     const result = await prepareStartWorkflow({ ...engine, fallbackWorkflowReader: { getWorkflowById: async () => workflow } },
@@ -1394,4 +1394,30 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
       authority.close();
     } finally { parent.abort(); await operatorCleanup(); await rm(root, { recursive: true, force: true }); }
   });
+});
+
+
+it.skipIf(process.platform === 'win32').each(['notes', 'review'] as const)('admits %s with its pinned capability marker', async output => {
+  const root = await mkdtemp(join(tmpdir(), 'host-admission-output-'));
+  try {
+    const { engine, expected, candidate } = await setup(root, 1, output);
+    expect(await publishAndReconcileHostAdmission(engine, root, expected, candidate.bytes, new AbortController().signal))
+      .toMatchObject({ kind: 'admitted' });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32').each(['notes', 'review'] as const)('refuses a mismatched %s marker before journal writes', async output => {
+  const root = await mkdtemp(join(tmpdir(), 'host-admission-output-mismatch-'));
+  try {
+    const { engine, prepared, expected, candidate } = await setup(root, 1, output);
+    const reservation = JSON.parse(Buffer.from(candidate.bytes).toString());
+    const enrollment = reservation.plan.events.at(-1).data;
+    if (output === 'review') delete enrollment.requiredOutput;
+    else enrollment.requiredOutput = 'wr.contracts.review_verdict';
+    expect(await publishAndReconcileHostAdmission(engine, root, expected, Buffer.from(JSON.stringify(reservation)), new AbortController().signal))
+      .toEqual({ kind: 'refused', reason: 'invalid_content' });
+    const truth = await engine.sessionStore.load(prepared.sessionId);
+    if (truth.isErr()) throw new Error(truth.error.code);
+    expect(truth.value.events).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

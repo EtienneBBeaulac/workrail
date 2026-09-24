@@ -1,3 +1,4 @@
+import { classifyAnswerWorkflow } from './workflow-support.js';
 import type { HostEnrollment, ExecutionRef, OwnerFence } from './contracts/invocation-contract.js';
 import type { RecoveryRef } from './contracts/answer-contract.js';
 import { startExecutionDeadline, type DeadlineClock, type ExecutionDeadline, type DeadlineStopReason, type StartDeadlineResult } from './execution-deadline.js';
@@ -13,7 +14,7 @@ import { DomainEventV1Schema } from '../v2/durable-core/schemas/session/index.js
 import { JsonValueSchema } from '../v2/durable-core/canonical/json-zod.js';
 import { workflowHashForCompiledSnapshot, snapshotRefForExecutionSnapshotFileV1 } from '../v2/durable-core/canonical/hashing.js';
 import { asSessionId, asSha256Digest, asSnapshotRef, asWorkflowHash } from '../v2/durable-core/ids/index.js';
-import { hasWorkflowDefinitionShape, isStandardStepDefinition } from '../types/workflow-definition.js';
+import { hasWorkflowDefinitionShape } from '../types/workflow-definition.js';
 
 export type HostAdmissionResult =
   | Readonly<{ kind: 'admitted'; pointer: PersistedHostPointer }>
@@ -39,11 +40,14 @@ export function buildHostAdmissionCandidate(
     const { eat_token: _legacyToken, ...hostContext } = parsedContext.data;
     return { ...event, data: { ...event.data, context: hostContext } };
   });
+  const output = classifyAnswerWorkflow(prepared.pinnedWorkflow.definition);
+  if (output === 'unsupported') return { kind: 'refused', reason: 'invalid_candidate' };
+  const requiredOutput = output === 'review' ? { requiredOutput: 'wr.contracts.review_verdict' as const } : {};
   const recovery = ids.idFactory.mintEventId();
   const initial = { v: 1, eventId: ids.idFactory.mintEventId(), eventIndex: events.length,
     sessionId: prepared.sessionId, timestampMs: now(), kind: 'answer_host_recorded', scope: { runId: prepared.runId },
     dedupeKey: `answer_host:${prepared.sessionId}:${events.length}`,
-    data: { kind: 'enrolled', mode: 'host_bound', recovery, initialNode: prepared.nodeId, request } };
+    data: { kind: 'enrolled', mode: 'host_bound', recovery, initialNode: prepared.nodeId, request, ...requiredOutput } };
   const bytes = Buffer.from(JSON.stringify({ formatVersion: request.daemonPolicy ? 2 : 1, operationId, request, sessionId: prepared.sessionId,
     runId: prepared.runId, nodeId: prepared.nodeId, workflowHash: prepared.workflowHash, recovery, mode: 'host_bound',
     plan: { events: [...events, initial], snapshotPins: prepared.appendPlan.snapshotPins } }));
@@ -75,9 +79,11 @@ async function contentMatches(engine: AdmissionEngine, reservation: AdmissionRes
       || computedSnapshot.isErr() || computedSnapshot.value !== snapshotRef) return 'invalid';
   if (!('definition' in pinned.value) || !hasWorkflowDefinitionShape(pinned.value.definition)) return 'invalid';
   const workflow = pinned.value.definition;
-  if (workflow.id !== reservation.request.workflowId || workflow.steps.length === 0
-      || !workflow.steps.every(step => isStandardStepDefinition(step) && !step.requireConfirmation
-        && !step.outputContract && !step.validationCriteria && !step.assessmentRefs && !step.runCondition)) return 'invalid';
+  const output = classifyAnswerWorkflow(workflow);
+  if (workflow.id !== reservation.request.workflowId || output === 'unsupported') return 'invalid';
+  const enrollment = reservation.plan.events.at(-1);
+  if (enrollment?.kind !== 'answer_host_recorded' || enrollment.data.kind !== 'enrolled'
+    || enrollment.data.requiredOutput !== (output === 'review' ? 'wr.contracts.review_verdict' : undefined)) return 'invalid';
   const state = snapshot.value.enginePayload.engineState;
   return !snapshot.value.enginePayload.gateCheckpoint && state.kind === 'running' && state.completed.values.length === 0
     && state.loopStack.length === 0 && state.pending.kind === 'some' && state.pending.step.loopPath.length === 0
