@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { publishAdmissionFile, MAX_ADMISSION_BYTES } from '../../../src/answer-v1/immutable-admission-file.js';
+import { publishAdmissionFile, readAdmissionFile, MAX_ADMISSION_BYTES } from '../../../src/answer-v1/immutable-admission-file.js';
 
 const signal = () => new AbortController().signal;
 const bytes = (value: string) => Buffer.from(value);
@@ -101,4 +101,22 @@ describe.skipIf(process.platform === 'win32')('immutable admission publication',
 it.skipIf(process.platform !== 'win32')('refuses unsupported directory durability on Windows', async () => {
   expect(await publishAdmissionFile(process.cwd(), randomUUID(), bytes('a'), signal()))
     .toEqual({ kind: 'refused', reason: 'unsupported_platform' });
+});
+
+it.skipIf(process.platform === 'win32')('cold reads distinguish absence, invalid files and cancellation without publishing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'admission-read-'));
+  try {
+    const id = randomUUID(), target = join(root, `${id}.json`);
+    expect(await readAdmissionFile(root, id, signal())).toEqual({ kind: 'missing' });
+    expect(await readdir(root)).toEqual([]);
+    expect(await readAdmissionFile(root, '../escape', signal())).toEqual({ kind: 'refused', reason: 'invalid_input' });
+    const controller = new AbortController(); controller.abort();
+    expect(await readAdmissionFile(root, id, controller.signal)).toEqual({ kind: 'unconfirmed', reason: 'cancelled' });
+    await writeFile(target, '');
+    expect(await readAdmissionFile(root, id, signal())).toEqual({ kind: 'refused', reason: 'invalid_file' });
+    await rm(target);
+    await symlink(join(root, 'absent'), target);
+    expect(await readAdmissionFile(root, id, signal())).toEqual({ kind: 'refused', reason: 'invalid_file' });
+    expect(await readdir(root)).toEqual([`${id}.json`]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

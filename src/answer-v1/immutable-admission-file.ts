@@ -1,4 +1,4 @@
-import { open, link, unlink } from 'node:fs/promises';
+import { open, link, unlink, type FileHandle } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
@@ -55,8 +55,43 @@ export async function publishAdmissionFile(
     try { await link(temporary, target); }
     catch (error) { if (!hasCode(error, 'EEXIST')) throw error; }
 
+    const retained = await readAdmissionFile(root, operationId, signal);
+    // Publication succeeded or found a winner. Disappearance is uncertainty, not
+    // permission to allocate another execution.
+    return retained.kind === 'missing'
+      ? { kind: 'unconfirmed', reason: 'storage_unavailable' } : retained;
+  } catch (error) {
+    if (hasCode(error, 'ELOOP')) return { kind: 'refused', reason: 'invalid_file' };
+    return { kind: 'unconfirmed', reason: signal.aborted ? 'cancelled' : 'storage_unavailable' };
+  } finally {
+    // Only this invocation's temporary link is disposable. Never remove the winner.
+    if (temporaryCreated) await unlink(temporary).catch(() => undefined);
+  }
+}
+
+export type AdmissionReadResult = AdmissionFileResult | Readonly<{ kind: 'missing' }>;
+
+/** Reads and synchronizes the retained winner without preparing or publishing bytes.
+ * Missing is an observation only, never proof that a concurrent admission cannot exist.
+ * Unknown filesystem failures remain unconfirmed and never authorize fresh enrollment.
+ */
+export async function readAdmissionFile(
+  root: string, operationId: string, signal: AbortSignal,
+): Promise<AdmissionReadResult> {
+  const name = admissionFileName(operationId);
+  if (!isAbsolute(root) || !name) return { kind: 'refused', reason: 'invalid_input' };
+  if (process.platform === 'win32') return { kind: 'refused', reason: 'unsupported_platform' };
+  if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+  const target = join(root, name);
+  try {
     // Read from the same bounded descriptor we sync. Never follow a substituted symlink.
-    const winner = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let winner: FileHandle;
+    try { winner = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+    catch (error) {
+      if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
+      if (hasCode(error, 'ENOENT')) return { kind: 'missing' };
+      throw error;
+    }
     try {
       const stat = await winner.stat();
       if (!stat.isFile() || stat.size === 0 || stat.size > MAX_ADMISSION_BYTES)
@@ -75,10 +110,8 @@ export async function publishAdmissionFile(
       return { kind: 'durable', bytes: retained };
     } finally { await winner.close(); }
   } catch (error) {
+    if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
     if (hasCode(error, 'ELOOP')) return { kind: 'refused', reason: 'invalid_file' };
-    return { kind: 'unconfirmed', reason: signal.aborted ? 'cancelled' : 'storage_unavailable' };
-  } finally {
-    // Only this invocation's temporary link is disposable. Never remove the winner.
-    if (temporaryCreated) await unlink(temporary).catch(() => undefined);
+    return { kind: 'unconfirmed', reason: 'storage_unavailable' };
   }
 }

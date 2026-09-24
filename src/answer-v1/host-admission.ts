@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { JsonValue } from '../v2/durable-core/canonical/json-types.js';
 import { ResultAsync } from 'neverthrow';
 import { decodeAdmissionReservation, matchesAdmissionPrefix, type AdmissionReservation } from './admission-reservation.js';
-import { publishAdmissionFile } from './immutable-admission-file.js';
+import { publishAdmissionFile, readAdmissionFile } from './immutable-admission-file.js';
 import type { AnswerEngine } from './engine-composition.js';
 import type { PreparedWorkflowStart } from '../v2/usecases/start-workflow.js';
 import type { HostWorkRequest, PersistedHostPointer } from './contracts/host-composition.js';
@@ -99,7 +99,27 @@ export async function publishAndReconcileHostAdmission(
   if (publication.kind !== 'durable') return publication;
   const decoded = decodeAdmissionReservation(publication.bytes, expected);
   if (decoded.kind === 'refused') return decoded;
-  const reservation = decoded.reservation;
+  return reconcileHostAdmission(engine, decoded.reservation, signal);
+}
+
+/** Recovery uses the original operation identity and request, never a new prepared
+ * workflow. Missing reservations do not create sessions or fall back to legacy enroll.
+ */
+export async function recoverHostAdmission(
+  engine: AdmissionEngine,
+  root: string,
+  expected: Readonly<{ operationId: string; request: HostWorkRequest }>,
+  signal: AbortSignal,
+): Promise<HostAdmissionResult | Readonly<{ kind: 'missing' }>> {
+  const retained = await readAdmissionFile(root, expected.operationId, signal);
+  if (retained.kind !== 'durable') return retained;
+  const decoded = decodeAdmissionReservation(retained.bytes, expected);
+  return decoded.kind === 'refused' ? decoded : reconcileHostAdmission(engine, decoded.reservation, signal);
+}
+
+async function reconcileHostAdmission(
+  engine: AdmissionEngine, reservation: AdmissionReservation, signal: AbortSignal,
+): Promise<HostAdmissionResult> {
   if (signal.aborted) return { kind: 'unconfirmed', reason: 'cancelled' };
   const pointer: PersistedHostPointer = { formatVersion: 1, executionId: reservation.sessionId, recoveryLocator: reservation.recovery };
   const result = await engine.gate.withHealthySessionLock(asSessionId(reservation.sessionId), lock =>
