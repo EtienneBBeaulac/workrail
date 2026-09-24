@@ -9,7 +9,9 @@ export const AnswerHostRequestSchema = z.object({
     goal: z.string(),
     workspacePath: z.string().min(1),
     daemonPolicy: DaemonExecutionPolicySchema.optional(),
-}).strict().refine(request => !request.daemonPolicy || request.workspacePath === request.daemonPolicy.workspace.workspacePath).readonly();
+// For scratch profiles workspacePath identifies request provenance, never a mount or file-read grant.
+}).strict().refine(request => !request.daemonPolicy || request.daemonPolicy.workspace.kind === 'linux_scratch'
+    || request.workspacePath === request.daemonPolicy.workspace.workspacePath).readonly();
 const epoch = z.string().regex(/^[1-9][0-9]*$/);
 const raw = z.object({ providerResponseId: z.string().optional(), responseText: z.string(),
     calls: z.array(z.object({ id: z.string(), name: z.string(), argumentsJson: z.string() }).strict().readonly()).readonly() }).strict().readonly();

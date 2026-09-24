@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LinuxScratchProfileSchema } from './linux-scratch-profile.js';
 
 const positiveInteger = z.number().int().positive().safe();
 const pathValue = z.string().min(1);
@@ -13,10 +14,11 @@ const checkout = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('branch'), name: branchName, commit }).strict(),
   z.object({ kind: z.literal('detached'), commit }).strict(),
 ]).readonly();
-const workspace = z.discriminatedUnion('kind', [
+const workspace = z.union([
   z.object({ kind: z.literal('existing'), workspacePath: pathValue }).strict(),
   z.object({ kind: z.literal('worktree'), repositoryPath: pathValue,
     workspacePath: pathValue, checkout }).strict(),
+  LinuxScratchProfileSchema,
 ]).readonly();
 
 /** Resolved configuration only. Credentials and mutable trigger objects have no slot.

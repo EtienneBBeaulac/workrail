@@ -16,7 +16,8 @@ export function decodeDaemonExecutionPolicy(input: unknown): DecodeDaemonPolicyR
   const parsed = DaemonExecutionPolicySchema.safeParse(input);
   if (parsed.success) {
     const workspace = parsed.data.workspace;
-    const paths = workspace.kind === 'worktree' ? [workspace.repositoryPath, workspace.workspacePath] : [workspace.workspacePath];
+    const paths = workspace.kind === 'linux_scratch' ? []
+      : workspace.kind === 'worktree' ? [workspace.repositoryPath, workspace.workspacePath] : [workspace.workspacePath];
     if (paths.some(value => !isAbsolute(value) || value.includes('\0'))
       || (workspace.kind === 'worktree' && resolve(workspace.repositoryPath) === resolve(workspace.workspacePath)))
       return { kind: 'refused', reason: 'invalid_policy' };

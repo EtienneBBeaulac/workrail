@@ -1296,3 +1296,102 @@ it.skipIf(process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1').each([
   } finally { lifetime.abort(); if (!real) vi.useRealTimers(); await operatorCleanup(); await rm(root, { recursive: true, force: true }); }
 });
 });
+
+(['preflight', 'throwing_preflight', 'unsupported', 'cancelled', 'cancel_after_claim', 'real_success', 'real_create_unknown', 'real_cancel_create'] as const).forEach(scenario => {
+  const real = scenario.startsWith('real_');
+  it.skipIf(process.platform === 'win32' || (real && process.env.WORKRAIL_TEST_LINUX_SCRATCH !== '1'))(
+    `prepares only the retained scratch profile from fresh admission: ${scenario}`, async () => {
+    const { prepareLinuxScratchExecution } = await import('../../../src/daemon/runner/linux-scratch/execution.js');
+    const root = await mkdtemp(join(tmpdir(), 'scratch-preparation-'));
+    const parent = new AbortController(), caller = new AbortController(), signal = new AbortController().signal;
+    let operatorCleanup = async () => {};
+    try {
+      const fixture = await freshFixture(root);
+      const profile = { kind: 'linux_scratch', image: 'python@sha256:eb5be8e5b4d0a159c237946bbdd06356dda5d19c30fc4f7843e8046d3a590333',
+        platform: 'linux/arm64', snapshot: { kind: 'explicit_files', description: 'Only the named fixture content', files: [{ path: 'retained.txt', text: 'from admission' }] } };
+      const parsed = decodeDaemonExecutionPolicy({ ...fixture.expected.request.daemonPolicy,
+        workspace: scenario === 'unsupported' ? fixture.expected.request.daemonPolicy.workspace : profile });
+      if (parsed.kind !== 'validated') throw new Error(parsed.kind);
+      const expected = { ...fixture.expected, request: { ...fixture.expected.request, daemonPolicy: parsed.policy } };
+      const candidate = buildHostAdmissionCandidate(fixture.prepared, expected.request, expected.operationId, fixture.engine, () => 1);
+      if (candidate.kind !== 'candidate') throw new Error(candidate.kind);
+      // Caller mutation cannot replace the decoded, retained snapshot.
+      profile.snapshot.files[0]!.text = 'caller replacement';
+      const authority = createFreshAdmissionAuthority(fixture.engine, new AdmissionClock(), parent.signal);
+      const admitted = await authority.admit(root, expected, candidate.bytes, signal);
+      if (admitted.kind !== 'fresh') throw new Error(admitted.kind);
+      let dockerCalls = 0, providerCalls = 0;
+      let docker: Pick<import('../../../src/daemon/runner/linux-scratch/docker-cli.js').DockerCli, 'run' | 'stream'> = {
+        async run() { dockerCalls++; if (scenario === 'throwing_preflight') throw new Error('Unknown boundary result'); return { kind: 'unknown' }; }, stream() { throw new Error('No stream without successful preflight'); },
+      };
+      const ids: string[] = [];
+      if (real) {
+        const { DockerCli } = await import('../../../src/daemon/runner/linux-scratch/docker-cli.js');
+        const backend = DockerCli.local(process.env.WORKRAIL_TEST_DOCKER_BINARY!, process.env.WORKRAIL_TEST_DOCKER_SOCKET!);
+        if (!backend) throw new Error('Explicit Docker configuration required');
+        docker = { stream: backend.stream.bind(backend), async run(...args) {
+          dockerCalls++;
+          const result = await backend.run(...args);
+          if (args[0][0] === 'create' && result.kind === 'completed') {
+            ids.push(result.bytes.toString().trim());
+            if (scenario === 'real_cancel_create') caller.abort();
+            if (scenario === 'real_create_unknown') return { kind: 'unknown' };
+          }
+          return result;
+        } };
+        operatorCleanup = async () => {
+          for (const id of ids) {
+            if ((await backend.run(['inspect', id], signal)).kind === 'completed') {
+              await backend.run(['stop', '--time', '1', id], signal);
+              const stopped = await backend.run(['inspect', id], signal);
+              if (stopped.kind === 'completed' && JSON.parse(stopped.bytes.toString())[0].State.Running === false)
+                await backend.run(['rm', id], signal);
+            }
+          }
+        };
+      }
+      const options = { engine: fixture.engine, config: fixture.config, admission: { async claim(...args: Parameters<typeof authority.claim>) {
+          const result = await authority.claim(...args);
+          if (scenario === 'cancel_after_claim') caller.abort();
+          return result;
+        } }, handoff: admitted.handoff,
+        docker, artifactDirectory: join(root, 'observations'), credentials: { provider: 'anthropic' as const, apiKey: 'fixture' },
+        lifetime: parent.signal, track: <T>(p: Promise<T>) => p,
+        fetch: (async (_url, init) => {
+          providerCalls++;
+          const body = JSON.parse(String(init?.body));
+          if (providerCalls === 2) expect(JSON.stringify(body.messages.at(-1))).toContain('from admission');
+          return new Response(JSON.stringify({ id: `response-${providerCalls}`, type: 'message', role: 'assistant', model: 'original-model',
+            content: [{ type: 'tool_use', id: `call-${providerCalls}`, name: providerCalls === 1 ? 'Read' : 'answer_work',
+              input: providerCalls === 1 ? { path: 'retained.txt' } : { answer: { notes: 'retained profile checked' } } }],
+            stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }),
+          { headers: { 'content-type': 'application/json' } });
+        }) satisfies NonNullable<import('@anthropic-ai/sdk/client').ClientOptions['fetch']> };
+      if (scenario === 'cancelled') caller.abort();
+      const prepared = await prepareLinuxScratchExecution(options, caller.signal);
+      if (scenario === 'real_success') {
+        expect(prepared.kind).toBe('ready'); if (prepared.kind !== 'ready') throw new Error(JSON.stringify(prepared));
+        try {
+          // The admission request's lifetime ends here, without cancelling the adopted execution.
+          caller.abort();
+          expect(await prepared.execution.runner.runTurn(signal)).toMatchObject({ kind: 'advanced', nextView: { kind: 'finished' } });
+          expect(await prepared.execution.close()).toMatchObject({ lifecycle: { kind: 'closed' }, workspace: { cleanup: 'removed' } });
+          expect(providerCalls).toBe(2); expect(ids).toHaveLength(1);
+        } finally { await prepared.execution.close(); }
+      } else {
+        expect(prepared).toMatchObject(scenario === 'cancelled' ? { kind: 'admission_failed' }
+          : { kind: 'not_prepared', outcome: scenario === 'unsupported' ? { kind: 'unsupported_profile' }
+            : scenario === 'real_create_unknown' || scenario === 'real_cancel_create' ? { kind: 'unknown', cleanup: 'unconfirmed' }
+            : scenario === 'throwing_preflight' ? { kind: 'boundary_unknown', cleanup: 'unconfirmed' }
+            : { kind: 'refused', reason: scenario === 'cancel_after_claim' ? 'deadline_stopped' : 'preflight_failed' } });
+        expect(providerCalls).toBe(0);
+        if (scenario === 'unsupported' || scenario === 'cancelled' || scenario === 'cancel_after_claim') expect(dockerCalls).toBe(0);
+        if (scenario === 'real_create_unknown' || scenario === 'real_cancel_create') expect(ids).toHaveLength(1);
+      }
+      const previous = dockerCalls;
+      expect(await prepareLinuxScratchExecution(options, signal)).toMatchObject({ kind: 'admission_failed', result: { kind: 'refused', reason: 'invalid_handoff' } });
+      expect(dockerCalls).toBe(previous);
+      authority.close();
+    } finally { parent.abort(); await operatorCleanup(); await rm(root, { recursive: true, force: true }); }
+  });
+});

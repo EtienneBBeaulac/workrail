@@ -107,3 +107,20 @@ it('does not default missing nested limits or checkout identity', () => {
   const input = fixture(); Reflect.deleteProperty(input.workspace.checkout.commit, 'value');
   expect(decodeDaemonExecutionPolicy(input).kind).toBe('refused');
 });
+
+it('retains a bounded scratch manifest without granting mounts or host paths', () => {
+  const workspace = { kind: 'linux_scratch', image: 'python@sha256:' + 'a'.repeat(64), platform: 'linux/arm64',
+    snapshot: { kind: 'explicit_files', description: 'Only the selected text', files: [{ path: 'file.txt', text: 'retained' }] } };
+  const decoded = decodeDaemonExecutionPolicy({ ...fixture(), workspace });
+  expect(decoded.kind).toBe('validated');
+  if (decoded.kind !== 'validated' || decoded.policy.workspace.kind !== 'linux_scratch') throw new Error('No scratch profile');
+  workspace.snapshot.files[0]!.text = 'mutated';
+  expect(decoded.policy.workspace.snapshot.files[0]!.text).toBe('retained');
+  expect(Object.isFrozen(decoded.policy.workspace.snapshot.files[0])).toBe(true);
+  for (const invalid of [
+    { ...workspace, workspacePath: '/host' }, { ...workspace, mounts: ['/host'] },
+    { ...workspace, image: 'python:latest' },
+    { ...workspace, snapshot: { ...workspace.snapshot, files: [{ path: '../host', text: '' }] } },
+    { ...workspace, snapshot: { ...workspace.snapshot, files: Array.from({ length: 4 }, (_, i) => ({ path: `${i}`, text: 'é'.repeat(65536) })) } },
+  ]) expect(decodeDaemonExecutionPolicy({ ...fixture(), workspace: invalid })).toEqual({ kind: 'refused', reason: 'invalid_policy' });
+});

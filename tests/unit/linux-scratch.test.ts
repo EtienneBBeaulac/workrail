@@ -12,6 +12,9 @@ describe('Linux scratch admission',()=>{
     raw.snapshot.files[0]!.text='changed';
     expect(decoded.profile.snapshot.files[0]!.text).toBe('original');
     expect(Object.isFrozen(decoded.profile.snapshot.files[0])).toBe(true);
+    expect(Object.isFrozen(decoded.profile)).toBe(true);
+    const same = profile();
+    expect(decodeLinuxScratchProfile({ snapshot: same.snapshot, platform: same.platform, image: same.image, kind: same.kind })).toEqual(decoded);
     expect(decodeLinuxScratchProfile(profile())).toEqual(decoded);
   });
   it.each(['../escape','/absolute','a/../b','a\\b','.git/config','a//b'])('rejects unsafe snapshot paths %s',path=>{

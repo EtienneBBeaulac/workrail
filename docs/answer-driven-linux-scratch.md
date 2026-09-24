@@ -1,7 +1,7 @@
 # Opt-in Linux scratch source profile
 
 The answer-host runner has an internal Linux scratch composition. It is not installed,
-registered by the public daemon policy, or activated automatically. Native/worktree policies
+admitted by the public daemon scheduler, or activated automatically. Native/worktree policies
 retain their existing refusal. This source is intended for a trusted host caller with a fresh
 canonical owner and the original execution deadline, not a serialized resume record.
 
@@ -64,8 +64,13 @@ accepted even if cleanup is unconfirmed. `close` exposes both the lifecycle resu
 inspection/cleanup outcome; a provider still settling is reported as work in flight even when the
 workspace is removed. It never reports a thrown cleanup boundary as successful.
 
-This adapter starts after provisioning. Public policy schema, bootstrap failure/unknown handling,
-host enrollment registration and ownership-release integration remain outstanding. The public
+The durable policy schema now accepts an explicit Linux scratch manifest. The trusted
+`prepareLinuxScratchExecution` entry consumes a fresh admission handoff, provisions only that
+retained profile, and transfers its original deadline and workspace to the adapter. Request
+cancellation during preparation closes that deadline; after adoption the request listener is
+removed. Unknown creation is returned with the owned identity for reconciliation, never retried.
+The request workspace path is provenance only for this profile, not a mount or file-read grant.
+Host enrollment registration and ownership-release integration remain outstanding. The public
 runtime continues refusing daemon policy enrollment. The adapter cannot resume a lost stream or
 reconstruct deadline continuity from a persisted pointer.
 
@@ -91,3 +96,7 @@ The `execution resource spans` matrix additionally exercises fresh admission, th
 budgeted SDK transport and execution ownership. Ordinary cases use a fake workspace; opt-in
 `real_two_turns` and `real_expired_idle` use Docker, proving one allocation, cross-turn file content
 and cleanup triggered while idle. These are trusted source-composition tests, not public enrollment.
+
+The `prepares only the retained scratch profile` cases cover consumed handoffs, native-profile
+refusal, preflight failures, caller input isolation and cancellation. Opt-in real cases additionally
+prove retained file content, unknown creation and cancellation during allocation with no retry.
