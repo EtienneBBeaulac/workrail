@@ -39,6 +39,7 @@ it.each(['unterminated','extra','malformed','oversize','cancelled','valid'] as c
     const bytes=mode==='unterminated'?hello:mode==='extra'?hello+'\n'+hello+'\n':mode==='malformed'?'{}\n':mode==='oversize'?'x'.repeat(1048577):hello+'\n';
     // A disposable executable fake exercises real pipe boundaries, not mocked callbacks.
     const child=spawn(process.execPath,['-e',`process.stdout.write(${mode==='oversize'?"'x'.repeat(1048577)":JSON.stringify(bytes)});${mode==='unterminated'?'':'setInterval(()=>{},1000);'}`],{stdio:['pipe','pipe','pipe']});
+    const exited=new Promise<void>(resolve=>child.once('close',()=>resolve()));
     const channel=new ScratchChannel(child),abort=new AbortController();
     if(mode==='cancelled')abort.abort();
     try {
@@ -47,5 +48,5 @@ it.each(['unterminated','extra','malformed','oversize','cancelled','valid'] as c
       channel.close();
       expect(await channel.receive(new AbortController().signal,100)).toBeUndefined();
       expect(channel.send({kind:'anything'})).toBe(false);
-    }finally{channel.close();}
+    }finally{channel.close();await exited;}
   });

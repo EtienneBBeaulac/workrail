@@ -620,6 +620,42 @@ describe('doPollGitHubQueue adaptive routing', () => {
     await deferredDispatch;
   });
 
+  it('persists the sidecar before starting the pipeline', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    let finish!: () => void;
+    const running = new Promise<void>(resolve => { finish = resolve; });
+    let observe!: (value: unknown) => void;
+    const observed = new Promise<unknown>(resolve => { observe = resolve; });
+    const router = {
+      dispatchAdaptivePipeline: async () => {
+        try { observe(JSON.parse(await fs.readFile(path.join(tmpDir, 'queue-issue-42.json'), 'utf8'))); }
+        catch { observe('missing'); }
+        return running;
+      },
+    } as unknown as TriggerRouter;
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+    expect(await observed).toMatchObject({ issueNumber: 42, attemptCount: 1 });
+    finish();
+    await vi.waitFor(async () => expect(await fs.readdir(tmpDir)).not.toContain('queue-issue-42.json'));
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('refuses dispatch when its ownership sidecar cannot be written', async () => {
+    const tmpDir = await makeTmpDir();
+    const store = new PolledEventStore({ WORKRAIL_HOME: tmpDir });
+    let calls = 0;
+    const router = { dispatchAdaptivePipeline: async () => { calls++; } } as unknown as TriggerRouter;
+    const trigger = makeQueuePollTrigger();
+    const scheduler = new PollingScheduler([trigger], router, store, makeQueueFetch(), tmpDir);
+    await fs.chmod(tmpDir, 0o500);
+    try {
+      await (scheduler as unknown as { doPoll(t: TriggerDefinition): Promise<void> }).doPoll(trigger);
+      expect(calls).toBe(0);
+    } finally { await fs.chmod(tmpDir, 0o700); }
+  });
+
   it('allows re-dispatch of issue after dispatchAdaptivePipeline Promise settles', async () => {
     // Proves I2: cleanup in .then() removes issue from dispatchingIssues,
     // making it eligible for dispatch on the next poll cycle.
@@ -649,8 +685,11 @@ describe('doPollGitHubQueue adaptive routing', () => {
     // Resolve the deferred Promise -- .then() handler fires (microtask), clears dispatchingIssues
     resolveDispatch();
     await deferredDispatch;
-    // Drain microtasks so .then() cleanup runs before the next doPoll call
-    await Promise.resolve();
+    // Pipeline settlement includes asynchronous sidecar cleanup, not just microtasks.
+    // Observe the persistent boundary before expecting re-dispatch.
+    await vi.waitFor(async () => {
+      expect(await fs.readdir(tmpDir)).not.toContain('queue-issue-42.json');
+    });
 
     // Re-arm the deferred Promise for the second dispatch
     deferredDispatch = new Promise<void>((resolve) => { resolveDispatch = resolve; });
