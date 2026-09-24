@@ -1,3 +1,4 @@
+import type { WorkspaceFailure } from './workspace-effect-contract.js';
 import type { TrustedDeliveryModelFactory, ModelBindingRefusal } from './trusted-model-factory.js';
 import type { ModelCallFailure } from './model-call-contract.js';
 import type { DaemonExecutionPolicy } from '../../v2/durable-core/schemas/session/daemon-policy.js';
@@ -90,6 +91,7 @@ export type ModelPromptInput = Readonly<{
 }>;
 
 export type ModelCompletionResult =
+  | Readonly<{kind:'workspace_failed'; failure:WorkspaceFailure}>
   | Readonly<{ kind: 'call_failed'; failure: ModelCallFailure }>
   | Readonly<{ kind: 'completed'; response: RawModelResponse }>
   | Readonly<{ kind: 'unavailable'; detail: string }>
@@ -123,6 +125,7 @@ export interface DurableJournalFaultSeam {
 }
 
 export type TurnUncertainty =
+  | Readonly<{stage:'workspace_effect'; execution:ExecutionRef; delivery:DeliveryRef; failure:WorkspaceFailure}>
   | Readonly<{ stage: 'model_call'; execution: ExecutionRef; delivery: DeliveryRef; failure: Extract<ModelCallFailure, { kind: 'unconfirmed' }> }>
   | Readonly<{ stage: 'delivery'; execution: ExecutionRef; reply: ReplyRef }>
   | Readonly<{ stage: 'capture'; execution: ExecutionRef; delivery: DeliveryRef }>

@@ -383,3 +383,14 @@ it('uses the daemon factory through the host while refusing absent retained poli
     expect(sends).toBe(0);
   } finally { await scheduler.close(signal()); }
 }));
+
+it('preserves workspace uncertainty without attempting answer capture', () => fixture(async config => {
+  let captures=0;
+  const failure={reason:'outcome_unacknowledged' as const,effect:'effect1'};
+  const {scheduler,enrolled}=await enroll({...config,model:{async generate(){return {kind:'workspace_failed',failure};}},
+    faultSeam:{async intercept(boundary){if(boundary==='before_capture_append')captures++;return {kind:'proceed'};}}});
+  try {
+    expect(await enrolled.runner.runTurn(signal())).toMatchObject({kind:'unconfirmed',uncertainty:{stage:'workspace_effect',failure}});
+    expect(captures).toBe(0);
+  } finally {await scheduler.close(signal());}
+}));

@@ -142,9 +142,9 @@ it('routes every workspace round through controlled inference', async () => {
     workspaceTools: [tool('Read', async () => { executions++; return { content: [{ type: 'text', text: 'controlled evidence' }], details: null }; })],
     provider: { async invoke(params) {
       requests++;
-      if (requests === 1) return { kind: 'completed', value: message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]) };
+      if (requests === 1) return { kind: 'completed', reservation: {call:'fake-call',ordinal:1}, value: message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]) };
       expect(JSON.stringify(params.messages)).toContain('controlled evidence');
-      return { kind: 'completed', value: message([answer('done', 'verified')]) };
+      return { kind: 'completed', reservation: {call:'fake-call',ordinal:1}, value: message([answer('done', 'verified')]) };
     } },
   });
   if (created.kind !== 'created') throw new Error(created.kind);
@@ -186,7 +186,7 @@ it.each([
   const created = createDaemonAnswerModel({ modelId: 'fake', systemPrompt: 'Answer',
     workspaceTools: [tool('Read', async () => { executions++; return { content: [], details: null }; })],
     provider: { async invoke() {
-      if (++requests === 1) return { kind: 'completed', value: message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]) };
+      if (++requests === 1) return { kind: 'completed', reservation: {call:'fake-call',ordinal:1}, value: message([{ type: 'tool_use', id: 'read', name: 'Read', input: {} }]) };
       return failure;
     } },
   });

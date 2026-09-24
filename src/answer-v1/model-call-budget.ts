@@ -58,7 +58,7 @@ export function bindBudgetedProvider<Input, Output>(
       const value = await send(input, signal);
       if (signal.aborted) { state = 'uncertain'; return { kind: 'unconfirmed', reason: 'provider_outcome_unknown' }; }
       state = 'ready';
-      return { kind: 'completed', value };
+      return { kind: 'completed', value, reservation: { call: reservation.call, ordinal: reservation.ordinal } };
     } catch {
       const reason = state === 'sending' ? 'provider_outcome_unknown' : 'commit_uncertain';
       state = 'uncertain';

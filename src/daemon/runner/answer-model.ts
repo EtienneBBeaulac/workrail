@@ -1,3 +1,4 @@
+import type { createWorkspaceEffectController } from './workspace-effect-controller.js';
 import type { BudgetedProviderResult, ModelCallFailure } from '../../answer-v1/contracts/model-call-contract.js';
 import type Anthropic from '@anthropic-ai/sdk';
 import { AgentLoop, type AgentLoopOptions, type AgentTool } from '../agent-loop.js';
@@ -8,8 +9,8 @@ import type { RawModelResponse } from '../../answer-v1/contracts/invocation-cont
 export type AnswerModelOptions = Pick<AgentLoopOptions,
   'modelId' | 'systemPrompt' | 'maxTokens' | 'callbacks' | 'stallTimeoutMs' | 'llmCallTimeoutMs'
 > & { readonly workspaceTools: readonly AgentTool[] } & (
-  | { readonly client: AgentLoopOptions['client']; readonly provider?: never }
-  | { readonly client?: never; readonly provider: {
+  | { readonly client: AgentLoopOptions['client']; readonly provider?: never; readonly effects?: never }
+  | { readonly client?: never; readonly effects?: ReturnType<typeof createWorkspaceEffectController>; readonly provider: {
       invoke(input: Anthropic.MessageCreateParamsNonStreaming, signal: AbortSignal): Promise<BudgetedProviderResult<Anthropic.Message>>;
     } }
 );
@@ -52,9 +53,11 @@ export function createDaemonAnswerModel(options: AnswerModelOptions): CreateDaem
     return { kind: 'refused', reason: 'unsupported_workspace_tool' };
   }
   if (new Set(names).size !== names.length) return { kind: 'refused', reason: 'duplicate_tool_name' };
-  const { workspaceTools, client, provider, ...loopOptions } = options;
+  const { workspaceTools, client, provider, effects, ...loopOptions } = options;
   const tools = [...workspaceTools, answerTool];
   return { kind: 'created', model: { async generate(input, signal) {
+    const priorWorkspaceFailure = effects?.failure();
+    if (priorWorkspaceFailure) return {kind:'workspace_failed',failure:priorWorkspaceFailure};
     if (signal.aborted) return { kind: 'cancelled' };
     let response: RawModelResponse | undefined;
     let failure: ModelCallFailure | undefined;
@@ -62,17 +65,22 @@ export function createDaemonAnswerModel(options: AnswerModelOptions): CreateDaem
       let result: BudgetedProviderResult<Anthropic.Message>;
       try { result = await provider.invoke(params, callSignal); }
       catch { result = { kind: 'unconfirmed', reason: 'provider_outcome_unknown' }; }
-      if (result.kind === 'completed') return { kind: 'response' as const, response: result.value };
+      if (result.kind === 'completed') {
+        if (effects?.prepare(result.reservation.call, result.value) === 'halted') return {kind:'halted' as const};
+        return { kind: 'response' as const, response: result.value };
+      }
       failure = result;
       return { kind: 'halted' as const };
     } } } : { client: options.client };
-    const loop = new AgentLoop({ ...loopOptions, ...transport, tools,
+    const loop = new AgentLoop({ ...loopOptions, ...transport, tools, toolBoundary: effects?.boundary,
       responseHandoff: { toolName: answerTool.name, accept(message) { response = raw(message); } },
     });
     const abort = () => loop.abort();
     signal.addEventListener('abort', abort, { once: true });
     try {
       await loop.prompt({ role: 'user', content: JSON.stringify(input), timestamp: 0 });
+      const workspaceFailure = effects?.failure();
+      if (workspaceFailure) return {kind:'workspace_failed', failure:workspaceFailure};
       if (failure) return { kind: 'call_failed', failure };
       if (signal.aborted) return { kind: 'cancelled' };
       if (response) return { kind: 'completed', response };
@@ -80,6 +88,8 @@ export function createDaemonAnswerModel(options: AnswerModelOptions): CreateDaem
       return { kind: 'unavailable', detail: last?.role === 'assistant' && last.stopReason === 'error'
         ? last.errorMessage ?? 'Model failed' : 'Model ended without submitting an answer' };
     } catch (error) {
+      const workspaceFailure = effects?.failure();
+      if (workspaceFailure) return {kind:'workspace_failed',failure:workspaceFailure};
       return signal.aborted ? { kind: 'cancelled' } : { kind: 'unavailable', detail: String(error) };
     } finally {
       signal.removeEventListener('abort', abort);

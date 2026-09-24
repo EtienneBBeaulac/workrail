@@ -4,7 +4,7 @@ export type ReserveModelCallResult =
   | Readonly<{ kind: 'unconfirmed'; reason: 'commit_uncertain' }>;
 
 export type BudgetedProviderResult<T> =
-  | Readonly<{ kind: 'completed'; value: T }>
+  | Readonly<{ kind: 'completed'; value: T; reservation: Readonly<{ call: string; ordinal: number }> }>
   | Exclude<ReserveModelCallResult, { kind: 'reserved' }>
   | Readonly<{ kind: 'refused'; reason: 'busy' | 'reconciliation_required' }>
   | Readonly<{ kind: 'unconfirmed'; reason: 'provider_outcome_unknown' }>;

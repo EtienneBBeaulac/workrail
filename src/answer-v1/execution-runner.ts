@@ -102,6 +102,8 @@ export function createExecutionRunner(engine: AnswerEngine, config: AnswerHostCo
                 catch (error) {
                     return signal.aborted ? { kind: 'cancelled' } : { kind: 'refused', reason: 'model_unavailable', detail: String(error) };
                 }
+                if (completion.kind === 'workspace_failed')
+                    return {kind:'unconfirmed',uncertainty:{stage:'workspace_effect',execution:enrollment.execution,delivery:delivery.delivery,failure:completion.failure}};
                 if (completion.kind === 'call_failed')
                     return completion.failure.kind === 'unconfirmed'
                         ? { kind: 'unconfirmed', uncertainty: { stage: 'model_call', execution: enrollment.execution, delivery: delivery.delivery, failure: completion.failure } }

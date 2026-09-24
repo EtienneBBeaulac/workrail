@@ -1,3 +1,4 @@
+import { createWorkspaceEffectController } from './workspace-effect-controller.js';
 import type { TrustedDeliveryModelFactory } from '../../answer-v1/contracts/trusted-model-factory.js';
 import type { SessionJournal } from '../../answer-v1/journal.js';
 import type { DeliveryRef, OwnerFence } from '../../answer-v1/contracts/invocation-contract.js';
@@ -23,7 +24,8 @@ export type CreateDeliveryAnswerModelResult =
 /** Trusted composition only: the returned model receives neither journal nor owner.
  * Each provider attempt is reserved against this delivery before network work. Retain
  * this model for its delivery: constructing another one does not reconcile uncertainty.
- * This does not enable policy execution, validate workspace effects or grant recovery. */
+ * Tool intent/results use the canonical effect controller. This does not enable policy
+ * execution, prove workspace quiescence or grant recovery. */
 export async function createDeliveryAnswerModel(
   journal: SessionJournal, delivery: DeliveryRef, owner: OwnerFence,
   credentials: AnswerTransportCredentials, workspaceTools: readonly AgentTool[],
@@ -40,7 +42,7 @@ export async function createDeliveryAnswerModel(
   const transport = createAnswerTransport(retained.policy, credentials, fetch);
   if (transport.kind !== 'created') return transport;
   const provider = bindBudgetedProvider(journal, delivery, owner, transport.send);
-  return createDaemonAnswerModel({ provider, workspaceTools,
+  return createDaemonAnswerModel({ provider, workspaceTools, effects: createWorkspaceEffectController(journal,delivery,owner),
     modelId: retained.policy.model.modelId, systemPrompt: retained.policy.systemPrompt,
     maxTokens: retained.policy.limits.maxOutputTokens,
     stallTimeoutMs: retained.policy.limits.stallTimeoutMs,

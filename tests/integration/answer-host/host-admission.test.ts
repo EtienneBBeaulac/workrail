@@ -320,7 +320,7 @@ it.skipIf(process.platform === 'win32').each(['reservation', 'provider'])('charg
       });
       const firstCall = provider.invoke('one', signal);
       expect(await provider.invoke('concurrent', signal)).toEqual({ kind: 'refused', reason: 'busy' });
-      expect(await firstCall).toEqual({ kind: 'completed', value: 'one' });
+      expect(await firstCall).toMatchObject({ kind: 'completed', value: 'one', reservation: {ordinal:1} });
       const ambiguous = new SessionJournal(engine, hydrated.enrollment, { ...hostConfig,
         faultSeam: { async intercept(boundary) { return failure === 'reservation' && boundary === 'after_model_call_append'
           ? { kind: 'simulate_uncertain' as const, message: 'lost acknowledgement' } : { kind: 'proceed' as const }; } } }, s => !s.aborted);
@@ -780,4 +780,60 @@ it.skipIf(process.platform === 'win32').each(['normal', 'intent_ack', 'outcome_a
         }
       } finally { await host.scheduler.close(new AbortController().signal); }
     } finally { await rm(root,{recursive:true,force:true}); }
+  });
+
+it.skipIf(process.platform === 'win32').each(['success','duplicate','intent_ack','outcome_ack','throw','owner_change'] as const)(
+  'controls actual model tool batches through canonical effects: %s', async mode => {
+    const { createWorkspaceEffectController } = await import('../../../src/daemon/runner/workspace-effect-controller.js');
+    const { createDaemonAnswerModel } = await import('../../../src/daemon/runner/answer-model.js');
+    const root = await mkdtemp(join(tmpdir(),'controlled-workspace-'));
+    const signal = new AbortController().signal;
+    try {
+      const {engine,expected,candidate,config}=await setup(root);
+      const admitted=await publishAndReconcileHostAdmission(engine,root,expected,candidate.bytes,signal);
+      if(admitted.kind!=='admitted') throw new Error(admitted.kind);
+      const hostConfig: AnswerHostConfig={...config,model:{async generate(){return {kind:'unavailable',detail:'unused'};}}};
+      const host=await createAnswerHost(hostConfig,signal);
+      if(host.kind!=='created') throw new Error(host.kind);
+      try {
+        const hydrated=await host.scheduler.hydrator.hydrate(admitted.pointer,signal);
+        if(hydrated.kind!=='hydrated') throw new Error(hydrated.kind);
+        const journal=new SessionJournal(engine,hydrated.enrollment,{...hostConfig,faultSeam:{async intercept(b){
+          return (mode==='intent_ack'&&b==='after_effect_intent_append')||(mode==='outcome_ack'&&b==='after_effect_outcome_append')
+            ? {kind:'simulate_uncertain',message:'lost ack'}:{kind:'proceed'};
+        }}},s=>!s.aborted);
+        const owner={execution:hydrated.enrollment.execution,epoch:1n} as OwnerFence;
+        await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_acquired',epoch:'1'},signal));
+        const state=await readHostState(engine,hydrated.enrollment);
+        if(state.kind!=='loaded')throw new Error(state.kind);
+        const view=await workView(engine,state.state);
+        if(view.kind!=='question')throw new Error(view.kind);
+        const delivery=await journal.appendDelivery(view.reply,owner,signal);
+        if(delivery.kind!=='delivered')throw new Error(delivery.kind);
+        await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'model_call_reserved',call:'m1',delivery:delivery.delivery,epoch:'1',ordinal:1},signal));
+        const effects=createWorkspaceEffectController(journal,delivery.delivery,owner);
+        let requests=0,invocations=0;
+        const created=createDaemonAnswerModel({effects,provider:{async invoke(){
+          requests++;
+          const content=requests===1
+            ? [{type:'tool_use' as const,id:'t1',name:'Write',input:{}},{type:'tool_use' as const,id:mode==='duplicate'?'t1':'t2',name:'Write',input:{}}]
+            : [{type:'tool_use' as const,id:'answer',name:'answer_work',input:{answer:{notes:'done'}}}];
+          return {kind:'completed',reservation:{call:'m1',ordinal:1},value:{id:'response',type:'message',role:'assistant',model:'fake',stop_reason:'tool_use',stop_sequence:null,usage:{input_tokens:1,output_tokens:1},content}};
+        }},workspaceTools:[{name:'Write',label:'Write',description:'fake',inputSchema:{type:'object'},async execute(){
+          invocations++;if(mode==='throw')throw new Error('uncertain write');
+          if(mode==='owner_change') await journal.locked(signal,false,(s,l)=>journal.append(s,l,{kind:'owner_released',epoch:'1'},signal));
+          return {content:[{type:'text',text:'written'}],details:null};
+        }}],modelId:'fake',systemPrompt:'fake'});
+        if(created.kind!=='created')throw new Error(created.kind);
+        const result=await created.model.generate({instruction:'work',issues:[],retainedSummaries:[]},signal);
+        expect(result.kind).toBe(mode==='success'?'completed':'workspace_failed');
+        expect([requests,invocations]).toEqual(mode==='success'?[2,2]:mode==='duplicate'||mode==='intent_ack'?[1,0]:[1,1]);
+        if(mode!=='success') {
+          const again=await created.model.generate({instruction:'retry',issues:[],retainedSummaries:[]},signal);
+          expect(again.kind).toBe('workspace_failed');
+          expect(requests).toBe(1);
+          expect(invocations).toBe(mode==='duplicate'||mode==='intent_ack'?0:1);
+        }
+      } finally {await host.scheduler.close(signal);}
+    } finally {await rm(root,{recursive:true,force:true});}
   });
