@@ -1,3 +1,4 @@
+import type { TrustedDeliveryModelFactory, ModelBindingRefusal } from './trusted-model-factory.js';
 import type { ModelCallFailure } from './model-call-contract.js';
 import type { DaemonExecutionPolicy } from '../../v2/durable-core/schemas/session/daemon-policy.js';
 import type { ConditionalRecoveryPort } from './conditional-recovery-contract.js';
@@ -127,6 +128,7 @@ export type TurnUncertainty =
   | Readonly<{ stage: 'commit_or_dispatch'; invocation: InvocationRef }>;
 
 export type TurnOutcome =
+  | Readonly<{ kind: 'refused'; reason: 'model_binding_refused'; failure: Exclude<ModelBindingRefusal, 'stale_owner' | 'storage_unavailable'>; detail: string }>
   | Readonly<{ kind: 'refused'; reason: 'model_call_refused'; failure: Extract<ModelCallFailure, { kind: 'refused' }>; detail: string }>
   | Readonly<{ kind: 'advanced'; receipt: ReceiptRef; nextView: WorkView }>
   | Readonly<{ kind: 'rejected'; receipt: ReceiptRef; correctionView: WorkView }>
@@ -198,9 +200,11 @@ export type RuntimeCloseResult =
   | Readonly<{ kind: 'incomplete'; reason: 'cancelled' | 'work_in_flight' | 'cleanup_failed'; detail: string }>;
 
 export type AnswerHostConfig = SharedAuthorityConfig & Readonly<{
-  model: ModelInferenceBoundary;
   faultSeam?: DurableJournalFaultSeam;
-}>;
+}> & (
+  | Readonly<{ model: ModelInferenceBoundary; modelFactory?: never }>
+  | Readonly<{ model?: never; modelFactory: TrustedDeliveryModelFactory }>
+);
 
 export type AnswerWorkerConfig = SharedAuthorityConfig;
 

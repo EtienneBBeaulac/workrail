@@ -1,3 +1,4 @@
+import { createDaemonDeliveryModelFactory } from '../../../src/daemon/runner/delivery-answer-model.js';
 import { createDaemonAnswerModel } from '../../../src/daemon/runner/answer-model.js';
 import { createAnswerWorker } from '../../../src/answer-v1/worker.js';
 import { it, expect } from 'vitest';
@@ -289,5 +290,96 @@ it.each([
       ? { kind: 'refused', reason: 'model_call_refused', failure }
       : { kind: 'unconfirmed', uncertainty: { stage: 'model_call', failure } });
     expect(captureAttempts).toBe(0);
+  } finally { await scheduler.close(signal()); }
+}));
+
+it('binds acknowledged deliveries and skips the factory when replaying a retained response', () => fixture(async config => {
+  const { model: _model, ...authority } = config;
+  const deliveries: string[] = [];
+  let generated = 0, loseAck = true;
+  const boundConfig: AnswerHostConfig = { ...authority,
+    modelFactory: { async create({ journal, delivery, owner }) {
+      const canonical = await journal.locked(signal(), undefined, async state => state.records.at(-1));
+      expect(canonical).toMatchObject({ kind: 'delivered', delivery, epoch: owner.epoch.toString() });
+      deliveries.push(delivery);
+      return { kind: 'created', model: { async generate(input) {
+        expect(Object.keys(input).sort()).toEqual(['instruction', 'issues', 'retainedSummaries']);
+        generated++;
+        return { kind: 'completed', response: response('retained answer') };
+      } } };
+    } },
+    faultSeam: { async intercept(boundary) {
+      if (boundary === 'after_capture_append' && loseAck) { loseAck = false; return { kind: 'simulate_uncertain', message: 'lost ack' }; }
+      return { kind: 'proceed' };
+    } },
+  };
+  const { scheduler, enrolled } = await enroll(boundConfig);
+  const pointer = scheduler.hydrator.dehydrate(enrolled.enrollment);
+  expect(await enrolled.runner.runTurn(signal())).toMatchObject({ kind: 'unconfirmed', uncertainty: { stage: 'capture' } });
+  await scheduler.close(signal());
+  const restarted = await createAnswerHost(boundConfig, signal());
+  if (restarted.kind !== 'created') throw new Error(restarted.kind);
+  try {
+    const recovered = await restarted.scheduler.recover(pointer, signal());
+    if (recovered.kind !== 'ready') throw new Error(recovered.kind);
+    expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'question' } });
+    expect([deliveries.length, generated]).toEqual([1, 1]);
+    expect(await recovered.runner.runTurn(signal())).toMatchObject({ kind: 'advanced', nextView: { kind: 'finished' } });
+    expect([deliveries.length, generated, new Set(deliveries).size]).toEqual([2, 2, 2]);
+  } finally { await restarted.scheduler.close(signal()); }
+}));
+
+it('does not construct a model without confirmed delivery persistence', () => fixture(async config => {
+  const { model: _model, ...authority } = config;
+  let constructed = 0;
+  const { scheduler, enrolled } = await enroll({ ...authority,
+    modelFactory: { async create() { constructed++; return { kind: 'refused', reason: 'missing_policy' }; } },
+    faultSeam: { async intercept(boundary) { return boundary === 'after_delivery_append'
+      ? { kind: 'simulate_uncertain', message: 'lost delivery ack' } : { kind: 'proceed' }; } },
+  });
+  try {
+    expect(await enrolled.runner.runTurn(signal())).toMatchObject({ kind: 'unconfirmed', uncertainty: { stage: 'delivery' } });
+    expect(constructed).toBe(0);
+  } finally { await scheduler.close(signal()); }
+}));
+
+it.each(['refusal', 'throw', 'cancel', 'stale', 'storage'] as const)('handles factory %s before generation or capture', kind => fixture(async config => {
+  const { model: _model, ...authority } = config;
+  const control = new AbortController();
+  let generated = 0, captures = 0;
+  const { scheduler, enrolled } = await enroll({ ...authority,
+    modelFactory: { async create() {
+      if (kind === 'stale') return { kind: 'refused', reason: 'stale_owner' };
+      if (kind === 'storage') return { kind: 'refused', reason: 'storage_unavailable' };
+      if (kind === 'refusal') return { kind: 'refused', reason: 'missing_policy' };
+      if (kind === 'throw') throw new Error('factory unavailable');
+      control.abort();
+      return { kind: 'created', model: { async generate() { generated++; return { kind: 'completed', response: response('must not run') }; } } };
+    } },
+    faultSeam: { async intercept(boundary) { if (boundary === 'before_capture_append') captures++; return { kind: 'proceed' }; } },
+  });
+  try {
+    const result = await enrolled.runner.runTurn(control.signal);
+    expect([generated, captures]).toEqual([0, 0]);
+    expect(result).toMatchObject(kind === 'cancel' ? { kind: 'cancelled' }
+      : kind === 'stale' ? { kind: 'stale_owner' }
+      : kind === 'storage' ? { kind: 'refused', reason: 'storage_unavailable' }
+      : kind === 'refusal' ? { kind: 'refused', reason: 'model_binding_refused', failure: 'missing_policy' }
+      : { kind: 'refused', reason: 'model_unavailable', detail: 'Error: factory unavailable' });
+  } finally { await scheduler.close(signal()); }
+}));
+
+
+it('uses the daemon factory through the host while refusing absent retained policy', () => fixture(async config => {
+  const { model: _model, ...authority } = config;
+  let sends = 0;
+  const { scheduler, enrolled } = await enroll({ ...authority,
+    modelFactory: createDaemonDeliveryModelFactory({ provider: 'anthropic', apiKey: 'fake' }, [], async () => {
+      sends++; throw new Error('must not fetch');
+    }),
+  });
+  try {
+    expect(await enrolled.runner.runTurn(signal())).toMatchObject({ kind: 'refused', reason: 'model_binding_refused', failure: 'missing_policy' });
+    expect(sends).toBe(0);
   } finally { await scheduler.close(signal()); }
 }));

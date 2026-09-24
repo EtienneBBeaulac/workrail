@@ -3,7 +3,7 @@ import { join, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { AnswerHostRequestSchema } from '../v2/durable-core/schemas/session/answer-host.js';
 import { errAsync } from 'neverthrow';
-import type { AnswerHostConfig, CreateAnswerHostResult, TrustedAnswerScheduler, RuntimeCapabilityDescriptor, RecoverHostSessionResult, BoundTurnRunner, TurnOutcome, ReleaseOwnershipResult } from './contracts/host-composition.js';
+import type { AnswerHostConfig, ModelCompletionResult, CreateAnswerHostResult, TrustedAnswerScheduler, RuntimeCapabilityDescriptor, RecoverHostSessionResult, BoundTurnRunner, TurnOutcome, ReleaseOwnershipResult } from './contracts/host-composition.js';
 import type { ClaimUnownedResult } from './contracts/automatic-recovery-contract.js';
 import type { ConditionalRecoveryResult } from './contracts/conditional-recovery-contract.js';
 import type { HostEnrollment, ExecutionRef, OwnerFence, HostExecutorPorts, PreparedAnswer, CapturedResponse } from './contracts/invocation-contract.js';
@@ -113,9 +113,18 @@ export async function createAnswerRuntime(config: AnswerHostConfig, lifetime: Ab
                     return { kind: 'refused', reason: 'delivery_refused', detail: delivery.reason };
                 if (!available(signal))
                     return { kind: 'cancelled' };
-                let completion: Awaited<ReturnType<typeof config.model.generate>>;
+                let completion: ModelCompletionResult;
                 try {
-                    completion = await config.model.generate({ instruction: recovered.view.instruction, issues: recovered.view.issues, retainedSummaries: recovered.view.retained }, signal);
+                    const bound = config.modelFactory
+                        ? await config.modelFactory.create({ journal: journal(enrollment), delivery: delivery.delivery, owner }, signal)
+                        : { kind: 'created' as const, model: config.model };
+                    if (bound.kind === 'refused') {
+                        if (bound.reason === 'stale_owner') return { kind: 'stale_owner' };
+                        if (bound.reason === 'storage_unavailable') return { kind: 'refused', reason: 'storage_unavailable', detail: bound.reason };
+                        return { kind: 'refused', reason: 'model_binding_refused', failure: bound.reason, detail: bound.reason };
+                    }
+                    if (!available(signal)) return { kind: 'cancelled' };
+                    completion = await bound.model.generate({ instruction: recovered.view.instruction, issues: recovered.view.issues, retainedSummaries: recovered.view.retained }, signal);
                 }
                 catch (error) {
                     return signal.aborted ? { kind: 'cancelled' } : { kind: 'refused', reason: 'model_unavailable', detail: String(error) };

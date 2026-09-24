@@ -1,3 +1,4 @@
+import type { TrustedDeliveryModelFactory } from '../../answer-v1/contracts/trusted-model-factory.js';
 import type { SessionJournal } from '../../answer-v1/journal.js';
 import type { DeliveryRef, OwnerFence } from '../../answer-v1/contracts/invocation-contract.js';
 import type { ModelInferenceBoundary } from '../../answer-v1/contracts/host-composition.js';
@@ -45,4 +46,14 @@ export async function createDeliveryAnswerModel(
     stallTimeoutMs: retained.policy.limits.stallTimeoutMs,
     llmCallTimeoutMs: retained.policy.limits.callTimeoutMs,
   });
+}
+
+
+/** Explicit host injection. Installing this factory does not admit policy executions. */
+export function createDaemonDeliveryModelFactory(
+  credentials: AnswerTransportCredentials, workspaceTools: readonly AgentTool[],
+  fetch: NonNullable<ClientOptions['fetch']>,
+): TrustedDeliveryModelFactory {
+  return { create: (context, signal) => createDeliveryAnswerModel(context.journal,
+    context.delivery, context.owner, credentials, workspaceTools, fetch, signal) };
 }
