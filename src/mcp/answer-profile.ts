@@ -1,3 +1,4 @@
+import { AnswerJsonSchema } from '../answer-v1/answer-json.js';
 import { RequestLifetime } from './request-lifetime.js';
 import { z } from 'zod';
 import { createAnswerWorker } from '../answer-v1/worker.js';
@@ -20,7 +21,7 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
     const server = new Server({ name: 'workrail-server', version: '0.1.0' }, { capabilities: { tools: {} } });
     const schemas = {
         open_work: z.object({ workflowId: z.string(), workspacePath: z.string(), goal: z.string() }).strict(),
-        answer_work: z.object({ reply: z.string(), answer: z.object({ notes: z.string() }).strict() }).strict(),
+        answer_work: z.object({ reply: z.string(), answer: AnswerJsonSchema }).strict(),
         inspect_work: z.object({ read: z.string(), receipt: z.string().optional(), cursor: z.string().optional() }).strict(),
         recover_work: z.union([z.object({ recovery: z.string() }).strict(), z.object({ attempt: z.string() }).strict()]),
     };
@@ -36,7 +37,7 @@ export async function composeAnswerProfile(config: SharedAuthorityConfig, ctx: T
     }
     const handlers: Record<keyof typeof schemas, AnswerHandler> = {
         open_work: handler(schemas.open_work, (input, signal) => runtime.opener.open(input, signal)),
-        answer_work: handler(schemas.answer_work, (input, signal) => runtime.worker.answer(input.reply as ReplyRef, { kind: 'notes', notes: input.answer.notes }, signal)),
+        answer_work: handler(schemas.answer_work, (input, signal) => runtime.worker.answer(input.reply as ReplyRef, { kind: 'unvalidated_json', value: input.answer }, signal)),
         inspect_work: handler(schemas.inspect_work, (input, signal) => input.receipt === undefined ? runtime.inspector.inspect(input.read as ReadRef, signal) : runtime.inspector.inspectReceipt(input.read as ReadRef, input.receipt as ReceiptRef, signal, input.cursor as EvidenceCursor | undefined)),
         recover_work: handler(schemas.recover_work, (input, signal) => 'recovery' in input ? runtime.recovery.recover(input.recovery as RecoveryRef, signal) : runtime.recovery.reconcileOpen(input.attempt as OpenAttemptRef, signal)),
     };

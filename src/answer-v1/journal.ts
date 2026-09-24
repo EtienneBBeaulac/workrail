@@ -1,6 +1,5 @@
 import type { ExecutionSessionGateErrorV2 } from '../v2/usecases/execution-session-gate.js';
-import type { JsonValue } from '../v2/durable-core/canonical/json-types.js';
-import { JsonValueSchema } from '../v2/durable-core/canonical/json-zod.js';
+import { AnswerJsonSchema } from './answer-json.js';
 import { toCanonicalBytes } from '../v2/durable-core/canonical/jcs.js';
 import { ResultAsync, okAsync } from 'neverthrow';
 import { z } from 'zod';
@@ -171,8 +170,8 @@ export class SessionJournal implements InvocationJournal {
             const answer = NotesAnswer.safeParse(input);
             if (!answer.success || !call) {
                 const receipt = this.engine.idFactory.mintEventId() as ReceiptRef;
-                const envelope = z.object({ answer: JsonValueSchema }).safeParse(input);
-                const canonical = envelope.success ? toCanonicalBytes(envelope.data.answer as JsonValue) : undefined;
+                const envelope = z.object({ answer: AnswerJsonSchema }).safeParse(input);
+                const canonical = envelope.success ? toCanonicalBytes(envelope.data.answer) : undefined;
                 const evidence = canonical?.isOk() ? { encoding: 'canonical_json' as const, rawAnswer: Buffer.from(canonical.value).toString('utf8') } : { encoding: 'raw_utf8' as const, rawAnswer: call?.argumentsJson ?? captured.payload.responseText };
                 const record: AnswerHostRecord = { kind: 'rejected', delivery: response.delivery, response: response.response, receipt, reason: 'Provide answer_work with a nonempty notes answer.', ...evidence };
                 if (!await this.append(state, lock, record, signal))

@@ -143,6 +143,17 @@ it('MCP exposes only answer tools and preserves host isolation through the trans
       return JSON.parse(content[0]!.text);
     };
     expect(await call('answer_work',{reply,answer:{notes:'foreign'}})).toEqual({kind:'not_retained',reason:'bound_session_required'});
+    for (const invalid of [{ notes: 42, unknownField: 'kept' }, { notes: 'attempt', approval: true }, JSON.parse('{"notes":42,"__proto__":{"retained":true}}'), null, ['unexpected']]) {
+      const work=await call('open_work',{workflowId:'lifecycle',goal:'rejection',workspacePath:config.workflowStoragePath});
+      const rejected=await call('answer_work',{reply:work.view.reply,answer:invalid});
+      expect(rejected).toMatchObject({kind:'recorded',disposition:'rejected',view:{kind:'question',instruction:work.view.instruction}});
+      const receipt=await call('inspect_work',{read:rejected.view.read,receipt:rejected.receipt});
+      expect(receipt).toMatchObject({kind:'complete',disposition:'rejected',encoding:'canonical_json'});
+      expect(JSON.parse(receipt.chunk)).toEqual(invalid);
+      const repaired=await call('answer_work',{reply:rejected.view.reply,answer:{notes:'valid correction'}});
+      expect(repaired).toMatchObject({kind:'recorded',disposition:'accepted',view:{kind:'question'}});
+      expect(await call('answer_work',{reply:repaired.view.reply,answer:{notes:'last'}})).toMatchObject({kind:'recorded',view:{kind:'finished'}});
+    }
     const opened=await call('open_work',{workflowId:'lifecycle',goal:'transport',workspacePath:config.workflowStoragePath});
     const first=await call('answer_work',{reply:opened.view.reply,answer:{notes:'first'}});
     expect(first).toMatchObject({kind:'recorded',view:{kind:'question'}});

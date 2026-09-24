@@ -90,7 +90,8 @@ export async function createAnswerWorker(config: AnswerWorkerConfig, lifetime: A
                     return { kind: 'unconfirmed' as const, reason: 'commit_uncertain' as const };
                 if (delivery.kind !== 'delivered')
                     return { kind: 'not_retained' as const, reason: 'unavailable_storage' as const };
-                const payload = answer.kind === 'notes' ? { notes: answer.notes } : answer;
+                const payload = answer.kind === 'unvalidated_json' ? answer.value
+                    : answer.kind === 'notes' ? { notes: answer.notes } : answer;
                 const captured = await ports.journal.captureResponse(delivery.delivery, { responseText: '', calls: [{ id: 'answer', name: 'answer_work', argumentsJson: JSON.stringify({ answer: payload }) }] }, owner, signal);
                 if (captured.kind === 'unconfirmed')
                     return { kind: 'unconfirmed' as const, reason: 'commit_uncertain' as const };

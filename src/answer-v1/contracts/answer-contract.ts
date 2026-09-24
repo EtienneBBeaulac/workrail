@@ -1,3 +1,4 @@
+import type { JsonValue } from '../../v2/durable-core/canonical/json-types.js';
 /** Agent-facing values and capabilities shared by host and worker boundaries. */
 declare const replyBrand: unique symbol;
 declare const readBrand: unique symbol;
@@ -115,8 +116,11 @@ export type EvidenceReadResult = EvidenceReadPayload & NoWorkerAuthority;
 export type WorkerSubmissionResult = AnswerResult | Readonly<{kind:'unconfirmed';reason:'commit_uncertain'}>;
 
 /** Unbound MCP sessions only. Calls on host-bound sessions return not_retained with reason 'bound_session_required'. */
+/** Transport JSON is captured before domain validation; it grants no action authority. */
+export type AnswerSubmission = DomainAnswer | Readonly<{ kind: 'unvalidated_json'; value: JsonValue }>;
+
 export interface WorkerPort {
-  answer(reply: ReplyRef, answer: DomainAnswer, signal: AbortSignal): Promise<WorkerSubmissionResult>;
+  answer(reply: ReplyRef, answer: AnswerSubmission, signal: AbortSignal): Promise<WorkerSubmissionResult>;
 }
 
 /** Unbound MCP inspector only. Bound enrollments refuse here. */
