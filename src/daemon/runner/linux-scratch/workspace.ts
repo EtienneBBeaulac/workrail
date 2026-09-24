@@ -65,7 +65,7 @@ export async function createLinuxScratchWorkspace(options:Readonly<{
     '-I','-u','-c','import time; time.sleep(86400)' ] as const;
   const configurationDigest=createHash('sha256').update(digest).update(JSON.stringify(configuration))
     .update(supervisorSource).update(inspectionSource).digest('hex');
-  const reservation=await reserveSupervisor(journal,owner,{configurationDigest},signal);
+  const reservation=await reserveSupervisor(journal,owner,{configurationDigest,daemon:info.ID},signal);
   if(reservation.kind!=='reserved')return {kind:'refused',reason:'intent_unacknowledged'};
   const supervisor=reservation.supervisor;
   const unknown=()=>({kind:'unknown' as const,supervisor,cleanup:'unconfirmed' as const});

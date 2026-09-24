@@ -940,17 +940,19 @@ it.skipIf(process.platform === 'win32').each(['normal','intent_ack','transition_
             ? {kind:'simulate_uncertain',message:'lost ack'} : {kind:'proceed'};
         }}},s=>!s.aborted);
         const before=await engine.sessionStore.load(prepared.sessionId);
-        expect(await reserveSupervisor(journal,owner,{configurationDigest:'bad'},signal)).toEqual({kind:'refused',reason:'invalid_input'});
-        expect(await reserveSupervisor(journal,{...owner,epoch:2n},{configurationDigest:'a'.repeat(64)},signal)).toEqual({kind:'refused',reason:'stale_owner'});
+        expect(await reserveSupervisor(journal,owner,{configurationDigest:'a'.repeat(64)},signal)).toEqual({kind:'refused',reason:'invalid_input'});
+        expect(await reserveSupervisor(journal,owner,{configurationDigest:'bad',daemon:'d'},signal)).toEqual({kind:'refused',reason:'invalid_input'});
+        expect(await reserveSupervisor(journal,{...owner,epoch:2n},{configurationDigest:'a'.repeat(64),daemon:'d'},signal)).toEqual({kind:'refused',reason:'stale_owner'});
         expect(await engine.sessionStore.load(prepared.sessionId)).toEqual(before);
         if(failure==='cancelled')controller.abort();
-        const attempts=await Promise.all(Array.from({length:failure==='normal'?2:1},()=>reserveSupervisor(faulted,owner,{configurationDigest:'a'.repeat(64)},signal)));
+        const attempts=await Promise.all(Array.from({length:failure==='normal'?2:1},()=>reserveSupervisor(faulted,owner,{configurationDigest:'a'.repeat(64),daemon:'d'},signal)));
         if(failure==='normal')expect(attempts.map(r=>r.kind).sort()).toEqual(['refused','reserved']);
         if(failure==='intent_ack')expect(attempts[0]).toEqual({kind:'unconfirmed',reason:'commit_uncertain'});
         if(failure==='cancelled')expect(attempts[0]).toEqual({kind:'refused',reason:'not_started'});
         const reserved=attempts.find(r=>r.kind==='reserved');
         if(reserved?.kind==='reserved') {
           const created={kind:'supervisor_created',supervisor:reserved.supervisor,binding:{daemon:'d',environment:'exact'}};
+          expect(await retainSupervisorTransition(journal,owner,{...created,binding:{daemon:'replacement',environment:'exact'}},signal)).toEqual({kind:'refused',reason:'invalid_transition'});
           expect(await retainSupervisorTransition(faulted,owner,created,signal)).toEqual(failure==='transition_ack'?{kind:'unconfirmed',reason:'commit_uncertain'}:{kind:'retained'});
           expect(await retainSupervisorTransition(journal,owner,created,signal)).toEqual({kind:'refused',reason:'invalid_transition'});
           if(failure==='start_ack'||failure==='stop_ack') {
@@ -988,9 +990,10 @@ it.skipIf(process.platform === 'win32').each(['normal','intent_ack','transition_
         if(loaded.kind!=='loaded')throw new Error(loaded.kind);
         expect(foldSupervisor(loaded.state.records)).toMatchObject({kind:'valid',state:{kind:
           failure==='cancelled'?'absent':failure==='intent_ack'?'create_pending':failure==='normal'||failure==='start_ack'?'start_pending':failure==='stop_ack'?'stop_pending':'created'}});
+        if(failure!=='cancelled')expect(loaded.state.records.find(record=>record.kind==='supervisor_create_intended')).toMatchObject({daemon:'d'});
         const coldSignal=new AbortController().signal;
         const cold=new SessionJournal(reopened,hydrated.enrollment,hostConfig,s=>!s.aborted);
-        if(failure!=='cancelled')expect(await reserveSupervisor(cold,owner,{configurationDigest:'a'.repeat(64)},coldSignal)).toEqual({kind:'refused',reason:'invalid_transition'});
+        if(failure!=='cancelled')expect(await reserveSupervisor(cold,owner,{configurationDigest:'a'.repeat(64),daemon:'d'},coldSignal)).toEqual({kind:'refused',reason:'invalid_transition'});
         if(reserved?.kind==='reserved') {
           const duplicateKind=failure==='transition_ack'?'supervisor_created':failure==='stop_ack'?'supervisor_stop_intended':'supervisor_start_intended';
           expect(await retainSupervisorTransition(cold,owner,{kind:duplicateKind,supervisor:reserved.supervisor,binding:{daemon:'d',environment:'exact'}},coldSignal)).toEqual({kind:'refused',reason:'invalid_transition'});

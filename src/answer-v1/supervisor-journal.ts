@@ -8,7 +8,7 @@ import type { SessionJournal } from './journal.js';
 import { owns } from './host-state.js';
 import { foldSupervisor } from './supervisor-state.js';
 
-const CreateInput = SupervisorCreateIntendedSchema.omit({kind:true,supervisor:true,epoch:true});
+const CreateInput = SupervisorCreateIntendedSchema.omit({kind:true,supervisor:true,epoch:true}).required({daemon:true});
 const TransitionInput = SupervisorCreatedSchema.omit({epoch:true})
   .or(SupervisorStartIntendedSchema.omit({epoch:true}))
   .or(SupervisorStartedSchema.omit({epoch:true}))

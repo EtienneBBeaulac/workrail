@@ -160,6 +160,14 @@ it.skipIf(process.platform === 'win32').each([
       const result = await runSupervisedWorkflow(host.scheduler, operation, new AbortController().signal);
       if (cleanup === 'create_unknown' || cleanup === 'cancel_create') {
         expect(result).toMatchObject({ kind: 'not_started', enrollment: { kind: 'preparation_result', result: { kind: 'not_prepared', outcome: { kind: 'unknown', cleanup: 'unconfirmed' } } } });
+        if (result.kind !== 'not_started' || result.enrollment.kind !== 'preparation_result' || result.enrollment.result.kind !== 'not_prepared') throw new Error('Expected retained preparation failure');
+        const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
+        const { readHostState } = await import('../../../src/answer-v1/host-state.js');
+        const reopened = await composeAnswerEngine(config);
+        if (reopened.kind !== 'ready') throw new Error(reopened.kind);
+        const retained = await readHostState(reopened, result.enrollment.result.enrollment);
+        if (retained.kind !== 'loaded') throw new Error(retained.kind);
+        expect(retained.state.records.find(record => record.kind === 'supervisor_create_intended')).toMatchObject({ daemon: 'fixture-daemon' });
         expect(commands.filter(command => command === 'create')).toHaveLength(1);
         expect(commands).not.toContain('start');
         expect(calls).toBe(0);

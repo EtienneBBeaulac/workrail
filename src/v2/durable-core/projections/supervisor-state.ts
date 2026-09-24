@@ -42,6 +42,8 @@ export function foldSupervisor(records: readonly AnswerHostRecord[]): Supervisor
         if (!owner || owner !== record.epoch || state.intent.epoch !== record.epoch)
           return invalid('invalid_scope');
         if (state.intent.supervisor !== record.supervisor) return invalid('identity_mismatch');
+        if ('binding' in record && state.intent.daemon !== undefined && record.binding.daemon !== state.intent.daemon)
+          return invalid('identity_mismatch');
         if ('binding' in record && 'binding' in state && state.binding
           && (record.binding.daemon !== state.binding.daemon || record.binding.environment !== state.binding.environment))
           return invalid('identity_mismatch');

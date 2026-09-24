@@ -8,6 +8,8 @@ const bound = { ...scoped, binding: SupervisorBindingSchema };
 export const SupervisorCreateIntendedSchema = z.object({
   kind: z.literal('supervisor_create_intended'), ...scoped,
   configurationDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  // Older intents remain readable but cannot prove daemon identity after a lost create reply.
+  daemon: ref.optional(),
 }).strict();
 export const SupervisorCreatedSchema = z.object({ kind: z.literal('supervisor_created'), ...bound }).strict();
 export const SupervisorStartIntendedSchema = z.object({ kind: z.literal('supervisor_start_intended'), ...bound }).strict();
