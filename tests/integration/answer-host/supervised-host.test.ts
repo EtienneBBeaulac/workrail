@@ -28,11 +28,12 @@ it.skipIf(process.platform === 'win32').each(['unsupported', 'preflight_unknown'
     await mkdir(config.workflowStoragePath);
     await writeFile(join(config.workflowStoragePath, 'fixture.json'), JSON.stringify({ id: 'fixture', name: 'Fixture', description: 'Fixture', version: '1.0.0',
       steps: [{ id: 'review', title: 'Review', prompt: 'Review fixture', outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } }] }));
-    const host = await createSupervisedAnswerHost({ ...config, clock, artifactDirectory: join(root, 'artifacts'),
+    const hostConfig: Parameters<typeof createSupervisedAnswerHost>[0] = { ...config, clock, artifactDirectory: join(root, 'artifacts'),
       credentials: { provider: 'anthropic', apiKey: 'fake-key' },
       fetch: async () => { providerCalls++; throw new Error('No inference without preparation'); },
       docker: { async run(args) { dockerCalls.push([...args]); enteredPreflight(); if (scenario === 'close_during_preflight') await preflightBarrier; return { kind: 'unknown' }; }, stream() { throw new Error('No stream without preflight'); } },
-    }, lifetime.signal);
+    };
+    const host = await createSupervisedAnswerHost(hostConfig, lifetime.signal);
     if (host.kind !== 'created') throw new Error(host.kind);
     const decoded = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1',
       model: { provider: 'anthropic', modelId: 'fixture-model' }, systemPrompt: 'fixture',
@@ -96,7 +97,7 @@ it.skipIf(process.platform === 'win32').each([
       { id: 'review', title: 'Review', prompt: 'Review fixture', outputContract: { contractRef: 'wr.contracts.review_verdict', required: true } },
       { id: 'notes', title: 'Notes', prompt: 'Summarize fixture' },
     ] }));
-    const host = await createSupervisedAnswerHost({ ...config, clock, artifactDirectory: join(root, 'artifacts'),
+    const hostConfig: Parameters<typeof createSupervisedAnswerHost>[0] = { ...config, clock, artifactDirectory: join(root, 'artifacts'),
       credentials: { provider: 'anthropic', apiKey: 'fake-key' },
       fetch: async () => {
         calls++;
@@ -133,7 +134,8 @@ it.skipIf(process.platform === 'win32').each([
           children.push(child); exits.push(new Promise(resolve => child.once('close', () => resolve()))); return child;
         },
       },
-    }, lifetime.signal);
+    };
+    const host = await createSupervisedAnswerHost(hostConfig, lifetime.signal);
     if (host.kind !== 'created') throw new Error(host.kind);
     const decoded = decodeDaemonExecutionPolicy({ formatVersion: 1, profile: 'daemon_answers_v1', model: { provider: 'anthropic', modelId: 'fixture-model' }, systemPrompt: 'fixture',
       limits: { expiresAtMs: 61000, maxModelCalls: 5, maxOutputTokens: 100, stallTimeoutMs: 1000, callTimeoutMs: 1000 },
@@ -174,22 +176,29 @@ it.skipIf(process.platform === 'win32').each([
           expect(await readHostState(reopened, result.enrollment.result.enrollment)).toEqual(retained);
           const intent = retained.state.records.find(record => record.kind === 'supervisor_create_intended');
           if (intent?.kind !== 'supervisor_create_intended') throw new Error('Missing intent');
+          const coldHost = await createSupervisedAnswerHost(hostConfig, lifetime.signal);
+          if (coldHost.kind !== 'created') throw new Error(coldHost.kind);
+          const inspected = await coldHost.scheduler.inspectCleanup(operation, new AbortController().signal);
+          if (inspected.kind !== 'target') throw new Error(inspected.kind);
+          expect(await readHostState(reopened, result.enrollment.result.enrollment)).toEqual(retained);
           const beforeCleanup = [...commands];
-          expect(await host.scheduler.cleanupResource({ ...operation, request: { ...operation.request, goal: 'wrong' } },
-            result.enrollment.result.owner, intent.supervisor, new AbortController().signal))
+          expect(await coldHost.scheduler.cleanupResource({ ...operation, request: { ...operation.request, goal: 'wrong' } },
+            inspected.target, new AbortController().signal))
             .toMatchObject({ kind: 'admission', result: { kind: 'refused', reason: 'request_conflict' } });
           expect(commands).toEqual(beforeCleanup);
-          expect(await host.scheduler.cleanupResource(operation, result.enrollment.result.owner, 'wrong', new AbortController().signal))
+          expect(await coldHost.scheduler.cleanupResource(operation, { ...inspected.target, supervisor: 'wrong' }, new AbortController().signal))
             .toEqual({ kind: 'claim', result: { kind: 'refused', reason: 'invalid_scope' } });
           expect(commands).toEqual(beforeCleanup);
-          expect(await host.scheduler.cleanupResource(operation, result.enrollment.result.owner, intent.supervisor, new AbortController().signal))
+          expect(await coldHost.scheduler.cleanupResource(operation, inspected.target, new AbortController().signal))
             .toEqual({ kind: 'cleanup', result: { kind: 'resource_removed', executionSettlement: 'unresolved' } });
           const afterCleanup = [...commands];
-          expect(await host.scheduler.cleanupResource(operation, result.enrollment.result.owner, intent.supervisor, new AbortController().signal))
+          expect(await coldHost.scheduler.cleanupResource(operation, inspected.target, new AbortController().signal))
             .toEqual({ kind: 'cleanup', result: { kind: 'resource_removed', executionSettlement: 'unresolved' } });
           expect(commands).toEqual(afterCleanup);
           expect(await readHostState(reopened, result.enrollment.result.enrollment))
             .toMatchObject({ kind: 'loaded', state: { ownership: { kind: 'cleanup' } } });
+          expect(await coldHost.scheduler.inspectCleanup(operation, new AbortController().signal)).toEqual(inspected);
+          expect(await coldHost.scheduler.close(new AbortController().signal)).toMatchObject({ kind: 'incomplete', reason: 'cleanup_failed' });
 
         }
         expect(commands.filter(command => command === 'create')).toHaveLength(1);

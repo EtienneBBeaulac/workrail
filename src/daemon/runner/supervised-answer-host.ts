@@ -1,5 +1,5 @@
-import type { OwnerFence } from '../../answer-v1/contracts/invocation-contract.js';
-import { claimCleanupOwnership } from '../../answer-v1/cleanup-ownership.js';
+import { inspectCleanupTarget, type CleanupTarget } from '../../answer-v1/cleanup-target.js';
+import { claimInspectedCleanup } from '../../answer-v1/cleanup-ownership.js';
 import { reconcileScratchCleanup } from './linux-scratch/reconciliation.js';
 import { observeScratchResource } from './linux-scratch/observation.js';
 import { foldSupervisor } from '../../answer-v1/supervisor-state.js';
@@ -152,9 +152,19 @@ export async function createSupervisedAnswerHost(config: SharedAuthorityConfig &
           return { kind: 'observation', result: await observeScratchResource(projected.state, config.docker, combined) } as const;
         })());
       },
-      /** Explicit privileged operator action, never called by inference or inspection.
-       * The original owner and supervisor are supplied for compare-and-swap fencing. */
-      cleanupResource(operation: SupervisedOperation, expectedOwner: OwnerFence, supervisor: string, signal: AbortSignal) {
+      /** Read-only cold lookup returns cleanup authority only, never an execution fence. */
+      inspectCleanup(operation: SupervisedOperation, signal: AbortSignal) {
+        return track((async () => {
+          const checked = validate(operation);
+          if (checked.kind !== 'valid') return { kind: 'refused', reason: 'invalid_request' } as const;
+          const combined = AbortSignal.any([signal, parent]);
+          const located = await inspectHostAdmission(engine, directory.root, checked, combined);
+          if (located.kind !== 'located') return { kind: 'admission', result: located } as const;
+          return inspectCleanupTarget(new SessionJournal(engine, located.enrollment, config, s => !s.aborted), combined);
+        })());
+      },
+      /** Explicit privileged operator action. The inspected scope remains a CAS expectation. */
+      cleanupResource(operation: SupervisedOperation, target: CleanupTarget, signal: AbortSignal) {
         return track((async () => {
           const checked = validate(operation);
           if (checked.kind !== 'valid') return { kind: 'refused', reason: 'invalid_request' } as const;
@@ -162,8 +172,10 @@ export async function createSupervisedAnswerHost(config: SharedAuthorityConfig &
           const located = await inspectHostAdmission(engine, directory.root, checked, combined);
           if (located.kind !== 'located') return { kind: 'admission', result: located } as const;
           const journal = new SessionJournal(engine, located.enrollment, config, s => !s.aborted);
-          const claim = await claimCleanupOwnership(journal, expectedOwner, supervisor, combined);
+          const claim = await claimInspectedCleanup(journal, target, combined);
           if (claim.kind !== 'claimed') return { kind: 'claim', result: claim } as const;
+          // Adopting teardown also adopts unresolved execution, including on a cold host.
+          reconciliationRequired.add(checked.operationId);
           return { kind: 'cleanup', result: await reconcileScratchCleanup(journal, claim.fence, config.docker, combined) } as const;
         })());
       },

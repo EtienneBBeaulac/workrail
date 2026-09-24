@@ -452,11 +452,13 @@ it.each(['normal', 'lost_ack'] as const)('cleanup claim survives %s and reopenin
   const { composeAnswerEngine } = await import('../../../src/answer-v1/engine-composition.js');
   const { SessionJournal } = await import('../../../src/answer-v1/journal.js');
   const { reserveSupervisor, retainSupervisorTransition } = await import('../../../src/answer-v1/supervisor-journal.js');
-  const { claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
+  const { inspectCleanupTarget } = await import('../../../src/answer-v1/cleanup-target.js');
+  const { claimInspectedCleanup, claimCleanupOwnership } = await import('../../../src/answer-v1/cleanup-ownership.js');
   const { readHostState } = await import('../../../src/answer-v1/host-state.js');
   const engine = await composeAnswerEngine(config);
   if (engine.kind !== 'ready') throw new Error(engine.kind);
   const journal = new SessionJournal(engine, enrolled.enrollment, {}, s => !s.aborted);
+  expect(await inspectCleanupTarget(journal, signal())).toEqual({ kind: 'refused', reason: 'missing_identity' });
   expect(await claimCleanupOwnership(journal, enrolled.owner, 'missing', signal()))
     .toEqual({ kind: 'refused', reason: 'missing_identity' });
   const reserved = await reserveSupervisor(journal, enrolled.owner, { configurationDigest: 'a'.repeat(64), daemon: 'fixture' }, signal());
@@ -470,6 +472,9 @@ it.each(['normal', 'lost_ack'] as const)('cleanup claim survives %s and reopenin
   if (prepared.kind !== 'prepared') throw new Error(prepared.kind);
   const before = await readHostState(engine, enrolled.enrollment);
   expect(await claimCleanupOwnership(journal, enrolled.owner, 'wrong', signal())).toEqual({ kind: 'refused', reason: 'invalid_scope' });
+  expect(await readHostState(engine, enrolled.enrollment)).toEqual(before);
+  const target = await inspectCleanupTarget(journal, signal());
+  if (target.kind !== 'target') throw new Error(target.kind);
   expect(await readHostState(engine, enrolled.enrollment)).toEqual(before);
   const claimJournal = scenario === 'normal' ? journal : new class extends SessionJournal {
     override async append(...args: Parameters<SessionJournal['append']>) {
@@ -494,6 +499,8 @@ it.each(['normal', 'lost_ack'] as const)('cleanup claim survives %s and reopenin
   if (reopened.kind !== 'ready') throw new Error(reopened.kind);
   const cold = new SessionJournal(reopened, enrolled.enrollment, {}, s => !s.aborted);
   expect(await claimCleanupOwnership(cold, enrolled.owner, reserved.supervisor, signal())).toEqual(claim);
+  expect(await inspectCleanupTarget(cold, signal())).toEqual(target);
+  expect(await claimInspectedCleanup(cold, target.target, signal())).toEqual(claim);
   expect(await claimCleanupOwnership(cold, { ...enrolled.owner, epoch: 2n }, reserved.supervisor, signal()))
     .toEqual({ kind: 'refused', reason: 'ownership_changed' });
   const pointer = scheduler.hydrator.dehydrate(enrolled.enrollment);

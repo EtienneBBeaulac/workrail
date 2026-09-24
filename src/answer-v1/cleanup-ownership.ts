@@ -1,6 +1,6 @@
+import type { CleanupTarget } from './cleanup-target.js';
 import type { OwnerFence, ExecutionRef } from './contracts/invocation-contract.js';
 import type { SessionJournal } from './journal.js';
-import { owns } from './host-state.js';
 import { foldSupervisor } from './supervisor-state.js';
 import { foldAnswerOwnership } from '../v2/durable-core/projections/answer-ownership.js';
 
@@ -18,8 +18,18 @@ export type ClaimCleanupResult =
 /** Revokes future canonical writes under the old owner, atomically. It neither performs
  * teardown nor proves that previously dispatched backend/provider work has settled.
  * Reconciliation must establish that separate boundary before it can release anything. */
-export async function claimCleanupOwnership(
+export function claimCleanupOwnership(
   journal: SessionJournal, expected: OwnerFence, supervisor: string, signal: AbortSignal,
+): Promise<ClaimCleanupResult> {
+  return claimCleanup(journal, expected, supervisor, signal);
+}
+
+export function claimInspectedCleanup(journal: SessionJournal, target: CleanupTarget, signal: AbortSignal): Promise<ClaimCleanupResult> {
+  return claimCleanup(journal, target, target.supervisor, signal);
+}
+
+async function claimCleanup(
+  journal: SessionJournal, expected: Readonly<{ execution: ExecutionRef; epoch: bigint }>, supervisor: string, signal: AbortSignal,
 ): Promise<ClaimCleanupResult> {
   const uncertain = { kind: 'unconfirmed', reason: 'commit_uncertain' } as const;
   return journal.locked<ClaimCleanupResult>(signal, uncertain, async (state, lock) => {
@@ -31,7 +41,7 @@ export async function claimCleanupOwnership(
         ? { kind: 'claimed', fence: Object.freeze({ execution: expected.execution, epoch: current.epoch, previousEpoch: current.previousEpoch, supervisor: current.supervisor }) as CleanupFence }
         : { kind: 'refused', reason: 'ownership_changed' };
     }
-    if (!owns(state, expected)) return { kind: 'refused', reason: 'ownership_changed' };
+    if (current.kind !== 'execution' || current.epoch !== expected.epoch) return { kind: 'refused', reason: 'ownership_changed' };
     const projected = foldSupervisor(state.records);
     if (projected.kind !== 'valid' || projected.state.kind === 'absent')
       return { kind: 'refused', reason: 'missing_identity' };

@@ -18,3 +18,9 @@ function rejectsCleanupAsExecution(cleanup: CleanupFence) {
   return execution;
 }
 void rejectsCleanupAsExecution;
+
+import type { CleanupTarget } from '../../../src/answer-v1/cleanup-target.js';
+declare const target: CleanupTarget;
+// @ts-expect-error Cold cleanup inspection cannot grant execution ownership.
+const executionFromTarget: import('../../../src/answer-v1/contracts/invocation-contract.js').OwnerFence = target;
+void executionFromTarget;
